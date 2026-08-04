@@ -18,6 +18,10 @@
 import { Tray, Menu, nativeImage } from 'electron';
 
 const isMac = process.platform === 'darwin';
+const isLinux = process.platform === 'linux';
+// Linux StatusNotifier hosts often blank or drop oversized tray images; keep
+// the icon at a panel-typical size so AppImage trays stay visible.
+const LINUX_TRAY_ICON_PX = 22;
 
 const MAX_SESSIONS = 8;
 const MAX_APPROVALS = 10;
@@ -88,8 +92,19 @@ const computeTooltip = (counts, sessionCount) => {
 const ANIM_INTERVAL_MS = 75;
 
 const toTemplateImage = (p) => {
-  const image = nativeImage.createFromPath(p);
+  let image = nativeImage.createFromPath(p);
+  if (image.isEmpty()) return image;
   if (isMac) image.setTemplateImage(true);
+  if (isLinux) {
+    const { width, height } = image.getSize();
+    if (width > LINUX_TRAY_ICON_PX || height > LINUX_TRAY_ICON_PX) {
+      image = image.resize({
+        width: LINUX_TRAY_ICON_PX,
+        height: LINUX_TRAY_ICON_PX,
+        quality: 'best',
+      });
+    }
+  }
   return image;
 };
 
@@ -161,7 +176,11 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     tray = new Tray(idleFrame);
     tray.setIgnoreDoubleClickEvents(true);
     if (!isMac) {
-      tray.on('click', () => onAction({ type: 'show-main-window' }));
+      // Windows: left-click shows. Linux: left-click toggles show/hide so the
+      // panel icon stays useful when the window is already open.
+      tray.on('click', () => onAction({
+        type: isLinux ? 'toggle-main-window' : 'show-main-window',
+      }));
     }
     return tray;
   };
@@ -268,10 +287,25 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
       { type: 'separator' },
       { label: 'New Session', click: () => onAction({ type: 'new-session' }) },
       { label: 'New Mini Chat', click: () => onAction({ type: 'new-mini-chat' }) },
-      { label: 'Show OpenChamber', click: () => onAction({ type: 'show-main-window' }) },
-      { type: 'separator' },
-      { label: 'Quit OpenChamber', click: () => onAction({ type: 'quit' }) },
     );
+
+    if (isLinux || process.platform === 'win32') {
+      // Right-click context menu: show / hide / close (quit). Matches the
+      // expected AppImage / Windows tray controls.
+      template.push(
+        { type: 'separator' },
+        { label: 'Show Window', click: () => onAction({ type: 'show-main-window' }) },
+        { label: 'Hide Window', click: () => onAction({ type: 'hide-main-window' }) },
+        { type: 'separator' },
+        { label: 'Close', click: () => onAction({ type: 'quit' }) },
+      );
+    } else {
+      template.push(
+        { label: 'Show OpenChamber', click: () => onAction({ type: 'show-main-window' }) },
+        { type: 'separator' },
+        { label: 'Quit OpenChamber', click: () => onAction({ type: 'quit' }) },
+      );
+    }
 
     return Menu.buildFromTemplate(template);
   };

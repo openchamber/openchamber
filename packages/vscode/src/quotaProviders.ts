@@ -40,6 +40,13 @@ type OpenAiUsagePayload = {
     balance?: number | string;
     unlimited?: boolean;
   };
+  spend_control?: {
+    individual_limit?: {
+      limit?: number | string;
+      used?: number | string;
+      used_percent?: number | string;
+    };
+  };
 };
 
 type GoogleModelsPayload = {
@@ -115,6 +122,16 @@ type WaferPayload = {
 type CrofPayload = {
   usable_requests?: number | null;
   credits?: number | string;
+};
+
+type DeepseekPayload = {
+  is_available?: boolean;
+  balance_infos?: Array<{
+    currency?: string;
+    total_balance?: number | string;
+    granted_balance?: number | string;
+    topped_up_balance?: number | string;
+  }>;
 };
 
 type NeuralwattPayload = {
@@ -215,7 +232,10 @@ const resolveGoogleWindow = (sourceId: GoogleAuthSource['sourceId'], resetAt: nu
   return { label: 'daily', seconds: GOOGLE_DAILY_WINDOW_SECONDS } as const;
 };
 
-const ZAI_TOKEN_WINDOW_SECONDS: Record<number, number> = { 3: 3600 };
+const ZAI_TOKEN_WINDOW_SECONDS: Record<number, number> = {
+  3: 60 * 60,
+  6: 7 * 24 * 60 * 60,
+};
 
 const readAuthFile = (): AuthFile => {
   if (!fs.existsSync(AUTH_FILE)) {
@@ -482,6 +502,11 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('neuralwatt');
   }
 
+  const deepseekAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
+  if (deepseekAuth && ((deepseekAuth as Record<string, unknown>).key || (deepseekAuth as Record<string, unknown>).token)) {
+    configured.add('deepseek');
+  }
+
   return Array.from(configured);
 };
 
@@ -553,6 +578,20 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
           : null;
       windows.credits_balance = toUsageWindow({
         usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel,
+      });
+    }
+    if (payload?.spend_control?.individual_limit) {
+      const spendLimit = payload.spend_control.individual_limit;
+      const used = toNumber(spendLimit.used);
+      const limit = toNumber(spendLimit.limit);
+      const valueLabel = used !== null && limit !== null
+        ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
+        : null;
+      windows.credits = toUsageWindow({
+        usedPercent: toNumber(spendLimit.used_percent),
         windowSeconds: null,
         resetAt: null,
         valueLabel,
@@ -1113,6 +1152,24 @@ const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+// Kimi's weekly `usage` block reports `used`; its rate-limit `limits[].detail`
+// blocks report `remaining` instead. Neither field is guaranteed present, so
+// derive usedPercent from whichever one the API actually returned.
+const computeKimiUsedPercent = (
+  total: number | null,
+  used: number | null,
+  remaining: number | null,
+): number | null => {
+  if (!total) return null;
+  if (used !== null) {
+    return Math.max(0, Math.min(100, (used / total) * 100));
+  }
+  if (remaining !== null) {
+    return Math.max(0, Math.min(100, 100 - (remaining / total) * 100));
+  }
+  return null;
+};
+
 const fetchKimiQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi'])) as Record<string, unknown> | null;
@@ -1152,10 +1209,9 @@ const fetchKimiQuota = async (): Promise<ProviderResult> => {
     const usage = payload.usage as Record<string, unknown> | undefined;
     if (usage) {
       const limit = toNumber(usage.limit);
+      const used = toNumber(usage.used);
       const remaining = toNumber(usage.remaining);
-      const usedPercent = limit && remaining !== null
-        ? Math.max(0, Math.min(100, 100 - (remaining / limit) * 100))
-        : null;
+      const usedPercent = computeKimiUsedPercent(limit, used, remaining);
       windows.weekly = toUsageWindow({
         usedPercent,
         windowSeconds: null,
@@ -1171,10 +1227,9 @@ const fetchKimiQuota = async (): Promise<ProviderResult> => {
       const windowSeconds = durationToSeconds(window?.duration as number | undefined, window?.timeUnit as string | undefined);
       const label = windowSeconds === 5 * 60 * 60 ? `Rate Limit (${rawLabel})` : rawLabel;
       const total = toNumber(detail?.limit);
+      const used = toNumber(detail?.used);
       const remaining = toNumber(detail?.remaining);
-      const usedPercent = total && remaining !== null
-        ? Math.max(0, Math.min(100, 100 - (remaining / total) * 100))
-        : null;
+      const usedPercent = computeKimiUsedPercent(total, used, remaining);
       windows[label] = toUsageWindow({
         usedPercent,
         windowSeconds,
@@ -1571,18 +1626,26 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
 
     const payload = await response.json() as ZaiPayload;
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
-    const tokensLimit = limits.find((limit: Record<string, unknown>) => limit?.type === 'TOKENS_LIMIT');
-    const windowSeconds = resolveWindowSeconds(tokensLimit as Record<string, unknown> | undefined);
-    const windowLabel = resolveWindowLabel(windowSeconds);
-    const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
-    const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
-
     const windows: Record<string, UsageWindow> = {};
-    if (tokensLimit) {
+    for (const tokensLimit of limits.filter((limit) => limit?.type === 'TOKENS_LIMIT')) {
+      const windowSeconds = resolveWindowSeconds(tokensLimit as Record<string, unknown>);
+      const windowLabel = resolveWindowLabel(windowSeconds);
+      const resetAt = tokensLimit.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
+      const usedPercent = typeof tokensLimit.percentage === 'number' ? tokensLimit.percentage : null;
+
       windows[windowLabel] = toUsageWindow({
         usedPercent,
         windowSeconds,
         resetAt,
+      });
+    }
+
+    const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
+    if (mcpToolsTimeLimit) {
+      windows['MCP Tools'] = toUsageWindow({
+        usedPercent: typeof mcpToolsTimeLimit.percentage === 'number' ? mcpToolsTimeLimit.percentage : null,
+        windowSeconds: 30 * 24 * 60 * 60,
+        resetAt: mcpToolsTimeLimit.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null,
       });
     }
 
@@ -2143,6 +2206,103 @@ const fetchCrofQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const DEEPSEEK_QUOTA_URL = 'https://api.deepseek.com/user/balance';
+
+const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['deepseek'])) as Record<string, unknown> | null;
+  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetch(DEEPSEEK_QUOTA_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Encoding': 'identity',
+      },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'deepseek',
+        providerName: 'DeepSeek',
+        ok: false,
+        configured: true,
+        error: response.status === 401 || response.status === 403
+          ? 'Session expired — please re-authenticate with DeepSeek'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = await response.json() as DeepseekPayload;
+    const balanceInfos = Array.isArray(payload?.balance_infos) ? payload.balance_infos : [];
+    const balanceInfo = balanceInfos.find((info) => info?.currency === 'USD')
+      ?? balanceInfos.find((info) => info?.currency === 'CNY')
+      ?? null;
+    const rawBalance = balanceInfo?.total_balance;
+    const totalBalance = (typeof rawBalance === 'number' || (typeof rawBalance === 'string' && rawBalance.trim() !== ''))
+      ? toNumber(rawBalance)
+      : null;
+
+    if (totalBalance === null) {
+      return buildResult({
+        providerId: 'deepseek',
+        providerName: 'DeepSeek',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    const symbol = balanceInfo?.currency === 'CNY' ? '¥' : '$';
+    const windows: Record<string, UsageWindow> = {
+      credits_balance: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `${symbol}${formatMoney(totalBalance)}`,
+      }),
+    };
+
+    return buildResult({
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
@@ -2186,6 +2346,8 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
       return fetchCursorQuota();
     case 'crof':
       return fetchCrofQuota();
+    case 'deepseek':
+      return fetchDeepseekQuota();
     case 'neuralwatt':
       return fetchNeuralwattQuota();
     default:

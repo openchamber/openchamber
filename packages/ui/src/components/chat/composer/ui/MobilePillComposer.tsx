@@ -11,15 +11,13 @@
  * the pill grow into its place.
  */
 
-import React from 'react';
-
 import { Icon } from '@/components/icon/Icon';
+import { StopIcon } from '@/components/icons/StopIcon';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { Theme } from '@/types/theme';
-import { MobileSessionPanelTrigger } from '../../MobileSessionStatusBar';
 import { ComposerAttachmentControls } from './ComposerAttachmentControls';
 
 export interface MobilePillComposerProps {
@@ -29,8 +27,10 @@ export interface MobilePillComposerProps {
     newSessionDraftOpen: boolean;
     hasContent: boolean;
     isVSCode: boolean;
+    canAbort: boolean;
     footerIconButtonClass: string;
     iconSizeClass: string;
+    stopIconSizeClass: string;
     theme: Theme;
     onExpand: () => void;
     onApplySuggestion: (text: string) => void;
@@ -40,6 +40,7 @@ export interface MobilePillComposerProps {
     onOpenPrPicker: () => void;
     onOpenAttachSheet: () => void;
     onStartDictation: () => void;
+    onAbort: () => void;
 }
 
 export function MobilePillComposer(props: MobilePillComposerProps) {
@@ -51,8 +52,10 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         newSessionDraftOpen,
         hasContent,
         isVSCode,
+        canAbort,
         footerIconButtonClass,
         iconSizeClass,
+        stopIconSizeClass,
         theme: currentTheme,
         onExpand,
         onApplySuggestion,
@@ -62,6 +65,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         onOpenPrPicker,
         onOpenAttachSheet,
         onStartDictation,
+        onAbort,
     } = props;
 
     return (
@@ -83,10 +87,6 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
                 style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
             >
-                <MobileSessionPanelTrigger
-                    footerIconButtonClass={footerIconButtonClass}
-                    iconSizeClass={iconSizeClass}
-                />
                 <ComposerAttachmentControls
                     isVSCode={isVSCode}
                     footerIconButtonClass={footerIconButtonClass}
@@ -125,6 +125,33 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 >
                     <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
                 </button>
+                {/* Same visibility rule as the full composer's stop control:
+                    while a turn is running the stop button takes the mic's
+                    end slot and the mic shifts one slot left. Instant swap —
+                    no shape animation (WKWebView). */}
+                {canAbort ? (
+                    <button
+                        type="button"
+                        className={cn(footerIconButtonClass, 'text-[var(--status-error)] hover:text-[var(--status-error)]')}
+                        // The pill shows only while the keyboard is down — the
+                        // tap must abort in place, never focus/expand the
+                        // composer or raise the keyboard.
+                        onMouseDown={(event) => event.preventDefault()}
+                        onPointerDownCapture={(event) => {
+                            if (event.pointerType === 'touch') {
+                                event.preventDefault();
+                            }
+                        }}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onAbort();
+                        }}
+                        title={t('chat.chatInput.actions.stopGeneratingAria')}
+                        aria-label={t('chat.chatInput.actions.stopGeneratingAria')}
+                    >
+                        <StopIcon className={cn(stopIconSizeClass)} />
+                    </button>
+                ) : null}
             </div>
             {/* New-session button: fades/shrinks away when the draft is
                 already open, letting the pill expand into its place. */}

@@ -145,7 +145,7 @@ try {
     electronVersion,
     force: true,
     arch: targetArchitecture.electronBuilder,
-    onlyModules: ['better-sqlite3', 'node-pty', 'bun-pty'],
+    onlyModules: ['node-pty', 'bun-pty'],
   });
 } finally {
   try {

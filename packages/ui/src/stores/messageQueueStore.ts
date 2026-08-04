@@ -85,6 +85,19 @@ interface MessageQueueState {
     queuedMessages: Record<string, QueuedMessage[]>; // runtime + directory + session → queue
     quarantinedLegacyMessages: Record<string, QueuedMessage[]>;
     followUpBehavior: FollowUpBehavior;
+    /**
+     * Queued messages whose send is currently awaiting the server, per target.
+     *
+     * A queued item is removed only after its send resolves, so between
+     * dispatch and resolution it is still visible to every other reader — and
+     * a composer submit merges the whole queue into its own send. Over a relay
+     * that window is seconds, long enough for the same message to be delivered
+     * twice. Dispatchers must skip entries listed here.
+     *
+     * Never persisted: a restart has no in-flight sends, and a stale flag would
+     * strand a queued message permanently.
+     */
+    sendingIds: Record<string, string[]>;
 }
 
 interface MessageQueueActions {
@@ -94,6 +107,9 @@ interface MessageQueueActions {
     popToInput: (target: MessageQueueTarget, messageId: string) => QueuedMessage | null;
     clearQueue: (target: MessageQueueTarget) => void;
     clearAllQueues: () => void;
+    markSending: (target: MessageQueueTarget, messageId: string) => void;
+    clearSending: (target: MessageQueueTarget, messageId: string) => void;
+    getSendableQueue: (target: MessageQueueTarget) => QueuedMessage[];
     setFollowUpBehavior: (behavior: FollowUpBehavior) => void;
     getQueueForTarget: (target: MessageQueueTarget) => QueuedMessage[];
 }
@@ -127,6 +143,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 queuedMessages: {},
                 quarantinedLegacyMessages: {},
                 followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
+                sendingIds: {},
 
                 addToQueue: (target, message) => {
                     const key = getMessageQueueKey(target);
@@ -237,6 +254,14 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 clearQueue: (target) => {
                     const key = getMessageQueueKey(target);
                     set((state) => {
+                        // Clearing drops what is still queued, never a message
+                        // already handed to the server: that send will resolve
+                        // and must find its entry to remove or restore.
+                        const sending = state.sendingIds[key] ?? [];
+                        const retained = (state.queuedMessages[key] ?? []).filter((m) => sending.includes(m.id));
+                        if (retained.length > 0) {
+                            return { queuedMessages: { ...state.queuedMessages, [key]: retained } };
+                        }
                         const { [key]: _removed, ...rest } = state.queuedMessages;
                         void _removed;
                         return { queuedMessages: rest };
@@ -244,7 +269,40 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 },
 
                 clearAllQueues: () => {
-                    set({ queuedMessages: {} });
+                    set({ queuedMessages: {}, sendingIds: {} });
+                },
+
+                markSending: (target, messageId) => {
+                    const key = getMessageQueueKey(target);
+                    set((state) => {
+                        const current = state.sendingIds[key] ?? [];
+                        if (current.includes(messageId)) return state;
+                        return { sendingIds: { ...state.sendingIds, [key]: [...current, messageId] } };
+                    });
+                },
+
+                clearSending: (target, messageId) => {
+                    const key = getMessageQueueKey(target);
+                    set((state) => {
+                        const current = state.sendingIds[key];
+                        if (!current || !current.includes(messageId)) return state;
+                        const next = current.filter((id) => id !== messageId);
+                        if (next.length === 0) {
+                            const { [key]: _removed, ...rest } = state.sendingIds;
+                            void _removed;
+                            return { sendingIds: rest };
+                        }
+                        return { sendingIds: { ...state.sendingIds, [key]: next } };
+                    });
+                },
+
+                getSendableQueue: (target) => {
+                    const key = getMessageQueueKey(target);
+                    const state = get();
+                    const queue = state.queuedMessages[key] ?? [];
+                    const sending = state.sendingIds[key];
+                    if (!sending || sending.length === 0) return queue;
+                    return queue.filter((message) => !sending.includes(message.id));
                 },
 
                 setFollowUpBehavior: (behavior) => {

@@ -13,6 +13,7 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
+import { recordSendFailure } from "./send-failure-log"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { materializeSessionSnapshots } from "./materialization"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
@@ -28,11 +29,21 @@ import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/l
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { isAmbiguousTransportFailure } from "@/lib/relay/transport-error"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
-const SEND_CONFIRMATION_REFETCH_ATTEMPTS = 2
-const SEND_CONFIRMATION_REFETCH_RETRY_MS = 150
+// A relay-tunnel send fails when the tunnel drops, and the confirming refetch
+// then has to travel over that same tunnel to answer "did my message land?".
+// Two attempts 150ms apart always answered "no" on a remote connection, so an
+// accepted prompt looked like a failed one and got re-sent — two AI responses
+// for one user message. Wait for the connection to actually come back (an
+// authoritative signal, not a blind sleep), then retry with backoff. A healthy
+// connection skips the wait and answers on the first attempt.
+const SEND_CONFIRMATION_REFETCH_ATTEMPTS = 3
+const SEND_CONFIRMATION_REFETCH_BASE_RETRY_MS = 250
+const SEND_CONFIRMATION_RECONNECT_TIMEOUT_MS = 3000
+const SEND_CONFIRMATION_RECONNECT_POLL_MS = 100
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const UNREVERT_REFETCH_ATTEMPTS = 3
 const UNREVERT_REFETCH_RETRY_MS = 150
@@ -359,6 +370,13 @@ function getErrorStatus(error: unknown): number | null {
 }
 
 function isAmbiguousSendFailure(error: unknown): boolean {
+  // Authoritative first: the transport that lost the request says whether it
+  // had already been dispatched. The text matching below only covers direct
+  // fetch/HTTP failures, whose wording we do not control either — relay tunnel
+  // aborts ("stream aborted by host", "relay keepalive timeout", …) match none
+  // of those patterns and used to be misread as definite failures.
+  if (isAmbiguousTransportFailure(error)) return true
+
   const status = getErrorStatus(error)
   if (status === 503 || status === 504 || status === 408) return true
   if (error instanceof TypeError) return true
@@ -553,6 +571,56 @@ function removeQuestionRequestFromChildStores(sessionId: string, requestId: stri
   return removed
 }
 
+function isPermissionRequestNotFoundError(error: unknown): boolean {
+  if (error && typeof error === "object") {
+    const status = (error as { status?: unknown }).status
+    if (status === 404) return true
+  }
+
+  let message = ""
+  if (error instanceof Error) {
+    message = error.message
+  } else if (typeof error === "string") {
+    message = error
+  }
+
+  return /Permission(?:\.)?NotFoundError|Permission request not found/i.test(message)
+}
+
+function removePermissionRequestFromChildStores(sessionId: string, requestId: string): boolean {
+  const stores = _childStores
+  if (!stores || !requestId) return false
+
+  let removed = false
+  for (const [, store] of stores.children) {
+    const current = store.getState().permission ?? {}
+    let nextPermission: typeof current | null = null
+    const sessionIds = new Set([sessionId, ...Object.keys(current)].filter(Boolean))
+
+    for (const candidateSessionId of sessionIds) {
+      const requests = current[candidateSessionId]
+      if (!requests?.length) continue
+
+      const nextRequests = requests.filter((request) => request.id !== requestId)
+      if (nextRequests.length === requests.length) continue
+
+      nextPermission ??= { ...current }
+      if (nextRequests.length > 0) {
+        nextPermission[candidateSessionId] = nextRequests
+      } else {
+        delete nextPermission[candidateSessionId]
+      }
+      removed = true
+    }
+
+    if (nextPermission) {
+      store.setState({ permission: nextPermission })
+    }
+  }
+
+  return removed
+}
+
 function getRequestReplyClient(
   type: "permission" | "question",
   sessionId: string,
@@ -604,15 +672,39 @@ export async function createSession(
   }
 }
 
+/**
+ * True when a caller captured a runtime key before an asynchronous mutation and
+ * that runtime is no longer the active one. Callers pass `undefined` when they
+ * do not participate in runtime-scoped guarding, which keeps the previous
+ * unguarded behavior.
+ */
+function isStaleRuntime(expectedRuntimeKey: string | undefined): boolean {
+  return expectedRuntimeKey !== undefined && getRuntimeKey() !== expectedRuntimeKey
+}
+
+/**
+ * Read a session, apply `updater` to its metadata, and persist the result.
+ *
+ * `expectedRuntimeKey` is optional here and unguarded when omitted, unlike the
+ * archive and delete actions. When supplied, the runtime is rechecked before
+ * the read, before the write, and before the global store is updated; a change
+ * at any of those points **throws** `"runtime changed"` rather than returning a
+ * value, because this function must resolve to a `Session`. Callers that pass a
+ * key must therefore be prepared to catch that rejection.
+ */
 export async function patchSessionMetadata(
   sessionId: string,
   directory: string | null | undefined,
   updater: (metadata: SessionMetadataRecord) => SessionMetadataRecord,
+  expectedRuntimeKey?: string,
 ): Promise<Session> {
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   const targetDirectory = directory ?? getSessionDirectory(sessionId)
   const current = await opencodeClient.getSession(sessionId, targetDirectory)
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   const nextMetadata = updater(getSessionMetadata(current))
   const updated = await opencodeClient.updateSession(sessionId, { metadata: nextMetadata }, targetDirectory)
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   useGlobalSessionsStore.getState().upsertSession(updated)
   const sessionDirectory = (updated as { directory?: string | null }).directory ?? targetDirectory
   if (sessionDirectory) registerSessionDirectory(updated.id, sessionDirectory)
@@ -632,19 +724,26 @@ export async function setContextObligatoryMessage(
   return updated
 }
 
-async function cleanupReviewMetadataBeforeDelete(sessionId: string, directory?: string | null): Promise<void> {
+async function cleanupReviewMetadataBeforeDelete(
+  sessionId: string,
+  directory?: string | null,
+  expectedRuntimeKey?: string,
+): Promise<void> {
+  if (isStaleRuntime(expectedRuntimeKey)) return
   let session: Session
   try {
     session = await opencodeClient.getSession(sessionId, directory ?? getSessionDirectory(sessionId))
   } catch {
     return
   }
+  if (isStaleRuntime(expectedRuntimeKey)) return
   if (!isReviewSession(session)) return
   const originalSessionID = getOriginalSessionID(session)
   if (!originalSessionID) return
   try {
     await patchSessionMetadata(originalSessionID, directory ?? getSessionDirectory(originalSessionID), (metadata) =>
       withoutReviewSessionLink(metadata, sessionId),
+      expectedRuntimeKey,
     )
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -693,7 +792,21 @@ function cleanupSessionWorktreeMetadata(sessionId: string): void {
   useSessionUIStore.getState().setWorktreeMetadata(sessionId, null)
 }
 
-function finalizeConfirmedSessionDeletion(sessionId: string, sessionDirectory?: string): void {
+/**
+ * Commit a server-confirmed deletion.
+ *
+ * `expectedRuntimeKey` is the runtime the deletion was confirmed on. It is
+ * forwarded to `cleanupPersistedSessionState`, which rejects an identity whose
+ * runtime is no longer active. Passing the live `getRuntimeKey()` here would
+ * make that existing check a tautology, so the captured key is required to keep
+ * it meaningful. Callers must still reject a stale runtime themselves, because
+ * the in-memory live/global/UI stores mutated below are not runtime-scoped.
+ */
+function finalizeConfirmedSessionDeletion(
+  sessionId: string,
+  sessionDirectory?: string,
+  expectedRuntimeKey = getRuntimeKey(),
+): void {
   const snapshots = removeSessionFromLiveStores(sessionId, sessionDirectory)
   invalidateSessionLoads(sessionId, [...snapshots.map((snapshot) => snapshot.directory), sessionDirectory])
   useGlobalSessionsStore.getState().removeSessions([sessionId])
@@ -702,23 +815,50 @@ function finalizeConfirmedSessionDeletion(sessionId: string, sessionDirectory?: 
   cleanupSessionWorktreeMetadata(sessionId)
   if (sessionDirectory) {
     cleanupPersistedSessionState({
-      runtimeKey: getRuntimeKey(),
+      runtimeKey: expectedRuntimeKey,
       directory: sessionDirectory,
       sessionId,
     })
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
+export type DeleteSessionOptions = {
+  /**
+   * Runtime key the deletion is scoped to. Defaults to the active runtime when
+   * the action starts; callers may supply a key captured earlier when
+   * confirmation spans a runtime switch.
+   */
+  expectedRuntimeKey?: string
+}
+
+/**
+ * Delete one session.
+ *
+ * The runtime is rechecked before the request and again before any store is
+ * reconciled, so a response produced by the previous runtime cannot mutate the
+ * current runtime's state. Session IDs are not unique across runtimes, so
+ * committing a stale deletion could otherwise evict an unrelated session and
+ * erase its persisted queue, todos, drafts, folders, and pins.
+ *
+ * A `404` is treated as an already-completed deletion, but only when it is
+ * still authoritative for the captured runtime. After a runtime change the
+ * `404` describes either the previous runtime or a runtime this session never
+ * belonged to; neither justifies committing cleanup here, so the action reports
+ * failure and leaves reconciliation to the next authoritative load.
+ */
+export async function deleteSession(sessionId: string, options?: DeleteSessionOptions): Promise<boolean> {
+  const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+  if (isStaleRuntime(expectedRuntimeKey)) return false
   const sessionDirectory = getSessionDirectory(sessionId)
   try {
-    await cleanupReviewMetadataBeforeDelete(sessionId, sessionDirectory)
+    await cleanupReviewMetadataBeforeDelete(sessionId, sessionDirectory, expectedRuntimeKey)
+    if (isStaleRuntime(expectedRuntimeKey)) return false
     const deleted = await opencodeClient.deleteSession(sessionId, sessionDirectory)
+    if (isStaleRuntime(expectedRuntimeKey)) return false
     if (deleted !== true) {
       throw new Error("session.delete failed: server did not confirm deletion")
     }
-    finalizeConfirmedSessionDeletion(sessionId, sessionDirectory)
+    finalizeConfirmedSessionDeletion(sessionId, sessionDirectory, expectedRuntimeKey)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
@@ -726,7 +866,8 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     // Subsequent delete attempts for those children return 404; treat as
     // success since the session was already deleted by the cascade.
     if ((error as { status?: number })?.status === 404) {
-      finalizeConfirmedSessionDeletion(sessionId, sessionDirectory)
+      if (isStaleRuntime(expectedRuntimeKey)) return false
+      finalizeConfirmedSessionDeletion(sessionId, sessionDirectory, expectedRuntimeKey)
       return true
     }
     return false
@@ -734,31 +875,91 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
 }
 
 /** Delete a session specifying which directory it lives in. Used by agent groups for cross-directory deletes. */
-export async function deleteSessionInDirectory(sessionId: string, directory: string): Promise<boolean> {
+export async function deleteSessionInDirectory(
+  sessionId: string,
+  directory: string,
+  expectedRuntimeKey = getRuntimeKey(),
+): Promise<boolean> {
+  if (isStaleRuntime(expectedRuntimeKey)) return false
   try {
-    await cleanupReviewMetadataBeforeDelete(sessionId, directory)
+    await cleanupReviewMetadataBeforeDelete(sessionId, directory, expectedRuntimeKey)
+    if (isStaleRuntime(expectedRuntimeKey)) return false
     const deleted = await opencodeClient.deleteSession(sessionId, directory)
+    if (isStaleRuntime(expectedRuntimeKey)) return false
     if (deleted !== true) {
       throw new Error("session.delete failed: server did not confirm deletion")
     }
-    finalizeConfirmedSessionDeletion(sessionId, directory)
+    finalizeConfirmedSessionDeletion(sessionId, directory, expectedRuntimeKey)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
     if ((error as { status?: number })?.status === 404) {
-      finalizeConfirmedSessionDeletion(sessionId, directory)
+      if (isStaleRuntime(expectedRuntimeKey)) return false
+      finalizeConfirmedSessionDeletion(sessionId, directory, expectedRuntimeKey)
       return true
     }
     return false
   }
 }
 
-export async function archiveSession(sessionId: string): Promise<boolean> {
+export type DeleteSessionsOptions = {
+  /**
+   * Runtime key captured when the batch was confirmed. When supplied, the batch
+   * stops as soon as the active runtime differs.
+   */
+  expectedRuntimeKey?: string
+}
+
+/**
+ * Delete several sessions sequentially, preserving partial results.
+ *
+ * One failed session never blocks or erases the others: it is reported in
+ * `failedIds` while the remaining IDs are still attempted. When the runtime
+ * changes mid-batch, the sessions already committed on the captured runtime
+ * stay in `deletedIds` and every ID that was not committed there is reported in
+ * `failedIds`, so existing partial-failure feedback stays truthful.
+ */
+export async function deleteSessions(
+  ids: string[],
+  options?: DeleteSessionsOptions,
+): Promise<{ deletedIds: string[]; failedIds: string[] }> {
+  const deletedIds: string[] = []
+  const failedIds: string[] = []
+  const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+
+  for (const [index, id] of ids.entries()) {
+    if (isStaleRuntime(expectedRuntimeKey)) {
+      failedIds.push(...ids.slice(index))
+      break
+    }
+    if (await deleteSession(id, { expectedRuntimeKey })) deletedIds.push(id)
+    else failedIds.push(id)
+  }
+
+  return { deletedIds, failedIds }
+}
+
+/**
+ * Archive one session.
+ *
+ * `expectedRuntimeKey` defaults to the active runtime when the action starts.
+ * Callers may supply a key captured earlier when confirmation spans a runtime
+ * switch. When the runtime changes, the action stops and returns `false`
+ * without reconciling any store, so a response
+ * produced by the previous runtime cannot mutate the current runtime's live or
+ * global session state. A session the server already archived before the switch
+ * stays archived on that runtime and is re-read from the server the next time
+ * the runtime is loaded.
+ */
+export async function archiveSession(sessionId: string, expectedRuntimeKey = getRuntimeKey()): Promise<boolean> {
+  if (isStaleRuntime(expectedRuntimeKey)) return false
   const sessionDirectory = getSessionDirectory(sessionId)
   const archivedAt = Date.now()
   try {
-    await cleanupReviewMetadataBeforeDelete(sessionId, sessionDirectory)
+    await cleanupReviewMetadataBeforeDelete(sessionId, sessionDirectory, expectedRuntimeKey)
+    if (isStaleRuntime(expectedRuntimeKey)) return false
     const archived = await opencodeClient.updateSession(sessionId, { time: { archived: archivedAt } }, sessionDirectory)
+    if (isStaleRuntime(expectedRuntimeKey)) return false
     if (!archived) {
       throw new Error("session.update failed: server did not return the archived session")
     }
@@ -772,6 +973,45 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
     console.error("[session-actions] archiveSession failed", error)
     return false
   }
+}
+
+export type ArchiveSessionsOptions = {
+  /**
+   * Runtime key captured when the batch was confirmed. When supplied, the batch
+   * stops as soon as the active runtime differs.
+   */
+  expectedRuntimeKey?: string
+}
+
+/**
+ * Archive several sessions sequentially, preserving partial results.
+ *
+ * One failed session never blocks or erases the others: it is reported in
+ * `failedIds` while the remaining IDs are still attempted. When
+ * `expectedRuntimeKey` is supplied and the runtime changes mid-batch, the
+ * already-confirmed sessions stay in `archivedIds` and every ID that was not
+ * confirmed on the captured runtime is reported in `failedIds`, so callers keep
+ * showing the existing partial-failure feedback instead of silently dropping
+ * work.
+ */
+export async function archiveSessions(
+  ids: string[],
+  options?: ArchiveSessionsOptions,
+): Promise<{ archivedIds: string[]; failedIds: string[] }> {
+  const archivedIds: string[] = []
+  const failedIds: string[] = []
+  const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+
+  for (const [index, id] of ids.entries()) {
+    if (isStaleRuntime(expectedRuntimeKey)) {
+      failedIds.push(...ids.slice(index))
+      break
+    }
+    if (await archiveSession(id, expectedRuntimeKey)) archivedIds.push(id)
+    else failedIds.push(id)
+  }
+
+  return { archivedIds, failedIds }
 }
 
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
@@ -793,7 +1033,13 @@ export async function shareSession(sessionId: string): Promise<Session | null> {
 export async function unshareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = getSessionDirectory(sessionId)
   const result = await sdk().session.unshare({ sessionID: sessionId, directory: sessionDirectory })
-  const session = stripSessionDiffSnapshots(assertSdkData(result, "session.unshare"))
+  // A successful unshare is authoritative even when the upstream response
+  // echoes the pre-mutation session with its old share URL. Normalize that
+  // stale field at the action boundary before publishing to either store.
+  const session = {
+    ...stripSessionDiffSnapshots(assertSdkData(result, "session.unshare")),
+    share: undefined,
+  }
   useGlobalSessionsStore.getState().upsertSession(session)
   updateLiveSession(session, sessionDirectory)
   return session
@@ -887,6 +1133,17 @@ export async function optimisticSend(input: {
     const part = { ...stateBeforeSend.part }
     for (const revertedMessage of revertedMessages) delete part[revertedMessage.id]
     store.setState({ session, message, part })
+
+    // A server-backed user message can still remain in the loader's optimistic
+    // shadow until a page fetch confirms it. Forget the reverted branch there
+    // too, or the next tail refresh will merge those deleted messages back in.
+    for (const revertedMessage of revertedMessages) {
+      _optimisticConfirm?.({
+        sessionID: input.sessionId,
+        directory: targetDirectory,
+        messageID: revertedMessage.id,
+      })
+    }
   }
 
   const messageID = ascendingId("msg")
@@ -937,7 +1194,9 @@ export async function optimisticSend(input: {
   try {
     await input.send(messageID)
   } catch (error) {
-    const acceptedRecords = isAmbiguousSendFailure(error)
+    const status = getErrorStatus(error)
+    const ambiguousFailure = isAmbiguousSendFailure(error)
+    const acceptedRecords = ambiguousFailure
       ? await fetchRecentSendConfirmationRecords(input.sessionId, messageID, targetDirectory)
       : null
 
@@ -950,6 +1209,24 @@ export async function optimisticSend(input: {
       })
       return
     }
+
+    // The rollback below makes the user's message disappear with no other
+    // trace, and the composer intentionally stays silent for transport-level
+    // failures. Record the failure so the About dialog's diagnostics report can
+    // answer "it disappeared and nothing happened" with an actual cause.
+    // `reason` is truncated by the recorder: a rejected send echoes the
+    // provider/OpenCode response body, which this log has no reason to keep.
+    const failureRecord = {
+      sessionId: input.sessionId,
+      messageId: messageID,
+      directory: targetDirectory ?? null,
+      status,
+      ambiguous: ambiguousFailure,
+      confirmationChecked: ambiguousFailure,
+      reason: error instanceof Error ? error.message : String(error),
+    }
+    recordSendFailure(failureRecord)
+    console.warn("[session-actions] prompt send rejected; rolling back optimistic message", failureRecord)
 
     // Rollback via optimistic infrastructure
     _optimisticRemove({
@@ -995,8 +1272,15 @@ async function fetchRecentSendConfirmationRecords(
   messageID: string,
   directory?: string | null,
 ): Promise<Array<{ info: Message; parts?: Part[] }> | null> {
+  // Bounded: a connection that never returns must still let the send fail
+  // rather than hang the composer.
+  const reconnectDeadline = Date.now() + SEND_CONFIRMATION_RECONNECT_TIMEOUT_MS
+  while (!useConfigStore.getState().isConnected && Date.now() < reconnectDeadline) {
+    await wait(SEND_CONFIRMATION_RECONNECT_POLL_MS)
+  }
+
   for (let attempt = 0; attempt < SEND_CONFIRMATION_REFETCH_ATTEMPTS; attempt += 1) {
-    if (attempt > 0) await wait(SEND_CONFIRMATION_REFETCH_RETRY_MS)
+    if (attempt > 0) await wait(SEND_CONFIRMATION_REFETCH_BASE_RETRY_MS * 2 ** (attempt - 1))
     try {
       const result = await sdk().session.messages({
         sessionID: sessionId,
@@ -1070,12 +1354,17 @@ export async function respondToPermission(
   sessionId: string,
   requestId: string,
   response: "once" | "always" | "reject",
+  directoryOverride?: string,
 ): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
+  const directory = directoryOverride
+    || resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
+  const client = directoryOverride
+    ? opencodeClient.getScopedSdkClient(directoryOverride)
+    : getRequestReplyClient("permission", sessionId, requestId)
+  const result = await client.permission.reply({
     requestID: requestId,
     reply: response,
     ...(directory ? { directory } : {}),
@@ -1093,14 +1382,87 @@ export async function dismissPermission(
   const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
-    requestID: requestId,
-    reply: "reject",
-    ...(directory ? { directory } : {}),
-  })
-  if (assertSdkData(result, "permission.reply") !== true) {
-    throw new Error("Permission dismissal failed")
+  try {
+    const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
+      requestID: requestId,
+      reply: "reject",
+      ...(directory ? { directory } : {}),
+    })
+    if (assertSdkData(result, "permission.reply") !== true) {
+      throw new Error("Permission dismissal failed")
+    }
+  } catch (error) {
+    if (isPermissionRequestNotFoundError(error)) {
+      removePermissionRequestFromChildStores(sessionId, requestId)
+    }
+    throw error
   }
+}
+
+/**
+ * Dismiss every pending permission for the session subtree rooted at `sessionId`
+ * (the session itself plus any subagent children). Used by the chat send path:
+ * sending a message while a permission prompt is open must cancel/supersede the
+ * open permission so it cannot linger or block the new turn.
+ *
+ * The permissions are removed from the local store OPTIMISTICALLY (before any
+ * network call) so the prompt disappears instantly instead of waiting on the
+ * `permission.reply` round-trip. Each permission is then formally rejected on
+ * the backend via `permission.reply` with `reply: "reject"`, which fires
+ * `permission.replied` for reconciliation.
+ *
+ * Returns true when at least one permission was dismissed. Rejection failures are
+ * swallowed (a stranded permission must never block the send);
+ * PermissionNotFoundError also clears the stale entry from the child store via
+ * {@link dismissPermission}.
+ *
+ * NOTE: rejecting unblocks the agent's tool but does NOT end its turn. Callers
+ * that need to send the next message right away (the chat send path) must also
+ * queue the message so the OpenCode runner reaches `idle` — otherwise the new
+ * prompt arrives while the run is still active and is discarded by the runner's
+ * `ensureRunning`.
+ */
+export async function dismissOpenPermissionsForSession(sessionId: string): Promise<boolean> {
+  if (!sessionId) return false
+  const stores = _childStores
+  if (!stores) return false
+
+  const toDismiss: Array<{ sessionId: string; requestId: string }> = []
+  for (const [, store] of stores.children) {
+    const state = store.getState()
+    const scopedIds = computeSubtreeIds(state.session, sessionId)
+    if (scopedIds.size === 0) continue
+    const permissionsBySession = state.permission ?? {}
+    for (const scopedId of scopedIds) {
+      const requests = permissionsBySession[scopedId]
+      if (!requests) continue
+      for (const request of requests) {
+        toDismiss.push({ sessionId: scopedId, requestId: request.id })
+      }
+    }
+  }
+
+  if (toDismiss.length === 0) return false
+
+  // Optimistically clear the permissions from the local store so the prompt
+  // disappears immediately, before the reject round-trip.
+  for (const { sessionId: scopedSessionId, requestId } of toDismiss) {
+    removePermissionRequestFromChildStores(scopedSessionId, requestId)
+  }
+
+  await Promise.all(
+    toDismiss.map(async ({ sessionId: scopedSessionId, requestId }) => {
+      try {
+        await dismissPermission(scopedSessionId, requestId)
+      } catch (error) {
+        if (isPermissionRequestNotFoundError(error)) return
+        // Swallow: a failed dismissal must not block the send. The next
+        // permission.asked / permission.replied event reconciles the store.
+        console.error("[session-actions] Failed to dismiss open permission on send:", error)
+      }
+    }),
+  )
+  return true
 }
 
 // ---------------------------------------------------------------------------

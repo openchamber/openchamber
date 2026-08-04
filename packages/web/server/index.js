@@ -69,6 +69,7 @@ import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js
 import { createStaticRoutesRuntime } from './lib/opencode/static-routes-runtime.js';
 import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
 import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolution-runtime.js';
+import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
@@ -96,6 +97,7 @@ import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
+import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
@@ -269,6 +271,7 @@ const readCustomThemesFromDisk = (...args) => themeRuntime.readCustomThemesFromD
 
 let notificationTemplateRuntime = null;
 let agentToolRuntime = null;
+let systemPromptRuntime = null;
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
 const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
@@ -664,6 +667,7 @@ const getLoginShellEnvSnapshot = (...args) => openCodeEnvRuntime.getLoginShellEn
 const ensureOpencodeCliEnv = (...args) => openCodeEnvRuntime.ensureOpencodeCliEnv(...args);
 const applyOpencodeBinaryFromSettings = (...args) => openCodeEnvRuntime.applyOpencodeBinaryFromSettings(...args);
 const resolveOpencodeCliPath = (...args) => openCodeEnvRuntime.resolveOpencodeCliPath(...args);
+const isBundledOpenCodeCliPath = (...args) => openCodeEnvRuntime.isBundledOpenCodeCliPath(...args);
 const isExecutable = (...args) => openCodeEnvRuntime.isExecutable(...args);
 const searchPathFor = (...args) => openCodeEnvRuntime.searchPathFor(...args);
 const resolveGitBinaryForSpawn = (...args) => openCodeEnvRuntime.resolveGitBinaryForSpawn(...args);
@@ -891,6 +895,7 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   getOpenCodeAuthHeaders,
   buildOpenCodeUrl,
   ensureOpenCodeApiPrefix,
+  getUpstreamStallTimeoutMs,
   getUiNotificationClients: () => uiNotificationClients,
   getOpenCodePort: () => openCodePort,
   setOpenCodePortState: (value) => {
@@ -1054,12 +1059,50 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
   getActiveSessionCount,
+  // Most-recently-used directories first: OpenCode initializes each directory
+  // lazily on first request (seconds on large session stores), so the
+  // lifecycle warms these right after readiness — before the UI's first
+  // interactive request would otherwise pay that cost.
+  getWarmupDirectories: async () => {
+    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    if (!settings) return [];
+    const directories = [];
+    if (typeof settings.lastDirectory === 'string' && settings.lastDirectory) {
+      directories.push(settings.lastDirectory);
+    }
+    const projects = Array.isArray(settings.projects) ? [...settings.projects] : [];
+    projects.sort((a, b) => (b?.lastOpenedAt ?? 0) - (a?.lastOpenedAt ?? 0));
+    for (const project of projects) {
+      if (typeof project?.path === 'string' && project.path) {
+        directories.push(project.path);
+      }
+    }
+    return [...new Set(directories)];
+  },
   getManagedOpenCodeEnv: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    if (settings?.agentControlToolEnabled === false) return {};
-    return agentToolRuntime?.prepareManagedOpenCodeEnv() || {};
+    const managedEnv = settings?.agentControlToolEnabled === false
+      ? {}
+      : await (agentToolRuntime?.prepareManagedOpenCodeEnv() || {});
+    if (settings?.optimizeSystemPrompt !== true) return managedEnv;
+
+    const configContent = managedEnv.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT;
+    const systemPromptEnv = await systemPromptRuntime.prepareManagedOpenCodeEnv(configContent);
+    return { ...managedEnv, ...systemPromptEnv };
   },
 });
+
+const getOpenCodeUpgradeCapability = () => {
+  const activeBinary = lastOpenCodeLaunchDiagnostics?.sourceBinary
+    || lastOpenCodeLaunchDiagnostics?.binary
+    || resolvedOpencodeBinary;
+  return resolveOpenCodeUpgradeCapability({
+    isExternal: isExternalOpenCode,
+    hasManagedProcess: Boolean(openCodeProcess),
+    activeBinary,
+    isBundledBinary: isBundledOpenCodeCliPath,
+  });
+};
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
 const waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCodeReady(...args);
@@ -1240,6 +1283,11 @@ async function main(options = {}) {
       return typeof address === 'object' && address ? address.port : null;
     },
   });
+  systemPromptRuntime = createSystemPromptRuntime({
+    fsPromises,
+    path,
+    dataDir: OPENCHAMBER_DATA_DIR,
+  });
 
   // Pairing transports advertised to the create-device dialog. LAN reachability is
   // derived from the SERVER's actual bind (a wildcard bind → the machine's LAN IP;
@@ -1369,7 +1417,9 @@ async function main(options = {}) {
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
-  const sayTTSCapability = await detectSayTtsCapability(process);
+  // Voice enumeration is independent from route registration. Start it now,
+  // but do not hold server listen or managed OpenCode startup on `say -v "?"`.
+  const sayTTSCapability = detectSayTtsCapability(process);
 
   const app = express();
   const serverStartedAt = new Date().toISOString();
@@ -1586,6 +1636,7 @@ async function main(options = {}) {
     readCustomThemesFromDisk,
     refreshOpenCodeAfterConfigChange,
     getOpenCodeResolutionSnapshot,
+    getOpenCodeUpgradeCapability,
     formatSettingsResponse,
     readSettingsFromDisk,
     readSettingsFromDiskMigrated,

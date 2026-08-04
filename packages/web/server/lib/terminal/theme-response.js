@@ -2,11 +2,21 @@ const MODE_SET = '\u001b[?2031h';
 const MODE_RESET = '\u001b[?2031l';
 const CAPABILITY_QUERY = '\u001b[?2031$p';
 const MODE_QUERIES = ['\u001b[?996n', '\u001b[?997n'];
+// Fish asks this before an unattached browser terminal can reply.
+const PRIMARY_DEVICE_ATTRIBUTE_QUERIES = ['\u001b[c', '\u001b[0c'];
+const PRIMARY_DEVICE_ATTRIBUTE_RESPONSE = '\u001b[?1;2c';
 const OSC_QUERIES = [10, 11].flatMap((code) => [
   { sequence: `\u001b]${code};?\u0007`, code },
   { sequence: `\u001b]${code};?\u001b\\`, code },
 ]);
-const CONTROL_SEQUENCES = [MODE_SET, MODE_RESET, CAPABILITY_QUERY, ...MODE_QUERIES, ...OSC_QUERIES.map(({ sequence }) => sequence)];
+const CONTROL_SEQUENCES = [
+  MODE_SET,
+  MODE_RESET,
+  CAPABILITY_QUERY,
+  ...MODE_QUERIES,
+  ...PRIMARY_DEVICE_ATTRIBUTE_QUERIES,
+  ...OSC_QUERIES.map(({ sequence }) => sequence),
+];
 
 const parseColor = (value) => {
   if (typeof value !== 'string') return null;
@@ -28,7 +38,12 @@ const colorReport = (code, color) => {
 
 export const terminalThemeModeReport = (themeMode) => `\u001b[?997;${themeMode === 'light' ? 2 : 1}n`;
 
-export const consumeTerminalThemeQueries = (pending, data, appearance) => {
+export const consumeTerminalThemeQueries = (
+  pending,
+  data,
+  appearance,
+  { respondToPrimaryDeviceAttributes = false } = {},
+) => {
   if (!pending && !data.includes('\u001b')) return { pending: '', responses: [], modeEnabled: appearance.modeEnabled === true };
   const input = `${pending}${data}`;
   const responses = [];
@@ -54,6 +69,15 @@ export const consumeTerminalThemeQueries = (pending, data, appearance) => {
     if (modeQuery) {
       responses.push(terminalThemeModeReport(appearance.themeMode));
       index += modeQuery.length - 1;
+      continue;
+    }
+    const primaryDeviceAttributeQuery = PRIMARY_DEVICE_ATTRIBUTE_QUERIES.find((query) => input.startsWith(query, index));
+    if (primaryDeviceAttributeQuery && respondToPrimaryDeviceAttributes) {
+      // A shell can ask before any browser terminal is attached. Answer with a
+      // conservative VT100 DA1 response so Fish does not block startup for its
+      // ten-second query timeout while waiting for a renderer that cannot see it.
+      responses.push(PRIMARY_DEVICE_ATTRIBUTE_RESPONSE);
+      index += primaryDeviceAttributeQuery.length - 1;
       continue;
     }
     const oscQuery = OSC_QUERIES.find(({ sequence }) => input.startsWith(sequence, index));

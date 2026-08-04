@@ -1,0 +1,73 @@
+---
+title: Sitzungsziele
+description: Verwandelt eine Aufforderung in ein Ziel, auf das der Agent automatisch hinarbeitet.
+---
+
+# Sitzungsziele
+
+Ein Ziel macht aus einer Aufforderung eine Ziellinie. Statt den Agenten nach jeder Antwort mit "continue" anzustupsen, legst du das Ziel einmal fest — und OpenChamber hält die Sitzung automatisch darauf ausgerichtet und prüft nach jedem Zug mit einem unabhängigen Prüfer den Fortschritt. Es läuft weiter, auch wenn du nicht da bist.
+
+## Ein Ziel starten
+
+1. Drücke in der Composer-Ansicht die Zielschaltfläche. Sie leuchtet auf — der Zielmodus ist aktiviert.
+2. Gib deine Aufforderung ein und sende sie ab. Diese Nachricht wird zum Ziel des Vorhabens.
+
+Das funktioniert in einer bestehenden Sitzung ebenso wie in einem neuen Sitzungsentwurf: Zielmodus aktivieren, die erste Nachricht schreiben, senden — die neue Sitzung startet mit dem bereits aktiven Ziel.
+
+### Weitere Wege, ein Ziel zu starten
+
+- **Aus einer Antwort des Agenten**: Im Dialog "Start new session from this answer" aktiviere **Run as goal** — die Antwort wird als Aufgabe übergeben, die die neue Sitzung bis zum Abschluss ausführt (kombiniere das mit **Create worktree** für einen isolierten Lauf).
+- **Aus einem Plan**: Wenn du einen gespeicherten Plan in einer neuen Sitzung oder einem Worktree umsetzt, aktiviere im Dialog **Run as goal**. Das Ziel übernimmt den Planinhalt als seine Aufgabe, sodass der Prüfer den Fortschritt am tatsächlichen Plan misst.
+- **Nach Zeitplan**: Aktiviere bei einer [geplanten Aufgabe](/scheduled-tasks/) **Run as goal**, damit wiederkehrende Läufe ihre Aufforderung bis zum Abschluss verfolgen.
+
+## Eine eigenständige Zielbeschreibung schreiben
+
+Der Fortschrittsprüfer sieht nur deine Zielbeschreibung und die neueste Antwort des Agenten — nicht den Chatverlauf. Formuliere die Zielnachricht also so, dass auch jemand ohne Gesprächskontext versteht, wie der fertige Zustand aussieht.
+
+- Gut: "Füge Tests für das Exportmodul hinzu und sorge dafür, dass die gesamte Test-Suite besteht."
+- Nicht so gut: "Beheb das" oder "Mach mit der Idee weiter."
+
+Für kleine nachgelagerte Rückfragen mit Kontext brauchst du kein Ziel — sende einfach eine normale Nachricht.
+
+## So funktioniert es
+
+Nachdem der Agent anhält und die Sitzung für einen Moment ruhig bleibt, macht OpenChamber Folgendes:
+
+1. Es bittet ein kleines, günstiges Modell, den letzten Zug gegen das Ziel zu prüfen: weitermachen, fertig oder festgefahren?
+2. Wenn das Urteil "weitermachen" lautet, sendet es eine Fortsetzungsaufforderung und der Agent nimmt die Arbeit wieder auf.
+3. Wenn das Ziel nachweislich erreicht ist, ist es abgeschlossen und du bekommst eine Benachrichtigung.
+4. Wenn der Agent wirklich feststeckt (deine Eingabe braucht), wird das Ziel erst dann als blockiert gestoppt — aber nur nachdem der Prüfer das dreimal in Folge gesagt hat, damit ein einzelner Ausrutscher das Ziel nie beendet.
+
+Es gibt auch harte Sicherheitsstopps: ein optionales Token-Budget, eine Obergrenze für automatische Fortsetzungen und ein Stopp bei Fehlern in einem Zug. Wenn der Kontext der Sitzung mitten in der Arbeit komprimiert wird, geht das Ziel einfach weiter — in das Kontextfenster zu laufen ist ein Beweis dafür, dass die Arbeit noch nicht fertig war.
+
+### Stoppen und fortsetzen
+
+- Die **Stopp-Schaltfläche** bricht den laufenden Zug ab und pausiert das Ziel — dein ausdrückliches "stop" gewinnt immer gegen die Schleife.
+- **Pause** in der Zielleiste macht aus der anderen Richtung dasselbe: Es pausiert das Ziel und stoppt den laufenden Zug.
+- Während der Pause kannst du normal chatten — die Schleife bleibt dir aus dem Weg.
+- **Resume** aktiviert die Schleife neu: Bei einer ruhenden Sitzung geht der Fortsetzungsanstupser sofort raus; wenn der Agent gerade arbeitet, hängt sich die Schleife beim nächsten Halt stillschweigend wieder an.
+
+## Beobachten und verwalten
+
+- Die Leiste über dem Composer zeigt die neueste Fortschrittsnotiz, den Status und die Token-Nutzung des Ziels sowie eine Inline-Schaltfläche zum Pausieren/Fortsetzen. Wenn der Agent angehalten hat und das Ziel aktiv ist, zeigt die Leiste ein drehendes **Evaluating…** — das ist das ruhige Zeitfenster und der laufende Audit.
+- Die Zielschaltfläche bleibt während der Laufzeit blau beleuchtet, wird bei Abschluss grün und bei Blockierung oder erreichtem Budget rot. Drücke sie, um den Zieldialog zu öffnen: Bearbeite das Ziel oder das Budget oder entferne das Ziel. Ein abgeschlossenes Ziel ist schreibgeschützt — entferne es und aktiviere dann ein neues.
+- In der Sitzungs-Seitenleiste erscheint neben dem Sitzungsdatum ein kleines Zielsymbol, dessen Farbe den Zustand des Ziels widerspiegelt.
+
+## Benachrichtigungen
+
+Während ein Ziel aktiv ist, werden die "Agent ist bereit"-Benachrichtigungen pro Zug unterdrückt — sie würden nur die eigenen Fortsetzungen der Zielschleife wiederholen. Wenn das Ziel zur Ruhe kommt (abgeschlossen, blockiert oder Budget erreicht), bekommst du stattdessen eine letzte Benachrichtigung, auf dem Desktop und als mobile Push-Nachricht. Sie folgt derselben Einstellung "bei Abschluss benachrichtigen"; Berechtigungsanfragen, Fragen und Fehlermeldungen funktionieren währenddessen wie gewohnt weiter.
+
+## Token-Budget
+
+In **Einstellungen → Chat → Goal** kannst du ein Standard-Token-Budget für neue Ziele festlegen. Wenn ein Ziel sein Budget erreicht, stoppt es als "budget reached" statt weiter zu verbrauchen — du kannst das Budget erhöhen und im Zieldialog fortsetzen.
+
+## Beachten
+
+- Die Zielschleife läuft im OpenChamber-Server, nicht in deinem Browser-Tab. Schließe den Tab, sperre das Telefon — der Agent arbeitet weiter, und du bekommst eine Benachrichtigung, wenn das Ziel zur Ruhe kommt. Der Server (Desktop-App oder `openchamber`-Prozess) muss weiterlaufen.
+- Ziele verwenden den eigenen Provider und das Modell deiner Sitzung, einschließlich der Prüferaufrufe — nichts verlässt die Provider, die du bereits nutzt.
+- Pro Sitzung immer nur ein Ziel gleichzeitig.
+
+## Verwandt
+
+- [Geplante Aufgaben](/scheduled-tasks/) — eine Aufforderung nach Zeitplan ausführen; dort "Run as goal" aktivieren, damit ein geplanter Lauf seine Aufforderung bis zum Abschluss verfolgt
+- [Benachrichtigungen](/notifications/) — wie du von einem fertigen Ziel erfährst

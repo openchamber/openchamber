@@ -935,6 +935,36 @@ const summarySignature = (s: PrVisualSummary): string =>
 let prKeyedCacheSigs = new Map<string, string>();
 let prKeyedCacheResult: Map<string, PrVisualSummary> = new Map();
 
+// Per-key summary cache so many independent row subscribers (one key each)
+// keep referential stability without fighting over the multi-key cache above.
+// Practically bounded by the number of worktree branches observed in a
+// session; the explicit cap below guards long-running documents that rotate
+// through many branches/runtimes (entries are tiny; insertion-order eviction
+// only costs a one-frame identity change for the evicted key's subscriber).
+const PR_SUMMARY_CACHE_MAX_ENTRIES = 300;
+const prSummaryCacheByKey = new Map<string, { sig: string; summary: PrVisualSummary }>();
+
+export const usePrVisualSummary = (key: string | null): PrVisualSummary | null => {
+  return useGitHubPrStatusStore((state) => {
+    if (!key) return null;
+    const entry = state.entries[key];
+    const summary = entry ? deriveSummary(entry) : null;
+    if (!summary) {
+      prSummaryCacheByKey.delete(key);
+      return null;
+    }
+    const sig = summarySignature(summary);
+    const cached = prSummaryCacheByKey.get(key);
+    if (cached && cached.sig === sig) return cached.summary;
+    if (!cached && prSummaryCacheByKey.size >= PR_SUMMARY_CACHE_MAX_ENTRIES) {
+      const oldestKey = prSummaryCacheByKey.keys().next().value;
+      if (oldestKey !== undefined) prSummaryCacheByKey.delete(oldestKey);
+    }
+    prSummaryCacheByKey.set(key, { sig, summary });
+    return summary;
+  });
+};
+
 export const usePrVisualSummaryByKeys = (keys: string[]) => {
   return useGitHubPrStatusStore((state) => {
     // Derive summaries for requested keys only

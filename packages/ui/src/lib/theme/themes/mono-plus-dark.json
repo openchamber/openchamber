@@ -31,7 +31,7 @@
       "subtle": "#1A1A1A"
     },
     "interactive": {
-      "border": "#454545",
+      "border": "#2f2f2f",
       "borderHover": "#333333",
       "borderFocus": "#FFFFFF",
       "selection": "#ffffff1f",

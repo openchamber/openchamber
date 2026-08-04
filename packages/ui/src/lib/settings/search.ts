@@ -26,6 +26,8 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isWindows: boolean;
   // Linux desktop shell — for controls that only render on linux.
   isLinux: boolean;
+  // Windows ARM64 — temporary workaround gate (see opencode#19130).
+  isWindowsArm64: boolean;
 }
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -146,6 +148,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['input', 'home bar', 'offset'],
     // Only the mobile composer applies this offset (ChatInput gates on isMobile).
     isAvailable: (ctx) => ctx.isMobile,
+  },
+  {
+    id: 'appearance.auto-save-enabled',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.autoSaveEnabled',
+    descriptionKey: 'settings.openchamber.visual.field.autoSaveEnabledInfo',
+    keywords: ['editor', 'autosave', 'auto-save', 'files', 'save'],
   },
   {
     id: 'appearance.expanded-editor-toolbar',
@@ -370,6 +379,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['small model', 'utility', 'summary', 'recap', 'cheap', 'override'],
   },
   {
+    id: 'sessions.walkthrough-model',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.walkthroughModel.title',
+    descriptionKey: 'settings.openchamber.defaults.walkthroughModel.description',
+    keywords: ['walkthrough', 'diff', 'review', 'changes', 'structured output', 'model', 'override'],
+  },
+  {
     id: 'sessions.auto-cleanup',
     page: 'sessions',
     titleKey: 'settings.openchamber.sessionRetention.field.enableAutoCleanup',
@@ -402,6 +418,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.desktopNetwork.field.windowControlsPosition',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.windowControlsPositionDescription',
     keywords: ['desktop', 'window', 'controls', 'minimize', 'maximize', 'close', 'titlebar', 'linux', 'windows'],
+    isAvailable: (ctx) => ctx.isDesktop && (ctx.isWindows || !ctx.isMac),
+  },
+  {
+    id: 'sessions.desktop-window-controls-style',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.desktopNetwork.field.windowControlsStyle',
+    keywords: ['desktop', 'window', 'controls', 'style', 'traffic', 'lights', 'classic', 'macos', 'titlebar'],
     isAvailable: (ctx) => ctx.isDesktop && (ctx.isWindows || !ctx.isMac),
   },
   {
@@ -456,7 +479,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'general',
     titleKey: 'settings.openchamber.opencodeCli.field.showUpdateNotifications',
     keywords: ['opencode', 'cli', 'updates'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isWindowsArm64,
   },
   {
     id: 'sessions.agent-control-tool',
@@ -555,6 +578,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.remoteInstances.direct.description',
     keywords: ['server url', 'connection token', 'import link', 'host switcher', 'additional headers', 'request headers', 'cloudflare access', 'service token'],
     isAvailable: (ctx) => ctx.isDesktop,
+  },
+  {
+    id: 'behavior.system-prompt-optimization',
+    page: 'behavior',
+    titleKey: 'settings.behavior.page.section.systemPromptOptimization',
+    descriptionKey: 'settings.behavior.page.systemPromptOptimization.info',
+    keywords: ['system prompt', 'tokens', 'context', 'optimize', 'minimal'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'behavior.system-prompt',
@@ -729,6 +760,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'providers',
     titleKey: 'settings.providers.page.connect.title',
     keywords: ['add provider', 'connect provider', 'credentials'],
+  },
+  {
+    id: 'providers.custom',
+    page: 'providers',
+    titleKey: 'settings.providers.page.custom.title',
+    descriptionKey: 'settings.providers.page.custom.description',
+    keywords: ['other', 'custom', 'openai-compatible', 'base url', 'api key'],
   },
   {
     id: 'providers.auth',

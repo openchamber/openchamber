@@ -711,7 +711,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         open={open}
         onClose={handleClose}
         title={t('directoryExplorerDialog.title')}
-        className="h-[88dvh] max-h-[720px] max-w-full"
+        // Height only — the width stays on MobileOverlayPanel's shared max-w-lg
+        // so this sheet matches every other mobile overlay on wide screens.
+        className="h-[88dvh] max-h-[720px]"
         contentMaxHeightClassName="flex-1"
         footer={<div className="flex flex-col gap-2">{renderFooter()}</div>}
       >

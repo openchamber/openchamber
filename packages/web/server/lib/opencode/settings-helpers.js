@@ -197,6 +197,12 @@ export const createSettingsHelpers = (dependencies) => {
         result.desktopWindowControlsPosition = 'left';
       }
     }
+    if (typeof candidate.desktopWindowControlsStyle === 'string') {
+      const style = candidate.desktopWindowControlsStyle.trim();
+      if (style === 'classic' || style === 'traffic-lights') {
+        result.desktopWindowControlsStyle = style;
+      }
+    }
     if (candidate.permissionAutoAccept && typeof candidate.permissionAutoAccept === 'object' && !Array.isArray(candidate.permissionAutoAccept)) {
       const sessions = {};
       const sourceSessions = candidate.permissionAutoAccept.sessions;
@@ -437,6 +443,10 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.smallModelOverride.trim();
       result.smallModelOverride = trimmed.length > 0 ? trimmed : undefined;
     }
+    if (typeof candidate.walkthroughModelOverride === 'string') {
+      const trimmed = candidate.walkthroughModelOverride.trim();
+      result.walkthroughModelOverride = trimmed.length > 0 ? trimmed : undefined;
+    }
     if (typeof candidate.defaultGitIdentityId === 'string') {
       const trimmed = candidate.defaultGitIdentityId.trim();
       result.defaultGitIdentityId = trimmed.length > 0 ? trimmed : undefined;
@@ -493,6 +503,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.agentControlToolEnabled === 'boolean') {
       result.agentControlToolEnabled = candidate.agentControlToolEnabled;
+    }
+    if (typeof candidate.optimizeSystemPrompt === 'boolean') {
+      result.optimizeSystemPrompt = candidate.optimizeSystemPrompt;
     }
     if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
       const version = candidate.openCodeUpdateToastDismissedVersion.trim();

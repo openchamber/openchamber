@@ -300,6 +300,78 @@ export const worktreeMapsEqual = (
   return true;
 };
 
+/**
+ * Partition shared Git worktree topology across configured projects.
+ *
+ * A configured project may itself be a linked worktree. Asking Git for the
+ * worktree list from every configured checkout returns the same repository
+ * topology each time, which would otherwise render every sibling worktree
+ * under every project. The primary checkout owns the topology when it is
+ * configured; otherwise the first configured checkout for that repository
+ * owns it. Checkouts that are configured projects are omitted from the owned
+ * worktree list because they already have their own project section.
+ */
+export const partitionWorktreesByRegisteredProject = (
+  projects: ReadonlyArray<Pick<ProjectRef, 'path'>>,
+  worktreesByProject: ReadonlyMap<string, WorktreeMetadata[]>,
+): Map<string, WorktreeMetadata[]> => {
+  const configuredProjectOrder = new Map<string, number>();
+  projects.forEach((project, index) => {
+    const projectPath = normalizePath(project.path.trim());
+    if (projectPath && !configuredProjectOrder.has(projectPath)) {
+      configuredProjectOrder.set(projectPath, index);
+    }
+  });
+
+  type RepositorySource = {
+    projectPath: string;
+    worktrees: WorktreeMetadata[];
+    projectIndex: number;
+  };
+
+  const sourcesByRepository = new Map<string, RepositorySource[]>();
+  for (const [rawProjectPath, worktrees] of worktreesByProject) {
+    if (worktrees.length === 0) continue;
+    const projectPath = normalizePath(rawProjectPath.trim());
+    const projectIndex = configuredProjectOrder.get(projectPath);
+    if (!projectPath || projectIndex === undefined) continue;
+
+    const metadataRoot = worktrees.find((worktree) => worktree.projectDirectory?.trim())?.projectDirectory;
+    const repositoryRoot = normalizePath((metadataRoot || projectPath).trim());
+    if (!repositoryRoot) continue;
+
+    const sources = sourcesByRepository.get(repositoryRoot) ?? [];
+    sources.push({ projectPath, worktrees, projectIndex });
+    sourcesByRepository.set(repositoryRoot, sources);
+  }
+
+  const partitioned = new Map<string, WorktreeMetadata[]>();
+  for (const [repositoryRoot, sources] of sourcesByRepository) {
+    sources.sort((a, b) => a.projectIndex - b.projectIndex || a.projectPath.localeCompare(b.projectPath));
+    const firstSource = sources[0];
+    if (!firstSource) continue;
+
+    const ownerPath = configuredProjectOrder.has(repositoryRoot) ? repositoryRoot : firstSource.projectPath;
+    const topologySource = sources.find((candidate) => candidate.projectPath === ownerPath) ?? firstSource;
+
+    const seenPaths = new Set<string>();
+    const ownedWorktrees = topologySource.worktrees.filter((worktree) => {
+      const worktreePath = normalizePath(worktree.path.trim());
+      if (!worktreePath || configuredProjectOrder.has(worktreePath) || seenPaths.has(worktreePath)) {
+        return false;
+      }
+      seenPaths.add(worktreePath);
+      return true;
+    });
+
+    if (ownedWorktrees.length > 0) {
+      partitioned.set(ownerPath, ownedWorktrees);
+    }
+  }
+
+  return partitioned;
+};
+
 // Cache worktree listings to avoid repeated git worktree list + rev-parse calls
 const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: number }>();
 const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();

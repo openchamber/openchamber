@@ -455,7 +455,7 @@ export const CommandPalette: React.FC = () => {
   const handleOpenFile = React.useCallback(
     async (filePath: string) => {
       if (!currentRoot) return;
-      const validation = await validateContextFileOpen(filesApi, filePath);
+      const validation = await validateContextFileOpen(filesApi, filePath, { directory: currentRoot });
       if (!validation.ok) {
         toast.error(getContextFileOpenFailureMessage(validation.reason));
         return;

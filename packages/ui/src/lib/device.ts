@@ -1,6 +1,7 @@
 import React from 'react';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
-import { isCapacitorApp } from '@/lib/platform';
+import { isIPadApp } from '@/lib/platform';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 
 type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
@@ -65,8 +66,6 @@ const setRootDeviceAttributes = (
   }
 
   const root = document.documentElement;
-  const isMobile = deviceType === 'mobile';
-  const isTablet = deviceType === 'tablet';
 
   root.classList.remove('device-mobile', 'device-tablet', 'device-desktop');
   root.classList.add(
@@ -79,19 +78,9 @@ const setRootDeviceAttributes = (
 
   if (isDesktopShellRuntime) {
     root.classList.add('desktop-runtime');
-    root.style.setProperty('--is-mobile', '0');
-    root.style.setProperty('--device-type', 'desktop');
-    root.style.setProperty('--font-scale', '1');
-    root.style.setProperty('--has-coarse-pointer', '0');
-    root.style.setProperty('--has-touch-input', '0');
     root.classList.remove('mobile-pointer');
   } else {
     root.classList.remove('desktop-runtime');
-    root.style.setProperty('--is-mobile', isMobile ? '1' : '0');
-    root.style.setProperty('--device-type', deviceType);
-    root.style.setProperty('--font-scale', isMobile ? '0.9' : isTablet ? '0.95' : '1');
-    root.style.setProperty('--has-coarse-pointer', hasTouchInput ? '1' : '0');
-    root.style.setProperty('--has-touch-input', hasTouchInput ? '1' : '0');
     if (hasTouchInput) {
       root.classList.add('mobile-pointer');
     } else {
@@ -128,11 +117,12 @@ export function getDeviceInfo(): DeviceInfo {
     isTablet = false;
     isDesktop = true;
     deviceType = 'desktop';
-  } else if (isCapacitorApp()) {
-    // The Capacitor shell IS the phone UI: every surface in that bundle is
-    // built mobile-first, so wide devices (iPad, Android tablets) must not
-    // fall into tablet/desktop branches scattered across shared components.
-    // iPad-specific layout upgrades gate on isIPadApp()/orientation instead.
+  } else if (isMobileSurfaceRuntime()) {
+    // The mobile surface (Capacitor shell or hosted MobileApp) IS the phone
+    // UI: every component in that tree is built mobile-first, so wide devices
+    // (iPad, Android tablets, rotated phones) must not fall into
+    // tablet/desktop branches scattered across shared components.
+    // Tablet layout upgrades gate on useTabletLayout() (a size class) instead.
     isMobile = true;
     isTablet = false;
     isDesktop = false;
@@ -288,16 +278,7 @@ const subscribeDeviceInfo = (listener: () => void): (() => void) => {
 
 export function isMobileDeviceViaCSS(): boolean {
   if (typeof window === 'undefined') return false;
-
-  if (typeof window !== 'undefined' && isDesktopShell()) {
-    return false;
-  }
-
-  const root = document.documentElement;
-  const isMobileValue = root.style.getPropertyValue('--is-mobile') ||
-                        getComputedStyle(root).getPropertyValue('--is-mobile');
-
-  return isMobileValue === '1' || isMobileValue === 'true';
+  return readDeviceInfoSnapshot().isMobile;
 }
 
 const isStandalonePwaRuntime = (): boolean => {
@@ -382,6 +363,87 @@ export function useOrientation(): Orientation {
   }, []);
 
   return orientation;
+}
+
+/**
+ * Smallest viewport side that earns the tablet layout, following Android's
+ * long-standing `sw600dp` size class. The SHORT side is what makes this a size
+ * question rather than a device question: a phone reports ~360-430 whichever
+ * way it is held, a 7"+ tablet or an unfolded book foldable reports ~600+, and
+ * a foldable folded shut drops back under it. So a fold is just a resize, and
+ * nothing here has to know what a foldable is.
+ */
+const TABLET_LAYOUT_MIN_SHORT_SIDE_PX = 600;
+/**
+ * Width below which the workspace cannot become a side panel: the sessions
+ * sidebar (~320) plus the panel (~380) plus a chat column that is still worth
+ * reading. Unfolded book foldables land under this even "landscape", so they
+ * keep the full-cover drawer in both orientations — which is the whole point,
+ * their wide side is barely wider than a tablet's narrow one.
+ */
+const WORKSPACE_PANEL_MIN_WIDTH_PX = 1000;
+
+export interface TabletLayout {
+  /** Sessions become a persistent sidebar, dropdowns become anchored popovers. */
+  enabled: boolean;
+  /** There is room for the workspace beside the chat instead of over it. */
+  roomyForPanels: boolean;
+}
+
+export const readTabletLayout = (): TabletLayout => {
+  if (typeof window === 'undefined') return { enabled: false, roomyForPanels: false };
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  // iPads answer this on identity too: iPadOS reports odd viewports in Slide
+  // Over / Split View, and a device we KNOW is a tablet should not flip to the
+  // phone layout because it was given a narrow slice.
+  const enabled = isIPadApp() || Math.min(width, height) >= TABLET_LAYOUT_MIN_SHORT_SIDE_PX;
+  return {
+    enabled,
+    roomyForPanels: enabled && width > height && width >= WORKSPACE_PANEL_MIN_WIDTH_PX,
+  };
+};
+
+/**
+ * The tablet layout decision, live.
+ *
+ * Deliberately a hook over a one-shot check: foldables change size class while
+ * the app runs, and the Android shell keeps the WebView alive across the fold
+ * (`configChanges` covers screenSize), so every consumer has to re-decide
+ * rather than remember what it saw at mount.
+ */
+export function useTabletLayout(): TabletLayout {
+  const [layout, setLayout] = React.useState<TabletLayout>(readTabletLayout);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let frame: number | undefined;
+    const update = () => {
+      frame = undefined;
+      const next = readTabletLayout();
+      setLayout((current) => (
+        current.enabled === next.enabled && current.roomyForPanels === next.roomyForPanels
+          ? current
+          : next
+      ));
+    };
+    const schedule = () => {
+      if (frame !== undefined) return;
+      frame = window.requestAnimationFrame(update);
+    };
+
+    update();
+    window.addEventListener('resize', schedule);
+    const orientationQuery = window.matchMedia?.('(orientation: landscape)') ?? null;
+    const detachOrientation = attachMediaQueryListener(orientationQuery, schedule);
+    return () => {
+      window.removeEventListener('resize', schedule);
+      detachOrientation();
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  return layout;
 }
 
 export function useDeviceInfo(): DeviceInfo {

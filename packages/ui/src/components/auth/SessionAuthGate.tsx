@@ -13,9 +13,9 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
-import { resolveStatusCheckFailureState, type GateState } from './sessionAuthGateState';
+import { resolveStatusCheckFailureState, runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
 import {
   authenticateWithPasskey,
   cancelPasskeyCeremony,
@@ -160,20 +160,34 @@ const shouldUseDesktopShellPasswordLogin = (): boolean => {
   return isDesktopShell() && !isLocalDesktopRuntime();
 };
 
+const captureRuntimeIdentity = (): RuntimeIdentity => ({
+  apiBaseUrl: getRuntimeApiBaseUrl(),
+  runtimeKey: getRuntimeKey(),
+});
+
+const isRuntimeIdentityActive = (identity: RuntimeIdentity): boolean => {
+  return runtimeIdentityMatches(identity, captureRuntimeIdentity());
+};
+
 type DesktopPasswordLoginResult = {
   token: string;
   status?: number;
 };
 
-const issueDesktopClientTokenViaShell = async (password: string, trustDevice: boolean): Promise<DesktopPasswordLoginResult | null> => {
+const issueDesktopClientTokenViaShell = async (
+  password: string,
+  trustDevice: boolean,
+  runtime: RuntimeIdentity,
+  requestHeaders: Record<string, string>,
+): Promise<DesktopPasswordLoginResult | null> => {
   if (!isDesktopShell() || typeof window === 'undefined') {
     return null;
   }
   const response = await invokeDesktop('desktop_remote_password_login', {
-    url: getRuntimeApiBaseUrl(),
+    url: runtime.apiBaseUrl,
     password,
     trustDevice,
-    requestHeaders: getRuntimeExtraHeadersSync(),
+    requestHeaders,
   }).catch(() => null);
   if (!response || typeof response !== 'object') {
     return null;
@@ -186,22 +200,22 @@ const issueDesktopClientTokenViaShell = async (password: string, trustDevice: bo
   };
 };
 
-const persistDesktopClientToken = async (apiBaseUrl: string, clientToken: string): Promise<void> => {
-  if (!isDesktopShell() || !clientToken) return;
+const persistDesktopClientToken = async (runtime: RuntimeIdentity, clientToken: string): Promise<boolean> => {
+  if (!isDesktopShell() || !clientToken || !isRuntimeIdentityActive(runtime)) return false;
   const cfg = await desktopHostsGet().catch(() => null);
-  if (!cfg) return;
-  if (cfg.localOrigin && sameOrigin(cfg.localOrigin, apiBaseUrl)) {
+  if (!cfg || !isRuntimeIdentityActive(runtime)) return false;
+  if (cfg.localOrigin && sameOrigin(cfg.localOrigin, runtime.apiBaseUrl)) {
     await desktopHostsSet({
       hosts: cfg.hosts,
       defaultHostId: cfg.defaultHostId,
       initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
       localClientToken: clientToken,
     }).catch(() => undefined);
-    return;
+    return isRuntimeIdentityActive(runtime);
   }
   let changed = false;
   const hosts = cfg.hosts.map((host) => {
-    if (!sameOrigin(getDesktopHostApiUrl(host), apiBaseUrl)) {
+    if (!sameOrigin(getDesktopHostApiUrl(host), runtime.apiBaseUrl)) {
       return host;
     }
     if (host.clientToken === clientToken) {
@@ -210,24 +224,31 @@ const persistDesktopClientToken = async (apiBaseUrl: string, clientToken: string
     changed = true;
     return { ...host, clientToken };
   });
-  if (!changed) return;
+  if (!changed) return true;
+  if (!isRuntimeIdentityActive(runtime)) return false;
   await desktopHostsSet({
     hosts,
     defaultHostId: cfg.defaultHostId,
     initialHostChoiceCompleted: cfg.initialHostChoiceCompleted,
   }).catch(() => undefined);
+  return isRuntimeIdentityActive(runtime);
 };
 
-const applyDesktopClientToken = async (clientToken: string): Promise<void> => {
-  if (!clientToken) return;
-  const apiBaseUrl = getRuntimeApiBaseUrl();
-  const requestHeaders = getRuntimeExtraHeadersSync();
-  await persistDesktopClientToken(apiBaseUrl, clientToken);
+const applyDesktopClientToken = async (
+  clientToken: string,
+  runtime: RuntimeIdentity,
+  requestHeaders: Record<string, string>,
+): Promise<boolean> => {
+  if (!clientToken || !isRuntimeIdentityActive(runtime)) return false;
+  if (!await persistDesktopClientToken(runtime, clientToken)) return false;
+  if (!isRuntimeIdentityActive(runtime)) return false;
   switchRuntimeEndpoint({
-    apiBaseUrl,
+    apiBaseUrl: runtime.apiBaseUrl,
     clientToken,
     requestHeaders: Object.keys(requestHeaders).length > 0 ? requestHeaders : null,
+    runtimeKey: runtime.runtimeKey,
   });
+  return true;
 };
 
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -338,17 +359,21 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     window.localStorage.setItem(TRUST_DEVICE_STORAGE_KEY, trustDevice ? 'true' : 'false');
   }, [trustDevice]);
 
-  const refreshPasskeyStatus = React.useCallback(async () => {
+  const refreshPasskeyStatus = React.useCallback(async (runtime = captureRuntimeIdentity()) => {
     if (skipAuth) {
       return defaultPasskeyStatus;
     }
 
     try {
       const nextStatus = await fetchPasskeyStatus();
-      setPasskeyStatus(nextStatus);
+      if (isRuntimeIdentityActive(runtime)) {
+        setPasskeyStatus(nextStatus);
+      }
       return nextStatus;
     } catch {
-      setPasskeyStatus(defaultPasskeyStatus);
+      if (isRuntimeIdentityActive(runtime)) {
+        setPasskeyStatus(defaultPasskeyStatus);
+      }
       return defaultPasskeyStatus;
     }
   }, [skipAuth]);
@@ -423,13 +448,18 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       return;
     }
 
+    const runtime = captureRuntimeIdentity();
     setState((prev) => (prev === 'authenticated' ? prev : 'pending'));
     try {
       const [response, latestPasskeyStatus] = await Promise.all([
         fetchSessionStatus(),
-        refreshPasskeyStatus(),
+        refreshPasskeyStatus(runtime),
       ]);
       const responseText = await response.text();
+
+        if (!isRuntimeIdentityActive(runtime)) {
+          return;
+        }
 
         if (response.ok) {
           resetTransientRetry();
@@ -472,6 +502,9 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       setState('error');
       setIsTunnelLocked(false);
     } catch (error) {
+      if (!isRuntimeIdentityActive(runtime)) {
+        return;
+      }
       console.warn('Failed to check session status:', error);
       if (resolveStatusCheckFailureState({ shouldUseDesktopShellPasswordLogin: shouldUseDesktopShellPasswordLogin() }) === 'locked') {
         setState('locked');
@@ -504,10 +537,14 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     }
 
     return subscribeRuntimeEndpointChanged(() => {
+      cancelPasskeyCeremony();
       setPassword('');
       setErrorMessage('');
       setRetryAfter(undefined);
       setIsTunnelLocked(false);
+      setIsSubmitting(false);
+      setActivePasskeyAction(null);
+      setIsPasskeyBusy(false);
       resetTransientRetry();
       setState('pending');
       void checkStatus();
@@ -547,15 +584,19 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   };
 
   const registerPasskeyForCurrentSession = React.useCallback(async () => {
+    const runtime = captureRuntimeIdentity();
     setActivePasskeyAction('register');
     setIsPasskeyBusy(true);
     try {
       await registerCurrentDevicePasskey();
     } finally {
-      setActivePasskeyAction(null);
-      setIsPasskeyBusy(false);
+      if (isRuntimeIdentityActive(runtime)) {
+        setActivePasskeyAction(null);
+        setIsPasskeyBusy(false);
+      }
     }
-    await refreshPasskeyStatus();
+    if (!isRuntimeIdentityActive(runtime)) return;
+    await refreshPasskeyStatus(runtime);
   }, [refreshPasskeyStatus]);
 
   const cancelActivePasskey = React.useCallback(() => {
@@ -576,16 +617,19 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       cancelActivePasskey();
     }
 
+    const runtime = captureRuntimeIdentity();
+    const requestHeaders = getRuntimeExtraHeadersSync();
     setIsSubmitting(true);
     setErrorMessage('');
 
     try {
       if (shouldUseDesktopShellPasswordLogin()) {
-        const shellLogin = await issueDesktopClientTokenViaShell(password, trustDevice);
+        const shellLogin = await issueDesktopClientTokenViaShell(password, trustDevice, runtime, requestHeaders);
+        if (!isRuntimeIdentityActive(runtime)) return;
         if (shellLogin?.token) {
           setPassword('');
           setIsTunnelLocked(false);
-          await applyDesktopClientToken(shellLogin.token);
+          if (!await applyDesktopClientToken(shellLogin.token, runtime, requestHeaders)) return;
           setState('authenticated');
           return;
         }
@@ -604,8 +648,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       }
 
       const response = await submitPassword(password, trustDevice);
+      if (!isRuntimeIdentityActive(runtime)) return;
       if (response.ok) {
         const payload = await response.json().catch(() => null) as { clientToken?: unknown } | null;
+        if (!isRuntimeIdentityActive(runtime)) return;
         const shouldUseClientToken = shouldIssueDesktopClientToken();
         let clientToken = '';
         if (shouldUseClientToken) {
@@ -613,18 +659,21 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
             ? payload.clientToken.trim()
             : '';
           if (!clientToken) {
-            const shellLogin = await issueDesktopClientTokenViaShell(password, trustDevice);
+            const shellLogin = await issueDesktopClientTokenViaShell(password, trustDevice, runtime, requestHeaders);
+            if (!isRuntimeIdentityActive(runtime)) return;
             clientToken = shellLogin?.token || await issueDesktopClientToken();
+            if (!isRuntimeIdentityActive(runtime)) return;
           }
         }
         setPassword('');
         setIsTunnelLocked(false);
         if (clientToken) {
-          await applyDesktopClientToken(clientToken);
+          if (!await applyDesktopClientToken(clientToken, runtime, requestHeaders)) return;
         }
         if (enrollPasskey && supportsPasskeys) {
           try {
             await registerPasskeyForCurrentSession();
+            if (!isRuntimeIdentityActive(runtime)) return;
             toast.success(t('sessionAuth.toast.passkeyAdded'));
             setState('authenticated');
             return;
@@ -662,14 +711,16 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       setIsTunnelLocked(false);
       setState('error');
     } catch (error) {
+      if (!isRuntimeIdentityActive(runtime)) return;
       console.warn('Failed to submit UI password:', error);
       const shellLogin = shouldUseDesktopShellPasswordLogin()
-        ? await issueDesktopClientTokenViaShell(password, trustDevice)
+        ? await issueDesktopClientTokenViaShell(password, trustDevice, runtime, requestHeaders)
         : null;
+      if (!isRuntimeIdentityActive(runtime)) return;
       if (shellLogin?.token) {
         setPassword('');
         setIsTunnelLocked(false);
-        await applyDesktopClientToken(shellLogin.token);
+        if (!await applyDesktopClientToken(shellLogin.token, runtime, requestHeaders)) return;
         setState('authenticated');
         return;
       }
@@ -689,7 +740,9 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       setIsTunnelLocked(false);
       setState('error');
     } finally {
-      setIsSubmitting(false);
+      if (isRuntimeIdentityActive(runtime)) {
+        setIsSubmitting(false);
+      }
     }
   }, [cancelActivePasskey, isPasskeyBusy, isSubmitting, isTunnelLocked, password, registerPasskeyForCurrentSession, supportsPasskeys, t, trustDevice]);
 
@@ -706,6 +759,8 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     setIsPasskeyBusy(true);
     setActivePasskeyAction('auth');
     setErrorMessage('');
+    const runtime = captureRuntimeIdentity();
+    const requestHeaders = getRuntimeExtraHeadersSync();
 
     try {
       const payload = await authenticateWithPasskey(trustDevice, {
@@ -716,13 +771,15 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       const clientToken = shouldIssueDesktopClientToken() && typeof payload?.clientToken === 'string' && payload.clientToken.trim()
         ? payload.clientToken.trim()
         : '';
+      if (!isRuntimeIdentityActive(runtime)) return;
       if (clientToken) {
-        await applyDesktopClientToken(clientToken);
+        if (!await applyDesktopClientToken(clientToken, runtime, requestHeaders)) return;
       }
 
       setPassword('');
       setState('authenticated');
     } catch (error) {
+      if (!isRuntimeIdentityActive(runtime)) return;
       if (isPasskeyCeremonyAbort(error)) {
         setErrorMessage('');
       } else {
@@ -730,8 +787,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         setErrorMessage(message);
       }
     } finally {
-      setActivePasskeyAction(null);
-      setIsPasskeyBusy(false);
+      if (isRuntimeIdentityActive(runtime)) {
+        setActivePasskeyAction(null);
+        setIsPasskeyBusy(false);
+      }
     }
   }, [cancelActivePasskey, isPasskeyBusy, isSubmitting, supportsPasskeys, t, trustDevice]);
 

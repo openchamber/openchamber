@@ -138,6 +138,11 @@ describe('classifyMention', () => {
         expect(classifyMention('', classifier)).toBeNull();
     });
 
+    test('HTML fragments do not classify as file references', () => {
+        expect(classifyMention('import</style>', classifier)).toBeNull();
+        expect(classifyMention('src/<style.css', classifier)).toBeNull();
+    });
+
     test('an agent name wins over a file-looking name', () => {
         const shadowed = {
             knownAgentNames: new Set(['a.ts']),
@@ -152,4 +157,3 @@ describe('classifyMention', () => {
         expect(looksLikeFilePath('plain', new Set(['plain']))).toBe(true);
     });
 });
-

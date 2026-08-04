@@ -83,6 +83,10 @@ and the send path reading the same grammar.
 
 ## Ordering rules worth knowing
 
+- `editor/ComposerEditor.tsx` forwards a click on the composer's padding by
+  focusing the view *before* setting the selection: CodeMirror reveals its
+  drawn caret through a class it only writes while applying an update, so the
+  selection has to be the update that follows the focus.
 - `submit/buildOutgoingMessage.ts` flattens queued messages, the composer text,
   inline comments and context into OpenCode's one-primary-plus-parts shape. The
   oldest queued message becomes primary; **inline comments attach to the last

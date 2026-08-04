@@ -1,4 +1,4 @@
-import type { ProjectEntry, TerminalShell } from '@/lib/api/types';
+import type { ProjectEntry, RuntimeAPIs, TerminalShell } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -41,6 +41,8 @@ export type SkillCatalogConfig = {
 export type DesktopWindowControlsPosition = 'left' | 'right';
 export type DesktopWindowControlsSide = 'left' | 'right';
 export type DesktopWindowControlAction = 'close' | 'minimize' | 'maximize';
+// No fixed-width constant: control width depends on the style (classic vs traffic-lights).
+export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 
 export type DesktopSettings = {
   themeId?: string;
@@ -105,6 +107,7 @@ export type DesktopSettings = {
     renamedGroups?: Record<string, string>;  // groupId -> custom label
   }>;  // Per-provider custom model groups configuration
   autoDeleteEnabled?: boolean;
+  autoSaveEnabled?: boolean;
   autoDeleteAfterDays?: number;
   sessionRetentionAction?: 'archive' | 'delete';
   tunnelProvider?: string;
@@ -128,6 +131,10 @@ export type DesktopSettings = {
   sessionGoalDefaultBudgetEnabled?: boolean;
   sessionGoalDefaultBudget?: number;
   smallModelOverride?: string; // format: "provider/model"
+  // The walkthrough needs structured output and a roomy context, which the
+  // small model is often deliberately not chosen for. Unset means "use the
+  // small model"; a value replaces it for this feature only.
+  walkthroughModelOverride?: string; // format: "provider/model"
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
   autoCreateWorktree?: boolean;
@@ -142,9 +149,11 @@ export type DesktopSettings = {
   pwaOrientation?: 'system' | 'portrait' | 'landscape';
   mobileKeyboardMode?: MobileKeyboardMode;
   desktopWindowControlsPosition?: DesktopWindowControlsPosition;
+  desktopWindowControlsStyle?: DesktopWindowControlsStyle;
   inputSpellcheckEnabled?: boolean;
   showOpenCodeUpdateNotifications?: boolean;
   agentControlToolEnabled?: boolean;
+  optimizeSystemPrompt?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
   codeBlockLineWrap?: boolean;
@@ -227,6 +236,7 @@ type DesktopBridgeGlobal = {
 
 type ElectronRuntimeGlobal = {
   runtime?: string;
+  arch?: string;
   macVibrancy?: boolean;
   macVibrancySupported?: boolean;
   trayEnabled?: boolean;
@@ -249,9 +259,6 @@ export const getElectronPlatform = (): string | null => {
   const platform = (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__;
   return typeof platform === 'string' ? platform : null;
 };
-
-/** Width of the three in-app window control buttons when placed on the left (3 × w-8). */
-export const DESKTOP_WINDOW_CONTROLS_WIDTH_PX = 96;
 
 /** Default side for in-app window controls (Windows-style, right). */
 export const DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION: DesktopWindowControlsPosition = 'right';
@@ -554,6 +561,15 @@ export const isWebRuntime = (): boolean => {
   // Default: anything that's not VSCode behaves like web (HTTP UI).
   return !isVSCodeRuntime();
 };
+
+/**
+ * Electron reuses the web RuntimeAPIs implementation, so distinguish a browser
+ * client from an Electron renderer with both the runtime descriptor and shell.
+ */
+export const isBrowserClientRuntime = (
+  platform: RuntimeAPIs['runtime']['platform'],
+  desktopShell = isDesktopShell(),
+): boolean => platform === 'web' && !desktopShell;
 
 export const getDesktopHomeDirectory = async (): Promise<string | null> => {
   if (typeof window !== 'undefined') {
@@ -933,11 +949,6 @@ export const fetchDesktopInstalledApps = async (
 ): Promise<FetchDesktopInstalledAppsResult> => {
   if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
-  }
-
-  // Linux desktop does not resolve installed GUI apps; skip the IPC round-trip.
-  if (getElectronPlatform() === 'linux') {
-    return { apps: [], success: true, hasCache: false, isCacheStale: false };
   }
 
   const candidate = Array.isArray(apps) ? apps.filter((value) => typeof value === 'string') : [];

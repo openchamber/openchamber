@@ -1,0 +1,44 @@
+---
+title: Sicherheit
+description: Schützen Sie die UI mit einem Passwort und Passkeys, bevor Sie sie freigeben.
+---
+
+# Sicherheit
+
+OpenChamber gewährt Zugriff auf Ihren Rechner und Ihren Code. Sperren Sie es also ab, bevor jemand außer Ihnen darauf zugreifen kann. Diese Seite behandelt das UI-Passwort, Passkeys und was Sie wissen sollten, bevor Sie OpenChamber in ein Netzwerk exponieren.
+
+## UI-Passwort setzen
+
+Starten Sie OpenChamber mit einem Passwort, und die Browser-UI fragt danach:
+
+```bash
+openchamber --ui-password be-creative-here
+```
+
+Sie können es auch über die Umgebungsvariable `OPENCHAMBER_UI_PASSWORD` setzen, statt es in die Befehlszeile zu schreiben. Nach der Anmeldung merkt sich OpenChamber das Gerät für eine Weile, damit Sie nicht jedes Mal gefragt werden.
+
+Setzen Sie immer ein Passwort, wenn die Instanz für andere erreichbar ist — besonders über einen [Tunnel](/tunnels/) oder das öffentliche Internet.
+
+## Passkeys
+
+Sobald ein Passwort gesetzt ist, können Sie Passkeys (Face ID, Touch ID, ein Sicherheitsschlüssel) für eine schnellere Anmeldung hinzufügen. Fügen Sie sie unter **Einstellungen → OpenChamber → Passkeys** hinzu.
+
+Passkeys sind an das aktuelle Passwort gebunden. Wenn Sie das Passwort ändern oder entfernen, werden gespeicherte Passkeys gelöscht und Sie fügen sie erneut hinzu.
+
+## Geräte-Tokens
+
+Geräte, die über [Ein Gerät verbinden](/connect-devices/) gekoppelt werden, authentifizieren sich mit eigenen gerätespezifischen Tokens, nicht mit dem UI-Passwort. Pairing-Links sind nur einmal nutzbar und laufen ab, wenn sie nicht verwendet werden; jedes gekoppelte Gerät wird unter **Einstellungen → Remote-Instanzen → Mit diesem Server verbinden** aufgeführt, wo Sie es jederzeit widerrufen können. Verbindungen von außerhalb laufen über das [Private Relay](/private-relay/), das Ende-zu-Ende verschlüsselt ist und Ihren Traffic nicht lesen kann.
+
+## Bevor Sie es freigeben
+
+- Standardmäßig lauscht OpenChamber nur auf Ihrem eigenen Rechner (`127.0.0.1`). Es braucht eine bewusste Änderung, um breiter zu lauschen, und Sie sollten vorher ein Passwort setzen.
+- Für Ihre eigenen Geräte bevorzugen Sie [Pairing](/connect-devices/) mit dem [Private Relay](/private-relay/) — dabei wird überhaupt nichts öffentlich freigegeben.
+- Wenn Sie eine öffentliche URL brauchen, verwenden Sie lieber einen [Tunnel](/tunnels/) oder ein privates Netzwerk (z. B. VPN), statt einen Port ins Internet zu öffnen.
+- Wenn Sie OpenChamber hinter Ihrem eigenen HTTPS-Server betreiben, sehen Sie sich [Reverse Proxy](/reverse-proxy/) an.
+
+## Verwandt
+
+- [Ein Gerät verbinden](/connect-devices/) — einmaliges Pairing und gerätespezifische Tokens
+- [Private Relay](/private-relay/) — Ende-zu-Ende-verschlüsselter Zugriff von überall
+- [Tunnel](/tunnels/) — eine öffentliche URL freigeben, wenn Sie eine brauchen
+- [Reverse Proxy](/reverse-proxy/) — OpenChamber hinter Ihrem eigenen Server betreiben

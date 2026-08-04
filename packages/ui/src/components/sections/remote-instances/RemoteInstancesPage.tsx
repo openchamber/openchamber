@@ -751,7 +751,7 @@ export const RemoteInstancesPage: React.FC = () => {
     if (!showInstanceManagement || directHosts.length === 0) return;
     let cancelled = false;
     void Promise.all(directHosts.map(async (host) => {
-      const relayProbe = () => probeRelayDesktopHost(host.relay!).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+      const relayProbe = () => probeRelayDesktopHost(host.relay!, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
       // Relay-only host: tunnel probe. Multi-transport host: direct first,
       // relay as the away-from-home fallback.
       if (host.relay && !host.apiUrl) {

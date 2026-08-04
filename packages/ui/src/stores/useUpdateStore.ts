@@ -67,6 +67,12 @@ function detectDeviceClass(): 'mobile' | 'tablet' | 'desktop' | 'unknown' {
 }
 
 function detectArch(): 'arm64' | 'x64' | 'unknown' {
+  const electronArch = typeof window !== 'undefined'
+    ? window.__OPENCHAMBER_ELECTRON__?.arch?.toLowerCase?.()
+    : undefined;
+  if (electronArch === 'arm64' || electronArch === 'aarch64') return 'arm64';
+  if (electronArch === 'x64' || electronArch === 'amd64' || electronArch === 'x86_64') return 'x64';
+
   const vscodeArch = typeof window !== 'undefined'
     ? (window as { __VSCODE_CONFIG__?: { arch?: string } }).__VSCODE_CONFIG__?.arch?.toLowerCase?.()
     : undefined;
@@ -141,6 +147,8 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
     const response = await runtimeFetch(`/api/openchamber/update-check?${params.toString()}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
+      // Background check — keep sockets free for interactive traffic at startup.
+      priority: 'low',
     });
 
     if (!response.ok) {

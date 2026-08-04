@@ -1,0 +1,71 @@
+---
+title: Percurso pelas mudanças
+description: Leia um diff na ordem que faz sentido, não em ordem alfabética.
+---
+
+# Percurso pelas mudanças
+
+Um diff é ordenado por caminho de arquivo, que quase nunca é a ordem em que a mudança faz sentido. O percurso reorganiza isso: edições relacionadas viram **paradas**, cada parada explica o que o código passa a fazer de diferente, e as paradas seguem uma ordem em que cada uma se apoia na anterior.
+
+Ele explica e ordena. Não julga o seu código nem dá veredictos — isso é papel do [Review](/git/).
+
+Abra pelo ícone **Percurso** na barra direita ou pelo botão **Percurso com IA** nos painéis de mudanças e de pull request. Ambos apenas abrem o painel; nada é gerado até você apertar **Gerar percurso**.
+
+## O que dá para percorrer
+
+| Escopo | O que inclui |
+| --- | --- |
+| Tudo sem commit | Tudo que ainda não está em commit: no stage, fora do stage e arquivos novos |
+| No stage | Só o que iria para um commit agora |
+| Fora do stage | Árvore de trabalho e arquivos novos |
+| Este branch | Todos os commits do branch que não estão na base |
+| Pull request | A mudança como ela existe no GitHub |
+
+**Este branch** não quer dizer "commits sem push": é tudo o que o branch acrescenta à sua base, com push ou sem. Por isso, depois do commit e antes do push, ele e o pull request divergem de propósito: um mostra o que você fez, o outro o que os revisores veem agora.
+
+Cada escopo é guardado separadamente, então alternar entre eles nunca perde nada.
+
+## Escolhendo o modelo
+
+Os percursos usam o seu modelo pequeno por padrão. Escolha outro em **Configurações → Sessões → Modelo do percurso de mudanças**, ou apenas para uma revisão no cabeçalho do painel — útil quando a mudança é arriscada o bastante para merecer um modelo mais forte.
+
+O seletor só oferece modelos capazes de devolver saída estruturada, porque sem ela o percurso não se monta. Se o modelo for pequeno demais para o diff, a geração é recusada com explicação em vez de cortar a entrada em silêncio: um percurso escrito sobre metade de um diff soa seguro e está errado.
+
+Ao reabrir o painel você vê o modelo que produziu o que está na tela, então **Gerar novamente** repete com o mesmo, a menos que você troque.
+
+## Escolhendo o idioma
+
+Os percursos são escritos no idioma da sua interface por padrão. O seletor de idioma no cabeçalho do painel começa por ele, e você pode escolher qualquer outro idioma para o qual o OpenChamber esteja traduzido para uma única revisão — uma explicação guiada só serve num idioma que você lê com folga.
+
+Só a prosa é traduzida. Identificadores, caminhos de arquivo e nomes de API continuam exatamente como aparecem no seu código, então o que uma parada nomeia continua sendo o que você consegue buscar.
+
+Se ainda não houver nada gerado no idioma escolhido, o painel não se esvazia: ele continua mostrando o percurso que tem e avisa. Toque em **Gerar percurso** para obtê-lo no novo idioma.
+
+## Custo e cache
+
+Nada é gerado sozinho. A geração só começa quando você pede, e gerar de novo também é manual.
+
+Os resultados ficam em cache pelo conteúdo exato do diff. Volte a árvore de trabalho para um estado anterior e aquele percurso retorna de graça, sem chamar o modelo. O idioma e o modelo fazem parte dessa chave, então cada combinação é guardada separadamente: quando um diff já tem percurso em dois idiomas, alternar entre eles é instantâneo e não custa nada.
+
+A geração roda no servidor do OpenChamber, não na aba do navegador. Recarregue a página ou feche o painel e o trabalho continua; ao voltar, o resultado está esperando. Só **Cancelar** interrompe.
+
+## Honestidade sobre o que ficou velho
+
+Cada parada está ancorada ao conteúdo exato do código que descreve, então o painel consegue avisar quando esse código mudou:
+
+- **Etapas desatualizadas** — o código que a parada descrevia mudou ou sumiu. O percurso continua aparecendo, marcado, para você decidir se regenera.
+- **Sem cobertura** — mudanças do diff atual que nenhuma parada descreve. Entram aí as edições feitas depois de gerar, as mudanças que o percurso considerou rotineiras e os arquivos de lock e outras saídas geradas, mantidas fora do modelo de propósito. Tudo aparece no fim, para que nada suma em silêncio.
+
+Regenerar não remenda, reescreve: o percurso anterior vai ao modelo como contexto, o que ainda é verdade permanece, e tudo é reancorado no código atual.
+
+## Notas
+
+- Você pode comentar qualquer linha como na visão de diff; os comentários se anexam ao campo do chat.
+- Disponível em desktop e larguras de tablet. Não é oferecido na extensão do VS Code nem no app móvel.
+- Percorrer um pull request exige uma conta do GitHub conectada — veja [Issues e PRs do GitHub](/github/).
+
+## Relacionado
+
+- [Git e GitHub](/git/) — o painel de mudanças de onde isso lê, e a ação Review, que de fato julga o código
+- [Issues e PRs do GitHub](/github/) — conecte o GitHub para percorrer pull requests
+- [Provedores, modelos e agentes](/providers/) — de onde vem o modelo pequeno

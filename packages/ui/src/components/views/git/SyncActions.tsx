@@ -74,23 +74,25 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
     <div className="inline-flex items-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] border border-border/60 bg-[var(--surface-elevated)] overflow-hidden">
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={handleSync}
-            disabled={isPrimaryDisabled}
-            className={cn(
-              'inline-flex h-7 items-center gap-1.5 px-2 typography-ui-label font-medium text-foreground',
-              'transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50'
-            )}
-            aria-label={t('gitView.sync.syncChanges')}
-          >
-            {syncAction === 'sync' ? (
-              <Icon name="loader-4" className="size-4 animate-spin" />
-            ) : (
-              <Icon name="refresh" className="size-4" />
-            )}
-            <span className="whitespace-nowrap tabular-nums">{primaryLabel}</span>
-          </button>
+          <span className="inline-flex" tabIndex={blocksRebaseSync ? 0 : undefined}>
+            <button
+              type="button"
+              onClick={handleSync}
+              disabled={isPrimaryDisabled}
+              className={cn(
+                'inline-flex h-7 items-center gap-1.5 px-2 typography-ui-label font-medium text-foreground',
+                'transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50'
+              )}
+              aria-label={t('gitView.sync.syncChanges')}
+            >
+              {syncAction === 'sync' ? (
+                <Icon name="loader-4" className="size-4 animate-spin" />
+              ) : (
+                <Icon name="refresh" className="size-4" />
+              )}
+              <span className="whitespace-nowrap tabular-nums">{primaryLabel}</span>
+            </button>
+          </span>
         </TooltipTrigger>
         <TooltipContent sideOffset={8}>{tooltipLabel}</TooltipContent>
       </Tooltip>

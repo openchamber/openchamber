@@ -531,6 +531,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     sessionGoalDefaultBudget: defaults.sessionGoalDefaultBudget,
     collapsibleThinkingBlocks: defaults.collapsibleThinkingBlocks,
     autoDeleteEnabled: defaults.autoDeleteEnabled,
+    autoSaveEnabled: defaults.autoSaveEnabled,
     autoDeleteAfterDays: defaults.autoDeleteAfterDays,
     sessionRetentionAction: defaults.sessionRetentionAction,
     followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
@@ -557,6 +558,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     timeFormatPreference: defaults.timeFormatPreference,
     weekStartPreference: defaults.weekStartPreference,
     desktopWindowControlsPosition: defaults.desktopWindowControlsPosition,
+    desktopWindowControlsStyle: defaults.desktopWindowControlsStyle,
     chatRenderMode: defaults.chatRenderMode,
     activityRenderMode: defaults.activityRenderMode,
     mermaidRenderingMode: defaults.mermaidRenderingMode,
@@ -635,6 +637,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.autoDeleteEnabled === 'boolean' && settings.autoDeleteEnabled !== store.autoDeleteEnabled) {
     store.setAutoDeleteEnabled(settings.autoDeleteEnabled);
+  }
+  if (typeof settings.autoSaveEnabled === 'boolean' && settings.autoSaveEnabled !== store.autoSaveEnabled) {
+    store.setAutoSaveEnabled(settings.autoSaveEnabled);
   }
   if (typeof settings.autoDeleteAfterDays === 'number' && Number.isFinite(settings.autoDeleteAfterDays)) {
     const normalized = Math.max(1, Math.min(365, settings.autoDeleteAfterDays));
@@ -746,6 +751,16 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
         : null;
     if (nextPosition && nextPosition !== store.desktopWindowControlsPosition) {
       store.setDesktopWindowControlsPosition(nextPosition);
+    }
+  }
+  if (typeof settings.desktopWindowControlsStyle === 'string') {
+    const nextStyle = settings.desktopWindowControlsStyle === 'traffic-lights'
+      ? 'traffic-lights'
+      : settings.desktopWindowControlsStyle === 'classic'
+        ? 'classic'
+        : null;
+    if (nextStyle && nextStyle !== store.desktopWindowControlsStyle) {
+      store.setDesktopWindowControlsStyle(nextStyle);
     }
   }
   if (typeof settings.chatRenderMode === 'string'
@@ -1084,6 +1099,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.autoDeleteEnabled === 'boolean') {
     result.autoDeleteEnabled = candidate.autoDeleteEnabled;
   }
+  if (typeof candidate.autoSaveEnabled === 'boolean') {
+    result.autoSaveEnabled = candidate.autoSaveEnabled;
+  }
   if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
     result.autoDeleteAfterDays = candidate.autoDeleteAfterDays;
   }
@@ -1150,6 +1168,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.smallModelOverride === 'string' && candidate.smallModelOverride.length > 0) {
     result.smallModelOverride = candidate.smallModelOverride;
+  }
+  if (typeof candidate.walkthroughModelOverride === 'string' && candidate.walkthroughModelOverride.length > 0) {
+    result.walkthroughModelOverride = candidate.walkthroughModelOverride;
   }
   if (typeof candidate.autoCreateWorktree === 'boolean') {
     result.autoCreateWorktree = candidate.autoCreateWorktree;
@@ -1377,6 +1398,11 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     ) {
       // Legacy "auto" never read OS chrome config; treat as right.
       result.desktopWindowControlsPosition = 'right';
+    }
+  }
+  if (typeof candidate.desktopWindowControlsStyle === 'string') {
+    if (candidate.desktopWindowControlsStyle === 'classic' || candidate.desktopWindowControlsStyle === 'traffic-lights') {
+      result.desktopWindowControlsStyle = candidate.desktopWindowControlsStyle;
     }
   }
   if (typeof candidate.chatRenderMode === 'string'
@@ -1721,6 +1747,12 @@ export const syncDesktopSettings = async (): Promise<void> => {
     if (!isSettingsRuntimeContextCurrent(context)) return;
     const shouldPersistCraftGoalMigration = settings.draftStartersCraftGoalAdded !== true
       || settings.draftStartersScheduleTaskAdded !== true;
+    // `autoSaveEnabled` is new to the settings backend. Until the server has a
+    // value, materialize would invent the client default (true) and overwrite a
+    // deliberate legacy "off" preference migrated from
+    // `openchamber:files:auto-save-enabled`. Prefer the hydrated store value and
+    // seed the backend once so later omitted→default authority is correct.
+    const shouldSeedAutoSaveEnabled = typeof settings.autoSaveEnabled !== 'boolean';
     const authoritativeSettings = materializeAuthoritativeUiSettings(settings);
     try {
       persistToLocalStorage(settings);
@@ -1729,6 +1761,9 @@ export const syncDesktopSettings = async (): Promise<void> => {
     }
     await waitForHydration();
     if (!isSettingsRuntimeContextCurrent(context)) return;
+    if (shouldSeedAutoSaveEnabled) {
+      authoritativeSettings.autoSaveEnabled = useUIStore.getState().autoSaveEnabled;
+    }
     if (settings.draftStarters === undefined) {
       useUIStore.setState({ globalDraftStarters: null });
     }
@@ -1737,12 +1772,19 @@ export const syncDesktopSettings = async (): Promise<void> => {
     } catch (error) {
       console.warn('applyDesktopUiPreferences failed:', error);
     }
+    const migrationPatch: Partial<DesktopSettings> = {};
     if (shouldPersistCraftGoalMigration) {
-      await updateDesktopSettings({
-        ...(authoritativeSettings.draftStarters ? { draftStarters: authoritativeSettings.draftStarters } : {}),
-        draftStartersCraftGoalAdded: true,
-        draftStartersScheduleTaskAdded: true,
-      });
+      if (authoritativeSettings.draftStarters) {
+        migrationPatch.draftStarters = authoritativeSettings.draftStarters;
+      }
+      migrationPatch.draftStartersCraftGoalAdded = true;
+      migrationPatch.draftStartersScheduleTaskAdded = true;
+    }
+    if (shouldSeedAutoSaveEnabled) {
+      migrationPatch.autoSaveEnabled = authoritativeSettings.autoSaveEnabled;
+    }
+    if (Object.keys(migrationPatch).length > 0) {
+      await updateDesktopSettings(migrationPatch);
       if (!isSettingsRuntimeContextCurrent(context)) return;
     }
 

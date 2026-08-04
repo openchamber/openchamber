@@ -6,6 +6,10 @@ import {
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
+import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
+import { recordStartupPerformance } from './startup-performance.js';
+
+const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 
 export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } = {}) => {
   const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
@@ -186,6 +190,9 @@ export const registerOpenCodeProxy = (app, deps) => {
     getOpenCodeAuthHeaders,
     buildOpenCodeUrl,
     ensureOpenCodeApiPrefix,
+    SSE_HEARTBEAT_INTERVAL_MS = DEFAULT_SSE_HEARTBEAT_INTERVAL_MS,
+    SSE_UPSTREAM_STALL_TIMEOUT_MS = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
+    getSseUpstreamStallTimeoutMs = () => SSE_UPSTREAM_STALL_TIMEOUT_MS,
   } = deps;
 
   if (app.get('opencodeProxyConfigured')) {
@@ -340,6 +347,8 @@ export const registerOpenCodeProxy = (app, deps) => {
     let upstream = null;
     let reader = null;
     let heartbeatTimer = null;
+    let upstreamStallTimer = null;
+    let didUpstreamStall = false;
     let writeQueue = Promise.resolve(true);
     const sseBoundary = createSseBoundaryTracker();
 
@@ -392,8 +401,6 @@ export const registerOpenCodeProxy = (app, deps) => {
         res.socket.setNoDelay(true);
       }
 
-      const SSE_HEARTBEAT_INTERVAL_MS = 20_000;
-
       const scheduleHeartbeat = () => {
         heartbeatTimer = setTimeout(async () => {
           if (abortController.signal.aborted || res.writableEnded || res.destroyed) {
@@ -410,6 +417,20 @@ export const registerOpenCodeProxy = (app, deps) => {
         }, SSE_HEARTBEAT_INTERVAL_MS);
       };
 
+      const clearUpstreamStallTimer = () => {
+        clearTimeout(upstreamStallTimer);
+        upstreamStallTimer = null;
+      };
+
+      const resetUpstreamStallTimer = () => {
+        clearUpstreamStallTimer();
+        upstreamStallTimer = setTimeout(() => {
+          didUpstreamStall = true;
+          abortController.abort();
+        }, getSseUpstreamStallTimeoutMs());
+        upstreamStallTimer.unref?.();
+      };
+
       const enqueueSseWrite = (value) => {
         writeQueue = writeQueue
           .catch(() => false)
@@ -423,6 +444,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       };
 
       scheduleHeartbeat();
+      resetUpstreamStallTimer();
 
       reader = upstream.body.getReader();
       while (!abortController.signal.aborted) {
@@ -431,6 +453,7 @@ export const registerOpenCodeProxy = (app, deps) => {
           break;
         }
         if (value && value.length > 0) {
+          resetUpstreamStallTimer();
           sseBoundary.observe(value);
           const canContinue = await enqueueSseWrite(value);
           if (!canContinue) {
@@ -442,6 +465,10 @@ export const registerOpenCodeProxy = (app, deps) => {
       res.end();
     } catch (error) {
       if (isAbortError(error)) {
+        if (didUpstreamStall && !res.writableEnded && !res.destroyed) {
+          await writeQueue.catch(() => false);
+          res.end();
+        }
         return;
       }
       console.error('[proxy] OpenCode SSE proxy error:', error?.message ?? error);
@@ -454,6 +481,10 @@ export const registerOpenCodeProxy = (app, deps) => {
       if (heartbeatTimer) {
         clearTimeout(heartbeatTimer);
         heartbeatTimer = null;
+      }
+      if (upstreamStallTimer) {
+        clearTimeout(upstreamStallTimer);
+        upstreamStallTimer = null;
       }
       req.off('close', closeUpstream);
       try {
@@ -568,6 +599,12 @@ export const registerOpenCodeProxy = (app, deps) => {
       !runtimeState.openCodePort
     );
   };
+  const classifyReadinessRoute = (requestPath) => {
+    if (/^\/session\/[^/]+\/message(?:\/|$)/.test(requestPath)) return 'session-messages';
+    if (requestPath === '/session' || requestPath.startsWith('/session/')) return 'session';
+    if (requestPath === '/event' || requestPath === '/global/event') return 'events';
+    return 'other';
+  };
 
   app.use('/api', async (req, res, next) => {
     if (
@@ -587,16 +624,35 @@ export const registerOpenCodeProxy = (app, deps) => {
       return next();
     }
 
+    const holdStartedAt = performance.now();
+    const routeClass = classifyReadinessRoute(req.path);
     const deadline = Date.now() + Math.min(OPEN_CODE_READY_GRACE_MS, READINESS_HOLD_MAX_MS);
     while (Date.now() < deadline) {
       // Client gave up (closed/aborted) — stop holding.
-      if (res.writableEnded || req.aborted) return;
+      if (res.writableEnded || req.aborted) {
+        recordStartupPerformance('proxy.readiness-hold', {
+          durationMs: performance.now() - holdStartedAt,
+          outcome: 'aborted',
+          routeClass,
+        });
+        return;
+      }
       await sleep(READINESS_HOLD_POLL_MS);
       if (!isStillWaiting(getRuntime())) {
+        recordStartupPerformance('proxy.readiness-hold', {
+          durationMs: performance.now() - holdStartedAt,
+          outcome: 'ready',
+          routeClass,
+        });
         return next();
       }
     }
 
+    recordStartupPerformance('proxy.readiness-hold', {
+      durationMs: performance.now() - holdStartedAt,
+      outcome: 'timeout',
+      routeClass,
+    });
     if (!res.headersSent) {
       res.status(503).json({
         error: 'OpenCode is restarting',

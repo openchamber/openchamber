@@ -13,12 +13,13 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { formatDirectoryName, formatPathForDisplay, cn } from '@/lib/utils';
 import type { SessionGroup } from './types';
 import type { SortableDragHandleProps } from './sortableItems';
-import { SortableGroupItem, SortableProjectItem } from './sortableItems';
+import { ProjectHeaderIdentity, SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
 import type { MainTab } from '@/stores/useUIStore';
 import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
+import { Icon } from '@/components/icon/Icon';
 
 type ProjectSection = {
   project: {
@@ -32,6 +33,18 @@ type ProjectSection = {
   };
   groups: SessionGroup[];
 };
+
+const TOP_FADE_MAX_SIZE = 48;
+const TOP_FADE_MIN_SIZE = 32;
+const TOP_FADE_CLEAR_MAX_SIZE = 24;
+
+const getProjectLabel = (project: ProjectSection['project'], homeDirectory: string | null): string => (
+  formatProjectLabel(
+    project.label?.trim()
+    || formatDirectoryName(project.normalizedPath, homeDirectory)
+    || project.normalizedPath,
+  )
+);
 
 type Props = {
   topContent?: React.ReactNode;
@@ -53,11 +66,15 @@ type Props = {
     compactBodyPadding?: boolean,
     scrollContainerRef?: React.RefObject<HTMLElement | null>,
   ) => React.ReactNode;
+  getOrderedGroups: (projectId: string, groups: SessionGroup[]) => SessionGroup[];
+  setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
+  renderProjectStatusIndicator?: (projectId: string, groups: SessionGroup[]) => React.ReactNode;
   homeDirectory: string | null;
   collapsedProjects: Set<string>;
   hideDirectoryControls: boolean;
   projectRepoStatus: Map<string, boolean | null>;
   isDesktopShellRuntime: boolean;
+  stickyZoneHeaders: boolean;
   stuckProjectHeaders: Set<string>;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
@@ -67,13 +84,12 @@ type Props = {
   setSessionSwitcherOpen: (open: boolean) => void;
   openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
   openNewWorktreeDialog: () => void;
+  openWorktreesPage: (id: string) => void;
   openProjectEditDialog: (id: string) => void;
   removeProject: (id: string) => void;
   projectHeaderSentinelRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
   projectSortOrder: ProjectSortOrder;
-  getOrderedGroups: (projectId: string, groups: SessionGroup[]) => SessionGroup[];
-  setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
   isInlineEditing: boolean;
@@ -82,6 +98,7 @@ type Props = {
 function SidebarProjectsListComponent(props: Props): React.ReactNode {
   streamPerfCount('ui.sidebar_projects_list.render');
   const { t } = useI18n();
+  const enableStickyFade = props.isDesktopShellRuntime && props.stickyZoneHeaders;
   const projectSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -90,20 +107,9 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
 
-  // Threaded into SessionGroupSection so the archived-bucket virtualizer
-  // can resolve the scrolling ancestor synchronously (no getComputedStyle
-  // walk) and skip the cost of a style recalc on every render.
-  const scrollContainerRef = React.useRef<HTMLElement | null>(null);
-
-  // Memoize the result of getOrderedGroups. The callback is stable
-  // (deps: [groupOrderByProject]) and `section.groups` is a stable
-  // reference from useSessionSidebarSections, but the caller discards
-  // the result on every render and the callback allocates a new array
-  // each time. With many projects and many sidebar re-renders this
-  // builds O(P) arrays per render. The cache returns the same array
-  // reference when the inputs haven't changed, so the downstream
-  // orderedGroups.filter/find work and any consumer-memoization see a
-  // stable reference.
+  // Memoize getOrderedGroups per project so downstream consumers see a stable
+  // array reference while inputs are unchanged (avoids O(P) fresh arrays per
+  // list render invalidating the memoized group subtrees).
   const orderedGroupsCacheRef = React.useRef<Map<string, { groups: SessionGroup[]; ordered: SessionGroup[] }>>(new Map());
   const orderedGroupsCacheGetOrderedGroupsRef = React.useRef<typeof props.getOrderedGroups>(props.getOrderedGroups);
   if (orderedGroupsCacheGetOrderedGroupsRef.current !== props.getOrderedGroups) {
@@ -118,15 +124,64 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
     }
     const ordered = props.getOrderedGroups(projectId, groups);
     cache.set(projectId, { groups, ordered });
-    // Bound the cache so re-ordering projects (which replaces the
-    // projects list and invalidates every projectId) doesn't grow
-    // unboundedly.
     if (cache.size > 256) {
       const firstKey = cache.keys().next().value;
       if (firstKey !== undefined) cache.delete(firstKey);
     }
     return ordered;
   };
+
+  // Threaded into SessionGroupSection so the archived-bucket virtualizer
+  // can resolve the scrolling ancestor synchronously (no getComputedStyle
+  // walk) and skip the cost of a style recalc on every render.
+  const scrollContainerRef = React.useRef<HTMLElement | null>(null);
+  // Keep per-scroll measurements out of React state so the interaction guard
+  // can read the current fade boundary without rerendering the sidebar.
+  const topFadeSizeRef = React.useRef(0);
+  // Update the compositor-owned mask on every scroll, but cross the React
+  // render boundary only when the sticky identity overlay appears or hides.
+  const syncTopFade = React.useCallback((scroller: HTMLElement) => {
+    const hasTopScroll = scroller.scrollTop > 1;
+    const topFadeSize = hasTopScroll
+      ? Math.min(TOP_FADE_MIN_SIZE + scroller.scrollTop, TOP_FADE_MAX_SIZE)
+      : 0;
+    topFadeSizeRef.current = topFadeSize;
+    scroller.style.setProperty('--scroll-shadow-top-size', `${topFadeSize}px`);
+    scroller.style.setProperty(
+      '--scroll-shadow-top-clear-size',
+      `${Math.min(Math.max(topFadeSize - 8, 0), TOP_FADE_CLEAR_MAX_SIZE)}px`,
+    );
+  }, []);
+  const blockObscuredInteraction = React.useCallback((
+    event: React.MouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if ((event.target as Element).closest('[data-overlay-scrollbar-thumb], [data-sidebar-sticky-header]')) return;
+    const eventY = event.clientY - event.currentTarget.getBoundingClientRect().top;
+    if (eventY >= topFadeSizeRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+  const hasProjectScroller = props.projectSections.length > 0 && props.sectionsForRender.length > 0;
+  React.useLayoutEffect(() => {
+    if (enableStickyFade && hasProjectScroller && scrollContainerRef.current) {
+      syncTopFade(scrollContainerRef.current);
+    }
+  }, [enableStickyFade, hasProjectScroller, syncTopFade]);
+  let stuckProject: ProjectSection['project'] | null = null;
+  for (const section of props.projectSections) {
+    if (props.stuckProjectHeaders.has(section.project.id)) {
+      stuckProject = section.project;
+    }
+  }
+  // The IntersectionObserver reports the stuck header asynchronously, a frame or
+  // two after the (synchronous) mask has already hidden the real header — which
+  // otherwise leaves a one-frame gap where the title blinks out with no crisp
+  // replacement. Seed the overlay with the topmost rendered project so it is
+  // ready in the same frame; the observer then corrects it. When shared sessions
+  // lead the list, the Recent fallback below owns the top instead of a project.
+  const leadingProject =
+    stuckProject ?? (props.hasSharedSessions ? null : props.sectionsForRender[0]?.project ?? null);
+  const leadingProjectLabel = leadingProject ? getProjectLabel(leadingProject, props.homeDirectory) : null;
 
   if (props.sharedSessionsOnly) {
     return (
@@ -151,7 +206,22 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
     // button) and holds it in place, which makes newly revealed sessions look
     // like they insert upward. With anchoring off, scrollTop stays put and new
     // rows appear below naturally.
-    <ScrollableOverlay ref={scrollContainerRef} useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2 [overflow-anchor:none]', props.mobileVariant ? '' : '')}>
+    <div
+      className="oc-sticky-fade-root relative flex min-h-0 flex-1"
+      onPointerDownCapture={enableStickyFade ? blockObscuredInteraction : undefined}
+      onClickCapture={enableStickyFade ? blockObscuredInteraction : undefined}
+      onContextMenuCapture={enableStickyFade ? blockObscuredInteraction : undefined}
+    >
+    <ScrollableOverlay
+      ref={scrollContainerRef}
+      useScrollShadow
+      hideTopScrollShadow={!enableStickyFade}
+      scrollShadowSize={96}
+      outerClassName="flex-1 min-h-0"
+      className={cn('oc-sidebar-scroller space-y-1.5 pb-1 pl-2.5 pr-2 [overflow-anchor:none]', props.mobileVariant ? '' : '')}
+      style={enableStickyFade ? { '--scroll-shadow-top-size': '0px' } as React.CSSProperties : undefined}
+      onScroll={enableStickyFade ? (event) => syncTopFade(event.currentTarget) : undefined}
+    >
       {props.topContent}
       {props.showOnlyMainWorkspace ? (
         <div className="space-y-[0.6rem] py-1">
@@ -186,85 +256,80 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
           })()}
         </div>
       ) : (
-        <>
-          <DndContext
-            sensors={projectSensors}
-            collisionDetection={closestCenter}
-            onDragEnd={(event) => {
-              if (props.isInlineEditing) return;
-              // Drag only allowed in manual sort mode - indices from visual order don't match store order in other modes
-              if (props.projectSortOrder !== 'manual') return;
-              const { active, over } = event;
-              if (!over || active.id === over.id) return;
-              const oldIndex = props.sectionsForRender.findIndex((section) => section.project.id === active.id);
-              const newIndex = props.sectionsForRender.findIndex((section) => section.project.id === over.id);
-              if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
-              props.reorderProjects(oldIndex, newIndex);
-            }}
-          >
-            <SortableContext items={props.sectionsForRender.map((section) => section.project.id)} strategy={verticalListSortingStrategy}>
-              {props.sectionsForRender.map((section) => {
-                const project = section.project;
-                const projectKey = project.id;
-                const projectLabel = formatProjectLabel(
-                  project.label?.trim()
-                  || formatDirectoryName(project.normalizedPath, props.homeDirectory)
-                  || project.normalizedPath,
-                );
-                const projectDescription = formatPathForDisplay(project.normalizedPath, props.homeDirectory);
-                const isCollapsed = props.collapsedProjects.has(projectKey);
-                const isActiveProject = projectKey === props.activeProjectId;
-                const isRepo = props.projectRepoStatus.get(projectKey);
-                const orderedGroups = cachedGetOrderedGroups(projectKey, section.groups);
-                const rootGroup = orderedGroups.find((group) => group.isMain) ?? null;
-                const nestedGroups = rootGroup
-                  ? orderedGroups.filter((group) => group.id !== rootGroup.id)
-                  : orderedGroups;
+        <DndContext
+          sensors={projectSensors}
+          collisionDetection={closestCenter}
+          onDragEnd={(event) => {
+            if (props.isInlineEditing) return;
+            // Drag only allowed in manual sort mode - indices from visual order don't match store order in other modes
+            if (props.projectSortOrder !== 'manual') return;
+            const { active, over } = event;
+            if (!over || active.id === over.id) return;
+            const oldIndex = props.sectionsForRender.findIndex((section) => section.project.id === active.id);
+            const newIndex = props.sectionsForRender.findIndex((section) => section.project.id === over.id);
+            if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
+            props.reorderProjects(oldIndex, newIndex);
+          }}
+        >
+          <SortableContext items={props.sectionsForRender.map((section) => section.project.id)} strategy={verticalListSortingStrategy}>
+            {props.sectionsForRender.map((section) => {
+              const project = section.project;
+              const projectKey = project.id;
+              const projectLabel = getProjectLabel(project, props.homeDirectory);
+              const projectDescription = formatPathForDisplay(project.normalizedPath, props.homeDirectory);
+              const isCollapsed = props.collapsedProjects.has(projectKey);
+              const isRepo = props.projectRepoStatus.get(projectKey);
 
-                return (
-                  <SortableProjectItem
-                    key={projectKey}
-                    id={projectKey}
-                    disabled={props.projectSortOrder !== 'manual'}
-                    projectLabel={projectLabel}
-                    projectDescription={projectDescription}
-                    projectIcon={project.icon}
-                    projectColor={project.color}
-                    projectIconImage={project.iconImage}
-                    projectIconBackground={project.iconBackground}
-                    isCollapsed={isCollapsed}
-                    isActiveProject={isActiveProject}
-                    isRepo={Boolean(isRepo)}
-                    isDesktopShell={props.isDesktopShellRuntime}
-                    isStuck={props.stuckProjectHeaders.has(projectKey)}
-                    hideDirectoryControls={props.hideDirectoryControls}
-                    mobileVariant={props.mobileVariant}
-                    alwaysShowActions={props.alwaysShowActions}
-                    onToggle={() => props.toggleProject(projectKey)}
-                    onNewSession={() => {
-                      if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
-                      props.setActiveMainTab('chat');
-                      if (props.mobileVariant) props.setSessionSwitcherOpen(false);
-                      props.openNewSessionDraft({
-                        selectedProjectId: projectKey,
-                        directoryOverride: project.normalizedPath,
-                      });
-                    }}
-                    onNewWorktreeSession={() => {
-                      if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
-                      props.setActiveMainTab('chat');
-                      props.openNewWorktreeDialog();
-                    }}
-                    onRenameStart={() => props.openProjectEditDialog(projectKey)}
-                    onClose={() => props.removeProject(projectKey)}
-                    sentinelRef={(el) => { props.projectHeaderSentinelRefs.current.set(projectKey, el); }}
-                    showCreateButtons
-                    openSidebarMenuKey={props.openSidebarMenuKey}
-                    setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
-                  >
-                    {!isCollapsed ? (
-                      <div className="space-y-0 pt-0 pb-0.5 pl-3">
-                        {section.groups.length > 0 ? (
+              return (
+                <SortableProjectItem
+                  key={projectKey}
+                  id={projectKey}
+                  disabled={props.projectSortOrder !== 'manual'}
+                  projectLabel={projectLabel}
+                  projectDescription={projectDescription}
+                  projectIcon={project.icon}
+                  projectColor={project.color}
+                  projectIconImage={project.iconImage}
+                  projectIconBackground={project.iconBackground}
+                  isCollapsed={isCollapsed}
+                  isRepo={Boolean(isRepo)}
+                  isDesktopShell={props.isDesktopShellRuntime}
+                  hideDirectoryControls={props.hideDirectoryControls}
+                  mobileVariant={props.mobileVariant}
+                  alwaysShowActions={props.alwaysShowActions}
+                  statusIndicator={isCollapsed ? props.renderProjectStatusIndicator?.(projectKey, section.groups) : null}
+                  onToggle={() => props.toggleProject(projectKey)}
+                  onNewSession={() => {
+                    if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
+                    props.setActiveMainTab('chat');
+                    if (props.mobileVariant) props.setSessionSwitcherOpen(false);
+                    props.openNewSessionDraft({
+                      selectedProjectId: projectKey,
+                      directoryOverride: project.normalizedPath,
+                    });
+                  }}
+                  onNewWorktreeSession={() => {
+                    if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
+                    props.setActiveMainTab('chat');
+                    props.openNewWorktreeDialog();
+                  }}
+                  onManageWorktrees={() => props.openWorktreesPage(projectKey)}
+                  onRenameStart={() => props.openProjectEditDialog(projectKey)}
+                  onClose={() => props.removeProject(projectKey)}
+                  sentinelRef={(el) => { props.projectHeaderSentinelRefs.current.set(projectKey, el); }}
+                  showCreateButtons
+                  openSidebarMenuKey={props.openSidebarMenuKey}
+                  setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
+                >
+                  {!isCollapsed ? (
+                    <div className="space-y-0 pt-0.5 pb-0.5">
+                      {(() => {
+                        const orderedGroups = cachedGetOrderedGroups(projectKey, section.groups);
+                        const rootGroup = orderedGroups.find((group) => group.isMain) ?? null;
+                        const nestedGroups = rootGroup
+                          ? orderedGroups.filter((group) => group.id !== rootGroup.id)
+                          : orderedGroups;
+                        return (
                           <DndContext
                             sensors={groupSensors}
                             collisionDetection={closestCenter}
@@ -284,6 +349,9 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
                               });
                             }}
                           >
+                            {/* Root/flat sessions render directly under the
+                                project zone header; worktree and archived
+                                groups keep their own slim sortable sub-header. */}
                             {rootGroup ? props.renderGroupSessions(rootGroup, `${projectKey}:${rootGroup.id}`, projectKey, true, null, undefined, scrollContainerRef) : null}
                             <SortableContext items={nestedGroups.map((group) => group.id)} strategy={verticalListSortingStrategy}>
                               {nestedGroups.map((group) => {
@@ -297,20 +365,43 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
                             </SortableContext>
                             <DragOverlay dropAnimation={null} />
                           </DndContext>
-                        ) : (
-                          <div className="py-1 text-left typography-micro text-muted-foreground">{t('sessions.sidebar.empty.noSessions.title')}</div>
-                        )}
-                      </div>
-                    ) : null}
-                  </SortableProjectItem>
-                );
-              })}
-            </SortableContext>
-            <DragOverlay dropAnimation={null} />
-          </DndContext>
-        </>
+                        );
+                      })()}
+                    </div>
+                  ) : null}
+                </SortableProjectItem>
+              );
+            })}
+          </SortableContext>
+          <DragOverlay dropAnimation={null} />
+        </DndContext>
       )}
     </ScrollableOverlay>
+      {enableStickyFade && (leadingProject || props.hasSharedSessions) ? (
+        <div
+          className="oc-sticky-fade-overlay pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center gap-1.5 py-1 pl-4 pr-5"
+          aria-hidden="true"
+        >
+          {leadingProject && leadingProjectLabel ? (
+            <ProjectHeaderIdentity
+              id={leadingProject.id}
+              projectLabel={leadingProjectLabel}
+              projectIcon={leadingProject.icon}
+              projectColor={leadingProject.color}
+              projectIconImage={leadingProject.iconImage}
+              projectIconBackground={leadingProject.iconBackground}
+            />
+          ) : (
+            <>
+              <Icon name="history" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/80" />
+              <span className="truncate text-[14px] font-semibold lowercase text-foreground">
+                {t('sessions.sidebar.activity.recentTitle')}
+              </span>
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -1385,74 +1385,11 @@ const loadProjectStartCommand = async (projectID: string): Promise<string> => {
   }
 };
 
-const getProjectStoragePath = (projectID: string) => {
-  return path.join(getOpenCodeDataPath(), 'storage', 'project', `${projectID}.json`);
-};
-
-const updateProjectSandboxes = async (
-  projectID: string,
-  primaryWorktree: string,
-  updater: (project: {
-    id: string;
-    worktree: string;
-    vcs: string;
-    sandboxes: string[];
-    time: { created: number; updated: number };
-  }) => void
-) => {
-  const storagePath = getProjectStoragePath(projectID);
-  await fs.promises.mkdir(path.dirname(storagePath), { recursive: true });
-
-  const now = Date.now();
-  const base = {
-    id: projectID,
-    worktree: primaryWorktree,
-    vcs: 'git',
-    sandboxes: [] as string[],
-    time: { created: now, updated: now },
-  };
-
-  const parsed = await fs.promises.readFile(storagePath, 'utf8').then((raw) => JSON.parse(raw) as typeof base).catch(() => null);
-  const current = parsed && typeof parsed === 'object' ? { ...base, ...parsed } : base;
-  current.id = String(current.id || projectID);
-  current.worktree = String(current.worktree || primaryWorktree);
-  current.vcs = current.vcs || 'git';
-  current.sandboxes = Array.isArray(current.sandboxes)
-    ? current.sandboxes.map((entry) => String(entry || '').trim()).filter(Boolean)
-    : [];
-  const createdAt = Number(current?.time?.created);
-  current.time = {
-    created: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : now,
-    updated: now,
-  };
-
-  updater(current);
-
-  current.sandboxes = [...new Set(current.sandboxes.map((entry) => String(entry || '').trim()).filter(Boolean))];
-  await fs.promises.writeFile(storagePath, `${JSON.stringify(current, null, 2)}\n`, 'utf8');
-};
-
-const syncProjectSandboxAdd = async (projectID: string, primaryWorktree: string, sandboxPath: string) => {
-  const sandbox = String(sandboxPath || '').trim();
-  if (!sandbox) {
-    return;
-  }
-  await updateProjectSandboxes(projectID, primaryWorktree, (project) => {
-    if (!project.sandboxes.includes(sandbox)) {
-      project.sandboxes.push(sandbox);
-    }
-  });
-};
-
-const syncProjectSandboxRemove = async (projectID: string, primaryWorktree: string, sandboxPath: string) => {
-  const sandbox = String(sandboxPath || '').trim();
-  if (!sandbox) {
-    return;
-  }
-  await updateProjectSandboxes(projectID, primaryWorktree, (project) => {
-    project.sandboxes = project.sandboxes.filter((entry) => entry !== sandbox);
-  });
-};
+// OpenCode owns its own project/sandbox registry and records a worktree as a
+// sandbox itself when an instance boots for that directory. OpenChamber used to
+// write that state into OpenCode's storage JSON directly, behind the back of the
+// running process — and since OpenCode v2 reads sandboxes from its database, the
+// JSON write did not even reach it. Registration is not ours to perform.
 
 const isInsideOrSameDirectory = (root: string, target: string): boolean => {
   const relative = path.relative(root, target);
@@ -1476,14 +1413,6 @@ const cleanupFailedFastWorktreeCreate = async (
   const worktreeRoot = path.resolve(context.worktreeRoot);
   const isInsideWorktreeRoot = isInsideOrSameDirectory(worktreeRoot, candidateDirectory) && candidateDirectory !== worktreeRoot;
   const isAttached = await isAttachedGitWorktreeDirectory(candidateDirectory);
-
-  if (!isAttached) {
-    try {
-      await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, candidateDirectory);
-    } catch (error) {
-      console.warn('[GitService] Failed to clean up OpenCode sandbox metadata after worktree failure:', error instanceof Error ? error.message : String(error));
-    }
-  }
 
   if (!isInsideWorktreeRoot || isAttached) {
     return;
@@ -1963,12 +1892,6 @@ async function attachGitWorktreeToCandidate(
 
   await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
 
-  try {
-    await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);
-  } catch (error) {
-    console.warn('[GitService] Failed to sync OpenCode sandbox metadata (add):', error instanceof Error ? error.message : String(error));
-  }
-
   const shouldSetUpstream = Boolean(input?.setUpstream);
   const upstreamRemote = String(input?.upstreamRemote || inferredUpstream?.remote || '').trim();
   const upstreamBranch = String(input?.upstreamBranch || inferredUpstream?.branch || '').trim();
@@ -2032,12 +1955,6 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
 
   if (input?.returnAfterDirectoryCreated === true) {
     await fs.promises.mkdir(candidate.directory, { recursive: false });
-
-    try {
-      await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);
-    } catch (error) {
-      console.warn('[GitService] Failed to sync OpenCode sandbox metadata (add):', error instanceof Error ? error.message : String(error));
-    }
 
     const bootstrapStatus = setWorktreeBootstrapState(
       candidate.directory,
@@ -2129,12 +2046,6 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
       await fs.promises.rm(targetDirectory, { recursive: true, force: true });
     }
 
-    try {
-      await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, targetDirectory);
-    } catch (error) {
-      console.warn('[GitService] Failed to sync OpenCode sandbox metadata (remove):', error instanceof Error ? error.message : String(error));
-    }
-
     clearWorktreeBootstrapState(targetDirectory);
 
     return true;
@@ -2155,12 +2066,6 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
         `Failed to delete local branch ${branchName}`
       );
     }
-  }
-
-  try {
-    await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, matchedEntry.worktree);
-  } catch (error) {
-    console.warn('[GitService] Failed to sync OpenCode sandbox metadata (remove):', error instanceof Error ? error.message : String(error));
   }
 
   clearWorktreeBootstrapState(matchedEntry.worktree);

@@ -105,14 +105,14 @@ export type InputState = {
    * render the chips outside ChatInput (e.g. under the welcome message on
    * narrow layouts); consumed by ChatInput, which owns the command-aware submit.
    */
-  pendingPresetSubmit: string | null
+  pendingPresetSubmit: { text: string; type: "command" | "skill" } | null
   attachedFiles: AttachedFile[]
   activeEditorFile: VSCodeActiveEditorFile | null
 
   setPendingInputText: (text: string | null, mode?: "replace" | "append" | "append-inline") => void
   consumePendingInputText: () => { text: string; mode: "replace" | "append" | "append-inline" } | null
-  requestPresetSubmit: (text: string) => void
-  consumePendingPresetSubmit: () => string | null
+  requestPresetSubmit: (text: string, type: "command" | "skill") => void
+  consumePendingPresetSubmit: () => { text: string; type: "command" | "skill" } | null
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null) => void
   consumePendingSyntheticParts: () => SyntheticContextPart[] | null
   addAttachedFile: (file: File) => Promise<boolean>
@@ -144,7 +144,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
     return { text: pendingInputText, mode: pendingInputMode }
   },
 
-  requestPresetSubmit: (text) => set({ pendingPresetSubmit: text }),
+  requestPresetSubmit: (text, type) => set({ pendingPresetSubmit: { text, type } }),
 
   consumePendingPresetSubmit: () => {
     const { pendingPresetSubmit } = get()

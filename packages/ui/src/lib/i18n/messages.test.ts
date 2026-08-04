@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { dict as enDict } from './messages/en';
 import { dict as esDict } from './messages/es';
+import { dict as deDict } from './messages/de';
 import { dict as frDict } from './messages/fr';
 import { dict as jaDict } from './messages/ja';
 import { dict as koDict } from './messages/ko';
@@ -13,6 +14,7 @@ import { dict as zhTwDict } from './messages/zh-TW';
 
 const localeDictionaries = {
   en: enDict,
+  de: deDict,
   fr: frDict,
   es: esDict,
   ja: jaDict,
@@ -35,6 +37,7 @@ describe('i18n dictionaries', () => {
 
   test('all locales expose language label keys', () => {
     for (const [, dictionary] of Object.entries(localeDictionaries)) {
+      expect(dictionary['common.language.german']).toBeTruthy();
       expect(dictionary['common.language.french']).toBeTruthy();
       expect(dictionary['common.language.japanese']).toBeTruthy();
     }

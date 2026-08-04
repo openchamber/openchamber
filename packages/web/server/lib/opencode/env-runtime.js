@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { clearAppImageArgv0FromProcessEnv } from '../inherited-env.js';
 import { mergePathValues } from './path-utils.js';
 
 export const createOpenCodeEnvRuntime = (deps) => {
@@ -227,12 +228,16 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const applyLoginShellEnvSnapshot = () => {
+    // Always clear AppImage ARGV0, even when no login-shell snapshot is available.
+    // Otherwise a leaked process.env.ARGV0 survives into later child spawns (#2588).
+    clearAppImageArgv0FromProcessEnv();
+
     const snapshot = getLoginShellEnvSnapshot();
     if (!snapshot) {
       return;
     }
 
-    const skipKeys = new Set(['PWD', 'OLDPWD', 'SHLVL', '_']);
+    const skipKeys = new Set(['PWD', 'OLDPWD', 'SHLVL', '_', 'ARGV0']);
     for (const [key, value] of Object.entries(snapshot)) {
       if (skipKeys.has(key)) {
         continue;
@@ -299,6 +304,23 @@ export const createOpenCodeEnvRuntime = (deps) => {
       }
     }
     return null;
+  };
+
+  const canonicalExecutablePath = (candidate) => {
+    if (typeof candidate !== 'string' || !candidate.trim()) return null;
+    try {
+      return fs.realpathSync.native(candidate.trim());
+    } catch {
+      return path.resolve(candidate.trim());
+    }
+  };
+
+  const isBundledOpenCodeCliPath = (candidate) => {
+    const canonicalCandidate = canonicalExecutablePath(candidate);
+    if (!canonicalCandidate) return false;
+    return bundledOpenCodeCliCandidates().some((bundledCandidate) => (
+      canonicalExecutablePath(bundledCandidate) === canonicalCandidate
+    ));
   };
 
   const bundledOpenCodeCliFallback = () => {
@@ -647,8 +669,15 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const getWindowsNativeOpencodePackageNames = () => {
+    // TEMPORARY WORKAROUND — Windows ARM64: native opencode.exe fails with a Bun
+    // FFI/TinyCC dlopen error (https://github.com/anomalyco/opencode/issues/19130).
+    // prepare-opencode-cli.mjs bundles x64-baseline instead; match that here so
+    // the runtime resolver looks for the same x64-baseline package. Restore the
+    // arm64 branch below when the upstream issue is resolved.
     if (process.arch === 'arm64') {
-      return ['opencode-windows-arm64'];
+      // --- ORIGINAL (restore when ARM64 is fixed) ---
+      // return ['opencode-windows-arm64'];
+      return ['opencode-windows-x64-baseline', 'opencode-windows-x64'];
     }
     if (process.arch === 'x64') {
       // Prefer the baseline build when bypassing package-manager wrappers so the
@@ -1164,6 +1193,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     applyOpencodeBinaryFromSettings,
     getLoginShellEnvSnapshot,
     resolveOpencodeCliPath,
+    isBundledOpenCodeCliPath,
     resolveManagedOpenCodeLaunchSpec,
     isExecutable,
     searchPathFor,

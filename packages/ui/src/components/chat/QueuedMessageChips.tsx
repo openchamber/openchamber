@@ -111,7 +111,15 @@ const EMPTY_QUEUE: QueuedMessage[] = [];
 export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
     const { t } = useI18n();
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-    const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+    // Must use the same resolution the composer used to build the queue key —
+    // reading currentSessionDirectory raw can key the chips to a different
+    // directory than the one the messages were queued under.
+    const currentSessionDirectory = useSessionUIStore(
+        React.useCallback(
+            (state) => (currentSessionId ? state.getDirectoryForSession(currentSessionId) : null),
+            [currentSessionId],
+        ),
+    );
     const target = currentSessionId ? createMessageQueueTarget(currentSessionId, currentSessionDirectory) : null;
     const queueKey = target ? getMessageQueueKey(target) : null;
     const queuedMessages = useMessageQueueStore(

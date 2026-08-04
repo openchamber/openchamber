@@ -72,6 +72,20 @@ const MOBILE_SECURE_TIMEOUT_MS = 3000;
 // feels instant instead of hanging for seconds.
 const MOBILE_FAST_PROBE_TIMEOUT_MS = 2500;
 
+export const createMobilePasswordOperationTracker = () => {
+  let current = 0;
+  return {
+    begin: (): number => {
+      current += 1;
+      return current;
+    },
+    cancel: (): void => {
+      current += 1;
+    },
+    isCurrent: (operation: number): boolean => operation === current,
+  };
+};
+
 export type MobileConnectionMode = 'direct' | 'relay';
 
 // Persisted relay transport config. This is connection metadata, not a secret
@@ -830,7 +844,12 @@ const probeConnectionCandidates = async (
           continue;
         }
       }
-      const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: 'include', headers }, requestOptions);
+      // With a bearer token, probe EXACTLY the way the runtime authenticates:
+      // bearer-only, no cookies. A leftover valid oc_ui_session cookie in the
+      // WebView otherwise answers "authenticated" for a revoked/expired token,
+      // the probe passes, and the app dies later on bootstrap's bearer-only
+      // requests. Cookie auth stays for the token-less (browser) flow.
+      const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: token ? 'omit' : 'include', headers }, requestOptions);
       if (session?.status === 401) return { status: 'needs-login' };
       if (!session || (!session.ok && session.status !== 404)) continue;
       const status = await readSessionStatus(session);
@@ -962,28 +981,45 @@ export const getAutoConnectTargetLabel = (): string | null => {
 // the runtime endpoint when reachable AND we already have a usable bearer token;
 // returns false — caller shows the connect screen — when there is no saved
 // instance, it's unreachable, or it needs a (re)login. No prompts or UI state.
-export const autoConnectLastInstance = async (): Promise<boolean> => {
+export type AutoConnectOutcome =
+  | { status: 'connected' }
+  /** No saved instance / no saved token — nothing to report to the user. */
+  | { status: 'no-candidate' }
+  | { status: 'unreachable'; label: string }
+  /** The saved token was rejected (expired/revoked) — the user must sign in again. */
+  | { status: 'needs-login'; label: string };
+
+export const autoConnectLastInstance = async (): Promise<AutoConnectOutcome> => {
   await migrateLegacyInlineTokens();
   const candidate = readConnections()[0]; // sorted most-recent-first
-  if (!candidate) return false;
+  if (!candidate) return { status: 'no-candidate' };
 
   // The runtime transport needs a bearer token; only auto-connect when one is
   // already saved. A missing/expired token must go through the login UI.
   let token: string | undefined;
   if (isCapacitorApp()) {
-    if (!candidate.hasToken) return false;
+    if (!candidate.hasToken) {
+      return { status: 'no-candidate' };
+    }
     token = await readSecureToken(secureTokenKeyOf(candidate));
-    if (!token) return false;
+    if (!token) {
+      return { status: 'no-candidate' };
+    }
   } else {
     token = candidate.clientToken;
-    if (!token) return false;
+    if (!token) return { status: 'no-candidate' };
   }
 
-  const result = await probeConnectionCandidates(candidate.candidates, token);
-  if (result.status !== 'ok') return false;
+  // Fast probe: the cold-launch splash should decide in a couple of seconds,
+  // not sit through the full connect timeouts on a dead LAN candidate. A slow
+  // network that fails the fast probe still lands on the connect screen where
+  // a manual tap retries with the full budget.
+  const result = await probeConnectionCandidates(candidate.candidates, token, { fast: true });
+  if (result.status === 'needs-login') return { status: 'needs-login', label: candidate.label };
+  if (result.status !== 'ok') return { status: 'unreachable', label: candidate.label };
   await upsertMobileConnection({ id: candidate.id, label: candidate.label, candidates: candidate.candidates }); // bump lastUsedAt (keeps token)
   switchToTransport(result.transport, token, { runtimeKey: secureTokenKeyOf(candidate) });
-  return true;
+  return { status: 'connected' };
 };
 
 export const validateMobileConnectionSession = async (input: {
@@ -1005,7 +1041,9 @@ export const validateMobileConnectionSession = async (input: {
   const health = await requestWithTimeout(`${url}/health`, { method: 'GET', headers }, requestOptions);
   if (!health?.ok) return false;
 
-  const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: 'include', headers }, requestOptions);
+  // Bearer-only when a token is present — see the probe note about stale
+  // session cookies masking a revoked token.
+  const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: token ? 'omit' : 'include', headers }, requestOptions);
   if (!session || (!session.ok && session.status !== 404)) return false;
 
   const status = await readSessionStatus(session);
@@ -1115,7 +1153,7 @@ export const isActiveRuntimeConnection = (connection: MobileSavedConnection): bo
   return Boolean(runtimeKey) && secureTokenKeyOf(connection) === runtimeKey;
 };
 
-export type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'no-connection';
+export type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'needs-login' | 'no-connection';
 
 // App-resume re-probe: when the app wakes (Capacitor `isActive`), the network may
 // have changed while it slept, so re-select the active device's transport and
@@ -1149,7 +1187,8 @@ export const reprobeActiveConnection = async (): Promise<ReprobeOutcome> => {
     switchToTransport(better.transport, token, { runtimeKey: secureTokenKeyOf(active) });
     return 'switched';
   }
-  if (better.status === 'needs-login') return 'unreachable';
+  // The shared token was explicitly rejected — no transport will accept it.
+  if (better.status === 'needs-login') return 'needs-login';
 
   // 2. No better transport — is the current one still alive on its live channel?
   if (currentIndex >= 0) {
@@ -1172,6 +1211,7 @@ export const reprobeActiveConnection = async (): Promise<ReprobeOutcome> => {
     switchToTransport(fallback.transport, token, { runtimeKey: secureTokenKeyOf(active) });
     return 'switched';
   }
+  if (fallback.status === 'needs-login') return 'needs-login';
   return 'unreachable';
 };
 
@@ -1313,6 +1353,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
   const [pendingConnection, setPendingConnection] = React.useState<MobilePendingConnection | null>(null);
   const connectionsRef = React.useRef(connections);
   const busyRef = React.useRef<'connect' | 'password' | 'pairing' | null>(null);
+  const passwordOperationRef = React.useRef(createMobilePasswordOperationTracker());
 
   const applyConnections = React.useCallback((next: MobileSavedConnection[]) => {
     connectionsRef.current = next;
@@ -1496,6 +1537,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     if (!pendingConnection || !password.trim() || busyRef.current === 'password') return;
     setError(null);
     beginBusy('password');
+    const operation = passwordOperationRef.current.begin();
+    const isCurrentOperation = () => passwordOperationRef.current.isCurrent(operation);
     const { id, label, candidates } = pendingConnection;
     // A chosen relay transport owns an open tunnel; close it unless the switch
     // adopted it as the runtime tunnel.
@@ -1506,6 +1549,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       // tunnel; cookies never cross it, so an issued bearer token is mandatory
       // there. `issueClientToken` mints the device's token in one round-trip.
       chosen = await establishLiveTransport(candidates);
+      if (!isCurrentOperation()) return;
       if (!chosen) {
         setError(t('mobile.connect.error.unreachable'));
         return;
@@ -1522,12 +1566,14 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       const response = chosen.kind === 'relay'
         ? await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, chosen.tunnel.fetch('/auth/session', loginInit).catch(() => null))
         : await requestWithTimeout(`${chosen.url}/auth/session`, loginInit);
+      if (!isCurrentOperation()) return;
       logConnect('password:done', { ok: response?.ok === true, status: response?.status ?? null });
       if (!response?.ok) {
         setError(t('mobile.connect.error.passwordFailed'));
         return;
       }
       const body = await response.json().catch(() => null) as { clientToken?: unknown } | null;
+      if (!isCurrentOperation()) return;
       const issuedToken = typeof body?.clientToken === 'string' ? body.clientToken.trim() : '';
       logConnect('password:token', { issued: Boolean(issuedToken) });
 
@@ -1548,8 +1594,11 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
 
       // Persist the token BEFORE switching (no fire-and-forget).
       if (isCapacitorApp()) {
+        if (!isCurrentOperation()) return;
         await writeSecureToken(secureTokenKeyOf({ candidates }), issuedToken);
+        if (!isCurrentOperation()) return;
       }
+      if (!isCurrentOperation()) return;
       persistMetadata({ id, label, candidates, clientToken: issuedToken });
       setPendingConnection(null);
       // A relay transport hands its live login tunnel to the runtime (adopted
@@ -1560,20 +1609,24 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         { runtimeKey: secureTokenKeyOf({ candidates }) },
       );
       adopted = chosen.kind === 'relay';
+      if (!isCurrentOperation()) return;
       onConnected();
     } catch (error) {
+      if (!isCurrentOperation()) return;
       console.warn('[mobile-connect] password threw', error);
       setError(t('mobile.connect.error.passwordFailed'));
     } finally {
       if (!adopted && chosen?.kind === 'relay') chosen.tunnel.close();
-      endBusy('password');
+      if (isCurrentOperation()) endBusy('password');
     }
   }, [beginBusy, endBusy, onConnected, pendingConnection, persistMetadata, t]);
 
   const cancelPassword = React.useCallback(() => {
+    passwordOperationRef.current.cancel();
+    endBusy('password');
     setPendingConnection(null);
     setError(null);
-  }, []);
+  }, [endBusy]);
 
   const saveConnection = React.useCallback(async (input: MobileConnectInput): Promise<MobileSavedConnection | null> => {
     setError(null);

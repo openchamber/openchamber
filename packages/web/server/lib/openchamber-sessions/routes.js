@@ -2,7 +2,7 @@ import express from 'express';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { createWorktree } from '../git/index.js';
 import { expandSnippets } from '../opencode/snippets.js';
-import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
+import { expandCommandGoalObjective, parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { OpenChamberControlError, asControlError } from '../openchamber-control/error.js';
 
@@ -369,13 +369,27 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
 
     const expandedPrompt = expandSnippets(prompt, directory);
+    const parsedCommand = parseScheduledCommandPrompt(prompt);
+    let resolvedCommand = null;
+    if (parsedCommand) {
+      try {
+        const response = await client.command.list({ directory });
+        const commands = Array.isArray(response?.data) ? response.data : [];
+        const command = commands.find((candidate) => candidate?.name === parsedCommand.command);
+        if (command) resolvedCommand = { ...parsedCommand, template: command.template };
+      } catch {
+      }
+    }
     if (goalInput.enabled) {
+      const commandObjective = resolvedCommand
+        ? expandCommandGoalObjective(resolvedCommand.template, resolvedCommand.arguments)
+        : null;
       await (createSessionGoalOverride || createSessionGoal)({
         baseUrl,
         authHeaders,
         sessionID,
         directory,
-        objective: expandedPrompt,
+        objective: commandObjective ?? expandedPrompt,
         tokenBudget: goalInput.tokenBudget,
         providerID: model.providerID,
         modelID: model.modelID,
@@ -388,35 +402,21 @@ export const createOpenChamberSessionService = (dependencies) => {
       return error;
     };
 
-    let dispatchedAsCommand = false;
-    const parsedCommand = parseScheduledCommandPrompt(prompt);
-    if (parsedCommand) {
-      let commandExists = false;
+    if (resolvedCommand) {
       try {
-        const response = await client.command.list({ directory });
-        const commands = Array.isArray(response?.data) ? response.data : [];
-        commandExists = commands.some((command) => command?.name === parsedCommand.command);
-      } catch {
+        await client.session.command({
+          sessionID,
+          directory,
+          command: resolvedCommand.command,
+          arguments: resolvedCommand.arguments,
+          ...(agent ? { agent } : {}),
+          model: `${model.providerID}/${model.modelID}`,
+          ...(variant ? { variant } : {}),
+        });
+      } catch (error) {
+        throw markGoalPartial(error);
       }
-      if (commandExists) {
-        try {
-          await client.session.command({
-            sessionID,
-            directory,
-            command: parsedCommand.command,
-            arguments: parsedCommand.arguments,
-            ...(agent ? { agent } : {}),
-            model: `${model.providerID}/${model.modelID}`,
-            ...(variant ? { variant } : {}),
-          });
-        } catch (error) {
-          throw markGoalPartial(error);
-        }
-        dispatchedAsCommand = true;
-      }
-    }
-
-    if (!dispatchedAsCommand) {
+    } else {
       try {
         await runPromptAsync({
           baseUrl,
@@ -440,7 +440,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       }
     }
 
-    return { model, agent, variant, promptDispatched: true, dispatchedAsCommand };
+    return { model, agent, variant, promptDispatched: true, dispatchedAsCommand: Boolean(resolvedCommand) };
   };
 
   const create = async (payload = {}) => {
