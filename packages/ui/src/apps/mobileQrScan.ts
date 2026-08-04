@@ -4,7 +4,7 @@
 // scan() activity, this path bundles the barcode model in the app and does not need
 // Google Play Services. iOS keeps the native ready-made scanner.
 
-import { parsePairingConnectionPayload, type PairingConnectionPayload } from '@/lib/connectionPayload';
+import { parsePairingConnectionPayload, parsePairingConnectionPayloadString, type PairingConnectionPayload } from '@/lib/connectionPayload';
 
 export type MobileConnectionPayload = {
   url: string;
@@ -65,8 +65,15 @@ export const parseConnectionPayload = (raw: string): MobileConnectionPayload | M
   return null;
 };
 
-const resultFromRawValue = (raw: string): QrScanResult => {
+const resultFromRawValue = (raw: string, options?: { pairingStringFallback?: boolean }): QrScanResult => {
   const payload = parseConnectionPayload(raw);
+  if (!payload && options?.pairingStringFallback) {
+    // Old Android WebViews resolve openchamber://… with hostname "" / pathname "//connect",
+    // so the URL-based parse above fails even though the scanned string is intact. Retry
+    // with the URL-API-free string parser before declaring the scan invalid.
+    const pairing = parsePairingConnectionPayloadString(raw);
+    if (pairing) return { status: 'pairing', pairing };
+  }
   if (!payload) return { status: 'invalid' };
   if ('pairing' in payload) return { status: 'pairing', ...payload };
   return { status: 'ok', ...payload };
@@ -100,7 +107,7 @@ const scanWithBundledAndroidScanner = async (
       Promise.resolve(plugin.addListener('barcodesScanned', ({ barcodes }) => {
         const barcode = barcodes?.[0];
         const raw = (barcode?.rawValue ?? barcode?.displayValue ?? '').trim();
-        if (raw) finish(resultFromRawValue(raw));
+        if (raw) finish(resultFromRawValue(raw, { pairingStringFallback: true }));
       })).then((handle) => { barcodeListener = handle; }),
       Promise.resolve(plugin.addListener('scanError', () => finish({ status: 'failed' })))
         .then((handle) => { errorListener = handle; }),
