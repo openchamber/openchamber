@@ -1149,8 +1149,10 @@ const updateRoutingIndexFromEvent = (
  * know yet (e.g. a subagent session created during an SSE gap). Without this,
  * a pending question from a new session could never surface as an answerable
  * form: subtree scoping, the sidebar, and trimSessions all derive session
- * identity from `state.session` (issue #2448). Best-effort — a failed fetch
- * leaves the question merged but not scoped, recoverable on the next event.
+ * identity from `state.session` (issue #2448). Best-effort — a session that
+ * cannot be resolved here (or belongs to another directory) is not
+ * materialized; the caller drops its question group for this pass and the next
+ * event/reconnect resync recovers it.
  */
 async function materializeQuestionSessions(
   directory: string,
@@ -1173,6 +1175,13 @@ async function materializeQuestionSessions(
       })
       const session = response?.data
       if (!session?.id) return
+      // listPendingQuestions merges an unscoped global fetch (client.ts), so a
+      // session resolved here may belong to another directory. Only materialize
+      // sessions owned by this directory — otherwise a foreign session row leaks
+      // into this per-directory store (issue #2448 review).
+      if (session.directory && normalizeEventDirectory(session.directory) !== normalizeEventDirectory(directory)) {
+        return
+      }
       const nextSession = stripSessionDiffSnapshots(session)
       store.setState((state: DirectoryStore) => {
         const sessionIndex = state.session.findIndex((item) => item.id === nextSession.id)
@@ -1187,9 +1196,9 @@ async function materializeQuestionSessions(
         return { session: sessions, sessionTotal }
       })
     } catch {
-      // Best-effort: the question is still merged into the store below; if the
-      // session cannot be materialized, scoping surfaces it once a session
-      // event arrives.
+      // Best-effort: an unresolvable/foreign session is not materialized, and
+      // the caller drops its question group for this pass (the attribution
+      // filter runs next). The next event/reconnect resync recovers it.
     }
   }))
 }
@@ -1241,6 +1250,18 @@ export async function resyncBlockingRequestsForDirectory(
     // yet (created during an SSE gap). Materialize them so a pending question
     // from a new/subagent session surfaces as an answerable form (issue #2448).
     await materializeQuestionSessions(directory, store, grouped)
+
+    // listPendingQuestions merges an unscoped global fetch (client.ts), so the
+    // list can include questions for sessions owned by OTHER directories. Only
+    // surface/merge questions attributed to THIS directory: sessions already
+    // known to this store, or successfully materialized here. Anything else
+    // would pollute this store, fire wrong "Open session" toasts, and could
+    // leak a foreign session row (issue #2448 review).
+    for (const sessionId of Object.keys(grouped)) {
+      if (knownSessionIds.has(sessionId)) continue
+      if (store.getState().session.some((session) => session.id === sessionId)) continue
+      delete grouped[sessionId]
+    }
 
     for (const [sessionId, questions] of Object.entries(grouped)) {
       const knownIds = new Set((before.question[sessionId] ?? []).map((item) => item.id))
