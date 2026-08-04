@@ -2708,6 +2708,7 @@ export const dict: Record<I18nKey, string> = {
   'sidebarFilesTree.menu.newFolder': 'Nowy folder',
   'sidebarFilesTree.menu.rename': 'Zmień nazwę',
   'sidebarFilesTree.menu.save': 'Zapisz',
+  'sidebarFilesTree.menu.download': 'Pobierz',
   'sidebarFilesTree.search.clearAria': 'Wyczyść wyszukiwanie',
   'sidebarFilesTree.search.placeholder': 'Szukaj plików...',
   'sidebarFilesTree.state.loading': 'Ładowanie...',

@@ -2285,7 +2285,9 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
       usage: { windows },
     });
   } catch (error) {
-    const isTimeout = error instanceof DOMException && error.name === 'AbortError' && timeoutSignal.aborted;
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
     const isParseError = error instanceof SyntaxError;
     return buildResult({
       providerId: 'deepseek',

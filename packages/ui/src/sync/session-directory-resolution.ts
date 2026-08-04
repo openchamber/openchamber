@@ -13,8 +13,10 @@
  * The ordering discriminator is **whether the server confirmed the path**, not
  * whether the value is local or synced:
  *
- * 1. `authoritative` — the child store that actually holds the session, then
- *    the session's own record. Server-backed truth for an indexed session.
+ * 1. `authoritative` — the session's own record, then a child store that holds
+ *    it. Server-backed truth for an indexed session. Record first because
+ *    holding a session proves containment, not ownership: a project's session
+ *    list includes its worktrees' sessions so the sidebar can group them.
  * 2. `selected` — the directory captured when the session was selected, but
  *    only when it came from a server response (the directory `createSession`
  *    returned, which may be a canonicalized form of what was requested). A
@@ -42,7 +44,7 @@ export type SessionDirectorySource =
   | 'none'
 
 export type SessionDirectorySources = {
-  /** Directory of the child store that holds the session, or its own record. */
+  /** The session record's own directory, or a store that holds it. */
   authoritative?: string | null
   /** Server-confirmed directory captured at selection. Never a guessed one. */
   selected?: string | null

@@ -1203,6 +1203,7 @@ export const dict: Record<I18nKey, string> = {
   'sidebarFilesTree.menu.rename': '重新命名',
   'sidebarFilesTree.menu.copyPath': '複製路徑',
   'sidebarFilesTree.menu.save': '儲存',
+  'sidebarFilesTree.menu.download': '下載',
   'sidebarFilesTree.menu.newFile': '新增檔案',
   'sidebarFilesTree.menu.newFolder': '新增資料夾',
   'sidebarFilesTree.menu.delete': '刪除',

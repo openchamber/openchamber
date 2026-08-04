@@ -441,7 +441,11 @@ export const debugUtils = {
     const sources = {
       attachment,
       worktreeMetadata,
-      authoritative: owningStoreDirectory ?? recordDirectory,
+      // Record first, matching the resolver: holding a session proves
+      // containment, not ownership, so the parent repository holds its
+      // worktrees' sessions too. Reporting membership first made this
+      // diagnostic contradict the routing it exists to explain.
+      authoritative: recordDirectory ?? owningStoreDirectory,
       selected,
       remembered: remembered.runtime,
     };

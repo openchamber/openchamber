@@ -1,6 +1,6 @@
 {
   "name": "openchamber-monorepo",
-  "version": "1.17.2",
+  "version": "1.18.0",
   "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
@@ -40,7 +40,7 @@
     "lint:mobile": "bun run --cwd packages/mobile lint",
     "clean": "bun run --filter '*' clean",
     "changelog-card": "node scripts/changelog-card/generate.mjs",
-    "postinstall": "node ./fix-deprecation.js && patch-package",
+    "postinstall": "node ./fix-deprecation.js && patch-package && node ./packages/electron/scripts/ensure-electron.mjs --best-effort",
     "dev:web": "bun run --cwd packages/web build:watch",
     "dev:web:server": "bun run --cwd packages/web dev:server:watch",
     "dev:web:full": "node ./scripts/dev-web-full.mjs",
@@ -81,7 +81,10 @@
     "release:prepare": "bun run build && bun run type-check && bun run lint",
     "release:test": "./scripts/test-release-build.sh",
     "release:test:intel": "./scripts/test-release-build.sh x86_64",
-    "release:test:arm": "./scripts/test-release-build.sh aarch64"
+    "release:test:arm": "./scripts/test-release-build.sh aarch64",
+    "profile:idle": "node scripts/profile-idle.mjs",
+    "profile:session": "node scripts/profile-session.mjs",
+    "profile:animation": "node scripts/profile-animation.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",

@@ -1225,6 +1225,7 @@ export const dict = {
   'sidebarFilesTree.menu.rename': 'Rename',
   'sidebarFilesTree.menu.copyPath': 'Copy Path',
   'sidebarFilesTree.menu.save': 'Save',
+  'sidebarFilesTree.menu.download': 'Download',
   'sidebarFilesTree.menu.newFile': 'New File',
   'sidebarFilesTree.menu.newFolder': 'New Folder',
   'sidebarFilesTree.menu.delete': 'Delete',

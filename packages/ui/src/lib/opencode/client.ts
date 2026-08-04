@@ -12,6 +12,7 @@ import type {
   TextPartInput,
   FilePartInput,
 } from "@opencode-ai/sdk/v2";
+import { isAmbiguousTransportFailure, markAmbiguousTransportFailure } from "@/lib/relay/transport-error";
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 
@@ -878,7 +879,13 @@ class OpencodeService {
           // failure) — there is no HTTP response to report. Never fabricate a
           // status: surface it as a transport error so callers treat it like
           // any other network failure instead of a server 500.
-          throw new Error(`Message send transport failure: ${formatSdkError(result.error)}`);
+          // Preserve the transport's "dispatched, outcome unknown" tag through
+          // the wrap: without it the caller cannot tell a lost response from a
+          // send that never reached the server, and re-sends a running prompt.
+          const transportError = new Error(`Message send transport failure: ${formatSdkError(result.error)}`);
+          throw isAmbiguousTransportFailure(result.error)
+            ? markAmbiguousTransportFailure(transportError)
+            : transportError;
         }
         response = new Response(JSON.stringify(result.error), { status });
       } else {

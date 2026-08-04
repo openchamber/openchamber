@@ -1,6 +1,6 @@
 import { create, type StoreApi } from "zustand"
 import type { DirState, State } from "./types"
-import { INITIAL_STATE, MAX_DIR_STORES, DIR_IDLE_TTL_MS } from "./types"
+import { INITIAL_STATE, MAX_DIR_STORES, DIR_IDLE_TTL_MS, EVICTION_GRACE_MS } from "./types"
 import { pickDirectoriesToEvict, canDisposeDirectory, hasPendingBlockingRequests } from "./eviction"
 import { readDirCache, persistVcs, persistProjectMeta, persistIcon, persistSessions } from "./persist-cache"
 import { normalizePath } from "@/lib/pathNormalization"
@@ -250,6 +250,7 @@ export class ChildStoreManager {
   readonly children = new Map<string, StoreApi<DirectoryStore>>()
   private readonly lifecycle = new Map<string, DirState>()
   private readonly pins = new Map<string, number>()
+  private evictionScheduled = false
   private readonly disposers = new Map<string, () => void>()
   private readonly registrySubscribers = new Set<() => void>()
   private readonly bootstrapSubscribers = new Set<() => void>()
@@ -308,7 +309,25 @@ export class ChildStoreManager {
   mark(directory: string) {
     if (!directory) return
     this.lifecycle.set(directory, { lastAccessAt: Date.now() })
-    this.runEviction(directory)
+    this.scheduleEviction()
+  }
+
+  /**
+   * Coalesce eviction into one pass per tick.
+   *
+   * `ensureChild` runs during render, once per sidebar row, and used to sort
+   * and scan every directory synchronously on each call. Deferring the pass
+   * also lets a whole render commit — and with it every pin effect — settle
+   * before anything is considered for disposal.
+   */
+  private scheduleEviction() {
+    if (this.evictionScheduled || this.disposed) return
+    this.evictionScheduled = true
+    queueMicrotask(() => {
+      this.evictionScheduled = false
+      if (this.disposed) return
+      this.runEviction()
+    })
   }
 
   pin(directory: string) {
@@ -327,6 +346,8 @@ export class ChildStoreManager {
       return
     }
     this.pins.delete(normalizedDirectory)
+    // Releasing the final consumer is an explicit lifecycle edge, not a render-
+    // path access, so this pass stays synchronous.
     this.runEviction()
   }
 
@@ -621,6 +642,7 @@ export class ChildStoreManager {
       pins: new Set(stores.filter((d) => this.pinned(d))),
       max: MAX_DIR_STORES,
       ttl: DIR_IDLE_TTL_MS,
+      graceMs: EVICTION_GRACE_MS,
       now: Date.now(),
       hasPendingBlockingRequests: (dir) => this.hasPendingBlockingRequestsForDirectory(dir),
     }).filter((d) => d !== skip)

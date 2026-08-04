@@ -11,6 +11,7 @@ import {
 } from './crypto';
 import { createHostHandshake } from './handshake';
 import { TunnelFrameType } from './protocol';
+import { isAmbiguousTransportFailure } from './transport-error';
 import {
   createFragmentAssembler,
   decodeFrameBatch,
@@ -337,6 +338,24 @@ describe('createRelayTunnelClient', () => {
     await reader.read();
     controller.abort();
     await expect(reader.read()).rejects.toThrow();
+  });
+
+  // A POST that dies after dispatch may already have been processed by the
+  // server. Callers must be able to tell that apart from a definite failure —
+  // a prompt re-sent on this error produces a second AI response (#2425).
+  test('tags an in-flight request killed by reconnect as an ambiguous failure', async () => {
+    const { client, killWire } = await setupClient({ silent: true });
+    track(client);
+    const pending = client.fetch('/api/session/s1/prompt_async', { method: 'POST', body: '{}' });
+    let caught: unknown = null;
+    const settled = pending.catch((error: unknown) => {
+      caught = error;
+    });
+    await wait(20);
+    killWire();
+    await settled;
+    expect(caught).toBeInstanceOf(Error);
+    expect(isAmbiguousTransportFailure(caught)).toBe(true);
   });
 
   test('opens, echoes, and closes a tunneled WebSocket', async () => {
