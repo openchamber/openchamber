@@ -1,4 +1,5 @@
 import { create, type StoreApi } from "zustand"
+import type { Session } from "@opencode-ai/sdk/v2"
 import type { DirState, State } from "./types"
 import { INITIAL_STATE, MAX_DIR_STORES, DIR_IDLE_TTL_MS, EVICTION_GRACE_MS } from "./types"
 import { pickDirectoriesToEvict, canDisposeDirectory, hasPendingBlockingRequests } from "./eviction"
@@ -16,6 +17,55 @@ export type DirectoryStore = State & {
 
 type PermissionSubscriber = () => void
 const permissionSubscribersByStore = new WeakMap<StoreApi<DirectoryStore>, Map<string, Set<PermissionSubscriber>>>()
+
+type SessionHierarchySubscription = {
+  parentBySession: Map<string, string | null>
+  listeners: Set<() => void>
+}
+const sessionHierarchySubscriptionsByStore = new WeakMap<StoreApi<DirectoryStore>, SessionHierarchySubscription>()
+
+const sessionParent = (session: Session): string | null => session.parentID ?? null
+
+const buildSessionParents = (sessions: Session[]): Map<string, string | null> => (
+  new Map(sessions.map((session) => [session.id, sessionParent(session)]))
+)
+
+export function subscribeDirectorySessionHierarchy(
+  store: StoreApi<DirectoryStore>,
+  listener: () => void,
+): () => void {
+  let subscription = sessionHierarchySubscriptionsByStore.get(store)
+  if (!subscription) {
+    subscription = {
+      parentBySession: buildSessionParents(store.getState().session),
+      listeners: new Set(),
+    }
+    sessionHierarchySubscriptionsByStore.set(store, subscription)
+  }
+  subscription.listeners.add(listener)
+  return () => {
+    subscription?.listeners.delete(listener)
+    if (subscription?.listeners.size === 0) sessionHierarchySubscriptionsByStore.delete(store)
+  }
+}
+
+const notifyChangedSessionHierarchy = (
+  store: StoreApi<DirectoryStore>,
+  current: State["session"],
+  previous: State["session"],
+): void => {
+  if (current === previous) return
+  const subscription = sessionHierarchySubscriptionsByStore.get(store)
+  if (!subscription) return
+  const { parentBySession } = subscription
+  if (
+    current.length === parentBySession.size
+    && current.every((session) => parentBySession.get(session.id) === sessionParent(session))
+  ) return
+
+  subscription.parentBySession = buildSessionParents(current)
+  for (const listener of subscription.listeners) listener()
+}
 
 type SessionMessageChange = {
   messagesChanged: boolean
@@ -239,6 +289,7 @@ function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
     if (state.projectMeta !== prev.projectMeta) persistProjectMeta(directory, state.projectMeta)
     if (state.icon !== prev.icon) persistIcon(directory, state.icon)
     if (state.session !== prev.session) persistSessions(directory, state.session)
+    notifyChangedSessionHierarchy(store, state.session, prev.session)
     notifyChangedPermissions(store, state.permission, prev.permission)
     notifyChangedSessionMessages(store, state, prev)
   })

@@ -68,7 +68,11 @@ import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-mem
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
-import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
+import {
+  areRequestArraysReferentiallyEqual,
+  collectScopedBlockingRequests,
+  subscribeScopedPermissionRequests,
+} from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
 import {
   EMPTY_SESSION_MESSAGE_LOAD_STATE,
@@ -2444,7 +2448,6 @@ export function useSessions(directory?: string) {
   )
 }
 
-const selectPermissionRequestsBySession = (state: State) => state.permission
 const selectQuestionRequestsBySession = (state: State) => state.question
 
 type ScopedBlockingRequestCache<T extends { id: string }> = {
@@ -2493,8 +2496,59 @@ function useScopedBlockingRequests<T extends { id: string }>(
   )
 }
 
-export function useScopedBlockingPermissions(sessionID: string | null, directory?: string): PermissionRequest[] {
-  return useScopedBlockingRequests(sessionID, directory, selectPermissionRequestsBySession, EMPTY_PERMISSION_REQUESTS)
+const EMPTY_EXCLUDED_REQUEST_ROOT_IDS: readonly string[] = []
+type ScopedPermissionRequestCache = ScopedBlockingRequestCache<PermissionRequest> & {
+  excludedRootIds: readonly string[] | null
+}
+
+export function useScopedBlockingPermissions(
+  sessionID: string | null,
+  directory?: string,
+  options?: { bootstrap?: boolean; excludeSubtrees?: readonly string[] },
+): PermissionRequest[] {
+  const store = useDirectoryStore(directory, { bootstrap: options?.bootstrap })
+  const excludedRootIds = options?.excludeSubtrees ?? EMPTY_EXCLUDED_REQUEST_ROOT_IDS
+  const cacheRef = useRef<ScopedPermissionRequestCache>({
+    sessionID: null,
+    sessions: null,
+    requestsBySession: null,
+    excludedRootIds: null,
+    result: EMPTY_PERMISSION_REQUESTS,
+  })
+  const getSnapshot = useCallback(() => {
+    const state = store.getState()
+    const cache = cacheRef.current
+    if (
+      cache.sessionID === sessionID
+      && cache.sessions === state.session
+      && cache.requestsBySession === state.permission
+      && cache.excludedRootIds === excludedRootIds
+    ) {
+      return cache.result
+    }
+
+    const next = collectScopedBlockingRequests(
+      state.session,
+      state.permission,
+      sessionID,
+      EMPTY_PERMISSION_REQUESTS,
+      excludedRootIds,
+    )
+    const result = areRequestArraysReferentiallyEqual(cache.result, next) ? cache.result : next
+    cacheRef.current = {
+      sessionID,
+      sessions: state.session,
+      requestsBySession: state.permission,
+      excludedRootIds,
+      result,
+    }
+    return result
+  }, [excludedRootIds, sessionID, store])
+  const subscribe = useCallback(
+    (notify: () => void) => subscribeScopedPermissionRequests(store, sessionID, excludedRootIds, notify),
+    [excludedRootIds, sessionID, store],
+  )
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 export function useScopedBlockingQuestions(sessionID: string | null, directory?: string): QuestionRequest[] {
