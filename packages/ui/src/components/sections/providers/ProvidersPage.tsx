@@ -29,7 +29,10 @@ import { shouldLoadAvailableProviders } from './providerAvailability';
 import {
   getOAuthAuthMethods,
   parseAuthPayload,
+  providerHasCredentials,
+  shouldAutoOpenAuthPanel,
   shouldShowApiKeyAuth,
+  shouldShowModelsSection,
   type AuthMethod,
 } from './providerAuth';
 import { CustomProviderForm } from './CustomProviderForm';
@@ -157,7 +160,11 @@ export const ProvidersPage: React.FC = () => {
   const [providerSearchQuery, setProviderSearchQuery] = React.useState('');
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
+  // Bumped after auth writes so the source snapshot is refetched even when the
+  // selected provider id is unchanged (OAuth/API key success path).
+  const [providerSourcesRevision, setProviderSourcesRevision] = React.useState(0);
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
+  const [authPanelDismissedForId, setAuthPanelDismissedForId] = React.useState<string | null>(null);
   const [editingCustomProviderId, setEditingCustomProviderId] = React.useState<string | null>(null);
   const [editingCustomFormInitial, setEditingCustomFormInitial] = React.useState<CustomProviderFormState | null>(null);
   const [editingCustomScope, setEditingCustomScope] = React.useState<ProviderConfigScope | null>(null);
@@ -284,6 +291,7 @@ export const ProvidersPage: React.FC = () => {
   React.useEffect(() => {
     if (selectedProviderId === ADD_PROVIDER_ID) {
       setShowAuthPanel(true);
+      setAuthPanelDismissedForId(null);
       setEditingCustomProviderId(null);
       setEditingCustomFormInitial(null);
       setEditingCustomScope(null);
@@ -292,6 +300,7 @@ export const ProvidersPage: React.FC = () => {
     }
 
     setShowAuthPanel(false);
+    setAuthPanelDismissedForId(null);
     if (editingCustomProviderId && editingCustomProviderId !== selectedProviderId) {
       setEditingCustomProviderId(null);
       setEditingCustomFormInitial(null);
@@ -301,7 +310,7 @@ export const ProvidersPage: React.FC = () => {
   }, [selectedProviderId, editingCustomProviderId]);
 
   // Unauthenticated providers (OAuth-only plugins before login) should open the
-  // auth panel instead of a false "Connected" summary.
+  // auth panel instead of a false "Connected" summary. Respect an explicit Hide.
   React.useEffect(() => {
     if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
       return;
@@ -311,14 +320,20 @@ export const ProvidersPage: React.FC = () => {
       return;
     }
     const provider = providers.find((entry) => entry.id === selectedProviderId);
-    const envEntries = Array.isArray(provider?.env)
-      ? provider.env.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      : [];
-    const hasCreds = Boolean(sources.auth.exists) || envEntries.length > 0;
-    if (!hasCreds) {
+    const hasCreds = providerHasCredentials({
+      key: provider?.key,
+      authSourceExists: sources.auth.exists,
+    });
+    if (
+      shouldAutoOpenAuthPanel({
+        sourcesLoaded: true,
+        hasCredentials: hasCreds,
+        userDismissed: authPanelDismissedForId === selectedProviderId,
+      })
+    ) {
       setShowAuthPanel(true);
     }
-  }, [selectedProviderId, providerSources, providers]);
+  }, [selectedProviderId, providerSources, providers, authPanelDismissedForId]);
 
   React.useEffect(() => {
     if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
@@ -360,7 +375,33 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedProviderId, t]);
+  }, [selectedProviderId, providerSourcesRevision, t]);
+
+  const refreshProviderSources = React.useCallback(() => {
+    setProviderSourcesRevision((revision) => revision + 1);
+  }, []);
+
+  const markAuthWriteSucceeded = React.useCallback((providerId: string) => {
+    // Optimistically mark auth present so a providers refresh that has not yet
+    // stamped provider.key cannot reopen the panel / hide models with a stale
+    // "Credentials missing" summary before the source refetch lands.
+    setProviderSources((prev) => {
+      const existing = prev[providerId];
+      return {
+        ...prev,
+        [providerId]: {
+          auth: { exists: true, path: existing?.auth.path ?? null },
+          user: existing?.user ?? { exists: false, path: null },
+          project: existing?.project ?? { exists: false, path: null },
+          ...(existing?.custom ? { custom: existing.custom } : {}),
+        },
+      };
+    });
+    setAuthPanelDismissedForId(null);
+    setShowAuthPanel(false);
+    setSelectedProvider(providerId);
+    refreshProviderSources();
+  }, [refreshProviderSources, setSelectedProvider]);
 
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
@@ -387,7 +428,7 @@ export const ProvidersPage: React.FC = () => {
       toast.success(t('settings.providers.page.toast.apiKeySaved'));
       setApiKeyInputs((prev) => ({ ...prev, [providerId]: '' }));
       await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
-      setSelectedProvider(providerId);
+      markAuthWriteSucceeded(providerId);
     } catch (error) {
       console.error('Failed to save API key:', error);
       toast.error(t('settings.providers.page.toast.apiKeySaveFailed'));
@@ -445,7 +486,7 @@ export const ProvidersPage: React.FC = () => {
       setCustomAuthFailureHint(null);
       setLastCustomPersistId(null);
       await reloadOpenCodeConfiguration({ scopes: ['providers'], mode: 'active' });
-      setSelectedProvider(plan.providerID);
+      markAuthWriteSucceeded(plan.providerID);
     } catch (error) {
       console.error('Failed to save custom provider:', error);
       toast.error(
@@ -542,7 +583,7 @@ export const ProvidersPage: React.FC = () => {
       setOauthCodes((prev) => ({ ...prev, [codeKey]: '' }));
       setPendingOAuth(null);
       await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
-      setSelectedProvider(providerId);
+      markAuthWriteSucceeded(providerId);
     } catch (error) {
       console.error('Failed to complete OAuth flow:', error);
       toast.error(t('settings.providers.page.toast.oauthCompleteFailed'));
@@ -588,6 +629,8 @@ export const ProvidersPage: React.FC = () => {
 
       toast.success(t('settings.providers.page.toast.providerDisconnected'));
       await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
+      setAuthPanelDismissedForId(null);
+      refreshProviderSources();
     } catch (error) {
       console.error('Failed to disconnect provider:', error);
       toast.error(t('settings.providers.page.toast.providerDisconnectFailed'));
@@ -924,14 +967,16 @@ export const ProvidersPage: React.FC = () => {
   const sourcesLoaded = Boolean(selectedSources);
   const isEditableCustomProvider = sourcesLoaded
     && isConfigDefinedCustomProvider(selectedProvider, selectedSources);
-  const providerEnv = Array.isArray(selectedProvider.env)
-    ? selectedProvider.env.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-    : [];
-  const hasStoredAuth = Boolean(selectedSources?.auth.exists);
-  const hasEnvCredentials = providerEnv.length > 0;
-  const hasCredentials = hasStoredAuth || hasEnvCredentials;
+  const hasCredentials = providerHasCredentials({
+    key: selectedProvider.key,
+    authSourceExists: selectedSources?.auth.exists,
+  });
   const authStatusIncomplete = sourcesLoaded && !hasCredentials;
-  const showModelsSection = providerModels.length > 0 && (!sourcesLoaded || hasCredentials);
+  const showModelsSection = shouldShowModelsSection({
+    modelCount: providerModels.length,
+    sourcesLoaded,
+    hasCredentials,
+  });
   const incompleteAuthHint = !showApiKeyAuth && oauthAuthMethods.length > 0
     ? t('settings.providers.page.auth.useReconnectHint')
     : t('settings.providers.page.auth.incompleteHint');
@@ -1004,7 +1049,17 @@ export const ProvidersPage: React.FC = () => {
               variant="outline"
               size="xs"
               className="!font-normal"
-              onClick={() => setShowAuthPanel((prev) => !prev)}
+              onClick={() => {
+                setShowAuthPanel((prev) => {
+                  const next = !prev;
+                  if (!next) {
+                    setAuthPanelDismissedForId(selectedProvider.id);
+                  } else {
+                    setAuthPanelDismissedForId(null);
+                  }
+                  return next;
+                });
+              }}
             >
               {showAuthPanel ? t('settings.providers.page.actions.hide') : t('settings.providers.page.actions.reconnect')}
             </Button>
