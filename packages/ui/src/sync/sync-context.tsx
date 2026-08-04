@@ -705,6 +705,18 @@ async function resyncDirectorySessionStatuses(
   return nextStatuses
 }
 
+export async function adoptAuthoritativeSessionDirectoryAfterResync(
+  context: Pick<DirectoryBootstrapContext, "isCurrent">,
+  resync: () => Promise<unknown>,
+): Promise<void> {
+  await resync()
+  if (!context.isCurrent()) return
+  // A guessed selection is settled only after the owning store is readable;
+  // the generation check above keeps a runtime switch from settling it from
+  // the previous runtime's directory state.
+  useSessionUIStore.getState().adoptAuthoritativeSessionDirectory()
+}
+
 // After a monotonic poll, decide whether to escalate to a full authoritative
 // resync: the store believes the session is active but the snapshot reports it
 // idle/absent — a suspected missed idle that the monotonic poll deliberately
@@ -2073,20 +2085,15 @@ export function SyncProvider(props: {
         }
         if (result === "complete" && context.isCurrent()) {
           const latest = store.getState()
-          await resyncDirectorySessionStatuses(
-            directory,
-            store,
-            getAuthoritativeSessionCandidateIds(directory, latest),
-            "authoritative",
+          await adoptAuthoritativeSessionDirectoryAfterResync(
+            context,
+            () => resyncDirectorySessionStatuses(
+              directory,
+              store,
+              getAuthoritativeSessionCandidateIds(directory, latest),
+              "authoritative",
+            ),
           )
-
-          // Selecting a session whose directory this client had not indexed yet
-          // routes it through the active directory as a documented guess. This is
-          // the moment that guess can be settled: the owning store now holds the
-          // session, so the authoritative directory is finally readable. Without
-          // this the guess survives, every fetch is addressed to a directory that
-          // does not own the session, and the session never renders.
-          useSessionUIStore.getState().adoptAuthoritativeSessionDirectory()
         }
       },
       onDispose: (directory) => {
