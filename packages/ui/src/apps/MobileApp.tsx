@@ -19,6 +19,7 @@ import { useRouter } from '@/hooks/useRouter';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { opencodeClient } from '@/lib/opencode/client';
+import { parseRoute } from '@/lib/router/parseRoute';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { readTabletLayout, useOrientation, useTabletLayout } from '@/lib/device';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
@@ -26,6 +27,7 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { clearLastActiveSession, readLastActiveSession } from '@/sync/last-session-cache';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -50,10 +52,12 @@ import { BusyDots } from '@/components/chat/message/parts/BusyDots';
 import { MobileConnectionWelcome, type MobileConnectionNotice } from './MobileConnectionWelcome';
 import { MobileHeader } from './MobileHeader';
 import { MobileInstancesSurface } from './MobileInstancesSurface';
+import { MobileLandingSessions } from './MobileLandingSessions';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
 import { MobileWorkspaceDrawer, type MobileWorkspaceTab } from './MobileWorkspaceDrawer';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
+import { shouldBypassLastSessionRestore, shouldShowRecentsLanding } from './mobileLandingGate';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, reprobeActiveConnection, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
 import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
@@ -149,6 +153,32 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // A SIZE class, not a device check: an unfolded book foldable is a tablet
   // until it is folded shut, and the shell keeps running across that change.
   const { enabled: isTabletLayout, roomyForPanels } = useTabletLayout();
+  const mobileLandingMode = useSessionDisplayStore((state) => state.mobileLandingMode);
+  const landingCurrentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const landingDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
+  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
+  // One-shot dismissal: "New session" opens a real user draft; opening a
+  // session re-arms the landing for the next empty state.
+  const [landingDismissed, setLandingDismissed] = React.useState(false);
+  // A ?session=ID deep link applies asynchronously (useRouter effect) — hold
+  // the landing back so it never flashes before setCurrentSession runs.
+  const [initialSessionRoutePending, setInitialSessionRoutePending] = React.useState(
+    () => parseRoute().sessionId !== null,
+  );
+  React.useEffect(() => {
+    if (landingCurrentSessionId) {
+      setLandingDismissed(false);
+      setInitialSessionRoutePending(false);
+    }
+  }, [landingCurrentSessionId]);
+  const showRecentsLanding = shouldShowRecentsLanding({
+    mobileLandingMode,
+    isTabletLayout,
+    currentSessionId: landingCurrentSessionId,
+    draftOpen: landingDraftOpen,
+    landingDismissed,
+    initialSessionRoutePending,
+  });
   const orientation = useOrientation();
   const isPortrait = orientation === 'portrait';
   const hasHardwareKeyboard = useHardwareKeyboard();
@@ -443,7 +473,16 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
             <div className="h-full w-full">
               <ErrorBoundary>
-                <ChatView />
+                {showRecentsLanding ? (
+                  <MobileLandingSessions
+                    onStartNewSession={() => {
+                      openNewSessionDraft();
+                      setLandingDismissed(true);
+                    }}
+                  />
+                ) : (
+                  <ChatView />
+                )}
               </ErrorBoundary>
             </div>
           </main>
@@ -912,6 +951,15 @@ export function MobileApp({ apis }: MobileAppProps) {
     }
     const runtimeKey = getRuntimeKey();
     const persisted = readLastActiveSession(runtimeKey);
+    if (shouldBypassLastSessionRestore({
+      mobileLandingMode: useSessionDisplayStore.getState().mobileLandingMode,
+      isTabletLayout: readTabletLayout().enabled,
+    })) {
+      // The recents landing is the chosen landing surface, so restore must not preempt it; tablets retain restore because their persistent sidebar covers recents.
+      lastSessionRestoreDoneRef.current = true;
+      setLastSessionRestorePending(false);
+      return;
+    }
     if (!persisted) {
       lastSessionRestoreDoneRef.current = true;
       setLastSessionRestorePending(false);

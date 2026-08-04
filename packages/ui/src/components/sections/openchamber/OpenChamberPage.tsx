@@ -1,6 +1,7 @@
 import React from 'react';
 import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
 import { AboutSettings } from './AboutSettings';
+import { MobileLandingSettings } from './MobileLandingSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
 import { PasskeySettings } from './PasskeySettings';
 import { DefaultsSettings } from './DefaultsSettings';
@@ -213,9 +214,14 @@ const ChatSectionContent: React.FC = () => {
 
 // Sessions section: Default model & agent, Session retention
 const SessionsSectionContent: React.FC = () => {
+    const { isMobile } = useDeviceInfo();
+    const isVSCode = isVSCodeRuntime();
+    const showMobileLandingSettings = isMobile && isWebRuntime() && !isDesktopShell() && !isVSCode;
+
     return (
         <>
             <DefaultsSettings />
+            {showMobileLandingSettings && <MobileLandingSettings />}
             <SessionRetentionSettings />
         </>
     );

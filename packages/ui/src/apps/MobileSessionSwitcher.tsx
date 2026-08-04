@@ -1,72 +1,18 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 
-import { Icon } from '@/components/icon/Icon';
-import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
-import { useSwitcherItems } from '@/components/session/sidebar/hooks/useSwitcherItems';
 import { useTabletLayout } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useGlobalSessionStatus } from '@/sync/sync-context';
+
+import { MobileRecentSessionsList } from './MobileRecentSessionsList';
 
 const RECENT_SESSIONS_LIMIT = 10;
 /** Matches the metadata popover's width so both header dropdowns read as a pair. */
 const TABLET_POPOVER_WIDTH = 380;
-
-const getSessionTitle = (session: Session, fallback: string): string =>
-  session.title?.trim() || fallback;
-
-/** One switcher row: live status (busy spinner / attention dot), title,
-    "project · branch", compact time. Mirrors the desktop SessionSwitcherDropdown
-    indicator conventions; no subsession chevrons on mobile by design. */
-const SwitcherRow: React.FC<{
-  session: Session;
-  meta: string;
-  active: boolean;
-  onSelect: () => void;
-}> = ({ session, meta, active, onSelect }) => {
-  const { t } = useI18n();
-  const status = useGlobalSessionStatus(session.id);
-  const unseenCount = useSessionUnseenCount(session.id);
-  const statusType = status?.type ?? 'idle';
-  const isStreaming = statusType === 'busy' || statusType === 'retry';
-  const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
-  const timeLabel = formatSessionCompactDateLabel(session.time?.updated ?? session.time?.created ?? 0);
-
-  return (
-    <button
-      type="button"
-      className={cn(
-        'flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
-        active && 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]',
-      )}
-      onClick={onSelect}
-      style={{ touchAction: 'manipulation' }}
-    >
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className={cn('block truncate typography-ui-label', active ? 'text-primary' : 'text-foreground')}>
-          {getSessionTitle(session, t('sessions.sidebar.session.untitled'))}
-        </span>
-        {meta ? (
-          <span className="block truncate typography-micro text-muted-foreground">{meta}</span>
-        ) : null}
-      </span>
-      {/* Activity sits on the right, before the time — no reserved left gutter. */}
-      {isStreaming ? (
-        <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
-      ) : showUnreadDot ? (
-        <span className="size-1.5 shrink-0 rounded-full bg-[var(--status-info)]" aria-hidden />
-      ) : null}
-      {timeLabel ? (
-        <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{timeLabel}</span>
-      ) : null}
-    </button>
-  );
-};
 
 /** Recent-sessions popover under the mobile header, opened by tapping the
     session title. Same visual family as the metadata/usage overlay. */
@@ -118,8 +64,6 @@ export const MobileSessionSwitcher: React.FC<{
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
-
-  const items = useSwitcherItems(open || shouldRender, { maxParents: RECENT_SESSIONS_LIMIT });
 
   React.useEffect(() => {
     if (open) {
@@ -194,30 +138,16 @@ export const MobileSessionSwitcher: React.FC<{
         }}
       >
         <div className="oc-hide-scrollbar min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain">
-          {items.length === 0 ? (
-            <p className="px-3 py-6 text-center typography-small text-muted-foreground">
-              {t('sessions.switcher.empty')}
-            </p>
-          ) : (
-            items.map((item) => {
-              const session = item.node.session;
-              const meta = [item.secondaryMeta?.projectLabel, item.secondaryMeta?.branchLabel]
-                .filter(Boolean)
-                .join(' · ');
-              return (
-                <SwitcherRow
-                  key={session.id}
-                  session={session}
-                  meta={meta}
-                  active={session.id === currentSessionId}
-                  onSelect={() => {
-                    if (item.projectId) setActiveProjectIdOnly(item.projectId);
-                    handleSelect(session);
-                  }}
-                />
-              );
-            })
-          )}
+          <MobileRecentSessionsList
+            enabled={open || shouldRender}
+            limit={RECENT_SESSIONS_LIMIT}
+            currentSessionId={currentSessionId}
+            emptyLabel={t('sessions.switcher.empty')}
+            onSelectSession={(session, projectId) => {
+              if (projectId) setActiveProjectIdOnly(projectId);
+              handleSelect(session);
+            }}
+          />
         </div>
       </div>
       <style>{`

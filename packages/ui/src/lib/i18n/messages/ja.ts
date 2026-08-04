@@ -41,6 +41,7 @@ export const dict: Record<I18nKey, string> = {
   'layout.mainTab.terminal': 'ターミナル',
   'layout.mainTab.context': 'コンテキスト',
   'mobile.nav.aria': 'モバイルナビゲーション',
+  'mobile.landing.recents.title': '最近のセッション',
   'mobile.nav.changes': '変更',
   'mobile.nav.settings': '設定',
   'mobile.menu.instances': 'インスタンス',

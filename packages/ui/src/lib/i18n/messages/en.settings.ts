@@ -921,6 +921,10 @@ export const settingsDict = {
   'settings.openchamber.passkeys.toast.removed': 'Passkey removed',
   'settings.openchamber.passkeys.toast.removeFailed': 'Could not remove passkey.',
   'settings.openchamber.passkeys.toast.clearAuthFailed': 'Could not clear saved authentication.',
+  'settings.openchamber.mobileLanding.title': 'Mobile landing',
+  'settings.openchamber.mobileLanding.recents.label': 'Open to recent sessions',
+  'settings.openchamber.mobileLanding.recents.description':
+    'On phones, land on the cross-project recent sessions list when no session is open, instead of a new session draft.',
   'settings.openchamber.sessionRetention.title': 'Session Retention',
   'settings.openchamber.sessionRetention.tooltip': 'Automatically archive or delete inactive sessions based on last activity. Keeps the 5 most recent sessions.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Enable auto-cleanup',

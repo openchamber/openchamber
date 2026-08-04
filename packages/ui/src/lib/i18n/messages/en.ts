@@ -40,6 +40,7 @@ export const dict = {
   'layout.mainTab.terminal': 'Terminal',
   'layout.mainTab.context': 'Context',
   'mobile.nav.aria': 'Mobile navigation',
+  'mobile.landing.recents.title': 'Recent sessions',
   'mobile.connect.welcome.title': 'Connect to OpenChamber',
   'mobile.connect.welcome.description': 'Add a server URL or scan a pairing QR code to start using the mobile app.',
   'mobile.connect.url.label': 'Server URL',
