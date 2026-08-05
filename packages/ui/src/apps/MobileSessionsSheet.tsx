@@ -31,6 +31,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { useShallow } from 'zustand/react/shallow';
 
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import { Icon } from '@/components/icon/Icon';
@@ -56,7 +57,10 @@ import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
+import { deriveRecentSessions } from '@/components/session/sidebar/activitySections';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import {
+  compareSessionsByLifecycleOrder,
   EMPTY_SESSION_ORDER_RANKS,
   orderSessionsByLifecycleScopes,
   useSessionOrderingStore,
@@ -90,8 +94,14 @@ type MobileSessionsSheetProps = {
 };
 
 const EMPTY_PINNED_SESSION_IDS = new Set<string>();
+const EMPTY_ACTIVE_SESSION_IDS: string[] = [];
+const EMPTY_RECENT_SESSIONS: Session[] = [];
 
-// Pseudo-project key for the collapsible "recent" group's persisted expansion.
+// Pseudo-project key for the collapsible "recent" group's persisted expansion
+// in useMobileSessionTreeStore — same store and default-expanded semantics as
+// real projects (a missing key means expanded). Real project ids can never
+// collide with it.
+const RECENT_GROUP_KEY = '__recent__';
 
 type ProjectMeta = {
   id: string;
@@ -852,6 +862,8 @@ const SortableProjectRow: React.FC<{
 
 export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'drawer', footer }) => {
   const { t } = useI18n();
+  // Shared with the desktop sidebar's recent zone (same key, all locales).
+  const recentLabel = t('sessions.sidebar.activity.recentTitle');
   const { git } = useRuntimeAPIs();
   const liveSessions = useAllLiveSessions();
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
@@ -1025,6 +1037,29 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   }, [globalActiveSessions, liveSessions]);
 
   const normalizedQuery = query.trim().toLowerCase();
+
+  // The "active now" set (sessions with a non-idle status). The recents
+  // window keeps running sessions even when they are older than the retention
+  // period, mirroring the desktop sidebar's deriveRecentSessions semantics.
+  const activeSessionIds = useGlobalSessionStatusStore(useShallow(
+    (state) => (open || variant === 'sidebar')
+      ? [...state.statusById.keys()].sort()
+      : EMPTY_ACTIVE_SESSION_IDS,
+  ));
+  const activeSessionIdSet = React.useMemo(() => new Set(activeSessionIds), [activeSessionIds]);
+
+  // Desktop-parity "recents" zone: non-archived root sessions updated within
+  // the retention window or active right now, ordered by lifecycle order.
+  const recentSessions = React.useMemo(() => {
+    if (!open && variant !== 'sidebar') return EMPTY_RECENT_SESSIONS;
+    return deriveRecentSessions(sessions, activeSessionIdSet)
+      .sort((a, b) => compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks));
+  }, [activeSessionIdSet, open, pinnedSessionIds, sessionOrderRanks, sessions, variant]);
+
+  const recentVisibleCount = visibleCountByBucket.get(RECENT_GROUP_KEY) ?? SESSIONS_PER_BUCKET;
+  const visibleRecentSessions = recentSessions.slice(0, recentVisibleCount);
+  const remainingRecentSessions = recentSessions.length - visibleRecentSessions.length;
+  const canShowFewerRecent = recentSessions.length > SESSIONS_PER_BUCKET && remainingRecentSessions === 0;
 
   // On open, bring the current session (or at least its project) into view —
   // the list keeps its scroll position between opens, so a long project list
@@ -1231,6 +1266,16 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const toggleWorktree = (projectId: string, bucketKey: string, currentlyExpanded: boolean) => {
     setWorktreeExpanded(`${projectId}::${bucketKey}`, !currentlyExpanded);
     resetBucketVisibleCount(`${projectId}::${bucketKey}`);
+  };
+
+  // Recents group: same persisted expansion store as projects, keyed by the
+  // pseudo-project key; toggling resets its "show more" batch like any other
+  // group.
+  const isRecentGroupExpanded = projectExpandedMap[RECENT_GROUP_KEY] ?? true;
+
+  const toggleRecentGroup = (currentlyExpanded: boolean) => {
+    setProjectExpanded(RECENT_GROUP_KEY, !currentlyExpanded);
+    resetBucketVisibleCount(RECENT_GROUP_KEY);
   };
 
   const handleSelectSession = (session: Session) => {
@@ -1604,6 +1649,67 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             </div>
           ) : (
             <div className="flex flex-col">
+              {/* Recents: desktop-parity zone above the projects. Sessions
+                  also appear under their project — this is a shortcut list,
+                  exactly like the desktop sidebar's recent section. Hidden in
+                  search and reorder modes, which render their own surfaces. */}
+              {recentSessions.length > 0 ? (
+                <section className="border-b border-border/70">
+                  <button
+                    type="button"
+                    className="flex min-h-12 w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+                    onClick={() => toggleRecentGroup(isRecentGroupExpanded)}
+                    aria-expanded={isRecentGroupExpanded}
+                    aria-label={
+                      isRecentGroupExpanded
+                        ? t('sessions.sidebar.group.collapseAria', { label: recentLabel })
+                        : t('sessions.sidebar.group.expandAria', { label: recentLabel })
+                    }
+                    style={{ touchAction: 'manipulation' }}
+                  >
+                    <Icon name="history" className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="block min-w-0 flex-1 truncate typography-ui-label font-semibold text-foreground">
+                      {recentLabel}
+                    </span>
+                    <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
+                      {recentSessions.length}
+                    </span>
+                  </button>
+                  {isRecentGroupExpanded ? (
+                    <div className="pb-2">
+                      {visibleRecentSessions.map((session) => (
+                        <SessionRow
+                          key={session.id}
+                          session={session}
+                          active={currentSessionId === session.id}
+                          indent={12}
+                          contextLabel={buildSessionContextLabel(session)}
+                          onSelect={() => handleSelectSession(session)}
+                          revealed={revealedSessionId === session.id}
+                          onRevealedChange={(nextRevealed) => handleRowRevealedChange(session.id, nextRevealed)}
+                          confirmingDelete={confirmingDeleteSessionId === session.id}
+                          onArchive={() => void handleArchive(session)}
+                          onRequestDelete={() => setConfirmingDeleteSessionId(session.id)}
+                          onConfirmDelete={() => void handleConfirmDelete(session)}
+                          renaming={renamingSessionId === session.id}
+                          onRequestRename={() => handleRequestRename(session.id)}
+                          onSubmitRename={(nextTitle) => void handleSubmitRename(session.id, nextTitle)}
+                          onCancelRename={() => setRenamingSessionId(null)}
+                        />
+                      ))}
+                      {remainingRecentSessions > 0 ? (
+                        <ShowMoreRow
+                          indent={12}
+                          onClick={() => showMoreBucketSessions(RECENT_GROUP_KEY, visibleRecentSessions.length)}
+                        />
+                      ) : null}
+                      {canShowFewerRecent ? (
+                        <ShowFewerRow indent={12} onClick={() => resetBucketVisibleCount(RECENT_GROUP_KEY)} />
+                      ) : null}
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
               {orderedNodes.map((node, nodeIndex) => {
                 const projectExpanded = isProjectExpanded(node);
                 const buckets = normalizedQuery
