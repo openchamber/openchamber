@@ -2000,6 +2000,133 @@ describe('Guardian integration', () => {
       expect(client.stop).not.toHaveBeenCalled();
     }, 10000);
 
+    it('persists an abort-handoff ambiguity fence when a prepare-kind fence reconciles a still-prepared child and abortHandoff is ambiguous', async () => {
+      // Regression for issue-2421: a prepare-kind fence (persisted when a
+      // prepareHandoff response was lost after the record transitioned to
+      // handoff-prepared) is reconciled by calling abortHandoff. If that
+      // abortHandoff response is also lost, the catch must persist an
+      // abort-handoff ambiguity fence using the authoritative prepared record
+      // (oldChild) instead of dereferencing `checked.child`, which is still
+      // null at that point. The escaping error must remain a
+      // GUARDIAN_REQUEST_AMBIGUOUS error so startOpenCode/restart
+      // legacy-fallback paths stay blocked, and a later reconciliation must
+      // not replay the non-idempotent abortHandoff RPC.
+      const owner = {
+        ownerInstanceId: 'owner-prepare-abort-fence',
+        runtimeIdentity: 'runtime-prepare-abort-fence',
+        launchFingerprint: 'prepare-abort-fingerprint',
+      };
+      const prepared = {
+        incarnation: 'prepare-then-ambiguous-abort',
+        state: 'handoff-prepared',
+        revision: 3,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'prepare-then-ambiguous-abort-prepared-mac',
+        pid: 12345,
+        port: 45678,
+        launchSpec: {
+          binary: 'opencode',
+          args: [],
+          hostname: '127.0.0.1',
+          port: 45678,
+          cwd: '/tmp/project',
+        },
+        ...owner,
+      };
+      const clientPrepareHandoff = vi.fn().mockRejectedValue(Object.assign(
+        new Error('prepare response was lost'),
+        {
+          code: 'connection_closed',
+          originalCode: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          retryable: false,
+        },
+      ));
+      const clientAbort = vi.fn().mockRejectedValue(Object.assign(
+        new Error('abort response was lost'),
+        {
+          code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          ambiguous: true,
+          retryable: false,
+          originalCode: 'connection_closed',
+        },
+      ));
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: clientPrepareHandoff,
+        abortHandoff: clientAbort,
+        spawn: vi.fn(),
+        stop: vi.fn(),
+        health: vi.fn().mockResolvedValue({ healthy: true }),
+        list: vi.fn().mockResolvedValue([prepared]),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const legacySpawn = (await import('node:child_process')).spawn;
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: prepared.pid, close: vi.fn() };
+      state.openCodePort = prepared.port;
+      state.currentIncarnation = prepared.incarnation;
+      state.currentOwner = owner;
+      state.isOpenCodeReady = true;
+
+      // First restart: prepareHandoff response is lost after the guardian
+      // transitioned to handoff-prepared. The restart catch persists a
+      // prepare-kind fence and rethrows the ambiguous error.
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+        originalCode: 'connection_closed',
+      });
+      expect(clientPrepareHandoff).toHaveBeenCalledOnce();
+      expect(clientAbort).not.toHaveBeenCalled();
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'prepare',
+        incarnation: prepared.incarnation,
+      });
+
+      // Second restart: reconciliation finds the still-handoff-prepared
+      // child, calls abortHandoff, and that response is also lost. The catch
+      // must persist an abort-handoff ambiguity fence using the authoritative
+      // prepared record (oldChild) and rethrow the ambiguous error. The bug
+      // threw TypeError: Cannot read properties of null (reading 'child')
+      // here instead.
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+      });
+      expect(clientAbort).toHaveBeenCalledOnce();
+      expect(legacySpawn).not.toHaveBeenCalled();
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'abort-handoff',
+        incarnation: prepared.incarnation,
+        owner: owner,
+        // The persisted fence is recognized as ambiguous so startOpenCode /
+        // restart legacy-fallback paths remain blocked. The authoritative
+        // prepared record (oldChild) is passed as preparedRecord; for a
+        // non-durable client the binding is intentionally not copied into
+        // the fence, mirroring the existing abort-handoff fence precedent.
+        ambiguous: true,
+      });
+
+      // Third restart: reconciliation sees the abort-handoff fence against a
+      // still-handoff-prepared child. It must throw the abort-handoff kind
+      // error WITHOUT calling abortHandoff again (the non-idempotent RPC must
+      // not be replayed) and WITHOUT legacy-spawning.
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+      });
+      expect(clientAbort).toHaveBeenCalledOnce();
+      expect(client.spawn).not.toHaveBeenCalled();
+      expect(legacySpawn).not.toHaveBeenCalled();
+      expect(client.stop).not.toHaveBeenCalled();
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'abort-handoff',
+        incarnation: prepared.incarnation,
+      });
+    }, 15000);
+
     it('does not legacy-spawn or abort after an ambiguous successor spawn', async () => {
       const { spawn } = await import('node:child_process');
       const clientAbortHandoff = vi.fn();

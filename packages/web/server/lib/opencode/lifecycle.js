@@ -1596,11 +1596,21 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           active = await client.abortHandoff(withOwner({ incarnation: boundFence.incarnation }, boundFence.owner));
         } catch (error) {
           if (isAmbiguousGuardianRequestError(error)) {
+            // `checked` is still null here; it is only assigned after this
+            // try/catch via confirmGuardianFenceAdoption. The authoritative
+            // prepared record in scope at this catch point is `oldChild`
+            // (the authenticated handoff-prepared candidate matched to the
+            // fence). The abort-handoff ambiguity fence supersedes the
+            // prepare-kind fence being reconciled: clearing `boundFence`
+            // before persisting keeps a single fence keyed by the new kind
+            // so a later reconciliation does not replay the non-idempotent
+            // abortHandoff RPC against the still-prepared child.
+            clearGuardianOutcomeUnknownFence(boundFence);
             persistGuardianOutcomeUnknownFence({
               kind: 'abort-handoff',
               incarnation: boundFence.incarnation,
               owner: boundFence.owner,
-              preparedRecord: checked.child,
+              preparedRecord: oldChild,
               source: error,
               lease: guardianOutcomeUnknownLease,
             });
