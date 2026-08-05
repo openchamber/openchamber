@@ -8,6 +8,12 @@ const createWorktreeMock = vi.fn(async () => ({
   branch: 'openchamber/side-task',
   path: '/repo/worktrees/side-task',
 }));
+const getWorktreeBootstrapStatusMock = vi.fn(async () => ({
+  status: 'ready',
+  phase: 'setup-ready',
+  error: null,
+  updatedAt: Date.now(),
+}));
 const sessionCreateMock = vi.fn(async () => ({ data: { id: 'ses_123' } }));
 const sessionForkMock = vi.fn(async () => ({ data: { id: 'ses_fork', title: 'Forked session' } }));
 const sessionMessagesMock = vi.fn(async () => ({ data: [] }));
@@ -61,6 +67,7 @@ const selectionInputResponse = (url) => {
 const sessionCommandMock = vi.fn(async () => ({ data: {} }));
 const commandListMock = vi.fn(async () => ({ data: [] }));
 globalThis.__openchamberCreateWorktreeMock = createWorktreeMock;
+globalThis.__openchamberGetWorktreeBootstrapStatusMock = getWorktreeBootstrapStatusMock;
 
 let registerOpenChamberSessionRoutes;
 
@@ -80,6 +87,7 @@ vi.mock('@opencode-ai/sdk/v2', () => ({
 
 vi.mock('../git/index.js', () => ({
   createWorktree: (...args) => globalThis.__openchamberCreateWorktreeMock(...args),
+  getWorktreeBootstrapStatus: (...args) => globalThis.__openchamberGetWorktreeBootstrapStatusMock(...args),
 }));
 
 const createApp = (overrides = {}, options = {}) => {
@@ -107,6 +115,13 @@ describe('openchamber session routes', () => {
 
   beforeEach(() => {
     createWorktreeMock.mockClear();
+    getWorktreeBootstrapStatusMock.mockClear();
+    getWorktreeBootstrapStatusMock.mockImplementation(async () => ({
+      status: 'ready',
+      phase: 'setup-ready',
+      error: null,
+      updatedAt: Date.now(),
+    }));
     sessionCreateMock.mockClear();
     sessionForkMock.mockClear();
     existingSessionMessages = [];
@@ -361,6 +376,74 @@ describe('openchamber session routes', () => {
         'http://opencode.test/session/ses_123/prompt_async?directory=%2Frepo%2Fworktrees%2Fside-task',
         expect.objectContaining({ method: 'POST' }),
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('waits for the worktree bootstrap to complete before creating the session', async () => {
+    const statuses = [
+      { status: 'pending', phase: 'directory-created', error: null, updatedAt: 1 },
+      { status: 'pending', phase: 'git-ready', error: null, updatedAt: 2 },
+      { status: 'ready', phase: 'setup-ready', error: null, updatedAt: 3 },
+    ];
+    getWorktreeBootstrapStatusMock.mockImplementation(async () => statuses.shift() || statuses[statuses.length - 1]);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url).includes('/prompt_async')) {
+        return { ok: true, text: async () => '' };
+      }
+      return { ok: true, json: async () => ({ id: 'ses_123' }) };
+    });
+    try {
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({
+          directory: '/repo/app',
+          worktree: { name: 'side-task' },
+          prompt: 'Run this',
+          model: 'openai/gpt-5.5',
+        })
+        .expect(200);
+
+      expect(response.body.promptDispatched).toBe(true);
+      const sessionCreateCalls = globalThis.fetch.mock.calls.filter(([url]) => String(url).includes('/session?directory'));
+      const promptCalls = globalThis.fetch.mock.calls.filter(([url]) => String(url).includes('/prompt_async'));
+      expect(sessionCreateCalls.length).toBeGreaterThanOrEqual(1);
+      expect(promptCalls.length).toBeGreaterThanOrEqual(1);
+      const createIndex = globalThis.fetch.mock.calls.indexOf(sessionCreateCalls[0]);
+      const promptIndex = globalThis.fetch.mock.calls.indexOf(promptCalls[0]);
+      expect(getWorktreeBootstrapStatusMock).toHaveBeenCalled();
+      expect(createIndex).toBeGreaterThan(-1);
+      expect(promptIndex).toBeGreaterThan(createIndex);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('fails the create when the worktree bootstrap failed', async () => {
+    getWorktreeBootstrapStatusMock.mockImplementation(async () => ({
+      status: 'failed',
+      phase: 'directory-created',
+      error: 'branch already exists',
+      updatedAt: Date.now(),
+    }));
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url) => ({ ok: true, json: async () => ({ id: 'ses_123' }) }));
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({
+          directory: '/repo/app',
+          worktree: { name: 'side-task' },
+          prompt: 'Run this',
+          model: 'openai/gpt-5.5',
+        })
+        .expect(500, { error: 'Worktree bootstrap failed: branch already exists' });
+      const promptCalls = globalThis.fetch.mock.calls.filter(([url]) => String(url).includes('/prompt_async'));
+      expect(promptCalls.length).toBe(0);
     } finally {
       globalThis.fetch = originalFetch;
     }
