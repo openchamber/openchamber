@@ -295,3 +295,27 @@ export const formatRemainingTime = (seconds: number): string => {
 export const calculateExpectedUsagePercent = (elapsedRatio: number): number => {
   return Math.min(100, Math.max(0, elapsedRatio * 100));
 };
+
+/** How old stored quota data may be before an opening usage surface refreshes
+    it. Matches the default auto-refresh cadence, so opening a panel never
+    re-fetches data an enabled auto-refresh already keeps fresh. */
+export const QUOTA_RESULTS_STALE_AFTER_MS = 60_000;
+
+/**
+ * True when the stored quota results need a refresh for the given providers:
+ * a provider is missing entirely or its last fetch is older than `staleMs`.
+ *
+ * Used when a usage surface opens, so results that already exist locally
+ * (e.g. with auto-refresh disabled) cannot stay frozen indefinitely while the
+ * panel keeps showing them until the refresh completes.
+ */
+export const shouldRefreshQuotaResults = (
+  providerIds: readonly string[],
+  results: readonly { providerId: string; fetchedAt: number }[],
+  nowMs: number,
+  staleMs: number,
+): boolean =>
+  providerIds.some((providerId) => {
+    const result = results.find((entry) => entry.providerId === providerId);
+    return !result || nowMs - result.fetchedAt >= staleMs;
+  });

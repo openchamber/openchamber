@@ -6,7 +6,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { preloadProviderLogos } from '@/hooks/useProviderLogo';
 import { useTabletLayout } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
-import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
+import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, QUOTA_RESULTS_STALE_AFTER_MS, resolveUsageTone, shouldRefreshQuotaResults } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -417,11 +417,14 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
   }, [dropdownProviderIds]);
 
   React.useEffect(() => {
+    // Opening the panel refreshes stale quota data: results that already exist
+    // in the store (e.g. with auto-refresh disabled) must not stay frozen.
+    // Current values stay visible while the fetch runs — isLoading only adds
+    // the inline spinner, and per-provider results are replaced as they
+    // arrive. The stale window mirrors the default auto-refresh cadence, so
+    // an enabled auto-refresh never triggers a redundant fetch here.
     if (!open || isQuotaLoading) return;
-    const missingEnabledProvider = dropdownProviderIds.some((providerId) => (
-      !quotaResults.some((result) => result.providerId === providerId)
-    ));
-    if (!missingEnabledProvider) return;
+    if (!shouldRefreshQuotaResults(dropdownProviderIds, quotaResults, Date.now(), QUOTA_RESULTS_STALE_AFTER_MS)) return;
     void fetchAllQuotas();
   }, [dropdownProviderIds, fetchAllQuotas, isQuotaLoading, open, quotaResults]);
 

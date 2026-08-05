@@ -9,5 +9,7 @@ export {
   getPaceStatusColor,
   formatRemainingTime,
   calculateExpectedUsagePercent,
+  QUOTA_RESULTS_STALE_AFTER_MS,
+  shouldRefreshQuotaResults,
 } from './utils';
 export type { PaceInfo } from './utils';
