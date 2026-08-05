@@ -577,6 +577,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
       result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
     }
+    if (typeof candidate.collapsibleUserMessages === 'boolean') {
+      result.collapsibleUserMessages = candidate.collapsibleUserMessages;
+    }
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
     }
