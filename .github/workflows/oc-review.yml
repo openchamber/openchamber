@@ -32,6 +32,15 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      - name: Lint runtime JavaScript
+        # `bun run lint` (root) fans out to each package's `lint` script,
+        # which only covers `src/**/*.{ts,tsx}`. The web package's
+        # guardian/opencode-lifecycle/CLI bin JavaScript is plain JS
+        # outside that glob, so lint:runtime is gated separately to keep
+        # server and bin JS under the same ESLint contract on every PR.
+        working-directory: packages/web
+        run: bun run lint:runtime
+
       - name: Electron Linux packaging unit tests
         working-directory: packages/electron
         run: |

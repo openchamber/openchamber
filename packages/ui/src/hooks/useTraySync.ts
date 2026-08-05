@@ -54,7 +54,7 @@ const FLUSH_DEBOUNCE_MS = 500;
 const GLOBAL_REFRESH_MS = 45000;
 const MAX_SESSIONS = 20;
 
-type TraySessionStatus = 'idle' | 'busy' | 'retry';
+type TraySessionStatus = 'idle' | 'busy' | 'retry' | 'reconnecting';
 
 type TraySession = {
   id: string;
@@ -399,17 +399,29 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
   // (instant, but can miss sessions created outside this window) or the
   // cross-project status map (event-driven for every directory + polled
   // reconciliation). Requiring agreement would re-introduce the gaps.
-  const globalStatusById = useGlobalSessionStatusStore.getState().statusById;
+  const globalStatusState = useGlobalSessionStatusStore.getState();
+  const globalStatusById = globalStatusState.statusById;
   const resolveStatus = (id: string): TraySessionStatus => {
     const fromStores = live.statusById.get(id);
-    if (fromStores && fromStores !== 'idle') return fromStores;
-    return globalStatusById.get(id)?.status.type ?? fromStores ?? 'idle';
+    const fromGlobal = globalStatusById.get(id)?.status.type;
+    const raw: TraySessionStatus = (fromStores && fromStores !== 'idle')
+      ? fromStores
+      : (fromGlobal ?? fromStores ?? 'idle');
+    // While the global status index is unavailable, preserved busy/retry is
+    // last-known data and must NOT be presented as confirmed active. Convert
+    // it to 'reconnecting' so the tray shows the session is there but not
+    // confirmed running — neither a busy spinner nor idle.
+    if (globalStatusState.statusUnavailable && (raw === 'busy' || raw === 'retry')) {
+      return 'reconnecting';
+    }
+    return raw;
   };
 
   const rollupStatus = (family: string[]): TraySessionStatus => {
     const statuses = family.map((id) => resolveStatus(id));
     if (statuses.includes('busy')) return 'busy';
     if (statuses.includes('retry')) return 'retry';
+    if (statuses.includes('reconnecting')) return 'reconnecting';
     return 'idle';
   };
 

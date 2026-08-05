@@ -226,6 +226,37 @@ export function useGlobalSessionStatusUnavailable(): boolean {
   )
 }
 
+/**
+ * Derived presentation status for a session. Combines the raw last-known
+ * status from `useGlobalSessionStatus` with the `statusUnavailable` freshness
+ * flag so consumers don't each have to check freshness separately.
+ *
+ * - `fresh + busy/retry` → `'busy'` / `'retry'`
+ * - `fresh + no status`   → `'idle'`
+ * - `unavailable + last known busy/retry` → `'reconnecting'`
+ *   (preserved data stays in `rawStatus` for when freshness returns)
+ * - `unavailable + no status` → `'idle'`
+ *
+ * The raw last-known status is always available in `rawStatus` so consumers
+ * that need the underlying data (e.g. retry details) can still read it without
+ * re-subscribing to the raw hook. Preserved busy/retry must NOT be presented
+ * as a confirmed active spinner while `type === 'reconnecting'`.
+ */
+export type SessionDisplayStatus = {
+  type: 'busy' | 'retry' | 'idle' | 'reconnecting';
+  /** The raw last-known status, preserved for when freshness returns. */
+  rawStatus: SessionStatus | undefined;
+};
+
+export function useSessionDisplayStatus(sessionId: string): SessionDisplayStatus {
+  const status = useGlobalSessionStatus(sessionId);
+  const unavailable = useGlobalSessionStatusUnavailable();
+  if (unavailable && status && (status.type === 'busy' || status.type === 'retry')) {
+    return { type: 'reconnecting', rawStatus: status };
+  }
+  return { type: status?.type ?? 'idle', rawStatus: status };
+}
+
 /** Read all session statuses (for sidebar) */
 export function useAllSessionStatuses(): Record<string, SessionStatus> {
   return useLiveSyncSelector(

@@ -167,6 +167,14 @@ jobs:
         working-directory: packages/web
         run: bun run lint
 
+      - name: Lint runtime JavaScript on Windows
+        # `bun run lint` only covers `src/**/*.{ts,tsx}`. The guardian,
+        # opencode lifecycle, and CLI bin JavaScript is plain JS outside
+        # that glob, so lint:runtime is gated here too — a Windows-only
+        # runtime lint regression must be fixed rather than softened.
+        working-directory: packages/web
+        run: bun run lint:runtime
+
       - name: Validate docs
         # W-A does not touch docs, but `bun run docs:validate` is the
         # repo-wide "no broken cross-references" check. Cheap, and

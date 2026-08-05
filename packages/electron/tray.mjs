@@ -34,9 +34,13 @@ const truncate = (value, max) => {
 
 // Which status icon key a session maps to. 'blank' (a transparent image)
 // reserves the same left gutter for idle rows so every row aligns.
+// 'reconnecting' (statusUnavailable + preserved busy/retry) falls back to the
+// blank icon: the row is present but not confirmed active, so it should not
+// show a busy/retry spinner. A dedicated reconnecting icon can be added later.
 const statusIconKey = (session) => {
   if (session.status === 'busy') return 'busy';
   if (session.status === 'retry') return 'retry';
+  if (session.status === 'reconnecting') return 'blank';
   if (session.hasError) return 'error';
   if (session.unseen > 0) return 'unseen';
   return 'blank';
@@ -68,7 +72,9 @@ const computeTitle = (counts) => {
 
 // Which icon variant to show. Busy work animates a "breathing" fill; unread
 // (with nothing active) holds a static filled cube until the state clears;
-// otherwise the plain outline.
+// otherwise the plain outline. 'reconnecting' sessions do NOT animate — they
+// are preserved last-known state, not confirmed active work — so they fall
+// through to the unseen/idle path.
 const computeIconState = (counts) => {
   if (counts.busy > 0) return 'busy';
   if (counts.unseen > 0) return 'unseen';
@@ -81,6 +87,7 @@ const computeTooltip = (counts, sessionCount) => {
   if (counts.approvals > 0) bits.push(`${counts.approvals} awaiting approval`);
   if (counts.error > 0) bits.push(`${counts.error} with errors`);
   if (counts.busy > 0) bits.push(`${counts.busy} working`);
+  if (counts.reconnecting > 0) bits.push(`${counts.reconnecting} reconnecting`);
   if (counts.unseen > 0) bits.push(`${counts.unseen} unread`);
   const suffix = bits.length ? ` · ${bits.join(', ')}` : ' · idle';
   return `OpenChamber — ${sessionCount} session${sessionCount === 1 ? '' : 's'}${suffix}`;
@@ -332,7 +339,11 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
 
     const counts = {
+      // Only confirmed busy/retry animates the aggregate icon. 'reconnecting'
+      // (statusUnavailable + preserved busy/retry) is tracked separately and
+      // does NOT count as active work.
       busy: sessions.filter((s) => s.status === 'busy' || s.status === 'retry').length,
+      reconnecting: sessions.filter((s) => s.status === 'reconnecting').length,
       error: sessions.filter((s) => s.hasError).length,
       approvals: approvals.length,
       unseen: sessions.reduce((sum, s) => sum + (Number.isFinite(s.unseen) ? s.unseen : 0), 0),

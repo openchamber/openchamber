@@ -226,6 +226,10 @@ const ProjectAggregateStatusIndicator: React.FC<{ directories: Array<string | nu
     return set;
   }, [directories]);
   const hasBusySession = useGlobalSessionStatusStore(React.useCallback((state) => {
+    // While the global status index is unavailable, preserved busy/retry is
+    // last-known data and must NOT be presented as confirmed active — the
+    // collapsed-project aggregate dot stays off until freshness returns.
+    if (state.statusUnavailable) return false;
     for (const entry of state.statusById.values()) {
       if (entry.status.type !== 'busy' && entry.status.type !== 'retry') continue;
       const directory = normalizePath(entry.directory)?.toLowerCase();
@@ -306,7 +310,12 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     [isVisible],
   ));
   const activeSessionIds = useGlobalSessionStatusStore(useShallow(
-    (state) => isVisible ? [...state.statusById.keys()].sort() : EMPTY_STRING_ARRAY,
+    // While the global status index is unavailable, preserved busy/retry is
+    // last-known data and must NOT be presented as confirmed active. Return an
+    // empty set so the sidebar shows no active markers until freshness returns.
+    (state) => (isVisible && !state.statusUnavailable)
+      ? [...state.statusById.keys()].sort()
+      : EMPTY_STRING_ARRAY,
   ));
   const activeSessionIdSet = React.useMemo(() => new Set(activeSessionIds), [activeSessionIds]);
   const unreadSessionIds = useNotificationStore(useShallow(

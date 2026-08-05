@@ -72,3 +72,11 @@ jobs:
       - name: Lint web package
         working-directory: packages/web
         run: bun run lint
+
+      - name: Lint runtime JavaScript
+        # `bun run lint` only covers `src/**/*.{ts,tsx}`. The guardian,
+        # opencode lifecycle, and CLI bin JavaScript is plain JS outside
+        # that glob, so lint:runtime is gated separately to keep server
+        # and bin JS under the same ESLint contract.
+        working-directory: packages/web
+        run: bun run lint:runtime
