@@ -96,6 +96,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'walkthrough',
     descriptionKey: 'contextRail.surface.walkthrough.description',
     defaultWidthFraction: 3 / 5,
+    defaultHeightFraction: 0.4,
     mode: 'walkthrough',
     icon: 'route',
     labelKey: 'contextPanel.mode.walkthrough',
