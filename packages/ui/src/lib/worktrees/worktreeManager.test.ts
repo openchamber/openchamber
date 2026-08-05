@@ -86,7 +86,13 @@ mock.module('@/lib/gitApi', () => ({
   },
 }));
 
-const { createWorktree, getLatestWorktreeMetadata, listProjectWorktrees, worktreeMapsEqual } = await import('./worktreeManager');
+const {
+  createWorktree,
+  getLatestWorktreeMetadata,
+  listProjectWorktrees,
+  partitionWorktreesByRegisteredProject,
+  worktreeMapsEqual,
+} = await import('./worktreeManager');
 
 const waitForListCallCount = async (count: number): Promise<void> => {
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -282,5 +288,87 @@ describe('worktreeMapsEqual', () => {
       ['/repo', [wt('/r/main', 'main'), wt('/r/feat', 'feat'), wt('/r/old', 'new-branch')]],
     ]);
     expect(worktreeMapsEqual(a, b)).toBe(false);
+  });
+});
+
+describe('partitionWorktreesByRegisteredProject', () => {
+  const worktree = (path: string, projectDirectory = '/repo'): WorktreeMetadata => {
+    const label = path.split('/').pop() ?? path;
+    return { path, projectDirectory, branch: label, label };
+  };
+
+  test('assigns shared topology to the primary project and omits configured worktree projects', () => {
+    const projects = [
+      { path: '/repo' },
+      { path: '/worktrees/alpha' },
+      { path: '/worktrees/beta' },
+    ];
+    const topology = new Map<string, WorktreeMetadata[]>([
+      ['/repo', [
+        worktree('/worktrees/alpha'),
+        worktree('/worktrees/beta'),
+        worktree('/worktrees/loose'),
+      ]],
+      ['/worktrees/alpha', [
+        worktree('/repo'),
+        worktree('/worktrees/beta'),
+        worktree('/worktrees/loose'),
+      ]],
+      ['/worktrees/beta', [
+        worktree('/repo'),
+        worktree('/worktrees/alpha'),
+        worktree('/worktrees/loose'),
+      ]],
+    ]);
+
+    const result = partitionWorktreesByRegisteredProject(projects, topology);
+
+    expect([...result.keys()]).toEqual(['/repo']);
+    expect(result.get('/repo')?.map((entry) => entry.path)).toEqual(['/worktrees/loose']);
+  });
+
+  test('uses the first configured checkout when the primary project is not configured', () => {
+    const projects = [
+      { path: '/worktrees/alpha' },
+      { path: '/worktrees/beta' },
+    ];
+    const topology = new Map<string, WorktreeMetadata[]>([
+      ['/worktrees/beta', [
+        worktree('/repo'),
+        worktree('/worktrees/alpha'),
+        worktree('/worktrees/loose'),
+      ]],
+      ['/worktrees/alpha', [
+        worktree('/repo'),
+        worktree('/worktrees/beta'),
+        worktree('/worktrees/loose'),
+      ]],
+    ]);
+
+    const result = partitionWorktreesByRegisteredProject(projects, topology);
+
+    expect([...result.keys()]).toEqual(['/worktrees/alpha']);
+    expect(result.get('/worktrees/alpha')?.map((entry) => entry.path)).toEqual([
+      '/repo',
+      '/worktrees/loose',
+    ]);
+  });
+
+  test('keeps primary ownership when topology comes from another configured checkout', () => {
+    const projects = [
+      { path: '/repo' },
+      { path: '/worktrees/alpha' },
+    ];
+    const topology = new Map<string, WorktreeMetadata[]>([
+      ['/worktrees/alpha', [
+        worktree('/repo'),
+        worktree('/worktrees/loose'),
+      ]],
+    ]);
+
+    const result = partitionWorktreesByRegisteredProject(projects, topology);
+
+    expect([...result.keys()]).toEqual(['/repo']);
+    expect(result.get('/repo')?.map((entry) => entry.path)).toEqual(['/worktrees/loose']);
   });
 });

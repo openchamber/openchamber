@@ -284,6 +284,9 @@ jobs:
           - arch: x64
             target: x86_64-pc-windows-msvc
             platform: win32-x64
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+            platform: win32-arm64
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -331,6 +334,9 @@ jobs:
       - name: Rebuild native modules
         working-directory: packages/electron
         shell: bash
+        env:
+          # Cross-compile for ARM64 target from x64 runner.
+          ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
         # npmRebuild=false in package.json, so electron-builder won't
         # recompile native deps on its own — we must rebuild against the
         # target Electron ABI before packaging.
@@ -350,7 +356,6 @@ jobs:
           files: |
             packages/electron/dist/*.exe
             packages/electron/dist/*.blockmap
-            packages/electron/dist/latest.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -504,7 +509,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   combine-electron-manifests:
-    needs: [create-release, build-desktop-electron-macos]
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -514,13 +519,13 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Download per-arch latest-mac.yml
+      - name: Download per-arch update manifests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: latest-yml-*-apple-darwin
+          pattern: latest-yml-*
           path: artifacts
 
-      - name: Finalize combined latest-mac.yml
+      - name: Finalize combined manifests
         env:
           LATEST_YML_DIR: ${{ github.workspace }}/artifacts
           GH_REPO: ${{ github.repository }}
@@ -533,6 +538,8 @@ jobs:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: |
             ${{ runner.temp }}/latest-mac.yml
+            ${{ runner.temp }}/latest.yml
+            ${{ runner.temp }}/latest-arm64.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

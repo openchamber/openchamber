@@ -1,3 +1,5 @@
+import { recordStartupPerformance } from './startup-performance.js';
+
 export const createStartupPipelineRuntime = (dependencies) => {
   const {
     createTerminalRuntime,
@@ -7,6 +9,8 @@ export const createStartupPipelineRuntime = (dependencies) => {
   } = dependencies;
 
   const run = async (options) => {
+    const pipelineStartedAt = performance.now();
+    recordStartupPerformance('web.pipeline.start');
     const {
       app,
       server,
@@ -128,6 +132,9 @@ export const createStartupPipelineRuntime = (dependencies) => {
       bindHost,
       startupTunnelRequest,
       onTunnelReady,
+    });
+    recordStartupPerformance('web.listener.ready', {
+      durationMs: performance.now() - pipelineStartedAt,
     });
     tunnelRuntimeContext.setActivePort(startupResult.activePort);
     scheduleOpenCodeApiDetection();

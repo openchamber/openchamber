@@ -1,0 +1,32 @@
+---
+title: Vorschau & Entwicklungsserver
+description: Öffne einen laufenden Entwicklungsserver direkt in OpenChamber.
+---
+
+# Vorschau & Entwicklungsserver
+
+Wenn du einen Entwicklungsserver startest, kann OpenChamber ihn direkt in der App öffnen statt in einem separaten Browser-Tab — so kannst du deine Seite neben dem Chat sehen, ihre Konsole aufzeichnen und Elemente anstupsen, um Fragen dazu zu stellen.
+
+## Eine Vorschau öffnen
+
+OpenChamber überwacht die Terminalausgabe auf eine lokale Adresse (die `Local:`-Zeile, die Werkzeuge wie Vite, Next.js oder Astro ausgeben). Sobald es eine findet:
+
+- erscheint im Terminal eine Schaltfläche **Open preview**
+- öffnet eine [Projektaktion](/project-actions/) mit aktiviertem Auto-Open die Vorschau für dich
+- kann auch ein lokaler Link in einer Chatnachricht sie öffnen
+
+Die Seite lädt im Seitenbereich. Nur lokale Adressen (auf deinem eigenen Rechner) können als Vorschau geöffnet werden.
+
+## Konsole und Inspektion
+
+Im Vorschau-Bereich kannst du:
+
+- die **Konsole** der Seite beobachten — Fehler, Warnungen und Protokolle, so gefiltert, wie du möchtest
+- **inspect** einschalten, auf ein beliebiges Element klicken und eine Notiz dazu senden — Selektor, Stile, Position und ein Screenshot — direkt in den Chat
+
+Das ist der schnellste Weg, dem Agenten "diese Schaltfläche hier" zu sagen, ohne sie beschreiben zu müssen.
+
+## Verwandt
+
+- [Projektaktionen](/project-actions/) — einen Server automatisch öffnen, wenn du ihn startest
+- [Desktop-Browser](/desktop-browser/) — dieselben Werkzeuge für jede Seite, auf dem Desktop

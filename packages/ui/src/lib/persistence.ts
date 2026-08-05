@@ -1176,6 +1176,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.smallModelOverride === 'string' && candidate.smallModelOverride.length > 0) {
     result.smallModelOverride = candidate.smallModelOverride;
   }
+  if (typeof candidate.walkthroughModelOverride === 'string' && candidate.walkthroughModelOverride.length > 0) {
+    result.walkthroughModelOverride = candidate.walkthroughModelOverride;
+  }
   if (typeof candidate.autoCreateWorktree === 'boolean') {
     result.autoCreateWorktree = candidate.autoCreateWorktree;
   }

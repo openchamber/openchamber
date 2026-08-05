@@ -25,10 +25,12 @@ The following functions are exported and used by the web server:
 
 ### Status and Diff Operations
 - `getStatus(directory)`: Get comprehensive Git status including current branch, tracking, ahead/behind, file changes, diff stats, merge/rebase state.
-- `getDiff(directory, { path, staged, contextLines })`: Get diff output for files or entire working tree.
-- `getRangeDiff(directory, { base, head, path, contextLines })`: Get diff between two refs.
+- `getDiff(directory, { path, staged, contextLines })`: Get diff output for files or entire working tree. Untracked symbolic links are represented as link entries without following their targets.
+- `getRangeDiff(directory, { base, head, path, contextLines })`: Get diff between two refs. Uses three-dot `base...head` semantics, so work merged into `head` from `base` is excluded and only the branch's own changes are returned. Prefers `origin/<base>` when that remote-tracking ref exists, so a stale local base branch does not resurface already-merged commits. Exposed as `GET /api/git/range-diff` (`path` optional; omit it for the whole range).
 - `getRangeFiles(directory, { base, head })`: Get list of changed files between two refs.
-- `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs).
+- `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs and symbolic links as their link-target text).
+- `listUntrackedPaths(directory)`: List individual untracked file paths honoring ignore rules. Much cheaper than `getStatus` when that is all a caller needs. Deliberately not `--directory`: collapsed directory entries end in a slash and are rejected by the per-file diff helpers, so a caller would silently lose every file inside a new directory.
+- `getUntrackedDiffs(directory, filePaths, { concurrency, contextLines })`: Diffs for untracked files against an empty tree. Resolves the repository context once instead of per file (`getDiff` re-resolves every call, costing an extra `rev-parse` each time) and bounds how many diff processes run at once. Returns one entry per input path in order; unreadable paths yield `''` rather than failing the batch.
 - `collectDiffs(directory, files)`: Collect diff output for multiple files.
 - `revertFile(directory, filePath, options)`: Revert a file. Default scope `all` discards staged and working-tree changes; scope `working` discards only unstaged/working-tree changes.
 - `stageFile(directory, filePath)`: Add one file path to the index.
@@ -109,6 +111,9 @@ The following functions are internal helpers used by exported functions:
 - `mergeInProgress`: Object with `{ head, message }` if merge in progress.
 - `rebaseInProgress`: Object with `{ headName, onto }` if rebase in progress.
 
+### Runtime availability of range diffs
+- `GET /api/git/range-diff` is served by the OpenChamber web server, so it is available to web, desktop, and mobile clients. The shared `GitAPI.getGitRangeDiff` is therefore optional: web supplies the HTTP implementation, and VS Code does not implement it because the extension host serves Git through its own bridge rather than these routes. Features built on range diffs (currently the AI diff walkthrough) are not offered in VS Code.
+
 ### Staged and unstaged change handling
 - `status.files` exposes both `index` and `working_dir` codes. Shared UI uses these as separate scopes: staged rows are derived from non-empty `index` statuses, while unstaged rows are derived from `working_dir` statuses and untracked files.
 - A file with both staged and unstaged changes can appear in both UI sections. Staged rows request diffs with `staged: true`; unstaged rows request normal working-tree diffs.
@@ -135,7 +140,7 @@ The following functions are internal helpers used by exported functions:
 ### Adding a New Git Operation
 1. Add the function to `packages/web/server/lib/git/service.js`.
 2. Export the function if it's part of the public API.
-3. Use `createGit(directory)` to get a simple-git instance with the correct environment.
+3. Use `createGit(directory)` to get a simple-git instance with the correct environment. `directory` is required (`baseDir`); never omit it so commands cannot inherit `process.cwd()`.
 4. Use `runGitCommand(cwd, args)` for direct git command execution with better error handling.
 5. Use `runGitCommandOrThrow(cwd, args, fallbackMessage)` for commands that must succeed.
 6. Return consistent error messages; use `parseGitErrorText(error)` to extract meaningful git errors.
@@ -145,6 +150,11 @@ The following functions are internal helpers used by exported functions:
 - SSH keys are escaped and validated via `escapeSshKeyPath` to prevent command injection.
 - On Windows, paths are converted to MSYS format (`C:/path` → `/c/path`).
 - SSH_AUTH_SOCK is automatically resolved via `resolveSshAuthSock` (checks GPG agent, gpgconf).
+
+### Working directory (simple-git)
+- Repository operations always pass an explicit `baseDir` (the opened project/directory path) into simple-git. Omitting `baseDir` would default to `process.cwd()`, which breaks when the server was launched from a neutral directory (e.g. `$HOME`) while the opened project lives elsewhere.
+- Global identity reads use the user home directory as `baseDir` (they do not need a repository).
+- A `GitError` / non-repository result from status or check must not abort project/session enumeration: routes return a soft non-repo payload and log a warning.
 
 ### Worktree Naming
 - Worktree names are slugified via `slugWorktreeName`.

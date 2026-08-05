@@ -23,9 +23,17 @@ interface ModelSelectorProps {
     onChange: (providerId: string, modelId: string) => void;
     className?: string;
     allowedProviderIds?: string[];
+    isModelAllowed?: (providerId: string, modelId: string) => boolean;
     placeholder?: string;
     tooltipsEnabled?: boolean;
     dropdownPortalToBody?: boolean;
+    /**
+     * Drop the model name and the chevron, leaving the provider logo. For
+     * headers that run out of room before they run out of controls — the logo
+     * still says which provider is answering, which is the part a glance is
+     * usually after.
+     */
+    compact?: boolean;
 }
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
@@ -34,9 +42,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     onChange,
     className,
     allowedProviderIds,
+    isModelAllowed,
     placeholder,
     tooltipsEnabled = true,
     dropdownPortalToBody = false,
+    compact = false,
 }) => {
     const { t } = useI18n();
     const { isReady, isUnavailable } = useOpenCodeReadiness();
@@ -115,6 +125,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             selectedModel={selectedModel}
             hiddenModels={hiddenModels}
             allowedProviderIds={allowedProviderIds}
+            isModelAllowed={isModelAllowed}
             includeNotSelected
             onSelectNone={handleSelectNone}
             onEscape={closePicker}
@@ -166,26 +177,35 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     return (
         <DropdownMenu open={isReady && isDropdownOpen} onOpenChange={isReady ? setIsDropdownOpen : undefined}>
             <DropdownMenuTrigger asChild>
-                <div className={cn(
-                    dropdownTriggerVariants({ size: 'sm' }),
-                    'min-w-0 w-fit',
-                    !isReady && 'opacity-60 cursor-not-allowed',
-                    className,
-                )}>
+                <div
+                    className={cn(
+                        dropdownTriggerVariants({ size: 'sm' }),
+                        'min-w-0 w-fit',
+                        !isReady && 'opacity-60 cursor-not-allowed',
+                        className,
+                    )}
+                    // The name is gone from the trigger, so it has to stay
+                    // reachable somewhere.
+                    title={compact && isReady ? triggerLabel : undefined}
+                >
                     {!isReady ? (
                         <>
                             <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
-                            <span className="typography-ui-label font-normal whitespace-nowrap text-muted-foreground">
-                                {isUnavailable ? t('common.unavailable') : t('common.loading')}
-                            </span>
+                            {!compact && (
+                                <span className="typography-ui-label font-normal whitespace-nowrap text-muted-foreground">
+                                    {isUnavailable ? t('common.unavailable') : t('common.loading')}
+                                </span>
+                            )}
                         </>
                     ) : (
                         <>
                             {providerId ? <ProviderLogo providerId={providerId} className="h-3.5 w-3.5 flex-shrink-0" /> : <Icon name="pencil-ai" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
-                            <span className="typography-ui-label min-w-0 flex-1 truncate text-left font-normal text-foreground">{triggerLabel}</span>
+                            {!compact && (
+                                <span className="typography-ui-label min-w-0 flex-1 truncate text-left font-normal text-foreground">{triggerLabel}</span>
+                            )}
                         </>
                     )}
-                    <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
+                    {!compact && <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />}
                 </div>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="start" portalToBody={dropdownPortalToBody}>

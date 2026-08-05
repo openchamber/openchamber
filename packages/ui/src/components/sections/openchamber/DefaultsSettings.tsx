@@ -45,6 +45,7 @@ export const DefaultsSettings: React.FC = () => {
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const providers = useConfigStore((state) => state.providers);
+  const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
 
   const [defaultModel, setDefaultModel] = React.useState<string | undefined>();
   const [defaultVariant, setDefaultVariant] = React.useState<string | undefined>();
@@ -52,6 +53,7 @@ export const DefaultsSettings: React.FC = () => {
   const [smallModelUseDefault, setSmallModelUseDefault] = React.useState(true);
   const [smallModelOverride, setSmallModelOverride] = React.useState<string | undefined>();
   const [smallModelProviders, setSmallModelProviders] = React.useState<string[] | undefined>();
+  const [walkthroughModelOverride, setWalkthroughModelOverride] = React.useState<string | undefined>();
   const [isLoading, setIsLoading] = React.useState(true);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
@@ -65,6 +67,7 @@ export const DefaultsSettings: React.FC = () => {
           defaultAgent?: string;
           smallModelUseDefault?: boolean;
           smallModelOverride?: string;
+          walkthroughModelOverride?: string;
         } | null = null;
 
         if (!data) {
@@ -84,6 +87,8 @@ export const DefaultsSettings: React.FC = () => {
                   defaultAgent: typeof settings.defaultAgent === 'string' ? settings.defaultAgent : undefined,
                   smallModelUseDefault: typeof raw.smallModelUseDefault === 'boolean' ? raw.smallModelUseDefault : undefined,
                   smallModelOverride: typeof raw.smallModelOverride === 'string' ? raw.smallModelOverride : undefined,
+                  walkthroughModelOverride:
+                    typeof raw.walkthroughModelOverride === 'string' ? raw.walkthroughModelOverride : undefined,
                 };
               }
             } catch {
@@ -122,6 +127,9 @@ export const DefaultsSettings: React.FC = () => {
           if (typeof data.smallModelUseDefault === 'boolean') setSmallModelUseDefault(data.smallModelUseDefault);
           if (typeof data.smallModelOverride === 'string' && data.smallModelOverride.trim()) {
             setSmallModelOverride(data.smallModelOverride.trim());
+          }
+          if (typeof data.walkthroughModelOverride === 'string' && data.walkthroughModelOverride.trim()) {
+            setWalkthroughModelOverride(data.walkthroughModelOverride.trim());
           }
         }
       } catch (error) {
@@ -236,10 +244,43 @@ export const DefaultsSettings: React.FC = () => {
     []
   );
 
+  const handleWalkthroughModelOverrideChange = React.useCallback(
+    async (providerId: string, modelId: string) => {
+      const newValue = providerId && modelId ? `${providerId}/${modelId}` : undefined;
+      setWalkthroughModelOverride(newValue);
+      try {
+        // Clearing the picker is how the user goes back to the small model, so
+        // an empty value is a real choice rather than a no-op.
+        await updateDesktopSettings({ walkthroughModelOverride: newValue ?? '' });
+      } catch (error) {
+        console.warn('Failed to save walkthrough model override:', error);
+      }
+    },
+    []
+  );
+
+  // The walkthrough cannot work at all without schema-shaped output, so models
+  // the catalog says cannot do it are hidden rather than offered and then
+  // refused. A missing capability is not a "no": roughly half the catalog omits
+  // the field, and those models usually work.
+  const isStructuredOutputCapable = React.useCallback(
+    (providerId: string, modelId: string) =>
+      modelsMetadata.get(`${providerId}/${modelId}`)?.structured_output !== false,
+    [modelsMetadata]
+  );
+
   const parsedSmallModel = React.useMemo(() => getDisplayModel(smallModelOverride), [smallModelOverride]);
+  const parsedWalkthroughModel = React.useMemo(
+    () => getDisplayModel(walkthroughModelOverride),
+    [walkthroughModelOverride]
+  );
 
   React.useEffect(() => {
-    if (smallModelUseDefault || smallModelProviders !== undefined) return;
+    // Both pickers filter by the same authenticated-provider list, so either
+    // one being open is reason enough to fetch it.
+    // Both pickers filter by the same authenticated-provider list, and the
+    // walkthrough picker is always visible, so this is always worth fetching.
+    if (smallModelProviders !== undefined) return;
     let cancelled = false;
     (async () => {
       try {
@@ -256,7 +297,7 @@ export const DefaultsSettings: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [smallModelUseDefault, smallModelProviders]);
+  }, [smallModelProviders]);
 
   const availableVariants = React.useMemo(() => {
     if (!parsedModel.providerId || !parsedModel.modelId) return [];
@@ -396,6 +437,32 @@ export const DefaultsSettings: React.FC = () => {
                 />
               </SettingsFieldRow>
             ) : null}
+
+            <SettingsInset className={SETTINGS_OPTION_STACK_CLASS}>
+              <div className="flex items-center gap-1.5">
+                <SettingsGroupTitle>
+                  {t('settings.openchamber.defaults.walkthroughModel.title')}
+                </SettingsGroupTitle>
+                <SettingsInfoHint>
+                  {t('settings.openchamber.defaults.walkthroughModel.description')}
+                </SettingsInfoHint>
+              </div>
+
+              <SettingsFieldRow
+                settingsItem="sessions.walkthrough-model"
+                label={t('settings.openchamber.defaults.walkthroughModel.overrideModel')}
+              >
+                <ModelSelector
+                  providerId={parsedWalkthroughModel.providerId}
+                  modelId={parsedWalkthroughModel.modelId}
+                  onChange={handleWalkthroughModelOverrideChange}
+                  allowedProviderIds={smallModelProviders}
+                  isModelAllowed={isStructuredOutputCapable}
+                  placeholder={t('settings.openchamber.defaults.walkthroughModel.usesSmallModel')}
+                  className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+                />
+              </SettingsFieldRow>
+            </SettingsInset>
           </div>
         </div>
       </SettingsSection>

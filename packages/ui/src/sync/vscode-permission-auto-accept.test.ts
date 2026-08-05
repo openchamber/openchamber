@@ -86,6 +86,27 @@ describe("VS Code permission auto-accept runtime", () => {
     expect(attempts).toBe(2)
   })
 
+  test("routes the state check and reply through the permission event directory", async () => {
+    const stateDirectories: Array<string | undefined> = []
+    const replyDirectories: Array<string | undefined> = []
+    const runtime = createVSCodePermissionAutoAcceptRuntime({
+      getPolicy: () => ({ child: true }),
+      getSessions: () => new Map(),
+      getSession: async () => session("child"),
+      listPendingPermissions: async () => [],
+      getPermissionState: async (_sessionId, _requestId, directory) => {
+        stateDirectories.push(directory)
+        return "ok"
+      },
+      reply: async (_sessionId, _requestId, directory) => { replyDirectories.push(directory) },
+      wait: async () => undefined,
+    })
+
+    expect(await runtime.processPermission(permission, "/permission/project")).toBe(true)
+    expect(stateDirectories).toEqual(["/permission/project"])
+    expect(replyDirectories).toEqual(["/permission/project"])
+  })
+
   test("reconciles existing pending permissions immediately after enablement", async () => {
     const replied: string[] = []
     const runtime = createVSCodePermissionAutoAcceptRuntime({
@@ -109,19 +130,88 @@ describe("VS Code permission auto-accept runtime", () => {
     expect(replied).toEqual(["perm-1"])
   })
 
-  test("treats an already resolved permission as handled without replying", async () => {
+  test("accepts visible pending permissions before a network reconciliation failure", async () => {
+    const replied: string[] = []
+    let stateChecks = 0
+    const runtime = createVSCodePermissionAutoAcceptRuntime({
+      getPolicy: () => ({ child: true }),
+      getSessions: () => new Map(),
+      getSession: async () => session("child"),
+      getKnownPendingPermissions: () => [permission],
+      listPendingPermissions: async () => { throw new Error("offline") },
+      getPermissionState: async () => {
+        stateChecks += 1
+        return "ok"
+      },
+      reply: async (_sessionId, requestId) => { replied.push(requestId) },
+      wait: async () => undefined,
+    })
+
+    await expect(runtime.reconcilePending("/repo")).rejects.toThrow("offline")
+    expect(stateChecks).toBe(0)
+    expect(replied).toEqual(["perm-1"])
+  })
+
+  test("deduplicates visible and network pending permissions", async () => {
     let replyCalls = 0
+    let stateChecks = 0
+    const runtime = createVSCodePermissionAutoAcceptRuntime({
+      getPolicy: () => ({ child: true }),
+      getSessions: () => new Map(),
+      getSession: async () => session("child"),
+      getKnownPendingPermissions: () => [permission],
+      listPendingPermissions: async () => [permission],
+      getPermissionState: async () => {
+        stateChecks += 1
+        return "ok"
+      },
+      reply: async () => { replyCalls += 1 },
+      wait: async () => undefined,
+    })
+
+    await runtime.reconcilePending("/repo")
+    expect(stateChecks).toBe(0)
+    expect(replyCalls).toBe(1)
+  })
+
+  test("sends a live-event reply immediately without a permission-state preflight", async () => {
+    let stateChecks = 0
+    let replyStarted = false
     const runtime = createVSCodePermissionAutoAcceptRuntime({
       getPolicy: () => ({ child: true }),
       getSessions: () => new Map(),
       getSession: async () => session("child"),
       listPendingPermissions: async () => [],
+      getPermissionState: async () => {
+        stateChecks += 1
+        return "ok"
+      },
+      reply: async () => { replyStarted = true },
+      wait: async () => undefined,
+    })
+
+    expect(await runtime.processPermission(
+      { ...permission, id: "immediate" },
+      "/repo",
+      { verifyPending: false },
+    )).toBe(true)
+    expect(stateChecks).toBe(0)
+    expect(replyStarted).toBe(true)
+  })
+
+  test("keeps the permission-state preflight for refresh reconciliation", async () => {
+    let replyCalls = 0
+    const runtime = createVSCodePermissionAutoAcceptRuntime({
+      getPolicy: () => ({ child: true }),
+      getSessions: () => new Map(),
+      getSession: async () => session("child"),
+      listPendingPermissions: async () => [{ ...permission, id: "resolved" }],
       getPermissionState: async () => "resolved",
       reply: async () => { replyCalls += 1 },
       wait: async () => undefined,
     })
 
-    expect(await runtime.processPermission({ ...permission, id: "resolved" })).toBe(true)
+    await runtime.reconcilePending("/repo")
     expect(replyCalls).toBe(0)
   })
 })

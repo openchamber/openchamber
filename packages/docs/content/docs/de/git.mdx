@@ -1,0 +1,41 @@
+---
+title: Git- & GitHub-Workflows
+description: Änderungen vormerken, committen und Branches verwalten, ohne OpenChamber zu verlassen.
+---
+
+# Git- & GitHub-Workflows
+
+OpenChamber hat eine integrierte Git-Ansicht, damit du Änderungen prüfen, committen und Branches verwalten kannst, ohne in ein Terminal zu wechseln. Öffne sie über den **Git**-Tab in der rechten Seitenleiste.
+
+## Prüfen und committen
+
+Die Git-Ansicht teilt deine Änderungen in **staged** und **unstaged** auf:
+
+- klicke auf das **+** einer Datei, um sie zu stage'n, oder auf **−**, um sie wieder unstaged zu machen
+- stage oder unstage ganze Gruppen auf einmal
+- klicke auf eine Datei, um ihren Diff zu sehen
+
+Schreibe dann eine Commit-Nachricht und committe. Du kannst OpenChamber eine **Commit-Nachricht generieren** lassen, basierend auf deinen gestagten Änderungen — dabei wird das Modell der aktuellen Sitzung verwendet, also brauchst du eine geöffnete Sitzung.
+
+## Branches und Verlauf
+
+Die Git-Ansicht deckt auch den üblichen Rest von Git ab:
+
+- Branches erstellen, wechseln, umbenennen und löschen
+- pushen, pullen und fetchen
+- Verlauf und Diffs pro Commit durchsuchen
+- Änderungen stashen und wiederherstellen
+
+## Pull Requests
+
+Verbinde GitHub (siehe [GitHub Issues & PRs](/github/)) und der **PR**-Tab lässt dich einen Pull Request öffnen, aktualisieren, als bereit markieren oder mergen — und seinen Titel und seine Beschreibung auf dieselbe Weise wie Commit-Nachrichten generieren.
+
+## Konflikte übernehmen
+
+Wenn ein Merge, Rebase oder Integrate auf einen Konflikt stößt, zeigt OpenChamber, was festhängt, und lässt dich es lösen — einschließlich der Übergabe an den Agenten.
+
+## Verwandt
+
+- [GitHub Issues & PRs](/github/) — GitHub verbinden und mit Issues mit der Arbeit beginnen
+- [Worktree-Sitzungen](/worktrees/) — einen Branch in seinem eigenen Ordner isolieren
+- [Git-Identitäten](/git-identities/) — als die richtige Person pro Repo committen

@@ -1,3 +1,26 @@
+## [Unreleased]
+
+- **Providers:** custom OpenAI-compatible providers can now be added and edited from Settings, including their endpoint, models, credentials, headers, and configuration scope (thanks to @makeittech).
+- UI/Localization: added German interface translations (thanks to @SGD-DEV).
+- Chat/Tools: Bash output now applies terminal control characters and strips ANSI formatting, preventing progress output and rewritten lines from appearing as raw escape sequences (thanks to @catan271).
+- Chat: queued messages now retry after a temporary send failure or an interrupted turn instead of remaining stuck until another session update.
+- Settings/Skills: repository-local `.agents/skills` now appear for the active workspace (thanks to @makeittech).
+- Chat: clicking an apply_patch tool result now opens each changed file at its correct path instead of always opening the first file (thanks to @nabsiddiqui).
+- Chat: assistant messages no longer render active HTML.
+- Sidebar: a worktree shared by more than one project no longer appears twice.
+- Sidebar: session titles no longer clip at the ends of their rows.
+- Sessions: archiving and unarchiving now stays scoped to the current workspace.
+
+## [1.17.2] - 2026-08-01
+
+- Per-session permission auto-accept now replies to live permission requests correctly when auto-accept is turned on.
+- Chat: messages arriving at the start of the SSE stream no longer drop silently after initial connection.
+- Sessions with active agents now show a live activity indicator even when the sidebar is collapsed (thanks to @pascalandr).
+- Usage: all Z.ai usage windows now appear in the usage view.
+- Chat: tool descriptions now show the glob pattern when a tool's input uses one.
+- Chat: clicking in the padding area of the composer now correctly places the cursor (thanks to @IbrahimKhan12).
+- Chat: the `/` command menu no longer lists a skill twice when a command shares its name (thanks to @IbrahimKhan12).
+
 ## [1.17.1] - 2026-07-29
 
 - **Chat tools:** Bash tool cards now show output before a command finishes, keep it in a fixed-height pane, and follow new lines until you scroll away. Long-running commands no longer remain at a 300-second duration, and their timers continue until they finish.

@@ -5,6 +5,7 @@ import { listGlobalSessionPages } from '@/stores/globalSessions';
 import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
 import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
 import { normalizePath } from '@/lib/pathNormalization';
+import { raiseSessionOrderingBaselines } from '@/sync/session-ordering';
 import { mapWithConcurrency } from '@/lib/concurrency';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -491,6 +492,10 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   status: 'idle',
 
   applySnapshot: (activeSessions, archivedSessions, status = 'ready') => {
+    // An authoritative snapshot may carry newer `updated` stamps for sessions
+    // whose active→settled cycle this client slept through — raise their
+    // ordering baselines so recent lists re-sort (see session-ordering).
+    raiseSessionOrderingBaselines(activeSessions);
     set((state) => applySnapshot(state, activeSessions, archivedSessions, status));
   },
 

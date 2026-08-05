@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "1.17.1",
+  "version": "1.17.2",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
@@ -25,7 +25,7 @@
   "dependencies": {
     "@clack/prompts": "^1.1.0",
     "@octokit/rest": "^22.0.1",
-    "@opencode-ai/sdk": "1.18.9",
+    "@opencode-ai/sdk": "1.18.11",
     "@simplewebauthn/server": "13.3.1",
     "adm-zip": "^0.5.16",
     "better-sqlite3": "^12.10.0",
@@ -42,7 +42,7 @@
     "qrcode-terminal": "^0.12.0",
     "reflect-metadata": "^0.2.2",
     "sherpa-onnx-node": "1.12.28",
-    "simple-git": "^3.28.0",
+    "simple-git": "^3.36.0",
     "web-push": "^3.6.7",
     "ws": "^8.18.3",
     "yaml": "^2.8.1"

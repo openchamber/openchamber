@@ -3,6 +3,7 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { mapWithConcurrency } from '@/lib/concurrency';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 
 type Project = { id: string; path: string; normalizedPath: string };
 const ROOT_BRANCH_TTL_MS = 5 * 60_000;
@@ -36,7 +37,7 @@ export const useProjectRepoStatus = (args: Args): void => {
 
     // Trigger ensureStatus for each project to populate store
     normalizedProjects.forEach((project) => {
-      void ensureStatus(project.normalizedPath, git);
+      void runBackgroundNetworkTask(() => ensureStatus(project.normalizedPath, git));
     });
   }, [enabled, normalizedProjects, git, ensureStatus, setProjectRepoStatus]);
 
@@ -129,9 +130,11 @@ export const useProjectRepoStatus = (args: Args): void => {
         const entries = await mapWithConcurrency(pending, 2, async (project) => {
           const inputBranch = gitRepoStatus.get(project.normalizedPath)?.branch?.trim() ?? '';
           const inputKey = `${project.normalizedPath}\0${inputBranch}`;
-          const branch = await getRootBranch(
-            project.normalizedPath,
-            inputBranch ? { knownBranch: inputBranch } : undefined,
+          const branch = await runBackgroundNetworkTask(() =>
+            getRootBranch(
+              project.normalizedPath,
+              inputBranch ? { knownBranch: inputBranch } : undefined,
+            )
           ).catch(() => null);
           return { id: project.id, inputKey, branch };
         });

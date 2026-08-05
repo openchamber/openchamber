@@ -13,6 +13,7 @@
 - Group-level PR-status polling/indicators and worktree-group drag-to-reorder were removed together with the worktree grouping level; `oc.sessions.groupOrder` is no longer read or written. Worktree PR/branch context lives in the Worktrees surface.
 - Root session menus can quickly create a worktree from the session directory's current branch and move the full session subtree there while idle.
 - Directory loading is demand-driven: the sidebar publishes one complete priority plan for all known project/worktree directories, while the sync layer owns bounded execution.
+- When multiple configured projects are checkouts of the same Git repository, exactly one project owns the shared worktree topology: the configured canonical primary root when present, otherwise the first configured source for that repository. Any worktree path that is also a configured project is omitted from subordinate worktree groups, so every directory has one sidebar location while remaining part of bootstrap demand.
 
 ## VS Code grouping
 

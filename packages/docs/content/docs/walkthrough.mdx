@@ -1,0 +1,71 @@
+---
+title: Changes Walkthrough
+description: Read a diff in the order it makes sense, not in alphabetical order.
+---
+
+# Changes Walkthrough
+
+A diff is sorted by file path, which is almost never the order in which the change makes sense. The walkthrough reorders it: related edits are grouped into **stops**, each stop explains what the code now does differently, and the stops are ordered so each one builds on the last.
+
+It explains and orders. It does not judge your code or hand out verdicts — that is what [Review](/git/) is for.
+
+Open it from the **Walkthrough** icon in the right rail, or from the **AI walkthrough** button in the Changes and Pull Request panels. Both just open the panel; nothing is generated until you press **Generate walkthrough**.
+
+## What it can review
+
+| Scope | What it covers |
+| --- | --- |
+| All uncommitted | Everything not yet committed: staged, unstaged, and new files |
+| Staged | Only what would go into a commit right now |
+| Unstaged | Working tree and new files |
+| This branch | Every commit on this branch that is not on its base |
+| Pull request | The change as it exists on GitHub |
+
+**This branch** is not "unpushed commits" — it is everything the branch adds to its base, pushed or not. So after committing but before pushing, it and the pull request deliberately differ: one shows what you did, the other what reviewers currently see.
+
+Each scope is stored separately, so switching between them never loses anything.
+
+## Choosing the model
+
+Walkthroughs use your small model by default. Pick a different one in **Settings → Sessions → Changes Walkthrough Model**, or for a single review in the panel header — useful when a change is risky enough to deserve a stronger model.
+
+The picker only offers models that can return structured output, because the walkthrough cannot be assembled without it. If a model is too small for the diff, generation is refused with an explanation rather than silently truncating the input: a walkthrough written against half a diff reads as confident and is wrong.
+
+Reopening a panel shows the model that produced what you are looking at, so **Regenerate** repeats with the same one unless you change it.
+
+## Choosing the language
+
+Walkthroughs are written in your interface language by default. The language picker in the panel header starts there, and you can pick any other language OpenChamber is translated into for a single review — a guided explanation is only useful in a language you read comfortably.
+
+Only the prose is translated. Identifiers, file paths, and API names stay exactly as they appear in your code, so what a stop names is still what you can search for.
+
+When nothing has been generated yet in the language you picked, the panel keeps showing the walkthrough it has and says so, rather than emptying itself. Press **Generate walkthrough** to get one in the new language.
+
+## Cost and caching
+
+Nothing generates on its own. Generation only ever starts when you ask, and regeneration is manual too.
+
+Results are cached against the exact content of the diff. Return the working tree to an earlier state and the earlier walkthrough comes back for free, no model call. Language and model are both part of that key, so each combination is kept separately: once a diff has a walkthrough in two languages, switching between them is instant and costs nothing.
+
+Generation runs on the OpenChamber server, not in your browser tab. Reload the page or close the panel and it keeps going; come back and the result is waiting. Pressing **Cancel** is the only thing that stops it.
+
+## Staying honest about staleness
+
+Every stop is anchored to the exact content of the code it describes, so the panel can tell you when that code has moved on:
+
+- **Outdated steps** — the code a stop described has changed or is gone. The walkthrough still shows, marked, so you can decide whether to regenerate.
+- **Not covered** — changes in the current diff that no stop describes. That includes edits made after generating, changes the walkthrough judged routine, and lockfiles and other generated files, which are deliberately kept out of the model's input. They are all listed at the end of the stream so nothing disappears silently.
+
+Regenerating re-authors rather than patches: the previous walkthrough goes to the model as context so accurate parts survive, and everything is re-anchored to the current code.
+
+## Notes
+
+- Comment on any line in the walkthrough exactly as in the diff view; comments attach to the chat composer.
+- Available on desktop and tablet widths. Not offered in the VS Code extension or the mobile app.
+- A pull request review needs a connected GitHub account — see [GitHub Issues & PRs](/github/).
+
+## Related
+
+- [Git & GitHub](/git/) — the Changes panel this reads from, and the Review action that does judge code
+- [GitHub Issues & PRs](/github/) — connect GitHub to review pull requests
+- [Providers, Models & Agents](/providers/) — where the small model comes from

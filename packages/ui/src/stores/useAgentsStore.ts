@@ -700,7 +700,9 @@ async function performConfigRefresh(options: {
       uiRefreshTasks.push(commandsStore.loadCommands().then(() => undefined));
     }
     if (refreshSkills) {
-      invalidateSkillsLoadCache(currentDirectory);
+      // Match loadSkills cache key (active-project-first). Passing client/directory-store
+      // path here misses the key when those diverge after getRequestDirectory().
+      invalidateSkillsLoadCache();
       uiRefreshTasks.push(skillsStore.loadSkills().then(() => undefined));
       uiRefreshTasks.push(skillsCatalogStore.loadCatalog({ refresh: true }).then(() => undefined));
     }

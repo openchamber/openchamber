@@ -7,6 +7,7 @@ export type ContextSurfaceId =
   | 'git'
   | 'pr'
   | 'diff'
+  | 'walkthrough'
   | 'terminal'
   | 'plan'
   | 'notes'
@@ -77,7 +78,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     defaultWidthFraction: 0.45,
     defaultHeightFraction: 0.4,
     mode: 'pr',
-    icon: 'git-pull-request',
+    icon: 'github',
     labelKey: 'contextPanel.mode.pr',
     availability: 'always',
   },
@@ -92,12 +93,21 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     availability: 'always',
   },
   {
+    id: 'walkthrough',
+    descriptionKey: 'contextRail.surface.walkthrough.description',
+    defaultWidthFraction: 3 / 5,
+    mode: 'walkthrough',
+    icon: 'route',
+    labelKey: 'contextPanel.mode.walkthrough',
+    availability: 'always',
+  },
+  {
     id: 'editor',
     descriptionKey: 'contextRail.surface.editor.description',
     defaultWidthFraction: 3 / 5,
     defaultHeightFraction: 0.4,
     mode: 'file',
-    icon: 'file-code',
+    icon: 'braces',
     labelKey: 'contextPanel.mode.files',
     availability: 'always',
   },

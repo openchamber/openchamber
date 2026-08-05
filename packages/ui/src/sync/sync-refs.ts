@@ -17,6 +17,7 @@ const configListeners = new Set<(directory: string, config: Config) => void>()
 let cachedSessionManager: ChildStoreManager | null = null
 let cachedSessionSlices = new Map<string, State["session"]>()
 let cachedSessionsById = new Map<string, State["session"][number]>()
+let cachedSessionDirectoryById = new Map<string, string>()
 
 export function setSyncRefs(
   _sdk: OpencodeClient,
@@ -29,6 +30,7 @@ export function setSyncRefs(
     cachedSessionManager = null
     cachedSessionSlices = new Map()
     cachedSessionsById = new Map()
+    cachedSessionDirectoryById = new Map()
   }
   _directory = directory
   if (registerSessionDirectory) {
@@ -103,18 +105,36 @@ export function getAllSyncSessionMap(): ReadonlyMap<string, State["session"][num
 
   const nextSlices = new Map<string, State["session"]>()
   const nextSessionsById = new Map<string, State["session"][number]>()
+  const nextDirectoriesById = new Map<string, string>()
   for (const [directory, store] of stores.children) {
     const sessions = store.getState().session
     nextSlices.set(directory, sessions)
     for (const session of sessions) {
       if (!session?.id) continue
       nextSessionsById.set(session.id, session)
+      nextDirectoriesById.set(session.id, directory)
     }
   }
   cachedSessionManager = stores
   cachedSessionSlices = nextSlices
   cachedSessionsById = nextSessionsById
+  cachedSessionDirectoryById = nextDirectoriesById
   return cachedSessionsById
+}
+
+/**
+ * Directory of the child store that actually holds this session.
+ *
+ * This is the authoritative session→directory mapping: a session is present in
+ * exactly the store for the directory it belongs to, regardless of whether the
+ * server populated `session.directory` on the record itself. Returns `null`
+ * when no initialized child store contains the session, which means "unknown",
+ * never "no directory".
+ */
+export function getSyncSessionDirectory(sessionId: string): string | null {
+  if (!sessionId) return null
+  getAllSyncSessionMap()
+  return cachedSessionDirectoryById.get(sessionId) ?? null
 }
 
 /** Read messages for a session from current directory's child store */
