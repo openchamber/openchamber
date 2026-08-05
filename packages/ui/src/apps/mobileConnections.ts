@@ -1155,6 +1155,16 @@ export const isActiveRuntimeConnection = (connection: MobileSavedConnection): bo
 
 export type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'needs-login' | 'no-connection';
 
+// Resume/online re-probe policy: an outcome is FATAL (tears the runtime down
+// and lands the user on the connect screen) only when the server EXPLICITLY
+// rejected the token. Transport reachability failures ('unreachable',
+// 'no-connection') are transient on mobile — Wi-Fi/cellular handover, radio
+// congestion, a Keychain read hiccup — and the sync pipeline reconnects on its
+// own (visibility/system-resume + exponential backoff), so they must never
+// bounce the user off the session screen. The user leaves via the recovery UI
+// or Instances, never via an implicit probe result.
+export const isFatalResumeProbeOutcome = (outcome: ReprobeOutcome): boolean => outcome === 'needs-login';
+
 // App-resume re-probe: when the app wakes (Capacitor `isActive`), the network may
 // have changed while it slept, so re-select the active device's transport and
 // hot-switch if a better one is reachable — the seamless "LAN at home ⇄ relay

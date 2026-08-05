@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-import { createMobilePasswordOperationTracker, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { createMobilePasswordOperationTracker, isFatalResumeProbeOutcome, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -212,5 +212,15 @@ describe('validateMobileConnectionSession', () => {
     } finally {
       restoreGlobals();
     }
+  });
+});
+
+describe('resume re-probe policy', () => {
+  test('only an explicit auth rejection is fatal — transient failures never tear the session down', () => {
+    expect(isFatalResumeProbeOutcome('needs-login')).toBe(true);
+    expect(isFatalResumeProbeOutcome('switched')).toBe(false);
+    expect(isFatalResumeProbeOutcome('unchanged')).toBe(false);
+    expect(isFatalResumeProbeOutcome('unreachable')).toBe(false);
+    expect(isFatalResumeProbeOutcome('no-connection')).toBe(false);
   });
 });

@@ -54,7 +54,7 @@ import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
 import { MobileWorkspaceDrawer, type MobileWorkspaceTab } from './MobileWorkspaceDrawer';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
-import { autoConnectLastInstance, getAutoConnectTargetLabel, reprobeActiveConnection, type AutoConnectOutcome } from './mobileConnections';
+import { autoConnectLastInstance, getAutoConnectTargetLabel, isFatalResumeProbeOutcome, reprobeActiveConnection, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
 import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
@@ -683,10 +683,14 @@ export function MobileApp({ apis }: MobileAppProps) {
     void reprobeActiveConnection().then((outcome) => {
       if (nativeResumeValidationSeqRef.current !== validationSeq) return;
       if (outcome === 'no-connection') {
-        disconnect();
+        // The runtime endpoint is up but it does not map to a saved connection
+        // (a bookkeeping mismatch, e.g. after a candidate rewrite). That is not
+        // a transport failure — keep the current connection; the sync pipeline
+        // reconnects on its own.
+        refreshInPlace();
         return;
       }
-      if (outcome === 'needs-login') {
+      if (isFatalResumeProbeOutcome(outcome)) {
         // Token explicitly rejected (revoked/expired) — tell the user why they
         // land back on the connect screen instead of silently bouncing them.
         setAutoConnectNotice({ kind: 'auth-expired', label: getAutoConnectTargetLabel() ?? '' });
@@ -697,7 +701,12 @@ export function MobileApp({ apis }: MobileAppProps) {
         // Right after a resume or Wi-Fi switch the network is often still
         // settling (on Android without a SIM there is NO connectivity at all for
         // a few seconds), so a single fast probe races the network coming up.
-        // Retry once after a grace period before tearing the connection down.
+        // Retry once after a grace period — the retry exists to hot-switch to a
+        // better transport when it comes back ('switched'/'unchanged'). A
+        // transport that stays unreachable is transient, not fatal: tearing the
+        // connection down here is what randomly kicked users back to the
+        // connect screen. Keep the runtime; the sync layer's own reconnect loop
+        // recovers, and the user leaves manually via the recovery UI/Instances.
         window.setTimeout(() => {
           if (nativeResumeValidationSeqRef.current !== validationSeq) return;
           void reprobeActiveConnection().then((retry) => {
@@ -707,10 +716,12 @@ export function MobileApp({ apis }: MobileAppProps) {
               refreshInPlace();
               return;
             }
-            if (retry === 'needs-login') {
+            if (isFatalResumeProbeOutcome(retry)) {
               setAutoConnectNotice({ kind: 'auth-expired', label: getAutoConnectTargetLabel() ?? '' });
+              disconnect();
+              return;
             }
-            disconnect();
+            refreshInPlace();
           });
         }, 4000);
         return;
