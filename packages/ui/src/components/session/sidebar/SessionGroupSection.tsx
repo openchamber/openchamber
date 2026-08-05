@@ -1,6 +1,7 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { ContextMenu } from '@base-ui/react/context-menu';
 
 // Archived buckets routinely grow into the hundreds/thousands; virtualize
 // when we cross this row count so the DOM stays bounded.
@@ -12,6 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { sessionEvents } from '@/lib/sessionEvents';
+import { dropdownMenuItemClass, dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import type { MainTab } from '@/stores/useUIStore';
 import { SessionFolderItem } from '../SessionFolderItem';
 import type { SortableDragHandleProps } from './sortableItems';
@@ -1032,30 +1034,42 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     return <div className="oc-group"><div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div></div>;
   }
 
-  return (
-    <div className="oc-group">
+  // Worktree rows get an explicit "Delete worktree" context-menu item (with
+  // danger styling, like session rows) so the destructive action stays
+  // discoverable even when the hover-revealed trash button is missed.
+  const canDeleteWorktree = Boolean(group.directory && !group.isMain && group.worktree);
+  const requestDeleteWorktree = () => {
+    if (!canDeleteWorktree) return;
+    sessionEvents.requestDelete({
+      sessions: allGroupSessions,
+      mode: 'worktree',
+      worktree: group.worktree,
+    });
+  };
+
+  const groupHeader = (
+    <div
+      className={cn('group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}
+      onClick={() => onToggleCollapsedGroup(groupKey)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onToggleCollapsedGroup(groupKey);
+        }
+      }}
+      aria-label={isCollapsed
+        ? t('sessions.sidebar.group.expandAria', { label: group.label })
+        : t('sessions.sidebar.group.collapseAria', { label: group.label })}
+      aria-expanded={!isCollapsed}
+    >
       <div
-        className={cn('group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}
-        onClick={() => onToggleCollapsedGroup(groupKey)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            onToggleCollapsedGroup(groupKey);
-          }
-        }}
-        aria-label={isCollapsed
-          ? t('sessions.sidebar.group.expandAria', { label: group.label })
-          : t('sessions.sidebar.group.collapseAria', { label: group.label })}
-        aria-expanded={!isCollapsed}
-      >
-        <div
-          ref={dragHandleProps?.setActivatorNodeRef}
-          className={cn(
-            // pl-1.5 lines the branch icon up with the project-zone header
-            // icon (container pl-2.5 + 6px = band pl-4 past its -ml-2.5).
-            'min-w-0 flex flex-1 items-start gap-1 overflow-hidden pl-1.5 transition-[padding]',
+        ref={dragHandleProps?.setActivatorNodeRef}
+        className={cn(
+          // pl-1.5 lines the branch icon up with the project-zone header
+          // icon (container pl-2.5 + 6px = band pl-4 past its -ml-2.5).
+          'min-w-0 flex flex-1 items-start gap-1 overflow-hidden pl-1.5 transition-[padding]',
             groupHeaderRightPadding,
           )}
           {...(dragHandleProps?.listeners ?? {})}
@@ -1149,7 +1163,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
             </Tooltip>
           </div>
         ) : null}
-        {group.directory && !group.isMain && group.worktree ? (
+        {canDeleteWorktree ? (
           <div className={cn('absolute right-7 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1157,13 +1171,13 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
-                    sessionEvents.requestDelete({
-                      sessions: allGroupSessions,
-                      mode: 'worktree',
-                      worktree: group.worktree,
-                    });
+                    requestDeleteWorktree();
                   }}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  // Clear destructive affordance (elevated fill + destructive
+                  // border/text + destructive hover fill) so the worktree
+                  // delete action reads as a destructive button, not a faint
+                  // ghost icon. Mirrors the BulkActionBar destructive style.
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-destructive/50 bg-[var(--surface-elevated)] text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
                   aria-label={t('sessions.sidebar.group.actions.deleteGroupAria', { label: group.label })}
                 >
                   <Icon name="delete-bin" className="h-4 w-4" />
@@ -1196,7 +1210,40 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
              </Tooltip>
            </div>
          ) : null}
-      </div>
+    </div>
+  );
+
+  const worktreeContextMenu = canDeleteWorktree ? (
+    <ContextMenu.Portal>
+      <ContextMenu.Positioner className="app-region-no-drag z-50">
+        <ContextMenu.Popup
+          data-slot="dropdown-menu-content"
+          style={{
+            backgroundColor: 'var(--surface-elevated)',
+            color: 'var(--surface-elevated-foreground)',
+          }}
+          className={cn(dropdownMenuPopupClass, 'min-w-[180px]')}
+        >
+          <ContextMenu.Item
+            onClick={requestDeleteWorktree}
+            className={cn(dropdownMenuItemClass, 'text-destructive focus:text-destructive [&>svg]:mr-1')}
+          >
+            <Icon name="delete-bin" className="mr-1 h-4 w-4" />
+            {t('sessions.sidebar.group.actions.deleteWorktree')}
+          </ContextMenu.Item>
+        </ContextMenu.Popup>
+      </ContextMenu.Positioner>
+    </ContextMenu.Portal>
+  ) : null;
+
+  return (
+    <div className="oc-group">
+      {canDeleteWorktree ? (
+        <ContextMenu.Root>
+          <ContextMenu.Trigger render={groupHeader} />
+          {worktreeContextMenu}
+        </ContextMenu.Root>
+      ) : groupHeader}
       {!isCollapsed ? <div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div> : null}
     </div>
   );
