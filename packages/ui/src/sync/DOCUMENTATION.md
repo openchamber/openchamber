@@ -204,7 +204,7 @@ Incomplete-session materialization is deduplicated by runtime, directory, and se
 
 When `session.idle` or `session.error` settles a session but the trailing assistant message still contains a `pending` or `running` tool, sync refreshes that session tail. This narrowly reconciles a missed terminal tool-part event without refetching normally completed turns or stale tools from older turns. A stale refresh or delayed part event cannot regress a locally observed terminal tool to an active status.
 
-Directory stores also own session-keyed sidecar notification channels for permissions and message materialization. High-frequency realtime part events annotate the exact session/message before committing, so visible records, user history, renderability, and sidebar permission rows are not notified by unrelated sessions. Structural message replacements notify only changed subscribed session buckets; unannotated bulk part replacement conservatively resets active message subscribers so bootstrap, pagination, rollback, and legacy writers cannot leave stale projections.
+Directory stores also own session-keyed sidecar notification channels for permissions, questions, and message materialization. High-frequency realtime part events annotate the exact session/message before committing, so visible records, user history, renderability, and sidebar permission and question rows are not notified by unrelated sessions. A consumer subscribed to several session buckets is notified once per publication. Structural message replacements notify only changed subscribed session buckets; unannotated bulk part replacement conservatively resets active message subscribers so bootstrap, pagination, rollback, and legacy writers cannot leave stale projections.
 
 Message sidecar consumers also filter targeted updates by purpose before notifying React. Suspended live-tail text/reasoning changes do not rebuild visible message records, but structural Task session identity changes bypass suspension so a parent can link a newly created subagent immediately. Assistant-only part changes do not rebuild user input history, and targeted updates that preserve authoritative part buckets do not recheck a session that is already renderable. Message replacements, removed final part buckets, and conservative resets always notify.
 
@@ -345,7 +345,7 @@ Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 
 | Event type | Fields to clone |
 |---|---|
-| `session.created/updated/deleted` | `session`, `permission`, `todo`, `part` |
+| `session.created/updated/deleted` | `session`, `permission`, `question`, `todo`, `part` |
 | `session.diff` | `session_diff` |
 | `session.status` | `session_status` |
 | `todo.updated` | `todo` |

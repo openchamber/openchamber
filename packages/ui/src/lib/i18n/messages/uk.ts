@@ -531,6 +531,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.pinned": "Закріплений сесія",
   "sessions.sidebar.session.status.movingToWorktree": "Перенесення сесії в новий worktree",
   "sessions.sidebar.session.status.permissionRequired": "Потрібен дозвіл",
+  "sessions.sidebar.session.status.questionPendingSingle": "1 запитання очікує відповіді",
+  "sessions.sidebar.session.status.questionPendingMany": "Кількість запитань, що очікують відповіді: {count}",
   "sessions.sidebar.session.status.activeFor": "Активна вже {duration}",
   "sessions.sidebar.session.status.lastTurnDuration": "Останній хід тривав {duration}",
   "sessions.sidebar.session.subsessions.collapse": "Згорнути підсесії",

@@ -4,6 +4,7 @@ import {
   ChildStoreManager,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
+  subscribeDirectoryQuestions,
   subscribeDirectorySessionMessages,
 } from './child-store';
 import {
@@ -115,6 +116,59 @@ describe('ChildStoreManager permission subscriptions', () => {
     expect(notifications).toBe(1);
     expect(getSyncPerformanceDiagnostics()?.permissionChangeCallbacks).toBe(1);
     for (const unsubscribe of unsubscribers) unsubscribe();
+    setSyncPerformanceDiagnosticsEnabled(false);
+    manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager question subscriptions', () => {
+  test('notifies a row once per publication for the buckets it renders', () => {
+    const manager = new ChildStoreManager();
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    let rowNotifications = 0;
+    let childRowNotifications = 0;
+    const unsubscribeRow = subscribeDirectoryQuestions(child, ['session-1', 'session-2'], () => {
+      rowNotifications += 1;
+    });
+    const unsubscribeChildRow = subscribeDirectoryQuestions(child, ['session-2'], () => {
+      childRowNotifications += 1;
+    });
+    setSyncPerformanceDiagnosticsEnabled(true);
+
+    for (let index = 0; index < 10_000; index += 1) {
+      child.setState({ part: { [`message-${index}`]: [] } });
+    }
+
+    expect(rowNotifications).toBe(0);
+    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(0);
+
+    // Both descendant buckets change in one publication: the row that stands in
+    // for both must repaint once, not once per bucket.
+    child.setState({
+      question: {
+        'session-1': [{ id: 'question-1' }] as never[],
+        'session-2': [{ id: 'question-2' }] as never[],
+      },
+    });
+
+    expect(rowNotifications).toBe(1);
+    expect(childRowNotifications).toBe(1);
+
+    // A replacement map that preserves both buckets notifies neither row.
+    child.setState({ question: { ...child.getState().question, 'session-9': [] as never[] } });
+
+    expect(rowNotifications).toBe(1);
+    expect(childRowNotifications).toBe(1);
+
+    // Cleanup that drops the buckets is observable, so a stale badge cannot survive.
+    child.setState({ question: {} });
+
+    expect(rowNotifications).toBe(2);
+    expect(childRowNotifications).toBe(2);
+    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(4);
+
+    unsubscribeRow();
+    unsubscribeChildRow();
     setSyncPerformanceDiagnosticsEnabled(false);
     manager.disposeAll();
   });

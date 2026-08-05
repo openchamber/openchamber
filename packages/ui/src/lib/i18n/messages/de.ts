@@ -473,6 +473,8 @@ export const dict = {
   'sessions.sidebar.session.status.unread': 'Ungelesene Updates',
   'sessions.sidebar.session.status.pinned': 'Angeheftete Sitzung',
   'sessions.sidebar.session.status.permissionRequired': 'Berechtigung erforderlich',
+  'sessions.sidebar.session.status.questionPendingSingle': '1 offene Frage',
+  'sessions.sidebar.session.status.questionPendingMany': '{count} offene Fragen',
   'sessions.sidebar.session.status.activeFor': 'Seit {duration} aktiv',
   'sessions.sidebar.session.status.lastTurnDuration': 'Letzter Durchlauf dauerte {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Untersitzungen einklappen',

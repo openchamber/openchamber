@@ -14,6 +14,7 @@ import {
   ChildStoreManager,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
+  subscribeDirectoryQuestions,
   subscribeDirectorySessionMessages,
   type DirectoryBootstrapContext,
   type DirectoryBootstrapReason,
@@ -1620,6 +1621,9 @@ function handleEvent(
     case "session.deleted":
       cloneField("session", (value) => [...value])
       cloneField("permission", (value) => ({ ...value }))
+      // Archive and delete drop the session's pending questions, so the bucket
+      // must be replaced for the question sidecar channel to observe it.
+      cloneField("question", (value) => ({ ...value }))
       cloneField("todo", (value) => ({ ...value }))
       cloneField("part", (value) => ({ ...value }))
       cloneField("sessionEventRevision", (value) => ({ ...(value ?? {}) }))
@@ -2434,6 +2438,49 @@ export function useSessionQuestions(sessionID: string, directory?: string) {
     useCallback((state: State) => state.question[sessionID] ?? EMPTY_QUESTION_REQUESTS, [sessionID]),
     directory,
   )
+}
+
+/**
+ * Count pending questions across the sessions one row reports on, grouped by the
+ * directory store that owns each bucket. Rows subscribe to the exact buckets they
+ * render and never bootstrap: the sidebar schedules directory bootstrap once, not
+ * per row. Referenced stores stay pinned while the row is mounted so an idle
+ * worktree cannot be evicted out from under a live subscription.
+ */
+export function useSessionQuestionCount(
+  scopes: readonly { directory: string; sessionIDs: readonly string[] }[],
+): number {
+  const childStores = useSyncSystem().childStores
+  const scopedStores = useMemo(
+    () => scopes.map((scope) => ({
+      sessionIDs: scope.sessionIDs,
+      store: childStores.ensureChild(scope.directory, { bootstrap: false }),
+    })),
+    [childStores, scopes],
+  )
+  useEffect(() => {
+    for (const scope of scopes) childStores.pin(scope.directory)
+    return () => {
+      for (const scope of scopes) childStores.unpin(scope.directory)
+    }
+  }, [childStores, scopes])
+  const getSnapshot = useCallback(() => {
+    let count = 0
+    for (const { sessionIDs, store } of scopedStores) {
+      const questions = store.getState().question
+      for (const sessionID of sessionIDs) count += questions[sessionID]?.length ?? 0
+    }
+    return count
+  }, [scopedStores])
+  const subscribe = useCallback((notify: () => void) => {
+    const unsubscribers = scopedStores.map(({ sessionIDs, store }) => (
+      subscribeDirectoryQuestions(store, sessionIDs, notify)
+    ))
+    return () => {
+      for (const unsubscribe of unsubscribers) unsubscribe()
+    }
+  }, [scopedStores])
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /** Get sessions list for a directory */

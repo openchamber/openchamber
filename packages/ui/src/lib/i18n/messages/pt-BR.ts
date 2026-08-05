@@ -531,6 +531,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.pinned": "Sessão fixada",
   "sessions.sidebar.session.status.movingToWorktree": "Movendo a sessão para um novo worktree",
   "sessions.sidebar.session.status.permissionRequired": "Permissão obrigatória",
+  "sessions.sidebar.session.status.questionPendingSingle": "1 pergunta pendente",
+  "sessions.sidebar.session.status.questionPendingMany": "{count} perguntas pendentes",
   "sessions.sidebar.session.status.activeFor": "Ativa há {duration}",
   "sessions.sidebar.session.status.lastTurnDuration": "O último turno levou {duration}",
   "sessions.sidebar.session.subsessions.collapse": "Recolher subsessões",

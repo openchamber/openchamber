@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
-import { computeNodeStructureKey, nodeHasPinnedMembershipChange, selectFolderRootNodes } from './sessionNodeItemUtils';
+import { computeNodeStructureKey, nodeHasPinnedMembershipChange, selectFolderRootNodes, selectQuestionScopes } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
 
 const session = (id: string, title: string): Session => ({
@@ -29,6 +29,47 @@ describe('computeNodeStructureKey', () => {
     const next = { ...previous, title: 'After' };
 
     expect(computeNodeStructureKey(rootWithChild(previous))).not.toBe(computeNodeStructureKey(rootWithChild(next)));
+  });
+});
+
+describe('selectQuestionScopes', () => {
+  const inDirectory = (id: string, directory: string): Session => (
+    { ...session(id, id), directory } as Session
+  );
+
+  const tree = (): SessionNode => ({
+    session: inDirectory('root', '/repo'),
+    children: [{
+      session: inDirectory('child', '/worktrees/feature'),
+      children: [{ session: inDirectory('grandchild', '/worktrees/feature'), children: [], worktree: null }],
+      worktree: null,
+    }],
+    worktree: null,
+  });
+
+  test('rolls the whole hidden subtree up, grouped by owning directory', () => {
+    expect(selectQuestionScopes(tree(), false, '/fallback')).toEqual([
+      { directory: '/repo', sessionIDs: ['root'] },
+      { directory: '/worktrees/feature', sessionIDs: ['child', 'grandchild'] },
+    ]);
+  });
+
+  test('an expanded row claims only its own session, so totals are not doubled', () => {
+    expect(selectQuestionScopes(tree(), true, '/fallback')).toEqual([
+      { directory: '/repo', sessionIDs: ['root'] },
+    ]);
+  });
+
+  test('falls back to the group directory when a session carries none', () => {
+    const node = rootWithChild(session('child', 'Child'));
+
+    expect(selectQuestionScopes(node, false, '/repo')).toEqual([
+      { directory: '/repo', sessionIDs: ['root', 'child'] },
+    ]);
+  });
+
+  test('yields no scope to subscribe to when no directory can be resolved', () => {
+    expect(selectQuestionScopes(rootWithChild(session('child', 'Child')), false, null)).toEqual([]);
   });
 });
 

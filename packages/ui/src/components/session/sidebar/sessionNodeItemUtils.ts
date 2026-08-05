@@ -1,6 +1,8 @@
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
+import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionNode } from './types';
+import { normalizePath } from './utils';
 
 /**
  * Per-row render extras precomputed once per group render and threaded down to
@@ -68,6 +70,42 @@ export const nodeContainsSessionId = (node: SessionNode, sessionId: string | nul
   }
 
   return false;
+};
+
+type SessionQuestionScope = {
+  directory: string;
+  sessionIDs: string[];
+};
+
+/**
+ * Group the sessions whose pending questions a row reports on by the directory
+ * store that owns them. A collapsed row is the only visible place its hidden
+ * descendants can report from; an expanded row leaves each child's count to the
+ * child row so a total is never counted twice. Sidebar trees nest by parent id
+ * alone, so a descendant can sit in another worktree's store.
+ */
+export const selectQuestionScopes = (
+  node: SessionNode,
+  isExpanded: boolean,
+  fallbackDirectory: string | null,
+): SessionQuestionScope[] => {
+  const sessionIDsByDirectory = new Map<string, string[]>();
+
+  const visit = (current: SessionNode): void => {
+    const directory = normalizePath((current.session as Session & { directory?: string | null }).directory ?? null)
+      ?? fallbackDirectory;
+    if (directory) {
+      const sessionIDs = sessionIDsByDirectory.get(directory);
+      if (sessionIDs) sessionIDs.push(current.session.id);
+      else sessionIDsByDirectory.set(directory, [current.session.id]);
+    }
+    if (isExpanded && current === node) return;
+    for (const child of current.children) visit(child);
+  };
+
+  visit(node);
+
+  return [...sessionIDsByDirectory].map(([directory, sessionIDs]) => ({ directory, sessionIDs }));
 };
 
 export const selectFolderRootNodes = (
