@@ -64,7 +64,6 @@ vi.mock('@openchamber/ui/lib/gitApiHttp', () => ({
   cherryPick: vi.fn(),
   revertCommit: vi.fn(),
   resetToCommit: vi.fn(),
-  getCommitFileDiff: vi.fn(),
   previewGitWorktree: vi.fn(),
   getGitWorktreeBootstrapStatus: vi.fn(),
   getWorktreeSetupLog: vi.fn(),
