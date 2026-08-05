@@ -45,6 +45,16 @@ mock.module('@/lib/gitApiHttp', () => ({
   },
 }));
 
+const gitRefreshHints: Array<{ directory: string; paths?: string[] }> = [];
+
+mock.module('@/lib/sessionEvents', () => ({
+  sessionEvents: {
+    requestGitRefresh: (hint: { directory: string; paths?: string[] }) => {
+      gitRefreshHints.push(hint);
+    },
+  },
+}));
+
 const {
   clearWorktreeBootstrapState,
   getWorktreeBootstrapState,
@@ -67,6 +77,7 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
   beforeEach(() => {
     bootstrapStatusCalls.length = 0;
     toastErrors.length = 0;
+    gitRefreshHints.length = 0;
     bootstrapStatusResult = { status: 'ready', error: null, updatedAt: 1 };
     getBootstrapStatus = () => Promise.resolve(bootstrapStatusResult);
     clearWorktreeBootstrapState('/repo');
@@ -244,5 +255,100 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
     await waitFor(() => bootstrapStatusCalls.length === 1);
     expect(bootstrapStatusCalls).toEqual(['/repo-wt']);
     clearWorktreeBootstrapState('/repo-wt');
+  });
+
+  test('emits a git status refresh hint when setup completes via wait', async () => {
+    markWorktreeBootstrapPending('/repo-wt');
+    bootstrapStatusResult = {
+      status: 'ready',
+      phase: 'setup-ready',
+      error: null,
+      updatedAt: 2,
+    };
+
+    await waitForWorktreeBootstrap('/repo-wt');
+
+    expect(gitRefreshHints).toEqual([{ directory: '/repo-wt' }]);
+  });
+
+  test('emits a git status refresh hint when setup completes via background watcher', async () => {
+    markWorktreeBootstrapPending('/repo-wt');
+    bootstrapStatusResult = {
+      status: 'ready',
+      phase: 'setup-ready',
+      error: null,
+      updatedAt: 2,
+    };
+
+    startWorktreeBootstrapWatcher('/repo-wt', { pollIntervalMs: 0 });
+
+    await waitFor(() => gitRefreshHints.length === 1);
+    expect(gitRefreshHints).toEqual([{ directory: '/repo-wt' }]);
+  });
+
+  test('does not emit a git status refresh hint for git-ready alone', async () => {
+    markWorktreeBootstrapPending('/repo-wt');
+    bootstrapStatusResult = {
+      status: 'pending',
+      phase: 'git-ready',
+      error: null,
+      updatedAt: 2,
+    };
+
+    await waitForWorktreeGitReady('/repo-wt');
+
+    expect(gitRefreshHints).toEqual([]);
+  });
+
+  test('emits a single git status refresh hint when waiter and watcher observe the same completion', async () => {
+    markWorktreeBootstrapPending('/repo-wt');
+    bootstrapStatusResult = {
+      status: 'ready',
+      phase: 'setup-ready',
+      error: null,
+      updatedAt: 2,
+    };
+
+    const waiter = waitForWorktreeBootstrap('/repo-wt');
+    startWorktreeBootstrapWatcher('/repo-wt', { pollIntervalMs: 0 });
+    await waiter;
+    await waitFor(() => bootstrapStatusCalls.length >= 2);
+
+    expect(gitRefreshHints).toEqual([{ directory: '/repo-wt' }]);
+  });
+
+  test('does not emit for an already-ready directory without polling', async () => {
+    setWorktreeBootstrapState('/repo-wt', {
+      status: 'ready',
+      phase: 'setup-ready',
+      error: null,
+      updatedAt: 1,
+    });
+
+    await waitForWorktreeBootstrap('/repo-wt');
+
+    expect(bootstrapStatusCalls).toEqual([]);
+    expect(gitRefreshHints).toEqual([]);
+  });
+
+  test('emits again for a fresh lifecycle after re-marking the same directory pending', async () => {
+    markWorktreeBootstrapPending('/repo-wt');
+    bootstrapStatusResult = {
+      status: 'ready',
+      phase: 'setup-ready',
+      error: null,
+      updatedAt: 2,
+    };
+
+    await waitForWorktreeBootstrap('/repo-wt');
+    expect(gitRefreshHints).toEqual([{ directory: '/repo-wt' }]);
+
+    markWorktreeBootstrapPending('/repo-wt');
+    await waitForWorktreeBootstrap('/repo-wt');
+
+    expect(gitRefreshHints).toEqual([
+      { directory: '/repo-wt' },
+      { directory: '/repo-wt' },
+    ]);
   });
 });

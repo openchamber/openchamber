@@ -1,6 +1,7 @@
 import * as gitHttp from '@/lib/gitApiHttp';
 import type { GitWorktreeBootstrapStatus } from '@/lib/api/types';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore, type I18nKey, type I18nParams } from '@/lib/i18n';
 
@@ -20,6 +21,12 @@ const waiters = new Map<string, Promise<void>>();
 const lifecycleVersions = new Map<string, number>();
 let nextLifecycleVersion = 0;
 const watchers = new Map<string, { cancelled: boolean; lifecycleVersion: number }>();
+// Lifecycle-scoped dedupe for the git-status refresh hint: when a poll observes
+// the server-side setup completion (status 'ready'), the worktree directory may
+// have been fetched before setup finished (not yet a repo / empty status), so
+// subscribers must re-fetch changed files. Emit once per lifecycle — a fresh
+// lifecycle (new setup for the same path) may emit again.
+const readyNotifiedLifecycles = new Map<string, number>();
 
 const getKey = (directory: string): string => normalizePath(directory);
 const getWaiterKey = (key: string, target: WorktreeBootstrapTarget): string => `${key}\n${target}`;
@@ -33,12 +40,21 @@ const startLifecycle = (key: string): void => {
 
   waiters.delete(getWaiterKey(key, 'git-ready'));
   waiters.delete(getWaiterKey(key, 'setup-ready'));
+  readyNotifiedLifecycles.delete(key);
 
   const version = ++nextLifecycleVersion;
   lifecycleVersions.set(key, version);
 };
 
 const isCurrentLifecycle = (key: string, version: number): boolean => lifecycleVersions.get(key) === version;
+
+const notifyGitStatusRefreshOnce = (key: string, lifecycleVersion: number, directory: string): void => {
+  if (readyNotifiedLifecycles.get(key) === lifecycleVersion) {
+    return;
+  }
+  readyNotifiedLifecycles.set(key, lifecycleVersion);
+  sessionEvents.requestGitRefresh({ directory });
+};
 
 const phaseRank = (phase: GitWorktreeBootstrapStatus['phase']): number => {
   switch (phase) {
@@ -172,6 +188,9 @@ const pollWorktreeBootstrapUntilSettled = async (
     }
 
     if (hasReachedTarget(current, target)) {
+      if (current.status === 'ready') {
+        notifyGitStatusRefreshOnce(key, lifecycleVersion, directory);
+      }
       return;
     }
 
@@ -208,6 +227,7 @@ const pollWorktreeBootstrapInBackground = async (
     }
 
     if (current.status === 'ready') {
+      notifyGitStatusRefreshOnce(key, watcher.lifecycleVersion, directory);
       onReady?.(current);
       return;
     }
