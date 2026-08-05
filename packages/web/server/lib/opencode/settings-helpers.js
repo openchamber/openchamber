@@ -565,6 +565,9 @@ export const createSettingsHelpers = (dependencies) => {
         result.userMessageRenderingMode = mode;
       }
     }
+    if (typeof candidate.collapsibleUserMessages === 'boolean') {
+      result.collapsibleUserMessages = candidate.collapsibleUserMessages;
+    }
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
     }

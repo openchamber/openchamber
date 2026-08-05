@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2';
 import { opencodeClient } from '@/lib/opencode/client';
-import { listGlobalSessionPages } from '@/stores/globalSessions';
+import { listGlobalSessionPages, splitGlobalSessionsByArchived } from '@/stores/globalSessions';
 import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
 import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
 import { normalizePath } from '@/lib/pathNormalization';
@@ -253,7 +253,6 @@ type DirectoryPageResult = {
 const fetchDirectoryPages = async (
   sdk: OpencodeClient,
   directories: Set<string>,
-  archived: boolean,
 ): Promise<DirectoryPageResult> => {
   const currentDirectory = normalizePath(opencodeClient.getDirectory());
   const orderedDirectories = [...directories].sort((left, right) => {
@@ -267,8 +266,11 @@ const fetchDirectoryPages = async (
         status: 'fulfilled' as const,
         value: {
           directory,
+          // One inclusive request per directory: the server has no filter that
+          // returns only active sessions including restored (`time.archived`
+          // falsy-but-present) rows, so fetch everything and split client-side.
           sessions: await withDirectorySessionRefreshSlot(() => (
-            listGlobalSessionPages(sdk, { directory, archived, pageSize: PAGE_SIZE })
+            listGlobalSessionPages(sdk, { directory, archived: true, narrowToArchived: false, pageSize: PAGE_SIZE })
           )),
         },
       };
@@ -526,35 +528,25 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     const loadPromise = (async () => {
       try {
         const sdk = opencodeClient.getSdkClient();
-        const [activeResult, archivedResult] = await Promise.allSettled([
-          listGlobalSessionPages(sdk, { archived: false, pageSize: PAGE_SIZE }),
-          listGlobalSessionPages(sdk, { archived: true, pageSize: PAGE_SIZE }),
-        ]);
-
-        if (activeResult.status === 'rejected') {
-          console.warn('[GlobalSessions] Failed to load active sessions, preserving existing snapshot with fallback merge:', activeResult.reason);
-        }
-        if (archivedResult.status === 'rejected') {
-          console.warn('[GlobalSessions] Failed to load archived sessions, preserving current snapshot:', archivedResult.reason);
-        }
+        // One inclusive fetch, split client-side. The server's
+        // `time_archived IS NULL` active filter would exclude restored
+        // sessions (`time.archived` falsy-but-present), so an
+        // `archived: false` request cannot produce a truthful active list.
+        const allSessions = await listGlobalSessionPages(sdk, {
+          archived: true,
+          narrowToArchived: false,
+          pageSize: PAGE_SIZE,
+        });
 
         if (generation !== loadGeneration) {
           // Runtime switched mid-load: this snapshot belongs to the previous
           // instance — drop it.
           return { activeSessions: [], archivedSessions: [] };
         }
-        const status = activeResult.status === 'fulfilled' && archivedResult.status === 'fulfilled'
-          ? 'ready'
-          : 'error';
+        const { active, archived } = splitGlobalSessionsByArchived(allSessions);
         set((state) => {
-          const fetchedActive = activeResult.status === 'fulfilled'
-            ? activeResult.value
-            : mergeSessionLists(state.activeSessions, fallbackActive);
-          const fetchedArchived = archivedResult.status === 'fulfilled'
-            ? archivedResult.value
-            : state.archivedSessions;
-          const reconciled = overlayMutationsSince(state, fetchedActive, fetchedArchived, baselineRevision);
-          return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, status);
+          const reconciled = overlayMutationsSince(state, active, archived, baselineRevision);
+          return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, 'ready');
         });
         const committed = get();
         return { activeSessions: committed.activeSessions, archivedSessions: committed.archivedSessions };
@@ -597,31 +589,27 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     const generation = loadGeneration;
     const baselineRevision = get().mutationRevision;
     const sdk = opencodeClient.getSdkClient();
-    const [active, archived] = await Promise.all([
-      fetchDirectoryPages(sdk, directorySet, false),
-      fetchDirectoryPages(sdk, directorySet, true),
-    ]);
+    const fetched = await fetchDirectoryPages(sdk, directorySet);
 
     if (generation !== loadGeneration) {
       const state = get();
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
 
-    if (active.errors.length > 0) {
-      console.warn('[GlobalSessions] Failed to refresh active sessions for some directories:', active.errors[0]);
-    }
-    if (archived.errors.length > 0) {
-      console.warn('[GlobalSessions] Failed to refresh archived sessions for some directories:', archived.errors[0]);
+    if (fetched.errors.length > 0) {
+      console.warn('[GlobalSessions] Failed to refresh sessions for some directories:', fetched.errors[0]);
     }
 
+    const { active, archived } = splitGlobalSessionsByArchived(fetched.sessions);
+
     set((state) => {
-      let nextActiveSessions = replaceSessionsForDirectories(state.activeSessions, active.sessions, active.directories);
+      let nextActiveSessions = replaceSessionsForDirectories(state.activeSessions, active, fetched.directories);
       nextActiveSessions = mergeSessionLists(nextActiveSessions, fallbackActive);
       if (sameSessionList(state.activeSessions, nextActiveSessions)) {
         nextActiveSessions = state.activeSessions;
       }
 
-      let nextArchivedSessions = replaceSessionsForDirectories(state.archivedSessions, archived.sessions, archived.directories);
+      let nextArchivedSessions = replaceSessionsForDirectories(state.archivedSessions, archived, fetched.directories);
       if (sameSessionList(state.archivedSessions, nextArchivedSessions)) {
         nextArchivedSessions = state.archivedSessions;
       }

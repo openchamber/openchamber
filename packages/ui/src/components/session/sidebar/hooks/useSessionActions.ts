@@ -40,6 +40,7 @@ type Args = {
   deleteSessions: (ids: string[]) => Promise<{ deletedIds: string[]; failedIds: string[] }>;
   archiveSession: (id: string) => Promise<boolean>;
   archiveSessions: (ids: string[]) => Promise<{ archivedIds: string[]; failedIds: string[] }>;
+  unarchiveSession: (id: string) => Promise<boolean>;
   childrenMap: Map<string, Session[]>;
   showDeletionDialog: boolean;
   setDeleteSessionConfirm: DeleteSessionConfirmSetter;
@@ -286,6 +287,18 @@ export const useSessionActions = (args: Args) => {
     await executeDeleteSession(session, { archivedBucket }, { descendantIds });
   }, [args, executeDeleteSession]);
 
+  const handleRestoreSession = React.useCallback(
+    async (session: Session) => {
+      const success = await args.unarchiveSession(session.id);
+      if (success) {
+        toast.success(t('sessions.sidebar.session.restore.success'));
+      } else {
+        toast.error(t('sessions.sidebar.session.restore.error'));
+      }
+    },
+    [args, t],
+  );
+
   return {
     copiedSessionId,
     handleSessionSelect,
@@ -297,6 +310,7 @@ export const useSessionActions = (args: Args) => {
     handleCopySessionId,
     handleUnshareSession,
     handleDeleteSession,
+    handleRestoreSession,
     confirmDeleteSession,
   };
 };

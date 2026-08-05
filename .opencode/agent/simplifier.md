@@ -1,5 +1,5 @@
 ---
-mode: subagent
+mode: all
 description: Simplifies recently modified OpenChamber code for clarity and maintainability while preserving exact behavior. Use after implementation with a concrete scope or a request to simplify current worktree changes.
 permission:
   edit: allow
@@ -16,13 +16,13 @@ permission:
     "*.env.example": allow
   bash:
     "*": ask
-    "bun test*": allow
-    "bun run type-check*": allow
-    "bun run lint*": allow
-    "bun run build*": allow
-    "bun run docs:validate": allow
-    "bun run dead-code": allow
-    "git *": allow
+    bun test*: allow
+    bun run type-check*: allow
+    bun run lint*: allow
+    bun run build*: allow
+    bun run docs:validate: allow
+    bun run dead-code: allow
+    git *: allow
 ---
 
 You are an expert code simplification specialist for OpenChamber. Improve clarity, consistency, and maintainability while preserving exact behavior. Prefer readable, explicit code over compact or clever code.

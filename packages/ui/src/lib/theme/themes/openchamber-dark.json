@@ -24,12 +24,12 @@
       "emphasis": "#fd9b66"
     },
     "surface": {
-      "background": "#0c0b0a",
-      "foreground": "#dbd7ca",
-      "muted": "#131211",
+      "background": "#120f0e",
+      "foreground": "#c9c5ba",
+      "muted": "#171615",
       "mutedForeground": "#8f8b81",
       "elevated": "#181715",
-      "elevatedForeground": "#dbd7ca",
+      "elevatedForeground": "#c9c5ba",
       "overlay": "#00000099",
       "subtle": "#171616"
     },
@@ -37,11 +37,11 @@
       "border": "#242323",
       "borderHover": "#504e4c",
       "borderFocus": "#da7c47",
-      "selection": "#da7c472b",
-      "selectionForeground": "#dbd7ca",
+      "selection": "#b9a5992b",
+      "selectionForeground": "#c9c5ba",
       "focus": "#da7c47",
       "focusRing": "#da7c4755",
-      "cursor": "#dbd7ca",
+      "cursor": "#c9c5ba",
       "hover": "#ffffff12",
       "active": "#ffffff1f"
     },
@@ -72,8 +72,8 @@
     },
     "syntax": {
       "base": {
-        "background": "#131211",
-        "foreground": "#dbd7ca",
+        "background": "#120f0e",
+        "foreground": "#c9c5ba",
         "comment": "#728772",
         "keyword": "#34983a",
         "string": "#d58373",
@@ -127,14 +127,14 @@
         "diffModified": "#5d99a9",
         "diffModifiedBackground": "#5d99a920",
         "lineNumber": "#3c3a37",
-        "lineNumberActive": "#dbd7ca"
+        "lineNumberActive": "#c9c5ba"
       }
     },
     "markdown": {
-      "heading1": "#dbd7ca",
-      "heading2": "#dbd7ca",
-      "heading3": "#dbd7ca",
-      "heading4": "#dbd7ca",
+      "heading1": "#c9c5ba",
+      "heading2": "#c9c5ba",
+      "heading3": "#c9c5ba",
+      "heading4": "#c9c5ba",
       "link": "#5d99a9",
       "linkHover": "#6ba7b8",
       "inlineCode": "#76ad4f",
@@ -144,19 +144,19 @@
       "listMarker": "#4d934e99"
     },
     "chat": {
-      "userMessage": "#dbd7ca",
+      "userMessage": "#c9c5ba",
       "userMessageBackground": "#25170e",
-      "assistantMessage": "#dbd7ca",
-      "assistantMessageBackground": "#0c0b0a",
+      "assistantMessage": "#c9c5ba",
+      "assistantMessageBackground": "#120f0e",
       "timestamp": "#8f8b81",
       "divider": "#302e2b"
     },
     "tools": {
-      "background": "#13121150",
+      "background": "#120f0e50",
       "border": "#302e2b99",
       "headerHover": "#ffffff0d",
       "icon": "#ada9a0",
-      "title": "#dbd7ca",
+      "title": "#c9c5ba",
       "description": "#aba9a3",
       "edit": {
         "added": "#4d934e",

@@ -619,6 +619,116 @@ describe("confirmed session removal", () => {
   })
 })
 
+describe("session restore (unarchive)", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    registeredSessionDirectories.length = 0
+    globalUpsertedSessions.length = 0
+    sessionUpdateResult = {}
+    beforeSessionUpdateResolve = null
+  })
+
+  test("does not restore locally until the server returns the restored session", async () => {
+    const source = createStore({}, {
+      session: [],
+    })
+    const { unarchiveSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await unarchiveSession("session-a")).toBe(false)
+    expect(globalUpsertedSessions).toEqual([])
+    expect(registeredSessionDirectories).toEqual([])
+  })
+
+  test("sends the archive-clearing sentinel and upserts the restored session after confirmation", async () => {
+    sessionUpdateResult = {
+      data: { id: "session-a", directory: "/test/project", time: { created: 1, archived: 0 } } as Session,
+    }
+    const source = createStore({}, {
+      session: [],
+    })
+    const { unarchiveSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await unarchiveSession("session-a")).toBe(true)
+    // The server cannot clear time.archived over HTTP, so the action must
+    // write the falsy sentinel rather than omitting the field.
+    expect(replyCalls.filter((call) => call.method === "session.update")).toEqual([{
+      method: "session.update",
+      params: { sessionID: "session-a", time: { archived: 0 }, directory: "/test/project" },
+    }])
+    expect((globalUpsertedSessions[0] as Session)?.time?.archived).toBe(0)
+    expect(registeredSessionDirectories).toEqual([{ sessionID: "session-a", directory: "/test/project" }])
+  })
+
+  test("fails when the server keeps the session archived", async () => {
+    sessionUpdateResult = {
+      data: { id: "session-a", directory: "/test/project", time: { created: 1, archived: 2 } } as Session,
+    }
+    const source = createStore({}, {
+      session: [],
+    })
+    const { unarchiveSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    // A silent server-side no-op must surface as a failure, not a success toast.
+    expect(await unarchiveSession("session-a")).toBe(false)
+    expect(globalUpsertedSessions).toEqual([])
+    expect(registeredSessionDirectories).toEqual([])
+  })
+
+  test("rejects a restore response that arrives after a runtime switch", async () => {
+    sessionUpdateResult = {
+      data: { id: "session-a", directory: "/test/project", time: { created: 1, archived: 0 } } as Session,
+    }
+    const source = createStore({}, {
+      session: [],
+    })
+    const { getRuntimeKey, switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://restore-runtime-a.test", runtimeKey: "restore-runtime-a" })
+    beforeSessionUpdateResolve = () => {
+      switchRuntimeEndpoint({ apiBaseUrl: "http://restore-runtime-b.test", runtimeKey: "restore-runtime-b" })
+    }
+    const { unarchiveSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await unarchiveSession("session-a")).toBe(false)
+    expect(getRuntimeKey()).toBe("restore-runtime-b")
+    // The stale response must not reconcile the runtime the user switched to.
+    expect(globalUpsertedSessions).toEqual([])
+    expect(registeredSessionDirectories).toEqual([])
+  })
+
+  test("keeps confirmed sessions and fails the rest when the runtime changes mid-batch", async () => {
+    sessionUpdateResult = {
+      data: { id: "session-a", directory: "/test/project", time: { created: 1, archived: 0 } } as Session,
+    }
+    const source = createStore({}, {
+      session: [],
+    })
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://restore-batch-a.test", runtimeKey: "restore-batch-a" })
+    beforeSessionUpdateResolve = (sessionId) => {
+      if (sessionId === "session-b") {
+        switchRuntimeEndpoint({ apiBaseUrl: "http://restore-batch-b.test", runtimeKey: "restore-batch-b" })
+      }
+    }
+    const { unarchiveSessions, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const result = await unarchiveSessions(["session-a", "session-b", "session-c"])
+
+    // session-a was confirmed before the switch and stays restored; session-b's
+    // response is stale and session-c is never attempted, so both are reported
+    // as failures instead of being silently dropped.
+    expect(result).toEqual({ restoredIds: ["session-a"], failedIds: ["session-b", "session-c"] })
+    expect(globalUpsertedSessions).toHaveLength(1)
+    // session-c must not reach the SDK after the runtime changed.
+    expect(replyCalls.filter((call) => call.method === "session.update").map((call) => call.params.sessionID))
+      .toEqual(["session-a", "session-b"])
+  })
+})
+
 describe("fetchMessagesForSession startup race", () => {
   test("does not reject before sync action refs are initialized", async () => {
     const { fetchMessagesForSession } = await import("./session-actions")
@@ -1012,6 +1122,53 @@ describe("optimisticSend target directory", () => {
     expect(replyCalls.find((call) => call.method === "session.messages")?.params.limit).toBe(30)
     expect(targetStore.getState().message["session-confirmed"]?.[0]?.id).toBe(sentMessageID)
     expect(targetStore.getState().part[sentMessageID]?.[0]?.id).toBe("server-part")
+  })
+
+  // Relay tunnel aborts carry no HTTP status and no wording the text-matching
+  // heuristic recognizes. Without the transport tag they were classified as
+  // definite failures, the accepted prompt was rolled back, and the queue
+  // re-sent a message the engine was already answering (#2425).
+  test("confirms a tunnel-tagged transport failure that no text heuristic matches", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let optimisticRemove: OptimisticRemoveCall | null = null
+    let optimisticConfirm: OptimisticRemoveCall | null = null
+    let sentMessageID = ""
+
+    const { markAmbiguousTransportFailure } = await import("@/lib/relay/transport-error")
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      () => {},
+      (input) => {
+        optimisticRemove = input
+      },
+      (input) => {
+        optimisticConfirm = input
+      },
+    )
+
+    await optimisticSend({
+      sessionId: "session-tunnel",
+      directory: "/target/project",
+      content: "hello",
+      providerID: "provider",
+      modelID: "model",
+      send: async (messageID) => {
+        sentMessageID = messageID
+        sessionMessagesResult = {
+          data: [{
+            info: { id: messageID, role: "user", sessionID: "session-tunnel", time: { created: 1 } } as Message,
+            parts: [{ id: "server-part", type: "text", text: "hello" } as Part],
+          }],
+        }
+        throw markAmbiguousTransportFailure(new Error("stream aborted by host"))
+      },
+    })
+
+    expect(optimisticRemove).toBe(null)
+    expect((optimisticConfirm as OptimisticRemoveCall | null)?.messageID).toBe(sentMessageID)
+    expect(targetStore.getState().message["session-tunnel"]?.[0]?.id).toBe(sentMessageID)
   })
 
   test("rolls back an ambiguous send failure when recent messages do not contain the sent ID", async () => {

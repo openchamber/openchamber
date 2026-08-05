@@ -119,6 +119,15 @@ describe('DeepSeek quota provider', () => {
     expect(result.error).toBe('Invalid response from provider');
   });
 
+  it('reports a normalized timeout error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError')));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('Request timed out');
+  });
+
   it('returns no-quota-data on a 200 payload with no usable balance', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
       is_available: true,

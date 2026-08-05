@@ -34,6 +34,7 @@ import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { setActionRefs } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
+import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { applySessionEventToGlobalSessions } from "./session-event-router"
 import { syncDebug } from "./debug"
@@ -1949,6 +1950,16 @@ export function SyncProvider(props: {
 
         const result = await runBootstrap(0)
         if (result === "failed") throw new Error(`Directory bootstrap failed for ${directory}`)
+
+        // Selecting a session whose directory this client had not indexed yet
+        // routes it through the active directory as a documented guess. This is
+        // the moment that guess can be settled: the owning store now holds the
+        // session, so the authoritative directory is finally readable. Without
+        // this the guess survives, every fetch is addressed to a directory that
+        // does not own the session, and the session never renders.
+        if (result === "complete") {
+          useSessionUIStore.getState().adoptAuthoritativeSessionDirectory()
+        }
       },
       onDispose: (directory) => {
         messageLoader.invalidateDirectory(directory)

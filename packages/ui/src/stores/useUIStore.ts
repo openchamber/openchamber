@@ -187,6 +187,7 @@ const clampContextPanelHeight = (height: number): number => {
 // maps cannot drift apart on which modes they accept.
 const isContextPanelMode = (value: unknown): value is ContextPanelMode => (
   value === 'diff'
+  || value === 'walkthrough'
   || value === 'file'
   || value === 'context'
   || value === 'plan'

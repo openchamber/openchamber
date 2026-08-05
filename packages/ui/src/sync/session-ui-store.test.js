@@ -483,6 +483,15 @@ describe('archiveSessions option forwarding', () => {
     expect(result).toEqual({ archivedIds: [], failedIds: ['session-x', 'session-y'] });
     expect(updateSessionCalls).toEqual([]);
   });
+
+  test('unarchiveSessions honors expectedRuntimeKey instead of discarding the options object', async () => {
+    const result = await useSessionUIStore.getState().unarchiveSessions(['session-x', 'session-y'], {
+      expectedRuntimeKey: 'runtime-that-is-not-active',
+    });
+
+    expect(result).toEqual({ restoredIds: [], failedIds: ['session-x', 'session-y'] });
+    expect(updateSessionCalls).toEqual([]);
+  });
 });
 
 describe('deleteSessions option forwarding', () => {

@@ -436,7 +436,10 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   );
 
   const allowedProviderSet = React.useMemo(() => {
-    if (!allowedProviderIds || allowedProviderIds.length === 0) return null;
+    // undefined = no restriction; [] = allow none. Treating empty like
+    // "unrestricted" would resurface providers without a login in pickers that
+    // intentionally pass the authenticated-only list.
+    if (!allowedProviderIds) return null;
     return new Set(allowedProviderIds);
   }, [allowedProviderIds]);
 

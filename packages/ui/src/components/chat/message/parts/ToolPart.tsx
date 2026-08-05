@@ -42,7 +42,7 @@ import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
-import { useDurationTickerNow } from './useDurationTicker';
+import { useDurationTickerNow } from '@/hooks/useDurationTicker';
 import {
     buildTaskSummaryEntriesFromSession,
     normalizeTaskSummaryEntries,

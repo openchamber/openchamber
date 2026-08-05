@@ -234,6 +234,11 @@ const commandExists = (program, env = process.env) => {
 
 const findEntry = (entries, appId, appName) => entries.find((entry) => desktopEntryMatchesApp(entry, appName, appId)) || null;
 
+const isTerminalEmulatorEntry = (entry) => {
+  const categories = Array.isArray(entry?.categories) ? entry.categories : [];
+  return categories.some((category) => normalizeComparable(category) === 'terminalemulator');
+};
+
 export const buildLinuxOpenSpecs = ({ targetPath, appId, appName, targetKind = 'path', entries = [], env = process.env }) => {
   if (appId === 'finder') {
     return [{ kind: 'default', targetKind, targetPath }];
@@ -241,7 +246,9 @@ export const buildLinuxOpenSpecs = ({ targetPath, appId, appName, targetKind = '
   const specs = [];
   if (TERMINAL_APP_IDS.has(appId)) {
     const directory = targetKind === 'file' ? path.dirname(targetPath) : targetPath;
-    const terminalEntry = findEntry(entries, appId, appName);
+    const terminalEntry = appId === 'terminal'
+      ? entries.find(isTerminalEmulatorEntry) || null
+      : findEntry(entries, appId, appName);
     if (terminalEntry) {
       const spec = buildCommandFromDesktopExec(terminalEntry, directory);
       if (spec) specs.push(spec);
@@ -515,7 +522,7 @@ export const buildLinuxInstalledApps = async (apps, options = {}) => {
           ...FILE_MANAGER_ICON_FALLBACKS,
         ], { ...options, env });
       } else if (normalizeComparable(name) === 'terminal') {
-        const terminalEntry = findEntry(entries, 'terminal', name)
+        const terminalEntry = entries.find(isTerminalEmulatorEntry)
           || findEntry(entries, 'ghostty', 'Ghostty');
         iconDataUrl = resolveIconDataUrlForName([
           terminalEntry?.icon,

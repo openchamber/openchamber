@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>OpenChamber animation cost fixture</title>
+<style>
+  body { margin: 0; background: #111; color: #eee; font: 12px ui-monospace, monospace; }
+  .grid { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; }
+  .cell { width: 24px; height: 24px; }
+  svg { width: 24px; height: 24px; display: block; }
+  .wrap { display: block; width: 24px; height: 24px; }
+
+  /*
+    One variant per animated property, so a run answers "what does animating
+    this cost" rather than "is this particular component slow". Compositor-
+    driven properties should cost a small constant; anything the compositor
+    cannot handle recalculates style every frame.
+  */
+  @keyframes oc-transform-rotate { to { transform: rotate(360deg); } }
+  @keyframes oc-rotate-property { to { rotate: 360deg; } }
+  @keyframes oc-opacity { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+  @keyframes oc-translate { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
+  @keyframes oc-scale { 0%, 100% { transform: scale(0.7); } 50% { transform: scale(1); } }
+  @keyframes oc-background-position { to { background-position: 200% 0; } }
+  @keyframes oc-border-color { 0%, 100% { border-color: #345; } 50% { border-color: #8ab; } }
+  @keyframes oc-box-shadow { 0%, 100% { box-shadow: 0 0 0 0 #8ab; } 50% { box-shadow: 0 0 8px 2px #8ab; } }
+  @keyframes oc-filter { 0%, 100% { filter: brightness(0.6); } 50% { filter: brightness(1.4); } }
+  @keyframes oc-width { 0%, 100% { width: 12px; } 50% { width: 24px; } }
+
+  .v-none svg { animation: none; }
+  .v-transform-rotate svg { animation: oc-transform-rotate 1s linear infinite; }
+  .v-transform-rotate-willchange svg { animation: oc-transform-rotate 1s linear infinite; will-change: transform; }
+  .v-transform-rotate-steps svg { animation: oc-transform-rotate 1s steps(12) infinite; }
+  .v-transform-rotate-wrapper .wrap { animation: oc-transform-rotate 1s linear infinite; }
+  .v-rotate-property svg { animation: oc-rotate-property 1s linear infinite; }
+  .v-opacity svg { animation: oc-opacity 1.2s ease-in-out infinite; }
+  .v-translate svg { animation: oc-translate 1.2s ease-in-out infinite; }
+  .v-scale svg { animation: oc-scale 1.2s ease-in-out infinite; }
+  .v-background-position .cell { background: linear-gradient(90deg, #223, #8ab, #223); background-size: 200% 100%; animation: oc-background-position 1.5s linear infinite; }
+  .v-border-color .cell { border: 2px solid #345; animation: oc-border-color 1.5s linear infinite; }
+  .v-box-shadow .cell { animation: oc-box-shadow 1.5s linear infinite; }
+  .v-filter svg { animation: oc-filter 1.5s linear infinite; }
+  .v-width svg { animation: oc-width 1.5s linear infinite; }
+
+  /*
+    Context variants. The same composited animation can stop being composited
+    because of an ancestor, so these reproduce the surroundings a spinner
+    actually lives in. Each keeps the identical transform animation and varies
+    only the context.
+  */
+  .v-ctx-button .cell svg,
+  .v-ctx-filter .cell svg,
+  .v-ctx-overflow .cell svg,
+  .v-ctx-backdrop .cell svg,
+  .v-ctx-opacity .cell svg,
+  .v-ctx-transformed-parent .cell svg,
+  .v-ctx-sibling-translatez .cell svg,
+  .v-ctx-currentcolor .cell svg { animation: oc-transform-rotate 1s linear infinite; }
+
+  /* Mirrors the repository rule that gives every other button SVG a GPU hint. */
+  .v-ctx-sibling-translatez button svg:not(.spin) { transform: translateZ(0); }
+
+  .v-ctx-filter .cell { filter: brightness(1.05); }
+  .v-ctx-overflow .cell { overflow: hidden; }
+  .v-ctx-backdrop .cell { backdrop-filter: blur(2px); }
+  .v-ctx-opacity .cell { opacity: 0.9; }
+  .v-ctx-transformed-parent .cell { transform: translateY(1px); }
+  .v-ctx-currentcolor .cell { color: color-mix(in srgb, #8ab 60%, #345); }
+  .v-ctx-currentcolor .cell svg { stroke: currentColor; }
+
+  /*
+    The repository's own spinner rules, isolated. The application overrides
+    Tailwind's animate-spin with these, so each piece is measured separately to
+    find which one stops the rotation being composited.
+  */
+  @keyframes oc-webkit-spin {
+    0% { transform: translateZ(0) rotate(0deg); }
+    100% { transform: translateZ(0) rotate(360deg); }
+  }
+  .v-app-keyframes svg { animation: oc-webkit-spin 1s linear infinite; }
+  .v-app-fillbox svg {
+    animation: oc-transform-rotate 1s linear infinite;
+    transform-box: fill-box;
+    transform-origin: 50% 50%;
+  }
+  .v-app-full svg {
+    animation: oc-webkit-spin 1s linear infinite;
+    will-change: transform;
+    transform-box: fill-box;
+    transform-origin: 50% 50%;
+    overflow: visible;
+    display: block;
+  }
+</style>
+</head>
+<body>
+<div class="grid" id="grid"></div>
+<script>
+  const SPINNER = '<svg viewBox="0 0 24 24" fill="none" stroke="#8ab" stroke-width="2">'
+    + '<circle cx="12" cy="12" r="9" stroke-opacity=".25"/><path d="M21 12a9 9 0 0 0-9-9"/></svg>';
+  const params = new URLSearchParams(location.search);
+  // Style recalculation cost depends on how much document there is to walk, so
+  // a variant that is free on a small page is not proven free in a real one.
+  const filler = Math.max(0, Number(params.get('filler') || 0));
+  const variant = params.get('variant') || 'none';
+  const count = Math.max(1, Number(params.get('count') || 2));
+  const grid = document.getElementById('grid');
+  grid.className = 'grid v-' + variant;
+  const usesWrapper = variant.endsWith('-wrapper');
+  const usesButton = variant === 'ctx-button' || variant === 'ctx-sibling-translatez';
+  for (let index = 0; index < count; index += 1) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    const spinner = SPINNER.replace('<svg', '<svg class="spin"');
+    if (usesWrapper) cell.innerHTML = '<span class="wrap">' + SPINNER + '</span>';
+    else if (usesButton) cell.innerHTML = '<button>' + spinner + '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="#456"/></svg></button>';
+    else cell.innerHTML = SPINNER;
+    grid.appendChild(cell);
+  }
+
+  if (filler > 0) {
+    const container = document.createElement('div');
+    container.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;';
+    let markup = '';
+    for (let index = 0; index < filler; index += 1) {
+      markup += '<div class="filler-row"><span>row ' + index + '</span><em>x</em></div>';
+    }
+    container.innerHTML = markup;
+    document.body.appendChild(container);
+  }
+</script>
+</body>
+</html>

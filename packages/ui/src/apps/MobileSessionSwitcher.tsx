@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 
-import { Icon } from '@/components/icon/Icon';
+import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { useSwitcherItems } from '@/components/session/sidebar/hooks/useSwitcherItems';
 import { useTabletLayout } from '@/lib/device';
@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatus } from '@/sync/sync-context';
 
@@ -35,6 +36,8 @@ const SwitcherRow: React.FC<{
   const statusType = status?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
+  const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
+  const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
   const timeLabel = formatSessionCompactDateLabel(session.time?.updated ?? session.time?.created ?? 0);
 
   return (
@@ -56,12 +59,24 @@ const SwitcherRow: React.FC<{
         ) : null}
       </span>
       {/* Activity sits on the right, before the time — no reserved left gutter. */}
-      {isStreaming ? (
-        <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
-      ) : showUnreadDot ? (
-        <span className="size-1.5 shrink-0 rounded-full bg-[var(--status-info)]" aria-hidden />
+      {isStreaming || showUnreadDot ? (
+        <span
+          className={cn(
+            'size-1.5 shrink-0 rounded-full',
+            isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
+          )}
+          aria-hidden
+        />
       ) : null}
-      {timeLabel ? (
+      {/* The elapsed turn takes the time slot while it matters, then hands it
+          back to the relative timestamp. */}
+      {showActivityDuration ? (
+        <SessionActivityDuration
+          sessionId={session.id}
+          running={isStreaming}
+          className="typography-micro"
+        />
+      ) : timeLabel ? (
         <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{timeLabel}</span>
       ) : null}
     </button>

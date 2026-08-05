@@ -29,11 +29,21 @@ import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/l
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { isAmbiguousTransportFailure } from "@/lib/relay/transport-error"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
-const SEND_CONFIRMATION_REFETCH_ATTEMPTS = 2
-const SEND_CONFIRMATION_REFETCH_RETRY_MS = 150
+// A relay-tunnel send fails when the tunnel drops, and the confirming refetch
+// then has to travel over that same tunnel to answer "did my message land?".
+// Two attempts 150ms apart always answered "no" on a remote connection, so an
+// accepted prompt looked like a failed one and got re-sent — two AI responses
+// for one user message. Wait for the connection to actually come back (an
+// authoritative signal, not a blind sleep), then retry with backoff. A healthy
+// connection skips the wait and answers on the first attempt.
+const SEND_CONFIRMATION_REFETCH_ATTEMPTS = 3
+const SEND_CONFIRMATION_REFETCH_BASE_RETRY_MS = 250
+const SEND_CONFIRMATION_RECONNECT_TIMEOUT_MS = 3000
+const SEND_CONFIRMATION_RECONNECT_POLL_MS = 100
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const UNREVERT_REFETCH_ATTEMPTS = 3
 const UNREVERT_REFETCH_RETRY_MS = 150
@@ -360,6 +370,13 @@ function getErrorStatus(error: unknown): number | null {
 }
 
 function isAmbiguousSendFailure(error: unknown): boolean {
+  // Authoritative first: the transport that lost the request says whether it
+  // had already been dispatched. The text matching below only covers direct
+  // fetch/HTTP failures, whose wording we do not control either — relay tunnel
+  // aborts ("stream aborted by host", "relay keepalive timeout", …) match none
+  // of those patterns and used to be misread as definite failures.
+  if (isAmbiguousTransportFailure(error)) return true
+
   const status = getErrorStatus(error)
   if (status === 503 || status === 504 || status === 408) return true
   if (error instanceof TypeError) return true
@@ -997,6 +1014,92 @@ export async function archiveSessions(
   return { archivedIds, failedIds }
 }
 
+/**
+ * Sentinel written to `time.archived` when restoring a session.
+ *
+ * The OpenCode server has no HTTP path to clear `time.archived` back to NULL:
+ * `session.update` only applies the field when the payload carries a finite
+ * number (`archived !== undefined`), so omitting the key is a no-op and `null`
+ * is silently ignored. Writing `0` is the only value that makes every reader
+ * treat the session as active again: the UI, the event reducer, and the
+ * OpenCode app/TUI all classify archive state by truthiness of
+ * `time.archived`, and `0` is falsy. The one place that still excludes such a
+ * session is the server's own `time_archived IS NULL` list filter, so the
+ * global session cache loads with the inclusive `archived` flag and splits
+ * client-side instead of relying on that filter (see
+ * `useGlobalSessionsStore.loadSessions`).
+ */
+const UNARCHIVED_TIMESTAMP = 0
+
+/**
+ * Restore one archived session back to the active list.
+ *
+ * Same contract as `archiveSession`: waits for server confirmation before
+ * reconciling stores, and rejects stale runtimes so a response produced by a
+ * previous runtime cannot mutate the current runtime's state. The global
+ * session cache is updated directly (the sidebar reads active/archived
+ * buckets from it); the live directory store is re-populated by the
+ * authoritative `session.updated` event the server publishes for the update.
+ */
+export async function unarchiveSession(sessionId: string, expectedRuntimeKey = getRuntimeKey()): Promise<boolean> {
+  if (isStaleRuntime(expectedRuntimeKey)) return false
+  const sessionDirectory = getSessionDirectory(sessionId)
+  try {
+    const restored = await opencodeClient.updateSession(sessionId, { time: { archived: UNARCHIVED_TIMESTAMP } }, sessionDirectory)
+    if (isStaleRuntime(expectedRuntimeKey)) return false
+    if (!restored) {
+      throw new Error("session.update failed: server did not return the restored session")
+    }
+    if (restored.time?.archived) {
+      throw new Error("session.update failed: server kept the session archived")
+    }
+    useGlobalSessionsStore.getState().upsertSession(restored)
+    if (sessionDirectory) registerSessionDirectory(sessionId, sessionDirectory)
+    return true
+  } catch (error) {
+    console.error("[session-actions] unarchiveSession failed", error)
+    return false
+  }
+}
+
+export type UnarchiveSessionsOptions = {
+  /**
+   * Runtime key captured when the batch was confirmed. When supplied, the batch
+   * stops as soon as the active runtime differs.
+   */
+  expectedRuntimeKey?: string
+}
+
+/**
+ * Restore several archived sessions sequentially, preserving partial results.
+ *
+ * One failed session never blocks or erases the others: it is reported in
+ * `failedIds` while the remaining IDs are still attempted. When
+ * `expectedRuntimeKey` is supplied and the runtime changes mid-batch, the
+ * already-confirmed sessions stay in `restoredIds` and every ID that was not
+ * confirmed on the captured runtime is reported in `failedIds`, so callers keep
+ * showing truthful partial-failure feedback.
+ */
+export async function unarchiveSessions(
+  ids: string[],
+  options?: UnarchiveSessionsOptions,
+): Promise<{ restoredIds: string[]; failedIds: string[] }> {
+  const restoredIds: string[] = []
+  const failedIds: string[] = []
+  const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+
+  for (const [index, id] of ids.entries()) {
+    if (isStaleRuntime(expectedRuntimeKey)) {
+      failedIds.push(...ids.slice(index))
+      break
+    }
+    if (await unarchiveSession(id, expectedRuntimeKey)) restoredIds.push(id)
+    else failedIds.push(id)
+  }
+
+  return { restoredIds, failedIds }
+}
+
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
   const sessionDirectory = getSessionDirectory(sessionId)
   const session = await opencodeClient.updateSession(sessionId, { title }, sessionDirectory)
@@ -1255,8 +1358,15 @@ async function fetchRecentSendConfirmationRecords(
   messageID: string,
   directory?: string | null,
 ): Promise<Array<{ info: Message; parts?: Part[] }> | null> {
+  // Bounded: a connection that never returns must still let the send fail
+  // rather than hang the composer.
+  const reconnectDeadline = Date.now() + SEND_CONFIRMATION_RECONNECT_TIMEOUT_MS
+  while (!useConfigStore.getState().isConnected && Date.now() < reconnectDeadline) {
+    await wait(SEND_CONFIRMATION_RECONNECT_POLL_MS)
+  }
+
   for (let attempt = 0; attempt < SEND_CONFIRMATION_REFETCH_ATTEMPTS; attempt += 1) {
-    if (attempt > 0) await wait(SEND_CONFIRMATION_REFETCH_RETRY_MS)
+    if (attempt > 0) await wait(SEND_CONFIRMATION_REFETCH_BASE_RETRY_MS * 2 ** (attempt - 1))
     try {
       const result = await sdk().session.messages({
         sessionID: sessionId,

@@ -64,6 +64,8 @@ import {
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions, useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
+import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
@@ -476,6 +478,8 @@ const SessionRow: React.FC<{
   const statusType = liveStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
+  const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
+  const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
 
   const contentRef = React.useRef<HTMLDivElement>(null);
   const startRef = React.useRef<{ x: number; y: number } | null>(null);
@@ -616,10 +620,14 @@ const SessionRow: React.FC<{
               onToggleChildren?.();
             }}
           >
-            {isStreaming ? (
-              <Icon name="loader-4" className="size-3.5 animate-spin text-primary" />
-            ) : showUnreadDot ? (
-              <span className="size-1.5 rounded-full bg-[var(--status-info)]" aria-hidden />
+            {isStreaming || showUnreadDot ? (
+              <span
+                className={cn(
+                  'size-1.5 rounded-full',
+                  isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
+                )}
+                aria-hidden
+              />
             ) : (
               <RiArrowDownSLine className={cn('size-[18px] transition-transform duration-150', expanded ? 'rotate-0' : '-rotate-90')} />
             )}
@@ -664,7 +672,15 @@ const SessionRow: React.FC<{
               >
                 {title}
               </span>
-              {time ? (
+              {/* The elapsed turn takes the time slot while it matters, then
+                  hands it back to the relative timestamp. */}
+              {showActivityDuration ? (
+                <SessionActivityDuration
+                  sessionId={session.id}
+                  running={isStreaming}
+                  className="typography-micro"
+                />
+              ) : time ? (
                 <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{time}</span>
               ) : null}
             </span>
@@ -1800,26 +1816,28 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             style={{ paddingBottom: 'calc(0.375rem + var(--oc-safe-area-bottom, 0px))' }}
           >
             {footer.instanceLabel && footer.onOpenInstances ? (
-              <button
+              <Button
                 type="button"
-                className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl px-2 text-left transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+                variant="info"
+                size="lg"
+                className="min-w-0 shrink justify-start"
                 onClick={footer.onOpenInstances}
                 aria-label={t('mobile.menu.instances')}
                 style={{ touchAction: 'manipulation' }}
               >
-                <Icon name="server" className="size-[18px] shrink-0 text-muted-foreground" />
-                <span className="block min-w-0 truncate typography-ui-label text-foreground">
-                  {footer.instanceLabel}
-                </span>
-              </button>
+                <Icon name="server" className="size-[18px]" />
+                <span className="block min-w-0 truncate">{footer.instanceLabel}</span>
+              </Button>
             ) : (
               <div className="min-w-0 flex-1" />
             )}
             <div className="flex shrink-0 items-center gap-1">
               {footer.onOpenUpdate ? (
-                <button
+                <Button
                   type="button"
-                  className="relative flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  variant="default"
+                  size="lg"
+                  className="w-10 px-0"
                   onClick={footer.onOpenUpdate}
                   aria-label={t('mobile.menu.update')}
                   title={t('mobile.menu.update')}
@@ -1827,18 +1845,20 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 >
                   <Icon name="download" className="size-5" />
                   <span className="absolute right-2 top-2 inline-flex size-2 rounded-full bg-primary" aria-hidden />
-                </button>
+                </Button>
               ) : null}
-              <button
+              <Button
                 type="button"
-                className="flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                variant="default"
+                size="lg"
+                className="w-10 px-0"
                 onClick={footer.onOpenSettings}
                 aria-label={t('mobile.menu.settings')}
                 title={t('mobile.menu.settings')}
                 style={{ touchAction: 'manipulation' }}
               >
                 <Icon name="settings-3" className="size-5" />
-              </button>
+              </Button>
             </div>
           </div>
         ) : null}
