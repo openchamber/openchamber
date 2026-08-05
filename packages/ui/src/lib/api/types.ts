@@ -183,6 +183,7 @@ export interface GitBranch {
   all: string[];
   current: string;
   branches: Record<string, GitBranchDetails>;
+  defaultBranches?: Record<string, string>;
 }
 
 interface GitCommitSummary {

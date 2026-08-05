@@ -6,9 +6,19 @@ All notable changes to this project will be documented in this file.
 
 - **Guardian:** cross-platform (Linux/POSIX + Windows). The Linux/POSIX path uses a Unix-domain socket at `mode 0600` (same as before). The Windows path uses loopback TCP at `127.0.0.1:<ephemeral>` with an `icacls`-granted per-user ACL on the discovery file under `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\port`. Live children use their process handles; rehydrated children use a hidden PowerShell/.NET handle helper that verifies persisted identity before terminating, with no PID-only fallback.
 - **Guardian/restart:** owner identity is persisted in each OpenChamber instance's metadata and propagated through `OPENCHAMBER_GUARDIAN_OWNER_ID`; restart detaches from the matching child, while ordinary stop is owner-scoped and `openchamber guardian stop` remains the explicit administrative shutdown.
-- **Guardian/downgrade hint:** downgrading from a Windows-aware guardian build to an older build leaves the Windows discovery file as a harmless orphan; remove it with `rm "%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\port"` if desired. No automatic migration is required.
-- **Desktop/Linux:** official AppImage releases for x64 and arm64, with in-app updates from the GitHub release feed. Missing update manifests are treated as “no update” instead of a hard failure, and updater errors surface in About/sidebar (thanks to @jibanez-staticduo).
-- Chat: the `/` command menu no longer lists a skill twice when a command shares its name.
+- **Guardian/downgrade hint:** downgrading from a Windows-aware guardian build to an older build leaves the Windows discovery file as a harmless orphan; remove it with `Remove-Item "%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\port"` in PowerShell if desired. No automatic migration is required.
+
+## [1.18.1] - 2026-08-04
+
+- **Providers:** signing in to an OAuth-only provider now actually completes — the browser login is stored and the provider list updates instead of remaining signed out. OAuth-only providers show a Connect flow instead of an API key form, and their models stay hidden until you are signed in.
+- **Sessions:** archived sessions can now be restored to the active list — from the sidebar context menu, the archived-sessions page, or the bulk-selection bar — instead of only offering permanent deletion (thanks to @makeittech).
+- Walkthrough: models without a working provider login no longer appear in the walkthrough picker, and Generate stays disabled until a usable model is selected instead of failing with a raw provider error.
+- Providers: sign-ins that need extra details (such as GitHub Copilot Enterprise) now ask for them before opening the browser, and device codes come with a working copy button.
+- Walkthrough: connecting to a server older than the app now says the server needs updating instead of showing a raw HTML parsing error, and the "Critical" tag is now "Key change" with a tooltip so it no longer reads as a problem found in your code.
+- Chat: Ctrl/Cmd+L now adds the selected text to the chat input, or focuses it when nothing is selected; the toggle-sidebar shortcut moved to Ctrl/Cmd+Alt+L.
+- Chat: a manually chosen model now stays selected after a delegated subtask finishes, instead of reverting to the agent's default model.
+- Agents/CLI: sending a prompt that never reaches its session is now reported as failed, and an unavailable model, agent, or variant is rejected with a clear error before anything is created.
+- Desktop/Linux: "Open in Terminal" no longer launches a non-terminal app that is set as the terminal launcher (thanks to @kydorn).
 
 ## [1.18.0] - 2026-08-04
 

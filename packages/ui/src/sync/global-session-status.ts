@@ -6,6 +6,11 @@ import {
   reconcileSessionActivitySnapshot,
   removeSessionOrdering,
 } from './session-ordering';
+import {
+  observeSessionActivityTiming,
+  reconcileSessionActivityTiming,
+  removeSessionActivityTiming,
+} from './session-activity-timing';
 
 // Shared live busy/retry index for every directory. Global events update it
 // incrementally and authoritative directory snapshots reconcile it, so each
@@ -95,6 +100,8 @@ export const applyGlobalSessionStatusEvent = (directory: string, payload: Event)
         type === 'idle' ? { type: 'idle' } : { ...(props.status ?? {}), type } as SessionStatus,
       );
       observeSessionActivityEvent(props.sessionID, type === 'idle' ? 'settled' : 'active');
+      // `retry` is still a running turn, so the elapsed counter keeps going.
+      observeSessionActivityTiming(props.sessionID, type === 'idle' ? 'settled' : 'active');
       return;
     }
     case 'session.idle':
@@ -103,6 +110,7 @@ export const applyGlobalSessionStatusEvent = (directory: string, payload: Event)
       if (typeof props?.sessionID === 'string' && props.sessionID) {
         setStatus(props.sessionID, normalizeDirectory(directory), { type: 'idle' });
         observeSessionActivityEvent(props.sessionID, 'settled');
+        observeSessionActivityTiming(props.sessionID, 'settled');
       }
       return;
     }
@@ -113,6 +121,7 @@ export const applyGlobalSessionStatusEvent = (directory: string, payload: Event)
         setStatus(sessionId, normalizeDirectory(directory), { type: 'idle' });
         observeSessionActivityEvent(sessionId, 'settled');
         removeSessionOrdering(sessionId);
+        removeSessionActivityTiming(sessionId);
       }
       return;
     }
@@ -136,10 +145,21 @@ export const applyGlobalSessionStatusSnapshot = (
   for (const [sessionId, entry] of useGlobalSessionStatusStore.getState().statusById) {
     if (entry.directory === directory) known.add(sessionId);
   }
-  const activeSessionIds = Object.entries(raw)
-    .filter(([, status]) => normalizeStatusType(status?.type) !== 'idle')
-    .map(([sessionId]) => sessionId);
+  // Built once as a set and shared by both consumers below; only non-idle
+  // sessions land here, so it stays small however long the directory's list is.
+  const activeSessionIds = new Set<string>();
+  for (const [sessionId, status] of Object.entries(raw)) {
+    if (normalizeStatusType(status?.type) !== 'idle') activeSessionIds.add(sessionId);
+  }
   reconcileSessionActivitySnapshot(activeSessionIds, known);
+  // Timing asks the coverage question instead of being handed a list: a snapshot
+  // authoritatively covers the caller's session list plus every id it reports
+  // itself, and only the handful of sessions actually being timed need an
+  // answer. Reuses the sets already built above, so this allocates nothing.
+  reconcileSessionActivityTiming(
+    activeSessionIds,
+    (sessionId) => known.has(sessionId) || sessionId in raw,
+  );
   useGlobalSessionStatusStore.setState((state) => {
     let changed = false;
     const next = new Map(state.statusById);

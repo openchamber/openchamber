@@ -213,14 +213,32 @@ export const PullRequestView: React.FC = () => {
     }));
   }, [remotes, remoteBranches, remoteUrl, status?.tracking]);
 
+  const currentBranch = status?.current ?? null;
+
+  // A pull request opened against a branch that does not exist is worse than a
+  // broken walkthrough, so this surface reads the repository's default branch
+  // too rather than guessing at main/master/develop.
+  const defaultBranch = React.useMemo(() => {
+    const trackingRemote = status?.tracking?.trim().split('/')[0];
+    return (trackingRemote && branches?.defaultBranches?.[trackingRemote])
+      ?? branches?.defaultBranches?.origin;
+  }, [branches, status?.tracking]);
+
   const baseBranch = React.useMemo(() => deriveBaseBranch({
     remoteNames: new Set(effectiveRemotes.map((remote) => remote.name)),
     localBranches,
     worktreeCreatedFromBranch: worktreeMetadata?.createdFromBranch,
     rootBranchHint,
-  }), [effectiveRemotes, localBranches, rootBranchHint, worktreeMetadata?.createdFromBranch]);
-
-  const currentBranch = status?.current ?? null;
+    defaultBranch,
+    headBranch: currentBranch,
+  }), [
+    currentBranch,
+    defaultBranch,
+    effectiveRemotes,
+    localBranches,
+    rootBranchHint,
+    worktreeMetadata?.createdFromBranch,
+  ]);
 
   if (!currentDirectory || !currentBranch) {
     return (

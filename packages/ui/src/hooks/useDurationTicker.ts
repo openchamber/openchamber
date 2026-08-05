@@ -1,3 +1,7 @@
+// Shared wall-clock ticker for live duration readouts (tool runtimes, session
+// activity counters). Subscribers of the same interval share one timer and one
+// `now`, so N live rows cost one interval rather than N.
+
 import React from 'react';
 
 type Subscriber = (now: number) => void;

@@ -16,9 +16,30 @@ interface ErrorPayload {
   availableChars?: unknown;
 }
 
+const isJsonResponse = (response: Response): boolean =>
+  /^application\/(?:[\w.+-]+\+)?json\b/i.test(response.headers.get('content-type') ?? '');
+
+/**
+ * A server without these routes does not answer 404 with JSON. Unmatched
+ * `/api/*` falls through to the OpenCode proxy, and OpenCode serves its embedded
+ * web UI for any path it does not know — HTML, status 200. Parsing that as JSON
+ * surfaced `Unexpected token '<', "<!doctype "...` in the panel, which names
+ * neither the cause nor the remedy.
+ *
+ * Only a missing route is reported this way: 2xx and 404 are the shapes it
+ * produces. A 5xx that is not JSON came from a server that did answer, so it
+ * keeps its own failure rather than becoming advice to upgrade.
+ */
+const serverUnsupported = () =>
+  new WalkthroughError('This OpenChamber server has no walkthrough API', { code: 'server-unsupported' });
+
+const looksUnsupported = (response: Response): boolean =>
+  !isJsonResponse(response) && (response.ok || response.status === 404);
+
 // An authoritative read that fails must never look like "there is nothing
 // here" — the caller would clear a perfectly good walkthrough off the screen.
 const throwFromResponse = async (response: Response, fallback: string): Promise<never> => {
+  if (looksUnsupported(response)) throw serverUnsupported();
   const payload = (await response.json().catch(() => null)) as ErrorPayload | null;
   throw new WalkthroughError(typeof payload?.error === 'string' ? payload.error : fallback, {
     code: typeof payload?.code === 'string' ? (payload.code as WalkthroughError['code']) : undefined,
@@ -26,6 +47,17 @@ const throwFromResponse = async (response: Response, fallback: string): Promise<
     requiredChars: typeof payload?.requiredChars === 'number' ? payload.requiredChars : undefined,
     availableChars: typeof payload?.availableChars === 'number' ? payload.availableChars : undefined,
   });
+};
+
+const readJson = async <T>(response: Response): Promise<T> => {
+  if (!isJsonResponse(response)) throw serverUnsupported();
+  try {
+    return (await response.json()) as T;
+  } catch {
+    // Declared JSON, arrived truncated or empty: still not an answer, and the
+    // parser's own message says nothing a reader can act on.
+    throw new WalkthroughError('The server returned a malformed walkthrough response');
+  }
 };
 
 export async function fetchWalkthrough(
@@ -45,7 +77,7 @@ export async function fetchWalkthrough(
   if (!response.ok) {
     return throwFromResponse(response, 'Failed to load walkthrough');
   }
-  return response.json();
+  return readJson<WalkthroughResult>(response);
 }
 
 export async function generateWalkthrough(
@@ -68,7 +100,7 @@ export async function generateWalkthrough(
   if (!response.ok) {
     return throwFromResponse(response, 'Failed to generate walkthrough');
   }
-  return response.json();
+  return readJson<WalkthroughResult>(response);
 }
 
 /**

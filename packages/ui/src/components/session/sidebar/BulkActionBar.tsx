@@ -21,6 +21,7 @@ type Props = {
   onCreateFolderAndMove: () => void;
   onRemoveFromFolder: () => void;
   canRemoveFromFolder: boolean;
+  onRestore: () => void;
   onDelete: () => void;
   onDone: () => void;
 };
@@ -34,6 +35,7 @@ export const BulkActionBar: React.FC<Props> = ({
   onCreateFolderAndMove,
   onRemoveFromFolder,
   canRemoveFromFolder,
+  onRestore,
   onDelete,
   onDone,
 }) => {
@@ -96,6 +98,22 @@ export const BulkActionBar: React.FC<Props> = ({
               ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
+        ) : null}
+
+        {archivedBucket ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onRestore}
+                className={iconButtonClass}
+                aria-label={t('sessions.sidebar.bulkActions.restore')}
+              >
+                <Icon name="inbox-unarchive" className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.bulkActions.restore')}</p></TooltipContent>
+          </Tooltip>
         ) : null}
 
         <Tooltip>
