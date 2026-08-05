@@ -1,12 +1,15 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 
+import { Icon } from '@/components/icon/Icon';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
-import { useSwitcherItems } from '@/components/session/sidebar/hooks/useSwitcherItems';
+import { useSwitcherItems, type SwitcherItem } from '@/components/session/sidebar/hooks/useSwitcherItems';
+import { toast } from '@/components/ui';
 import { useTabletLayout } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { collectSessionNodeDescendantIds } from '@/apps/mobileSessionArchive';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
@@ -23,13 +26,20 @@ const getSessionTitle = (session: Session, fallback: string): string =>
 
 /** One switcher row: live status (busy spinner / attention dot), title,
     "project · branch", compact time. Mirrors the desktop SessionSwitcherDropdown
-    indicator conventions; no subsession chevrons on mobile by design. */
+    indicator conventions; no subsession chevrons on mobile by design. The
+    archive affordance is a SIBLING of the select button — tapping it never
+    selects the session — and uses the two-step pattern from the sessions
+    drawer: the first tap arms a destructive confirm chip, the second tap on
+    the chip archives; the armed icon button (X) or any row selection cancels. */
 const SwitcherRow: React.FC<{
   session: Session;
   meta: string;
   active: boolean;
   onSelect: () => void;
-}> = ({ session, meta, active, onSelect }) => {
+  confirmingArchive?: boolean;
+  onRequestArchive?: () => void;
+  onConfirmArchive?: () => void;
+}> = ({ session, meta, active, onSelect, confirmingArchive = false, onRequestArchive, onConfirmArchive }) => {
   const { t } = useI18n();
   const status = useGlobalSessionStatus(session.id);
   const unseenCount = useSessionUnseenCount(session.id);
@@ -39,47 +49,78 @@ const SwitcherRow: React.FC<{
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
   const timeLabel = formatSessionCompactDateLabel(session.time?.updated ?? session.time?.created ?? 0);
+  const title = getSessionTitle(session, t('sessions.sidebar.session.untitled'));
+  const archiveEnabled = Boolean(onRequestArchive && onConfirmArchive);
 
   return (
-    <button
-      type="button"
-      className={cn(
-        'flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
-        active && 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]',
-      )}
-      onClick={onSelect}
-      style={{ touchAction: 'manipulation' }}
-    >
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className={cn('block truncate typography-ui-label', active ? 'text-primary' : 'text-foreground')}>
-          {getSessionTitle(session, t('sessions.sidebar.session.untitled'))}
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        className={cn(
+          'flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+          active && 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]',
+        )}
+        onClick={onSelect}
+        style={{ touchAction: 'manipulation' }}
+      >
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className={cn('block truncate typography-ui-label', active ? 'text-primary' : 'text-foreground')}>
+            {title}
+          </span>
+          {meta ? (
+            <span className="block truncate typography-micro text-muted-foreground">{meta}</span>
+          ) : null}
         </span>
-        {meta ? (
-          <span className="block truncate typography-micro text-muted-foreground">{meta}</span>
+        {/* Activity sits on the right, before the time — no reserved left gutter. */}
+        {isStreaming || showUnreadDot ? (
+          <span
+            className={cn(
+              'size-1.5 shrink-0 rounded-full',
+              isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
+            )}
+            aria-hidden
+          />
         ) : null}
-      </span>
-      {/* Activity sits on the right, before the time — no reserved left gutter. */}
-      {isStreaming || showUnreadDot ? (
-        <span
-          className={cn(
-            'size-1.5 shrink-0 rounded-full',
-            isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-          )}
-          aria-hidden
-        />
+        {/* The elapsed turn takes the time slot while it matters, then hands it
+            back to the relative timestamp. */}
+        {showActivityDuration ? (
+          <SessionActivityDuration
+            sessionId={session.id}
+            running={isStreaming}
+            className="typography-micro"
+          />
+        ) : timeLabel ? (
+          <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{timeLabel}</span>
+        ) : null}
+      </button>
+      {archiveEnabled ? (
+        <>
+          {confirmingArchive ? (
+            <button
+              type="button"
+              className="mr-1.5 flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-destructive px-3 text-destructive-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+              aria-label={t('mobile.sessions.archiveSessionAria', { title })}
+              onClick={onConfirmArchive}
+              style={{ touchAction: 'manipulation' }}
+            >
+              <Icon name="archive" className="size-4" />
+              <span className="typography-ui-label">{t('sessions.sidebar.bulkActions.archive')}</span>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="mr-1.5 flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground/70 transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label={confirmingArchive
+              ? t('mobile.sessions.cancelArchiveAria', { title })
+              : t('mobile.sessions.archiveSessionAria', { title })}
+            onClick={onRequestArchive}
+            style={{ touchAction: 'manipulation' }}
+          >
+            <Icon name={confirmingArchive ? 'close' : 'archive'} className="size-4" />
+          </button>
+        </>
       ) : null}
-      {/* The elapsed turn takes the time slot while it matters, then hands it
-          back to the relative timestamp. */}
-      {showActivityDuration ? (
-        <SessionActivityDuration
-          sessionId={session.id}
-          running={isStreaming}
-          className="typography-micro"
-        />
-      ) : timeLabel ? (
-        <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{timeLabel}</span>
-      ) : null}
-    </button>
+    </div>
   );
 };
 
@@ -133,6 +174,11 @@ export const MobileSessionSwitcher: React.FC<{
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
+  const archiveSession = useSessionUIStore((state) => state.archiveSession);
+  const archiveSessions = useSessionUIStore((state) => state.archiveSessions);
+  // Two-step archive: which row's confirm chip is armed. Any selection or
+  // panel close disarms it, so cancel leaves the session unchanged.
+  const [confirmingArchiveId, setConfirmingArchiveId] = React.useState<string | null>(null);
 
   const items = useSwitcherItems(open || shouldRender, { maxParents: RECENT_SESSIONS_LIMIT });
 
@@ -145,6 +191,8 @@ export const MobileSessionSwitcher: React.FC<{
       setIsExiting(false);
       return;
     }
+    // Closing the panel cancels any armed archive confirmation.
+    setConfirmingArchiveId(null);
     if (!shouldRender) return;
     setIsExiting(true);
     const timeoutId = window.setTimeout(() => {
@@ -179,9 +227,43 @@ export const MobileSessionSwitcher: React.FC<{
   }, [anchorRef, onClose, open]);
 
   const handleSelect = React.useCallback((session: Session) => {
+    // Selecting a row cancels any armed archive confirmation.
+    setConfirmingArchiveId(null);
     void setCurrentSession(session.id, resolveGlobalSessionDirectory(session));
     onClose();
   }, [onClose, setCurrentSession]);
+
+  // First tap arms the row's confirm chip; tapping the armed icon (X) or
+  // selecting the row disarms it. Archive never selects the session.
+  const handleRequestArchive = React.useCallback((sessionId: string) => {
+    setConfirmingArchiveId((current) => (current === sessionId ? null : sessionId));
+  }, []);
+
+  // Second tap: archive the session and its known active descendants through
+  // the canonical batch action, keeping the existing per-result toasts so
+  // partial failures stay visible. The global store reconciliation removes
+  // the archived rows from this panel automatically.
+  const handleConfirmArchive = React.useCallback(async (item: SwitcherItem) => {
+    setConfirmingArchiveId(null);
+    const descendantIds = collectSessionNodeDescendantIds(item.node);
+    if (descendantIds.length === 0) {
+      const ok = await archiveSession(item.node.session.id);
+      if (ok) toast.success(t('sessions.sidebar.session.archive.success'));
+      else toast.error(t('sessions.sidebar.session.archive.error'));
+      return;
+    }
+    const { archivedIds, failedIds } = await archiveSessions([item.node.session.id, ...descendantIds]);
+    if (archivedIds.length > 0) {
+      toast.success(archivedIds.length === 1
+        ? t('sessions.sidebar.bulkActions.archivedSingle', { count: archivedIds.length })
+        : t('sessions.sidebar.bulkActions.archivedPlural', { count: archivedIds.length }));
+    }
+    if (failedIds.length > 0) {
+      toast.error(failedIds.length === 1
+        ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
+        : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
+    }
+  }, [archiveSession, archiveSessions, t]);
 
   if (!shouldRender) return null;
 
@@ -229,6 +311,9 @@ export const MobileSessionSwitcher: React.FC<{
                     if (item.projectId) setActiveProjectIdOnly(item.projectId);
                     handleSelect(session);
                   }}
+                  confirmingArchive={confirmingArchiveId === session.id}
+                  onRequestArchive={() => handleRequestArchive(session.id)}
+                  onConfirmArchive={() => void handleConfirmArchive(item)}
                 />
               );
             })
