@@ -119,6 +119,15 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
       role="dialog"
       aria-modal="true"
       onClick={onClose}
+      // The panel centers over the CHAT column, not the whole app: on a tablet
+      // the shell keeps a persistent sessions sidebar, and a sheet centered on
+      // the window reads as belonging to nothing. The shell publishes the
+      // column's insets; on phones they are 0 and this is a no-op. The scrim
+      // deliberately still covers everything.
+      style={{
+        paddingLeft: 'var(--oc-chat-inset-left, 0px)',
+        paddingRight: 'var(--oc-chat-inset-right, 0px)',
+      }}
     >
         <div
           className={cn(

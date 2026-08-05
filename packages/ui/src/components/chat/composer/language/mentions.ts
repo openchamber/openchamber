@@ -116,6 +116,9 @@ export function classifyMention(
     classifier: MentionClassifier,
 ): MentionKind | null {
     if (!name) return null;
+    // HTML fragments are prompt text, never references. In particular, do not
+    // interpret CSS syntax such as `@import</style>` as a local file path.
+    if (name.includes('<') || name.includes('>')) return null;
     if (classifier.knownAgentNames.has(name.toLowerCase())) return 'agent';
     if (looksLikeFilePath(name, classifier.confirmedMentions)) return 'file';
     return null;

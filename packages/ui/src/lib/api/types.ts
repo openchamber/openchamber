@@ -146,6 +146,17 @@ export interface GetGitDiffOptions {
   contextLines?: number;
 }
 
+/**
+ * Diff between two refs. Uses three-dot (`base...head`) semantics server-side, so changes
+ * pulled into `head` by merging `base` are excluded — only the branch's own work is returned.
+ */
+export interface GetGitRangeDiffOptions {
+  base: string;
+  head: string;
+  path?: string;
+  contextLines?: number;
+}
+
 export interface GitFileDiffResponse {
   original: string;
   modified: string;
@@ -172,6 +183,7 @@ export interface GitBranch {
   all: string[];
   current: string;
   branches: Record<string, GitBranchDetails>;
+  defaultBranches?: Record<string, string>;
 }
 
 interface GitCommitSummary {
@@ -453,6 +465,7 @@ export interface GitAPI {
   getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus>;
   getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
+  getGitRangeDiff?(directory: string, options: GetGitRangeDiffOptions): Promise<GitDiffResponse>;
   revertGitFile(directory: string, filePath: string, options?: { scope?: 'all' | 'working' }): Promise<void>;
   stageGitFile(directory: string, filePath: string): Promise<void>;
   stageGitFiles?(directory: string, filePaths: string[]): Promise<void>;

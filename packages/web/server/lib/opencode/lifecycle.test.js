@@ -2,10 +2,14 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
+const recordStartupPerformanceMock = vi.fn();
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
   spawnSync: vi.fn(),
+}));
+vi.mock('./startup-performance.js', () => ({
+  recordStartupPerformance: recordStartupPerformanceMock,
 }));
 
 const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
@@ -16,6 +20,7 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   spawnMock.mockReset();
+  recordStartupPerformanceMock.mockReset();
   globalThis.fetch = originalFetch;
   if (typeof originalOpencodeBinary === 'string') {
     process.env.OPENCODE_BINARY = originalOpencodeBinary;
@@ -108,6 +113,92 @@ const createRuntime = (overrides = {}, stateOverrides = {}) => {
 };
 
 describe('OpenCode lifecycle', () => {
+  it('records an authoritative ready terminal event for external startup', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ healthy: true }),
+    }));
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+
+    expect(recordStartupPerformanceMock).toHaveBeenCalledWith('opencode.bootstrap.ready', {
+      totalDurationMs: expect.any(Number),
+      outcome: 'ready',
+    });
+    expect(recordStartupPerformanceMock).not.toHaveBeenCalledWith(
+      'opencode.bootstrap.error',
+      expect.anything(),
+    );
+    const terminalEvents = recordStartupPerformanceMock.mock.calls.filter(([phase]) => (
+      phase === 'opencode.bootstrap.ready' || phase === 'opencode.bootstrap.error'
+    ));
+    expect(terminalEvents).toHaveLength(1);
+  });
+
+  it('warms recently used directories after a successful bootstrap', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ healthy: true }),
+    }));
+    globalThis.fetch = fetchMock;
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      getWarmupDirectories: vi.fn(async () => ['/tmp/worktree-a', '/tmp/project-b']),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const warmupUrls = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes('/session/status'));
+    expect(warmupUrls).toEqual([
+      'http://127.0.0.1:45678/session/status?directory=%2Ftmp%2Fworktree-a',
+      'http://127.0.0.1:45678/session/status?directory=%2Ftmp%2Fproject-b',
+    ]);
+  });
+
+  it('records an authoritative error terminal event when bootstrap fails', async () => {
+    const runtime = createRuntime({
+      syncFromHmrState: vi.fn(() => {
+        throw new Error('bootstrap failed');
+      }),
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+
+    expect(recordStartupPerformanceMock).toHaveBeenCalledWith('opencode.bootstrap.error', {
+      totalDurationMs: expect.any(Number),
+      outcome: 'error',
+    });
+    expect(recordStartupPerformanceMock).not.toHaveBeenCalledWith(
+      'opencode.bootstrap.ready',
+      expect.anything(),
+    );
+    const terminalEvents = recordStartupPerformanceMock.mock.calls.filter(([phase]) => (
+      phase === 'opencode.bootstrap.ready' || phase === 'opencode.bootstrap.error'
+    ));
+    expect(terminalEvents).toHaveLength(1);
+  });
+
   it('does not count rapid transport-triggered checks as independent health failures', async () => {
     const close = vi.fn(async () => {});
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -139,6 +230,30 @@ describe('OpenCode lifecycle', () => {
 
     expect(warn).toHaveBeenCalledTimes(2);
     expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('(2/20)'));
+    warn.mockRestore();
+  });
+
+  it('does not mistake a live managed process wrapper for an exited child', async () => {
+    const close = vi.fn(async () => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      json: async () => null,
+    }));
+    const runtime = createRuntime({}, {
+      openCodePort: 45678,
+      openCodeProcess: {
+        pid: process.pid,
+        close,
+      },
+      isOpenCodeReady: true,
+    });
+
+    await runtime.triggerHealthCheck();
+
+    expect(close).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('(1/20)'));
     warn.mockRestore();
   });
 
@@ -190,8 +305,45 @@ describe('OpenCode lifecycle', () => {
     expect(options.env.PATH).toBe('/home/user/.bun/bin:/usr/local/bin:/usr/bin');
     expect(options.env.SHELL_ONLY).toBe('yes');
     expect(options.env.OPENCODE_SERVER_PASSWORD).toBe('password');
+    expect(server.exitCode).toBeNull();
+    expect(server.signalCode).toBeNull();
 
     await server.close();
+    expect(server.signalCode).toBe('SIGTERM');
+  });
+
+  it('strips AppImage ARGV0 from managed OpenCode launch env', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const previousArgv0 = process.env.ARGV0;
+    process.env.ARGV0 = '/path/to/OpenChamber/OpenChamber-1.17.2-linux-x86_64.AppImage';
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    try {
+      const runtime = createRuntime({
+        getManagedOpenCodeShellEnvSnapshot: vi.fn(() => ({
+          PATH: '/home/user/.bun/bin:/usr/local/bin:/usr/bin',
+          ARGV0: '/leaked/from/shell/snapshot.AppImage',
+          SHELL_ONLY: 'yes',
+        })),
+      });
+      const server = await runtime.startOpenCode();
+      const [, , options] = spawnMock.mock.calls[0];
+
+      expect(options.env).not.toHaveProperty('ARGV0');
+      expect(options.env.SHELL_ONLY).toBe('yes');
+      expect(options.env.PATH).toBe('/home/user/.bun/bin:/usr/local/bin:/usr/bin');
+
+      await server.close();
+    } finally {
+      if (previousArgv0 === undefined) delete process.env.ARGV0;
+      else process.env.ARGV0 = previousArgv0;
+    }
   });
 
   it('adds managed OpenChamber tool environment without allowing it to replace launch invariants', async () => {

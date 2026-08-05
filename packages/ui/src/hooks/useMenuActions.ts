@@ -10,6 +10,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
+import { addSelectionToChat } from '@/lib/addSelectionToChat';
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -77,6 +78,7 @@ type MenuAction =
   | 'toggle-terminal'
   | 'toggle-terminal-expanded'
   | 'copy'
+  | 'add-selection-to-chat'
   | 'theme-light'
   | 'theme-dark'
   | 'theme-system'
@@ -276,6 +278,10 @@ export const useMenuActions = (
 
         case 'theme-system':
           setThemeMode('system');
+          break;
+
+        case 'add-selection-to-chat':
+          addSelectionToChat();
           break;
 
         case 'toggle-sidebar':

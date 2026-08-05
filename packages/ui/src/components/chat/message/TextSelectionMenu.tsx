@@ -16,6 +16,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
+import { focusChatInput } from '@/components/chat/composer/editor/dom';
 
 interface TextSelectionMenuProps {
   containerRef: React.RefObject<HTMLElement | null>;
@@ -309,6 +310,9 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     
     // Clear selection
     window.getSelection()?.removeAllRanges();
+    queueMicrotask(() => {
+      focusChatInput();
+    });
   }, [selectedTextMarkdown, setPendingInputText, hideMenu]);
 
   const handleCreateNewSession = React.useCallback(async () => {

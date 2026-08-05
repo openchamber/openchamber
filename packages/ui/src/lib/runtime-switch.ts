@@ -76,11 +76,52 @@ const sameOrigin = (left: string, right: string): boolean => {
 };
 
 export const getRuntimeApiBaseUrl = (): string => activeApiBaseUrl || readInjectedApiBaseUrl();
+
+// `getRuntimeKey` keys caches, stores, and persisted state across the whole UI,
+// so it runs on store reads, event handling, and render paths. Before the
+// runtime endpoint is explicitly initialised, every call re-derived the key by
+// trimming two injected globals and constructing three `URL` objects, which
+// made this one of the most expensive functions during streaming.
+//
+// The result depends only on `activeApiBaseUrl` and the two injected globals,
+// and `switchRuntimeEndpoint` writes the injected API base URL at runtime, so
+// the cache is validated against the raw, untrimmed values. That comparison
+// allocates nothing and still recomputes the moment any input changes.
+let cachedRuntimeKey = '';
+let cachedActiveApiBaseUrl: string | null = null;
+let cachedRawApiBaseUrl: string | undefined;
+let cachedRawLocalOrigin: string | undefined;
+
+const readRawRuntimeGlobal = (key: '__OPENCHAMBER_API_BASE_URL__' | '__OPENCHAMBER_LOCAL_ORIGIN__'): string | undefined => {
+  if (typeof window === 'undefined') return undefined;
+  const value = (window as typeof window & {
+    __OPENCHAMBER_API_BASE_URL__?: string;
+    __OPENCHAMBER_LOCAL_ORIGIN__?: string;
+  })[key];
+  return typeof value === 'string' ? value : undefined;
+};
+
 export const getRuntimeKey = (): string => {
   if (activeRuntimeKey) return activeRuntimeKey;
+
+  const rawApiBaseUrl = readRawRuntimeGlobal('__OPENCHAMBER_API_BASE_URL__');
+  const rawLocalOrigin = readRawRuntimeGlobal('__OPENCHAMBER_LOCAL_ORIGIN__');
+  if (
+    cachedActiveApiBaseUrl === activeApiBaseUrl
+    && cachedRawApiBaseUrl === rawApiBaseUrl
+    && cachedRawLocalOrigin === rawLocalOrigin
+  ) {
+    return cachedRuntimeKey;
+  }
+
   const apiBaseUrl = getRuntimeApiBaseUrl();
-  if (sameOrigin(apiBaseUrl, readInjectedLocalOrigin())) return 'local';
-  return normalizeRuntimeUrlKey(apiBaseUrl);
+  cachedRuntimeKey = sameOrigin(apiBaseUrl, readInjectedLocalOrigin())
+    ? 'local'
+    : normalizeRuntimeUrlKey(apiBaseUrl);
+  cachedActiveApiBaseUrl = activeApiBaseUrl;
+  cachedRawApiBaseUrl = rawApiBaseUrl;
+  cachedRawLocalOrigin = rawLocalOrigin;
+  return cachedRuntimeKey;
 };
 
 export const initializeRuntimeEndpoint = (options: { apiBaseUrl?: string | null; runtimeKey?: string | null } = {}): void => {

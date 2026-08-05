@@ -5,17 +5,34 @@ import request from 'supertest';
 import { registerTtsRoutes } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
-const createApp = () => {
+const createApp = (sayTTSCapability = null) => {
   const app = express();
   app.use(express.json());
   registerTtsRoutes(app, {
     resolveZenModel: async () => 'gpt-5-nano',
-    sayTTSCapability: null,
+    sayTTSCapability,
   });
   return app;
 };
 
 describe('tts routes', () => {
+  it('waits for the authoritative macOS say capability', async () => {
+    let resolveCapability;
+    const capability = new Promise((resolve) => {
+      resolveCapability = resolve;
+    });
+    const pending = request(createApp(capability)).get('/api/tts/say/status');
+
+    resolveCapability({ available: true, voices: [{ name: 'Samantha', locale: 'en_US' }] });
+
+    const response = await pending;
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      available: true,
+      voices: [{ name: 'Samantha', locale: 'en_US' }],
+    });
+  });
+
   it('returns local note fallback while model summarization is retired', async () => {
     const response = await request(createApp())
       .post('/api/text/summarize')

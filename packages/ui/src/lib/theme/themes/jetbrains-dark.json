@@ -30,10 +30,10 @@
       "elevated": "#2B2D30",
       "elevatedForeground": "#DFE1E5",
       "overlay": "#00000080",
-      "subtle": "#2c2d32"
+      "subtle": "#28292c"
     },
     "interactive": {
-      "border": "#474a51",
+      "border": "#383a3f",
       "borderHover": "#4B5059",
       "borderFocus": "#6796f5",
       "selection": "#43454A",
@@ -145,7 +145,7 @@
     },
     "chat": {
       "userMessage": "#DFE1E5",
-      "userMessageBackground": "#3a5b9d76",
+      "userMessageBackground": "#2a3b5d76",
       "assistantMessage": "#DFE1E5",
       "assistantMessageBackground": "#1E1F22",
       "timestamp": "#7A7E85",

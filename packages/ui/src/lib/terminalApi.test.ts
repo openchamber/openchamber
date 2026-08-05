@@ -93,6 +93,157 @@ describe('terminal transport', () => {
     transport.dispose();
   });
 
+  test('invalidates URL auth when the current socket closes before opening', async () => {
+    const socket = new FakeSocket();
+    let cleared = 0;
+    const transport = new TerminalTransport({
+      refreshAuth: async () => '',
+      openSocket: () => socket,
+      clearUrlAuthToken: () => { cleared += 1; },
+    });
+
+    const unsubscribe = transport.subscribe('term-1', { onEvent: () => {} });
+    await tick();
+    socket.close();
+    await tick();
+
+    expect(cleared).toBe(1);
+    unsubscribe();
+    transport.dispose();
+  });
+
+  test('invalidates URL auth before retrying a pre-open socket error', async () => {
+    const socket = new FakeSocket();
+    let cleared = 0;
+    const transport = new TerminalTransport({
+      refreshAuth: async () => '',
+      openSocket: () => socket,
+      clearUrlAuthToken: () => { cleared += 1; },
+    });
+
+    const unsubscribe = transport.subscribe('term-1', { onEvent: () => {} });
+    await tick();
+    socket.onerror?.();
+
+    expect(cleared).toBe(1);
+    unsubscribe();
+    transport.dispose();
+  });
+
+  test('does not let a cancelled opening reconnect a replacement subscription', async () => {
+    const sockets = [new FakeSocket(), new FakeSocket()];
+    let socketIndex = 0;
+    const replacementEvents: string[] = [];
+    const transport = new TerminalTransport({
+      refreshAuth: async () => '',
+      openSocket: () => sockets[socketIndex++]!,
+    });
+
+    const unsubscribeFirst = transport.subscribe('term-1', { onEvent: () => {} });
+    await tick();
+    unsubscribeFirst();
+
+    const unsubscribeReplacement = transport.subscribe('term-1', {
+      onEvent: (event) => replacementEvents.push(event.type),
+    });
+    await tick();
+    sockets[1]?.open();
+    await tick();
+
+    expect(replacementEvents).not.toContain('reconnecting');
+    unsubscribeReplacement();
+    transport.dispose();
+  });
+
+  test('starts a fresh reconnect sequence after every terminal has detached', async () => {
+    const firstEvents: number[] = [];
+    const replacementEvents: number[] = [];
+    const transport = new TerminalTransport({
+      refreshAuth: async () => '',
+      openSocket: () => { throw new Error('offline'); },
+    });
+
+    const unsubscribeFirst = transport.subscribe('term-1', {
+      onEvent: (event) => {
+        if (event.type === 'reconnecting' && typeof event.attempt === 'number') firstEvents.push(event.attempt);
+      },
+    });
+    await tick();
+    await tick();
+    expect(firstEvents).toEqual([1]);
+
+    unsubscribeFirst();
+    const unsubscribeReplacement = transport.subscribe('term-2', {
+      onEvent: (event) => {
+        if (event.type === 'reconnecting' && typeof event.attempt === 'number') replacementEvents.push(event.attempt);
+      },
+    });
+    await tick();
+    await tick();
+
+    expect(replacementEvents).toEqual([1]);
+    unsubscribeReplacement();
+    transport.dispose();
+  });
+
+  test('waits a minute before reconnecting while hidden', async () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+    const delays: number[] = [];
+    let transport: TerminalTransport | null = null;
+
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: {
+        visibilityState: 'hidden',
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      },
+    });
+    globalThis.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      delays.push(Number(timeout ?? 0));
+      if (timeout === 0) return originalSetTimeout(handler, 0, ...args);
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+
+    try {
+      transport = new TerminalTransport({
+        refreshAuth: async () => '',
+        openSocket: () => { throw new Error('offline'); },
+      });
+      transport.subscribe('term-1', { onEvent: () => {} });
+      await tick();
+      await tick();
+
+      expect(delays).toContain(60_000);
+    } finally {
+      transport?.dispose();
+      globalThis.setTimeout = originalSetTimeout;
+      if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
+      else delete (globalThis as { document?: unknown }).document;
+    }
+  });
+
+  test('attaches a remaining same-terminal subscriber after the first one leaves', async () => {
+    const socket = new FakeSocket();
+    const transport = new TerminalTransport({ refreshAuth: async () => '', openSocket: () => socket });
+
+    const unsubscribeOther = transport.subscribe('term-other', { onEvent: () => {} });
+    await tick();
+    socket.open();
+    await tick();
+
+    const unsubscribeFirst = transport.subscribe('term-1', { onEvent: () => {} });
+    const unsubscribeRemaining = transport.subscribe('term-1', { onEvent: () => {} });
+    unsubscribeFirst();
+    await tick();
+
+    expect(socket.sent.filter((message) => message.t === 'attach' && message.s === 'term-1')).toHaveLength(1);
+    unsubscribeRemaining();
+    unsubscribeOther();
+    transport.dispose();
+  });
+
   test('releases replay projections when the last subscriber detaches', async () => {
     const socket = new FakeSocket();
     const transport = new TerminalTransport({ refreshAuth: async () => '', openSocket: () => socket });

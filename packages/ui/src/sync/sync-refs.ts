@@ -17,6 +17,7 @@ const configListeners = new Set<(directory: string, config: Config) => void>()
 let cachedSessionManager: ChildStoreManager | null = null
 let cachedSessionSlices = new Map<string, State["session"]>()
 let cachedSessionsById = new Map<string, State["session"][number]>()
+let cachedSessionDirectoryById = new Map<string, string>()
 
 export function setSyncRefs(
   _sdk: OpencodeClient,
@@ -29,6 +30,7 @@ export function setSyncRefs(
     cachedSessionManager = null
     cachedSessionSlices = new Map()
     cachedSessionsById = new Map()
+    cachedSessionDirectoryById = new Map()
   }
   _directory = directory
   if (registerSessionDirectory) {
@@ -103,18 +105,38 @@ export function getAllSyncSessionMap(): ReadonlyMap<string, State["session"][num
 
   const nextSlices = new Map<string, State["session"]>()
   const nextSessionsById = new Map<string, State["session"][number]>()
+  const nextDirectoriesById = new Map<string, string>()
   for (const [directory, store] of stores.children) {
     const sessions = store.getState().session
     nextSlices.set(directory, sessions)
     for (const session of sessions) {
       if (!session?.id) continue
       nextSessionsById.set(session.id, session)
+      nextDirectoriesById.set(session.id, directory)
     }
   }
   cachedSessionManager = stores
   cachedSessionSlices = nextSlices
   cachedSessionsById = nextSessionsById
+  cachedSessionDirectoryById = nextDirectoriesById
   return cachedSessionsById
+}
+
+/**
+ * Directory of a child store that holds this session.
+ *
+ * This reports containment, not ownership, and a session can be held by more
+ * than one store: a project's session list includes the sessions of its
+ * worktrees so the sidebar can group them, so the parent repository holds
+ * worktree sessions too. Ownership comes from the session record's own
+ * directory; this is the fallback for a record that carries none. Returns
+ * `null` when no initialized child store contains the session, which means
+ * "unknown", never "no directory".
+ */
+export function getSyncSessionDirectory(sessionId: string): string | null {
+  if (!sessionId) return null
+  getAllSyncSessionMap()
+  return cachedSessionDirectoryById.get(sessionId) ?? null
 }
 
 /** Read messages for a session from current directory's child store */

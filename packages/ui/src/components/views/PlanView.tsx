@@ -48,6 +48,9 @@ import { useI18n } from '@/lib/i18n';
 
 type PlanViewProps = {
   targetPath?: string | null;
+  /** Called after a send action routes the user to the chat — hosts that show
+      PlanView in an overlay (mobile fullscreen surface) close it here. */
+  onNavigatedToChat?: () => void;
 };
 
 type PlanSendAction = 'improve' | 'implement';
@@ -147,7 +150,7 @@ type SelectedLineRange = {
   end: number;
 };
 
-export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
+export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, onNavigatedToChat }) => {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const createSession = useSessionUIStore((state) => state.createSession);
@@ -526,7 +529,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const routeToChat = React.useCallback(() => {
     setActiveMainTab('chat');
     setSessionSwitcherOpen(false);
-  }, [setActiveMainTab, setSessionSwitcherOpen]);
+    onNavigatedToChat?.();
+  }, [onNavigatedToChat, setActiveMainTab, setSessionSwitcherOpen]);
 
   const handleConfirmPlanSend = React.useCallback(
     async (execution: TodoSendExecution) => {

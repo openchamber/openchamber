@@ -47,7 +47,17 @@ const artifactForPlatform = (platform, targetArchitecture) => {
     if (arch === 'x64') return { name: 'opencode-darwin-x64-baseline.zip', binary: 'opencode' };
   }
   if (platform === 'win32') {
-    if (arch === 'arm64') return { name: 'opencode-windows-arm64.zip', binary: 'opencode.exe' };
+    // TEMPORARY WORKAROUND — Windows ARM64: native opencode.exe fails with a Bun
+    // FFI/TinyCC dlopen error (https://github.com/anomalyco/opencode/issues/19130).
+    // Bundle x64-baseline instead (runs under x64 emulation); OpenCode self-upgrade
+    // is disabled elsewhere so it can't overwrite with the broken ARM64 build.
+    // Remove this block and restore the original below when the upstream issue
+    // is resolved.
+    // --- ORIGINAL (restore when ARM64 is fixed) ---
+    // if (arch === 'arm64') return { name: 'opencode-windows-arm64.zip', binary: 'opencode.exe' };
+    // if (arch === 'x64') return { name: 'opencode-windows-x64-baseline.zip', binary: 'opencode.exe' };
+    // --- END ORIGINAL ---
+    if (arch === 'arm64') return { name: 'opencode-windows-x64-baseline.zip', binary: 'opencode.exe' };
     if (arch === 'x64') return { name: 'opencode-windows-x64-baseline.zip', binary: 'opencode.exe' };
   }
   if (platform === 'linux') {

@@ -18,6 +18,7 @@ type Args = {
   removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   archiveSessions: (ids: string[]) => Promise<{ archivedIds: string[]; failedIds: string[] }>;
+  unarchiveSessions: (ids: string[]) => Promise<{ restoredIds: string[]; failedIds: string[] }>;
   deleteSessions: (ids: string[]) => Promise<{ deletedIds: string[]; failedIds: string[] }>;
   setBulkDeleteConfirm: React.Dispatch<React.SetStateAction<{
     sessionCount: number;
@@ -50,6 +51,7 @@ export const useSidebarBulkActions = (args: Args) => {
     removeSessionsFromFolders,
     createFolderAndStartRename,
     archiveSessions,
+    unarchiveSessions,
     deleteSessions,
     setBulkDeleteConfirm,
   } = args;
@@ -206,6 +208,23 @@ export const useSidebarBulkActions = (args: Args) => {
     setBulkDeleteConfirm({ sessionCount: count, archivedBucket: bulkScopeIsArchived });
   }, [bulkScopeIsArchived, executeBulkDelete, selectedIds, showDeletionDialog, setBulkDeleteConfirm, hasSelection]);
 
+  const handleBulkRestore = React.useCallback(async () => {
+    if (!hasSelection || !bulkScopeIsArchived) return;
+    const ids = Array.from(selectedIds);
+    const { restoredIds, failedIds } = await unarchiveSessions(ids);
+    if (restoredIds.length > 0) {
+      toast.success(restoredIds.length === 1
+        ? t('sessions.sidebar.bulkActions.restoredSingle', { count: restoredIds.length })
+        : t('sessions.sidebar.bulkActions.restoredPlural', { count: restoredIds.length }));
+    }
+    if (failedIds.length > 0) {
+      toast.error(failedIds.length === 1
+        ? t('sessions.sidebar.bulkActions.failedRestoreSingle', { count: failedIds.length })
+        : t('sessions.sidebar.bulkActions.failedRestorePlural', { count: failedIds.length }));
+    }
+    useSessionMultiSelectStore.getState().clear();
+  }, [bulkScopeIsArchived, hasSelection, selectedIds, t, unarchiveSessions]);
+
   const confirmBulkDelete = React.useCallback(async () => {
     setBulkDeleteConfirm(null);
     await executeBulkDelete();
@@ -275,6 +294,7 @@ export const useSidebarBulkActions = (args: Args) => {
     handleBulkCreateFolderAndMove,
     handleBulkRemoveFromFolder,
     handleBulkDelete,
+    handleBulkRestore,
     confirmBulkDelete,
   };
 };

@@ -25,14 +25,14 @@
       "background": "#1F1F28",
       "foreground": "#DCD7BA",
       "muted": "#23232d",
-      "mutedForeground": "#7e7e77",
+      "mutedForeground": "#8b8b85",
       "elevated": "#2A2A37",
       "elevatedForeground": "#DCD7BA",
       "overlay": "#16161DCC",
-      "subtle": "#2f2f3d"
+      "subtle": "#2a2a36"
     },
     "interactive": {
-      "border": "#363646",
+      "border": "#333343",
       "borderHover": "#54546D",
       "borderFocus": "#7FB4CA",
       "selection": "#729fb333",
@@ -155,7 +155,7 @@
       "headerHover": "#36364650",
       "icon": "#afad9c",
       "title": "#DCD7BA",
-      "description": "#5A595B",
+      "description": "#818182",
       "edit": {
         "added": "#98BB6C",
         "addedBackground": "#98BB6C25",

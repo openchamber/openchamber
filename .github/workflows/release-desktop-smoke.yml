@@ -186,7 +186,7 @@ jobs:
 
   build-windows-electron:
     if: ${{ inputs.build_windows }}
-    name: Build Windows Electron (x64)
+    name: Build Windows Electron (${{ matrix.arch }})
     # Match the production release workflow. windows-latest currently resolves
     # to a runner with Visual Studio 18, which this Electron/node-gyp stack does
     # not detect correctly.
@@ -198,6 +198,9 @@ jobs:
           - arch: x64
             target: x86_64-pc-windows-msvc
             platform: win32-x64
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+            platform: win32-arm64
     steps:
       - name: Checkout selected ref
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -249,6 +252,9 @@ jobs:
       - name: Rebuild native modules
         working-directory: packages/electron
         shell: bash
+        env:
+          # Cross-compile for ARM64 target from x64 runner.
+          ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
         # npmRebuild=false in package.json, so electron-builder won't
         # recompile native deps on its own. Rebuild against the target
         # Electron ABI before packaging, matching the release workflow.

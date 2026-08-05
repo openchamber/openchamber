@@ -20,6 +20,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
 | `cursor` | Cursor | `providers/cursor.js` | Environment/token files, OpenChamber-managed credentials, or explicit one-time Cursor import |
 | `crof` | CrofAI | `providers/crof.js` | `crof` (API key under `key` or `token`) |
+| `deepseek` | DeepSeek | `providers/deepseek.js` | `deepseek` (API key under `key` or `token`) |
 | `google` | Google | `providers/google/index.js` | `google`, `google.oauth`, Antigravity accounts file |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
@@ -69,6 +70,14 @@ In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 mo
 - **Percentage-based plans**: Legacy Coding Plan accounts return `current_interval_total_count: 0` but include `current_interval_remaining_percent`. The provider prefers this field when count fields are absent.
 - **model_remains array**: Now contains entries for multiple model categories (chat, speech, video, image). The provider selects the chat-model entry by matching `MiniMax-M*`, then `general`/`chat`/`text` by name, then any entry with a remaining percent.
 - **Window status**: The `current_interval_status` and `current_weekly_status` fields indicate whether a window is active. Status `3` means the window is not applicable for the current plan tier (e.g. legacy plans without weekly limits). The provider omits inactive windows.
+
+## Kimi for Coding field semantics
+
+`GET https://api.kimi.com/coding/v1/usages` is inconsistent about which field carries consumption:
+- The weekly `usage` block returns `used` (consumed) with no `remaining` field.
+- Each `limits[].detail` rate-limit block returns `remaining` (available) with no `used` field.
+
+The provider computes `usedPercent` from whichever of `used`/`remaining` is present (`used` takes precedence when both exist) rather than assuming one field name. Both `packages/web/server/lib/quota/providers/kimi.js` and `packages/vscode/src/quotaProviders.ts` (`fetchKimiQuota`) must stay in sync — the VS Code extension duplicates this parsing logic rather than importing it.
 
 ## Notes for contributors
 - Keep provider IDs stable; clients use them directly.

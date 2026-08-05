@@ -1,0 +1,85 @@
+---
+title: Änderungen durchgehen
+description: Lesen Sie einen Diff in der Reihenfolge, in der er Sinn ergibt, nicht alphabetisch.
+---
+
+# Änderungen durchgehen
+
+Ein Diff ist nach Dateipfad sortiert, und das ist fast nie die Reihenfolge, in der die Änderung Sinn ergibt. Das Walkthrough ordnet ihn neu: Zusammengehörige Änderungen werden in **Stops** gruppiert, jeder Stop erklärt, was der Code jetzt anders macht, und die Stops sind so angeordnet, dass jeder auf dem vorherigen aufbaut.
+
+Es erklärt und ordnet. Es bewertet Ihren Code nicht und fällt kein Urteil — dafür ist [Review](/git/) da.
+
+Öffnen Sie es über das **Walkthrough**-Symbol in der rechten Leiste oder über die Schaltfläche **AI walkthrough** in den Bereichen Changes und Pull Request. Beides öffnet nur das Panel; generiert wird erst, wenn Sie **Generate walkthrough** drücken.
+
+## Wie ein Stop markiert ist
+
+Jeder Stop benennt sein Thema, erklärt es in ein bis zwei Sätzen und zeigt danach genau den Code, den er beschreibt. Manche Stops tragen eine kleine Markierung neben dem Titel:
+
+| Markierung | Bedeutung |
+| --- | --- |
+| **Kernänderung** | Dieser Stop trägt die eigentliche Änderung oder den größten Teil ihres Risikos. Lesen Sie ihn genau und zuerst. |
+| **Kontext** | Eine unterstützende Änderung, damit der Rest verständlich bleibt. Kann überflogen werden. |
+| *(ohne Markierung)* | Ein gewöhnlicher Schritt in der Lesereihenfolge. |
+
+Die Markierung sagt, **wo Sie Ihre Aufmerksamkeit investieren sollten**, und nichts über die Qualität des Codes. Ein Stop wird nie markiert, weil darin etwas Falsches gefunden wurde — das Walkthrough meldet keine Funde, keine Schweregrade und keine Urteile. Wenn Code bewertet werden soll, ist das die Aktion **Review** in [Git & GitHub](/git/).
+
+Die einzigen Markierungen, die tatsächlich auf ein Problem hinweisen, sind **Veraltet** und **Nicht abgedeckt** — und beide betreffen das Veralten des Walkthroughs selbst, nicht Ihren Code. Siehe unten.
+
+## Was es prüfen kann
+
+| Bereich | Was enthalten ist |
+| --- | --- |
+| Alle uncommitteten | Alles, was noch nicht committet ist: gestagte, ungestagte und neue Dateien |
+| Gestaged | Nur das, was jetzt in einen Commit gehen würde |
+| Ungestaged | Arbeitsbaum und neue Dateien |
+| Dieser Branch | Jeder Commit auf diesem Branch, der nicht auf seinem Basis-Stand ist |
+| Pull Request | Die Änderung so, wie sie auf GitHub existiert |
+
+**Dieser Branch** bedeutet nicht „nicht gepushte Commits“ — es ist alles, was der Branch gegenüber seiner Basis hinzufügt, egal ob gepusht oder nicht. Nach einem Commit, aber vor dem Push, unterscheiden sich also Branch und Pull Request absichtlich: Der eine zeigt, was Sie getan haben, der andere, was Reviewer gerade sehen.
+
+Jeder Bereich wird separat gespeichert, sodass der Wechsel zwischen ihnen nichts verliert.
+
+## Das Modell wählen
+
+Walkthroughs nutzen standardmäßig Ihr kleines Modell. Wählen Sie unter **Einstellungen → Sitzungen → Modell für Änderungen durchgehen** ein anderes aus oder für eine einzelne Prüfung im Kopfbereich des Panels — nützlich, wenn eine Änderung riskant genug ist, ein stärkeres Modell zu brauchen.
+
+Die Auswahl zeigt nur Modelle an, die strukturierten Output zurückgeben können, weil sich das Walkthrough ohne ihn nicht zusammensetzen lässt. Wenn ein Modell für den Diff zu klein ist, wird die Generierung mit einer Erklärung abgelehnt, statt die Eingabe stillschweigend zu kürzen: Ein Walkthrough über einen halben Diff wirkt sicher und ist falsch.
+
+Wenn Sie ein Panel erneut öffnen, sehen Sie das Modell, das den aktuellen Inhalt erzeugt hat, sodass **Regenerate** mit demselben Modell wiederholt, sofern Sie es nicht ändern.
+
+## Die Sprache wählen
+
+Walkthroughs werden standardmäßig in Ihrer UI-Sprache geschrieben. Der Sprachwähler im Panelkopf startet dort, und Sie können für eine einzelne Prüfung jede andere Sprache wählen, in die OpenChamber übersetzt ist — eine geführte Erklärung ist nur in einer Sprache nützlich, die Sie bequem lesen.
+
+Übersetzt wird nur der Fließtext. Bezeichner, Dateipfade und API-Namen bleiben genau so, wie sie im Code erscheinen, damit das, was ein Stop nennt, weiterhin suchbar bleibt.
+
+Wenn in der von Ihnen gewählten Sprache noch nichts erzeugt wurde, zeigt das Panel weiterhin das vorhandene Walkthrough an und sagt das auch, statt leer zu werden. Drücken Sie **Generate walkthrough**, um eines in der neuen Sprache zu erhalten.
+
+## Kosten und Caching
+
+Nichts wird von selbst generiert. Die Generierung startet nur, wenn Sie sie anfordern, und auch das erneute Generieren ist manuell.
+
+Ergebnisse werden gegen den exakten Inhalt des Diffs gecacht. Wenn Sie den Arbeitsbaum auf einen früheren Stand zurücksetzen, erscheint das frühere Walkthrough kostenlos wieder, ohne Modellaufruf. Sprache und Modell sind ebenfalls Teil dieses Schlüssels, also wird jede Kombination separat gespeichert: Hat ein Diff einmal Walkthroughs in zwei Sprachen, ist das Umschalten zwischen ihnen sofort und kostenlos.
+
+Die Generierung läuft auf dem OpenChamber-Server, nicht in Ihrem Browser-Tab. Laden Sie die Seite neu oder schließen Sie das Panel, und sie läuft weiter; wenn Sie zurückkommen, wartet das Ergebnis. Nur **Cancel** beendet sie.
+
+## Ehrlich mit Aktualität umgehen
+
+Jeder Stop ist an den exakten Codeinhalt gebunden, den er beschreibt, damit das Panel Ihnen sagen kann, wenn sich dieser Code weiterentwickelt hat:
+
+- **Veraltete Schritte** — der Code, den ein Stop beschrieben hat, wurde geändert oder ist verschwunden. Das Walkthrough bleibt sichtbar und markiert, damit Sie entscheiden können, ob Sie es neu generieren.
+- **Nicht abgedeckt** — Änderungen im aktuellen Diff, die kein Stop beschreibt. Dazu gehören spätere Bearbeitungen nach der Generierung, Änderungen, die das Walkthrough als Routine eingestuft hat, sowie Lockfiles und andere generierte Dateien, die absichtlich aus der Modelleingabe herausgehalten werden. Sie werden alle am Ende des Streams aufgelistet, damit nichts stillschweigend verschwindet.
+
+Neu generieren bedeutet neu schreiben statt patchen: Das vorherige Walkthrough geht als Kontext an das Modell, damit richtige Teile erhalten bleiben, und alles wird neu an den aktuellen Code angeheftet.
+
+## Hinweise
+
+- Kommentieren Sie im Walkthrough jede Zeile genau wie in der Diff-Ansicht; Kommentare werden an den Chat-Composer angehängt.
+- Verfügbar auf Desktop- und Tablet-Breiten. In der VS-Code-Erweiterung oder der mobilen App nicht angeboten.
+- Eine Pull-Request-Review benötigt ein verbundenes GitHub-Konto — siehe [GitHub Issues & PRs](/github/).
+
+## Verwandt
+
+- [Git & GitHub](/git/) — das Changes-Panel, aus dem dies liest, und die Review-Aktion, die tatsächlich Code bewertet
+- [GitHub Issues & PRs](/github/) — GitHub verbinden, um Pull Requests zu prüfen
+- [Anbieter, Modelle & Agents](/providers/) — woher das kleine Modell kommt

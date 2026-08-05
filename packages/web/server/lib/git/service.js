@@ -351,23 +351,38 @@ const buildGitEnv = async () => {
   return env;
 };
 
-const createGit = async (directory) => {
+const createGit = async (directory, { allowUnsafeSshCommand = false } = {}) => {
   const env = await buildGitEnv();
   const spawnOptions = { windowsHide: true };
   const binary = getGitBinary();
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
-  const unsafe = hasCustomBinary ? { allowUnsafeCustomBinary: true } : undefined;
-  if (!directory) {
-    return createSimpleGit({ env, spawnOptions, binary, unsafe });
+  const unsafe = hasCustomBinary || allowUnsafeSshCommand
+    ? {
+      ...(hasCustomBinary && { allowUnsafeCustomBinary: true }),
+      ...(allowUnsafeSshCommand && { allowUnsafeSshCommand: true }),
+    }
+    : undefined;
+  // Always pin simple-git to an explicit working directory. Omitting baseDir
+  // makes simple-git use process.cwd(), which breaks when the OpenChamber
+  // server was launched from a neutral directory (e.g. $HOME) and the opened
+  // project lives elsewhere — session/project discovery then sees spurious
+  // "not a git repository" errors and can abort enumeration.
+  const baseDir = normalizeDirectoryPath(directory);
+  if (typeof baseDir !== 'string' || !baseDir.trim()) {
+    throw new Error('Git directory is required');
   }
   return createSimpleGit({
-    baseDir: normalizeDirectoryPath(directory),
+    baseDir,
     env,
     spawnOptions,
     binary,
     unsafe,
   });
 };
+
+// Global config reads do not need a repository; use the home directory as a
+// stable baseDir so we never accidentally inherit process.cwd().
+const createGitForGlobalConfig = async () => createGit(os.homedir());
 
 const normalizeDirectoryPath = (value) => {
   if (typeof value !== 'string') {
@@ -469,11 +484,24 @@ const resolveGitRepositoryRoot = async (directoryPath, git) => {
 
 const createRepositoryGitContext = async (directory) => {
   const directoryPath = normalizeDirectoryPath(directory);
+  if (typeof directoryPath !== 'string' || !directoryPath.trim()) {
+    throw new Error('Git directory is required');
+  }
   const directoryGit = await createGit(directoryPath);
   const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
   const git = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot);
   return { directoryPath, directoryGit, repoRoot, git };
 };
+
+/**
+ * Absolute repository root for a directory anywhere inside it. Callers that key
+ * persisted data by repository need this so two directories in the same
+ * repository do not address different records.
+ */
+export async function getRepositoryRoot(directory) {
+  const { repoRoot } = await createRepositoryGitContext(directory);
+  return repoRoot;
+}
 
 const resolveGitInternalPath = async (repoRoot, git, gitPath) => {
   const resolved = await git.raw(['rev-parse', '--git-path', gitPath]);
@@ -493,7 +521,9 @@ const resolveGitFileContext = async (directoryPath, git, filePath, repoRootOverr
     }
 
     const repoPath = toGitPath(path.relative(repoRoot, absolutePath));
-    const existsInWorktree = await fsp.stat(absolutePath).then((stat) => stat.isFile()).catch(() => false);
+    const worktreeEntry = await fsp.lstat(absolutePath).catch(() => null);
+    const isSymbolicLink = worktreeEntry?.isSymbolicLink() ?? false;
+    const existsInWorktree = worktreeEntry?.isFile() || isSymbolicLink;
     const existsInIndex = await git.raw(['cat-file', '-e', `:${repoPath}`]).then(() => true).catch(() => false);
     const existsInHead = await git.raw(['cat-file', '-e', `HEAD:${repoPath}`]).then(() => true).catch(() => false);
 
@@ -502,6 +532,7 @@ const resolveGitFileContext = async (directoryPath, git, filePath, repoRootOverr
         absolutePath,
         repoPath,
         repoRoot,
+        isSymbolicLink,
       };
     }
   }
@@ -764,7 +795,11 @@ const parseGitErrorText = (error) => {
   const stderr = typeof error?.stderr === 'string' ? error.stderr : '';
   const stdout = typeof error?.stdout === 'string' ? error.stdout : '';
   const message = typeof error?.message === 'string' ? error.message : '';
-  return [stderr, stdout, message]
+  // Some runtimes (notably Bun + simple-git GitError) surface the fatal text
+  // primarily via message/toString; keep String(error) as a last resort so
+  // "not a git repository" matching never misses and aborts callers.
+  const fallback = !message && error != null ? String(error) : '';
+  return [stderr, stdout, message, fallback]
     .map((chunk) => String(chunk || '').trim())
     .filter(Boolean)
     .join('\n')
@@ -1609,94 +1644,13 @@ const loadProjectStartCommand = async (projectID) => {
   }
 };
 
-const getProjectStoragePath = (projectID) => {
-  return path.join(getOpenCodeDataPath(), 'storage', 'project', `${projectID}.json`);
-};
-
-const syncSandboxesToOpenCodeDb = (projectID, sandboxes) => {
-  try {
-    const Database = require('better-sqlite3');
-    const dbPath = path.join(getOpenCodeDataPath(), 'opencode.db');
-    if (!fs.existsSync(dbPath)) return;
-    const db = new Database(dbPath);
-    try {
-      const row = db.prepare('SELECT sandboxes FROM project WHERE id = ?').get(projectID);
-      if (!row) return;
-      const json = JSON.stringify(sandboxes);
-      db.prepare('UPDATE project SET sandboxes = ?, time_updated = ? WHERE id = ?').run(json, Date.now(), projectID);
-    } finally {
-      db.close();
-    }
-  } catch (error) {
-    console.warn('Failed to sync sandboxes to OpenCode DB:', error instanceof Error ? error.message : String(error));
-  }
-};
-
-const updateProjectSandboxes = async (projectID, primaryWorktree, updater) => {
-  const storagePath = getProjectStoragePath(projectID);
-  await fsp.mkdir(path.dirname(storagePath), { recursive: true });
-
-  const now = Date.now();
-  const base = {
-    id: projectID,
-    worktree: primaryWorktree,
-    vcs: 'git',
-    sandboxes: [],
-    time: {
-      created: now,
-      updated: now,
-    },
-  };
-
-  const parsed = await fsp.readFile(storagePath, 'utf8').then((raw) => JSON.parse(raw)).catch(() => null);
-  const current = parsed && typeof parsed === 'object' ? { ...base, ...parsed } : base;
-  current.id = String(current.id || projectID);
-  current.worktree = String(current.worktree || primaryWorktree);
-  current.vcs = current.vcs || 'git';
-  current.sandboxes = Array.isArray(current.sandboxes)
-    ? current.sandboxes.map((entry) => String(entry || '').trim()).filter(Boolean)
-    : [];
-  const createdAt = Number(current?.time?.created);
-  current.time = {
-    created: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : now,
-    updated: now,
-  };
-
-  updater(current);
-
-  current.sandboxes = [...new Set(
-    (Array.isArray(current.sandboxes) ? current.sandboxes : [])
-      .map((entry) => String(entry || '').trim())
-      .filter(Boolean)
-  )];
-
-  await fsp.writeFile(storagePath, `${JSON.stringify(current, null, 2)}\n`, 'utf8');
-
-  // Sync to OpenCode's SQLite database so project.sandboxes is visible via the SDK
-  syncSandboxesToOpenCodeDb(projectID, current.sandboxes);
-};
-
-const syncProjectSandboxAdd = async (projectID, primaryWorktree, sandboxPath) => {
-  const sandbox = String(sandboxPath || '').trim();
-  if (!sandbox) {
-    return;
-  }
-  await updateProjectSandboxes(projectID, primaryWorktree, (project) => {
-    if (!project.sandboxes.includes(sandbox)) {
-      project.sandboxes.push(sandbox);
-    }
-  });
-};
-
-const syncProjectSandboxRemove = async (projectID, primaryWorktree, sandboxPath) => {
-  const sandbox = String(sandboxPath || '').trim();
-  if (!sandbox) {
-    return;
-  }
-  await updateProjectSandboxes(projectID, primaryWorktree, (project) => {
-    project.sandboxes = project.sandboxes.filter((entry) => entry !== sandbox);
-  });
-};
+// OpenCode owns its own project/sandbox registry. It records a worktree as a
+// sandbox itself when an instance boots for that directory, and filters entries
+// whose directory no longer exists when reading them back. OpenChamber used to
+// write that state directly into OpenCode's storage JSON and SQLite database,
+// behind the back of the running process: the row changed but the server was
+// never told, so a worktree created while OpenCode was running stayed unknown
+// to it until a restart. Registration is not ours to perform.
 
 const isAttachedGitWorktreeDirectory = async (directory) => {
   try {
@@ -1712,14 +1666,6 @@ const cleanupFailedFastWorktreeCreate = async (context, candidate) => {
   const worktreeRoot = path.resolve(context.worktreeRoot);
   const isInsideWorktreeRoot = isInsideOrSameDirectory(worktreeRoot, candidateDirectory) && candidateDirectory !== worktreeRoot;
   const isAttached = await isAttachedGitWorktreeDirectory(candidateDirectory);
-
-  if (!isAttached) {
-    try {
-      await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, candidateDirectory);
-    } catch (error) {
-      console.warn('Failed to clean up OpenCode sandbox metadata after worktree failure:', error instanceof Error ? error.message : String(error));
-    }
-  }
 
   if (!isInsideWorktreeRoot || isAttached) {
     return;
@@ -1939,7 +1885,7 @@ export async function isGitRepository(directory) {
 }
 
 export async function getGlobalIdentity() {
-  const git = await createGit();
+  const git = await createGitForGlobalConfig();
 
   try {
     const userName = await git.getConfig('user.name', 'global').catch(() => null);
@@ -2017,7 +1963,7 @@ export async function hasLocalIdentity(directory) {
 }
 
 export async function setLocalIdentity(directory, profile) {
-  const git = await createGit(directory);
+  const git = await createGit(directory, { allowUnsafeSshCommand: true });
 
   try {
 
@@ -2027,12 +1973,12 @@ export async function setLocalIdentity(directory, profile) {
     const authType = profile.authType || 'ssh';
 
     if (authType === 'ssh' && profile.sshKey) {
-      await git.addConfig(
+      await git.raw([
+        'config',
+        '--local',
         'core.sshCommand',
-        buildSshCommand(profile.sshKey),
-        false,
-        'local'
-      );
+        buildSshCommand(profile.sshKey)
+      ]);
       await git.raw(['config', '--local', '--unset', 'credential.helper']).catch(() => {});
     } else if (authType === 'token' && profile.host) {
       await git.addConfig(
@@ -2059,9 +2005,19 @@ export async function setLocalIdentity(directory, profile) {
 
 export async function getStatus(directory, options = {}) {
   const lightMode = options.mode === 'light';
+  const normalizedDirectory = normalizeDirectoryPath(directory);
+  if (typeof normalizedDirectory !== 'string' || !normalizedDirectory.trim()) {
+    throw new Error('directory is required');
+  }
 
   try {
-    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(directory);
+    // Prefer an explicit non-repo check before simple-git status so a missing
+    // repository never depends on process.cwd() or an opaque GitError shape.
+    if (!(await isGitRepository(normalizedDirectory))) {
+      throw new Error('fatal: not a git repository (or any of the parent directories): .git');
+    }
+
+    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(normalizedDirectory);
 
     // Use -uall to show all untracked files individually, not just directories
     const status = await git.status(['-uall']);
@@ -2315,9 +2271,12 @@ export async function getStatus(directory, options = {}) {
       rebaseInProgress,
     };
   } catch (error) {
-    if (!isNotGitRepositoryError(error) && !isMissingDirectoryError(error)) {
-      console.error('Failed to get Git status:', error);
+    if (isNotGitRepositoryError(error) || isMissingDirectoryError(error)) {
+      // Re-throw a plain Error so route/session callers can match reliably and
+      // continue enumerating other projects instead of treating GitError as 500.
+      throw new Error('fatal: not a git repository (or any of the parent directories): .git');
     }
+    console.error('Failed to get Git status:', error);
     throw error;
   }
 }
@@ -2358,6 +2317,20 @@ export async function getDiff(directory, { path: filePath, staged = false, conte
       await git.raw(['ls-files', '--error-unmatch', '--', fileContext.repoPath]);
       return diff;
     } catch {
+      if (fileContext.isSymbolicLink) {
+        const target = await fsp.readlink(fileContext.absolutePath);
+        return [
+          `diff --git a/${fileContext.repoPath} b/${fileContext.repoPath}`,
+          'new file mode 120000',
+          '--- /dev/null',
+          `+++ b/${fileContext.repoPath}`,
+          '@@ -0,0 +1 @@',
+          `+${target}`,
+          '\\ No newline at end of file',
+          '',
+        ].join('\n');
+      }
+
       const noIndexArgs = ['diff', '--no-color'];
       if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
         noIndexArgs.push(`-U${Math.max(0, contextLines)}`);
@@ -2380,6 +2353,78 @@ export async function getDiff(directory, { path: filePath, staged = false, conte
   }
 }
 
+/**
+ * Individual untracked file paths, honoring ignore rules.
+ *
+ * Deliberately not `--directory`: collapsed directory entries end in a slash
+ * and are not valid inputs to the per-file diff helpers, so a caller would
+ * silently lose every file inside a new directory. Listing files costs more
+ * entries but each one is usable.
+ *
+ * Callers that only need this list should not pay for `getStatus`, which also
+ * computes ahead/behind, diff stats, and merge state — an order of magnitude
+ * more work for an answer they throw away.
+ */
+export async function listUntrackedPaths(directory) {
+  const { repoRoot } = await createRepositoryGitContext(directory);
+  const result = await runGitCommand(repoRoot, [
+    'ls-files',
+    '--others',
+    '--exclude-standard',
+  ]);
+  if (!result.success) return [];
+  return String(result.stdout || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Diffs for untracked files, produced against an empty tree.
+ *
+ * `getDiff` re-resolves the repository context on every call, which costs an
+ * extra `rev-parse` per file; a walkthrough of a branch with thirty new files
+ * pays that thirty times. This resolves once and reuses it, with a bounded pool
+ * so a repository full of new files cannot flood the process table.
+ *
+ * Returns one entry per input path, in order; unreadable paths yield `''`
+ * rather than failing the batch.
+ */
+export async function getUntrackedDiffs(directory, filePaths = [], { concurrency = 8, contextLines = 3 } = {}) {
+  const paths = (Array.isArray(filePaths) ? filePaths : []).filter((value) => typeof value === 'string' && value);
+  if (paths.length === 0) return [];
+
+  const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
+  const results = new Array(paths.length).fill('');
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < paths.length) {
+      const index = cursor++;
+      try {
+        const fileContext = await resolveGitFileContext(directoryPath, directoryGit, paths[index], repoRoot);
+        const args = ['diff', '--no-color'];
+        if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
+          args.push(`-U${Math.max(0, contextLines)}`);
+        }
+        args.push('--no-index', '--', '/dev/null', fileContext.repoPath);
+        try {
+          results[index] = await git.raw(args);
+        } catch (error) {
+          // `git diff --no-index` exits 1 whenever there are differences, which
+          // for a new file is always.
+          results[index] = error?.exitCode === 1 && error?.message ? error.message : '';
+        }
+      } catch {
+        results[index] = '';
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, paths.length) }, worker));
+  return results;
+}
+
 export async function getRangeDiff(directory, { base, head, path: filePath, contextLines = 3 } = {}) {
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
   const baseRef = typeof base === 'string' ? base.trim() : '';
@@ -2399,6 +2444,27 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
     }
   } catch {
     // ignore
+  }
+
+  // Not every repository has an `origin`. When the base names a branch that
+  // exists only on another remote, a bare name does not resolve — git looks in
+  // refs/heads, not across remotes — and the diff fails with "ambiguous
+  // argument". Fall back to whichever remote actually carries it.
+  if (resolvedBase === baseRef && !/[*?[\]^~:\\]/.test(baseRef)) {
+    const resolvesLocally = await git
+      .raw(['rev-parse', '--verify', `refs/heads/${baseRef}`])
+      .then((value) => Boolean(String(value || '').trim()))
+      .catch(() => false);
+
+    if (!resolvesLocally) {
+      const remoteMatch = await git
+        .raw(['for-each-ref', '--count=1', '--format=%(refname:short)', `refs/remotes/*/${baseRef}`])
+        .then((value) => String(value || '').trim())
+        .catch(() => '');
+      if (remoteMatch) {
+        resolvedBase = remoteMatch;
+      }
+    }
   }
 
   const args = ['diff', '--no-color'];
@@ -2555,9 +2621,9 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
   const isImage = isImageFile(filePath);
   const mimeType = isImage ? getImageMimeType(filePath) : null;
-  const { absolutePath, repoPath } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+  const { absolutePath, repoPath, isSymbolicLink } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
 
-  if (!isImage) {
+  if (!isImage && !isSymbolicLink) {
     const isBinaryBySniff = await looksBinaryBySniff(absolutePath);
     const isBinary = isBinaryBySniff || (await isBinaryDiff(repoRoot, repoPath, staged));
     if (isBinary) {
@@ -2611,8 +2677,18 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
         modified = await git.show([`:${repoPath}`]);
       }
     } else {
-      const stat = await fsp.stat(absolutePath);
-      if (stat.isFile()) {
+      if (isSymbolicLink) {
+        modified = await fsp.readlink(absolutePath);
+      } else {
+        const stat = await fsp.stat(absolutePath);
+        if (!stat.isFile()) {
+          return {
+            original: typeof original === 'string' ? original.replace(/\r\n/g, '\n') : original,
+            modified: '',
+            path: filePath,
+            isBinary: false,
+          };
+        }
         if (isImage) {
           // For images, read as binary and convert to data URL
           const buffer = await fsp.readFile(absolutePath);
@@ -3312,6 +3388,7 @@ export async function getBranches(directory) {
     const allBranches = result.all;
     const remoteBranches = allBranches.filter(branch => branch.startsWith('remotes/'));
     const activeRemoteBranches = await filterActiveRemoteBranches(git, remoteBranches);
+    const defaultBranches = await getRemoteDefaultBranches(git);
 
     const filteredAll = [
       ...allBranches.filter(branch => !branch.startsWith('remotes/')),
@@ -3321,7 +3398,8 @@ export async function getBranches(directory) {
     return {
       all: filteredAll,
       current: result.current,
-      branches: result.branches
+      branches: result.branches,
+      defaultBranches,
     };
   } catch (error) {
     console.error('Failed to get branches:', error);
@@ -3329,10 +3407,71 @@ export async function getBranches(directory) {
   }
 }
 
+async function getRemoteDefaultBranches(git) {
+  let defaults = {};
+
+  try {
+    const refs = await git.raw([
+      'for-each-ref',
+      '--format=%(refname) %(symref)',
+      'refs/remotes',
+    ]);
+    defaults = Object.fromEntries(
+      refs.trim().split('\n').flatMap((line) => {
+        const [ref, symbolicRef] = line.split(' ');
+        const match = ref.match(/^refs\/remotes\/([^/]+)\/HEAD$/);
+        const prefix = match ? `refs/remotes/${match[1]}/` : '';
+        return match && typeof symbolicRef === 'string' && symbolicRef.startsWith(prefix)
+          ? [[match[1], symbolicRef.slice(prefix.length)]]
+          : [];
+      })
+    );
+  } catch {
+    defaults = {};
+  }
+
+  // `remote/HEAD` is written by clone and by `git remote set-head`; a remote
+  // added by hand may never have one. Without this the caller falls back to
+  // guessing main/master/develop, which is exactly the guess this data exists
+  // to replace — so ask the remote itself, but only for the remotes that are
+  // actually missing an answer.
+  try {
+    const remotes = await git.getRemotes();
+    const missing = remotes.filter((remote) => remote?.name && !defaults[remote.name]);
+    if (missing.length === 0) return defaults;
+
+    const resolved = await Promise.all(missing.map(async (remote) => {
+      try {
+        const output = await git.raw(['ls-remote', '--symref', remote.name, 'HEAD']);
+        const match = String(output || '').match(/^ref:\s+refs\/heads\/(.+?)\s+HEAD$/m);
+        return match ? [remote.name, match[1]] : null;
+      } catch {
+        // Unreachable or refusing: no answer is better than a guessed one.
+        return null;
+      }
+    }));
+
+    for (const entry of resolved) {
+      if (entry) defaults[entry[0]] = entry[1];
+    }
+  } catch {
+    // Remote list unavailable; the local symrefs are still valid.
+  }
+
+  return defaults;
+}
+
 async function filterActiveRemoteBranches(git, remoteBranches) {
   try {
     const remotes = await git.getRemotes();
     const branchesByRemote = new Map();
+
+    // A remote that did not answer says nothing about its branches. Dropping
+    // them would turn "we could not ask" into "these branches are gone", and
+    // callers use this list to decide whether a base branch exists at all — so
+    // offline would silently remove comparisons that work perfectly well
+    // against the local remote-tracking refs.
+    const unreachableRemotes = new Set();
 
     await Promise.all(remotes.map(async (remote) => {
       try {
@@ -3347,7 +3486,7 @@ async function filterActiveRemoteBranches(git, remoteBranches) {
         }
         branchesByRemote.set(remote.name, actualRemoteBranches);
       } catch {
-        // Skip remotes that fail (e.g., unreachable)
+        unreachableRemotes.add(remote.name);
       }
     }));
 
@@ -3356,6 +3495,7 @@ async function filterActiveRemoteBranches(git, remoteBranches) {
       if (!match) return false;
       const remoteName = remoteBranch.split('/')[1];
       const branchName = match[1];
+      if (unreachableRemotes.has(remoteName)) return true;
       return branchesByRemote.get(remoteName)?.has(branchName) ?? false;
     });
   } catch (error) {
@@ -3796,12 +3936,6 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
 
   await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
 
-  try {
-    await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);
-  } catch (error) {
-    console.warn('Failed to sync OpenCode sandbox metadata (add):', error instanceof Error ? error.message : String(error));
-  }
-
   const shouldSetUpstream = Boolean(input?.setUpstream);
   const upstreamRemote = String(input?.upstreamRemote || inferredUpstream?.remote || '').trim();
   const upstreamBranch = String(input?.upstreamBranch || inferredUpstream?.branch || '').trim();
@@ -3860,12 +3994,6 @@ export async function createWorktree(directory, input = {}) {
 
   if (input?.returnAfterDirectoryCreated === true) {
     await fsp.mkdir(candidate.directory, { recursive: false });
-
-    try {
-      await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);
-    } catch (error) {
-      console.warn('Failed to sync OpenCode sandbox metadata (add):', error instanceof Error ? error.message : String(error));
-    }
 
     const bootstrapStatus = setWorktreeBootstrapState(
       candidate.directory,
@@ -3959,12 +4087,6 @@ export async function removeWorktree(directory, input = {}) {
       await fsp.rm(targetDirectory, { recursive: true, force: true });
     }
 
-    try {
-      await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, targetDirectory);
-    } catch (error) {
-      console.warn('Failed to sync OpenCode sandbox metadata (remove):', error instanceof Error ? error.message : String(error));
-    }
-
     clearWorktreeBootstrapState(targetDirectory);
 
     return true;
@@ -3985,12 +4107,6 @@ export async function removeWorktree(directory, input = {}) {
         `Failed to delete local branch ${branchName}`
       );
     }
-  }
-
-  try {
-    await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, matchedEntry.worktree);
-  } catch (error) {
-    console.warn('Failed to sync OpenCode sandbox metadata (remove):', error instanceof Error ? error.message : String(error));
   }
 
   clearWorktreeBootstrapState(matchedEntry.worktree);

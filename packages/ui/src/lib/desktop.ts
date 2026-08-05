@@ -1,4 +1,4 @@
-import type { ProjectEntry, TerminalShell } from '@/lib/api/types';
+import type { ProjectEntry, RuntimeAPIs, TerminalShell } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -131,6 +131,10 @@ export type DesktopSettings = {
   sessionGoalDefaultBudgetEnabled?: boolean;
   sessionGoalDefaultBudget?: number;
   smallModelOverride?: string; // format: "provider/model"
+  // The walkthrough needs structured output and a roomy context, which the
+  // small model is often deliberately not chosen for. Unset means "use the
+  // small model"; a value replaces it for this feature only.
+  walkthroughModelOverride?: string; // format: "provider/model"
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
   autoCreateWorktree?: boolean;
@@ -557,6 +561,15 @@ export const isWebRuntime = (): boolean => {
   // Default: anything that's not VSCode behaves like web (HTTP UI).
   return !isVSCodeRuntime();
 };
+
+/**
+ * Electron reuses the web RuntimeAPIs implementation, so distinguish a browser
+ * client from an Electron renderer with both the runtime descriptor and shell.
+ */
+export const isBrowserClientRuntime = (
+  platform: RuntimeAPIs['runtime']['platform'],
+  desktopShell = isDesktopShell(),
+): boolean => platform === 'web' && !desktopShell;
 
 export const getDesktopHomeDirectory = async (): Promise<string | null> => {
   if (typeof window !== 'undefined') {

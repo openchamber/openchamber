@@ -40,6 +40,11 @@ import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { markStartupTrace } from '@/lib/startupTrace';
+import {
+    findLatestUserModelChoice,
+    shouldPreserveManualModelOverride,
+} from '@/lib/messages/userModelChoice';
+import { getSyncParts } from '@/sync/sync-refs';
 
 type IconComponent = IconName;
 
@@ -645,37 +650,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         currentSessionDirectory ?? undefined,
     );
     const currentSessionMessagesFromSync = useSessionMessages(currentSessionId ?? '', currentSessionDirectory ?? undefined);
+    // Skip synthetic subagent-completion nudges — restoring from them resets a
+    // manual model override back to the agent default (issue #2404).
     const latestLoadedUserChoice = React.useMemo(() => {
-        for (let i = currentSessionMessagesFromSync.length - 1; i >= 0; i -= 1) {
-            const message = currentSessionMessagesFromSync[i] as typeof currentSessionMessagesFromSync[number] & {
-                model?: { providerID?: string; modelID?: string; variant?: string };
-                variant?: string;
-                mode?: string;
-            };
-            if (message.role !== 'user') {
-                continue;
-            }
-
-            const providerID = typeof message.model?.providerID === 'string' && message.model.providerID.trim().length > 0
-                ? message.model.providerID
-                : undefined;
-            const modelID = typeof message.model?.modelID === 'string' && message.model.modelID.trim().length > 0
-                ? message.model.modelID
-                : undefined;
-            const agent = typeof message.agent === 'string' && message.agent.trim().length > 0
-                ? message.agent
-                : (typeof message.mode === 'string' && message.mode.trim().length > 0 ? message.mode : undefined);
-            // OpenCode 1.4.0 moved variant from top-level to model.variant.
-            // Prefer the new location, fall back to the legacy one for older servers.
-            const variantCandidate = message.model?.variant ?? message.variant;
-            const variant = typeof variantCandidate === 'string' && variantCandidate.trim().length > 0
-                ? variantCandidate
-                : undefined;
-
-            return { id: message.id, agent, providerID, modelID, variant };
-        }
-        return null;
-    }, [currentSessionMessagesFromSync]);
+        return findLatestUserModelChoice(
+            currentSessionMessagesFromSync,
+            (messageId) => getSyncParts(messageId, currentSessionDirectory ?? undefined),
+        );
+    }, [currentSessionDirectory, currentSessionMessagesFromSync]);
 
     const tryApplyModelSelection = React.useCallback(
         (providerId: string, modelId: string, agentName?: string): ModelApplyResult => {
@@ -828,6 +810,25 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
+        // Manual session override wins over historical / synthetic message metadata.
+        const savedSessionModel = getSessionModelSelection(currentSessionId);
+        if (shouldPreserveManualModelOverride({
+            selectionSource: useConfigStore.getState().selectionSource,
+            savedSessionModel,
+            candidate: latestLoadedUserChoice,
+        })) {
+            if (savedSessionModel) {
+                applyModelSelectionWithVariant(
+                    savedSessionModel.providerId,
+                    savedSessionModel.modelId,
+                    resolveModelVariantSelection(savedSessionModel.providerId, savedSessionModel.modelId),
+                    currentAgentName || undefined,
+                );
+            }
+            latestLoadedUserChoiceRestoreRef.current = restoreKey;
+            return;
+        }
+
         if (latestLoadedUserChoice.agent && currentAgentName !== latestLoadedUserChoice.agent) {
             setAgent(latestLoadedUserChoice.agent);
         }
@@ -869,6 +870,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         setAgent,
         applyModelSelectionWithVariant,
         getModelVariantOptions,
+        getSessionModelSelection,
+        resolveModelVariantSelection,
         saveSessionAgentSelection,
         saveAgentModelVariantForSession,
         saveSessionModelSelection,
