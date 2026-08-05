@@ -1854,8 +1854,13 @@ const AssistantMessageBody = React.memo(({
                     i += 1;
                     continue;
                 }
+                // Key by the part's stable id (falling back to the index) so a
+                // new part inserted or filtered earlier in the array cannot
+                // remount every following text block. A remount re-parses the
+                // markdown from scratch and reads as a blink while streaming.
+                const textPartKey = part.id ? `assistant-text-${messageId}-${part.id}` : `assistant-text-${messageId}-${i}`;
                 rendered.push(
-                    <div key={`assistant-text-${messageId}-${i}`} ref={messageTextContentRef} data-message-text-export-source="true">
+                    <div key={textPartKey} ref={messageTextContentRef} data-message-text-export-source="true">
                         <AssistantTextPart
                             part={part}
                             sessionId={sessionId}
@@ -1886,12 +1891,16 @@ const AssistantMessageBody = React.memo(({
                     i += 1;
                     continue;
                 }
+                // Same stable-id keying as text parts above: keeps reasoning
+                // blocks mounted when earlier parts are inserted/filtered, so
+                // their markdown is not re-parsed mid-stream.
+                const reasoningPartKey = part.id ? `reasoning-${messageId}-${part.id}` : `reasoning-${messageId}-${i}`;
                 if (showReasoningTraces) {
                     if (!collapsibleThinkingBlocks) {
                         // Non-collapsible mode: render thinking blocks as plain text inline.
                         rendered.push(
                             <AssistantTextPart
-                                key={`reasoning-${messageId}-${i}`}
+                                key={reasoningPartKey}
                                 part={part}
                                 sessionId={sessionId}
                                 messageId={messageId}
@@ -1905,7 +1914,7 @@ const AssistantMessageBody = React.memo(({
                         // Per-part mode: each reasoning block at its natural position.
                         rendered.push(
                             <ReasoningPart
-                                key={`reasoning-${messageId}-${i}`}
+                                key={reasoningPartKey}
                                 part={part}
                                 messageId={messageId}
                                 streamPhase={effectiveStreamPhase}
