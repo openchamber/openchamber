@@ -34,6 +34,17 @@
     font-size: unset !important;
   }
 
+  /* Composer model/agent chips (MobileModelButton / MobileAgentButton): the
+     generic override above (font-size: unset !important) makes their
+     typography-micro labels inherit the base text size on phones — LARGER
+     than the desktop scale they were sized with (16px inherited vs 14px
+     desktop), which is why the labels look oversized and truncate. Pin the
+     chips to a compact size, scoped to the chips only: the app-wide --text-*
+     shrink (revert of #1791) was reverted because it resized every surface. */
+  :root.mobile-pointer:not(.desktop-runtime) .oc-composer-chip {
+    font-size: 0.75rem !important; /* 12px on phones vs 14px on desktop */
+  }
+
   /* Fix font size for tool displays */
   :root.mobile-pointer:not(.desktop-runtime) [class*="tool"],
   :root.mobile-pointer:not(.desktop-runtime) [class*="code"] {
