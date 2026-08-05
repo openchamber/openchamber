@@ -37,6 +37,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
 import { setContextObligatoryMessage } from '@/sync/session-actions';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { focusChatInput } from './composer/editor/dom';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -416,6 +417,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 createdAt: messageCreatedAt,
                 role: isUser ? 'user' : 'assistant',
             }, !isPinnedIntoContext);
+            // Return focus to the composer so the user can keep typing right
+            // after adding the message to context (matches the refocus pattern
+            // used by the model/agent selectors).
+            requestAnimationFrame(focusChatInput);
         } catch (error) {
             console.error('[chat-message] failed to update context pin', error);
             toast.error(t('chat.messageBody.actions.contextPinFailed'));
