@@ -343,6 +343,7 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
 - `registerOpenChamberRoutes(app, dependencies)`: registers OpenChamber endpoints:
   - `GET /api/openchamber/update-check`
   - `POST /api/openchamber/update-install`
+  - `GET /api/openchamber/update-status` (authoritative install completion state written by the update-install flow: `installing` → `success`/`failed`; `idle` when no install is recorded)
   - `GET /api/openchamber/models-metadata`
   - `GET /api/zen/models`
 

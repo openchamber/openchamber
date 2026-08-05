@@ -13,6 +13,30 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     getCachedZenModels,
   } = dependencies;
 
+  function readUpdateStatusFile(filePath) {
+    try {
+      const content = fs.readFileSync(filePath, 'utf8').trim();
+      if (!content) {
+        return null;
+      }
+      return JSON.parse(content);
+    } catch {
+      return null;
+    }
+  }
+
+  function writeUpdateStatusFile(filePath, status) {
+    try {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, `${JSON.stringify(status)}\n`, { encoding: 'utf8' });
+    } catch (error) {
+      console.warn('Failed to write update status file:', error);
+    }
+  }
+
+  const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
+  const updateStatusFilePath = path.join(openchamberDataDir, 'update-status.json');
+
   app.get('/api/openchamber/update-check', async (req, res) => {
     try {
       const { checkForUpdates } = await import('../package-manager.js');
@@ -75,6 +99,13 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         process.env.container === 'docker';
 
       if (isContainer) {
+        const containerUpdateStatus = {
+          state: 'installing',
+          startedAt: Date.now(),
+          targetVersion: updateInfo.version || null,
+        };
+        writeUpdateStatusFile(updateStatusFilePath, containerUpdateStatus);
+
         res.json({
           success: true,
           message: 'Update starting, server will stay online',
@@ -89,12 +120,55 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
           const shell = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : 'sh';
           const shellFlag = process.platform === 'win32' ? '/c' : '-c';
+
+          let logFd = null;
+          try {
+            fs.mkdirSync(path.dirname(updateLogPath), { recursive: true });
+            logFd = fs.openSync(updateLogPath, 'a');
+          } catch (logError) {
+            console.warn('Failed to open update log file, continuing without log capture:', logError);
+          }
+
           const child = spawnChild(shell, [shellFlag, updateCmd], {
             detached: true,
-            stdio: 'ignore',
+            stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
             env: process.env,
           });
+
+          const writeFinishedStatus = (state, exitCode, errorMessage) => {
+            writeUpdateStatusFile(updateStatusFilePath, {
+              state,
+              startedAt: containerUpdateStatus.startedAt,
+              targetVersion: updateInfo.version || null,
+              finishedAt: Date.now(),
+              ...(exitCode !== undefined && exitCode !== null ? { exitCode } : {}),
+              ...(errorMessage ? { error: errorMessage } : {}),
+            });
+          };
+
+          child.on('exit', (code) => {
+            writeFinishedStatus(code === 0 ? 'success' : 'failed', code);
+            if (code === 0) {
+              console.log(`Update installed successfully (${pm}).`);
+            } else {
+              console.error(`Update failed (${pm}) with exit code ${code}. See ${updateLogPath}`);
+            }
+          });
+
+          child.on('error', (spawnError) => {
+            const message = spawnError instanceof Error ? spawnError.message : String(spawnError);
+            console.error(`Failed to spawn update command (${updateCmd}):`, spawnError);
+            writeFinishedStatus('failed', undefined, message);
+          });
+
           child.unref();
+
+          if (logFd !== null) {
+            try {
+              fs.closeSync(logFd);
+            } catch {
+            }
+          }
         }, 500);
 
         return;
@@ -155,7 +229,12 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         restartCmdFallback += ' --api-only';
       }
       const restartCmd = isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
-      const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
+      const updateStatus = {
+        state: 'installing',
+        startedAt: Date.now(),
+        targetVersion: updateInfo.version || null,
+      };
+      writeUpdateStatusFile(updateStatusFilePath, updateStatus);
       const logPreamble = [
         '',
         `=== OpenChamber update ${new Date().toISOString()} ===`,
@@ -189,15 +268,18 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
           const shell = isWindows ? (process.env.ComSpec || 'cmd.exe') : 'sh';
           const shellFlag = isWindows ? '/c' : '-c';
+          const quoteStatusFile = isWindows ? quoteCmd(updateStatusFilePath) : quotePosix(updateStatusFilePath);
           const script = isWindows
             ? `
             echo ${quoteCmd(logPreamble)}
             timeout /t 2 /nobreak >nul
             ${updateCmd}
             if %ERRORLEVEL% EQU 0 (
+              echo {"state":"success"} 1> ${quoteStatusFile}
               echo Update successful, restarting OpenChamber...
               ${restartCmd || 'echo Service manager will restart OpenChamber.'}
             ) else (
+              echo {"state":"failed","exitCode":%ERRORLEVEL%} 1> ${quoteStatusFile}
               echo Update failed
               exit /b 1
             )
@@ -206,10 +288,13 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
             printf '%s\n' ${quotePosix(logPreamble)}
             sleep 2
             ${updateCmd}
-            if [ $? -eq 0 ]; then
+            code=$?
+            if [ $code -eq 0 ]; then
+              printf '%s\n' '{"state":"success"}' > ${quoteStatusFile}
               echo "Update successful, restarting OpenChamber..."
               ${restartCmd || 'echo "Service manager will restart OpenChamber."'}
             else
+              printf '{"state":"failed","exitCode":%s}\\n' "$code" > ${quoteStatusFile}
               echo "Update failed"
               exit 1
             fi
@@ -249,6 +334,14 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         error: error instanceof Error ? error.message : 'Failed to install update',
       });
     }
+  });
+
+  app.get('/api/openchamber/update-status', (_req, res) => {
+    // Authoritative completion state for the in-app updater. Written by the
+    // update-install flow before it responds, then replaced by the install
+    // process when it finishes. `idle` means no install is recorded, which the
+    // UI treats the same as an unreachable status endpoint.
+    res.json(readUpdateStatusFile(updateStatusFilePath) || { state: 'idle' });
   });
 
   app.get('/api/openchamber/models-metadata', async (_req, res) => {
