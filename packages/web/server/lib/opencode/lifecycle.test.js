@@ -541,6 +541,45 @@ describe('OpenCode lifecycle', () => {
     }
   });
 
+  it('preserves ambiguity metadata while sanitizing startup errors', () => {
+    const error = Object.assign(new Error('guardian request outcome is unknown'), {
+      code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+      ambiguous: true,
+      retryable: false,
+      originalCode: 'connection_closed',
+    });
+    const sanitized = lifecycleTest.createRedactedStartupError(
+      error,
+      lifecycleTest.createManagedStartupOutputFormatter(),
+    );
+
+    expect(sanitized).toMatchObject({
+      code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+      ambiguous: true,
+      retryable: false,
+      originalCode: 'connection_closed',
+    });
+  });
+
+  it('preserves originalCode when an ambiguous structured error omits code', () => {
+    const error = Object.assign(new Error('guardian request outcome is unknown'), {
+      ambiguous: true,
+      retryable: false,
+      originalCode: 'connection_closed',
+    });
+    const sanitized = lifecycleTest.createRedactedStartupError(
+      error,
+      lifecycleTest.createManagedStartupOutputFormatter(),
+    );
+
+    expect(sanitized).toMatchObject({
+      code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+      ambiguous: true,
+      retryable: false,
+      originalCode: 'connection_closed',
+    });
+  });
+
   it.each([
     {
       label: 'password',

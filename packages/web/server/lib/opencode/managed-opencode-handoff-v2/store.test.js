@@ -232,6 +232,29 @@ describe('managed OpenCode handoff v2 SQLite store', () => {
     expect(fs.statSync(databasePath).mode & 0o777).toBe(0o600);
   });
 
+  it.skipIf(process.platform === 'win32')('migrates the v2 record-only schema and preserves legacy records while adding the operation table', async () => {
+    const root = createRoot();
+    const databasePath = path.join(root, MANAGED_OPENCODE_HANDOFF_V2_STORE_FILENAME);
+    const record = createRecord();
+    const initial = createManagedOpenCodeHandoffV2Store({ rootDir: root });
+    await initial.compareAndSwap({ incarnation: record.incarnation, expected: null, next: record });
+    await initial.close();
+    const database = new Database(databasePath);
+    database.exec(`DROP INDEX managed_opencode_handoff_v2_operations_expiry_idx; DROP TABLE managed_opencode_handoff_v2_operations;`);
+    database.pragma('user_version = 2421007');
+    database.close();
+
+    const store = createManagedOpenCodeHandoffV2Store({ rootDir: root });
+    await expect(store.read({ incarnation: record.incarnation })).resolves.toEqual(record);
+    await expect(store.listOperations()).resolves.toEqual([]);
+    await store.close();
+
+    const reopened = new Database(databasePath, { readonly: true });
+    expect(reopened.pragma('user_version', { simple: true })).toBe(2421009);
+    expect(reopened.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'managed_opencode_handoff_v2_operations'").get()).toEqual({ name: 'managed_opencode_handoff_v2_operations' });
+    reopened.close();
+  });
+
   it.skipIf(process.platform === 'win32')('retains an expired stopping record as a recovery handle', async () => {
     const root = createRoot();
     const record = createRecord({
@@ -263,6 +286,36 @@ describe('managed OpenCode handoff v2 SQLite store', () => {
       state: ManagedOpenCodeHandoffV2State.Stopping,
     });
     await reopened.close();
+  });
+
+  it.skipIf(process.platform === 'win32')('protects an expired terminal record until credential cleanup succeeds', async () => {
+    const root = createRoot();
+    const record = createRecord({
+      state: ManagedOpenCodeHandoffV2State.Interrupted,
+      createdAt: Date.now() - 10_000,
+      leaseExpiresAt: Date.now() - 1_000,
+    });
+    const store = createManagedOpenCodeHandoffV2Store({ rootDir: root });
+    await expect(store.compareAndSwap({
+      incarnation: record.incarnation,
+      expected: null,
+      next: record,
+      allowExpired: true,
+    })).resolves.toEqual({ status: 'applied' });
+
+    // Guardian attention represents an unresolved credential-removal retry.
+    // Production SQLite cleanup must retain the terminal recovery handle while
+    // that attention remains protected.
+    await expect(store.cleanup({ protectedIncarnations: [record.incarnation] }))
+      .resolves.toEqual({ removed: 0 });
+    await expect(store.read({ incarnation: record.incarnation }))
+      .resolves.toMatchObject({ state: ManagedOpenCodeHandoffV2State.Interrupted });
+
+    // Once credential cleanup succeeds, the guardian omits the incarnation
+    // from the protection set and the same production cleanup path may evict it.
+    await expect(store.cleanup()).resolves.toEqual({ removed: 1 });
+    await expect(store.read({ incarnation: record.incarnation })).resolves.toBeNull();
+    await store.close();
   });
 
   it.skipIf(process.platform === 'win32')('atomically fences concurrent, stale, and expired compare-and-swap requests', async () => {
@@ -332,7 +385,114 @@ describe('managed OpenCode handoff v2 SQLite store', () => {
     );
     database.close();
 
-    expect(() => createManagedOpenCodeHandoffV2Store({ rootDir: root })).toThrow(/corrupt|malformed/);
+    expect(() => createManagedOpenCodeHandoffV2Store({ rootDir: root })).toThrow(/corrupt|malformed|schema is invalid|CHECK constraint/);
+  });
+
+  it.skipIf(process.platform === 'win32')('fails closed when an operation row is malformed and reopens only after repair', async () => {
+    const root = createRoot();
+    const store = createManagedOpenCodeHandoffV2Store({ rootDir: root });
+    await store.close();
+    const databasePath = path.join(root, MANAGED_OPENCODE_HANDOFF_V2_STORE_FILENAME);
+    const operationId = randomBytes(32).toString('base64url');
+    const incarnation = randomBytes(32).toString('base64url');
+    const database = new Database(databasePath);
+    database.pragma('ignore_check_constraints = ON');
+    database.prepare(`
+      INSERT INTO managed_opencode_handoff_v2_operations (
+        operation_id, version, kind, incarnation, owner_instance_id,
+        runtime_identity, launch_fingerprint, target_revision,
+        target_lease_expires_at, target_mac, state, resolution_state,
+        resolution_revision, resolution_lease_expires_at, resolution_mac,
+        created_at, confirmation_expires_at, revision, mac
+      ) VALUES (?, 2, 'stop', ?, 'owner', 'runtime', 'fingerprint', 0, ?, ?,
+        'not-a-state', NULL, NULL, NULL, NULL, ?, ?, 0, ?)
+    `).run(
+      operationId,
+      incarnation,
+      Date.now() + 60_000,
+      randomBytes(32).toString('base64url'),
+      Date.now() - 1_000,
+      Date.now() + 60_000,
+      randomBytes(32).toString('base64url'),
+    );
+    database.close();
+
+    expect(() => createManagedOpenCodeHandoffV2Store({ rootDir: root })).toThrow(/corrupt|malformed|schema is invalid/);
+  });
+
+  it.skipIf(process.platform === 'win32')('rolls back a failed operation-table migration and reopens after row repair', async () => {
+    const root = createRoot();
+    const store = createManagedOpenCodeHandoffV2Store({ rootDir: root });
+    await store.close();
+    const databasePath = path.join(root, MANAGED_OPENCODE_HANDOFF_V2_STORE_FILENAME);
+    const operationId = randomBytes(32).toString('base64url');
+    const incarnation = randomBytes(32).toString('base64url');
+    const database = new Database(databasePath);
+    database.exec(`DROP INDEX managed_opencode_handoff_v2_operations_expiry_idx; DROP TABLE managed_opencode_handoff_v2_operations;`);
+    database.exec(`
+      CREATE TABLE managed_opencode_handoff_v2_operations (
+        operation_id TEXT PRIMARY KEY NOT NULL,
+        version INTEGER NOT NULL CHECK (version = 2),
+        kind TEXT NOT NULL CHECK (kind IN ('spawn', 'stop', 'prepare-handoff', 'abort-handoff')),
+        incarnation TEXT NOT NULL,
+        owner_instance_id TEXT NOT NULL,
+        runtime_identity TEXT NOT NULL,
+        launch_fingerprint TEXT NOT NULL,
+        target_revision INTEGER NOT NULL CHECK (target_revision >= 0),
+        target_lease_expires_at INTEGER NOT NULL,
+        target_mac TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('pending', 'resolved', 'expired')),
+        resolution_state TEXT CHECK (resolution_state IS NULL OR resolution_state IN ('active', 'interrupted', 'retired')),
+        resolution_revision INTEGER,
+        resolution_lease_expires_at INTEGER,
+        resolution_mac TEXT,
+        created_at INTEGER NOT NULL,
+        confirmation_expires_at INTEGER NOT NULL CHECK (confirmation_expires_at > created_at),
+        revision INTEGER NOT NULL CHECK (revision >= 0),
+        mac TEXT NOT NULL,
+        CHECK (
+          (resolution_state IS NULL AND resolution_revision IS NULL AND resolution_lease_expires_at IS NULL AND resolution_mac IS NULL)
+          OR (resolution_state IS NOT NULL AND resolution_revision >= 0 AND resolution_lease_expires_at IS NOT NULL AND resolution_mac IS NOT NULL)
+        ),
+        CHECK ((state = 'pending' AND resolution_state IS NULL) OR (state = 'resolved' AND resolution_state IS NOT NULL) OR state = 'expired')
+      ) STRICT;
+      CREATE INDEX managed_opencode_handoff_v2_operations_expiry_idx
+        ON managed_opencode_handoff_v2_operations (confirmation_expires_at);
+    `);
+    database.pragma('user_version = 2421008');
+    database.pragma('ignore_check_constraints = ON');
+    database.prepare(`
+      INSERT INTO managed_opencode_handoff_v2_operations (
+        operation_id, version, kind, incarnation, owner_instance_id,
+        runtime_identity, launch_fingerprint, target_revision,
+        target_lease_expires_at, target_mac, state, resolution_state,
+        resolution_revision, resolution_lease_expires_at, resolution_mac,
+        created_at, confirmation_expires_at, revision, mac
+      ) VALUES (?, 2, 'stop', ?, 'owner', 'runtime', 'fingerprint', 0, ?, ?,
+        'corrupt', NULL, NULL, NULL, NULL, ?, ?, 0, ?)
+    `).run(
+      operationId,
+      incarnation,
+      Date.now() + 60_000,
+      randomBytes(32).toString('base64url'),
+      Date.now() - 1_000,
+      Date.now() + 60_000,
+      randomBytes(32).toString('base64url'),
+    );
+    database.close();
+
+    expect(() => createManagedOpenCodeHandoffV2Store({ rootDir: root })).toThrow(/corrupt|malformed|schema is invalid|CHECK constraint/);
+    const rolledBack = new Database(databasePath);
+    expect(rolledBack.pragma('user_version', { simple: true })).toBe(2421008);
+    expect(rolledBack.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'managed_opencode_handoff_v2_operations_legacy'").get()).toBeUndefined();
+    rolledBack.prepare('UPDATE managed_opencode_handoff_v2_operations SET state = \'pending\' WHERE operation_id = ?').run(operationId);
+    rolledBack.close();
+
+    const reopened = createManagedOpenCodeHandoffV2Store({ rootDir: root });
+    await expect(reopened.listOperations()).resolves.toMatchObject([
+      { operationId, state: 'pending' },
+    ]);
+    await reopened.close();
   });
 
   it.skipIf(process.platform === 'win32')('stores only public credential fingerprints and no raw credential column or value', async () => {

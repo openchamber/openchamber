@@ -96,12 +96,12 @@ Baseline (2026-07-31): HEAD `894daff0c1138de3a3f422ee84a00eee5b844438`; current 
 ### CI gates
 - [x] Add hard-gated Linux coverage for the Phase 2E credential, lifecycle, and web-boundary paths.
 - [x] Add Windows credential, restart, and owner-mismatch coverage; required paths must not use `continue-on-error`.
-- [ ] Record native `windows-latest` evidence for the Phase 2E paths.
+- [x] Record native `windows-latest` evidence for the Phase 2E paths (PR HEAD `3d04d66f6`; Windows baseline run `30874446398`).
 
 ### Documentation and validation gates
 - [x] Document foreground/systemd semantics: ordinary SIGTERM is stop; supported `openchamber restart` is the restart contract.
 - [x] Run focused Phase 2E tests plus source syntax, package type-check/lint, and docs validation; focused Vitest, Linux boundary, syntax, web type-check/lint, workflow-YAML parse, and docs validation passed locally.
-- [ ] Record Linux and required Windows CI evidence, including the local native-Windows limitation, before marking Phase 2E complete.
+- [x] Record Linux and required Windows CI evidence, including the local native-Windows limitation, before marking Phase 2E complete (PR HEAD `3d04d66f6`; Linux baseline run `30874446385`; Windows baseline run `30874446398`).
 - [ ] Complete maintainer/security review of credential storage, IPC authentication/frame limits, lifecycle retention, shared hostname resolution, and required CI workflows.
 
 ### Confirmed blocker follow-up (2026-08-02)
@@ -156,3 +156,236 @@ Baseline (2026-07-31): HEAD `894daff0c1138de3a3f422ee84a00eee5b844438`; current 
 - [x] Provenance audited at current head; no history rewrite or Draft-status change is planned.
 - [x] Complete the PR review follow-ups above and refresh final-head validation.
 - Note: Further commits, pushes, force-pushes, or PR status changes require separate explicit approval.
+
+## Current uncommitted reviewer-fix scope — 2026-08-05
+
+- [x] Keep the reviewer-fix scope to the actual **21 files (17 JavaScript + 4
+  Markdown)** covering lifecycle/guardian/detection/v2/HMR/server composition
+  and the canonical-doc boundary. The scope adds no UI, CLI, or unrelated
+  platform files; adoption confirmation remains within the authenticated
+  guardian IPC and existing v2 CAS ownership path. No unrelated UI, CLI, or
+  platform files are included.
+- [x] C1: adopt fail-closed admission. Every unresolved attention record blocks
+  new launches regardless of explicit-port mismatch, null/unknown port,
+  incomplete owner identity, or conflicting owner fields. Terminal/expired
+  records unblock only after authoritative credential cleanup removes attention.
+- [x] Add C1 regressions for unrelated explicit-port launch beside null-port
+  attention, same-port/null-port admission, incomplete owner attention, and
+  safely reconciled terminal/expired records.
+- [x] H3: Reserved attention is re-read and terminalized through authoritative
+  incarnation/revision/MAC/lease fences; transient CAS/store failure retains
+  attention and credentials, then uses bounded explicit in-process retries.
+  Expired state is used only for terminal recovery, never launch/bind/renew.
+- [x] H5: sent non-idempotent Guardian RPC failures use stable
+  `GUARDIAN_REQUEST_AMBIGUOUS` with `retryable: false`; ambiguity is detected
+  through `code`, `ambiguous`, or preserved `originalCode`, and cleanup/wrappers
+  retain the underlying transport code. Ambiguous prepare-handoff/spawn skips
+  abort/rollback and legacy fallback; non-ambiguous failures retain fallback.
+- [x] Extend the persistent owner-scoped ambiguity fence to initial guardian
+  spawn, bootstrap/HMR restoration, restart, and direct lifecycle start. While
+  unresolved, no stop, spawn, rollback, retry, or legacy fallback occurs.
+  Delayed successor visibility is covered deterministically.
+- [x] Require complete authenticated revision/lease/MAC binding when matching
+  or clearing a persisted fence. Missing or mismatched binding, owner, or
+  incarnation remains fenced until authoritative owner-scoped reconciliation
+  supplies a complete record.
+- [x] Preserve H1 pre/post process identity fences.
+- [x] Focused validation after this scope change: guardian/C1/H3 tests **94
+  passed**; lifecycle/HMR/fence tests **88 passed**; v2/store tests **20
+  passed**; health-client/H1 tests **4 passed / 2 skipped** (platform-gated);
+  changed-JS syntax checks,
+  web typecheck/lint, docs validation, and diff-check passed.
+- [ ] Native Windows rehydration, bundled-web process-boundary E2E, native H1
+  interleaving, directory-wide orphan scans, and exactly-once side effects were
+  not validated or claimed in this session; no CI evidence was added.
+
+## Latest lifecycle-safety follow-up — 2026-08-05
+
+- [x] Extend the owner-scoped ambiguity fence to ambiguous owner-scoped stop
+  and abort-handoff cleanup responses, including successor cleanup, with no
+  duplicate cleanup, rollback, or legacy fallback before authoritative
+  reconciliation. Reconciliation may retry authoritative inspection/adoption,
+  but never replays an ambiguous non-idempotent RPC.
+- [x] If reconciliation still sees `handoff-prepared` after an ambiguous
+  `abortHandoff()`, keep the persisted fence and remain blocked; do not abort a
+  second time.
+- [x] Make every direct owner-scoped stop consult the unresolved ambiguity
+  fence before issuing a stop RPC; repeated stop requires reconciliation,
+  adoption, or explicit safe resolution.
+- [x] Require complete revision, lease, and MAC binding on both expected and
+  observed adoption records; missing fields fail closed.
+- [x] Route every fence-clearing adoption through guardian-side
+  `confirmAdoption()`, whose credential/health revalidation and v2 same-record
+  authoritative CAS are the final authority. Record-binding and
+  credential/health mutation-after-read regressions are deterministic;
+  plaintext credentials remain transient.
+- [x] Add guardian-side signed terminal status plus exact-binding CAS
+  confirmation for ambiguous stops after retirement/removal from `#children`.
+  Wrong owner, incarnation, revision, lease, or MAC remains fenced and no stop
+  replay is used.
+- [x] Keep H3 bounded attention retry scheduled when Reserved terminalization
+  succeeds but Interrupted/Retired credential removal fails; retain attention
+  and encrypted credentials until removal succeeds.
+- [x] Add deterministic lifecycle regressions for ambiguous stop, repeated
+  direct stop, ambiguous abort while prepared, delayed successor visibility,
+  no duplicate child/fallback, and binding mutation; add detection missing-field,
+  v2 CAS, and guardian credential/health mutation regressions.
+- [x] Final validation for this scope: current **21-file scope (17 JavaScript +
+  4 Markdown)**, focused lifecycle/guardian/detection/v2/HMR/IPC suites and
+  all new regressions from that preceding scope are historical; the current
+  21-file follow-up totals are recorded in the latest Phase 2E section.
+- [ ] Native Windows rehydration/termination races, bundled-web
+  process-boundary E2E, native H1 interleaving, directory-wide orphan scans,
+  and exactly-once side effects remain platform/evidence gaps.
+
+## H5 terminal-retention and startup-secret lease follow-up — 2026-08-05
+
+- [x] Retain signed `Interrupted`/`Retired` terminal records through a fresh
+  authoritative confirmation horizon so an expired launch lease cannot prune
+  the H5 terminal handle immediately after a lost stop response.
+- [x] Keep `terminalStatus()`/`confirmTerminal()` fail-closed on exact owner,
+  incarnation, revision, lease, and MAC binding; release a fence only after
+  authoritative terminal/quiescence confirmation, never on early absence and
+  never by replaying stop/abort.
+- [x] Associate startup-secret leases with unresolved initial-spawn and direct-
+  stop ambiguity fences, retain them through unresolved state, transfer them on
+  authoritative adoption, and release them after terminal confirmation or safe
+  fence expiry without persisting plaintext secrets.
+- [x] Correct the canonical inventory and validation wording to the actual
+  **21 files (17 JavaScript + 4 Markdown)**. The preceding focused totals are
+  historical; current counts are recorded in the latest Phase 2E section.
+- [ ] Native Windows rehydration/termination interleavings, bundled-web
+  process-boundary E2E, native H1 interleaving, directory-wide orphan scans,
+  and exactly-once side effects remain platform/evidence gaps; no CI evidence
+  was added in this session.
+
+## Approved durable operation persistence follow-up — 2026-08-05
+
+- [x] Extend the existing v2 persistence contract to schema `2421009` with a
+  strict signed operation table and transactional `2421007`/`2421008` migrations that
+  preserves existing child records and fails closed on malformed schemas.
+- [x] Persist owner/incarnation-bound spawn, stop, and abort operation outcomes
+  with exact target/resolution revision, lease, MAC, and authoritative
+  confirmation horizon. Missing records remain unresolved; no stop/abort replay
+  or legacy fallback is permitted while an operation is pending.
+- [x] Resolve ambiguous stop only after guardian-authoritative quiescence and
+  exact target/terminal evidence; an expired operation remains blocking and
+  discoverable, and initial ambiguous spawn remains fenced until safe
+  authoritative resolution.
+- [x] Add guardian operation status/resolution/expiry IPC and natural-child-exit
+  terminalization so the live child map is not the sole recovery authority.
+- [x] Transfer startup-secret lease association through named HMR lifecycle
+  state, retain it through unresolved operation state, and release it only after
+  authoritative operation resolution/expiry; no plaintext secret is persisted
+  in SQLite, JSON, public records, or IPC list/status payloads.
+- [x] Re-arm Reserved startup-recovery attention after a non-throwing CAS
+  conflict for same-process bounded retry.
+- [x] Current worktree inventory is exactly **21 files**; canonical details and
+  validation are recorded in `phases/phase-2e.md`.
+- [x] The prior focused validation remains historical; current follow-up
+  commands and counts are recorded in the latest Phase 2E review section.
+- [ ] Native Windows rehydration/termination interleavings, bundled-web
+  process-boundary E2E, native H1 interleaving, directory-wide orphan scans,
+  exactly-once side effects, and CI evidence remain open; no commit or push was
+  performed.
+
+## Latest lifecycle admission and lease cleanup findings — 2026-08-05
+
+- [x] Add guardian-authoritative global admission before every direct legacy
+  startup/restart fallback while guardian state is available; unresolved
+  attention or durable operation for any owner blocks without owner/port
+  filtering, while exact owner-scoped adoption remains separate.
+- [x] After confirmed old-child stop and non-ambiguous successor spawn failure,
+  require an authenticated empty successor result and no unresolved operation or
+  ambiguity fence before releasing the startup-secret lease exactly once.
+- [x] Regressions cover foreign unresolved attention/no exact owner with no
+  legacy spawn, zero leases after confirmed no-successor failure, and lease
+  retention for ambiguous failure.
+- [x] Validation: focused guardian/lifecycle/detection/v2/HMR/IPC command
+  **645 passed / 3 skipped** across 24 files; process-boundary **7 Vitest + 17
+  node:test passed**; 17 JavaScript syntax checks; web type-check/lint; docs
+  validation (**450 pages / 45 sidebar links**); and `git diff --check` passed.
+- [x] Current inventory remains exactly **21 files: 17 JavaScript + 4
+  Markdown**; no commit or push was performed.
+
+## Latest durable-operation remediation — 2026-08-05
+
+- [x] Current inventory verified as exactly **21 files: 17 JavaScript + 4 Markdown**; canonical paths are recorded in `phases/phase-2e.md`.
+- [x] Fail closed before guardian spawn, stop, prepare, and abort lifecycle
+  ambiguity side effects when durable operation creation is unavailable,
+  invalid, or fails; reservation cleanup and no-spawn regression are covered.
+- [x] Forward prepare operation IDs through GuardianClient and IPC; persist and resolve prepare operations, with operation status/list/discovery coverage.
+- [x] Enforce exact stored target owner/incarnation/revision/lease/MAC resolution bindings; distinguish absent target records from read failures; require signed terminal resolution and durable/terminal CAS confirmation before clearing lifecycle fences.
+- [x] Discover owner-scoped pending and expired operations after HMR/web-process restart and reconstruct the lifecycle fence before adoption, start, retry, or legacy fallback.
+- [x] Retain terminal attention until encrypted credential absence/cleanup is independently confirmed; expired operations remain unresolved and discoverable until authoritative quiescence resolution.
+- [x] Extend the durable store migration to schema `2421009`; add operation-table/index migration rollback, malformed-row, reopen, and MAC-corruption coverage while preserving `2421007` compatibility and transactional behavior.
+- [x] Final focused command passed **634 tests / 3 skips** across 24 guardian/v2/lifecycle/HMR files, including absent/unreadable operation-attention rehydration and stop/unexpected-exit credential-retention regressions; process-boundary command passed **7 Vitest + 17 node:test**; 17 JavaScript syntax checks, web type-check/lint, docs validation (**450 pages / 45 sidebar links**), and `git diff --check` passed.
+- [ ] Native Windows rehydration/termination interleavings, bundled-web process-boundary E2E, native H1 interleaving, directory-wide orphan scans, exactly-once side effects, and CI evidence remain platform/evidence gaps; no commit or push was performed.
+
+## Latest durable-operation review remediation — 2026-08-05
+
+- [x] Expiry is no longer resolution: pending operations become an expired
+  unresolved state at the confirmation horizon, remain discoverable after
+  restart, protect their terminal child rows from pruning, and continue to
+  block start/retry/fallback until guardian-authoritative quiescence plus exact
+  owner/incarnation/revision/lease/MAC-bound signed evidence passes CAS.
+- [x] Natural-exit, stop, and cleanup paths retain terminal rows, attention,
+  child entries, and durable operation IDs until `resolveDurableOperation()`
+  succeeds. Read/CAS failure is retained and retried; missing operation or
+  target state is never absence-as-success, and credentials remain behind the
+  credential store's authenticated absence/cleanup contract.
+- [x] Documentation narrows operation-fencing claims to lifecycle ambiguity
+  side effects (spawn/stop/prepare/abort); credential-removal cleanup remains
+  covered by the shared credential-store idempotent removal and attention
+  retention contract.
+- [x] Exact commands are recorded in `phases/phase-2e.md` and the current
+  review section; **634 passed / 3 skipped**, process-boundary **7 Vitest + 17
+  node:test**, 17 syntax checks, web type-check/lint, docs validation, and
+  `git diff --check` passed. No commit or push was performed.
+
+## Latest H5 retention/liveness findings — 2026-08-05
+
+- [x] Track all outstanding signed operations per incarnation in guardian
+  attention/child state; later stop/abort/cleanup operations cannot overwrite a
+  pending spawn/prepare handle, and restart discovery restores the full set.
+- [x] Keep attention and credentials retained until every unresolved operation
+  has authoritative quiescent resolution, including out-of-order resolution.
+- [x] Retain resolved signed operation rows as owner/incarnation/binding-bound
+  tombstones after terminal child pruning so HMR reconciliation distinguishes
+  authoritative resolution from ordinary absence. Wrong binding and read
+  failure remain blocked.
+- [x] Persist the stop operation/fence and startup-secret lease after an
+  authoritative stop response whose list verification is stale, malformed, or
+  unavailable; later terminal/quiescence confirmation clears it without a
+  duplicate stop.
+- [x] Preserve the exact **21-file (17 JavaScript + 4 Markdown)** inventory and
+  update validation claims only with current command results. No commit or push
+  was performed.
+- [x] Current validation: focused guardian/v2/lifecycle/HMR command **636
+  passed / 3 skipped** across 24 files; process boundary **7 Vitest + 17
+  node:test**; 17 JavaScript syntax checks; web type-check/lint; docs
+  validation (**450 pages / 45 sidebar links**); and `git diff --check` passed.
+
+## Latest lifecycle-operation findings — 2026-08-05
+
+- [x] Always discover and merge the complete owner-scoped pending/expired
+  operation set even when HMR already transferred one or more fences; keep
+  every unresolved operation blocking and cover the multiple-operation case.
+- [x] Declare and bind the initial-spawn fence before terminal reconciliation;
+  require exact terminal operation confirmation before releasing its lease and
+  cover restart/HMR recovery without a `ReferenceError` or stuck fence.
+- [x] Attach failed `beginStopping`, `prepareHandoff`, and `abortHandoff`
+  operations to durable attention immediately; rehydrate them before child
+  rows and block unrelated-port admission until resolution.
+- [x] Match durable terminal fences against operation owner/incarnation and
+  target or resolution revision/lease/MAC bindings; stale or replaced fences
+  remain blocked.
+- [x] Preserve the exact **21-file (17 JavaScript + 4 Markdown)** inventory.
+- [x] Current validation: focused lifecycle/guardian/v2/HMR/IPC command **643
+  passed / 3 skipped** across 24 files; process boundary **7 Vitest + 17
+  node:test**; 17 JavaScript syntax checks; web type-check/lint; docs
+  validation (**450 pages / 45 sidebar links**); and `git diff --check` passed.
+- [ ] Native Windows rehydration/termination interleavings, bundled-web
+  process-boundary E2E, native H1 interleaving, directory-wide orphan scans,
+  exactly-once side effects, and CI evidence remain open; no commit or push was
+  performed.

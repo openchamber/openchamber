@@ -55,6 +55,15 @@ import { isSupportedGuardianPlatform } from './ipc-transport.js';
 const DEFAULT_CONNECT_TIMEOUT_MS = 100;
 const isCanonicalProcessStartTicks = (value) => typeof value === 'string'
   && /^(?:0|[1-9]\d*)$/.test(value);
+const hasCompleteRecordBinding = (record) => Boolean(
+  record
+  && Number.isSafeInteger(record.revision)
+  && record.revision >= 0
+  && Number.isSafeInteger(record.leaseExpiresAt)
+  && record.leaseExpiresAt > 0
+  && typeof record.mac === 'string'
+  && record.mac.length > 0,
+);
 
 export function selectGuardianChild(children, { expectedOwner } = {}) {
   if (!Array.isArray(children) || children.length === 0) return null;
@@ -133,6 +142,7 @@ export function selectGuardianChild(children, { expectedOwner } = {}) {
     || child.port <= 0
     || child.port > 65535
     || !isCanonicalProcessStartTicks(child?.processStartTicks)
+    || !hasCompleteRecordBinding(child)
     )
   );
   if (incompleteLaunchIdentity) {
@@ -296,35 +306,75 @@ export async function detectAndAdoptGuardianChild(
       runtimeIdentity: activeChild.runtimeIdentity,
       launchFingerprint: activeChild.launchFingerprint,
     };
-    const health = await client.health({ incarnation: activeChild.incarnation, owner });
-    if (health?.healthy !== true) {
-      const error = new Error(
-        `Guardian adoption refused: active child ${activeChild.incarnation || 'unknown'} is not healthy`,
-      );
-      error.code = 'GUARDIAN_ADOPTION_UNHEALTHY';
-      throw error;
-    }
-
     if (typeof restoreCredential !== 'function') {
       const error = new Error('Guardian adoption requires an auth-state restore handler');
       error.code = 'GUARDIAN_ADOPTION_AUTH_UNAVAILABLE';
       throw error;
     }
-    if (typeof client.credential !== 'function') {
-      const error = new Error('Guardian adoption credential retrieval is unavailable');
+    if (typeof client.confirmAdoption !== 'function') {
+      const error = new Error('Guardian adoption authoritative confirmation is unavailable');
       error.code = 'GUARDIAN_ADOPTION_CREDENTIAL_UNAVAILABLE';
       throw error;
     }
     let credential;
     try {
-      credential = await client.credential({ incarnation: activeChild.incarnation, owner });
+      const confirmation = await client.confirmAdoption({
+        incarnation: activeChild.incarnation,
+        owner,
+        expected: {
+          revision: activeChild.revision,
+          leaseExpiresAt: activeChild.leaseExpiresAt,
+          mac: activeChild.mac,
+        },
+      });
+      const finalChild = confirmation?.record;
+      if (confirmation?.health?.healthy !== true
+        || finalChild?.state !== 'active'
+        || finalChild.incarnation !== activeChild.incarnation
+        || finalChild.ownerInstanceId !== activeChild.ownerInstanceId
+        || finalChild.runtimeIdentity !== activeChild.runtimeIdentity
+        || finalChild.launchFingerprint !== activeChild.launchFingerprint
+        || finalChild.revision !== activeChild.revision
+        || finalChild.leaseExpiresAt !== activeChild.leaseExpiresAt
+        || finalChild.mac !== activeChild.mac
+        || !hasCompleteRecordBinding(finalChild)) {
+        const error = new Error(
+          `Guardian adoption refused: child ${activeChild.incarnation || 'unknown'} binding was not authoritatively confirmed`,
+        );
+        error.code = 'GUARDIAN_ADOPTION_RECORD_INVALID';
+        throw error;
+      }
+      credential = confirmation.credential;
+      if (!credential || typeof credential !== 'object') {
+        const error = new Error('Guardian adoption credential retrieval is unavailable');
+        error.code = 'GUARDIAN_ADOPTION_CREDENTIAL_UNAVAILABLE';
+        throw error;
+      }
       await restoreCredential(credential);
-    } catch {
-      const error = new Error(
+      return {
+        incarnation: finalChild.incarnation,
+        pid: finalChild.pid,
+        port: finalChild.port,
+        url: buildManagedOpenCodeOrigin({
+          hostname: finalChild.launchSpec?.hostname,
+          port: finalChild.port,
+        }),
+        owner: {
+          ownerInstanceId: finalChild.ownerInstanceId,
+          runtimeIdentity: finalChild.runtimeIdentity,
+          launchFingerprint: finalChild.launchFingerprint,
+        },
+        launchSpec: finalChild.launchSpec,
+      };
+    } catch (error) {
+      if (typeof error?.code === 'string' && error.code.startsWith('GUARDIAN_ADOPTION_')) {
+        throw error;
+      }
+      const adoptionError = new Error(
         `Guardian adoption could not restore credentials for child ${activeChild.incarnation || 'unknown'}`,
       );
-      error.code = 'GUARDIAN_ADOPTION_CREDENTIAL_UNAVAILABLE';
-      throw error;
+      adoptionError.code = 'GUARDIAN_ADOPTION_CREDENTIAL_UNAVAILABLE';
+      throw adoptionError;
     } finally {
       if (credential && typeof credential === 'object') {
         try {
@@ -337,25 +387,6 @@ export async function detectAndAdoptGuardianChild(
       }
     }
 
-    return {
-      incarnation: activeChild.incarnation,
-      pid: activeChild.pid,
-      port: activeChild.port,
-      url: buildManagedOpenCodeOrigin({
-        hostname: activeChild.launchSpec?.hostname,
-        port: activeChild.port,
-      }),
-      ...(activeChild.ownerInstanceId && activeChild.runtimeIdentity && activeChild.launchFingerprint
-        ? {
-          owner: {
-            ownerInstanceId: activeChild.ownerInstanceId,
-            runtimeIdentity: activeChild.runtimeIdentity,
-            launchFingerprint: activeChild.launchFingerprint,
-          },
-        }
-        : {}),
-      launchSpec: activeChild.launchSpec,
-    };
   } catch (error) {
     if (typeof error?.code === 'string' && error.code.startsWith('GUARDIAN_ADOPTION_')) {
       throw error;

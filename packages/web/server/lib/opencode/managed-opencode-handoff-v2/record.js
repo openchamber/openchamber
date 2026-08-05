@@ -30,6 +30,7 @@
 export const MANAGED_OPENCODE_HANDOFF_V2_RECORD_VERSION = 2;
 export const MANAGED_OPENCODE_HANDOFF_V2_INCARNATION_BYTES = 32;
 export const MANAGED_OPENCODE_HANDOFF_V2_KEY_BYTES = 32;
+const MANAGED_OPENCODE_HANDOFF_V2_OPERATION_ID_BYTES = 32;
 export const MANAGED_OPENCODE_HANDOFF_V2_MAX_LEASE_MS = 24 * 60 * 60 * 1000;
 
 export const ManagedOpenCodeHandoffV2State = Object.freeze({
@@ -42,6 +43,19 @@ export const ManagedOpenCodeHandoffV2State = Object.freeze({
   Interrupted: 'interrupted',
   Stopping: 'stopping',
   Retired: 'retired',
+});
+
+export const ManagedOpenCodeHandoffV2OperationKind = Object.freeze({
+  Spawn: 'spawn',
+  Stop: 'stop',
+  PrepareHandoff: 'prepare-handoff',
+  AbortHandoff: 'abort-handoff',
+});
+
+export const ManagedOpenCodeHandoffV2OperationState = Object.freeze({
+  Pending: 'pending',
+  Resolved: 'resolved',
+  Expired: 'expired',
 });
 
 export const MANAGED_OPENCODE_HANDOFF_V2_ALLOWED_TRANSITIONS = Object.freeze({
@@ -114,6 +128,14 @@ const LEGACY_RECORD_KEYS = Object.freeze([
 const PROCESS_IDENTITY_KEYS = Object.freeze(['pid', 'port', 'processStartTicks']);
 const BASE64_URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 const STATE_VALUES = new Set(Object.values(ManagedOpenCodeHandoffV2State));
+const OPERATION_KIND_VALUES = new Set(Object.values(ManagedOpenCodeHandoffV2OperationKind));
+const OPERATION_STATE_VALUES = new Set(Object.values(ManagedOpenCodeHandoffV2OperationState));
+const OPERATION_RESOLUTION_STATE_VALUES = new Set([
+  ManagedOpenCodeHandoffV2State.Active,
+  ManagedOpenCodeHandoffV2State.HandoffPrepared,
+  ManagedOpenCodeHandoffV2State.Interrupted,
+  ManagedOpenCodeHandoffV2State.Retired,
+]);
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const hasExactlyKeys = (value, expectedKeys) => isObject(value)
@@ -168,6 +190,9 @@ export const isManagedOpenCodeHandoffV2Incarnation = (value) =>
 
 const isCanonicalKey = (value) =>
   decodeCanonicalBase64Url(value, MANAGED_OPENCODE_HANDOFF_V2_KEY_BYTES) !== null;
+
+export const isManagedOpenCodeHandoffV2OperationId = (value) =>
+  decodeCanonicalBase64Url(value, MANAGED_OPENCODE_HANDOFF_V2_OPERATION_ID_BYTES) !== null;
 
 export const normalizeManagedOpenCodeHandoffV2ProcessIdentity = (value) => {
   if (!hasExactlyKeys(value, PROCESS_IDENTITY_KEYS)) return null;
@@ -283,6 +308,126 @@ export const normalizeManagedOpenCodeHandoffV2Record = (value) => {
     revision: value.revision,
     mac: value.mac,
   };
+};
+
+const normalizeOperationBinding = (value) => {
+  if (!isObject(value)
+    || !isSafeNonNegativeInteger(value.revision)
+    || !isSafeNonNegativeInteger(value.leaseExpiresAt)
+    || !isCanonicalKey(value.mac)) return null;
+  return {
+    revision: value.revision,
+    leaseExpiresAt: value.leaseExpiresAt,
+    mac: value.mac,
+  };
+};
+
+const OPERATION_KEYS = Object.freeze([
+  'v',
+  'operationId',
+  'kind',
+  'incarnation',
+  'ownerInstanceId',
+  'runtimeIdentity',
+  'launchFingerprint',
+  'targetRevision',
+  'targetLeaseExpiresAt',
+  'targetMac',
+  'state',
+  'resolutionState',
+  'resolutionRevision',
+  'resolutionLeaseExpiresAt',
+  'resolutionMac',
+  'createdAt',
+  'confirmationExpiresAt',
+  'revision',
+  'mac',
+]);
+
+export const normalizeManagedOpenCodeHandoffV2Operation = (value) => {
+  if (!hasExactlyKeys(value, OPERATION_KEYS)
+    || value.v !== MANAGED_OPENCODE_HANDOFF_V2_RECORD_VERSION
+    || !isManagedOpenCodeHandoffV2OperationId(value.operationId)
+    || !OPERATION_KIND_VALUES.has(value.kind)
+    || !isManagedOpenCodeHandoffV2Incarnation(value.incarnation)
+    || !isIdentityString(value.ownerInstanceId)
+    || !isIdentityString(value.runtimeIdentity)
+    || !isIdentityString(value.launchFingerprint)
+    || value.ownerInstanceId === null
+    || value.runtimeIdentity === null
+    || value.launchFingerprint === null
+    || !isSafeNonNegativeInteger(value.targetRevision)
+    || !isSafeNonNegativeInteger(value.targetLeaseExpiresAt)
+    || !isCanonicalKey(value.targetMac)
+    || !OPERATION_STATE_VALUES.has(value.state)
+    || !isSafeNonNegativeInteger(value.createdAt)
+    || !isSafeNonNegativeInteger(value.confirmationExpiresAt)
+    || value.confirmationExpiresAt <= value.createdAt
+    || !isSafeNonNegativeInteger(value.revision)
+    || !isCanonicalKey(value.mac)) {
+    return null;
+  }
+
+  const resolution = value.resolutionState === null
+    ? null
+    : normalizeOperationBinding({
+      revision: value.resolutionRevision,
+      leaseExpiresAt: value.resolutionLeaseExpiresAt,
+      mac: value.resolutionMac,
+    });
+  if (value.resolutionState !== null && (!OPERATION_RESOLUTION_STATE_VALUES.has(value.resolutionState) || !resolution)) {
+    return null;
+  }
+  if (value.state === ManagedOpenCodeHandoffV2OperationState.Pending && resolution !== null) return null;
+  if (value.state === ManagedOpenCodeHandoffV2OperationState.Resolved && resolution === null) return null;
+  if (value.state === ManagedOpenCodeHandoffV2OperationState.Expired && resolution !== null) return null;
+
+  return {
+    v: value.v,
+    operationId: value.operationId,
+    kind: value.kind,
+    incarnation: value.incarnation,
+    ownerInstanceId: value.ownerInstanceId,
+    runtimeIdentity: value.runtimeIdentity,
+    launchFingerprint: value.launchFingerprint,
+    targetRevision: value.targetRevision,
+    targetLeaseExpiresAt: value.targetLeaseExpiresAt,
+    targetMac: value.targetMac,
+    state: value.state,
+    resolutionState: value.resolutionState,
+    resolutionRevision: resolution?.revision ?? null,
+    resolutionLeaseExpiresAt: resolution?.leaseExpiresAt ?? null,
+    resolutionMac: resolution?.mac ?? null,
+    createdAt: value.createdAt,
+    confirmationExpiresAt: value.confirmationExpiresAt,
+    revision: value.revision,
+    mac: value.mac,
+  };
+};
+
+export const canonicalizeManagedOpenCodeHandoffV2Operation = (operation) => {
+  const normalized = normalizeManagedOpenCodeHandoffV2Operation(operation);
+  if (!normalized) throw new TypeError('Invalid managed OpenCode handoff v2 operation');
+  return Buffer.from(JSON.stringify([
+    normalized.v,
+    normalized.operationId,
+    normalized.kind,
+    normalized.incarnation,
+    normalized.ownerInstanceId,
+    normalized.runtimeIdentity,
+    normalized.launchFingerprint,
+    normalized.targetRevision,
+    normalized.targetLeaseExpiresAt,
+    normalized.targetMac,
+    normalized.state,
+    normalized.resolutionState,
+    normalized.resolutionRevision,
+    normalized.resolutionLeaseExpiresAt,
+    normalized.resolutionMac,
+    normalized.createdAt,
+    normalized.confirmationExpiresAt,
+    normalized.revision,
+  ]), 'utf8');
 };
 
 export const canonicalizeManagedOpenCodeHandoffV2Record = (record) => {

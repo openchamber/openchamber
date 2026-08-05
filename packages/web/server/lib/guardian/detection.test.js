@@ -17,6 +17,9 @@ const child = (overrides = {}) => ({
   pid: 1001,
   port: 4096,
   processStartTicks: '1',
+  revision: 0,
+  leaseExpiresAt: Date.now() + 60_000,
+  mac: 'record-mac-a',
   ownerInstanceId: 'owner-a',
   runtimeIdentity: 'runtime-a',
   launchFingerprint: 'fingerprint-a',
@@ -74,6 +77,15 @@ describe('guardian transport detection', () => {
 });
 
 describe('guardian adoption selection', () => {
+  it.each([
+    ['revision', { revision: undefined }],
+    ['lease', { leaseExpiresAt: undefined }],
+    ['MAC', { mac: undefined }],
+  ])('rejects an active record with a missing %s binding field', (_label, override) => {
+    expect(() => selectGuardianChild([child(override)], { expectedOwner }))
+      .toThrow(/complete launch identity/);
+  });
+
   it('selects only the active child owned by this runtime', () => {
     const selected = selectGuardianChild([
       child({ incarnation: 'foreign', ownerInstanceId: 'owner-b', runtimeIdentity: 'runtime-b' }),

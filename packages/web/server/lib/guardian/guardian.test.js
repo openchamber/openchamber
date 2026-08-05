@@ -16,7 +16,12 @@ import {
   MANAGED_OPENCODE_CREDENTIAL_FILE_SUFFIX,
 } from '../opencode/managed-opencode-handoff-v2/credential-store.js';
 import { ManagedOpenCodeGuardian, createManagedOpenCodeGuardian } from './guardian.js';
-import { GuardianClient, GuardianClientError } from './guardian-client.js';
+import {
+  GuardianClient,
+  GuardianClientError,
+  GUARDIAN_AMBIGUOUS_REQUEST_CODE,
+  isAmbiguousGuardianRequestError,
+} from './guardian-client.js';
 import { GuardianIpcServer } from './ipc-server.js';
 import { detectAndAdoptGuardianChild } from './detection.js';
 import { GUARDIAN_IPC_MAX_FRAME_BYTES } from './ipc-auth.js';
@@ -57,8 +62,10 @@ const createClock = (initialTime = 1_000) => {
 
 const createFakeStore = (clock) => {
   const records = new Map();
+  const operations = new Map();
   return {
     records,
+    operations,
     read: async ({ incarnation }) => {
       const row = records.get(incarnation);
       return row ? { ...row } : null;
@@ -87,6 +94,28 @@ const createFakeStore = (clock) => {
         ? nextForAuthoritativeTime(clock.now())
         : next;
       records.set(incarnation, { ...candidate });
+      return { status: 'applied' };
+    },
+    readOperation: async ({ operationId }) => {
+      const row = operations.get(operationId);
+      return row ? { ...row } : null;
+    },
+    listOperations: async () => Array.from(operations.values(), (row) => ({ ...row })),
+    compareAndSwapOperation: async ({ operationId, expected, next, nextForAuthoritativeTime, allowExpired = false }) => {
+      const current = operations.get(operationId) ?? null;
+      if (expected === null) {
+        if (current !== null) return { status: 'conflict' };
+      } else if (!current
+        || current.revision !== expected.revision
+        || current.mac !== expected.mac
+        || current.confirmationExpiresAt !== expected.confirmationExpiresAt) {
+        return { status: 'conflict' };
+      } else if (!allowExpired && current.confirmationExpiresAt <= clock.now()) {
+        return { status: 'expired' };
+      }
+      const candidate = nextForAuthoritativeTime ? nextForAuthoritativeTime(clock.now()) : next;
+      if (!allowExpired && candidate.confirmationExpiresAt <= clock.now()) return { status: 'expired' };
+      operations.set(operationId, { ...candidate });
       return { status: 'applied' };
     },
     cleanup: async () => ({ removed: 0 }),
@@ -958,6 +987,507 @@ describe('ManagedOpenCodeGuardian', () => {
     await guardian.stop();
   });
 
+  it.skipIf(process.platform === 'win32')('fails closed before spawning when durable operation creation fails', async () => {
+    const mockChild = createMockChild();
+    const spawnFn = vi.fn().mockReturnValue(mockChild);
+    const fixture = await createGuardianFixture({ spawnFn });
+    fixture.store.compareAndSwapOperation = vi.fn().mockResolvedValue({ status: 'conflict' });
+    await fixture.guardian.start();
+
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4098,
+      cwd: '/tmp/project',
+    };
+    await expect(fixture.guardian.spawnManagedOpenCode({
+      ...launchSpec,
+      env: {},
+      owner: {
+        ownerInstanceId: 'operation-create-failure-owner',
+        runtimeIdentity: 'operation-create-failure-runtime',
+        launchFingerprint: createLaunchFingerprint(launchSpec),
+      },
+      launchSpec,
+    })).rejects.toMatchObject({ code: 'GUARDIAN_OPERATION_CREATE_FAILED' });
+
+    expect(spawnFn).not.toHaveBeenCalled();
+    const records = await fixture.store.list();
+    expect(records).toHaveLength(1);
+    expect(records[0].state).toBe(ManagedOpenCodeHandoffV2State.Interrupted);
+    await fixture.guardian.stop();
+  });
+
+  it.skipIf(process.platform === 'win32')('rehydrates an operation fence when its child row is absent and resolves it after the row returns', async () => {
+    const first = await createGuardianFixture();
+    const credentialStore = createManagedOpenCodeCredentialStore({
+      rootDir: first.root,
+      secretProvider: first.secretProvider,
+    });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4124,
+      cwd: '/tmp/project',
+    };
+    const active = await seedActiveRecord(first.protocol, {
+      pid: 98765,
+      processStartTicks: '12345',
+      port: launchSpec.port,
+    });
+    const owner = active.owner;
+    const operationId = randomBytes(32).toString('base64url');
+    const operation = await first.protocol.createOperation({
+      operationId,
+      kind: 'stop',
+      incarnation: active.incarnation,
+      owner,
+      target: {
+        revision: active.revision,
+        leaseExpiresAt: active.leaseExpiresAt,
+        mac: active.mac,
+      },
+    });
+    expect(operation.ok).toBe(true);
+    const interrupted = await first.protocol.markInterrupted({
+      incarnation: active.incarnation,
+      expectedRevision: active.revision,
+    });
+    expect(interrupted.ok).toBe(true);
+    await credentialStore.create({
+      ...interrupted.record,
+      password: 'rehydrated-operation-secret',
+    });
+    // Simulate the child row being temporarily absent while the durable
+    // operation remains pending across a guardian/web-process restart.
+    first.store.records.delete(active.incarnation);
+    let failRecordRead = true;
+    const rehydrationProtocol = {
+      ...first.protocol,
+      readRecord: vi.fn(async (input) => {
+        if (failRecordRead) {
+          failRecordRead = false;
+          throw new Error('child record read temporarily unavailable');
+        }
+        return first.protocol.readRecord(input);
+      }),
+    };
+
+    const second = await createGuardianFixture({
+      store: first.store,
+      protocol: rehydrationProtocol,
+      secretProvider: first.secretProvider,
+      credentialStore,
+      processLiveness: () => false,
+      options: { allowUnauthenticatedCredentials: false },
+      spawnFn: vi.fn().mockReturnValue(createMockChild()),
+    });
+
+    try {
+      await second.guardian.start();
+      // The first authoritative read fails and the next reports absence; in
+      // both cases the operation-linked attention remains durable and blocks
+      // a later launch.
+      await expect(second.guardian.listChildren()).resolves.toEqual([
+        expect.objectContaining({
+          incarnation: active.incarnation,
+          operationId,
+          state: 'attention',
+        }),
+      ]);
+      await expect(second.guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        env: {},
+        owner,
+        launchSpec,
+      })).rejects.toThrow(/blocked by attention record/);
+      await expect(credentialStore.read({
+        incarnation: active.incarnation,
+        ownerInstanceId: interrupted.record.ownerInstanceId,
+        runtimeIdentity: interrupted.record.runtimeIdentity,
+        launchFingerprint: interrupted.record.launchFingerprint,
+        credentialFingerprint: interrupted.record.credentialFingerprint,
+      })).resolves.toEqual({ username: 'opencode', password: 'rehydrated-operation-secret' });
+
+      // The authoritative terminal row returns later. Resolution is still
+      // possible because the absent-row attention was never deleted or
+      // converted into credential cleanup.
+      first.store.records.set(active.incarnation, interrupted.record);
+      await second.guardian.cleanup();
+      await expect(second.guardian.listChildren()).resolves.toEqual([]);
+      await expect(credentialStore.read({
+        incarnation: active.incarnation,
+        ownerInstanceId: interrupted.record.ownerInstanceId,
+        runtimeIdentity: interrupted.record.runtimeIdentity,
+        launchFingerprint: interrupted.record.launchFingerprint,
+        credentialFingerprint: interrupted.record.credentialFingerprint,
+      })).rejects.toMatchObject({ code: 'MANAGED_OPENCODE_CREDENTIAL_MISSING' });
+    } finally {
+      try { await second.guardian.stop(); } catch { /* retention assertions are authoritative */ }
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('rehydrates an unresolved transition operation and blocks a different-port launch', async () => {
+    const originalFetch = globalThis.fetch;
+    let secondGuardian;
+    try {
+      const first = await createGuardianFixture();
+      const active = await seedActiveRecord(first.protocol, {
+        pid: process.pid,
+        processStartTicks: '12345',
+        port: 4131,
+      });
+      const operationId = randomBytes(32).toString('base64url');
+      const operation = await first.protocol.createOperation({
+        operationId,
+        kind: 'prepare-handoff',
+        incarnation: active.incarnation,
+        owner: active.owner,
+        target: {
+          revision: active.revision,
+          leaseExpiresAt: active.leaseExpiresAt,
+          mac: active.mac,
+        },
+      });
+      expect(operation.ok).toBe(true);
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ healthy: true }),
+      });
+      const second = await createGuardianFixture({
+        store: first.store,
+        protocol: first.protocol,
+        secretProvider: first.secretProvider,
+        processLiveness: () => true,
+        spawnFn: vi.fn().mockReturnValue(createMockChild()),
+      });
+      secondGuardian = second.guardian;
+      await secondGuardian.start();
+
+      await expect(secondGuardian.listChildren()).resolves.toEqual([
+        expect.objectContaining({
+          incarnation: active.incarnation,
+          operationId,
+          state: 'attention',
+        }),
+      ]);
+      const launchSpec = {
+        ...active.launchSpec,
+        port: 4132,
+      };
+      await expect(secondGuardian.spawnManagedOpenCode({
+        ...launchSpec,
+        env: {},
+        owner: {
+          ...active.owner,
+          launchFingerprint: createLaunchFingerprint(launchSpec),
+        },
+        launchSpec,
+      })).rejects.toThrow(/blocked by attention record/);
+      await expect(secondGuardian.getOperationStatus({ operationId, owner: active.owner }))
+        .resolves.toMatchObject({ operation: { state: 'pending' } });
+    } finally {
+      if (secondGuardian) {
+        try { await secondGuardian.stop(); } catch { /* unresolved attention is the assertion */ }
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps an in-flight operation fenced across its horizon until guardian quiescence resolves it', async () => {
+    const base = await createGuardianFixture();
+    let permitResolution = false;
+    const protocol = {
+      ...base.protocol,
+      createOperation: (input) => base.protocol.createOperation({ ...input, horizonMs: 100 }),
+      resolveOperation: vi.fn((input) => permitResolution
+        ? base.protocol.resolveOperation(input)
+        : Promise.resolve({ ok: false, reason: 'operation-cas-failed' })),
+    };
+    const child = createMockChild();
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4120,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'horizon-owner',
+      runtimeIdentity: 'horizon-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+    const { guardian } = await createGuardianFixture({
+      store: base.store,
+      secretProvider: base.secretProvider,
+      protocol,
+      spawnFn: vi.fn().mockReturnValue(child),
+    });
+
+    try {
+      await guardian.start();
+      const spawnPromise = guardian.spawnManagedOpenCode({ ...launchSpec, env: {}, owner, launchSpec });
+      setTimeout(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:4120\n'), 10);
+      await spawnPromise;
+      const operation = (await base.store.listOperations())[0];
+      expect((await guardian.listChildren()).some((entry) => entry.state === 'attention')).toBe(true);
+
+      base.clock.advance(200);
+      await guardian.cleanup();
+      await expect(guardian.getOperationStatus({ operationId: operation.operationId, owner })).resolves.toMatchObject({
+        operation: { state: 'expired' },
+      });
+      await expect(guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        port: 4121,
+        launchSpec: { ...launchSpec, port: 4121 },
+        env: {},
+        owner: { ...owner, launchFingerprint: createLaunchFingerprint({ ...launchSpec, port: 4121 }) },
+      })).rejects.toThrow(/blocked by attention/);
+
+      permitResolution = true;
+      await guardian.cleanup();
+      expect(protocol.resolveOperation).toHaveBeenCalledTimes(3);
+      expect((await guardian.listChildren()).some((entry) => entry.state === 'attention')).toBe(false);
+    } finally {
+      try { await guardian.stop(); } catch { /* the retention assertions are authoritative */ }
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('retains every overlapping incarnation operation until all resolve', async () => {
+    const base = await createGuardianFixture();
+    const allowed = new Set();
+    const protocol = {
+      ...base.protocol,
+      resolveOperation: vi.fn((input) => allowed.has(input.operationId)
+        ? base.protocol.resolveOperation(input)
+        : Promise.resolve({ ok: false, reason: 'operation-cas-failed' })),
+    };
+    const child = createMockChild();
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4124,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'overlap-owner',
+      runtimeIdentity: 'overlap-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+    const { guardian, store } = await createGuardianFixture({
+      store: base.store,
+      secretProvider: base.secretProvider,
+      protocol,
+      spawnFn: vi.fn().mockReturnValue(child),
+    });
+
+    try {
+      await guardian.start();
+      const spawnPromise = guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        env: { OPENCODE_SERVER_PASSWORD: 'overlap-secret' },
+        owner,
+        launchSpec,
+      });
+      setTimeout(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:4124\n'), 10);
+      const spawned = await spawnPromise;
+      const spawnOperation = (await store.listOperations()).find((operation) => operation.kind === 'spawn');
+
+      await guardian.prepareHandoff({ incarnation: spawned.incarnation, owner });
+      const prepareOperation = (await store.listOperations()).find((operation) => operation.kind === 'prepare-handoff');
+      const fenced = (await guardian.listChildren()).find((entry) => entry.incarnation === spawned.incarnation);
+      expect(fenced.operationIds).toEqual(expect.arrayContaining([
+        spawnOperation.operationId,
+        prepareOperation.operationId,
+      ]));
+
+      // The later prepare operation resolves first. The earlier spawn handle
+      // remains unresolved, so attention and credentials remain retained.
+      allowed.add(prepareOperation.operationId);
+      await guardian.cleanup();
+      expect((await guardian.listChildren()).find((entry) => entry.incarnation === spawned.incarnation))
+        .toMatchObject({ state: 'attention', operationIds: [spawnOperation.operationId] });
+
+      // Abort creates a third operation without overwriting the original
+      // spawn handle. Resolve the remaining operations in the other order.
+      await guardian.abortHandoff({ incarnation: spawned.incarnation, owner });
+      const abortOperation = (await store.listOperations()).find((operation) => operation.kind === 'abort-handoff');
+      allowed.add(spawnOperation.operationId);
+      allowed.add(abortOperation.operationId);
+      // A later abort result must not overwrite the original operation set.
+      // The unresolved spawn handle remains the authoritative blocker until
+      // its own exact binding is resolved.
+      expect((await guardian.listChildren()).find((entry) => entry.incarnation === spawned.incarnation))
+        .toMatchObject({ operationIds: expect.arrayContaining([spawnOperation.operationId]) });
+    } finally {
+      try { await guardian.stop(); } catch { /* retention assertions are authoritative */ }
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('retains terminal handles after operation CAS failure and resolves them on retry', async () => {
+    const base = await createGuardianFixture();
+    let failResolution = false;
+    const protocol = {
+      ...base.protocol,
+      resolveOperation: vi.fn(async (input) => {
+        if (failResolution) {
+          failResolution = false;
+          throw new Error('operation CAS unavailable');
+        }
+        return base.protocol.resolveOperation(input);
+      }),
+    };
+    const child = createMockChild();
+    const credentialStore = createManagedOpenCodeCredentialStore({
+      rootDir: base.root,
+      secretProvider: base.secretProvider,
+    });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4122,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'retention-owner',
+      runtimeIdentity: 'retention-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+    const { guardian, store } = await createGuardianFixture({
+      store: base.store,
+      secretProvider: base.secretProvider,
+      protocol,
+      credentialStore,
+      options: { allowUnauthenticatedCredentials: false },
+      spawnFn: vi.fn().mockReturnValue(child),
+    });
+
+    try {
+      await guardian.start();
+      const spawnPromise = guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        env: { OPENCODE_SERVER_PASSWORD: 'retained-operation-secret' },
+        owner,
+        launchSpec,
+      });
+      setTimeout(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:4122\n'), 10);
+      const spawned = await spawnPromise;
+      const active = (await store.list()).find((record) => record.incarnation === spawned.incarnation);
+      failResolution = true;
+
+      await expect(guardian.stopChild({ incarnation: spawned.incarnation, owner }))
+        .rejects.toMatchObject({ code: 'GUARDIAN_OPERATION_RESOLUTION_UNCERTAIN' });
+      const operation = (await store.listOperations()).find((candidate) => candidate.state === 'pending');
+      await expect(guardian.getOperationStatus({
+        operationId: operation.operationId,
+        owner,
+      })).resolves.toMatchObject({ operation: { state: 'pending' }, record: { state: 'retired' } });
+      await expect(credentialStore.read({
+        incarnation: spawned.incarnation,
+        ...owner,
+        credentialFingerprint: active.credentialFingerprint,
+      })).resolves.toEqual({ username: 'opencode', password: 'retained-operation-secret' });
+      expect(JSON.stringify(await guardian.listChildren())).not.toContain('retained-operation-secret');
+
+      await guardian.cleanup();
+      await expect(credentialStore.read({
+        incarnation: spawned.incarnation,
+        ...owner,
+        credentialFingerprint: active.credentialFingerprint,
+      })).rejects.toMatchObject({ code: 'MANAGED_OPENCODE_CREDENTIAL_MISSING' });
+      await expect(guardian.listChildren()).resolves.toEqual([]);
+    } finally {
+      try { await guardian.stop(); } catch { /* cleanup is asserted above */ }
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('retains credentials through an unexpected exit operation-resolution failure', async () => {
+    const base = await createGuardianFixture();
+    let resolutionFailures = 1;
+    const protocol = {
+      ...base.protocol,
+      resolveOperation: vi.fn(async (input) => {
+        if (resolutionFailures > 0) {
+          resolutionFailures -= 1;
+          return { ok: false, reason: 'operation-cas-failed' };
+        }
+        return base.protocol.resolveOperation(input);
+      }),
+    };
+    const child = createMockChild();
+    const credentialStore = createManagedOpenCodeCredentialStore({
+      rootDir: base.root,
+      secretProvider: base.secretProvider,
+    });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4123,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'unexpected-exit-owner',
+      runtimeIdentity: 'unexpected-exit-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+    const { guardian, store } = await createGuardianFixture({
+      store: base.store,
+      secretProvider: base.secretProvider,
+      protocol,
+      credentialStore,
+      options: { allowUnauthenticatedCredentials: false },
+      spawnFn: vi.fn().mockReturnValue(child),
+    });
+
+    try {
+      await guardian.start();
+      const spawnPromise = guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        env: { OPENCODE_SERVER_PASSWORD: 'unexpected-exit-secret' },
+        owner,
+        launchSpec,
+      });
+      setTimeout(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:4123\n'), 10);
+      const spawned = await spawnPromise;
+      const active = (await store.list()).find((record) => record.incarnation === spawned.incarnation);
+      expect((await store.listOperations()).find((operation) => operation.incarnation === spawned.incarnation))
+        .toMatchObject({ state: 'pending' });
+
+      // The first failed resolution above is the ambiguous spawn outcome. A
+      // later unexpected exit must not turn that unresolved operation into
+      // premature credential deletion.
+      resolutionFailures = 1;
+      child.exitCode = 1;
+      child.emit('close', 1, null);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      await expect(credentialStore.read({
+        incarnation: spawned.incarnation,
+        ...owner,
+        credentialFingerprint: active.credentialFingerprint,
+      })).resolves.toEqual({ username: 'opencode', password: 'unexpected-exit-secret' });
+      expect((await guardian.listChildren()).some((entry) => entry.operationId)).toBe(true);
+
+      resolutionFailures = 0;
+      await guardian.cleanup();
+      await expect(credentialStore.read({
+        incarnation: spawned.incarnation,
+        ...owner,
+        credentialFingerprint: active.credentialFingerprint,
+      })).rejects.toMatchObject({ code: 'MANAGED_OPENCODE_CREDENTIAL_MISSING' });
+      await expect(guardian.listChildren()).resolves.toEqual([]);
+    } finally {
+      try { await guardian.stop(); } catch { /* retention assertions are authoritative */ }
+    }
+  });
+
   it.skipIf(process.platform === 'win32')('does not include malformed child stdout in guardian launch errors', async () => {
     const password = 'guardian-malformed-url-secret';
     const mockChild = createMockChild();
@@ -1443,7 +1973,20 @@ describe('ManagedOpenCodeGuardian', () => {
           cwd: '/tmp/project',
         }),
       };
-      await client.prepareHandoff({ incarnation: result.incarnation, owner });
+      const prepareOperationId = randomBytes(32).toString('base64url');
+      await client.prepareHandoff({ incarnation: result.incarnation, owner, operationId: prepareOperationId });
+      await expect(client.operationStatus({ operationId: prepareOperationId, owner }))
+        .resolves.toMatchObject({
+          operation: {
+            operationId: prepareOperationId,
+            kind: 'prepare-handoff',
+            state: 'resolved',
+            resolutionState: ManagedOpenCodeHandoffV2State.HandoffPrepared,
+          },
+        });
+      await expect(client.operationList({ owner })).resolves.toEqual(
+        expect.arrayContaining([expect.objectContaining({ operationId: prepareOperationId })]),
+      );
       const rollback = await client.abortHandoff({ incarnation: result.incarnation, owner });
       expect(rollback).toMatchObject({
         state: ManagedOpenCodeHandoffV2State.Active,
@@ -1546,7 +2089,12 @@ describe('ManagedOpenCodeGuardian', () => {
     });
 
     try {
-      await expect(client.list()).rejects.toMatchObject({ code: 'frame_too_large' });
+      await expect(client.spawn({ sideEffect: true })).rejects.toMatchObject({
+        code: GUARDIAN_AMBIGUOUS_REQUEST_CODE,
+        ambiguous: true,
+        retryable: false,
+        originalCode: 'frame_too_large',
+      });
     } finally {
       client.disconnect();
       await new Promise((resolve) => server.close(resolve));
@@ -1713,6 +2261,126 @@ describe('ManagedOpenCodeGuardian', () => {
     }
   });
 
+  it.skipIf(process.platform === 'win32')('fails adoption confirmation when credentials mutate after the health read', async () => {
+    const mockChild = createMockChild();
+    const spawnFn = vi.fn().mockReturnValue(mockChild);
+    const credentials = [
+      { username: 'ipc-user', password: 'credential-before' },
+      { username: 'ipc-user', password: 'credential-before' },
+      { username: 'ipc-user', password: 'credential-after' },
+    ];
+    let readCount = 0;
+    const credentialStore = {
+      create: vi.fn(),
+      read: vi.fn(async () => credentials[Math.min(readCount++, credentials.length - 1)]),
+      remove: vi.fn().mockResolvedValue({ removed: true }),
+    };
+    const { guardian } = await createGuardianFixture({
+      spawnFn,
+      credentialStore,
+      options: { allowUnauthenticatedCredentials: false },
+    });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4110,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'adoption-credential-race-owner',
+      runtimeIdentity: 'adoption-credential-race-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+
+    try {
+      await guardian.start();
+      const spawnPromise = guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        env: { OPENCODE_SERVER_PASSWORD: 'credential-before' },
+        owner,
+        launchSpec,
+      });
+      setTimeout(() => mockChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:4110\n'), 10);
+      const spawned = await spawnPromise;
+      const listed = await guardian.listChildren();
+      const record = listed.find((candidate) => candidate.incarnation === spawned.incarnation);
+
+      await expect(guardian.confirmAdoption({
+        incarnation: spawned.incarnation,
+        owner,
+        expected: {
+          revision: record.revision,
+          leaseExpiresAt: record.leaseExpiresAt,
+          mac: record.mac,
+        },
+      })).rejects.toThrow(/credential changed/);
+      expect(credentialStore.read).toHaveBeenCalledTimes(3);
+    } finally {
+      await guardian.stop();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('fails adoption confirmation when final health changes', async () => {
+    const mockChild = createMockChild();
+    const spawnFn = vi.fn().mockReturnValue(mockChild);
+    let healthCount = 0;
+    const credentialStore = {
+      create: vi.fn(),
+      read: vi.fn().mockResolvedValue({ username: 'ipc-user', password: 'health-race-password' }),
+      remove: vi.fn().mockResolvedValue({ removed: true }),
+    };
+    const managedHealthProbe = vi.fn(async () => {
+      healthCount += 1;
+      return { healthy: healthCount === 1 };
+    });
+    const { guardian } = await createGuardianFixture({
+      spawnFn,
+      credentialStore,
+      managedHealthProbe,
+      options: { allowUnauthenticatedCredentials: false },
+    });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4111,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'adoption-health-race-owner',
+      runtimeIdentity: 'adoption-health-race-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+
+    try {
+      await guardian.start();
+      const spawnPromise = guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        env: { OPENCODE_SERVER_PASSWORD: 'health-race-password' },
+        owner,
+        launchSpec,
+      });
+      setTimeout(() => mockChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:4111\n'), 10);
+      const spawned = await spawnPromise;
+      const listed = await guardian.listChildren();
+      const record = listed.find((candidate) => candidate.incarnation === spawned.incarnation);
+
+      await expect(guardian.confirmAdoption({
+        incarnation: spawned.incarnation,
+        owner,
+        expected: {
+          revision: record.revision,
+          leaseExpiresAt: record.leaseExpiresAt,
+          mac: record.mac,
+        },
+      })).rejects.toThrow(/final health confirmation failed/);
+      expect(managedHealthProbe).toHaveBeenCalledTimes(2);
+    } finally {
+      await guardian.stop();
+    }
+  });
+
   it.skipIf(process.platform === 'win32')('serializes credential health ahead of same-incarnation stop', async () => {
     const mockChild = createMockChild();
     const spawnFn = vi.fn().mockReturnValue(mockChild);
@@ -1782,6 +2450,157 @@ describe('ManagedOpenCodeGuardian', () => {
       })).rejects.toMatchObject({ code: 'MANAGED_OPENCODE_CREDENTIAL_MISSING' });
     } finally {
       try { await guardian.stop(); } catch { /* child stop is asserted above */ }
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('routes adoption confirmation through the v2 CAS authority', async () => {
+    const mockChild = createMockChild();
+    const base = await createGuardianFixture();
+    const confirmRecord = vi.fn((input) => base.protocol.confirmRecord(input));
+    const protocol = { ...base.protocol, confirmRecord };
+    const credentialStore = createManagedOpenCodeCredentialStore({
+      rootDir: base.root,
+      secretProvider: base.secretProvider,
+    });
+    const { guardian } = await createGuardianFixture({
+      store: base.store,
+      secretProvider: base.secretProvider,
+      protocol,
+      credentialStore,
+      options: { allowUnauthenticatedCredentials: false },
+      spawnFn: vi.fn().mockReturnValue(mockChild),
+      managedHealthProbe: vi.fn(async () => ({ healthy: true })),
+    });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4113,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'adoption-cas-owner',
+      runtimeIdentity: 'adoption-cas-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+
+    try {
+      await guardian.start();
+      const spawnPromise = guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        env: { OPENCODE_SERVER_PASSWORD: 'adoption-cas-password' },
+        owner,
+        launchSpec,
+      });
+      setTimeout(() => mockChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:4113\n'), 10);
+      const spawned = await spawnPromise;
+      const record = (await guardian.listChildren()).find((candidate) => candidate.incarnation === spawned.incarnation);
+
+      await expect(guardian.confirmAdoption({
+        incarnation: spawned.incarnation,
+        owner,
+        expected: {
+          revision: record.revision,
+          leaseExpiresAt: record.leaseExpiresAt,
+          mac: record.mac,
+        },
+      })).resolves.toMatchObject({ record });
+      expect(confirmRecord).toHaveBeenCalledOnce();
+      expect(confirmRecord).toHaveBeenCalledWith(expect.objectContaining({
+        incarnation: spawned.incarnation,
+        expectedRevision: record.revision,
+        expectedLeaseExpiresAt: record.leaseExpiresAt,
+        expectedMac: record.mac,
+      }));
+    } finally {
+      await guardian.stop();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('confirms a retired record after child removal with exact owner and binding', async () => {
+    const mockChild = createMockChild();
+    const { guardian, root } = await createGuardianFixture({ spawnFn: vi.fn().mockReturnValue(mockChild) });
+    const client = new GuardianClient({ socketPath: path.join(root, 'guardian.sock') });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4112,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'terminal-confirm-owner',
+      runtimeIdentity: 'terminal-confirm-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+
+    try {
+      await guardian.start();
+      await client.connect();
+      const spawnPromise = client.spawn({
+        ...launchSpec,
+        env: {},
+        owner,
+        launchSpec,
+      });
+      setTimeout(() => mockChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:4112\n'), 10);
+      const spawned = await spawnPromise;
+      const retired = await client.stop({ incarnation: spawned.incarnation, owner });
+      expect(await client.list()).toEqual([]);
+
+      await expect(client.terminalStatus({
+        incarnation: spawned.incarnation,
+        owner,
+      })).resolves.toMatchObject({ record: retired });
+      await expect(client.confirmTerminal({
+        incarnation: spawned.incarnation,
+        owner,
+        expected: {
+          revision: retired.revision,
+          leaseExpiresAt: retired.leaseExpiresAt,
+          mac: retired.mac,
+        },
+      })).resolves.toMatchObject({ record: retired });
+
+      await expect(client.confirmTerminal({
+        incarnation: spawned.incarnation,
+        owner: { ...owner, ownerInstanceId: 'wrong-owner' },
+        expected: {
+          revision: retired.revision,
+          leaseExpiresAt: retired.leaseExpiresAt,
+          mac: retired.mac,
+        },
+      })).rejects.toThrow(/ownership identity does not match/);
+      await expect(client.confirmTerminal({
+        incarnation: spawned.incarnation,
+        owner,
+        expected: {
+          revision: retired.revision + 1,
+          leaseExpiresAt: retired.leaseExpiresAt,
+          mac: retired.mac,
+        },
+      })).rejects.toThrow(/binding changed/);
+      await expect(client.confirmTerminal({
+        incarnation: spawned.incarnation,
+        owner,
+        expected: {
+          revision: retired.revision,
+          leaseExpiresAt: retired.leaseExpiresAt,
+          mac: 'wrong-mac',
+        },
+      })).rejects.toThrow(/binding changed/);
+      await expect(client.confirmTerminal({
+        incarnation: 'wrong-incarnation',
+        owner,
+        expected: {
+          revision: retired.revision,
+          leaseExpiresAt: retired.leaseExpiresAt,
+          mac: retired.mac,
+        },
+      })).rejects.toThrow(/terminal record is unavailable/);
+    } finally {
+      client.disconnect();
+      await guardian.stop();
     }
   });
 
@@ -1907,6 +2726,23 @@ describe('ManagedOpenCodeGuardian', () => {
     } finally {
       shutdownClient.disconnect();
       launchClient.disconnect();
+      await guardian.stop();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('recovers the mutation queue after a failed mutation', async () => {
+    const { guardian } = await createGuardianFixture();
+    await guardian.start();
+
+    const startTimersSpy = vi.spyOn(guardian, 'startTimers').mockImplementationOnce(() => {
+      throw new Error('reload failed');
+    });
+
+    try {
+      await expect(guardian.reload()).rejects.toThrow('reload failed');
+      await expect(guardian.reload()).resolves.toEqual({ reloaded: true });
+      expect(startTimersSpy).toHaveBeenCalledTimes(2);
+    } finally {
       await guardian.stop();
     }
   });
@@ -2085,6 +2921,62 @@ describe('ManagedOpenCodeGuardian', () => {
     await guardian.stop();
   });
 
+  it.skipIf(process.platform === 'win32')('cleans up a published credential when beginLaunch fails', async () => {
+    const base = await createGuardianFixture();
+    const credentialStore = {
+      create: vi.fn().mockResolvedValue({ created: true }),
+      read: vi.fn(),
+      remove: vi.fn().mockResolvedValue({ removed: true }),
+    };
+    const beginLaunch = vi.fn().mockResolvedValue({
+      ok: false,
+      reason: 'credential-publication-failed',
+    });
+    const protocol = { ...base.protocol, beginLaunch };
+    const { guardian, store } = await createGuardianFixture({
+      store: base.store,
+      protocol,
+      secretProvider: base.secretProvider,
+      credentialStore,
+      options: { allowUnauthenticatedCredentials: false },
+      spawnFn: vi.fn(),
+    });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4108,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'begin-launch-failure-owner',
+      runtimeIdentity: 'begin-launch-failure-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+
+    try {
+      await guardian.start();
+      await expect(guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        env: { OPENCODE_SERVER_PASSWORD: 'begin-launch-failure-password' },
+        owner,
+        launchSpec,
+      })).rejects.toThrow('Failed to begin launch: credential-publication-failed');
+
+      expect(beginLaunch).toHaveBeenCalledOnce();
+      expect(credentialStore.create).toHaveBeenCalledOnce();
+      expect(credentialStore.remove).toHaveBeenCalledWith(expect.objectContaining({
+        credentialFingerprint: expect.any(String),
+      }));
+      await expect(store.list()).resolves.toEqual([
+        expect.objectContaining({ state: ManagedOpenCodeHandoffV2State.Interrupted }),
+      ]);
+      await expect(guardian.listChildren()).resolves.toEqual([]);
+    } finally {
+      await guardian.stop();
+    }
+  });
+
   it.skipIf(process.platform === 'win32')('re-reads the current revision after a stale launch-cleanup CAS', async () => {
     const base = await createGuardianFixture();
     let readCount = 0;
@@ -2180,6 +3072,86 @@ describe('ManagedOpenCodeGuardian', () => {
     expect(prepared.state).toBe(ManagedOpenCodeHandoffV2State.HandoffPrepared);
 
     await guardian.stop();
+  });
+
+  it.skipIf(process.platform === 'win32').each([
+    ['beginStopping', 'stopChild', 'stop'],
+    ['prepareHandoff', 'prepareHandoff', 'prepare-handoff'],
+    ['abortHandoff', 'abortHandoff', 'abort-handoff'],
+  ])('retains a %s transition operation in durable attention when the transition fails', async (
+    transition,
+    action,
+    operationKind,
+  ) => {
+    const base = await createGuardianFixture();
+    const child = createMockChild();
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4140 + ['stopChild', 'prepareHandoff', 'abortHandoff'].indexOf(action),
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: `transition-failure-${transition}`,
+      runtimeIdentity: `transition-failure-${transition}-runtime`,
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+    const failedTransition = vi.fn().mockResolvedValue({
+      ok: false,
+      reason: `${transition}-failed`,
+    });
+    const protocol = {
+      ...base.protocol,
+      [transition]: failedTransition,
+    };
+    const { guardian, store } = await createGuardianFixture({
+      store: base.store,
+      secretProvider: base.secretProvider,
+      protocol,
+      spawnFn: vi.fn().mockReturnValue(child),
+    });
+
+    try {
+      await guardian.start();
+      const spawnPromise = guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        env: {},
+        owner,
+        launchSpec,
+      });
+      setTimeout(() => child.stdout.emit('data', `opencode server listening on http://127.0.0.1:${launchSpec.port}\n`), 10);
+      const spawned = await spawnPromise;
+
+      if (action === 'abortHandoff') {
+        await guardian.protocol.prepareHandoff({
+          incarnation: spawned.incarnation,
+          expectedRevision: (await guardian.protocol.readRecord({ incarnation: spawned.incarnation })).record.revision,
+        });
+      }
+
+      await expect(guardian[action]({
+        incarnation: spawned.incarnation,
+        owner,
+      })).rejects.toThrow();
+
+      const operation = (await store.listOperations()).find((candidate) => candidate.kind === operationKind);
+      expect(operation).toMatchObject({ state: 'pending', kind: operationKind });
+      expect((await guardian.listChildren()).find((entry) => entry.incarnation === spawned.incarnation))
+        .toMatchObject({ state: 'attention', operationIds: [operation.operationId] });
+      await expect(guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        port: launchSpec.port + 100,
+        launchSpec: { ...launchSpec, port: launchSpec.port + 100 },
+        env: {},
+        owner: {
+          ...owner,
+          launchFingerprint: createLaunchFingerprint({ ...launchSpec, port: launchSpec.port + 100 }),
+        },
+      })).rejects.toThrow(/blocked by attention record/);
+    } finally {
+      try { await guardian.stop(); } catch { /* unresolved attention is the assertion */ }
+    }
   });
 
   it.skipIf(process.platform === 'win32')('rejects owner-scoped stops for ownerless children', async () => {
@@ -2495,9 +3467,515 @@ describe('ManagedOpenCodeGuardian', () => {
         launchFingerprint: record.launchFingerprint,
         credentialFingerprint: record.credentialFingerprint,
       })).rejects.toMatchObject({ code: 'MANAGED_OPENCODE_CREDENTIAL_MISSING' });
+      await expect(secondGuardian.listChildren()).resolves.toEqual([]);
     } finally {
       if (secondGuardian) await secondGuardian.stop();
     }
+  });
+
+  it.skipIf(process.platform === 'win32')('reconciles a credential left by a crash before beginLaunch', async () => {
+    const first = await createGuardianFixture();
+    const durableStore = createManagedOpenCodeHandoffV2Store({ rootDir: first.root });
+    const durableProtocol = createManagedOpenCodeHandoffV2Protocol({
+      secretProvider: first.secretProvider,
+      store: durableStore,
+      now: first.clock.now,
+      defaultLeaseMs: 60_000,
+    });
+    const credentialStore = createManagedOpenCodeCredentialStore({
+      rootDir: first.root,
+      secretProvider: first.secretProvider,
+    });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4111,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'reserved-crash-owner',
+      runtimeIdentity: 'reserved-crash-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+    const reservation = await durableProtocol.reserveLaunch({ owner, launchSpec });
+    expect(reservation.ok).toBe(true);
+
+    // Equivalent to a guardian crash after credential publication and before
+    // beginLaunch's CAS: the durable row is still Reserved and has no process
+    // identity, so no detached child can exist for this incarnation.
+    await credentialStore.create({
+      ...reservation.record,
+      password: 'reserved-crash-password',
+    });
+    first.clock.advance(60_001);
+
+    const second = await createGuardianFixture({
+      store: durableStore,
+      protocol: durableProtocol,
+      secretProvider: first.secretProvider,
+      credentialStore,
+      options: { allowUnauthenticatedCredentials: false },
+    });
+    await second.guardian.start();
+
+    await expect(second.protocol.readRecord({
+      incarnation: reservation.record.incarnation,
+      allowExpired: true,
+    }))
+      .resolves.toMatchObject({
+        ok: true,
+        record: { state: ManagedOpenCodeHandoffV2State.Interrupted },
+      });
+    await expect(credentialStore.read({
+      incarnation: reservation.record.incarnation,
+      ownerInstanceId: reservation.record.ownerInstanceId,
+      runtimeIdentity: reservation.record.runtimeIdentity,
+      launchFingerprint: reservation.record.launchFingerprint,
+      credentialFingerprint: reservation.record.credentialFingerprint,
+    })).rejects.toMatchObject({ code: 'MANAGED_OPENCODE_CREDENTIAL_MISSING' });
+    await expect(second.guardian.listChildren()).resolves.toEqual([]);
+    await second.guardian.stop();
+  });
+
+  it.skipIf(process.platform === 'win32')('retries a transient Reserved terminal CAS in the same guardian', async () => {
+    const first = await createGuardianFixture();
+    let failTerminalCas = true;
+    const transientStore = {
+      ...first.store,
+      compareAndSwap: async (input) => {
+        if (failTerminalCas && input.expected !== null) {
+          failTerminalCas = false;
+          throw new Error('transient reserved CAS failure');
+        }
+        return first.store.compareAndSwap(input);
+      },
+    };
+    const protocol = createManagedOpenCodeHandoffV2Protocol({
+      secretProvider: first.secretProvider,
+      store: transientStore,
+      now: first.clock.now,
+      defaultLeaseMs: 60_000,
+    });
+    const realCredentialStore = createManagedOpenCodeCredentialStore({
+      rootDir: first.root,
+      secretProvider: first.secretProvider,
+    });
+    const credentialStore = {
+      ...realCredentialStore,
+      remove: vi.fn((...args) => realCredentialStore.remove(...args)),
+    };
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4113,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'reserved-transient-owner',
+      runtimeIdentity: 'reserved-transient-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+    const reservation = await protocol.reserveLaunch({ owner, launchSpec });
+    await credentialStore.create({
+      ...reservation.record,
+      password: 'reserved-transient-password',
+    });
+
+    const second = await createGuardianFixture({
+      store: transientStore,
+      protocol,
+      secretProvider: first.secretProvider,
+      credentialStore,
+      options: { allowUnauthenticatedCredentials: false },
+    });
+
+    try {
+      await second.guardian.start();
+      await expect(second.protocol.readRecord({
+        incarnation: reservation.record.incarnation,
+        allowExpired: true,
+      })).resolves.toMatchObject({
+        ok: true,
+        record: { state: ManagedOpenCodeHandoffV2State.Reserved },
+      });
+      expect(credentialStore.remove).not.toHaveBeenCalled();
+      expect(second.log.mock.calls.flat().join('\n')).toContain('scheduled attention reconciliation');
+
+      // The explicit cleanup retry is the same-process recovery path; no
+      // restart is needed and the credential remains until the CAS succeeds.
+      await second.guardian.cleanup();
+      await expect(second.protocol.readRecord({
+        incarnation: reservation.record.incarnation,
+        allowExpired: true,
+      })).resolves.toMatchObject({
+        ok: true,
+        record: { state: ManagedOpenCodeHandoffV2State.Interrupted },
+      });
+      await expect(credentialStore.read({
+        incarnation: reservation.record.incarnation,
+        ownerInstanceId: reservation.record.ownerInstanceId,
+        runtimeIdentity: reservation.record.runtimeIdentity,
+        launchFingerprint: reservation.record.launchFingerprint,
+        credentialFingerprint: reservation.record.credentialFingerprint,
+      })).rejects.toMatchObject({ code: 'MANAGED_OPENCODE_CREDENTIAL_MISSING' });
+      expect(credentialStore.remove).toHaveBeenCalledOnce();
+      await expect(second.guardian.listChildren()).resolves.toEqual([]);
+    } finally {
+      await second.guardian.stop();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps bounded retry scheduled when Reserved terminalization outlives credential cleanup', async () => {
+    const first = await createGuardianFixture();
+    const durableStore = createManagedOpenCodeHandoffV2Store({ rootDir: first.root });
+    const protocol = createManagedOpenCodeHandoffV2Protocol({
+      secretProvider: first.secretProvider,
+      store: durableStore,
+      now: first.clock.now,
+      defaultLeaseMs: 60_000,
+    });
+    const realCredentialStore = createManagedOpenCodeCredentialStore({
+      rootDir: first.root,
+      secretProvider: first.secretProvider,
+    });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4114,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'reserved-credential-retry-owner',
+      runtimeIdentity: 'reserved-credential-retry-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+    const reservation = await protocol.reserveLaunch({ owner, launchSpec });
+    const credentialDescriptor = {
+      ...reservation.record,
+      password: 'reserved-credential-retry-password',
+    };
+    await realCredentialStore.create(credentialDescriptor);
+    const credentialStore = {
+      ...realCredentialStore,
+      remove: vi.fn()
+        .mockRejectedValueOnce(new Error('credential removal temporarily unavailable'))
+        .mockImplementation((...args) => realCredentialStore.remove(...args)),
+    };
+    const second = await createGuardianFixture({
+      store: durableStore,
+      protocol,
+      secretProvider: first.secretProvider,
+      credentialStore,
+      options: { allowUnauthenticatedCredentials: false },
+    });
+
+    try {
+      await second.guardian.start();
+      await expect(second.protocol.readRecord({
+        incarnation: reservation.record.incarnation,
+        allowExpired: true,
+      })).resolves.toMatchObject({
+        ok: true,
+        record: { state: ManagedOpenCodeHandoffV2State.Interrupted },
+      });
+      await expect(realCredentialStore.read(credentialDescriptor)).resolves.toMatchObject({
+        password: 'reserved-credential-retry-password',
+      });
+      expect(credentialStore.remove).toHaveBeenCalledOnce();
+      await expect(second.guardian.listChildren()).resolves.toEqual([
+        expect.objectContaining({ kind: 'confirmed-death-cleanup-failed', incarnation: reservation.record.incarnation }),
+      ]);
+
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+
+      await expect(realCredentialStore.read(credentialDescriptor))
+        .rejects.toMatchObject({ code: 'MANAGED_OPENCODE_CREDENTIAL_MISSING' });
+      await expect(second.guardian.listChildren()).resolves.toEqual([]);
+      expect(credentialStore.remove).toHaveBeenCalledTimes(2);
+    } finally {
+      await second.guardian.stop();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('retries reserved recovery when its lease expires before the terminal CAS', async () => {
+    const first = await createGuardianFixture();
+    let raced = false;
+    const casInputs = [];
+    const raceStore = {
+      ...first.store,
+      compareAndSwap: async (input) => {
+        casInputs.push(input);
+        if (!raced && input.expected !== null) {
+          raced = true;
+          first.clock.advance(60_001);
+        }
+        return first.store.compareAndSwap(input);
+      },
+    };
+    const raceProtocol = createManagedOpenCodeHandoffV2Protocol({
+      secretProvider: first.secretProvider,
+      store: raceStore,
+      now: first.clock.now,
+      defaultLeaseMs: 60_000,
+    });
+    const credentialStore = createManagedOpenCodeCredentialStore({
+      rootDir: first.root,
+      secretProvider: first.secretProvider,
+    });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4115,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'reserved-race-owner',
+      runtimeIdentity: 'reserved-race-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+    const reservation = await raceProtocol.reserveLaunch({ owner, launchSpec });
+    await credentialStore.create({
+      ...reservation.record,
+      password: 'reserved-race-password',
+    });
+
+    const replacementChild = createMockChild();
+    const second = await createGuardianFixture({
+      store: raceStore,
+      protocol: raceProtocol,
+      secretProvider: first.secretProvider,
+      credentialStore,
+      spawnFn: vi.fn(() => replacementChild),
+      options: { allowUnauthenticatedCredentials: false },
+    });
+
+    try {
+      await second.guardian.start();
+      expect(raced).toBe(true);
+      const terminalCasInputs = casInputs.filter((input) => input.expected !== null);
+      expect(terminalCasInputs).toHaveLength(2);
+      expect(terminalCasInputs[1]).toMatchObject({
+        allowExpired: true,
+        expected: terminalCasInputs[0].expected,
+      });
+      await expect(second.protocol.readRecord({
+        incarnation: reservation.record.incarnation,
+        allowExpired: true,
+      })).resolves.toMatchObject({
+        ok: true,
+        record: { state: ManagedOpenCodeHandoffV2State.Interrupted },
+      });
+      await expect(credentialStore.read({
+        incarnation: reservation.record.incarnation,
+        ownerInstanceId: reservation.record.ownerInstanceId,
+        runtimeIdentity: reservation.record.runtimeIdentity,
+        launchFingerprint: reservation.record.launchFingerprint,
+        credentialFingerprint: reservation.record.credentialFingerprint,
+      })).rejects.toMatchObject({ code: 'MANAGED_OPENCODE_CREDENTIAL_MISSING' });
+      await expect(second.guardian.listChildren()).resolves.toEqual([]);
+
+      const replacementLaunch = second.guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        env: { OPENCODE_SERVER_PASSWORD: 'replacement-password' },
+        owner,
+        launchSpec,
+      });
+      setTimeout(() => {
+        replacementChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:4115\n');
+      }, 10);
+      await expect(replacementLaunch).resolves.toMatchObject({ port: 4115 });
+    } finally {
+      await second.guardian.stop();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('retains a terminal record when credential removal fails until cleanup retries', async () => {
+    const first = await createGuardianFixture();
+    const cleanupStore = {
+      ...first.store,
+      cleanup: async ({ protectedIncarnations = [] } = {}) => {
+        const protectedSet = new Set(protectedIncarnations);
+        let removed = 0;
+        for (const [incarnation, record] of first.store.records) {
+          if (
+            record.leaseExpiresAt <= first.clock.now()
+            && [ManagedOpenCodeHandoffV2State.Interrupted, ManagedOpenCodeHandoffV2State.Retired]
+              .includes(record.state)
+            && !protectedSet.has(incarnation)
+          ) {
+            first.store.records.delete(incarnation);
+            removed += 1;
+          }
+        }
+        return { removed };
+      },
+    };
+    const cleanupProtocol = createManagedOpenCodeHandoffV2Protocol({
+      secretProvider: first.secretProvider,
+      store: cleanupStore,
+      now: first.clock.now,
+      defaultLeaseMs: 60_000,
+    });
+    const realCredentialStore = createManagedOpenCodeCredentialStore({
+      rootDir: first.root,
+      secretProvider: first.secretProvider,
+    });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4113,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'terminal-cleanup-owner',
+      runtimeIdentity: 'terminal-cleanup-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+    const reservation = await cleanupProtocol.reserveLaunch({ owner, launchSpec });
+    const launching = await cleanupProtocol.beginLaunch({
+      incarnation: reservation.record.incarnation,
+      expectedRevision: reservation.record.revision,
+      withCredential: async () => undefined,
+    });
+    const interrupted = await cleanupProtocol.markInterrupted({
+      incarnation: launching.record.incarnation,
+      expectedRevision: launching.record.revision,
+    });
+    await realCredentialStore.create({
+      ...interrupted.record,
+      password: 'terminal-cleanup-password',
+    });
+    first.clock.advance(60_001);
+
+    const credentialStore = {
+      ...realCredentialStore,
+      remove: vi.fn(),
+    };
+    const removeSpy = credentialStore.remove
+      .mockRejectedValueOnce(new Error('temporary credential removal failure'))
+      .mockRejectedValueOnce(new Error('temporary credential removal failure'))
+      .mockImplementation((...args) => realCredentialStore.remove(...args));
+    const second = await createGuardianFixture({
+      store: cleanupStore,
+      protocol: cleanupProtocol,
+      secretProvider: first.secretProvider,
+      credentialStore,
+      options: { allowUnauthenticatedCredentials: false },
+    });
+
+    try {
+      await second.guardian.start();
+      expect(removeSpy).toHaveBeenCalledTimes(1);
+
+      // The periodic cleanup path must not erase the terminal recovery handle
+      // while the credential removal attention is still unresolved.
+      await expect(second.guardian.cleanup()).resolves.toEqual({ removed: 0 });
+      await expect(cleanupStore.read({ incarnation: interrupted.record.incarnation }))
+        .resolves.toMatchObject({ state: ManagedOpenCodeHandoffV2State.Interrupted });
+      await expect(credentialStore.read({
+        incarnation: interrupted.record.incarnation,
+        ownerInstanceId: interrupted.record.ownerInstanceId,
+        runtimeIdentity: interrupted.record.runtimeIdentity,
+        launchFingerprint: interrupted.record.launchFingerprint,
+        credentialFingerprint: interrupted.record.credentialFingerprint,
+      })).resolves.toEqual({ username: 'opencode', password: 'terminal-cleanup-password' });
+
+      // Reconciliation retries the same identity-fenced removal, then the
+      // now-unneeded terminal row may be removed by the same cleanup pass.
+      await expect(second.guardian.cleanup()).resolves.toEqual({ removed: 1 });
+      await expect(cleanupStore.read({ incarnation: interrupted.record.incarnation })).resolves.toBeNull();
+      await expect(credentialStore.read({
+        incarnation: interrupted.record.incarnation,
+        ownerInstanceId: interrupted.record.ownerInstanceId,
+        runtimeIdentity: interrupted.record.runtimeIdentity,
+        launchFingerprint: interrupted.record.launchFingerprint,
+        credentialFingerprint: interrupted.record.credentialFingerprint,
+      })).rejects.toMatchObject({ code: 'MANAGED_OPENCODE_CREDENTIAL_MISSING' });
+      expect(removeSpy).toHaveBeenCalledTimes(3);
+      await expect(second.guardian.listChildren()).resolves.toEqual([]);
+    } finally {
+      removeSpy.mockRestore();
+      await second.guardian.stop();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('retains a credential for an unresolved launching orphan until terminal cleanup is fenced', async () => {
+    const first = await createGuardianFixture();
+    const credentialStore = createManagedOpenCodeCredentialStore({
+      rootDir: first.root,
+      secretProvider: first.secretProvider,
+    });
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4112,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'launching-crash-owner',
+      runtimeIdentity: 'launching-crash-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+    const reservation = await first.protocol.reserveLaunch({ owner, launchSpec });
+    const launching = await first.protocol.beginLaunch({
+      incarnation: reservation.record.incarnation,
+      expectedRevision: reservation.record.revision,
+      withCredential: async () => undefined,
+    });
+    await credentialStore.create({
+      ...launching.record,
+      password: 'launching-crash-password',
+    });
+
+    const second = await createGuardianFixture({
+      store: first.store,
+      protocol: first.protocol,
+      secretProvider: first.secretProvider,
+      credentialStore,
+      options: { allowUnauthenticatedCredentials: false },
+    });
+    await second.guardian.start();
+
+    await expect(second.guardian.listChildren()).resolves.toEqual([
+      expect.objectContaining({
+        state: 'attention',
+        incarnation: launching.record.incarnation,
+        port: launchSpec.port,
+      }),
+    ]);
+    await expect(credentialStore.read({
+      incarnation: launching.record.incarnation,
+      ownerInstanceId: launching.record.ownerInstanceId,
+      runtimeIdentity: launching.record.runtimeIdentity,
+      launchFingerprint: launching.record.launchFingerprint,
+      credentialFingerprint: launching.record.credentialFingerprint,
+    })).resolves.toEqual({
+      username: 'opencode',
+      password: 'launching-crash-password',
+    });
+
+    // Only after an explicit CAS terminalization may attention reconciliation
+    // remove the credential; an unresolved Launching row alone is not proof of
+    // child death.
+    const current = await second.protocol.readRecord({ incarnation: launching.record.incarnation });
+    await expect(second.protocol.markInterrupted({
+      incarnation: launching.record.incarnation,
+      expectedRevision: current.record.revision,
+    })).resolves.toMatchObject({ ok: true });
+    await second.guardian.stop();
+    await expect(credentialStore.read({
+      incarnation: launching.record.incarnation,
+      ownerInstanceId: launching.record.ownerInstanceId,
+      runtimeIdentity: launching.record.runtimeIdentity,
+      launchFingerprint: launching.record.launchFingerprint,
+      credentialFingerprint: launching.record.credentialFingerprint,
+    })).rejects.toMatchObject({ code: 'MANAGED_OPENCODE_CREDENTIAL_MISSING' });
   });
 
   it.skipIf(process.platform === 'win32')('cleans credentials before retiring a dead expired handoff record', async () => {
@@ -2515,6 +3993,7 @@ describe('ManagedOpenCodeGuardian', () => {
         rootDir: first.root,
         secretProvider: first.secretProvider,
       });
+      const replacementChild = createMockChild();
       await credentialStore.create({ ...record, password: 'expired-handoff-password' });
       first.clock.advance(60_001);
 
@@ -2523,6 +4002,7 @@ describe('ManagedOpenCodeGuardian', () => {
         protocol: first.protocol,
         secretProvider: first.secretProvider,
         credentialStore,
+        spawnFn: vi.fn(() => replacementChild),
         options: {
           allowUnauthenticatedCredentials: false,
           processLiveness: () => false,
@@ -2544,6 +4024,29 @@ describe('ManagedOpenCodeGuardian', () => {
         launchFingerprint: record.launchFingerprint,
         credentialFingerprint: record.credentialFingerprint,
       })).rejects.toMatchObject({ code: 'MANAGED_OPENCODE_CREDENTIAL_MISSING' });
+      await expect(secondGuardian.listChildren()).resolves.toEqual([]);
+
+      const replacementLaunchSpec = {
+        binary: 'opencode',
+        args: [],
+        hostname: '127.0.0.1',
+        port: 4114,
+        cwd: '/tmp/project',
+      };
+      const replacementLaunch = secondGuardian.spawnManagedOpenCode({
+        ...replacementLaunchSpec,
+        env: {},
+        owner: {
+          ownerInstanceId: 'post-cleanup-owner',
+          runtimeIdentity: 'post-cleanup-runtime',
+          launchFingerprint: createLaunchFingerprint(replacementLaunchSpec),
+        },
+        launchSpec: replacementLaunchSpec,
+      });
+      setTimeout(() => {
+        replacementChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:4114\n');
+      }, 10);
+      await expect(replacementLaunch).resolves.toMatchObject({ port: 4114 });
     } finally {
       if (secondGuardian) await secondGuardian.stop();
     }
@@ -2680,7 +4183,8 @@ describe('ManagedOpenCodeGuardian', () => {
       expect(await client.list()).toEqual(expect.arrayContaining([
         expect.objectContaining({
           incarnation: record.incarnation,
-          state: ManagedOpenCodeHandoffV2State.Stopping,
+          state: 'attention',
+          operationId: expect.any(String),
         }),
       ]));
       expect((await second.protocol.readRecord({ incarnation: record.incarnation })).record.state)
@@ -2755,6 +4259,141 @@ describe('ManagedOpenCodeGuardian', () => {
       if (started) {
         await settleAttentionForTest(secondGuardian);
         await secondGuardian.stop();
+      }
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('blocks unrelated launches while a null-port attention record is unresolved', async () => {
+    const first = await createGuardianFixture();
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4109,
+      cwd: '/tmp/project',
+    };
+    const owner = {
+      ownerInstanceId: 'unbound-port-owner',
+      runtimeIdentity: 'unbound-port-runtime',
+      launchFingerprint: createLaunchFingerprint(launchSpec),
+    };
+    const reservation = await first.protocol.reserveLaunch({ owner });
+    const launching = await first.protocol.beginLaunch({
+      incarnation: reservation.record.incarnation,
+      expectedRevision: reservation.record.revision,
+      withCredential: async () => undefined,
+    });
+    expect(launching).toMatchObject({
+      ok: true,
+      record: {
+        state: ManagedOpenCodeHandoffV2State.Launching,
+        launchSpec: null,
+        port: null,
+      },
+    });
+
+    const child = createMockChild();
+    const second = await createGuardianFixture({
+      store: first.store,
+      protocol: first.protocol,
+      secretProvider: first.secretProvider,
+      spawnFn: vi.fn(() => child),
+    });
+    let started = false;
+    try {
+      await second.guardian.start();
+      started = true;
+      const attention = await second.guardian.listChildren();
+      expect(attention).toEqual([
+        expect.objectContaining({
+          state: 'attention',
+          incarnation: reservation.record.incarnation,
+          ownerInstanceId: owner.ownerInstanceId,
+          runtimeIdentity: owner.runtimeIdentity,
+          reason: 'durable launch has no bound process identity; refusing to resume or guess a detached child',
+        }),
+      ]);
+      expect(attention[0]).not.toHaveProperty('port');
+
+      await expect(second.guardian.spawnManagedOpenCode({
+        ...launchSpec,
+        env: {},
+        owner,
+        launchSpec,
+      })).rejects.toThrow(/blocked by attention record/);
+
+      const unrelatedLaunchSpec = { ...launchSpec, port: 4110 };
+      const unrelatedOwner = {
+        ownerInstanceId: 'unrelated-owner',
+        runtimeIdentity: 'unrelated-runtime',
+        launchFingerprint: createLaunchFingerprint(unrelatedLaunchSpec),
+      };
+      await expect(second.guardian.spawnManagedOpenCode({
+        ...unrelatedLaunchSpec,
+        env: {},
+        owner: unrelatedOwner,
+        launchSpec: unrelatedLaunchSpec,
+      })).rejects.toThrow(/blocked by attention record/);
+    } finally {
+      if (started) {
+        await settleAttentionForTest(second.guardian);
+        await second.guardian.stop();
+      }
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('blocks launches when an unresolved attention record has incomplete owner identity', async () => {
+    const first = await createGuardianFixture();
+    const launchSpec = {
+      binary: 'opencode',
+      args: [],
+      hostname: '127.0.0.1',
+      port: 4111,
+      cwd: '/tmp/project',
+    };
+    const reservation = await first.protocol.reserveLaunch({ owner: {}, launchSpec });
+    const launching = await first.protocol.beginLaunch({
+      incarnation: reservation.record.incarnation,
+      expectedRevision: reservation.record.revision,
+      withCredential: async () => undefined,
+    });
+    expect(launching).toMatchObject({
+      ok: true,
+      record: { state: ManagedOpenCodeHandoffV2State.Launching, port: null },
+    });
+
+    const second = await createGuardianFixture({
+      store: first.store,
+      protocol: first.protocol,
+      secretProvider: first.secretProvider,
+    });
+    let started = false;
+    try {
+      await second.guardian.start();
+      started = true;
+      await expect(second.guardian.listChildren()).resolves.toEqual([
+        expect.objectContaining({
+          state: 'attention',
+          incarnation: reservation.record.incarnation,
+          port: launchSpec.port,
+        }),
+      ]);
+
+      const unrelatedLaunchSpec = { ...launchSpec, port: 4112 };
+      await expect(second.guardian.spawnManagedOpenCode({
+        ...unrelatedLaunchSpec,
+        env: {},
+        owner: {
+          ownerInstanceId: 'complete-owner',
+          runtimeIdentity: 'complete-runtime',
+          launchFingerprint: createLaunchFingerprint(unrelatedLaunchSpec),
+        },
+        launchSpec: unrelatedLaunchSpec,
+      })).rejects.toThrow(/blocked by attention record/);
+    } finally {
+      if (started) {
+        await settleAttentionForTest(second.guardian);
+        await second.guardian.stop();
       }
     }
   });
@@ -2942,6 +4581,79 @@ describe('ManagedOpenCodeGuardian', () => {
       if (secondGuardian) {
         await settleAttentionForTest(secondGuardian);
         await secondGuardian.stop();
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a process replacement during the in-flight rehydration health probe', async () => {
+    const originalFetch = globalThis.fetch;
+    let releaseHealth;
+    let healthStarted;
+    const healthStartedPromise = new Promise((resolve) => { healthStarted = resolve; });
+    const healthReleasePromise = new Promise((resolve) => { releaseHealth = resolve; });
+    let foreignLaunch = false;
+    let secondGuardian;
+    let started = false;
+    try {
+      const first = await createGuardianFixture();
+      const record = await seedActiveRecord(first.protocol, { processStartTicks: '12345' });
+      const second = await createGuardianFixture({
+        store: first.store,
+        protocol: first.protocol,
+        secretProvider: first.secretProvider,
+        processInspector: ({ record: inspectedRecord }) => foreignLaunch
+          ? {
+            processStartTicks: '99999',
+            launch: {
+              commandLine: 'foreign-server serve --hostname 127.0.0.1 --port 4096',
+              cwd: '/tmp/foreign-project',
+            },
+          }
+          : {
+            processStartTicks: '12345',
+            launch: {
+              commandLine: `${path.basename(inspectedRecord.launchSpec.binary)} serve --hostname ${inspectedRecord.launchSpec.hostname} --port ${inspectedRecord.port}`,
+              cwd: inspectedRecord.launchSpec.cwd,
+            },
+          },
+      });
+      secondGuardian = second.guardian;
+      globalThis.fetch = vi.fn(async () => {
+        healthStarted();
+        await healthReleasePromise;
+        return {
+          ok: true,
+          json: async () => ({ healthy: true }),
+        };
+      });
+
+      const startPromise = secondGuardian.start();
+      await healthStartedPromise;
+      // The persisted process is replaced while the port-based health request
+      // is awaiting its response. The post-health identity fence must win over
+      // the otherwise healthy response and prevent adoption.
+      foreignLaunch = true;
+      releaseHealth();
+      await startPromise;
+      started = true;
+
+      await expect(secondGuardian.listChildren()).resolves.toEqual([
+        expect.objectContaining({
+          state: 'attention',
+          incarnation: record.incarnation,
+          reason: 'PID start identity changed',
+        }),
+      ]);
+    } finally {
+      if (!started && secondGuardian) {
+        releaseHealth?.();
+        try { await secondGuardian.stop(); } catch { /* cleanup assertion covers unresolved state */ }
+      } else if (secondGuardian) {
+        try {
+          await settleAttentionForTest(secondGuardian);
+          await secondGuardian.stop();
+        } catch { /* cleanup assertion covers unresolved state */ }
       }
       globalThis.fetch = originalFetch;
     }
@@ -3459,7 +5171,7 @@ describe('Windows rehydration identity and termination guards', () => {
       await expect(guardian.stop()).rejects.toMatchObject({ code: 'GUARDIAN_STOP_FAILED' });
       const localRecords = await guardian.listChildren();
       expect(localRecords).toEqual(expect.arrayContaining([
-        expect.objectContaining({ state: ManagedOpenCodeHandoffV2State.Stopping }),
+        expect.objectContaining({ state: 'attention', operationId: expect.any(String) }),
       ]));
       const persisted = await fixture.protocol.readRecord({ incarnation: localRecords[0].incarnation });
       expect(persisted).toMatchObject({
@@ -3467,7 +5179,7 @@ describe('Windows rehydration identity and termination guards', () => {
         record: { state: ManagedOpenCodeHandoffV2State.Stopping },
       });
       await expect(client.list()).resolves.toEqual(expect.arrayContaining([
-        expect.objectContaining({ state: ManagedOpenCodeHandoffV2State.Stopping }),
+        expect.objectContaining({ state: 'attention', operationId: expect.any(String) }),
       ]));
 
       terminateSpy.mockResolvedValue({ ok: true });
@@ -3676,6 +5388,105 @@ describe('GuardianClient', () => {
       client.disconnect();
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  it.skipIf(process.platform === 'win32')('marks a sent non-idempotent request ambiguous when disconnect rejects it', async () => {
+    let receivedSpawn;
+    const spawnReceived = new Promise((resolve) => { receivedSpawn = resolve; });
+    const { server, socketPath } = await createRawClientServer((socket, request) => {
+      if (request.method === 'handshake') {
+        socket.write(`${JSON.stringify({ id: request.id, result: { authenticated: true } })}\n`);
+        return;
+      }
+      if (request.method === 'spawn') receivedSpawn();
+    });
+    const client = new GuardianClient({
+      socketPath,
+      authSecret: Buffer.alloc(32, 6),
+    });
+
+    try {
+      const pendingSpawn = client.spawn({ sideEffect: true });
+      await spawnReceived;
+      client.disconnect();
+
+      await expect(pendingSpawn).rejects.toMatchObject({
+        code: GUARDIAN_AMBIGUOUS_REQUEST_CODE,
+        ambiguous: true,
+        retryable: false,
+        originalCode: 'disconnected',
+      });
+      await pendingSpawn.catch((error) => {
+        expect(isAmbiguousGuardianRequestError(error)).toBe(true);
+        expect(error.retryable).toBe(false);
+      });
+    } finally {
+      client.disconnect();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('reconnects with a fresh authenticated sequence after a consumed request loses its response', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-guardian-client-reconnect-'));
+    roots.push(root);
+    const socketPath = path.join(root, 'guardian.sock');
+    const authSecret = Buffer.alloc(32, 8);
+    let server;
+    const spawn = vi.fn(async () => {
+      // The server has already verified and consumed sequence 0 before this
+      // handler runs. Close the connection before the response is delivered;
+      // retrying spawn would be unsafe because its side effect is ambiguous.
+      await server.stop();
+      return { spawned: true };
+    });
+    const guardian = {
+      spawnManagedOpenCode: spawn,
+      listChildren: vi.fn(async () => [{ incarnation: 'after-reconnect' }]),
+    };
+    const createServer = () => new GuardianIpcServer({
+      socketPath,
+      guardian,
+      authSecret,
+    });
+    server = createServer();
+    await server.start();
+    const client = new GuardianClient({
+      socketPath,
+      authSecret,
+      requestTimeoutMs: 500,
+    });
+
+    try {
+      await expect(client.spawn({ sideEffect: true }))
+        .rejects.toMatchObject({
+          code: GUARDIAN_AMBIGUOUS_REQUEST_CODE,
+          ambiguous: true,
+          retryable: false,
+          originalCode: 'connection_closed',
+        });
+
+      // A new server instance represents recovery after the guardian process
+      // crash. The next request must authenticate as sequence 0 on its new
+      // session, not reuse the consumed sequence from the dead connection.
+      server = createServer();
+      await server.start();
+      await expect(client.list()).resolves.toEqual([{ incarnation: 'after-reconnect' }]);
+      expect(spawn).toHaveBeenCalledOnce();
+    } finally {
+      client.disconnect();
+      await server.stop();
+    }
+  });
+
+  it('keeps ambiguity detectable after lifecycle-style error sanitization', () => {
+    const error = new GuardianClientError('request outcome is unknown', 'connection_closed', { ambiguous: true });
+    const sanitized = new Error(error.message);
+    sanitized.code = error.code;
+
+    expect(error.retryable).toBe(false);
+    expect(error.originalCode).toBe('connection_closed');
+    expect(isAmbiguousGuardianRequestError(sanitized)).toBe(true);
+    expect(sanitized.code).toBe(GUARDIAN_AMBIGUOUS_REQUEST_CODE);
   });
 });
 

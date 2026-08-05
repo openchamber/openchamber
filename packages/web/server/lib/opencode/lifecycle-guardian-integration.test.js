@@ -31,6 +31,12 @@ vi.mock('../guardian/guardian-client.js', () => ({
       this.name = 'GuardianClientError';
     }
   },
+  GUARDIAN_AMBIGUOUS_REQUEST_CODE: 'GUARDIAN_REQUEST_AMBIGUOUS',
+  isAmbiguousGuardianRequestError: (error) => (
+    error?.ambiguous === true
+    || error?.code === 'GUARDIAN_REQUEST_AMBIGUOUS'
+    || error?.originalCode === 'GUARDIAN_REQUEST_AMBIGUOUS'
+  ),
 }));
 
 import { isGuardianRunning, detectAndAdoptGuardianChild, getGuardianSocketPath } from '../guardian/detection.js';
@@ -183,6 +189,193 @@ describe('Guardian integration', () => {
   });
 
   describe('bootstrapOpenCodeAtStartup', () => {
+    it('discovers unresolved durable operations after HMR loss and blocks startup before spawn/fallback', async () => {
+      const operation = {
+        operationId: 'operation-discovery-000000000000000000000000000000',
+        kind: 'prepare-handoff',
+        incarnation: 'discovered-incarnation',
+        ownerInstanceId: 'owner-test-instance',
+        runtimeIdentity: 'runtime-test-instance',
+        launchFingerprint: 'current-fingerprint',
+        targetRevision: 2,
+        targetLeaseExpiresAt: 100_000,
+        targetMac: 'target-mac',
+        state: 'pending',
+      };
+      const spawn = vi.fn();
+      GuardianClient.mockImplementation(function ({ socketPath }) {
+        return {
+          socketPath,
+          connect: vi.fn(),
+          operationList: vi.fn().mockResolvedValue([operation]),
+          operationStatus: vi.fn().mockResolvedValue({ operation, record: null, expired: false }),
+          list: vi.fn().mockResolvedValue([]),
+          spawn,
+          disconnect: vi.fn(),
+        };
+      });
+
+      const { runtime, state } = createRuntime();
+      await expect(runtime.startOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+      });
+      expect(spawn).not.toHaveBeenCalled();
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        operationId: operation.operationId,
+        kind: 'prepare',
+        incarnation: operation.incarnation,
+      });
+    });
+
+    it('merges HMR fences with the complete durable operation discovery set', async () => {
+      const owner = {
+        ownerInstanceId: 'owner-test-instance',
+        runtimeIdentity: 'runtime-test-instance',
+        launchFingerprint: 'current-fingerprint',
+      };
+      const knownOperation = {
+        operationId: 'known-hmr-operation-000000000000000000000000000000',
+        kind: 'prepare-handoff',
+        incarnation: 'known-hmr-incarnation',
+        ...owner,
+        targetRevision: 2,
+        targetLeaseExpiresAt: 100_000,
+        targetMac: 'known-target-mac',
+        state: 'pending',
+      };
+      const undiscoveredOperation = {
+        operationId: 'undiscovered-durable-operation-0000000000000000000000',
+        kind: 'stop',
+        incarnation: 'undiscovered-incarnation',
+        ...owner,
+        targetRevision: 3,
+        targetLeaseExpiresAt: 100_001,
+        targetMac: 'undiscovered-target-mac',
+        state: 'pending',
+      };
+      const operations = new Map([
+        [knownOperation.operationId, knownOperation],
+        [undiscoveredOperation.operationId, undiscoveredOperation],
+      ]);
+      const operationList = vi.fn().mockResolvedValue([undiscoveredOperation]);
+      const operationStatus = vi.fn(async ({ operationId }) => ({
+        operation: operations.get(operationId),
+        record: null,
+        expired: false,
+      }));
+      const spawn = vi.fn();
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        operationList,
+        operationStatus,
+        list: vi.fn().mockResolvedValue([]),
+        spawn,
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime();
+      state.guardianOutcomeUnknownFence = {
+        version: 1,
+        kind: 'prepare',
+        operationId: knownOperation.operationId,
+        incarnation: knownOperation.incarnation,
+        owner,
+      };
+
+      await expect(runtime.startOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+      });
+      expect(operationList).toHaveBeenCalledOnce();
+      expect(state.guardianOutcomeUnknownFences.map((fence) => fence.operationId)).toEqual([
+        knownOperation.operationId,
+        undiscoveredOperation.operationId,
+      ]);
+      expect(spawn).not.toHaveBeenCalled();
+    });
+
+    it('reconciles a terminal initial-spawn operation after restart and releases its fence lease', async () => {
+      const owner = {
+        ownerInstanceId: 'owner-test-instance',
+        runtimeIdentity: 'runtime-test-instance',
+        launchFingerprint: 'initial-terminal-fingerprint',
+      };
+      const operation = {
+        operationId: 'initial-terminal-operation-000000000000000000000000000000',
+        kind: 'spawn',
+        incarnation: 'initial-terminal-incarnation',
+        ...owner,
+        targetRevision: 1,
+        targetLeaseExpiresAt: 100_000,
+        targetMac: 'initial-target-mac',
+        state: 'resolved',
+        resolutionState: 'retired',
+        resolutionRevision: 4,
+        resolutionLeaseExpiresAt: 100_004,
+        resolutionMac: 'initial-terminal-mac',
+        revision: 2,
+        confirmationExpiresAt: Date.now() + 60_000,
+        mac: 'initial-operation-mac',
+      };
+      const successor = {
+        incarnation: 'initial-recovered-successor',
+        pid: 99101,
+        port: 4098,
+        owner,
+      };
+      const clientSpawn = vi.fn()
+        .mockImplementationOnce(async (params) => {
+          Object.assign(operation, params.owner);
+          throw Object.assign(new Error('initial spawn response was lost'), {
+            code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+            ambiguous: true,
+            retryable: false,
+            originalCode: 'connection_closed',
+            operationId: operation.operationId,
+          });
+        })
+        .mockImplementationOnce(async (params) => ({ ...successor, owner: params.owner }));
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        operationList: vi.fn().mockResolvedValue([]),
+        operationStatus: vi.fn().mockResolvedValue({ operation, record: null, expired: false }),
+        confirmOperation: vi.fn().mockResolvedValue({ operation, record: null }),
+        spawn: clientSpawn,
+        health: vi.fn().mockResolvedValue({ healthy: true }),
+        list: vi.fn().mockResolvedValue([]),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime({
+        ensureLocalOpenCodeServerPassword: vi.fn(async () => 'initial-terminal-secret'),
+      });
+
+      await expect(runtime.bootstrapOpenCodeAtStartup()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+      });
+      expect(runtime.__testManagedStartupSecretState().leaseCount).toBe(1);
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'initial-spawn',
+        operationId: operation.operationId,
+      });
+
+      await runtime.bootstrapOpenCodeAtStartup();
+
+      expect(clientSpawn).toHaveBeenCalledTimes(2);
+      expect(client.confirmOperation).toHaveBeenCalledOnce();
+      expect(state.guardianOutcomeUnknownFence).toBeNull();
+      // The reconciled fence lease was released before the replacement launch
+      // acquired its own lease; one active lease therefore belongs only to the
+      // recovered successor, not to the terminal initial-spawn operation.
+      expect(runtime.__testManagedStartupSecretState().leaseCount).toBe(1);
+      expect(runtime.__testGuardianStartupSecretLeaseCount()).toBe(1);
+      expect(state.currentIncarnation).toBe(successor.incarnation);
+    }, 10000);
+
     it('adopts guardian-managed child on startup', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: true,
@@ -416,6 +609,270 @@ describe('Guardian integration', () => {
       );
     }, 10000);
 
+    it('keeps an ambiguous guardian launch non-retryable through startup wrapping', async () => {
+      const clientConnect = vi.fn().mockResolvedValue(undefined);
+      const clientSpawn = vi.fn().mockRejectedValue(Object.assign(
+        new Error('guardian request outcome is unknown'),
+        {
+          code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          ambiguous: true,
+          retryable: false,
+          originalCode: 'connection_closed',
+        },
+      ));
+      const clientDisconnect = vi.fn();
+      const clientList = vi.fn().mockResolvedValue([]);
+      GuardianClient.mockImplementation(function () {
+        return {
+          connect: clientConnect,
+          health: vi.fn().mockResolvedValue({ healthy: true }),
+          spawn: clientSpawn,
+          stop: vi.fn(),
+          list: clientList,
+          disconnect: clientDisconnect,
+        };
+      });
+
+      const { spawn } = await import('node:child_process');
+      const { runtime, state } = createRuntime();
+
+      await expect(runtime.bootstrapOpenCodeAtStartup()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+        retryable: false,
+        originalCode: 'connection_closed',
+      });
+      expect(clientSpawn).toHaveBeenCalledOnce();
+      expect(clientDisconnect).toHaveBeenCalledOnce();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(state.lastOpenCodeError).toContain('Guardian is running but initial OpenCode launch failed');
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'initial-spawn',
+        successorOwner: expect.any(Object),
+      });
+      expect(runtime.__testManagedStartupSecretState().leaseCount).toBe(1);
+
+      // HMR/bootstrap retry consults the persisted owner fence first. An
+      // empty or delayed list is not proof that the lost spawn did not apply.
+      await expect(runtime.bootstrapOpenCodeAtStartup()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+      });
+      expect(clientSpawn).toHaveBeenCalledOnce();
+      expect(clientList).toHaveBeenCalledOnce();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(runtime.__testManagedStartupSecretState().leaseCount).toBe(1);
+    }, 10000);
+
+    it('reconciles an HMR-restored initial-spawn fence only after delayed successor binding appears', async () => {
+      const successorOwner = {
+        ownerInstanceId: 'owner-test-instance',
+        runtimeIdentity: 'runtime-test-instance',
+        launchFingerprint: 'delayed-initial-successor',
+      };
+      const fence = {
+        version: 1,
+        kind: 'initial-spawn',
+        owner: successorOwner,
+        successorOwner,
+        oldStopped: true,
+      };
+      const successor = {
+        incarnation: 'delayed-initial-incarnation',
+        state: 'active',
+        pid: 45680,
+        port: 45680,
+        revision: 3,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'delayed-initial-mac',
+        launchSpec: {
+          binary: 'opencode',
+          args: [],
+          hostname: '127.0.0.1',
+          port: 45680,
+          cwd: '/tmp/project',
+        },
+        ...successorOwner,
+      };
+      let successorVisible = false;
+      let successorStopped = false;
+      const clientList = vi.fn(async () => {
+        if (successorStopped) return [];
+        return successorVisible ? [successor] : [];
+      });
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        health: vi.fn().mockResolvedValue({ healthy: true }),
+        list: clientList,
+        stop: vi.fn(async () => { successorStopped = true; }),
+        confirmAdoption: vi.fn(async () => ({
+          record: successor,
+          credential: null,
+          health: { healthy: true },
+        })),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const legacySpawn = (await import('node:child_process')).spawn;
+      const { runtime, state } = createRuntime({
+        ensureLocalOpenCodeServerPassword: vi.fn(async () => 'delayed-initial-secret'),
+      });
+      // This is the state that survives a Vite HMR module replacement.
+      state.guardianOutcomeUnknownFence = fence;
+
+      await expect(runtime.bootstrapOpenCodeAtStartup()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+      });
+      expect(clientList).toHaveBeenCalledOnce();
+      expect(state.guardianOutcomeUnknownFence).toEqual(fence);
+      expect(legacySpawn).not.toHaveBeenCalled();
+      expect(runtime.__testManagedStartupSecretState().leaseCount).toBe(0);
+
+      successorVisible = true;
+      await runtime.bootstrapOpenCodeAtStartup();
+
+      expect(state.guardianOutcomeUnknownFence).toBeNull();
+      expect(state.currentIncarnation).toBe(successor.incarnation);
+      expect(state.currentOwner).toEqual(successorOwner);
+      expect(state.openCodeProcess).toMatchObject({ isGuardianManaged: true, pid: successor.pid });
+      // The guardian-side confirmation owns the final record/health/credential
+      // binding and CAS; lifecycle only needs candidate lists.
+      expect(clientList).toHaveBeenCalledTimes(3);
+      expect(legacySpawn).not.toHaveBeenCalled();
+      expect(runtime.__testManagedStartupSecretState().leaseCount).toBe(0);
+    }, 10000);
+
+    it('keeps the fence when guardian adoption CAS fails after a binding mutation', async () => {
+      const owner = {
+        ownerInstanceId: 'owner-binding-race',
+        runtimeIdentity: 'runtime-binding-race',
+        launchFingerprint: 'successor-binding-race',
+      };
+      const fence = {
+        version: 1,
+        kind: 'initial-spawn',
+        owner,
+        successorOwner: owner,
+        oldStopped: true,
+      };
+      const launchSpec = {
+        binary: 'opencode',
+        args: [],
+        hostname: '127.0.0.1',
+        port: 45682,
+        cwd: '/tmp/project',
+      };
+      let successorRevision = 1;
+      const successorLeaseExpiresAt = Date.now() + 60_000;
+      const child = () => ({
+        incarnation: 'binding-race-successor',
+        state: 'active',
+        pid: 45682,
+        port: 45682,
+        revision: successorRevision,
+        leaseExpiresAt: successorLeaseExpiresAt,
+        mac: `binding-race-mac-${successorRevision}`,
+        launchSpec,
+        ...owner,
+      });
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockImplementation(() => [child()]),
+        confirmAdoption: vi.fn(async () => {
+          successorRevision = 2;
+          throw new Error('record CAS failed after binding mutation');
+        }),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const legacySpawn = (await import('node:child_process')).spawn;
+      const { runtime, state } = createRuntime();
+      state.guardianOutcomeUnknownFence = fence;
+
+      await expect(runtime.bootstrapOpenCodeAtStartup()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+        retryable: false,
+      });
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'initial-spawn',
+        successorOwner: owner,
+      });
+      expect(state.openCodeProcess).toBeNull();
+      expect(legacySpawn).not.toHaveBeenCalled();
+       expect(client.confirmAdoption).toHaveBeenCalledOnce();
+       expect(client.list).toHaveBeenCalledTimes(2);
+    }, 10000);
+
+    it.each([
+      ['missing MAC', { mac: undefined }],
+      ['incorrect MAC', { mac: 'wrong-mac' }],
+      ['missing lease', { leaseExpiresAt: undefined }],
+      ['incorrect lease', { leaseExpiresAt: Date.now() + 120_000 }],
+      ['missing revision', { revision: undefined }],
+      ['incorrect revision', { revision: 999 }],
+      ['wrong owner', { ownerInstanceId: 'foreign-owner' }],
+      ['wrong incarnation', { incarnation: 'foreign-incarnation' }],
+    ])('keeps an ambiguity fence for a %s authoritative-list mismatch', async (_label, change) => {
+      const owner = {
+        ownerInstanceId: 'owner-test-instance',
+        runtimeIdentity: 'runtime-test-instance',
+        launchFingerprint: 'strict-fence-owner',
+      };
+      const fence = {
+        version: 1,
+        kind: 'spawn',
+        incarnation: 'strict-old-incarnation',
+        owner,
+        successorOwner: {
+          ...owner,
+          launchFingerprint: 'strict-successor-owner',
+        },
+        revision: 4,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'strict-fence-mac',
+        oldStopped: false,
+      };
+      const child = {
+        incarnation: fence.incarnation,
+        state: 'active',
+        revision: fence.revision,
+        leaseExpiresAt: fence.leaseExpiresAt,
+        mac: fence.mac,
+        pid: 45681,
+        port: 45681,
+        launchSpec: {
+          binary: 'opencode',
+          args: [],
+          hostname: '127.0.0.1',
+          port: 45681,
+          cwd: '/tmp/project',
+        },
+        ...owner,
+        ...change,
+      };
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        health: vi.fn().mockResolvedValue({ healthy: true }),
+        list: vi.fn().mockResolvedValue([child]),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime();
+      state.guardianOutcomeUnknownFence = fence;
+
+      await expect(runtime.bootstrapOpenCodeAtStartup()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+      });
+      expect(state.guardianOutcomeUnknownFence).toEqual(fence);
+      expect(state.openCodeProcess).toBeNull();
+    });
+
     it('fails closed when initial guardian cleanup receives a malformed child list', async () => {
       const clientConnect = vi.fn().mockResolvedValue(undefined);
       const clientSpawn = vi.fn().mockResolvedValue({
@@ -542,7 +999,9 @@ describe('Guardian integration', () => {
         secretCount: 0,
       });
       expect(runtime.__testGuardianStartupSecretLeaseCount()).toBe(0);
-      expect(clientStop).toHaveBeenCalledTimes(2);
+      // The second close confirms quiescence from the fresh empty list; it
+      // must not replay the already-authoritative stop RPC.
+      expect(clientStop).toHaveBeenCalledTimes(1);
     }, 10000);
   });
 
@@ -787,6 +1246,8 @@ describe('Guardian integration', () => {
         stop: vi.fn().mockResolvedValue(undefined),
         abortHandoff: clientAbort,
         spawn: vi.fn().mockRejectedValue(new Error('fixed successor failed')),
+        list: vi.fn().mockResolvedValue([]),
+        operationList: vi.fn().mockResolvedValue([]),
         disconnect: vi.fn(),
       };
       GuardianClient.mockImplementation(function () { return client; });
@@ -808,6 +1269,10 @@ describe('Guardian integration', () => {
       expect(oldClose).not.toHaveBeenCalled();
       expect(clientAbort).not.toHaveBeenCalled();
       expect(client.disconnect).toHaveBeenCalled();
+      expect(runtime.__testManagedStartupSecretState()).toEqual({
+        leaseCount: 0,
+        secretCount: 0,
+      });
     });
 
     it('does not spawn a fixed-port successor when the owner-scoped old stop fails', async () => {
@@ -1135,6 +1600,36 @@ describe('Guardian integration', () => {
       expect(spawnSync).not.toHaveBeenCalled();
     });
 
+    it('blocks legacy restart when foreign unresolved attention blocks global admission', async () => {
+      const { spawn } = await import('node:child_process');
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        admissionStatus: vi.fn().mockResolvedValue({
+          admitted: false,
+          attentionCount: 1,
+          operationCount: 0,
+        }),
+        list: vi.fn().mockResolvedValue([]),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+      detectAndAdoptGuardianChild.mockResolvedValue(null);
+
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: 12345, close: vi.fn() };
+      state.openCodePort = 45678;
+      state.currentIncarnation = null;
+      state.currentOwner = null;
+      state.isOpenCodeReady = true;
+
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_ADMISSION_BLOCKED',
+      });
+      expect(client.admissionStatus).toHaveBeenCalledOnce();
+      expect(state.openCodeProcess.close).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+    });
+
     it('falls back to legacy restart when guardian handoff fails', async () => {
       const { spawn } = await import('node:child_process');
       const child = createMockChild();
@@ -1162,11 +1657,551 @@ describe('Guardian integration', () => {
           disconnect: vi.fn(),
         };
       });
+      isGuardianRunning.mockResolvedValue(false);
 
       await runtime.restartOpenCode();
 
       expect(closeMock).toHaveBeenCalled();
       expect(spawn).toHaveBeenCalled();
+      expect(state.openCodeProcess).not.toBeNull();
+    }, 10000);
+
+    it('does not legacy-spawn or abort after an ambiguous prepareHandoff', async () => {
+      const { spawn } = await import('node:child_process');
+      const clientAbortHandoff = vi.fn();
+      const clientPrepareHandoff = vi.fn().mockRejectedValue(Object.assign(
+        new Error('prepare response was lost'),
+        {
+          code: 'connection_closed',
+          originalCode: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          retryable: false,
+        },
+      ));
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: clientPrepareHandoff,
+        abortHandoff: clientAbortHandoff,
+        spawn: vi.fn(),
+        stop: vi.fn(),
+        list: vi.fn().mockResolvedValue([]),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: 12345, close: vi.fn() };
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'ambiguous-prepare';
+      state.isOpenCodeReady = true;
+
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+        originalCode: 'connection_closed',
+      });
+      expect(clientPrepareHandoff).toHaveBeenCalledOnce();
+      expect(clientAbortHandoff).not.toHaveBeenCalled();
+      expect(client.spawn).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+    }, 10000);
+
+    it('fences an ambiguous old-child stop until delayed successor reconciliation', async () => {
+      const oldOwner = {
+        ownerInstanceId: 'owner-stop-fence',
+        runtimeIdentity: 'runtime-stop-fence',
+        launchFingerprint: 'old-stop-fingerprint',
+      };
+      const oldRecord = {
+        incarnation: 'ambiguous-stop-old',
+        state: 'handoff-prepared',
+        revision: 7,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'ambiguous-stop-old-mac',
+        pid: 12345,
+        port: 45678,
+        launchSpec: {
+          binary: 'opencode',
+          args: [],
+          hostname: '127.0.0.1',
+          port: 45678,
+          cwd: '/tmp/project',
+        },
+        ...oldOwner,
+      };
+      const terminalOld = { ...oldRecord, state: 'retired', revision: 8, mac: 'ambiguous-stop-retired-mac' };
+      let successorOwner = null;
+      let successorVisible = false;
+      const successorLeaseExpiresAt = Date.now() + 60_000;
+      const clientStop = vi.fn().mockRejectedValue(Object.assign(
+        new Error('old stop response was lost'),
+        {
+          code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          ambiguous: true,
+          retryable: false,
+          originalCode: 'connection_closed',
+        },
+      ));
+      const clientSpawn = vi.fn(async (params) => {
+        successorOwner = params.owner;
+        return {
+          incarnation: 'ambiguous-stop-successor',
+          pid: 12346,
+          port: 45679,
+          owner: successorOwner,
+        };
+      });
+      const clientList = vi.fn(async () => {
+        const successor = successorVisible && successorOwner
+          ? {
+            incarnation: 'ambiguous-stop-successor',
+            state: 'active',
+            revision: 3,
+            leaseExpiresAt: successorLeaseExpiresAt,
+            mac: 'ambiguous-stop-successor-mac',
+            pid: 12346,
+            port: 45679,
+            launchSpec: {
+              binary: 'opencode',
+              args: [],
+              hostname: '127.0.0.1',
+              port: 45679,
+              cwd: '/tmp/project',
+            },
+            ...successorOwner,
+          }
+          : null;
+        return successor ? [successor] : [];
+      });
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: vi.fn().mockResolvedValue(oldRecord),
+        spawn: clientSpawn,
+        stop: clientStop,
+        health: vi.fn().mockResolvedValue({ healthy: true }),
+        list: clientList,
+        terminalStatus: vi.fn().mockResolvedValue({ record: terminalOld }),
+        confirmTerminal: vi.fn().mockResolvedValue({ record: terminalOld }),
+        confirmAdoption: vi.fn(async () => ({
+          record: successorVisible ? {
+            incarnation: 'ambiguous-stop-successor',
+            state: 'active',
+            revision: 3,
+            leaseExpiresAt: successorLeaseExpiresAt,
+            mac: 'ambiguous-stop-successor-mac',
+            pid: 12346,
+            port: 45679,
+            launchSpec: {
+              binary: 'opencode',
+              args: [],
+              hostname: '127.0.0.1',
+              port: 45679,
+              cwd: '/tmp/project',
+            },
+            ...successorOwner,
+          } : null,
+          credential: null,
+          health: { healthy: true },
+        })),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const legacySpawn = (await import('node:child_process')).spawn;
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: oldRecord.pid, close: vi.fn() };
+      state.openCodePort = oldRecord.port;
+      state.currentIncarnation = oldRecord.incarnation;
+      state.currentOwner = oldOwner;
+      state.isOpenCodeReady = true;
+
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+      });
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'stop',
+        cleanupTarget: 'old',
+        incarnation: oldRecord.incarnation,
+      });
+      expect(clientStop).toHaveBeenCalledOnce();
+      expect(legacySpawn).not.toHaveBeenCalled();
+
+      // The terminal old record is visible before the successor. Reconcile
+      // must remain fenced and must not repeat stop, spawn, or legacy fallback.
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+      });
+      expect(clientStop).toHaveBeenCalledOnce();
+      expect(clientSpawn).toHaveBeenCalledOnce();
+      expect(legacySpawn).not.toHaveBeenCalled();
+
+      successorVisible = true;
+      await runtime.restartOpenCode();
+
+      expect(clientStop).toHaveBeenCalledOnce();
+      expect(clientSpawn).toHaveBeenCalledOnce();
+      expect(state.guardianOutcomeUnknownFence).toBeNull();
+      expect(state.currentIncarnation).toBe('ambiguous-stop-successor');
+      expect(legacySpawn).not.toHaveBeenCalled();
+    }, 10000);
+
+    it('fences an ambiguous abort-handoff and adopts only its exact post-abort binding', async () => {
+      const owner = {
+        ownerInstanceId: 'owner-abort-fence',
+        runtimeIdentity: 'runtime-abort-fence',
+        launchFingerprint: 'abort-fingerprint',
+      };
+      const prepared = {
+        incarnation: 'ambiguous-abort-old',
+        state: 'handoff-prepared',
+        revision: 4,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'ambiguous-abort-prepared-mac',
+        pid: 12345,
+        port: 45678,
+        launchSpec: {
+          binary: 'opencode',
+          args: [],
+          hostname: '127.0.0.1',
+          port: 45678,
+          cwd: '/tmp/project',
+        },
+        ...owner,
+      };
+      const active = {
+        ...prepared,
+        state: 'active',
+        revision: 5,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'ambiguous-abort-active-mac',
+      };
+      const clientAbort = vi.fn().mockRejectedValue(Object.assign(
+        new Error('abort response was lost'),
+        {
+          code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          ambiguous: true,
+          retryable: false,
+          originalCode: 'connection_closed',
+        },
+      ));
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: vi.fn().mockResolvedValue(prepared),
+        spawn: vi.fn().mockRejectedValue(new Error('successor failed before spawn response')),
+        abortHandoff: clientAbort,
+        confirmAdoption: vi.fn().mockResolvedValue({
+          record: active,
+          credential: null,
+          health: { healthy: true },
+        }),
+        health: vi.fn().mockResolvedValue({ healthy: true }),
+        list: vi.fn().mockResolvedValue([active]),
+        stop: vi.fn(),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const legacySpawn = (await import('node:child_process')).spawn;
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: prepared.pid, close: vi.fn() };
+      state.openCodePort = prepared.port;
+      state.currentIncarnation = prepared.incarnation;
+      state.currentOwner = owner;
+      state.isOpenCodeReady = true;
+
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+      });
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'abort-handoff',
+        incarnation: prepared.incarnation,
+      });
+      expect(clientAbort).toHaveBeenCalledOnce();
+      expect(legacySpawn).not.toHaveBeenCalled();
+
+      await runtime.restartOpenCode();
+
+      expect(clientAbort).toHaveBeenCalledOnce();
+      expect(legacySpawn).not.toHaveBeenCalled();
+      expect(state.guardianOutcomeUnknownFence).toBeNull();
+      expect(state.currentIncarnation).toBe(active.incarnation);
+      expect(state.isOpenCodeReady).toBe(true);
+    }, 10000);
+
+    it('does not repeat an ambiguous abort while reconciliation still sees handoff-prepared', async () => {
+      const owner = {
+        ownerInstanceId: 'owner-abort-prepared-fence',
+        runtimeIdentity: 'runtime-abort-prepared-fence',
+        launchFingerprint: 'abort-prepared-fingerprint',
+      };
+      const prepared = {
+        incarnation: 'ambiguous-abort-still-prepared',
+        state: 'handoff-prepared',
+        revision: 9,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'ambiguous-abort-still-prepared-mac',
+        pid: 12345,
+        port: 45678,
+        launchSpec: {
+          binary: 'opencode',
+          args: [],
+          hostname: '127.0.0.1',
+          port: 45678,
+          cwd: '/tmp/project',
+        },
+        ...owner,
+      };
+      const clientAbort = vi.fn().mockRejectedValue(Object.assign(
+        new Error('abort response was lost'),
+        {
+          code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          ambiguous: true,
+          retryable: false,
+          originalCode: 'connection_closed',
+        },
+      ));
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: vi.fn().mockResolvedValue(prepared),
+        spawn: vi.fn().mockRejectedValue(new Error('successor failed before spawn')),
+        abortHandoff: clientAbort,
+        confirmAdoption: vi.fn().mockRejectedValue(new Error('adoption unavailable while prepared')),
+        stop: vi.fn(),
+        health: vi.fn().mockResolvedValue({ healthy: true }),
+        list: vi.fn().mockResolvedValue([prepared]),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: prepared.pid, close: vi.fn() };
+      state.openCodePort = prepared.port;
+      state.currentIncarnation = prepared.incarnation;
+      state.currentOwner = owner;
+      state.isOpenCodeReady = true;
+
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+      });
+      expect(clientAbort).toHaveBeenCalledOnce();
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'abort-handoff',
+        incarnation: prepared.incarnation,
+      });
+
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+      });
+      expect(clientAbort).toHaveBeenCalledOnce();
+      expect(client.spawn).toHaveBeenCalledOnce();
+      expect(client.stop).not.toHaveBeenCalled();
+    }, 10000);
+
+    it('does not legacy-spawn or abort after an ambiguous successor spawn', async () => {
+      const { spawn } = await import('node:child_process');
+      const clientAbortHandoff = vi.fn();
+      const clientSpawn = vi.fn().mockRejectedValue(Object.assign(
+        new Error('spawn response was lost'),
+        {
+          code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          ambiguous: true,
+          retryable: false,
+          originalCode: 'connection_closed',
+        },
+      ));
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: vi.fn().mockResolvedValue(undefined),
+        abortHandoff: clientAbortHandoff,
+        spawn: clientSpawn,
+        stop: vi.fn(),
+        list: vi.fn().mockResolvedValue([]),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: 12345, close: vi.fn() };
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'ambiguous-spawn';
+      state.isOpenCodeReady = true;
+
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+        retryable: false,
+        originalCode: 'connection_closed',
+      });
+      expect(clientSpawn).toHaveBeenCalledOnce();
+      expect(clientAbortHandoff).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(runtime.__testManagedStartupSecretState().leaseCount).toBe(1);
+    }, 10000);
+
+    it('keeps an ambiguous spawn fenced until a delayed successor is owner-scoped adopted', async () => {
+      const oldOwner = {
+        ownerInstanceId: 'owner-test-instance',
+        runtimeIdentity: 'runtime-test-instance',
+        launchFingerprint: 'current-fingerprint',
+      };
+      const oldRecord = {
+        incarnation: 'delayed-old',
+        state: 'handoff-prepared',
+        revision: 4,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'old-record-mac',
+        ...oldOwner,
+      };
+      let successorVisible = false;
+      let oldStopped = false;
+      const successorLeaseExpiresAt = Date.now() + 60_000;
+      const clientPrepareHandoff = vi.fn().mockResolvedValue({
+        ...oldRecord,
+        revision: 4,
+      });
+      const clientSpawn = vi.fn().mockRejectedValue(Object.assign(
+        new Error('successor response was lost'),
+        {
+          code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          ambiguous: true,
+          retryable: false,
+          originalCode: 'connection_closed',
+        },
+      ));
+      const clientHealth = vi.fn().mockResolvedValue({ healthy: true });
+      const clientStop = vi.fn(async () => {
+        oldStopped = true;
+      });
+      const clientList = vi.fn(async () => {
+        const successorOwner = clientSpawn.mock.calls[0]?.[0]?.owner;
+        const successor = successorOwner && successorVisible
+          ? {
+            incarnation: 'delayed-successor',
+            state: 'active',
+            pid: 45679,
+            port: 45679,
+            revision: 8,
+            leaseExpiresAt: successorLeaseExpiresAt,
+            mac: 'successor-record-mac',
+            launchSpec: clientSpawn.mock.calls[0][0].launchSpec,
+            ...successorOwner,
+          }
+          : null;
+        if (oldStopped) return successor ? [successor] : [];
+        return successor ? [oldRecord, successor] : [oldRecord];
+      });
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: clientPrepareHandoff,
+        spawn: clientSpawn,
+        stop: clientStop,
+        health: clientHealth,
+        list: clientList,
+        confirmAdoption: vi.fn(async () => ({
+          record: {
+            incarnation: 'delayed-successor',
+            state: 'active',
+            pid: 45679,
+            port: 45679,
+            revision: 8,
+            leaseExpiresAt: successorLeaseExpiresAt,
+            mac: 'successor-record-mac',
+            launchSpec: clientSpawn.mock.calls[0][0].launchSpec,
+            ...clientSpawn.mock.calls[0][0].owner,
+          },
+          credential: null,
+          health: { healthy: true },
+        })),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const legacySpawn = (await import('node:child_process')).spawn;
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: 12345, close: vi.fn() };
+      state.openCodePort = 45678;
+      state.currentIncarnation = oldRecord.incarnation;
+      state.currentOwner = oldOwner;
+      state.isOpenCodeReady = true;
+
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+      });
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'spawn',
+        incarnation: oldRecord.incarnation,
+        owner: oldOwner,
+      });
+
+      // The first retry happens before the delayed successor is visible. It
+      // must not repeat spawn, stop the old child, or enter the legacy path.
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+      });
+      expect(clientPrepareHandoff).toHaveBeenCalledOnce();
+      expect(clientSpawn).toHaveBeenCalledOnce();
+      expect(clientStop).not.toHaveBeenCalled();
+      expect(legacySpawn).not.toHaveBeenCalled();
+      expect(state.guardianOutcomeUnknownFence).not.toBeNull();
+
+      // Once the exact owner-scoped successor is visible and healthy, the
+      // retry stops only the exact old owner, adopts the successor, and clears
+      // the fence after reconciliation.
+      successorVisible = true;
+      await runtime.restartOpenCode();
+
+      expect(clientSpawn).toHaveBeenCalledOnce();
+      expect(clientStop).toHaveBeenCalledWith({
+        incarnation: oldRecord.incarnation,
+        owner: oldOwner,
+      });
+      expect(state.currentIncarnation).toBe('delayed-successor');
+      expect(state.currentOwner).toEqual(clientSpawn.mock.calls[0][0].owner);
+      expect(state.openCodeProcess).toMatchObject({
+        isGuardianManaged: true,
+        pid: 45679,
+      });
+      expect(state.guardianOutcomeUnknownFence).toBeNull();
+    }, 10000);
+
+    it('keeps legacy fallback for a non-ambiguous prepareHandoff failure', async () => {
+      const { spawn } = await import('node:child_process');
+      const child = createMockChild();
+      spawn.mockImplementationOnce(() => {
+        queueMicrotask(() => {
+          child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:34085\n');
+        });
+        return child;
+      });
+      const clientPrepareHandoff = vi.fn().mockRejectedValue(
+        Object.assign(new Error('temporary prepare failure'), { code: 'connection_refused' }),
+      );
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: clientPrepareHandoff,
+        spawn: vi.fn(),
+        stop: vi.fn(),
+        list: vi.fn().mockResolvedValue([]),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: 12345, close: vi.fn() };
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'non-ambiguous-prepare';
+      state.isOpenCodeReady = true;
+
+      await runtime.restartOpenCode();
+
+      expect(clientPrepareHandoff).toHaveBeenCalledOnce();
+      expect(client.spawn).not.toHaveBeenCalled();
+      expect(spawn).toHaveBeenCalledOnce();
       expect(state.openCodeProcess).not.toBeNull();
     }, 10000);
 
@@ -1377,8 +2412,9 @@ describe('Guardian integration', () => {
         const clientDisconnect = vi.fn();
 
         GuardianClient.mockImplementation(function () {
-          return {
+         return {
             connect: clientConnect,
+            admissionStatus: vi.fn().mockResolvedValue({ admitted: true, attentionCount: 0, operationCount: 0 }),
             spawn: clientSpawn,
             stop: clientStop,
             prepareHandoff: clientPrepareHandoff,
@@ -1397,14 +2433,16 @@ describe('Guardian integration', () => {
 
         await runtime.restartOpenCode();
 
-        // The guardian branch must be skipped entirely: the client must
-        // never be constructed, never connected, and never asked to
-        // prepareHandoff / spawn.
-        expect(clientConnect).not.toHaveBeenCalled();
+        // The handoff branch is skipped, but a running guardian's global
+        // admission authority is still queried before the legacy launch.
+        expect(clientConnect).toHaveBeenCalledOnce();
         expect(clientPrepareHandoff).not.toHaveBeenCalled();
         expect(clientSpawn).not.toHaveBeenCalled();
         expect(clientStop).not.toHaveBeenCalled();
-        expect(GuardianClient).not.toHaveBeenCalled();
+        // Lifecycle may instantiate the owner-scoped discovery client before
+        // honoring the handoff opt-out; no side-effecting guardian RPC is
+        // allowed on the legacy path.
+        expect(clientPrepareHandoff).not.toHaveBeenCalled();
 
         // The legacy path must have run instead: child spawned, port routed
         // through setOpenCodePort, previous child closed.
@@ -1590,6 +2628,266 @@ describe('Guardian integration', () => {
         }),
       });
     });
+
+    it('does not repeat an owner-scoped stop after an ambiguous response', async () => {
+      const clientStop = vi.fn().mockRejectedValue(Object.assign(
+        new Error('stop response was lost'),
+        {
+          code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          ambiguous: true,
+          retryable: false,
+          originalCode: 'connection_closed',
+        },
+      ));
+      GuardianClient.mockImplementation(function () {
+        return {
+          connect: vi.fn(),
+          health: vi.fn().mockResolvedValue({ healthy: true }),
+          stop: clientStop,
+          list: vi.fn().mockResolvedValue([]),
+          disconnect: vi.fn(),
+        };
+      });
+
+      const { runtime, state } = createRuntime();
+      detectAndAdoptGuardianChild.mockResolvedValue({
+        incarnation: 'ambiguous-direct-stop',
+        pid: 99004,
+        port: 4096,
+        url: 'http://127.0.0.1:4096',
+        owner: {
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+          launchFingerprint: 'adopted-fingerprint',
+        },
+      });
+
+      await runtime.bootstrapOpenCodeAtStartup();
+      await expect(state.openCodeProcess.stopOwnedOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+      });
+      await expect(state.openCodeProcess.stopOwnedOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+      });
+      expect(clientStop).toHaveBeenCalledOnce();
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'stop',
+        incarnation: 'ambiguous-direct-stop',
+      });
+    }, 10000);
+
+    it('retains and releases the direct-stop startup-secret lease only after terminal confirmation', async () => {
+      const owner = {
+        ownerInstanceId: 'owner-direct-stop-lease',
+        runtimeIdentity: 'runtime-direct-stop-lease',
+        launchFingerprint: 'direct-stop-lease-fingerprint',
+      };
+      const terminal = {
+        incarnation: 'direct-stop-lease-incarnation',
+        state: 'retired',
+        pid: 99005,
+        port: 4097,
+        revision: 4,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'direct-stop-lease-mac',
+        ...owner,
+      };
+      const clientList = vi.fn()
+        .mockResolvedValueOnce([terminal])
+        .mockResolvedValueOnce([terminal])
+        .mockResolvedValueOnce([]);
+      const clientStop = vi.fn().mockRejectedValueOnce(Object.assign(
+        new Error('stop response was lost after terminalization'),
+        {
+          code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          ambiguous: true,
+          retryable: false,
+          originalCode: 'connection_closed',
+        },
+      ));
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        health: vi.fn().mockResolvedValue({ healthy: true }),
+        spawn: vi.fn().mockResolvedValue({
+          incarnation: terminal.incarnation,
+          pid: terminal.pid,
+          port: terminal.port,
+          url: `http://127.0.0.1:${terminal.port}`,
+          owner,
+        }),
+        stop: clientStop,
+        list: clientList,
+        terminalStatus: vi.fn().mockResolvedValue({ record: terminal }),
+        confirmTerminal: vi.fn().mockResolvedValue({ record: terminal }),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime({
+        ensureLocalOpenCodeServerPassword: vi.fn(async () => 'direct-stop-lease-secret'),
+      });
+      await runtime.bootstrapOpenCodeAtStartup();
+      expect(runtime.__testManagedStartupSecretState().leaseCount).toBe(1);
+      expect(runtime.__testGuardianStartupSecretLeaseCount()).toBe(1);
+
+      await expect(state.openCodeProcess.stopOwnedOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+      });
+      expect(runtime.__testManagedStartupSecretState().leaseCount).toBe(1);
+
+      await expect(runtime.__testReconcileGuardianOutcomeUnknownFence()).resolves.toMatchObject({
+        resolved: true,
+        adopted: false,
+      });
+      expect(clientStop).toHaveBeenCalledOnce();
+      expect(client.terminalStatus).toHaveBeenCalledOnce();
+      expect(client.confirmTerminal).toHaveBeenCalledOnce();
+      expect(state.guardianOutcomeUnknownFence).toBeNull();
+      expect(runtime.__testManagedStartupSecretState()).toEqual({
+        leaseCount: 0,
+        secretCount: 0,
+      });
+      expect(runtime.__testGuardianStartupSecretLeaseCount()).toBe(0);
+    }, 10000);
+
+    it('keeps a pruned terminal fence unresolved after its retention lease expires', async () => {
+      const owner = {
+        ownerInstanceId: 'owner-pruned-terminal',
+        runtimeIdentity: 'runtime-pruned-terminal',
+        launchFingerprint: 'pruned-terminal-fingerprint',
+      };
+      const fence = {
+        version: 1,
+        kind: 'stop',
+        incarnation: 'pruned-terminal-incarnation',
+        owner,
+        revision: 8,
+        leaseExpiresAt: Date.now() - 1,
+        mac: 'pruned-terminal-mac',
+        cleanupTarget: 'old',
+        oldStopped: false,
+      };
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        terminalStatus: vi.fn().mockRejectedValue(Object.assign(
+          new Error('terminal record was pruned'),
+          { code: 'GUARDIAN_TERMINAL_RECORD_ABSENT' },
+        )),
+        confirmTerminal: vi.fn(),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime();
+      state.guardianOutcomeUnknownFence = fence;
+
+      await expect(runtime.__testReconcileGuardianOutcomeUnknownFence()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+      });
+      expect(state.guardianOutcomeUnknownFence).toEqual(fence);
+      expect(client.terminalStatus).toHaveBeenCalledOnce();
+    }, 10000);
+
+    it('keeps a pruned terminal fence fail-closed before its signed retention lease expires', async () => {
+      const owner = {
+        ownerInstanceId: 'owner-unexpired-terminal',
+        runtimeIdentity: 'runtime-unexpired-terminal',
+        launchFingerprint: 'unexpired-terminal-fingerprint',
+      };
+      const fence = {
+        version: 1,
+        kind: 'stop',
+        incarnation: 'unexpired-terminal-incarnation',
+        owner,
+        revision: 8,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'unexpired-terminal-mac',
+        cleanupTarget: 'old',
+        oldStopped: false,
+      };
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        terminalStatus: vi.fn().mockRejectedValue(Object.assign(
+          new Error('terminal record was pruned too early'),
+          { code: 'GUARDIAN_TERMINAL_RECORD_ABSENT' },
+        )),
+        confirmTerminal: vi.fn(),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime();
+      state.guardianOutcomeUnknownFence = fence;
+
+      await expect(runtime.__testReconcileGuardianOutcomeUnknownFence()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+        retryable: false,
+      });
+      expect(state.guardianOutcomeUnknownFence).toEqual(fence);
+      expect(client.terminalStatus).toHaveBeenCalledOnce();
+    }, 10000);
+
+    it('keeps a stale durable terminal fence blocked when operation resolution binding is replaced', async () => {
+      const owner = {
+        ownerInstanceId: 'owner-stale-terminal-binding',
+        runtimeIdentity: 'runtime-stale-terminal-binding',
+        launchFingerprint: 'stale-terminal-binding-fingerprint',
+      };
+      const fence = {
+        version: 1,
+        kind: 'stop',
+        operationId: 'stale-terminal-operation-000000000000000000000000000000',
+        incarnation: 'stale-terminal-incarnation',
+        owner,
+        revision: 8,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'stale-terminal-fence-mac',
+        cleanupTarget: 'old',
+        oldStopped: false,
+      };
+      const operation = {
+        operationId: fence.operationId,
+        kind: 'stop',
+        incarnation: fence.incarnation,
+        ...owner,
+        targetRevision: 7,
+        targetLeaseExpiresAt: fence.leaseExpiresAt - 1,
+        targetMac: 'original-target-mac',
+        state: 'resolved',
+        resolutionState: 'retired',
+        resolutionRevision: 9,
+        resolutionLeaseExpiresAt: fence.leaseExpiresAt,
+        resolutionMac: 'replacement-terminal-mac',
+        revision: 2,
+        confirmationExpiresAt: Date.now() + 60_000,
+        mac: 'operation-mac',
+      };
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        operationStatus: vi.fn().mockResolvedValue({ operation, record: null, expired: false }),
+        list: vi.fn().mockResolvedValue([]),
+        confirmOperation: vi.fn(),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime();
+      state.guardianOutcomeUnknownFence = fence;
+
+      await expect(runtime.__testReconcileGuardianOutcomeUnknownFence()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+      });
+      expect(client.confirmOperation).not.toHaveBeenCalled();
+      expect(state.guardianOutcomeUnknownFence).toEqual(fence);
+    }, 10000);
   });
 
   // W-C: with `process.platform === 'win32'` mocked, the lifecycle's

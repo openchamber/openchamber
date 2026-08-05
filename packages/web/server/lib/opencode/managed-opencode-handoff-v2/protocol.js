@@ -2,14 +2,19 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 import {
   canonicalizeManagedOpenCodeHandoffV2Record,
+  canonicalizeManagedOpenCodeHandoffV2Operation,
   isManagedOpenCodeHandoffV2Incarnation,
+  isManagedOpenCodeHandoffV2OperationId,
   MANAGED_OPENCODE_HANDOFF_V2_ALLOWED_TRANSITIONS,
   MANAGED_OPENCODE_HANDOFF_V2_INCARNATION_BYTES,
   MANAGED_OPENCODE_HANDOFF_V2_KEY_BYTES,
   MANAGED_OPENCODE_HANDOFF_V2_MAX_LEASE_MS,
   MANAGED_OPENCODE_HANDOFF_V2_RECORD_VERSION,
   ManagedOpenCodeHandoffV2State,
+  ManagedOpenCodeHandoffV2OperationKind,
+  ManagedOpenCodeHandoffV2OperationState,
   normalizeManagedOpenCodeHandoffV2ProcessIdentity,
+  normalizeManagedOpenCodeHandoffV2Operation,
   normalizeManagedOpenCodeHandoffV2OwnerIdentity,
   normalizeManagedOpenCodeHandoffV2Record,
   normalizeManagedOpenCodeHandoffV2LaunchSpec,
@@ -23,14 +28,30 @@ const ZERO_MAC = Buffer.alloc(MANAGED_OPENCODE_HANDOFF_V2_KEY_BYTES).toString('b
 const failed = (reason) => ({ ok: false, reason });
 const succeeded = (record, extra = {}) => ({
   ok: true,
-  record: toPublicManagedOpenCodeHandoffV2Record(record),
+  // The authenticated public record intentionally exposes only public
+  // authority fields.  The MAC is one of those fields: lifecycle recovery
+  // must be able to compare a persisted ambiguity fence against the exact
+  // authenticated record it reconciles, rather than treating a missing MAC
+  // as a wildcard.
+  record: {
+    ...toPublicManagedOpenCodeHandoffV2Record(record),
+    mac: record.mac,
+  },
+  ...extra,
+});
+const succeededOperation = (operation, extra = {}) => ({
+  ok: true,
+  operation: { ...operation },
   ...extra,
 });
 const isSafeNonNegativeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
 const normalizeLease = (value) =>
   Number.isSafeInteger(value) && value > 0 && value <= MANAGED_OPENCODE_HANDOFF_V2_MAX_LEASE_MS ? value : null;
-const isExpiredRecoveryState = (state) => state === ManagedOpenCodeHandoffV2State.Stopping
-  || state === ManagedOpenCodeHandoffV2State.HandoffPrepared;
+const isExpiredRecoveryState = (state) => state === ManagedOpenCodeHandoffV2State.Reserved
+  || state === ManagedOpenCodeHandoffV2State.Stopping
+  || state === ManagedOpenCodeHandoffV2State.HandoffPrepared
+  || state === ManagedOpenCodeHandoffV2State.Interrupted
+  || state === ManagedOpenCodeHandoffV2State.Retired;
 
 const nextRevision = (record) =>
   record.revision < Number.MAX_SAFE_INTEGER ? record.revision + 1 : null;
@@ -39,6 +60,11 @@ const expectedRecord = (record) => ({
   revision: record.revision,
   mac: record.mac,
   leaseExpiresAt: record.leaseExpiresAt,
+});
+const expectedOperation = (operation) => ({
+  revision: operation.revision,
+  mac: operation.mac,
+  confirmationExpiresAt: operation.confirmationExpiresAt,
 });
 
 /**
@@ -123,6 +149,43 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
     (key) => signRecordWithKey(record, key),
   );
 
+  const signOperationWithKey = (operation, key) => {
+    const unsigned = normalizeManagedOpenCodeHandoffV2Operation({ ...operation, mac: ZERO_MAC });
+    if (!unsigned) throw new TypeError('Invalid managed OpenCode handoff v2 operation');
+    const mac = createHmac('sha256', key)
+      .update(canonicalizeManagedOpenCodeHandoffV2Operation(unsigned))
+      .digest();
+    try {
+      return { ...unsigned, mac: mac.toString('base64url') };
+    } finally {
+      mac.fill(0);
+    }
+  };
+
+  const signOperation = async (operation) => withRecordMacKey(
+    operation.incarnation,
+    (key) => signOperationWithKey(operation, key),
+  );
+
+  const verifySignedOperation = async (operation) => {
+    const normalized = normalizeManagedOpenCodeHandoffV2Operation(operation);
+    if (!normalized) return null;
+    let provided;
+    let expected;
+    try {
+      provided = Buffer.from(normalized.mac, 'base64url');
+      expected = await withRecordMacKey(normalized.incarnation, (key) => createHmac('sha256', key)
+        .update(canonicalizeManagedOpenCodeHandoffV2Operation(normalized))
+        .digest());
+      return provided.length === expected.length && timingSafeEqual(provided, expected) ? normalized : null;
+    } catch {
+      return null;
+    } finally {
+      provided?.fill(0);
+      expected?.fill(0);
+    }
+  };
+
   const verifySignedRecord = async (record) => {
     const normalized = normalizeManagedOpenCodeHandoffV2Record(record);
     if (!normalized) return null;
@@ -187,6 +250,24 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
       return failed('compare-and-swap-failed');
     } catch {
       return failed('compare-and-swap-failed');
+    }
+  };
+
+  const compareAndSwapOperation = async ({ operationId, expected, next, nextForAuthoritativeTime, allowExpired = false }) => {
+    try {
+      if (typeof store.compareAndSwapOperation !== 'function') return failed('operation-store-unavailable');
+      const input = { operationId, expected };
+      if (next !== undefined) input.next = { ...next };
+      if (nextForAuthoritativeTime !== undefined) input.nextForAuthoritativeTime = nextForAuthoritativeTime;
+      if (allowExpired) input.allowExpired = true;
+      const result = await store.compareAndSwapOperation(input);
+      if (!result || Object.keys(result).length !== 1) return failed('operation-compare-and-swap-failed');
+      if (result.status === 'applied') return { ok: true };
+      if (result.status === 'conflict') return failed('operation-compare-and-swap-conflict');
+      if (result.status === 'expired') return failed('operation-expired');
+      return failed('operation-compare-and-swap-failed');
+    } catch {
+      return failed('operation-compare-and-swap-failed');
     }
   };
 
@@ -291,6 +372,7 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
       loaded.expired
       && (!allowExpired
         || ![
+          ManagedOpenCodeHandoffV2State.Interrupted,
           ManagedOpenCodeHandoffV2State.Stopping,
           ManagedOpenCodeHandoffV2State.Retired,
         ].includes(nextState))
@@ -300,18 +382,50 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
 
     const revision = nextRevision(record);
     if (revision === null) return failed('revision-exhausted');
+    const terminal = nextState === ManagedOpenCodeHandoffV2State.Interrupted
+      || nextState === ManagedOpenCodeHandoffV2State.Retired;
     let next;
+    let stored;
     try {
-      next = await signRecord({ ...record, state: nextState, revision });
+      if (terminal) {
+        // A lost stop/cleanup response is reconciled after the child has left
+        // #children. Keep the signed terminal row available for that H5 fence
+        // instead of allowing the original launch lease to expire immediately
+        // after terminalization. The lease is extended from authoritative store
+        // time and never shortened, so cleanup can still prune the row once the
+        // retained confirmation horizon has elapsed.
+        stored = await withRecordMacKey(record.incarnation, async (key) => compareAndSwap({
+          incarnation: record.incarnation,
+          expected: expectedRecord(record),
+          allowExpired,
+          nextForAuthoritativeTime: (authoritativeNow) => {
+            if (authoritativeNow > Number.MAX_SAFE_INTEGER - configuredDefaultLease) {
+              throw new Error('Managed OpenCode handoff v2 terminal lease overflows the clock');
+            }
+            next = signRecordWithKey({
+              ...record,
+              state: nextState,
+              revision,
+              leaseExpiresAt: Math.max(
+                record.leaseExpiresAt,
+                authoritativeNow + configuredDefaultLease,
+              ),
+            }, key);
+            return next;
+          },
+        }));
+      } else {
+        next = await signRecord({ ...record, state: nextState, revision });
+        stored = await compareAndSwap({
+          incarnation: record.incarnation,
+          expected: expectedRecord(record),
+          next,
+          allowExpired,
+        });
+      }
     } catch {
       return failed('record-sign-failed');
     }
-    const stored = await compareAndSwap({
-      incarnation: record.incarnation,
-      expected: expectedRecord(record),
-      next,
-      allowExpired,
-    });
     if (!stored.ok) return stored;
     if (
       nextState === ManagedOpenCodeHandoffV2State.Interrupted
@@ -623,11 +737,368 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
     }
   };
 
+  // Confirm an already-observed record through the store's authoritative
+  // transaction. This deliberately writes the same authenticated record: the
+  // CAS predicate proves that revision, lease, and MAC still match at the
+  // transaction boundary without inventing a lifecycle transition.
+  const confirmRecord = async ({
+    incarnation,
+    expectedRevision,
+    expectedLeaseExpiresAt,
+    expectedMac,
+    allowExpired = false,
+  } = {}) => {
+    if (!isSafeNonNegativeInteger(expectedRevision)
+      || !isSafeNonNegativeInteger(expectedLeaseExpiresAt)
+      || typeof expectedMac !== 'string'
+      || expectedMac.length === 0) {
+      return failed('invalid-record-binding');
+    }
+    const loaded = await loadRecord(incarnation, { allowExpired });
+    if (!loaded.ok) return loaded;
+    const record = loaded.record;
+    if (record.revision !== expectedRevision
+      || record.leaseExpiresAt !== expectedLeaseExpiresAt
+      || record.mac !== expectedMac) {
+      return failed('record-binding-changed');
+    }
+    const stored = await compareAndSwap({
+      incarnation: record.incarnation,
+      expected: expectedRecord(record),
+      next: record,
+      allowExpired,
+    });
+    return stored.ok ? succeeded(record) : stored;
+  };
+
+  const operationStoreAvailable = typeof store.readOperation === 'function'
+    && typeof store.compareAndSwapOperation === 'function';
+
+  const loadOperation = async (operationId, { allowExpired = false } = {}) => {
+    if (!operationStoreAvailable || !isManagedOpenCodeHandoffV2OperationId(operationId)) {
+      return failed('operation-store-unavailable');
+    }
+    let raw;
+    try {
+      raw = await store.readOperation({ operationId });
+    } catch {
+      return failed('operation-read-failed');
+    }
+    if (raw === null) return failed('operation-absent');
+    const operation = await verifySignedOperation(raw);
+    if (!operation) return failed('operation-invalid');
+    const current = nowMs();
+    if (current === null) return failed('clock-invalid');
+    if (current >= operation.confirmationExpiresAt) {
+      if (!allowExpired) return failed('operation-expired');
+      return { ok: true, operation, expired: true };
+    }
+    return { ok: true, operation };
+  };
+
+  const createOperation = async ({
+    operationId,
+    kind,
+    incarnation,
+    owner,
+    target,
+    horizonMs = configuredDefaultLease,
+  } = {}) => {
+    if (!operationStoreAvailable || !isManagedOpenCodeHandoffV2OperationId(operationId)) return failed('operation-store-unavailable');
+    if (!Object.values(ManagedOpenCodeHandoffV2OperationKind).includes(kind)
+      || !isManagedOpenCodeHandoffV2Incarnation(incarnation)) return failed('invalid-operation');
+    const normalizedOwner = normalizeManagedOpenCodeHandoffV2OwnerIdentity(owner ?? {});
+    if (!normalizedOwner || Object.values(normalizedOwner).some((value) => value === null)) return failed('invalid-operation-owner');
+    const binding = normalizeManagedOpenCodeHandoffV2Record({
+      v: MANAGED_OPENCODE_HANDOFF_V2_RECORD_VERSION,
+      state: ManagedOpenCodeHandoffV2State.Active,
+      incarnation,
+      ...normalizedOwner,
+      launchSpec: null,
+      credentialFingerprint: ZERO_MAC,
+      pid: 1,
+      port: 1,
+      processStartTicks: '0',
+      createdAt: 0,
+      leaseExpiresAt: 1,
+      revision: target?.revision,
+      mac: target?.mac,
+    });
+    if (!binding || !Number.isSafeInteger(target?.revision)
+      || !Number.isSafeInteger(target?.leaseExpiresAt)
+      || typeof target.mac !== 'string' || target.mac.length === 0) return failed('invalid-operation-binding');
+    const horizon = normalizeLease(horizonMs);
+    if (!horizon) return failed('invalid-operation-horizon');
+    let operation;
+    try {
+      const stored = await withRecordMacKey(incarnation, async (key) => compareAndSwapOperation({
+        operationId,
+        expected: null,
+        nextForAuthoritativeTime: (authoritativeNow) => {
+          if (authoritativeNow > Number.MAX_SAFE_INTEGER - horizon) throw new Error('operation horizon overflows the clock');
+          operation = signOperationWithKey({
+            v: MANAGED_OPENCODE_HANDOFF_V2_RECORD_VERSION,
+            operationId,
+            kind,
+            incarnation,
+            ...normalizedOwner,
+            targetRevision: target.revision,
+            targetLeaseExpiresAt: target.leaseExpiresAt,
+            targetMac: target.mac,
+            state: ManagedOpenCodeHandoffV2OperationState.Pending,
+            resolutionState: null,
+            resolutionRevision: null,
+            resolutionLeaseExpiresAt: null,
+            resolutionMac: null,
+            createdAt: authoritativeNow,
+            confirmationExpiresAt: authoritativeNow + horizon,
+            revision: 0,
+          }, key);
+          return operation;
+        },
+      }));
+      return stored.ok && operation ? succeededOperation(operation) : stored;
+    } catch {
+      return failed('operation-create-failed');
+    }
+  };
+
+  const resolveOperation = async ({
+    operationId,
+    expectedRevision,
+    expectedConfirmationExpiresAt,
+    expectedMac,
+    resolutionState,
+    resolution,
+  } = {}) => {
+    const resolutionBinding = resolution?.record ?? resolution;
+    if (!Number.isSafeInteger(expectedRevision)
+      || !Number.isSafeInteger(expectedConfirmationExpiresAt)
+      || typeof expectedMac !== 'string'
+      || expectedMac.length === 0
+      || ![
+        ManagedOpenCodeHandoffV2State.Active,
+        ManagedOpenCodeHandoffV2State.HandoffPrepared,
+        ManagedOpenCodeHandoffV2State.Interrupted,
+        ManagedOpenCodeHandoffV2State.Retired,
+      ].includes(resolutionState)
+       || !Number.isSafeInteger(resolutionBinding?.revision)
+       || !Number.isSafeInteger(resolutionBinding?.leaseExpiresAt)
+       || typeof resolutionBinding?.mac !== 'string'
+       || resolutionBinding.mac.length === 0) return failed('invalid-operation-resolution');
+    // The confirmation horizon is only a point at which the operation must
+    // become an explicit expired/unresolved state. It is not permission to
+    // clear the side-effect fence. A guardian may resolve an expired row only
+    // after it has supplied the exact signed terminal/active evidence and its
+    // own quiescence checks.
+    const loaded = await loadOperation(operationId, { allowExpired: true });
+    if (!loaded.ok) return loaded;
+    const operation = loaded.operation;
+    if (loaded.expired && operation.state !== ManagedOpenCodeHandoffV2OperationState.Expired) {
+      return failed('operation-expired');
+    }
+    if (operation.revision !== expectedRevision
+      || operation.confirmationExpiresAt !== expectedConfirmationExpiresAt
+      || operation.mac !== expectedMac
+      || (operation.state !== ManagedOpenCodeHandoffV2OperationState.Pending
+        && operation.state !== ManagedOpenCodeHandoffV2OperationState.Expired
+        && !(operation.state === ManagedOpenCodeHandoffV2OperationState.Resolved
+          && operation.resolutionState === ManagedOpenCodeHandoffV2State.Active
+           && resolutionState !== ManagedOpenCodeHandoffV2State.Active))) return failed('operation-binding-changed');
+    if (!Number.isSafeInteger(resolution?.target?.revision)
+      || !Number.isSafeInteger(resolution.target.leaseExpiresAt)
+      || typeof resolution.target.mac !== 'string'
+      || resolution.target.revision !== operation.targetRevision
+      || resolution.target.leaseExpiresAt !== operation.targetLeaseExpiresAt
+      || resolution.target.mac !== operation.targetMac) {
+      return failed('operation-target-binding-invalid');
+    }
+
+    // A resolution is not an arbitrary tuple supplied by the caller. It must
+    // be the exact authenticated record that the guardian observed (or a
+    // guardian-signed terminal record retained as the post-pruning horizon).
+    // This prevents a missing target row, a wrong owner, or a forged MAC from
+    // being interpreted as successful resolution.
+    const resolutionRecord = resolutionBinding;
+    const resolvedRecord = await verifySignedRecord(resolutionRecord);
+    if (!resolvedRecord
+      || resolvedRecord.incarnation !== operation.incarnation
+      || resolvedRecord.ownerInstanceId !== operation.ownerInstanceId
+      || resolvedRecord.runtimeIdentity !== operation.runtimeIdentity
+      || resolvedRecord.launchFingerprint !== operation.launchFingerprint
+      || resolvedRecord.state !== resolutionState
+      || resolvedRecord.revision !== resolutionBinding.revision
+      || resolvedRecord.leaseExpiresAt !== resolutionBinding.leaseExpiresAt
+      || resolvedRecord.mac !== resolutionBinding.mac) {
+      return failed('operation-resolution-binding-invalid');
+    }
+
+    const target = await loadRecord(operation.incarnation, { allowExpired: true });
+    if (!target.ok && target.reason !== 'record-absent') {
+      return failed(target.reason === 'store-read-failed'
+        ? 'operation-target-read-failed'
+        : 'operation-target-invalid');
+    }
+    if (target.ok && (
+      target.record.ownerInstanceId !== operation.ownerInstanceId
+      || target.record.runtimeIdentity !== operation.runtimeIdentity
+      || target.record.launchFingerprint !== operation.launchFingerprint
+      || target.record.revision !== resolvedRecord.revision
+      || target.record.leaseExpiresAt !== resolvedRecord.leaseExpiresAt
+      || target.record.mac !== resolvedRecord.mac
+      || target.record.state !== resolvedRecord.state
+    )) {
+      return failed('operation-target-binding-changed');
+    }
+    if (!target.ok && ![
+      ManagedOpenCodeHandoffV2State.Interrupted,
+      ManagedOpenCodeHandoffV2State.Retired,
+    ].includes(resolutionState)) {
+      return failed('operation-target-absent');
+    }
+    const revision = nextRevision(operation);
+    if (revision === null) return failed('revision-exhausted');
+    let next;
+    try {
+      const stored = await withRecordMacKey(operation.incarnation, async (key) => compareAndSwapOperation({
+        operationId,
+        expected: expectedOperation(operation),
+        allowExpired: loaded.expired === true,
+        next: next = signOperationWithKey({
+          ...operation,
+          state: ManagedOpenCodeHandoffV2OperationState.Resolved,
+          resolutionState,
+           resolutionRevision: resolutionBinding.revision,
+           resolutionLeaseExpiresAt: resolutionBinding.leaseExpiresAt,
+           resolutionMac: resolutionBinding.mac,
+          revision,
+        }, key),
+      }));
+      return stored.ok && next ? succeededOperation(next) : stored;
+    } catch {
+      return failed('operation-resolution-failed');
+    }
+  };
+
+  const expireOperation = async ({ operationId, expectedRevision, expectedConfirmationExpiresAt, expectedMac } = {}) => {
+    const loaded = await loadOperation(operationId, { allowExpired: true });
+    if (!loaded.ok) return loaded;
+    const operation = loaded.operation;
+    if (!loaded.expired || operation.state !== ManagedOpenCodeHandoffV2OperationState.Pending
+      || operation.revision !== expectedRevision
+      || operation.confirmationExpiresAt !== expectedConfirmationExpiresAt
+      || operation.mac !== expectedMac) return failed('operation-not-expired');
+    const revision = nextRevision(operation);
+    if (revision === null) return failed('revision-exhausted');
+    let next;
+    try {
+      const stored = await withRecordMacKey(operation.incarnation, async (key) => compareAndSwapOperation({
+        operationId,
+        expected: expectedOperation(operation),
+        allowExpired: true,
+        next: next = signOperationWithKey({
+          ...operation,
+          state: ManagedOpenCodeHandoffV2OperationState.Expired,
+          revision,
+        }, key),
+      }));
+      return stored.ok && next ? succeededOperation(next, { expired: true }) : stored;
+    } catch {
+      return failed('operation-expiry-failed');
+    }
+  };
+
+  const confirmOperation = async ({ operationId, expectedRevision, expectedConfirmationExpiresAt, expectedMac, allowExpired = false } = {}) => {
+    const loaded = await loadOperation(operationId, { allowExpired });
+    if (!loaded.ok) return loaded;
+    const operation = loaded.operation;
+    if (operation.revision !== expectedRevision
+      || operation.confirmationExpiresAt !== expectedConfirmationExpiresAt
+      || operation.mac !== expectedMac) return failed('operation-binding-changed');
+    const stored = await compareAndSwapOperation({
+      operationId,
+      expected: expectedOperation(operation),
+      next: operation,
+      allowExpired,
+    });
+    return stored.ok ? succeededOperation(operation, { expired: loaded.expired === true }) : stored;
+  };
+
+  const listOperations = async ({ owner } = {}) => {
+    if (!operationStoreAvailable || typeof store.listOperations !== 'function') {
+      return failed('operation-store-unavailable');
+    }
+    const hasOwnerScope = owner && typeof owner.ownerInstanceId === 'string'
+      && owner.ownerInstanceId.length > 0
+      && typeof owner.runtimeIdentity === 'string'
+      && owner.runtimeIdentity.length > 0
+      && (owner.launchFingerprint === undefined || typeof owner.launchFingerprint === 'string');
+    const normalizedOwner = normalizeManagedOpenCodeHandoffV2OwnerIdentity({
+      ownerInstanceId: owner?.ownerInstanceId ?? null,
+      runtimeIdentity: owner?.runtimeIdentity ?? null,
+      launchFingerprint: owner?.launchFingerprint ?? null,
+    });
+    if (!normalizedOwner || !hasOwnerScope) {
+      return failed('invalid-operation-owner');
+    }
+    let rows;
+    try {
+      rows = await store.listOperations();
+    } catch {
+      return failed('operation-read-failed');
+    }
+    if (!Array.isArray(rows)) return failed('operation-read-failed');
+    const operations = [];
+    for (const row of rows) {
+      const operation = await verifySignedOperation(row);
+      if (!operation) return failed('operation-invalid');
+      if (operation.ownerInstanceId === normalizedOwner.ownerInstanceId
+        && operation.runtimeIdentity === normalizedOwner.runtimeIdentity
+        && (owner.launchFingerprint === undefined || operation.launchFingerprint === owner.launchFingerprint)) {
+        operations.push({ ...operation });
+      }
+    }
+    return { ok: true, operations };
+  };
+
+  // Lifecycle admission is the one intentionally global operation view. It is
+  // used only by the guardian to decide whether an unowned/legacy launch may
+  // proceed; owner-scoped callers must continue to use listOperations().
+  const listAllOperations = async () => {
+    if (!operationStoreAvailable || typeof store.listOperations !== 'function') {
+      return failed('operation-store-unavailable');
+    }
+    let rows;
+    try {
+      rows = await store.listOperations();
+    } catch {
+      return failed('operation-read-failed');
+    }
+    if (!Array.isArray(rows)) return failed('operation-read-failed');
+    const operations = [];
+    for (const row of rows) {
+      const operation = await verifySignedOperation(row);
+      if (!operation) return failed('operation-invalid');
+      operations.push({ ...operation });
+    }
+    return { ok: true, operations };
+  };
+
   return Object.freeze({
     reserveLaunch,
     beginLaunch,
     bindSpawnedProcess,
     renewLease,
+    createOperation,
+    readOperation: async ({ operationId, allowExpired = false } = {}) => {
+      const loaded = await loadOperation(operationId, { allowExpired });
+      return loaded.ok ? succeededOperation(loaded.operation, { expired: loaded.expired === true }) : loaded;
+    },
+    resolveOperation,
+    expireOperation,
+    confirmOperation,
+    listOperations,
+    listAllOperations,
     readRecord: async ({ incarnation, allowExpired = false } = {}) => {
       const loaded = await loadRecord(incarnation, { allowExpired });
       return loaded.ok ? succeeded(loaded.record) : loaded;
@@ -664,5 +1135,6 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
       nextState: ManagedOpenCodeHandoffV2State.Retired,
     }),
     recoverExpiredHandoff,
+    confirmRecord,
   });
 };

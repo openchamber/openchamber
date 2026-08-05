@@ -10,17 +10,23 @@ import {
 } from './filesystem.js';
 import {
   isManagedOpenCodeHandoffV2Incarnation,
+  isManagedOpenCodeHandoffV2OperationId,
   MANAGED_OPENCODE_HANDOFF_V2_MAX_LEASE_MS,
   ManagedOpenCodeHandoffV2State,
+  normalizeManagedOpenCodeHandoffV2Operation,
   normalizeManagedOpenCodeHandoffV2Record,
 } from './record.js';
 
 export const MANAGED_OPENCODE_HANDOFF_V2_STORE_FILENAME = 'records.sqlite3';
 
-const STORE_USER_VERSION = 2_421_007;
+const LEGACY_STORE_USER_VERSION = 2_421_007;
+const OPERATION_STORE_USER_VERSION = 2_421_008;
+const STORE_USER_VERSION = 2_421_009;
 const STORE_APPLICATION_ID = 0x4f434832;
 const STORE_TABLE = 'managed_opencode_handoff_v2_records';
 const STORE_EXPIRY_INDEX = 'managed_opencode_handoff_v2_expiry_idx';
+const STORE_OPERATION_TABLE = 'managed_opencode_handoff_v2_operations';
+const STORE_OPERATION_EXPIRY_INDEX = 'managed_opencode_handoff_v2_operations_expiry_idx';
 const STORE_COLUMNS = Object.freeze([
   'incarnation',
   'owner_instance_id',
@@ -39,6 +45,27 @@ const STORE_COLUMNS = Object.freeze([
   'mac',
 ]);
 const EXPECTED_KEYS = Object.freeze(['revision', 'mac', 'leaseExpiresAt']);
+const OPERATION_COLUMNS = Object.freeze([
+  'operation_id',
+  'version',
+  'kind',
+  'incarnation',
+  'owner_instance_id',
+  'runtime_identity',
+  'launch_fingerprint',
+  'target_revision',
+  'target_lease_expires_at',
+  'target_mac',
+  'state',
+  'resolution_state',
+  'resolution_revision',
+  'resolution_lease_expires_at',
+  'resolution_mac',
+  'created_at',
+  'confirmation_expires_at',
+  'revision',
+  'mac',
+]);
 const STATE_SQL = Object.values(ManagedOpenCodeHandoffV2State)
   .map((state) => `'${state}'`)
   .join(', ');
@@ -85,6 +112,65 @@ const CREATE_TABLE_SQL = `
 const CREATE_EXPIRY_INDEX_SQL = `
   CREATE INDEX ${STORE_EXPIRY_INDEX} ON ${STORE_TABLE} (lease_expires_at)
 `;
+const CREATE_OPERATION_TABLE_SQL = `
+  CREATE TABLE ${STORE_OPERATION_TABLE} (
+    operation_id TEXT PRIMARY KEY NOT NULL,
+    version INTEGER NOT NULL CHECK (version = 2),
+    kind TEXT NOT NULL CHECK (kind IN ('spawn', 'stop', 'prepare-handoff', 'abort-handoff')),
+    incarnation TEXT NOT NULL,
+    owner_instance_id TEXT NOT NULL,
+    runtime_identity TEXT NOT NULL,
+    launch_fingerprint TEXT NOT NULL,
+    target_revision INTEGER NOT NULL CHECK (target_revision >= 0),
+    target_lease_expires_at INTEGER NOT NULL,
+    target_mac TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('pending', 'resolved', 'expired')),
+    resolution_state TEXT CHECK (resolution_state IS NULL OR resolution_state IN ('active', 'handoff-prepared', 'interrupted', 'retired')),
+    resolution_revision INTEGER,
+    resolution_lease_expires_at INTEGER,
+    resolution_mac TEXT,
+    created_at INTEGER NOT NULL,
+    confirmation_expires_at INTEGER NOT NULL CHECK (confirmation_expires_at > created_at),
+    revision INTEGER NOT NULL CHECK (revision >= 0),
+    mac TEXT NOT NULL,
+    CHECK (
+      (resolution_state IS NULL AND resolution_revision IS NULL AND resolution_lease_expires_at IS NULL AND resolution_mac IS NULL)
+      OR (resolution_state IS NOT NULL AND resolution_revision >= 0 AND resolution_lease_expires_at IS NOT NULL AND resolution_mac IS NOT NULL)
+    ),
+    CHECK ((state = 'pending' AND resolution_state IS NULL) OR (state = 'resolved' AND resolution_state IS NOT NULL) OR state = 'expired')
+  ) STRICT
+`;
+const CREATE_OPERATION_TABLE_SQL_LEGACY = `
+  CREATE TABLE ${STORE_OPERATION_TABLE} (
+    operation_id TEXT PRIMARY KEY NOT NULL,
+    version INTEGER NOT NULL CHECK (version = 2),
+    kind TEXT NOT NULL CHECK (kind IN ('spawn', 'stop', 'prepare-handoff', 'abort-handoff')),
+    incarnation TEXT NOT NULL,
+    owner_instance_id TEXT NOT NULL,
+    runtime_identity TEXT NOT NULL,
+    launch_fingerprint TEXT NOT NULL,
+    target_revision INTEGER NOT NULL CHECK (target_revision >= 0),
+    target_lease_expires_at INTEGER NOT NULL,
+    target_mac TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('pending', 'resolved', 'expired')),
+    resolution_state TEXT CHECK (resolution_state IS NULL OR resolution_state IN ('active', 'interrupted', 'retired')),
+    resolution_revision INTEGER,
+    resolution_lease_expires_at INTEGER,
+    resolution_mac TEXT,
+    created_at INTEGER NOT NULL,
+    confirmation_expires_at INTEGER NOT NULL CHECK (confirmation_expires_at > created_at),
+    revision INTEGER NOT NULL CHECK (revision >= 0),
+    mac TEXT NOT NULL,
+    CHECK (
+      (resolution_state IS NULL AND resolution_revision IS NULL AND resolution_lease_expires_at IS NULL AND resolution_mac IS NULL)
+      OR (resolution_state IS NOT NULL AND resolution_revision >= 0 AND resolution_lease_expires_at IS NOT NULL AND resolution_mac IS NOT NULL)
+    ),
+    CHECK ((state = 'pending' AND resolution_state IS NULL) OR (state = 'resolved' AND resolution_state IS NOT NULL) OR state = 'expired')
+  ) STRICT
+`;
+const CREATE_OPERATION_EXPIRY_INDEX_SQL = `
+  CREATE INDEX ${STORE_OPERATION_EXPIRY_INDEX} ON ${STORE_OPERATION_TABLE} (confirmation_expires_at)
+`;
 const EXPECTED_TABLE_COLUMNS = Object.freeze([
   ['incarnation', 'TEXT', 1, 1],
   ['owner_instance_id', 'TEXT', 0, 0],
@@ -99,6 +185,27 @@ const EXPECTED_TABLE_COLUMNS = Object.freeze([
   ['process_start_ticks', 'TEXT', 0, 0],
   ['created_at', 'INTEGER', 1, 0],
   ['lease_expires_at', 'INTEGER', 1, 0],
+  ['revision', 'INTEGER', 1, 0],
+  ['mac', 'TEXT', 1, 0],
+]);
+const EXPECTED_OPERATION_TABLE_COLUMNS = Object.freeze([
+  ['operation_id', 'TEXT', 1, 1],
+  ['version', 'INTEGER', 1, 0],
+  ['kind', 'TEXT', 1, 0],
+  ['incarnation', 'TEXT', 1, 0],
+  ['owner_instance_id', 'TEXT', 1, 0],
+  ['runtime_identity', 'TEXT', 1, 0],
+  ['launch_fingerprint', 'TEXT', 1, 0],
+  ['target_revision', 'INTEGER', 1, 0],
+  ['target_lease_expires_at', 'INTEGER', 1, 0],
+  ['target_mac', 'TEXT', 1, 0],
+  ['state', 'TEXT', 1, 0],
+  ['resolution_state', 'TEXT', 0, 0],
+  ['resolution_revision', 'INTEGER', 0, 0],
+  ['resolution_lease_expires_at', 'INTEGER', 0, 0],
+  ['resolution_mac', 'TEXT', 0, 0],
+  ['created_at', 'INTEGER', 1, 0],
+  ['confirmation_expires_at', 'INTEGER', 1, 0],
   ['revision', 'INTEGER', 1, 0],
   ['mac', 'TEXT', 1, 0],
 ]);
@@ -153,53 +260,82 @@ const getUserSchemaEntries = (database) => database.prepare(`
   ORDER BY type, name
 `).all();
 
-const validateExactSchema = (database) => {
+const validateTableColumns = (database, tableName, expectedColumns) => {
+  const columns = database.prepare(`PRAGMA table_info(${tableName})`).all();
+  return columns.length === expectedColumns.length && columns.every((column, index) => {
+    const [name, type, notnull, pk] = expectedColumns[index];
+    return column.cid === index
+      && column.name === name
+      && column.type === type
+      && column.notnull === notnull
+      && column.pk === pk
+      && column.dflt_value === null;
+  });
+};
+
+const validateExactSchema = (database, { allowLegacy = false, allowOperationLegacy = false } = {}) => {
   const userVersion = database.pragma('user_version', { simple: true });
   const applicationId = database.pragma('application_id', { simple: true });
-  if (userVersion !== STORE_USER_VERSION || applicationId !== STORE_APPLICATION_ID) {
+  if (
+    applicationId !== STORE_APPLICATION_ID
+    || (userVersion !== STORE_USER_VERSION
+      && userVersion !== OPERATION_STORE_USER_VERSION
+      && (!allowLegacy || userVersion !== LEGACY_STORE_USER_VERSION))
+  ) {
     throw schemaError();
   }
 
   const entries = getUserSchemaEntries(database);
-  if (
-    entries.length !== 2
-    || entries[0].type !== 'index'
-    || entries[0].name !== STORE_EXPIRY_INDEX
-    || entries[0].tbl_name !== STORE_TABLE
-    || normalizeSql(entries[0].sql) !== normalizeSql(CREATE_EXPIRY_INDEX_SQL)
-    || entries[1].type !== 'table'
-    || entries[1].name !== STORE_TABLE
-    || entries[1].tbl_name !== STORE_TABLE
-    || normalizeSql(entries[1].sql) !== normalizeSql(CREATE_TABLE_SQL)
-  ) {
+  const legacyEntries = entries.length === 2
+    && entries[0].type === 'index'
+    && entries[0].name === STORE_EXPIRY_INDEX
+    && entries[0].tbl_name === STORE_TABLE
+    && normalizeSql(entries[0].sql) === normalizeSql(CREATE_EXPIRY_INDEX_SQL)
+    && entries[1].type === 'table'
+    && entries[1].name === STORE_TABLE
+    && entries[1].tbl_name === STORE_TABLE
+    && normalizeSql(entries[1].sql) === normalizeSql(CREATE_TABLE_SQL);
+  const operationTableSql = userVersion === OPERATION_STORE_USER_VERSION && allowOperationLegacy
+    ? CREATE_OPERATION_TABLE_SQL_LEGACY
+    : CREATE_OPERATION_TABLE_SQL;
+  const currentEntries = entries.length === 4
+    && entries.some((entry) => entry.type === 'index'
+      && entry.name === STORE_EXPIRY_INDEX
+      && entry.tbl_name === STORE_TABLE
+      && normalizeSql(entry.sql) === normalizeSql(CREATE_EXPIRY_INDEX_SQL))
+    && entries.some((entry) => entry.type === 'table'
+      && entry.name === STORE_TABLE
+      && entry.tbl_name === STORE_TABLE
+      && normalizeSql(entry.sql) === normalizeSql(CREATE_TABLE_SQL))
+    && entries.some((entry) => entry.type === 'index'
+      && entry.name === STORE_OPERATION_EXPIRY_INDEX
+      && entry.tbl_name === STORE_OPERATION_TABLE
+      && normalizeSql(entry.sql) === normalizeSql(CREATE_OPERATION_EXPIRY_INDEX_SQL))
+    && entries.some((entry) => entry.type === 'table'
+      && entry.name === STORE_OPERATION_TABLE
+      && entry.tbl_name === STORE_OPERATION_TABLE
+       && normalizeSql(entry.sql) === normalizeSql(operationTableSql));
+  if ((userVersion === LEGACY_STORE_USER_VERSION && !legacyEntries)
+    || ((userVersion === STORE_USER_VERSION || userVersion === OPERATION_STORE_USER_VERSION) && !currentEntries)) {
     throw schemaError();
   }
 
-  const columns = database.prepare(`PRAGMA table_info(${STORE_TABLE})`).all();
-  if (
-    columns.length !== EXPECTED_TABLE_COLUMNS.length
-    || columns.some((column, index) => {
-      const [name, type, notnull, pk] = EXPECTED_TABLE_COLUMNS[index];
-      return column.cid !== index
-        || column.name !== name
-        || column.type !== type
-        || column.notnull !== notnull
-        || column.pk !== pk
-        || column.dflt_value !== null;
-    })
-  ) {
+  if (!validateTableColumns(database, STORE_TABLE, EXPECTED_TABLE_COLUMNS)) {
+    throw schemaError();
+  }
+
+  if ((userVersion === STORE_USER_VERSION || userVersion === OPERATION_STORE_USER_VERSION)
+    && !validateTableColumns(database, STORE_OPERATION_TABLE, EXPECTED_OPERATION_TABLE_COLUMNS)) {
     throw schemaError();
   }
 
   const indexes = database.prepare(`PRAGMA index_list(${STORE_TABLE})`).all();
   const primaryKeyIndex = `sqlite_autoindex_${STORE_TABLE}_1`;
-  if (
-    indexes.length !== 2
+  if (indexes.length !== 2
     || !indexes.some((index) => index.name === STORE_EXPIRY_INDEX
       && index.unique === 0 && index.origin === 'c' && index.partial === 0)
     || !indexes.some((index) => index.name === primaryKeyIndex
-      && index.unique === 1 && index.origin === 'pk' && index.partial === 0)
-  ) {
+      && index.unique === 1 && index.origin === 'pk' && index.partial === 0)) {
     throw schemaError();
   }
 
@@ -211,6 +347,25 @@ const validateExactSchema = (database) => {
     || expiryIndexColumns[0].name !== 'lease_expires_at'
   ) {
     throw schemaError();
+  }
+
+  if (userVersion === STORE_USER_VERSION || userVersion === OPERATION_STORE_USER_VERSION) {
+    const operationIndexes = database.prepare(`PRAGMA index_list(${STORE_OPERATION_TABLE})`).all();
+    const operationPrimaryKeyIndex = `sqlite_autoindex_${STORE_OPERATION_TABLE}_1`;
+    if (operationIndexes.length !== 2
+      || !operationIndexes.some((index) => index.name === STORE_OPERATION_EXPIRY_INDEX
+        && index.unique === 0 && index.origin === 'c' && index.partial === 0)
+      || !operationIndexes.some((index) => index.name === operationPrimaryKeyIndex
+        && index.unique === 1 && index.origin === 'pk' && index.partial === 0)) {
+      throw schemaError();
+    }
+    const operationExpiryColumns = database.prepare(`PRAGMA index_info(${STORE_OPERATION_EXPIRY_INDEX})`).all();
+    if (operationExpiryColumns.length !== 1
+      || operationExpiryColumns[0].seqno !== 0
+      || operationExpiryColumns[0].cid !== 16
+      || operationExpiryColumns[0].name !== 'confirmation_expires_at') {
+      throw schemaError();
+    }
   }
 };
 
@@ -224,6 +379,19 @@ const normalizeExpected = (value) => {
     revision: value.revision,
     mac: value.mac,
     leaseExpiresAt: value.leaseExpiresAt,
+  };
+};
+
+const normalizeOperationExpected = (value) => {
+  if (!hasExactlyKeys(value, ['revision', 'mac', 'confirmationExpiresAt'])) return null;
+  if (!isSafeNonNegativeInteger(value.revision)
+    || !isSafeNonNegativeInteger(value.confirmationExpiresAt)
+    || typeof value.mac !== 'string'
+    || value.mac.length === 0) return null;
+  return {
+    revision: value.revision,
+    mac: value.mac,
+    confirmationExpiresAt: value.confirmationExpiresAt,
   };
 };
 
@@ -268,6 +436,57 @@ const rowToRecord = (row) => {
   });
   if (!record) throw new Error('Managed OpenCode handoff v2 store contains a corrupt record');
   return record;
+};
+
+const operationToParameters = (operation) => [
+  operation.operationId,
+  operation.v,
+  operation.kind,
+  operation.incarnation,
+  operation.ownerInstanceId,
+  operation.runtimeIdentity,
+  operation.launchFingerprint,
+  operation.targetRevision,
+  operation.targetLeaseExpiresAt,
+  operation.targetMac,
+  operation.state,
+  operation.resolutionState,
+  operation.resolutionRevision,
+  operation.resolutionLeaseExpiresAt,
+  operation.resolutionMac,
+  operation.createdAt,
+  operation.confirmationExpiresAt,
+  operation.revision,
+  operation.mac,
+];
+
+const rowToOperation = (row) => {
+  if (!hasExactlyKeys(row, OPERATION_COLUMNS)) {
+    throw new Error('Managed OpenCode handoff v2 store contains a malformed operation row');
+  }
+  const operation = normalizeManagedOpenCodeHandoffV2Operation({
+    v: row.version,
+    operationId: row.operation_id,
+    kind: row.kind,
+    incarnation: row.incarnation,
+    ownerInstanceId: row.owner_instance_id,
+    runtimeIdentity: row.runtime_identity,
+    launchFingerprint: row.launch_fingerprint,
+    targetRevision: row.target_revision,
+    targetLeaseExpiresAt: row.target_lease_expires_at,
+    targetMac: row.target_mac,
+    state: row.state,
+    resolutionState: row.resolution_state,
+    resolutionRevision: row.resolution_revision,
+    resolutionLeaseExpiresAt: row.resolution_lease_expires_at,
+    resolutionMac: row.resolution_mac,
+    createdAt: row.created_at,
+    confirmationExpiresAt: row.confirmation_expires_at,
+    revision: row.revision,
+    mac: row.mac,
+  });
+  if (!operation) throw new Error('Managed OpenCode handoff v2 store contains a corrupt operation');
+  return operation;
 };
 
 const assertExistingDatabaseFile = (
@@ -363,8 +582,36 @@ export const createManagedOpenCodeHandoffV2Store = ({
           }
           database.exec(CREATE_TABLE_SQL);
           database.exec(CREATE_EXPIRY_INDEX_SQL);
+          database.exec(CREATE_OPERATION_TABLE_SQL);
+          database.exec(CREATE_OPERATION_EXPIRY_INDEX_SQL);
           database.pragma(`user_version = ${STORE_USER_VERSION}`);
           database.pragma(`application_id = ${STORE_APPLICATION_ID}`);
+        } else if (
+          database.pragma('user_version', { simple: true }) === LEGACY_STORE_USER_VERSION
+        ) {
+          validateExactSchema(database, { allowLegacy: true });
+          database.exec(CREATE_OPERATION_TABLE_SQL);
+          database.exec(CREATE_OPERATION_EXPIRY_INDEX_SQL);
+          database.pragma(`user_version = ${STORE_USER_VERSION}`);
+        } else if (
+          database.pragma('user_version', { simple: true }) === OPERATION_STORE_USER_VERSION
+        ) {
+          // 2421008 introduced the operation table.  2421009 widens its
+          // resolution domain to include the durable prepare-handoff state.
+          // Rebuild the strict table inside this transaction so a malformed
+          // row, failed insert, or failed index creation rolls the migration
+          // back to the known-good 2421008 database.
+          validateExactSchema(database, { allowOperationLegacy: true });
+          database.exec(`DROP INDEX ${STORE_OPERATION_EXPIRY_INDEX}`);
+          database.exec(`ALTER TABLE ${STORE_OPERATION_TABLE} RENAME TO ${STORE_OPERATION_TABLE}_legacy`);
+          database.exec(CREATE_OPERATION_TABLE_SQL);
+          database.exec(`
+            INSERT INTO ${STORE_OPERATION_TABLE} (${OPERATION_COLUMNS.join(', ')})
+            SELECT ${OPERATION_COLUMNS.join(', ')} FROM ${STORE_OPERATION_TABLE}_legacy
+          `);
+          database.exec(`DROP TABLE ${STORE_OPERATION_TABLE}_legacy`);
+          database.exec(CREATE_OPERATION_EXPIRY_INDEX_SQL);
+          database.pragma(`user_version = ${STORE_USER_VERSION}`);
         }
         validateExactSchema(database);
         database.exec('COMMIT');
@@ -417,18 +664,28 @@ export const createManagedOpenCodeHandoffV2Store = ({
         AND mac = ?
         AND lease_expires_at = ?
     `),
-    deleteExpired: database.prepare(`
-      DELETE FROM ${STORE_TABLE}
-      WHERE lease_expires_at <= ?
-        AND state IN (?, ?)
-    `),
     authoritativeTime: database.prepare(
       "SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) AS now",
     ),
+    readOperation: database.prepare(`SELECT ${OPERATION_COLUMNS.join(', ')} FROM ${STORE_OPERATION_TABLE} WHERE operation_id = ?`),
+    allOperations: database.prepare(`SELECT ${OPERATION_COLUMNS.join(', ')} FROM ${STORE_OPERATION_TABLE} ORDER BY operation_id`),
+    insertOperation: database.prepare(`
+      INSERT INTO ${STORE_OPERATION_TABLE} (${OPERATION_COLUMNS.join(', ')})
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+    updateOperation: database.prepare(`
+      UPDATE ${STORE_OPERATION_TABLE}
+      SET version = ?, kind = ?, incarnation = ?, owner_instance_id = ?, runtime_identity = ?, launch_fingerprint = ?,
+          target_revision = ?, target_lease_expires_at = ?, target_mac = ?, state = ?, resolution_state = ?,
+          resolution_revision = ?, resolution_lease_expires_at = ?, resolution_mac = ?, created_at = ?,
+          confirmation_expires_at = ?, revision = ?, mac = ?
+      WHERE operation_id = ? AND revision = ? AND mac = ? AND confirmation_expires_at = ?
+    `),
   };
 
   try {
     statements.all.all().map(rowToRecord);
+    statements.allOperations.all().map(rowToOperation);
   } catch (error) {
     try { database.close(); } catch {}
     throw error;
@@ -518,11 +775,12 @@ export const createManagedOpenCodeHandoffV2Store = ({
         }
         if (
           normalizedNext.leaseExpiresAt <= now
-          && (!allowExpired
-            || ![
-              ManagedOpenCodeHandoffV2State.Stopping,
-              ManagedOpenCodeHandoffV2State.Retired,
-            ].includes(normalizedNext.state))
+            && (!allowExpired
+              || ![
+                ManagedOpenCodeHandoffV2State.Interrupted,
+                ManagedOpenCodeHandoffV2State.Stopping,
+                ManagedOpenCodeHandoffV2State.Retired,
+              ].includes(normalizedNext.state))
         ) {
           return { status: 'expired' };
         }
@@ -561,6 +819,95 @@ export const createManagedOpenCodeHandoffV2Store = ({
         return result.changes === 1 ? { status: 'applied' } : { status: 'conflict' };
       });
     },
+    readOperation: async ({ operationId } = {}) => {
+      assertOpen();
+      if (!isManagedOpenCodeHandoffV2OperationId(operationId)) {
+        throw new TypeError('Invalid managed OpenCode handoff v2 operation ID');
+      }
+      const row = statements.readOperation.get(operationId);
+      return row === undefined ? null : rowToOperation(row);
+    },
+    compareAndSwapOperation: async ({ operationId, expected, next, nextForAuthoritativeTime, allowExpired = false } = {}) => {
+      assertOpen();
+      const normalizedExpected = expected === null ? null : normalizeOperationExpected(expected);
+      const hasStaticNext = next !== undefined;
+      const hasAuthoritativeBuilder = typeof nextForAuthoritativeTime === 'function';
+      const normalizedStaticNext = hasStaticNext
+        ? normalizeManagedOpenCodeHandoffV2Operation(next)
+        : null;
+      if (
+        !isManagedOpenCodeHandoffV2OperationId(operationId)
+        || (expected !== null && !normalizedExpected)
+        || hasStaticNext === hasAuthoritativeBuilder
+        || (hasStaticNext && (!normalizedStaticNext || normalizedStaticNext.operationId !== operationId))
+        || (allowExpired !== true && allowExpired !== false)
+      ) {
+        throw new TypeError('Invalid managed OpenCode handoff v2 operation compare-and-swap input');
+      }
+
+      return runImmediate(() => {
+        const currentRow = statements.readOperation.get(operationId);
+        const current = currentRow === undefined ? null : rowToOperation(currentRow);
+        const now = readAuthoritativeTime(statements.authoritativeTime);
+        const maxHorizon = now + MANAGED_OPENCODE_HANDOFF_V2_MAX_LEASE_MS;
+        if (!Number.isSafeInteger(maxHorizon)) throw new Error('Managed OpenCode handoff v2 operation clock is invalid');
+        if (normalizedExpected === null) {
+          if (current !== null) return { status: 'conflict' };
+        } else {
+          if (current === null) return { status: 'conflict' };
+          if (current.revision !== normalizedExpected.revision
+            || current.mac !== normalizedExpected.mac
+            || current.confirmationExpiresAt !== normalizedExpected.confirmationExpiresAt) {
+            return { status: 'conflict' };
+          }
+          if (!allowExpired && current.confirmationExpiresAt <= now) return { status: 'expired' };
+        }
+        const candidate = hasAuthoritativeBuilder
+          ? nextForAuthoritativeTime(now)
+          : normalizedStaticNext;
+        const normalizedNext = normalizeManagedOpenCodeHandoffV2Operation(candidate);
+        if (!normalizedNext || normalizedNext.operationId !== operationId) {
+          throw new TypeError('Invalid managed OpenCode handoff v2 operation candidate');
+        }
+        if (normalizedNext.confirmationExpiresAt > maxHorizon) {
+          throw new TypeError('Managed OpenCode handoff v2 operation exceeds the maximum horizon');
+        }
+        if (normalizedNext.confirmationExpiresAt <= now
+          && (!allowExpired || normalizedNext.state !== 'expired')) {
+          return { status: 'expired' };
+        }
+        if (normalizedExpected === null) {
+          statements.insertOperation.run(...operationToParameters(normalizedNext));
+          return { status: 'applied' };
+        }
+        const updateParameters = [
+          normalizedNext.v,
+          normalizedNext.kind,
+          normalizedNext.incarnation,
+          normalizedNext.ownerInstanceId,
+          normalizedNext.runtimeIdentity,
+          normalizedNext.launchFingerprint,
+          normalizedNext.targetRevision,
+          normalizedNext.targetLeaseExpiresAt,
+          normalizedNext.targetMac,
+          normalizedNext.state,
+          normalizedNext.resolutionState,
+          normalizedNext.resolutionRevision,
+          normalizedNext.resolutionLeaseExpiresAt,
+          normalizedNext.resolutionMac,
+          normalizedNext.createdAt,
+          normalizedNext.confirmationExpiresAt,
+          normalizedNext.revision,
+          normalizedNext.mac,
+          normalizedNext.operationId,
+          normalizedExpected.revision,
+          normalizedExpected.mac,
+          normalizedExpected.confirmationExpiresAt,
+        ];
+        const result = statements.updateOperation.run(...updateParameters);
+        return result.changes === 1 ? { status: 'applied' } : { status: 'conflict' };
+      });
+    },
     hasV2Records: async () => {
       assertOpen();
       return auditRows().length > 0;
@@ -569,12 +916,37 @@ export const createManagedOpenCodeHandoffV2Store = ({
       assertOpen();
       return auditRows();
     },
-    cleanup: async () => {
+    listOperations: async () => {
       assertOpen();
+      return statements.allOperations.all().map(rowToOperation);
+    },
+    cleanup: async ({ protectedIncarnations = [] } = {}) => {
+      assertOpen();
+      const protectedValues = [...new Set(protectedIncarnations)].filter(
+        (incarnation) => isManagedOpenCodeHandoffV2Incarnation(incarnation),
+      );
       return runImmediate(() => {
         auditRows();
         const now = readAuthoritativeTime(statements.authoritativeTime);
-        const result = statements.deleteExpired.run(now, ...SAFE_CLEANUP_STATES);
+        const exclusion = protectedValues.length > 0
+          ? `\n        AND incarnation NOT IN (${protectedValues.map(() => '?').join(', ')})`
+          : '';
+        const result = database.prepare(`
+          DELETE FROM ${STORE_TABLE}
+          WHERE lease_expires_at <= ?
+            AND state IN (?, ?)
+            AND NOT EXISTS (
+              SELECT 1 FROM ${STORE_OPERATION_TABLE} operation
+              WHERE operation.incarnation = ${STORE_TABLE}.incarnation
+                AND operation.state IN ('pending', 'expired')
+            )
+            ${exclusion}
+        `).run(now, ...SAFE_CLEANUP_STATES, ...protectedValues);
+        // Resolved operations are signed lifecycle tombstones. Retain them
+        // after their confirmation horizon so an HMR/web-process restart can
+        // distinguish authoritative resolution from ordinary row absence even
+        // after the terminal child row is pruned. Unresolved rows remain
+        // durable for the same reason; neither kind is replayed.
         return { removed: result.changes };
       });
     },

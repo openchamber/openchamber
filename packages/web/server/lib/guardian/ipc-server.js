@@ -115,6 +115,7 @@ export class GuardianIpcServer extends EventEmitter {
     this.#methods.set('stop', async (params) => this.#guardian.stopChild({
       incarnation: params?.incarnation,
       owner: params?.owner,
+      operationId: params?.operationId,
     }));
     this.#methods.set('health', async (params) => {
       if (!params?.owner) {
@@ -136,13 +137,44 @@ export class GuardianIpcServer extends EventEmitter {
       }
       return this.#guardian.getCredential(params);
     });
+    this.#methods.set('confirm-adoption', async (params) => {
+      if (typeof this.#guardian.confirmAdoption !== 'function') {
+        throw new Error('Guardian adoption confirmation is unavailable');
+      }
+      return this.#guardian.confirmAdoption(params);
+    });
+    this.#methods.set('terminal-status', async (params) => {
+      if (typeof this.#guardian.getTerminalStatus !== 'function') {
+        throw new Error('Guardian terminal status is unavailable');
+      }
+      return this.#guardian.getTerminalStatus(params);
+    });
+    this.#methods.set('operation-status', async (params) => this.#guardian.getOperationStatus(params));
+    this.#methods.set('operation-list', async (params) => this.#guardian.listOperations(params));
+    this.#methods.set('admission-status', async () => {
+      if (typeof this.#guardian.getAdmissionStatus !== 'function') {
+        throw new Error('Guardian global admission is unavailable');
+      }
+      return this.#guardian.getAdmissionStatus();
+    });
+    this.#methods.set('resolve-operation', async (params) => this.#guardian.resolveOperation(params));
+    this.#methods.set('confirm-operation', async (params) => this.#guardian.confirmOperation(params));
+    this.#methods.set('expire-operation', async (params) => this.#guardian.expireOperation(params));
+    this.#methods.set('confirm-terminal', async (params) => {
+      if (typeof this.#guardian.confirmTerminal !== 'function') {
+        throw new Error('Guardian terminal confirmation is unavailable');
+      }
+      return this.#guardian.confirmTerminal(params);
+    });
     this.#methods.set('prepare-handoff', async (params) => this.#guardian.prepareHandoff({
       incarnation: params?.incarnation,
       owner: params?.owner,
+      operationId: params?.operationId,
     }));
     this.#methods.set('abort-handoff', async (params) => this.#guardian.abortHandoff({
       incarnation: params?.incarnation,
       owner: params?.owner,
+      operationId: params?.operationId,
     }));
     this.#methods.set('reload', async () => this.#guardian.reload());
     this.#methods.set('list', async () => this.#guardian.listChildren());

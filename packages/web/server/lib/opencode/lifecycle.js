@@ -1,9 +1,14 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import net from 'node:net';
 import { stripAppImageArgv0Leak } from '../inherited-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { detectAndAdoptGuardianChild, getGuardianSocketPath, isGuardianRunning } from '../guardian/detection.js';
-import { GuardianClient } from '../guardian/guardian-client.js';
+import {
+  GuardianClient,
+  GUARDIAN_AMBIGUOUS_REQUEST_CODE,
+  isAmbiguousGuardianRequestError,
+} from '../guardian/guardian-client.js';
 import {
   buildManagedOpenCodeOrigin,
   resolveManagedOpenCodeConnectHostname,
@@ -35,6 +40,7 @@ const MANAGED_STARTUP_CAPTURE_LIMIT = 16 * 1024;
 const MANAGED_STARTUP_DIAGNOSTIC_LIMIT = 32 * 1024;
 const STARTUP_REDACTION = '[REDACTED]';
 const MANAGED_CREDENTIAL_ENV_KEY = /(?:PASSWORD|TOKEN|SECRET|API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)/i;
+const createGuardianOperationId = () => randomBytes(32).toString('base64url');
 
 const appendBoundedStartupOutput = (current, text) => {
   const value = String(text ?? '');
@@ -249,6 +255,34 @@ const createManagedStartupCapture = (formatter, sharedRedactor = formatter.creat
   };
 };
 
+const copyStructuredStartupErrorMetadata = (target, source) => {
+  if (!source || typeof source !== 'object') return target;
+  if (isAmbiguousGuardianRequestError(source)) {
+    // An outer cleanup wrapper may preserve the ambiguity marker in
+    // originalCode while replacing code with its own failure code. Normalize
+    // it back to the stable fail-closed contract and retain the underlying
+    // transport code for diagnosis.
+    target.code = GUARDIAN_AMBIGUOUS_REQUEST_CODE;
+    target.ambiguous = true;
+    target.retryable = false;
+    const originalCode = typeof source.code === 'string'
+      && source.code !== GUARDIAN_AMBIGUOUS_REQUEST_CODE
+      ? source.code
+      : source.originalCode;
+    if (typeof originalCode === 'string' && originalCode !== GUARDIAN_AMBIGUOUS_REQUEST_CODE) {
+      target.originalCode = originalCode;
+    }
+    if (typeof source.name === 'string' && source.name !== 'Error') target.name = source.name;
+    return target;
+  }
+  if (typeof source.code === 'string') target.code = source.code;
+  if (typeof source.name === 'string' && source.name !== 'Error') target.name = source.name;
+  if (typeof source.retryable === 'boolean') target.retryable = source.retryable;
+  if (typeof source.originalCode === 'string') target.originalCode = source.originalCode;
+  if (source.ambiguous === true) target.ambiguous = true;
+  return target;
+};
+
 const createRedactedStartupError = (error, formatter) => {
   const rawMessage = error instanceof Error ? error.message : String(error ?? '');
   const message = formatter.bound(rawMessage);
@@ -259,6 +293,7 @@ const createRedactedStartupError = (error, formatter) => {
   if (error && typeof error === 'object' && typeof error.name === 'string' && error.name !== 'Error') {
     safeError.name = error.name;
   }
+  copyStructuredStartupErrorMetadata(safeError, error);
   return safeError;
 };
 
@@ -456,8 +491,146 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     && typeof owner.launchFingerprint === 'string'
     && owner.launchFingerprint.length > 0
   );
+  const hasOwnerScopeIdentity = (owner) => Boolean(
+    owner
+    && typeof owner.ownerInstanceId === 'string'
+    && owner.ownerInstanceId.length > 0
+    && typeof owner.runtimeIdentity === 'string'
+    && owner.runtimeIdentity.length > 0
+  );
 
   const withOwner = (params, owner) => owner ? { ...params, owner } : params;
+
+  // A lost response from a side-effecting handoff RPC is an ownership fence,
+  // not a normal restart failure. Keep only the authenticated identity and
+  // public handoff fields here; the guardian remains authoritative for the
+  // record MAC and lease checks.
+  let guardianOutcomeUnknownLease = state.guardianOutcomeUnknownLease || null;
+  const getGuardianOutcomeUnknownFences = () => {
+    const fences = Array.isArray(state.guardianOutcomeUnknownFences)
+      ? state.guardianOutcomeUnknownFences
+      : (state.guardianOutcomeUnknownFence ? [state.guardianOutcomeUnknownFence] : []);
+    return fences.filter((fence) => fence && typeof fence === 'object');
+  };
+  const getGuardianOutcomeUnknownFence = () => getGuardianOutcomeUnknownFences()[0] || null;
+  const setGuardianOutcomeUnknownFence = (fence) => {
+    const fences = getGuardianOutcomeUnknownFences();
+    if (!fence) {
+      state.guardianOutcomeUnknownFences = fences;
+      state.guardianOutcomeUnknownFence = fences[0] || null;
+      state.guardianOutcomeUnknownLease = guardianOutcomeUnknownLease || null;
+      syncToHmrState();
+      return;
+    }
+    const key = fence.operationId || `${fence.kind}:${fence.incarnation || ''}:${fence.owner?.ownerInstanceId || ''}`;
+    const next = [...fences];
+    const index = next.findIndex((candidate) => (
+      (candidate.operationId || `${candidate.kind}:${candidate.incarnation || ''}:${candidate.owner?.ownerInstanceId || ''}`) === key
+    ));
+    if (index >= 0) next[index] = fence;
+    else next.push(fence);
+    state.guardianOutcomeUnknownFences = next;
+    state.guardianOutcomeUnknownFence = next[0] || null;
+    state.guardianOutcomeUnknownLease = guardianOutcomeUnknownLease || null;
+    syncToHmrState();
+  };
+  const clearGuardianOutcomeUnknownFence = (fence) => {
+    const fences = getGuardianOutcomeUnknownFences();
+    const key = fence?.operationId || `${fence?.kind}:${fence?.incarnation || ''}:${fence?.owner?.ownerInstanceId || ''}`;
+    const next = fences.filter((candidate) => (
+      (candidate.operationId || `${candidate.kind}:${candidate.incarnation || ''}:${candidate.owner?.ownerInstanceId || ''}`) !== key
+    ));
+    state.guardianOutcomeUnknownFences = next;
+    state.guardianOutcomeUnknownFence = next[0] || null;
+    syncToHmrState();
+  };
+  const releaseGuardianOutcomeUnknownLease = () => {
+    // One startup-secret lease may cover several overlapping lifecycle
+    // operations. Releasing it while another fence remains would expose later
+    // diagnostics and violate the retention contract.
+    if (getGuardianOutcomeUnknownFences().length > 1) return;
+    const lease = guardianOutcomeUnknownLease || state.guardianOutcomeUnknownLease || null;
+    guardianOutcomeUnknownLease = null;
+    releaseManagedStartupSecretLease(lease);
+    state.guardianOutcomeUnknownLease = null;
+  };
+  const createGuardianOutcomeUnknownError = (fence, reason = 'guardian handoff outcome remains unknown') => {
+    const error = new Error(reason);
+    error.code = GUARDIAN_AMBIGUOUS_REQUEST_CODE;
+    error.ambiguous = true;
+    error.retryable = false;
+    if (typeof fence?.originalCode === 'string' && fence.originalCode !== GUARDIAN_AMBIGUOUS_REQUEST_CODE) {
+      error.originalCode = fence.originalCode;
+    }
+    return error;
+  };
+  const assertGuardianStopIsUnfenced = () => {
+    const fence = getGuardianOutcomeUnknownFence();
+    if (fence) {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        'Guardian stop is blocked by an unresolved owner-scoped ambiguity fence',
+      );
+    }
+  };
+  const persistGuardianOutcomeUnknownFence = ({
+    kind,
+    incarnation,
+    owner,
+    preparedRecord,
+    successorOwner,
+    cleanupTarget,
+    rollbackIncarnation,
+    rollbackOwner,
+    launchSpec,
+    oldStopped,
+    source,
+    lease,
+    operationId,
+  }) => {
+    const initialSpawn = kind === 'initial-spawn';
+    const fenceOwner = initialSpawn ? (successorOwner || owner) : owner;
+    if ((!initialSpawn && (!incarnation || !hasCompleteOwnerIdentity(fenceOwner)))
+      || (initialSpawn && !hasCompleteOwnerIdentity(fenceOwner))) {
+      throw Object.assign(
+        new Error('Guardian ambiguous handoff outcome has no complete owner identity'),
+        { code: 'GUARDIAN_OUTCOME_UNKNOWN_OWNER' },
+      );
+    }
+    const durableOperationId = operationId || source?.operationId;
+    // Legacy injected clients do not expose a durable operation ID. Do not
+    // copy a transition record into their fence as if it were a durable
+    // operation binding; terminalStatus/confirmTerminal remains the complete
+    // authoritative check for that compatibility path.
+    const boundRecord = durableOperationId ? preparedRecord : null;
+    const originalCode = typeof source?.code === 'string'
+      && source.code !== GUARDIAN_AMBIGUOUS_REQUEST_CODE
+      ? source.code
+      : source?.originalCode;
+    guardianOutcomeUnknownLease = lease || guardianOutcomeUnknownLease;
+    setGuardianOutcomeUnknownFence({
+      version: 1,
+      kind,
+      ...(typeof durableOperationId === 'string' && durableOperationId.length > 0 ? { operationId: durableOperationId } : {}),
+      ...(incarnation ? { incarnation } : {}),
+      owner: { ...fenceOwner },
+       ...(Number.isSafeInteger(boundRecord?.revision) ? { revision: boundRecord.revision } : {}),
+       ...(Number.isSafeInteger(boundRecord?.leaseExpiresAt)
+         ? { leaseExpiresAt: boundRecord.leaseExpiresAt }
+         : {}),
+       ...(typeof boundRecord?.mac === 'string' ? { mac: boundRecord.mac } : {}),
+      ...(successorOwner ? { successorOwner: { ...successorOwner } } : {}),
+      ...(cleanupTarget ? { cleanupTarget } : {}),
+      ...(rollbackIncarnation ? { rollbackIncarnation } : {}),
+      ...(rollbackOwner ? { rollbackOwner: { ...rollbackOwner } } : {}),
+      ...(launchSpec ? { launchSpec: { ...launchSpec, args: [...launchSpec.args] } } : {}),
+      oldStopped: oldStopped === true,
+      ambiguous: isAmbiguousGuardianRequestError(source),
+      ...(typeof originalCode === 'string' && originalCode !== GUARDIAN_AMBIGUOUS_REQUEST_CODE
+        ? { originalCode }
+        : {}),
+    });
+  };
 
   // Reset the OpenCode API prefix detection state. Mirrors the legacy
   // restart fallback (previously inlined): mark the prefix as detected,
@@ -481,15 +654,40 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (!hasCompleteOwnerIdentity(owner)) {
         throw new Error('Guardian child owner identity is required for an owner-scoped stop');
       }
-      await client.stop(withOwner({ incarnation }, owner));
-      const lease = startupSecretLease || guardianStartupSecretLeases.get(incarnation);
-      if (lease) {
-        if (!(await verifyGuardianChildGone(client, { incarnation }))) {
-          throw Object.assign(
-            new Error(`Guardian child ${incarnation} cleanup was not confirmed`),
-            { code: 'GUARDIAN_CLEANUP_UNCERTAIN' },
-          );
+      const retainedFence = getGuardianOutcomeUnknownFences().find((fence) => (
+        fence.kind === 'stop' && fence.incarnation === incarnation
+      ));
+      if (retainedFence
+        && retainedFence.ambiguous !== true
+        && (!retainedFence.operationId
+          || (typeof client.operationStatus !== 'function' && typeof client.terminalStatus !== 'function'))) {
+        // Older/injected clients may not expose the durable terminal RPCs. A
+        // fresh authenticated empty child list is still authoritative
+        // quiescence; it resolves the fence without replaying stop.
+        try {
+          if (await verifyGuardianChildGone(client, { incarnation })) {
+            const lease = startupSecretLease || guardianStartupSecretLeases.get(incarnation);
+            releaseManagedStartupSecretLease(lease);
+            releaseGuardianStartupSecretLease(incarnation);
+            clearGuardianOutcomeUnknownFence(retainedFence);
+            return true;
+          }
+        } catch {
+          // Keep the fence blocked when verification is unavailable or stale.
         }
+      }
+      // A lost stop response may already have terminated this child. The
+      // persisted fence must be reconciled before any caller can issue the
+      // non-idempotent stop again, including repeated shutdown/close calls.
+      assertGuardianStopIsUnfenced();
+      const lease = startupSecretLease || guardianStartupSecretLeases.get(incarnation);
+      await stopGuardianChildAndVerify({
+        client,
+        incarnation,
+        owner,
+        lease,
+      });
+      if (lease) {
         releaseManagedStartupSecretLease(lease);
       }
       return true;
@@ -610,6 +808,60 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     return children;
   };
 
+  const assertGuardianGlobalAdmission = async (client) => {
+    if (!client) throw new Error('Guardian global admission requires a client');
+    if (typeof client.admissionStatus === 'function') {
+      const status = await client.admissionStatus();
+      if (status?.admitted !== true) {
+        const error = new Error(
+          `Guardian global admission is blocked (${status?.attentionCount ?? 'unknown'} attention, ${status?.operationCount ?? 'unknown'} unresolved operation(s))`,
+        );
+        error.code = 'GUARDIAN_ADMISSION_BLOCKED';
+        throw error;
+      }
+      return status;
+    }
+
+    if (typeof client.list !== 'function') {
+      // The production client always exposes admissionStatus(). Older test or
+      // injected clients have no guardian observation surface at all; keep
+      // their established compatibility path rather than dereferencing a
+      // synthetic null list.
+      return { admitted: true, attentionCount: 0, operationCount: 0 };
+    }
+
+    // Compatibility for injected/older clients. Production GuardianClient has
+    // admissionStatus(); a list-only client can prove attention records but
+    // cannot expose durable operations, so this fallback is intentionally
+    // narrow and still fails closed on malformed/unavailable lists.
+    const children = await readGuardianChildList(client);
+    const unresolved = children.find((child) => (
+      child.attention === true
+      || child.state === 'attention'
+      || ['unknown', 'stopping', 'handoff-prepared'].includes(child.state)
+    ));
+    if (unresolved) {
+      const error = new Error(`Guardian global admission is blocked by ${unresolved.incarnation}`);
+      error.code = 'GUARDIAN_ADMISSION_BLOCKED';
+      throw error;
+    }
+    return { admitted: true, attentionCount: 0, operationCount: 0 };
+  };
+
+  const assertLegacyLaunchAdmission = async ({ guardianRunning } = {}) => {
+    const running = guardianRunning === undefined ? await probeGuardianRunning() : guardianRunning;
+    if (!running) return;
+    const admissionClient = createGuardianClient({ connectTimeoutMs: 5000 });
+    let admissionConnected = false;
+    try {
+      await admissionClient.connect();
+      admissionConnected = true;
+      await assertGuardianGlobalAdmission(admissionClient);
+    } finally {
+      if (admissionConnected) await disconnectGuardianClient(admissionClient);
+    }
+  };
+
   // A successful owner-scoped stop is authoritative for the real
   // GuardianClient. When a test/injected client exposes list(), additionally
   // verify that no live record for the incarnation remains before allowing a
@@ -623,6 +875,75 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     });
   };
 
+  // A successful stop response is not enough when the follow-up list is
+  // stale or unreadable. The guardian has already durably recorded the stop;
+  // retain that operation as an HMR fence and never replay the non-idempotent
+  // RPC just because verification failed.
+  const stopGuardianChildAndVerify = async ({
+    client,
+    incarnation,
+    owner,
+    lease = null,
+    successorOwner,
+    cleanupTarget = 'old',
+    rollbackIncarnation,
+    rollbackOwner,
+    oldStopped = false,
+  }) => {
+    const operationId = createGuardianOperationId();
+    const durableOperationId = typeof client?.operationStatus === 'function' ? operationId : null;
+    let stopped;
+    try {
+      stopped = await client.stop(withOwner({
+        incarnation,
+        ...(durableOperationId ? { operationId: durableOperationId } : {}),
+      }, owner));
+    } catch (error) {
+      if (isAmbiguousGuardianRequestError(error)) {
+        persistGuardianOutcomeUnknownFence({
+          kind: 'stop',
+          incarnation,
+          owner,
+          preparedRecord: null,
+          successorOwner,
+          cleanupTarget,
+          rollbackIncarnation,
+          rollbackOwner,
+          oldStopped,
+          source: error,
+          lease,
+          operationId: error.operationId || durableOperationId,
+        });
+      }
+      throw error;
+    }
+    try {
+      if (!(await verifyGuardianChildGone(client, { incarnation }))) {
+        throw Object.assign(
+          new Error(`Guardian child ${incarnation} cleanup was not confirmed`),
+          { code: 'GUARDIAN_CLEANUP_UNCERTAIN' },
+        );
+      }
+    } catch (error) {
+      persistGuardianOutcomeUnknownFence({
+        kind: 'stop',
+        incarnation,
+        owner,
+        preparedRecord: stopped,
+        successorOwner,
+        cleanupTarget,
+        rollbackIncarnation,
+        rollbackOwner,
+        oldStopped,
+        source: error,
+        lease,
+        operationId: durableOperationId,
+      });
+      throw error;
+    }
+    return { stopped, operationId };
+  };
+
   const findLiveGuardianSuccessor = async (client, owner) => {
     if (!client || typeof client.list !== 'function') return null;
     const children = await readGuardianChildList(client);
@@ -634,6 +955,917 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       && child?.runtimeIdentity === owner.runtimeIdentity
       && child?.launchFingerprint === owner.launchFingerprint
     )) || null;
+  };
+
+  const confirmGuardianNoSuccessor = async (client, owner) => {
+    const children = await readGuardianChildList(client);
+    if (children.some((child) => (
+      child?.state !== 'retired'
+      && child?.state !== 'interrupted'
+      && guardianChildMatchesOwner(child, owner)
+    ))) {
+      throw new Error('Guardian successor remains discoverable');
+    }
+    if (typeof client.operationList === 'function') {
+      const operations = await client.operationList({ owner });
+      if (!Array.isArray(operations)) throw new Error('Guardian operation list is malformed');
+      if (operations.some((operation) => ['pending', 'expired'].includes(operation?.state))) {
+        throw new Error('Guardian successor operation remains unresolved');
+      }
+    }
+    if (getGuardianOutcomeUnknownFences().length > 0) {
+      throw new Error('Guardian successor cleanup remains fenced');
+    }
+    return true;
+  };
+
+  const getGuardianChildOwner = (child) => child?.owner || (
+    child?.ownerInstanceId && child?.runtimeIdentity && child?.launchFingerprint
+      ? {
+        ownerInstanceId: child.ownerInstanceId,
+        runtimeIdentity: child.runtimeIdentity,
+        launchFingerprint: child.launchFingerprint,
+      }
+      : null
+  );
+
+  const guardianChildMatchesOwner = (child, owner) => {
+    const childOwner = getGuardianChildOwner(child);
+    return hasCompleteOwnerIdentity(owner)
+      && hasCompleteOwnerIdentity(childOwner)
+      && childOwner.ownerInstanceId === owner.ownerInstanceId
+      && childOwner.runtimeIdentity === owner.runtimeIdentity
+      && childOwner.launchFingerprint === owner.launchFingerprint;
+  };
+
+  const hasCompleteGuardianRecordBinding = (record) => Boolean(
+    record
+    && Number.isSafeInteger(record.revision)
+    && Number.isSafeInteger(record.leaseExpiresAt)
+    && record.leaseExpiresAt > 0
+    && typeof record.mac === 'string'
+    && record.mac.length > 0
+  );
+
+  const guardianFenceRecordMatches = (child, fence) => {
+    if (!hasCompleteGuardianRecordBinding(fence)
+      || !hasCompleteGuardianRecordBinding(child)
+      || !child
+      || child.incarnation !== fence?.incarnation
+      || !guardianChildMatchesOwner(child, fence.owner)) {
+      return false;
+    }
+    return child.revision === fence.revision
+      && child.leaseExpiresAt === fence.leaseExpiresAt
+      && child.mac === fence.mac;
+  };
+
+  const guardianFenceHasRecordBinding = (fence) => Boolean(
+    fence && ['revision', 'leaseExpiresAt', 'mac'].some((key) => Object.hasOwn(fence, key)),
+  );
+
+  const guardianFenceMatchesOperation = (fence, operation) => {
+    if (!fence || !operation
+      || (fence.incarnation && operation.incarnation !== fence.incarnation)
+      || operation.ownerInstanceId !== fence.owner?.ownerInstanceId
+      || operation.runtimeIdentity !== fence.owner?.runtimeIdentity
+      || operation.launchFingerprint !== fence.owner?.launchFingerprint) {
+      return false;
+    }
+    if (!guardianFenceHasRecordBinding(fence)) return true;
+    const targetMatches = operation.targetRevision === fence.revision
+      && operation.targetLeaseExpiresAt === fence.leaseExpiresAt
+      && operation.targetMac === fence.mac;
+    const resolutionMatches = Number.isSafeInteger(operation.resolutionRevision)
+      && Number.isSafeInteger(operation.resolutionLeaseExpiresAt)
+      && typeof operation.resolutionMac === 'string'
+      && operation.resolutionMac.length > 0
+      && operation.resolutionRevision === fence.revision
+      && operation.resolutionLeaseExpiresAt === fence.leaseExpiresAt
+      && operation.resolutionMac === fence.mac;
+    return targetMatches || resolutionMatches;
+  };
+
+  const guardianFenceCandidateMatchesIdentity = (child, fence) => {
+    if (!child || !fence) return false;
+    if (fence.kind === 'initial-spawn') {
+      return guardianChildMatchesOwner(child, fence.successorOwner)
+        && child.incarnation !== fence.incarnation;
+    }
+    return child.incarnation === fence.incarnation
+      && guardianChildMatchesOwner(child, fence.owner);
+  };
+
+  const bindGuardianFenceToAuthoritativeRecord = (fence, child) => {
+    if (!hasCompleteGuardianRecordBinding(child)) {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        'Guardian outcome-unknown fence requires complete revision, lease, and MAC binding',
+      );
+    }
+    if (hasCompleteGuardianRecordBinding(fence)) {
+      if (!guardianFenceRecordMatches(child, fence)) {
+        // abort-handoff itself advances the v2 revision/lease/MAC when it
+        // applies. A lost response is therefore reconciled by accepting only
+        // the exact owner/incarnation in the authoritative Active record, then
+        // pinning the fence to that complete post-abort binding.
+        if ((fence.kind === 'abort-handoff'
+          && child.incarnation === fence.incarnation
+          && guardianChildMatchesOwner(child, fence.owner)
+          && child.state === 'active')
+          || (fence.kind === 'stop'
+            && child.incarnation === fence.incarnation
+            && guardianChildMatchesOwner(child, fence.owner)
+            && ['interrupted', 'retired'].includes(child.state))
+          || (fence.kind === 'prepare'
+            && child.incarnation === fence.incarnation
+            && guardianChildMatchesOwner(child, fence.owner)
+            && child.state === 'handoff-prepared')) {
+          const transitionedFence = {
+            ...fence,
+            revision: child.revision,
+            leaseExpiresAt: child.leaseExpiresAt,
+            mac: child.mac,
+          };
+          setGuardianOutcomeUnknownFence(transitionedFence);
+          return transitionedFence;
+        }
+        throw createGuardianOutcomeUnknownError(
+          fence,
+          'Guardian outcome-unknown fence does not match the authoritative revision, lease, or MAC',
+        );
+      }
+      return fence;
+    }
+    const boundFence = {
+      ...fence,
+      revision: child.revision,
+      leaseExpiresAt: child.leaseExpiresAt,
+      mac: child.mac,
+    };
+    setGuardianOutcomeUnknownFence(boundFence);
+    return boundFence;
+  };
+
+  const bindGuardianFenceSuccessor = (fence, child) => {
+    if (!hasCompleteGuardianRecordBinding(child)
+      || typeof child?.incarnation !== 'string'
+      || !guardianChildMatchesOwner(child, fence?.successorOwner)) {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        'Guardian outcome-unknown fence successor lacks complete owner or record binding',
+      );
+    }
+    const successorBinding = {
+      incarnation: child.incarnation,
+      revision: child.revision,
+      leaseExpiresAt: child.leaseExpiresAt,
+      mac: child.mac,
+    };
+    if (fence.successorBinding && (
+      fence.successorBinding.incarnation !== successorBinding.incarnation
+      || fence.successorBinding.revision !== successorBinding.revision
+      || fence.successorBinding.leaseExpiresAt !== successorBinding.leaseExpiresAt
+      || fence.successorBinding.mac !== successorBinding.mac
+    )) {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        'Guardian outcome-unknown fence successor binding changed during reconciliation',
+      );
+    }
+    if (fence.successorBinding) return fence;
+    const boundFence = { ...fence, successorBinding };
+    setGuardianOutcomeUnknownFence(boundFence);
+    return boundFence;
+  };
+
+  const reconcileDurableGuardianOperation = async (client, fence) => {
+    if (!fence?.operationId) return null;
+    if (typeof client?.operationStatus !== 'function') {
+      throw createGuardianOutcomeUnknownError(fence, 'Guardian ambiguity has no durable operation status endpoint');
+    }
+    let status;
+    try {
+      status = await client.operationStatus({ operationId: fence.operationId, owner: fence.owner });
+    } catch (error) {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        `Guardian durable operation status is unavailable: ${error?.message || String(error)}`,
+      );
+    }
+    let operation = status?.operation;
+    if (!operation || operation.incarnation !== fence.incarnation && fence.kind !== 'initial-spawn') {
+      throw createGuardianOutcomeUnknownError(fence, 'Guardian durable operation binding does not match the fence');
+    }
+    if (!operation
+      || operation.ownerInstanceId !== fence.owner?.ownerInstanceId
+      || operation.runtimeIdentity !== fence.owner?.runtimeIdentity
+      || operation.launchFingerprint !== fence.owner?.launchFingerprint) {
+      throw createGuardianOutcomeUnknownError(fence, 'Guardian durable operation owner binding does not match the fence');
+    }
+    if (operation.state === 'pending' && status?.expired && typeof client.expireOperation === 'function') {
+      const expired = await client.expireOperation({
+        operationId: fence.operationId,
+        owner: fence.owner,
+        expected: {
+          revision: operation.revision,
+          confirmationExpiresAt: operation.confirmationExpiresAt,
+          mac: operation.mac,
+        },
+      });
+      operation = expired?.operation;
+    }
+    if (['pending', 'expired'].includes(operation?.state) && status.record
+      && ['active', 'handoff-prepared', 'interrupted', 'retired'].includes(status.record.state)) {
+      if (status.record.incarnation === operation.incarnation
+        && guardianChildMatchesOwner(status.record, fence.owner)) {
+        const resolved = await client.resolveOperation({
+          operationId: fence.operationId,
+          owner: fence.owner,
+          expected: {
+            revision: operation.revision,
+            confirmationExpiresAt: operation.confirmationExpiresAt,
+            mac: operation.mac,
+          },
+          resolution: {
+            state: status.record.state,
+            revision: status.record.revision,
+            leaseExpiresAt: status.record.leaseExpiresAt,
+            mac: status.record.mac,
+          },
+        });
+        operation = resolved?.operation;
+      }
+    }
+    if (!operation || operation.state !== 'resolved') {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        operation?.state === 'expired'
+          ? 'Guardian durable operation expired but remains unresolved pending authoritative quiescence'
+          : 'Guardian durable operation remains unresolved',
+      );
+    }
+    if (operation.state === 'resolved' && operation.incarnation !== fence.incarnation
+      && fence.kind !== 'initial-spawn') {
+      throw createGuardianOutcomeUnknownError(fence, 'Guardian durable operation incarnation changed');
+    }
+    if (!guardianFenceMatchesOperation(fence, operation)) {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        'Guardian durable operation resolution does not match the persisted fence binding',
+      );
+    }
+    return { operation, record: status?.record || null };
+  };
+
+  // HMR state is only an optimization. After a real web-process restart the
+  // guardian's signed operation table is the authority for an outcome that
+  // may have crossed a side-effect boundary. Discover pending operations
+  // before any adoption, start, or legacy fallback decision and reconstruct a
+  // local fence from their owner/target binding.
+  const discoverGuardianOutcomeUnknownFence = async () => {
+    if (!canUseGuardian || !hasOwnerScopeIdentity(expectedGuardianOwner)) {
+      return;
+    }
+    if (!(await probeGuardianRunning())) return;
+    const client = createGuardianClient({ connectTimeoutMs: 5000 });
+    let connected = false;
+    try {
+      if (typeof client.operationList !== 'function') {
+        // Compatibility for injected/older clients. The production
+        // GuardianClient exposes operationList; an unavailable discovery
+        // method cannot prove a pending operation, so no synthetic fence is
+        // created from an incomplete client contract.
+        return;
+      }
+      await client.connect();
+      connected = true;
+      const operations = await client.operationList({ owner: expectedGuardianOwner });
+      if (!Array.isArray(operations)) {
+        throw createGuardianOutcomeUnknownError(
+          { owner: expectedGuardianOwner },
+          'Guardian durable operation discovery returned an invalid list',
+        );
+      }
+      const pending = operations.filter((operation) => (
+        operation?.state === 'pending' || operation?.state === 'expired'
+      ));
+      if (pending.length === 0) return;
+      for (const operation of pending) {
+        const kind = operation.kind === 'spawn'
+          ? 'initial-spawn'
+          : operation.kind === 'prepare-handoff'
+            ? 'prepare'
+            : operation.kind;
+        const operationOwner = {
+          ownerInstanceId: operation.ownerInstanceId,
+          runtimeIdentity: operation.runtimeIdentity,
+          launchFingerprint: operation.launchFingerprint,
+        };
+        persistGuardianOutcomeUnknownFence({
+          kind,
+          // Initial spawn fences intentionally leave incarnation unset: the
+          // operation's incarnation is the candidate successor, not an old
+          // child that must match the pre-spawn fence.
+          incarnation: kind === 'initial-spawn' ? null : operation.incarnation,
+          owner: operationOwner,
+          successorOwner: kind === 'initial-spawn' ? operationOwner : undefined,
+          preparedRecord: kind === 'initial-spawn' ? null : {
+            incarnation: operation.incarnation,
+            ownerInstanceId: operation.ownerInstanceId,
+            runtimeIdentity: operation.runtimeIdentity,
+            launchFingerprint: operation.launchFingerprint,
+            revision: operation.targetRevision,
+            leaseExpiresAt: operation.targetLeaseExpiresAt,
+            mac: operation.targetMac,
+          },
+          operationId: operation.operationId,
+          oldStopped: kind === 'initial-spawn',
+        });
+      }
+    } finally {
+      if (connected) await disconnectGuardianClient(client);
+    }
+  };
+
+  const findFenceChild = (children, fence, { successor = false } = {}) => children.find((child) => {
+    if (successor) {
+      return child?.state !== 'retired'
+        && child?.state !== 'interrupted'
+        && guardianChildMatchesOwner(child, fence?.successorOwner)
+        && (!fence.successorBinding || child.incarnation === fence.successorBinding.incarnation);
+    }
+    return child?.incarnation === fence?.incarnation
+      && guardianChildMatchesOwner(child, fence?.owner);
+  }) || null;
+
+  const guardianFenceSuccessorMatches = (child, fence) => {
+    const binding = fence?.successorBinding;
+    return Boolean(binding
+      && child?.incarnation === binding.incarnation
+      && child.revision === binding.revision
+      && child.leaseExpiresAt === binding.leaseExpiresAt
+      && child.mac === binding.mac
+      && guardianChildMatchesOwner(child, fence.successorOwner));
+  };
+
+  // A list only identifies a candidate. The guardian owns the adoption
+  // authority: it revalidates the record, credential, and health and closes
+  // with the v2 same-record CAS before lifecycle state may be published or a
+  // fence may be cleared.
+  const confirmGuardianFenceAdoption = async (client, fence, { successor = false } = {}) => {
+    if (typeof client?.confirmAdoption !== 'function') {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        'Guardian outcome-unknown fence cannot be adopted without authoritative confirmation',
+      );
+    }
+    const firstChildren = await readGuardianChildList(client);
+    const first = findFenceChild(firstChildren, fence, { successor });
+    if (!first) throw createGuardianOutcomeUnknownError(fence);
+    const boundFence = successor
+      ? bindGuardianFenceSuccessor(fence, first)
+      : bindGuardianFenceToAuthoritativeRecord(fence, first);
+    const expectedBinding = successor ? boundFence.successorBinding : boundFence;
+    if (successor ? !guardianFenceSuccessorMatches(first, boundFence) : !guardianFenceRecordMatches(first, expectedBinding)) {
+      throw createGuardianOutcomeUnknownError(
+        boundFence,
+        'Guardian outcome-unknown fence candidate binding is not authoritative',
+      );
+    }
+    const owner = successor ? getGuardianChildOwner(first) : boundFence.owner;
+    let confirmation;
+    try {
+      confirmation = await client.confirmAdoption({
+        incarnation: first.incarnation,
+        owner,
+        expected: {
+          revision: first.revision,
+          leaseExpiresAt: first.leaseExpiresAt,
+          mac: first.mac,
+        },
+      });
+    } catch (error) {
+      throw createGuardianOutcomeUnknownError(
+        boundFence,
+        `Guardian outcome-unknown adoption confirmation failed: ${error?.message || String(error)}`,
+      );
+    }
+    const final = confirmation?.record;
+    if (!final
+      || final.state !== 'active'
+      || final.incarnation !== first.incarnation
+      || !guardianChildMatchesOwner(final, owner)
+      || (successor
+        ? !guardianFenceSuccessorMatches(final, boundFence)
+        : !guardianFenceRecordMatches(final, expectedBinding))
+      || confirmation?.health?.healthy !== true) {
+      throw createGuardianOutcomeUnknownError(
+        boundFence,
+        'Guardian outcome-unknown fence was not authoritatively adopted',
+      );
+    }
+    let credential = confirmation?.credential;
+    try {
+      if (typeof restoreManagedOpenCodeCredential === 'function') {
+        if (!credential || typeof credential !== 'object') {
+          throw createGuardianOutcomeUnknownError(
+            boundFence,
+            'Guardian outcome-unknown fence credential state is unavailable',
+          );
+        }
+        await restoreManagedOpenCodeCredential(credential);
+      }
+    } finally {
+      if (credential && typeof credential === 'object') {
+        try {
+          credential.username = '';
+          credential.password = '';
+        } catch {
+          // Best-effort secret scrubbing must not mask the authoritative result.
+        }
+      }
+    }
+    return { fence: boundFence, child: final, owner };
+  };
+
+  const confirmGuardianTerminal = async (client, fence) => {
+    if (typeof client?.terminalStatus !== 'function'
+      || typeof client?.confirmTerminal !== 'function') {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        'Guardian stop fence cannot be reconciled without authoritative terminal confirmation',
+      );
+    }
+    const owner = fence.owner;
+    const durable = await reconcileDurableGuardianOperation(client, fence);
+    if (durable?.operation?.state === 'resolved'
+      && ['interrupted', 'retired'].includes(durable.operation.resolutionState)) {
+      if (typeof client.confirmOperation !== 'function') {
+        throw createGuardianOutcomeUnknownError(
+          fence,
+          'Guardian stop fence cannot be cleared without durable operation CAS confirmation',
+        );
+      }
+      const confirmedOperation = await client.confirmOperation({
+        operationId: fence.operationId,
+        owner,
+        expected: {
+          revision: durable.operation.revision,
+          confirmationExpiresAt: durable.operation.confirmationExpiresAt,
+          mac: durable.operation.mac,
+        },
+      });
+      if (!confirmedOperation?.operation
+        || confirmedOperation.operation.state !== 'resolved'
+        || confirmedOperation.operation.resolutionState !== durable.operation.resolutionState
+        || !guardianFenceMatchesOperation(fence, confirmedOperation.operation)) {
+        throw createGuardianOutcomeUnknownError(fence, 'Guardian terminal operation CAS confirmation failed');
+      }
+      if (!durable.record) {
+        // The signed durable operation is the only surviving terminal handle
+        // after child-row pruning. Its exact owner/incarnation/resolution
+        // binding was verified by Guardian and confirmed above.
+        return {
+          fence: {
+            ...fence,
+            revision: durable.operation.resolutionRevision,
+            leaseExpiresAt: durable.operation.resolutionLeaseExpiresAt,
+            mac: durable.operation.resolutionMac,
+          },
+          record: {
+            incarnation: durable.operation.incarnation,
+            ownerInstanceId: durable.operation.ownerInstanceId,
+            runtimeIdentity: durable.operation.runtimeIdentity,
+            launchFingerprint: durable.operation.launchFingerprint,
+            state: durable.operation.resolutionState,
+            revision: durable.operation.resolutionRevision,
+            leaseExpiresAt: durable.operation.resolutionLeaseExpiresAt,
+            mac: durable.operation.resolutionMac,
+          },
+        };
+      }
+      return {
+        fence: {
+          ...fence,
+          revision: durable.operation.resolutionRevision,
+          leaseExpiresAt: durable.operation.resolutionLeaseExpiresAt,
+          mac: durable.operation.resolutionMac,
+        },
+        record: {
+          incarnation: durable.operation.incarnation,
+          ownerInstanceId: durable.operation.ownerInstanceId,
+          runtimeIdentity: durable.operation.runtimeIdentity,
+          launchFingerprint: durable.operation.launchFingerprint,
+          state: durable.operation.resolutionState,
+          revision: durable.operation.resolutionRevision,
+          leaseExpiresAt: durable.operation.resolutionLeaseExpiresAt,
+          mac: durable.operation.resolutionMac,
+        },
+      };
+    }
+    if (durable?.operation?.state === 'resolved') {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        'Guardian stop fence durable operation resolved without terminal confirmation',
+      );
+    }
+    const status = await client.terminalStatus({
+      incarnation: fence.incarnation,
+      owner,
+    });
+    const terminal = status?.record;
+    if (!terminal
+      || terminal.incarnation !== fence.incarnation
+      || !guardianChildMatchesOwner(terminal, owner)
+      || !hasCompleteGuardianRecordBinding(terminal)
+      || (guardianFenceHasRecordBinding(fence) && !guardianFenceRecordMatches(terminal, fence))
+      || !['retired', 'interrupted'].includes(terminal.state)) {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        'Guardian stop fence has no exact signed terminal record',
+      );
+    }
+    const confirmed = await client.confirmTerminal({
+      incarnation: terminal.incarnation,
+      owner,
+      expected: {
+        revision: terminal.revision,
+        leaseExpiresAt: terminal.leaseExpiresAt,
+        mac: terminal.mac,
+      },
+    });
+    const committed = confirmed?.record;
+    if (!committed
+      || committed.incarnation !== terminal.incarnation
+      || !guardianChildMatchesOwner(committed, owner)
+      || committed.state !== terminal.state
+      || committed.revision !== terminal.revision
+      || committed.leaseExpiresAt !== terminal.leaseExpiresAt
+      || committed.mac !== terminal.mac
+      || (guardianFenceHasRecordBinding(fence) && !guardianFenceRecordMatches(committed, fence))) {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        'Guardian stop fence terminal binding changed during confirmation',
+      );
+    }
+    const terminalFence = {
+      ...fence,
+      revision: committed.revision,
+      leaseExpiresAt: committed.leaseExpiresAt,
+      mac: committed.mac,
+    };
+    setGuardianOutcomeUnknownFence(terminalFence);
+    return { fence: terminalFence, record: committed };
+  };
+
+  // Reconcile an ambiguity before any new prepare/stop/spawn or legacy port
+  // cleanup. A missing successor is deliberately not treated as proof that
+  // the ambiguous spawn did not happen: the guardian list may lag the lost
+  // response. The fence therefore remains until an exact owner-scoped child is
+  // adopted, or a prepared old record is explicitly returned to active.
+  const reconcileGuardianOutcomeUnknownFence = async ({ client, fence }) => {
+    if (!client || typeof client.list !== 'function') {
+      throw createGuardianOutcomeUnknownError(fence, 'Guardian outcome-unknown fence cannot be reconciled without an authenticated child list');
+    }
+    const durableOperation = await reconcileDurableGuardianOperation(client, fence);
+    let boundFence = fence;
+    if (durableOperation?.operation?.state === 'resolved'
+      && fence.kind === 'initial-spawn'
+      && ['interrupted', 'retired'].includes(durableOperation.operation.resolutionState)) {
+      if (typeof client.confirmOperation !== 'function') {
+        throw createGuardianOutcomeUnknownError(
+          boundFence,
+          'Guardian initial-spawn fence cannot clear without durable operation confirmation',
+        );
+      }
+      const confirmedOperation = await client.confirmOperation({
+        operationId: boundFence.operationId,
+        owner: boundFence.owner,
+        expected: {
+          revision: durableOperation.operation.revision,
+          confirmationExpiresAt: durableOperation.operation.confirmationExpiresAt,
+          mac: durableOperation.operation.mac,
+        },
+      });
+      if (!confirmedOperation?.operation
+        || confirmedOperation.operation.state !== 'resolved'
+        || !['interrupted', 'retired'].includes(confirmedOperation.operation.resolutionState)
+        || !guardianFenceMatchesOperation(boundFence, confirmedOperation.operation)) {
+        throw createGuardianOutcomeUnknownError(
+          boundFence,
+          'Guardian initial-spawn terminal operation confirmation does not match the fence',
+        );
+      }
+      releaseGuardianOutcomeUnknownLease();
+      clearGuardianOutcomeUnknownFence(boundFence);
+      state.openCodeProcess = null;
+      state.currentIncarnation = null;
+      state.currentOwner = null;
+      syncToHmrState();
+      return { adopted: false, resolved: true };
+    }
+    const children = await readGuardianChildList(client);
+    const candidate = children.find((child) => guardianFenceCandidateMatchesIdentity(child, fence)) || null;
+    boundFence = candidate ? bindGuardianFenceToAuthoritativeRecord(fence, candidate) : fence;
+    const oldChild = boundFence.kind === 'initial-spawn'
+      ? null
+      : (candidate && guardianFenceRecordMatches(candidate, boundFence) ? candidate : null);
+
+    if (boundFence.kind === 'prepare' || boundFence.kind === 'abort-handoff') {
+      if (!oldChild || !['active', 'handoff-prepared'].includes(oldChild.state)) {
+        throw createGuardianOutcomeUnknownError(boundFence);
+      }
+      let checked = null;
+      let authoritativeOld = null;
+      if (oldChild.state === 'handoff-prepared') {
+        if (boundFence.kind === 'abort-handoff') {
+          // This fence records an abortHandoff whose response was ambiguous.
+          // Seeing the record still prepared is not proof that the abort did
+          // not apply; retrying abort would duplicate a non-idempotent RPC.
+          throw createGuardianOutcomeUnknownError(
+            boundFence,
+            'Guardian abort outcome remains unknown while the old record is still handoff-prepared',
+          );
+        }
+        if (typeof client.abortHandoff !== 'function') {
+          throw createGuardianOutcomeUnknownError(boundFence, 'Guardian outcome-unknown fence cannot safely resolve the prepared handoff');
+        }
+        let active;
+        try {
+          active = await client.abortHandoff(withOwner({ incarnation: boundFence.incarnation }, boundFence.owner));
+        } catch (error) {
+          if (isAmbiguousGuardianRequestError(error)) {
+            persistGuardianOutcomeUnknownFence({
+              kind: 'abort-handoff',
+              incarnation: boundFence.incarnation,
+              owner: boundFence.owner,
+              preparedRecord: checked.child,
+              source: error,
+              lease: guardianOutcomeUnknownLease,
+            });
+          }
+          throw error;
+        }
+        if (active?.state !== 'active' || active?.incarnation !== boundFence.incarnation
+          || !hasCompleteGuardianRecordBinding(active)) {
+          throw createGuardianOutcomeUnknownError(boundFence, 'Guardian outcome-unknown fence did not return the old child to active with complete binding');
+        }
+        // abort-handoff legitimately advances revision/lease/MAC. Carry that
+        // authoritative transition into the final adoption fence rather than
+        // comparing the active record to the older handoff-prepared binding.
+        const activeFence = { ...boundFence,
+          revision: active.revision,
+          leaseExpiresAt: active.leaseExpiresAt,
+          mac: active.mac,
+        };
+        setGuardianOutcomeUnknownFence(activeFence);
+        checked = await confirmGuardianFenceAdoption(client, activeFence);
+        authoritativeOld = checked.child;
+      } else {
+        checked = await confirmGuardianFenceAdoption(client, boundFence);
+        authoritativeOld = checked.child;
+      }
+      state.openCodeProcess = createGuardianChildProxy({
+        pid: authoritativeOld.pid,
+        incarnation: authoritativeOld.incarnation,
+        client,
+        owner: boundFence.owner,
+      });
+      state.openCodeBaseUrl = getAuthoritativeGuardianOrigin({
+        child: authoritativeOld,
+        launchSpec: authoritativeOld.launchSpec,
+        port: authoritativeOld.port,
+      });
+      setOpenCodePort(authoritativeOld.port);
+      resetOpenCodeApiPrefixState();
+      state.currentIncarnation = authoritativeOld.incarnation;
+      state.currentOwner = boundFence.owner;
+      state.isExternalOpenCode = false;
+      state.isOpenCodeReady = true;
+      state.lastOpenCodeError = null;
+      state.openCodeNotReadySince = 0;
+        releaseGuardianOutcomeUnknownLease();
+        clearGuardianOutcomeUnknownFence(boundFence);
+      syncToHmrState();
+      return { adopted: true };
+    }
+
+    if (boundFence.kind === 'stop') {
+      // A stop response can be lost after the guardian has durably entered a
+      // terminal state. Never issue a second stop: first require an exact
+      // owner/incarnation/revision/lease/MAC record proving the target is
+      // terminal, then do the final owner-scoped successor reconciliation.
+        let terminalConfirmation;
+        try {
+          terminalConfirmation = await confirmGuardianTerminal(client, boundFence);
+        } catch (error) {
+          throw createGuardianOutcomeUnknownError(
+            boundFence,
+            `Guardian stop fence terminal confirmation remains unresolved: ${error?.message || String(error)}`,
+          );
+        }
+        const terminalFence = terminalConfirmation.fence;
+        const finalChildren = await readGuardianChildList(client);
+
+       if (terminalFence.cleanupTarget === 'old') {
+         const successor = finalChildren.find((child) => (
+           child?.state === 'active'
+           && guardianChildMatchesOwner(child, terminalFence.successorOwner)
+           && child?.incarnation !== terminalFence.incarnation
+         )) || null;
+         if (!successor) {
+           if (!terminalFence.successorOwner) {
+            state.openCodeProcess = null;
+            state.currentIncarnation = null;
+            state.currentOwner = null;
+              releaseGuardianOutcomeUnknownLease();
+              clearGuardianOutcomeUnknownFence(terminalFence);
+            syncToHmrState();
+            return { adopted: false };
+          }
+          throw createGuardianOutcomeUnknownError(boundFence);
+        }
+         const successorFence = bindGuardianFenceSuccessor(terminalFence, successor);
+         const checkedSuccessor = await confirmGuardianFenceAdoption(client, successorFence, { successor: true });
+         const successorOwner = checkedSuccessor.owner;
+        retainGuardianStartupSecretLease(checkedSuccessor.child.incarnation, guardianOutcomeUnknownLease);
+        state.openCodeProcess = createGuardianChildProxy({
+          pid: checkedSuccessor.child.pid,
+          incarnation: checkedSuccessor.child.incarnation,
+          client,
+          owner: successorOwner,
+          startupSecretLease: guardianOutcomeUnknownLease,
+        });
+        state.openCodeBaseUrl = getAuthoritativeGuardianOrigin({
+          child: checkedSuccessor.child,
+          launchSpec: checkedSuccessor.child.launchSpec,
+          port: checkedSuccessor.child.port,
+        });
+        setOpenCodePort(checkedSuccessor.child.port);
+        resetOpenCodeApiPrefixState();
+        state.currentIncarnation = checkedSuccessor.child.incarnation;
+        state.currentOwner = successorOwner;
+        state.isExternalOpenCode = false;
+        state.isOpenCodeReady = true;
+        state.lastOpenCodeError = null;
+        state.openCodeNotReadySince = 0;
+        guardianOutcomeUnknownLease = null;
+        clearGuardianOutcomeUnknownFence(terminalFence);
+        syncToHmrState();
+        return { adopted: true };
+      }
+
+       if (terminalFence.cleanupTarget === 'successor') {
+         if (terminalFence.oldStopped === true) {
+          state.openCodeProcess = null;
+          state.currentIncarnation = null;
+          state.currentOwner = null;
+            releaseGuardianOutcomeUnknownLease();
+            clearGuardianOutcomeUnknownFence(terminalFence);
+          syncToHmrState();
+          return { adopted: false };
+        }
+        const rollbackChild = finalChildren.find((child) => (
+           child?.incarnation === terminalFence.rollbackIncarnation
+           && guardianChildMatchesOwner(child, terminalFence.rollbackOwner)
+          && ['active', 'handoff-prepared'].includes(child.state)
+        )) || null;
+        if (!rollbackChild || !hasCompleteGuardianRecordBinding(rollbackChild)) {
+          throw createGuardianOutcomeUnknownError(boundFence);
+        }
+        const rollbackFence = {
+          version: 1,
+          kind: 'prepare',
+          incarnation: rollbackChild.incarnation,
+           owner: { ...terminalFence.rollbackOwner },
+          revision: rollbackChild.revision,
+          leaseExpiresAt: rollbackChild.leaseExpiresAt,
+          mac: rollbackChild.mac,
+          oldStopped: false,
+        };
+        setGuardianOutcomeUnknownFence(rollbackFence);
+         return reconcileGuardianOutcomeUnknownFence({ client, fence: rollbackFence });
+      }
+    }
+
+    const successor = children.find((child) => (
+      child?.state === 'active'
+      && guardianChildMatchesOwner(child, boundFence.successorOwner)
+      && child?.incarnation !== boundFence.incarnation
+    )) || null;
+    if (!successor || !Number.isSafeInteger(successor.pid) || successor.pid <= 0
+      || !Number.isSafeInteger(successor.port) || successor.port <= 0
+      || !successor.launchSpec) {
+      throw createGuardianOutcomeUnknownError(boundFence);
+    }
+    if (!hasCompleteGuardianRecordBinding(successor)) {
+      throw createGuardianOutcomeUnknownError(
+        boundFence,
+        'Guardian outcome-unknown fence successor lacks complete revision, lease, or MAC binding',
+      );
+    }
+    const successorFence = bindGuardianFenceSuccessor(boundFence, successor);
+     const checkedSuccessor = await confirmGuardianFenceAdoption(client, successorFence, { successor: true });
+    const authoritativeSuccessor = checkedSuccessor.child;
+    const successorOwner = checkedSuccessor.owner;
+
+      if (boundFence.kind !== 'initial-spawn' && !boundFence.oldStopped) {
+      if (!oldChild || ['retired', 'interrupted'].includes(oldChild.state)) {
+        throw createGuardianOutcomeUnknownError(boundFence, 'Guardian outcome-unknown fence cannot prove the old child was stopped');
+      }
+      try {
+        await stopGuardianChildAndVerify({
+          client,
+          incarnation: boundFence.incarnation,
+          owner: boundFence.owner,
+          lease: guardianOutcomeUnknownLease,
+          successorOwner,
+          cleanupTarget: 'old',
+          oldStopped: false,
+        });
+      } catch (error) {
+        if (isAmbiguousGuardianRequestError(error)) {
+          persistGuardianOutcomeUnknownFence({
+            kind: 'stop',
+            incarnation: boundFence.incarnation,
+            owner: boundFence.owner,
+            preparedRecord: oldChild,
+            successorOwner,
+            cleanupTarget: 'old',
+            oldStopped: false,
+            source: error,
+            lease: guardianOutcomeUnknownLease,
+          });
+        }
+        throw error;
+      }
+    }
+
+    retainGuardianStartupSecretLease(authoritativeSuccessor.incarnation, guardianOutcomeUnknownLease);
+    state.openCodeProcess = createGuardianChildProxy({
+      pid: authoritativeSuccessor.pid,
+      incarnation: authoritativeSuccessor.incarnation,
+      client,
+      owner: successorOwner,
+      startupSecretLease: guardianOutcomeUnknownLease,
+    });
+    state.openCodeBaseUrl = getAuthoritativeGuardianOrigin({
+      child: authoritativeSuccessor,
+      launchSpec: authoritativeSuccessor.launchSpec,
+      port: authoritativeSuccessor.port,
+    });
+    setOpenCodePort(authoritativeSuccessor.port);
+    resetOpenCodeApiPrefixState();
+    state.currentIncarnation = authoritativeSuccessor.incarnation;
+    state.currentOwner = successorOwner;
+    state.isExternalOpenCode = false;
+    state.isOpenCodeReady = true;
+    state.lastOpenCodeError = null;
+    state.openCodeNotReadySince = 0;
+    guardianOutcomeUnknownLease = null;
+     clearGuardianOutcomeUnknownFence(boundFence);
+    syncToHmrState();
+    return { adopted: true };
+  };
+
+  const reconcileGuardianOutcomeUnknownFenceForLifecycle = async () => {
+    await discoverGuardianOutcomeUnknownFence();
+    const fences = getGuardianOutcomeUnknownFences();
+    const fence = fences[0];
+    if (!fence) return { resolved: false, adopted: false };
+    if (!canUseGuardian) {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        'Guardian outcome-unknown fence blocks lifecycle startup while owner-scoped guardian use is unavailable',
+      );
+    }
+    if (!(await probeGuardianRunning())) {
+      throw createGuardianOutcomeUnknownError(
+        fence,
+        'Guardian outcome-unknown fence cannot be reconciled while the guardian is unavailable',
+      );
+    }
+    const client = createGuardianClient({ connectTimeoutMs: 5000 });
+    let keepClient = false;
+    let adopted = false;
+    try {
+      await client.connect();
+      for (const candidate of getGuardianOutcomeUnknownFences()) {
+        const result = await reconcileGuardianOutcomeUnknownFence({ client, fence: candidate });
+        adopted ||= result.adopted === true;
+        if (result.adopted === true) keepClient = true;
+      }
+      if (getGuardianOutcomeUnknownFences().length > 0) {
+        throw createGuardianOutcomeUnknownError(
+          getGuardianOutcomeUnknownFence(),
+          'Guardian durable operations remain unresolved after reconciliation',
+        );
+      }
+      return { resolved: true, adopted };
+    } finally {
+      if (!keepClient) await disconnectGuardianClient(client);
+    }
   };
 
   const adoptGuardianChildForRestart = async ({ socketPath, portPath }) => {
@@ -1377,7 +2609,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
-  const startOpenCode = async () => {
+  const startOpenCode = async ({ admissionChecked = false } = {}) => {
+    if (!admissionChecked) await assertLegacyLaunchAdmission();
+    const fenceResolution = await reconcileGuardianOutcomeUnknownFenceForLifecycle();
+    if (fenceResolution.resolved && state.openCodeProcess) {
+      return state.openCodeProcess;
+    }
     let lastError = null;
     for (let attempt = 1; attempt <= START_OPEN_CODE_MAX_ATTEMPTS; attempt += 1) {
       try {
@@ -1385,6 +2622,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       } catch (error) {
         const safeError = sanitizeManagedStartupError(error);
         lastError = safeError;
+        if (isAmbiguousGuardianRequestError(safeError)) break;
         if (safeError?.code === 'OPENCODE_BINARY_INVALID') {
           break;
         }
@@ -1409,6 +2647,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   const startOpenCodeThroughGuardian = async () => {
+    const fenceResolution = await reconcileGuardianOutcomeUnknownFenceForLifecycle();
+    if (fenceResolution.resolved && state.openCodeProcess) {
+      return state.openCodeProcess;
+    }
     if (!canUseGuardian) {
       throw new Error('Guardian launch requires a stable OpenChamber owner identity');
     }
@@ -1416,6 +2658,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     let successor = null;
     let successorOwner = null;
     let launch = null;
+    let guardianLaunch = null;
     let connected = false;
 
     try {
@@ -1424,7 +2667,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       const desiredPort = env.ENV_CONFIGURED_OPENCODE_PORT ?? 0;
       const spawnPort = await resolveManagedOpenCodePort(desiredPort, env.ENV_CONFIGURED_OPENCODE_HOSTNAME);
       launch = await buildManagedOpenCodeSpawnEnv({ rotatePassword: true });
-      const guardianLaunch = createGuardianLaunch({
+      guardianLaunch = createGuardianLaunch({
         binary: launch.binary,
         args: launch.args,
         hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
@@ -1484,29 +2727,80 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
       return state.openCodeProcess;
     } catch (error) {
+      const ambiguousRequest = isAmbiguousGuardianRequestError(error);
       let cleanupUncertain = false;
-      if (successor?.incarnation) {
+      let ambiguousCleanupError = ambiguousRequest ? error : null;
+      if (ambiguousRequest) {
+        // The initial guardian spawn is also a non-idempotent side effect. A
+        // lost response does not prove that no child was created, so retain a
+        // successor-owner fence before disconnecting and never stop, retry, or
+        // fall back beside the unknown child.
+        persistGuardianOutcomeUnknownFence({
+          kind: 'initial-spawn',
+          incarnation: successor?.incarnation || null,
+          owner: successorOwner,
+          successorOwner,
+          launchSpec: guardianLaunch?.launchSpec || null,
+          oldStopped: true,
+          source: error,
+          lease: launch?.startupSecretLease,
+        });
+      } else if (successor?.incarnation) {
         try {
-          await client.stop(withOwner(
-            { incarnation: successor.incarnation },
-            hasCompleteOwnerIdentity(successor.owner) ? successor.owner : successorOwner,
-          ));
-          if (!(await verifyGuardianChildGone(client, { incarnation: successor.incarnation }))) {
-            cleanupUncertain = true;
+          assertGuardianStopIsUnfenced();
+          await stopGuardianChildAndVerify({
+            client,
+            incarnation: successor.incarnation,
+            owner: hasCompleteOwnerIdentity(successor.owner) ? successor.owner : successorOwner,
+            lease: launch?.startupSecretLease,
+            cleanupTarget: 'successor',
+            oldStopped: true,
+          });
+        } catch (cleanupError) {
+          if (isAmbiguousGuardianRequestError(cleanupError)) {
+            ambiguousCleanupError = cleanupError;
+            persistGuardianOutcomeUnknownFence({
+              kind: 'stop',
+              incarnation: successor.incarnation,
+              owner: hasCompleteOwnerIdentity(successor.owner) ? successor.owner : successorOwner,
+              preparedRecord: successor,
+              cleanupTarget: 'successor',
+              oldStopped: true,
+              source: cleanupError,
+              lease: launch?.startupSecretLease,
+            });
           }
-        } catch {
           cleanupUncertain = true;
         }
       } else if (successorOwner) {
+        let liveSuccessor = null;
         try {
-          const liveSuccessor = await findLiveGuardianSuccessor(client, successorOwner);
+          liveSuccessor = await findLiveGuardianSuccessor(client, successorOwner);
           if (liveSuccessor?.incarnation) {
-            await client.stop(withOwner({ incarnation: liveSuccessor.incarnation }, successorOwner));
-            if (!(await verifyGuardianChildGone(client, { incarnation: liveSuccessor.incarnation }))) {
-              cleanupUncertain = true;
-            }
+            assertGuardianStopIsUnfenced();
+            await stopGuardianChildAndVerify({
+              client,
+              incarnation: liveSuccessor.incarnation,
+              owner: successorOwner,
+              lease: launch?.startupSecretLease,
+              cleanupTarget: 'successor',
+              oldStopped: true,
+            });
           }
-        } catch {
+        } catch (cleanupError) {
+          if (isAmbiguousGuardianRequestError(cleanupError) && liveSuccessor?.incarnation) {
+            ambiguousCleanupError = cleanupError;
+            persistGuardianOutcomeUnknownFence({
+              kind: 'stop',
+              incarnation: liveSuccessor.incarnation,
+              owner: successorOwner,
+              preparedRecord: liveSuccessor,
+              cleanupTarget: 'successor',
+              oldStopped: true,
+              source: cleanupError,
+              lease: launch?.startupSecretLease,
+            });
+          }
           cleanupUncertain = true;
         }
       }
@@ -1517,10 +2811,19 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         const cleanupError = new Error(
           `Guardian initial OpenCode launch failed without confirmed cleanup: ${error?.message || String(error)}`,
         );
-        cleanupError.code = 'GUARDIAN_CLEANUP_UNCERTAIN';
+        const cleanupFence = state.guardianOutcomeUnknownFence;
+        const cleanupFenceIsAmbiguous = cleanupFence?.ambiguous === true;
+        cleanupError.code = ambiguousRequest || cleanupFenceIsAmbiguous
+          ? GUARDIAN_AMBIGUOUS_REQUEST_CODE
+          : 'GUARDIAN_CLEANUP_UNCERTAIN';
+        if (ambiguousRequest || ambiguousCleanupError || cleanupFenceIsAmbiguous) {
+          copyStructuredStartupErrorMetadata(cleanupError, ambiguousCleanupError || error);
+        }
         throw cleanupError;
       }
-      releaseManagedStartupSecretLease(launch?.startupSecretLease);
+      if (!state.guardianOutcomeUnknownFence) {
+        releaseManagedStartupSecretLease(launch?.startupSecretLease);
+      }
       throw error;
     }
   };
@@ -1547,6 +2850,20 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       state.isOpenCodeReady = false;
       state.openCodeNotReadySince = Date.now();
       console.log('Restarting OpenCode process...');
+
+      // A persisted ambiguity fence is checked before every lifecycle entry
+      // point that could stop, spawn, retry, or fall back.  Reconciliation is
+      // the only path allowed to perform the owner-scoped cutover while the
+      // fence is unresolved; a missing/partial/mismatched authenticated record
+      // remains a hard blocker.
+      const fenceResolution = await reconcileGuardianOutcomeUnknownFenceForLifecycle();
+      if (fenceResolution.resolved && fenceResolution.adopted) {
+        if (state.expressApp) {
+          setupProxy(state.expressApp);
+          ensureOpenCodeApiPrefix();
+        }
+        return;
+      }
 
       if (state.isExternalOpenCode) {
         console.log('Re-probing external OpenCode server...');
@@ -1589,8 +2906,22 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       // dispatches per-platform inside GuardianClient / isGuardianRunning.
       const handoffEnabled = process.env.OPENCHAMBER_RESTART_HANDOFF !== 'disabled';
       let currentGuardianOwner = state.currentOwner || state.openCodeProcess?.owner || null;
+      const outcomeUnknownFence = getGuardianOutcomeUnknownFence();
+      if (outcomeUnknownFence && (!handoffEnabled || !canUseGuardian)) {
+        throw createGuardianOutcomeUnknownError(
+          outcomeUnknownFence,
+          'Guardian outcome-unknown fence blocks restart while owner-scoped handoff is unavailable',
+        );
+      }
       if (handoffEnabled && canUseGuardian) {
         const guardianRunning = await probeGuardianRunning();
+
+        if (outcomeUnknownFence && !guardianRunning) {
+          throw createGuardianOutcomeUnknownError(
+            outcomeUnknownFence,
+            'Guardian outcome-unknown fence cannot be reconciled while the guardian is unavailable',
+          );
+        }
 
         if (guardianRunning) {
           guardianRunningObserved = true;
@@ -1598,7 +2929,29 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           const portPath = getWindowsPortPath();
           let adoptedGuardianClient = null;
 
-           // HMR, legacy startup, and migration states can retain a live
+           if (outcomeUnknownFence) {
+             const fenceClient = createGuardianClient({ connectTimeoutMs: 5000 });
+             let keepFenceClient = false;
+             try {
+               await fenceClient.connect();
+               const reconciliation = await reconcileGuardianOutcomeUnknownFence({
+                 client: fenceClient,
+                 fence: outcomeUnknownFence,
+               });
+               if (reconciliation.adopted) {
+                 keepFenceClient = true;
+                 if (state.expressApp) {
+                   setupProxy(state.expressApp);
+                   ensureOpenCodeApiPrefix();
+                 }
+                 return;
+               }
+             } finally {
+               if (!keepFenceClient) await disconnectGuardianClient(fenceClient);
+             }
+           }
+
+            // HMR, legacy startup, and migration states can retain a live
            // guardian child without retaining its incarnation in memory.
            // Inspect the authenticated record set before allowing the legacy
            // path to spawn. `detectAndAdoptGuardianChild` rejects ownerless,
@@ -1642,6 +2995,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             let successorStopped = false;
             let restoreOpenCodeAuthState = null;
             let launch = null;
+            let preparedRecord = null;
+            let guardianLaunch = null;
+            let handoffPhase = null;
 
           try {
             await client.connect();
@@ -1653,7 +3009,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             // fixed-port path must stop and release the old listener before
             // spawning its successor; dynamic ports can start the successor
             // first and keep the cutover fast.
-            await client.prepareHandoff(withOwner({ incarnation: previousIncarnation }, previousOwner));
+            handoffPhase = 'prepare';
+            preparedRecord = await client.prepareHandoff(withOwner({ incarnation: previousIncarnation }, previousOwner));
+            handoffPhase = null;
             prepared = true;
 
             if (typeof captureOpenCodeAuthState === 'function') {
@@ -1661,7 +3019,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
               restoreOpenCodeAuthState = typeof restore === 'function' ? restore : null;
             }
             launch = await buildManagedOpenCodeSpawnEnv({ rotatePassword: true });
-            const guardianLaunch = createGuardianLaunch({
+            guardianLaunch = createGuardianLaunch({
               binary: launch.binary,
               args: launch.args,
               hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
@@ -1671,13 +3029,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             successorOwner = guardianLaunch.owner;
 
             if (fixedPort) {
-              await client.stop(withOwner({ incarnation: previousIncarnation }, previousOwner));
-              if (!(await verifyGuardianChildGone(client, { incarnation: previousIncarnation }))) {
-                throw Object.assign(
-                  new Error(`Guardian previous child ${previousIncarnation} cleanup was not confirmed`),
-                  { code: 'GUARDIAN_CLEANUP_UNCERTAIN' },
-                );
-              }
+              handoffPhase = 'stop-old';
+              assertGuardianStopIsUnfenced();
+              await stopGuardianChildAndVerify({
+                client,
+                incarnation: previousIncarnation,
+                owner: previousOwner,
+                lease: guardianStartupSecretLeases.get(previousIncarnation),
+              });
+              handoffPhase = null;
               releaseGuardianStartupSecretLease(previousIncarnation);
               oldStopped = true;
               state.openCodeProcess = null;
@@ -1690,6 +3050,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
               }
             }
 
+            handoffPhase = 'spawn';
             successor = await client.spawn({
               port: newPort,
               hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
@@ -1699,6 +3060,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
               env: buildGuardianSpawnEnv(launch.env),
               ...guardianLaunch,
             });
+            handoffPhase = null;
 
             const activeOwner = hasCompleteOwnerIdentity(successor?.owner)
               ? successor.owner
@@ -1714,13 +3076,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             });
 
             if (!fixedPort) {
-              await client.stop(withOwner({ incarnation: previousIncarnation }, previousOwner));
-              if (!(await verifyGuardianChildGone(client, { incarnation: previousIncarnation }))) {
-                throw Object.assign(
-                  new Error(`Guardian previous child ${previousIncarnation} cleanup was not confirmed`),
-                  { code: 'GUARDIAN_CLEANUP_UNCERTAIN' },
-                );
-              }
+              handoffPhase = 'stop-old';
+              assertGuardianStopIsUnfenced();
+              await stopGuardianChildAndVerify({
+                client,
+                incarnation: previousIncarnation,
+                owner: previousOwner,
+                lease: guardianStartupSecretLeases.get(previousIncarnation),
+              });
+              handoffPhase = null;
               releaseGuardianStartupSecretLease(previousIncarnation);
               oldStopped = true;
             }
@@ -1757,37 +3121,103 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             // recoverable handoff failure. Legacy port cleanup could target a
             // reused PID or a foreign listener, so refuse fallback and leave
             // the guardian attention record authoritative.
-            let cleanupUncertain = error?.code === 'GUARDIAN_CHILD_IDENTITY_INVALID';
+            const ambiguousRequest = isAmbiguousGuardianRequestError(error);
+            const ambiguousHandoffPhase = ambiguousRequest
+              && (handoffPhase === 'prepare' || handoffPhase === 'spawn' || handoffPhase === 'stop-old');
+            let cleanupUncertain = error?.code === 'GUARDIAN_CHILD_IDENTITY_INVALID'
+              || ambiguousRequest;
+            let ambiguousCleanupError = ambiguousRequest ? error : null;
 
-            if (successor?.incarnation && !successorStopped) {
+            if (ambiguousHandoffPhase) {
+              persistGuardianOutcomeUnknownFence({
+                kind: handoffPhase === 'stop-old' ? 'stop' : handoffPhase,
+                incarnation: previousIncarnation,
+                owner: previousOwner,
+                preparedRecord,
+                successorOwner,
+                cleanupTarget: handoffPhase === 'stop-old' ? 'old' : undefined,
+                launchSpec: handoffPhase === 'spawn' ? guardianLaunch?.launchSpec : null,
+                oldStopped,
+                source: error,
+                lease: launch?.startupSecretLease,
+              });
+            }
+
+            if (!ambiguousRequest && successor?.incarnation && !successorStopped) {
               try {
-                await client.stop(withOwner(
-                  { incarnation: successor.incarnation },
-                  hasCompleteOwnerIdentity(successor.owner) ? successor.owner : successorOwner,
-                ));
-                successorStopped = await verifyGuardianChildGone(client, {
+                assertGuardianStopIsUnfenced();
+                await stopGuardianChildAndVerify({
+                  client,
                   incarnation: successor.incarnation,
+                  owner: hasCompleteOwnerIdentity(successor.owner) ? successor.owner : successorOwner,
+                  lease: launch?.startupSecretLease,
+                  cleanupTarget: 'successor',
+                  rollbackIncarnation: previousIncarnation,
+                  rollbackOwner: previousOwner,
+                  oldStopped,
                 });
-                if (!successorStopped) {
-                  cleanupUncertain = true;
-                } else {
-                  releaseManagedStartupSecretLease(launch?.startupSecretLease);
-                }
-              } catch {
-                cleanupUncertain = true;
-              }
-            } else if (!successor?.incarnation) {
-              try {
-                const liveSuccessor = await findLiveGuardianSuccessor(client, successorOwner);
-                if (liveSuccessor?.incarnation) {
-                  await client.stop(withOwner({ incarnation: liveSuccessor.incarnation }, successorOwner));
-                  if (!(await verifyGuardianChildGone(client, { incarnation: liveSuccessor.incarnation }))) {
-                    cleanupUncertain = true;
-                  } else {
-                    releaseManagedStartupSecretLease(launch?.startupSecretLease);
+                successorStopped = true;
+                releaseManagedStartupSecretLease(launch?.startupSecretLease);
+                } catch (cleanupError) {
+                  if (isAmbiguousGuardianRequestError(cleanupError)) {
+                    ambiguousCleanupError = cleanupError;
+                    persistGuardianOutcomeUnknownFence({
+                      kind: 'stop',
+                      incarnation: successor.incarnation,
+                      owner: hasCompleteOwnerIdentity(successor.owner) ? successor.owner : successorOwner,
+                      preparedRecord: successor,
+                      cleanupTarget: 'successor',
+                      rollbackIncarnation: previousIncarnation,
+                      rollbackOwner: previousOwner,
+                      oldStopped,
+                      source: cleanupError,
+                      lease: launch?.startupSecretLease,
+                    });
                   }
+                  cleanupUncertain = true;
                 }
-              } catch {
+            } else if (!ambiguousRequest && !successor?.incarnation) {
+              let liveSuccessor = null;
+              try {
+                liveSuccessor = await findLiveGuardianSuccessor(client, successorOwner);
+                if (liveSuccessor?.incarnation) {
+                  assertGuardianStopIsUnfenced();
+                  await stopGuardianChildAndVerify({
+                    client,
+                    incarnation: liveSuccessor.incarnation,
+                    owner: successorOwner,
+                    lease: launch?.startupSecretLease,
+                    cleanupTarget: 'successor',
+                    rollbackIncarnation: previousIncarnation,
+                    rollbackOwner: previousOwner,
+                    oldStopped,
+                   });
+                   releaseManagedStartupSecretLease(launch?.startupSecretLease);
+                 } else if (oldStopped) {
+                   // A non-ambiguous spawn failure plus a fresh authenticated
+                   // empty owner-scoped list is the only proof that no
+                   // successor exists. Release this launch's lease once, but
+                   // retain it if any durable operation or ambiguity fence is
+                   // still unresolved.
+                   await confirmGuardianNoSuccessor(client, successorOwner);
+                   releaseManagedStartupSecretLease(launch?.startupSecretLease);
+                 }
+              } catch (cleanupError) {
+                if (isAmbiguousGuardianRequestError(cleanupError) && liveSuccessor?.incarnation) {
+                  ambiguousCleanupError = cleanupError;
+                  persistGuardianOutcomeUnknownFence({
+                    kind: 'stop',
+                    incarnation: liveSuccessor.incarnation,
+                    owner: successorOwner,
+                    preparedRecord: liveSuccessor,
+                    cleanupTarget: 'successor',
+                    rollbackIncarnation: previousIncarnation,
+                    rollbackOwner: previousOwner,
+                    oldStopped,
+                    source: cleanupError,
+                    lease: launch?.startupSecretLease,
+                  });
+                }
                 cleanupUncertain = true;
               }
             }
@@ -1798,7 +3228,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             // successor is launched before the old stop attempt: a rejected
             // old stop is not proof that the old child is gone.
             let oldRollbackConfirmed = false;
-            if (prepared && !oldStopped) {
+            if (prepared && !oldStopped && !ambiguousRequest) {
               let rollbackError = null;
               try {
                 if (typeof client.abortHandoff !== 'function') {
@@ -1832,6 +3262,20 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
                 }
               } catch (rollbackFailure) {
                 rollbackError = rollbackFailure;
+                if (isAmbiguousGuardianRequestError(rollbackFailure)) {
+                  ambiguousCleanupError = rollbackFailure;
+                  persistGuardianOutcomeUnknownFence({
+                    kind: 'abort-handoff',
+                    incarnation: previousIncarnation,
+                    owner: previousOwner,
+                    preparedRecord,
+                    rollbackIncarnation: previousIncarnation,
+                    rollbackOwner: previousOwner,
+                    oldStopped,
+                    source: rollbackFailure,
+                    lease: launch?.startupSecretLease,
+                  });
+                }
               }
 
               if (oldRollbackConfirmed) {
@@ -1888,6 +3332,16 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
               syncToHmrState();
             }
 
+            if (ambiguousRequest || ambiguousCleanupError) {
+              // The RPC may have crossed its side-effect boundary even though
+              // the response was lost. Do not claim the old child is healthy,
+              // abort a possibly-applied handoff, or continue into the legacy
+              // spawn path.
+              state.isOpenCodeReady = false;
+              state.openCodeNotReadySince = Date.now();
+              syncToHmrState();
+            }
+
             const retainGuardianClientForFallback = oldRollbackConfirmed
               && state.openCodeProcess?.isGuardianManaged === true;
             if (!retainGuardianClientForFallback && !(await disconnectGuardianClient(client))) {
@@ -1895,13 +3349,27 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             }
 
             if (cleanupUncertain) {
-              throw new Error(`Guardian handoff failed without a confirmed rollback: ${error?.message || String(error)}`);
+              const failure = new Error(
+                `Guardian handoff failed without a confirmed rollback: ${error?.message || String(error)}`,
+              );
+              if (ambiguousCleanupError) copyStructuredStartupErrorMetadata(failure, ambiguousCleanupError);
+              else failure.code = 'GUARDIAN_CLEANUP_UNCERTAIN';
+              failure.cause = error;
+              throw failure;
             }
 
-            console.log('[lifecycle] guardian handoff failed, falling back to legacy restart:', error.message);
+             console.log('[lifecycle] guardian handoff failed, falling back to legacy restart:', error.message);
           }
         }
       }
+      }
+
+      // A guardian may have no exact child for this owner while still holding
+      // foreign-owner attention or a durable operation. Before any direct
+      // legacy close/port cleanup/start, query the guardian's global
+      // admission authority; owner-scoped adoption above remains separate.
+      if (guardianRunningObserved || await probeGuardianRunning()) {
+        await assertLegacyLaunchAdmission({ guardianRunning: true });
       }
 
       if (state.openCodeProcess) {
@@ -1963,7 +3431,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
 
       state.lastOpenCodeError = null;
-      state.openCodeProcess = await startOpenCode();
+      state.openCodeProcess = await startOpenCode({ admissionChecked: true });
       state.currentIncarnation = null;
       state.currentOwner = null;
       syncToHmrState();
@@ -2117,6 +3585,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
 
       syncFromHmrState();
+      await reconcileGuardianOutcomeUnknownFenceForLifecycle();
       if (await isOpenCodeProcessHealthy()) {
         console.log(`[HMR] Reusing existing OpenCode process on port ${state.openCodePort}`);
       } else {
@@ -2203,9 +3672,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
               const guardianFailure = new Error(
                 `Guardian is running but initial OpenCode launch failed; refusing legacy fallback: ${safeError.message}`,
               );
-              guardianFailure.code = safeError?.code === 'GUARDIAN_CLEANUP_UNCERTAIN'
+              guardianFailure.code = isAmbiguousGuardianRequestError(safeError)
+                ? GUARDIAN_AMBIGUOUS_REQUEST_CODE
+                : safeError?.code === 'GUARDIAN_CLEANUP_UNCERTAIN'
                 ? safeError.code
                 : 'GUARDIAN_LIVE_START_FAILED';
+              if (isAmbiguousGuardianRequestError(safeError)) {
+                copyStructuredStartupErrorMetadata(guardianFailure, safeError);
+              }
               guardianFailure.cause = safeError;
               state.isOpenCodeReady = false;
               state.openCodeNotReadySince = Date.now();
@@ -2246,6 +3720,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (
         error?.code === 'GUARDIAN_CLEANUP_UNCERTAIN'
         || error?.code === 'OPENCODE_CHILD_STILL_RUNNING'
+        || isAmbiguousGuardianRequestError(error)
       ) {
         throw sanitizeManagedStartupError(error);
       }
@@ -2461,6 +3936,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     value: getGuardianStartupSecretLeaseCount,
     enumerable: false,
   });
+  Object.defineProperty(runtime, '__testReconcileGuardianOutcomeUnknownFence', {
+    value: reconcileGuardianOutcomeUnknownFenceForLifecycle,
+    enumerable: false,
+  });
   return runtime;
 };
 
@@ -2470,5 +3949,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 export const __test__ = {
   createManagedStartupOutputFormatter,
   createManagedStartupCapture,
+  createRedactedStartupError,
   MANAGED_STARTUP_CAPTURE_LIMIT,
 };
