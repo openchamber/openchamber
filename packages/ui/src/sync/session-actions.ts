@@ -1014,6 +1014,92 @@ export async function archiveSessions(
   return { archivedIds, failedIds }
 }
 
+/**
+ * Sentinel written to `time.archived` when restoring a session.
+ *
+ * The OpenCode server has no HTTP path to clear `time.archived` back to NULL:
+ * `session.update` only applies the field when the payload carries a finite
+ * number (`archived !== undefined`), so omitting the key is a no-op and `null`
+ * is silently ignored. Writing `0` is the only value that makes every reader
+ * treat the session as active again: the UI, the event reducer, and the
+ * OpenCode app/TUI all classify archive state by truthiness of
+ * `time.archived`, and `0` is falsy. The one place that still excludes such a
+ * session is the server's own `time_archived IS NULL` list filter, so the
+ * global session cache loads with the inclusive `archived` flag and splits
+ * client-side instead of relying on that filter (see
+ * `useGlobalSessionsStore.loadSessions`).
+ */
+const UNARCHIVED_TIMESTAMP = 0
+
+/**
+ * Restore one archived session back to the active list.
+ *
+ * Same contract as `archiveSession`: waits for server confirmation before
+ * reconciling stores, and rejects stale runtimes so a response produced by a
+ * previous runtime cannot mutate the current runtime's state. The global
+ * session cache is updated directly (the sidebar reads active/archived
+ * buckets from it); the live directory store is re-populated by the
+ * authoritative `session.updated` event the server publishes for the update.
+ */
+export async function unarchiveSession(sessionId: string, expectedRuntimeKey = getRuntimeKey()): Promise<boolean> {
+  if (isStaleRuntime(expectedRuntimeKey)) return false
+  const sessionDirectory = getSessionDirectory(sessionId)
+  try {
+    const restored = await opencodeClient.updateSession(sessionId, { time: { archived: UNARCHIVED_TIMESTAMP } }, sessionDirectory)
+    if (isStaleRuntime(expectedRuntimeKey)) return false
+    if (!restored) {
+      throw new Error("session.update failed: server did not return the restored session")
+    }
+    if (restored.time?.archived) {
+      throw new Error("session.update failed: server kept the session archived")
+    }
+    useGlobalSessionsStore.getState().upsertSession(restored)
+    if (sessionDirectory) registerSessionDirectory(sessionId, sessionDirectory)
+    return true
+  } catch (error) {
+    console.error("[session-actions] unarchiveSession failed", error)
+    return false
+  }
+}
+
+export type UnarchiveSessionsOptions = {
+  /**
+   * Runtime key captured when the batch was confirmed. When supplied, the batch
+   * stops as soon as the active runtime differs.
+   */
+  expectedRuntimeKey?: string
+}
+
+/**
+ * Restore several archived sessions sequentially, preserving partial results.
+ *
+ * One failed session never blocks or erases the others: it is reported in
+ * `failedIds` while the remaining IDs are still attempted. When
+ * `expectedRuntimeKey` is supplied and the runtime changes mid-batch, the
+ * already-confirmed sessions stay in `restoredIds` and every ID that was not
+ * confirmed on the captured runtime is reported in `failedIds`, so callers keep
+ * showing truthful partial-failure feedback.
+ */
+export async function unarchiveSessions(
+  ids: string[],
+  options?: UnarchiveSessionsOptions,
+): Promise<{ restoredIds: string[]; failedIds: string[] }> {
+  const restoredIds: string[] = []
+  const failedIds: string[] = []
+  const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+
+  for (const [index, id] of ids.entries()) {
+    if (isStaleRuntime(expectedRuntimeKey)) {
+      failedIds.push(...ids.slice(index))
+      break
+    }
+    if (await unarchiveSession(id, expectedRuntimeKey)) restoredIds.push(id)
+    else failedIds.push(id)
+  }
+
+  return { restoredIds, failedIds }
+}
+
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
   const sessionDirectory = getSessionDirectory(sessionId)
   const session = await opencodeClient.updateSession(sessionId, { title }, sessionDirectory)

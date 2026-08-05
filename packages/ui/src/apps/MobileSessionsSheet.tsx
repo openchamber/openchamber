@@ -64,6 +64,8 @@ import {
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions, useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
+import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
@@ -476,6 +478,8 @@ const SessionRow: React.FC<{
   const statusType = liveStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
+  const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
+  const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
 
   const contentRef = React.useRef<HTMLDivElement>(null);
   const startRef = React.useRef<{ x: number; y: number } | null>(null);
@@ -616,10 +620,14 @@ const SessionRow: React.FC<{
               onToggleChildren?.();
             }}
           >
-            {isStreaming ? (
-              <Icon name="loader-4" className="size-3.5 animate-spin text-primary" />
-            ) : showUnreadDot ? (
-              <span className="size-1.5 rounded-full bg-[var(--status-info)]" aria-hidden />
+            {isStreaming || showUnreadDot ? (
+              <span
+                className={cn(
+                  'size-1.5 rounded-full',
+                  isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
+                )}
+                aria-hidden
+              />
             ) : (
               <RiArrowDownSLine className={cn('size-[18px] transition-transform duration-150', expanded ? 'rotate-0' : '-rotate-90')} />
             )}
@@ -664,7 +672,15 @@ const SessionRow: React.FC<{
               >
                 {title}
               </span>
-              {time ? (
+              {/* The elapsed turn takes the time slot while it matters, then
+                  hands it back to the relative timestamp. */}
+              {showActivityDuration ? (
+                <SessionActivityDuration
+                  sessionId={session.id}
+                  running={isStreaming}
+                  className="typography-micro"
+                />
+              ) : time ? (
                 <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{time}</span>
               ) : null}
             </span>

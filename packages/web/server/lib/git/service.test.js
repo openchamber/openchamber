@@ -10,6 +10,8 @@ import {
   cherryPick,
   createWorktree,
   getWorktreeBootstrapStatus,
+  getBranches,
+  getRangeDiff,
   getStatus,
   isGitRepository,
   populateWorktreeWithLockRecovery,
@@ -46,6 +48,28 @@ const runGit = (cwd, args) =>
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+
+/**
+ * A repository on `next` whose only remote publishes `defaultBranch` and has it
+ * recorded as that remote's HEAD — the shape of every repository whose default
+ * branch is not one of the conventional names.
+ */
+const createRepositoryWithRemote = ({ remoteName = 'origin', defaultBranch = 'react' } = {}) => {
+  const remote = createTempDir();
+  const repository = createTempDir();
+  runGit(remote, ['init', '--bare', `--initial-branch=${defaultBranch}`]);
+  runGit(repository, ['init', '-b', 'next']);
+  runGit(repository, ['config', 'user.email', 'test@example.com']);
+  runGit(repository, ['config', 'user.name', 'Test']);
+  fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+  runGit(repository, ['add', 'README.md']);
+  runGit(repository, ['commit', '-m', 'init']);
+  runGit(repository, ['remote', 'add', remoteName, remote]);
+  runGit(repository, ['push', remoteName, `HEAD:${defaultBranch}`]);
+  runGit(repository, ['fetch', remoteName]);
+  runGit(repository, ['remote', 'set-head', remoteName, '--auto']);
+  return { remote, repository };
+};
 
 const canRunGit = () => {
   try {
@@ -986,5 +1010,52 @@ describe('hash validation', () => {
     await expect(
       resetToCommit('/tmp', '1234567890abcdef1234567890abcdef12345678', 'soft')
     ).rejects.not.toThrow('Invalid commit hash');
+  });
+});
+
+describe.runIf(canRunGit())('getBranches', () => {
+  it('returns a remote default branch whose name is not a conventional fallback', async () => {
+    const { repository } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
+
+    await expect(getBranches(repository)).resolves.toMatchObject({
+      defaultBranches: { origin: 'react' },
+    });
+  });
+
+  it('asks the remote when no local remote/HEAD exists', async () => {
+    const { repository } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
+    // A hand-added remote can end up without this ref; the branch it points at
+    // is still knowable, and guessing instead is the bug this data replaces.
+    runGit(repository, ['remote', 'set-head', 'origin', '--delete']);
+
+    await expect(getBranches(repository)).resolves.toMatchObject({
+      defaultBranches: { origin: 'react' },
+    });
+  });
+
+  it('keeps the branches of a remote that cannot be reached', async () => {
+    const { repository, remote } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
+    fs.rmSync(remote, { recursive: true, force: true });
+
+    const branches = await getBranches(repository);
+
+    // "We could not ask" is not "the branch is gone": callers read this list to
+    // decide whether a base branch exists at all.
+    expect(branches.all).toContain('remotes/origin/react');
+  });
+});
+
+describe.runIf(canRunGit())('getRangeDiff', () => {
+  it('resolves a base that exists only on a remote other than origin', async () => {
+    const { repository } = createRepositoryWithRemote({ remoteName: 'upstream', defaultBranch: 'react' });
+    // Only refs/remotes/upstream/react carries the base — git cannot resolve the
+    // bare name, so an unqualified `react...next` fails with "ambiguous argument".
+    fs.writeFileSync(path.join(repository, 'feature.txt'), 'work\n');
+    runGit(repository, ['add', 'feature.txt']);
+    runGit(repository, ['commit', '-m', 'feature']);
+
+    const diff = await getRangeDiff(repository, { base: 'react', head: 'next' });
+
+    expect(diff).toContain('feature.txt');
   });
 });

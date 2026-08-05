@@ -10,10 +10,19 @@ import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
-import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
+import {
+  eventMatchesShortcut,
+  eventMatchesShortcutPrefix,
+  getEffectiveShortcutCombo,
+  getEffectiveShortcutPrefix,
+  normalizeCombo,
+} from '@/lib/shortcuts';
+import { getVisibleContextRailSurfaces } from '@/lib/surfaces/registry';
 import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstrap';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { addSelectionToChat } from '@/lib/addSelectionToChat';
@@ -29,6 +38,7 @@ export const useKeyboardShortcuts = () => {
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const currentShortcutDirectory = useDirectoryStore((s) => s.currentDirectory);
+  const effectiveDirectory = useEffectiveDirectory();
 
   // The terminal lives in the context panel; these mirror the rail behavior.
   const toggleTerminalSurface = React.useCallback(() => {
@@ -64,6 +74,9 @@ export const useKeyboardShortcuts = () => {
   const abortPrimedUntilRef = React.useRef<number | null>(null);
   const abortPrimedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const themeModeRef = React.useRef(themeMode);
+  // Currently held physical keys (lowercased), used to match chord prefixes
+  // whose primary key must be held while the activating key is pressed.
+  const heldKeysRef = React.useRef<Set<string>>(new Set());
 
   React.useEffect(() => {
     themeModeRef.current = themeMode;
@@ -80,6 +93,7 @@ export const useKeyboardShortcuts = () => {
 
   React.useEffect(() => {
     const combo = (actionId: string) => getEffectiveShortcutCombo(actionId, shortcutOverrides);
+    const switchSurfacePrefix = getEffectiveShortcutPrefix('switch_context_surface', shortcutOverrides);
     const dropdownTargetSelector = [
       '[data-slot="dropdown-menu-content"]',
       '[data-slot="select-content"]',
@@ -448,16 +462,6 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      if (eventMatchesShortcut(e, combo('open_diff_panel'))) {
-        const state = useUIStore.getState();
-        if (state.isMobile || !currentDirectory) {
-          return;
-        }
-        e.preventDefault();
-        state.openContextSurface(normalizeContextPanelDirectoryKey(currentDirectory), 'diff');
-        return;
-      }
-
       if (eventMatchesShortcut(e, combo('toggle_terminal'))) {
         const { isMobile } = useUIStore.getState();
         if (isMobile) {
@@ -475,6 +479,39 @@ export const useKeyboardShortcuts = () => {
         }
         e.preventDefault();
         toggleTerminalSurfaceExpanded();
+        return;
+      }
+
+      // Configured prefix + digit (default: Cmd/Ctrl + 1..9, with 0 for the
+      // 10th surface): open/close the matching context panel rail surface. The
+      // digit maps to the currently visible rail order, matching the number
+      // badges shown while holding the modifier. `e.repeat` guard keeps
+      // holding a digit from toggling.
+      const switchSurfaceDigit = e.key.length === 1 && e.key >= '0' && e.key <= '9'
+        ? (e.key === '0' ? 10 : Number(e.key))
+        : null;
+      if (switchSurfaceDigit !== null
+        && !e.repeat
+        && eventMatchesShortcutPrefix(e, switchSurfacePrefix, heldKeysRef.current)) {
+        const state = useUIStore.getState();
+        if (state.isMobile || !effectiveDirectory) {
+          return;
+        }
+        const directory = normalizeContextPanelDirectoryKey(effectiveDirectory);
+        const panelState = state.contextPanelByDirectory[directory];
+        const visibleSurfaces = getVisibleContextRailSurfaces({
+          railOrder: state.contextRailOrder,
+          planModeEnabled: useFeatureFlagsStore.getState().planModeEnabled,
+          isVSCode: isVSCodeRuntime(),
+          screenWidth: window.innerWidth,
+          tabs: panelState?.tabs ?? [],
+        });
+        const target = visibleSurfaces[switchSurfaceDigit - 1];
+        if (!target) {
+          return;
+        }
+        e.preventDefault();
+        state.openContextSurface(directory, target.mode);
         return;
       }
 
@@ -618,11 +655,30 @@ export const useKeyboardShortcuts = () => {
 
     };
 
+    // Track held physical keys so chord prefixes (e.g. a configured
+    // `mod+p`) can require their primary key to stay held. Capture phase runs
+    // before handleKeyDown, so the set is current when chord matching runs.
+    const handleKeyHoldDown = (e: KeyboardEvent) => {
+      heldKeysRef.current.add(e.key.toLowerCase());
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      heldKeysRef.current.delete(e.key.toLowerCase());
+    };
+    const handleWindowBlur = () => {
+      heldKeysRef.current.clear();
+    };
+
+    window.addEventListener('keydown', handleKeyHoldDown, true);
+    window.addEventListener('keyup', handleKeyUp, true);
+    window.addEventListener('blur', handleWindowBlur);
     window.addEventListener('keydown', handleTerminalShortcutCapture, true);
     window.addEventListener('keydown', handleEscapeKeyDownCapture, true);
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
+      window.removeEventListener('keydown', handleKeyHoldDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+      window.removeEventListener('blur', handleWindowBlur);
       window.removeEventListener('keydown', handleTerminalShortcutCapture, true);
       window.removeEventListener('keydown', handleEscapeKeyDownCapture, true);
       window.removeEventListener('keydown', handleKeyDown);
@@ -650,6 +706,7 @@ export const useKeyboardShortcuts = () => {
     resetAbortPriming,
     currentSessionId,
     currentDirectory,
+    effectiveDirectory,
     activeProject?.id,
     activeProject?.path,
     shortcutOverrides,

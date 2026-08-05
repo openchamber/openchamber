@@ -55,6 +55,18 @@ written against staged code never silently re-anchors onto an unstaged edit.
 | `branch` | `branch` | `getRangeDiff` uses three-dot `base...head`, so work merged in from the base branch is excluded |
 | `pr` | `pr:<number>` | GitHub returns the merge-base diff, matching the branch semantics |
 
+For the current-branch source, the UI takes the base from the default branch of
+the current branch's tracking remote (`defaultBranches` in the branches
+response), and only then falls back to the conventional names. It does not offer
+the source at all when the chosen base exists neither locally nor on a remote —
+a repository whose default is neither `main`, `master` nor `develop` used to be
+handed `main...<head>`, which git rejects outright.
+
+A base that exists only on a remote still works: `getRangeDiff` prefers
+`origin/<base>` when it exists, and otherwise resolves the base through whichever
+remote carries it, because a bare branch name git cannot find in `refs/heads`
+fails the same way.
+
 The panel offers the current branch's pull request on its own: it registers with
 the shared GitHub PR status store (`useGitHubPrStatusStore`) rather than waiting
 for the pull request panel to have been visited. That store already dedupes
@@ -117,6 +129,14 @@ offering them would move the same refusal one click later — and, like the smal
 model picker, only shows providers with a usable login. The in-panel picker on a
 blocked walkthrough writes this setting too, so recovering from a refusal never
 silently changes the model behind commit messages.
+
+A settings or `opencode.json` `small_model` override can still name a provider
+with no usable login (neither `auth.json` nor `provider.<id>.options.apiKey`).
+`describeSmallModel` reports that as `hasLogin: false`, readiness refuses with
+`reason: 'no-provider-login'` and omits the unusable model so the panel cannot
+present it as selected, and generation maps the same code to HTTP 401. The UI
+disables Generate and keeps the picker on authenticated providers only — it does
+not surface a raw auth error or a special login blocker for this case.
 
 ## Output language
 
@@ -368,6 +388,21 @@ endpoint nothing calls is a maintenance surface that rots untested.
 
 Registered lazily from `feature-routes-runtime.js`. `/api/walkthrough` is in the
 JSON body-parser allowlist in `core-routes.js`.
+
+## A server that does not have these routes
+
+An `/api/*` path no OpenChamber route claims reaches the OpenCode proxy, and
+OpenCode answers any path it does not know with its embedded web UI — HTML, with
+status **200**. So a client newer than the server it is connected to is not told
+"no such route"; it is handed a web page. Parsing that as JSON is where
+`Unexpected token '<', "<!doctype "...` came from, a message that names neither
+the cause nor the remedy.
+
+The client therefore checks the content type before parsing. A non-JSON answer
+on 2xx or 404 becomes `server-unsupported`, which the panel renders as "this
+server is older than the app, update it". A non-JSON **5xx** keeps its own
+failure: a server that answered badly is not a server missing the feature, and
+telling someone to upgrade would send them after the wrong thing.
 
 ## Runtime availability
 

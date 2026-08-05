@@ -45,6 +45,7 @@ So:
 | `SessionMessageLoader` | Initial message loading, pagination, prefetch, retries, load state, and optimistic reconciliation | One runtime, directory, and session ID |
 | `global-session-status.ts` | Incremental non-idle session status index reconciled from events and authoritative directory snapshots | All known directories in the active runtime |
 | `session-ordering.ts` | Ephemeral lifecycle rank used by every user-visible session list | All known sessions in the active runtime |
+| `session-activity-timing.ts` | Elapsed time of the running turn and of the turn that just finished, plus the persisted starts that survive a reload | All known sessions in the active runtime |
 | `session-ui-store.ts` | Session selection, draft lifecycle, abort prompts, worktree metadata, SDK-facing action entrypoints | App UI state |
 | `useGlobalSessionsStore.ts` | Global active sessions, global archived sessions, `sessionsByDirectory` | All opened project/worktree session lists |
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |
@@ -127,6 +128,16 @@ Current consumers:
 Cross-directory selectors subscribe to the narrow child-store field they aggregate. Session aggregation listens to `state.session`. Live busy/retry state is also maintained in `global-session-status.ts`, where each row subscribes to one session ID instead of scanning every child store. Events update the index incrementally; authoritative per-directory status snapshots seed it, clear sessions omitted as idle, and reconcile missed events. Unrelated streaming events such as `message.part.delta` must not trigger global session/status scans.
 
 Session display order is independent from streaming-frequency `time.updated` publications. `session-ordering.ts` promotes a session exactly when its authoritative activity phase crosses `settled` (`idle`/`error`) and `active` (`busy`/`retry`) in either direction. Repeated busy/retry or idle/error events are no-ops. The first authoritative status snapshot establishes a baseline without synthetic promotions; later snapshots reconcile missed transitions. Root sessions compare lifecycle rank only with other roots, while child sessions compare lifecycle rank only with siblings sharing the same `parentID`, so child activity never moves its root conversation. Pins remain the first ordering bucket. The timestamp/creation fallback is frozen when a session first participates in ordering, so later metadata-only updates cannot reorder it; creation time and ID provide deterministic ties. Runtime switches clear all phases, baselines, and ranks.
+
+`session-activity-timing.ts` measures how long a turn has been running, because `SessionStatus` carries no timestamps. It is driven from the same two write paths as `global-session-status.ts`, so a row can never count a turn that index calls idle. A session gains a start on its first `active` observation and keeps it across repeated busy/retry events; settling converts that start into a finished duration, which rows show only while the session is unread and which is therefore never persisted.
+
+Starts are persisted so a reload resumes the same count, but a persisted start is a lookup table and never a claim of activity. **Nothing in the protocol marks where a turn begins.** OpenCode calls `SessionStatus.set` with `busy` at every step of the agent loop and publishes an event each time, so a busy event means "still running", not "just started"; after a refresh one of those repeats normally beats the first status snapshot, so treating it as a turn boundary reset the counter on nearly every reload. Turn *ends* are marked — `session.idle` and `session.error` fire once, live, and retire the persisted record — while a snapshot that omits a session is not evidence of anything, since it may simply not see it yet.
+
+That leaves the case with no observable answer: a turn that ended, and another that began, entirely while the tab was gone. Two bounds stand in for the evidence the client cannot have. A liveness stamp sits beside the start — refreshed while the session is observed active, at most every 15s, and stamped precisely as the page hides (`pagehide`/`visibilitychange`/`freeze`, written immediately rather than through deferred storage so it cannot lose that race) — and is compared against this page's `performance.timeOrigin`, so the measure is how long the app was absent rather than how long bootstrap took; a 20-second startup must not spend the allowance. Records may only be adopted within 90s of load, after which they are discarded — a backstop for a runtime whose event stream is down and where snapshots are therefore the only signal. A runtime switch resets the module, since the previous instance's turns are not ours.
+
+Reconciliation walks the running turns and asks the snapshot whether it covers each one, rather than being handed everything the snapshot covers. Only a live start can settle, and there are a handful of those against a directory's hundreds of sessions, so the pass stays proportional to the timing work and allocates nothing per poll. Malformed, wrong-shaped, over-age, and future-dated entries are rejected on read. The payload is not runtime-scoped: records live for seconds and are keyed by instance-unique session IDs, whereas the runtime key is derived from injected globals and is not guaranteed stable across early startup — a read under a key the previous page never wrote to is indistinguishable from "no turn was running".
+
+**Only the stamp expires a persisted start.** A snapshot that covers a session without reporting it busy is not proof the turn ended: bootstrap fetches status and sessions in parallel and directory scopes resolve at different times, so a snapshot legitimately arrives before it can see a running session. Treating one of those as a settle deleted the start moments before the real busy snapshot arrived, which reset every counter to zero on reload. Settles therefore act only on sessions that already have a live start in this page session.
 
 The active-session watchdog in `sync-context.tsx` (per-directory status polls and child-session discovery lists) runs its network calls through the shared background-network gate in `@/lib/background-network`, alongside poll-shaped git reads, global session pages, and command/skill discovery. Background fan-out must stay under that gate so the browser's per-origin connection pool keeps free sockets for interactive traffic — an uncapped startup burst previously queued the first session-open message fetch for seconds.
 
@@ -240,16 +251,38 @@ Examples of global-store updates performed in `session-actions.ts`:
 - `updateSessionTitle()` -> `upsertSession(result.data)`
 - `shareSession()` / `unshareSession()` -> `upsertSession(result.data)`
 - `archiveSession()` / `archiveSessions()` -> wait for server confirmation, then upsert each archived session
+- `unarchiveSession()` / `unarchiveSessions()` -> wait for server confirmation, then upsert each restored session
 - `deleteSession()` / `deleteSessions()` -> wait for server confirmation or `404`, then remove the session and its persisted state
 - `moveSessionToDirectory()` -> move the session between directory stores and update the global directory index
+
+### Restore (unarchive) contract
+
+The OpenCode server cannot clear `time.archived` over HTTP: `session.update`
+only applies the field when the payload carries a finite number, so an omitted
+key is a no-op and `null` is silently ignored. Restore therefore writes
+`time.archived = 0` (`UNARCHIVED_TIMESTAMP` in `session-actions.ts`). Every
+client-side reader classifies archive state by truthiness of `time.archived`,
+so `0` reads as active in the UI, the event reducer, and the OpenCode app/TUI.
+
+The server's `time_archived IS NULL` list filter still excludes such rows, so
+any query that wants a truthful active list must fetch inclusively
+(`archived: true`) and split client-side (`splitGlobalSessionsByArchived`).
+The global sessions store does this for its full and per-directory loads;
+directory bootstrap keeps using the server filter because live child stores
+must not hold archived sessions. A restored session re-enters its live
+directory store through the authoritative `session.updated` event the server
+publishes for the update; until then it remains fully visible through the
+global store (sidebar, switcher) and addressable by ID (message loading).
 
 Archive and delete actions capture the active runtime key when they start and
 recheck it before every store reconciliation, so a response
 produced by the previous runtime is rejected instead of mutating the current
-runtime's live or global session state. A guarded batch stops at the first
-observed runtime change: sessions the server already confirmed remain archived
-or deleted and stay in `archivedIds`/`deletedIds`, while every ID not confirmed
-on the captured runtime is returned in `failedIds` so existing partial-failure
+runtime's live or global session state. Restore follows the same guard: a
+stale completion returns `false` without touching any store. A guarded batch
+stops at the first observed runtime change: sessions the server already
+confirmed remain archived, restored, or deleted and stay in
+`archivedIds`/`restoredIds`/`deletedIds`, while every ID not confirmed on the
+captured runtime is returned in `failedIds` so existing partial-failure
 feedback stays truthful.
 Callers whose confirmation can span a runtime switch may pass an
 `expectedRuntimeKey` captured earlier; ordinary callers are guarded by default.

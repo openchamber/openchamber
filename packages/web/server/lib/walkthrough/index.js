@@ -333,6 +333,13 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
     return { ready: false, reason, model, generatedFileCount };
   }
 
+  // A resolved override/config model can still have no usable login. Refuse up
+  // front and omit the model — offering an unauthenticated selection in the
+  // picker is what made the old raw auth error feel like a product bug.
+  if (model.hasLogin === false) {
+    return { ready: false, reason: 'no-provider-login' };
+  }
+
   // Built with the same language the generation would use: the instruction is
   // part of the prompt, so a readiness answer computed without it would be
   // measuring a request nobody is going to send.
@@ -391,6 +398,13 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   const model = await resolveModel(directory, explicitModel);
   if (!model) {
     throw fail('No model is available — sign in to a provider first', 404, { code: 'no-model' });
+  }
+  if (model.hasLogin === false) {
+    throw fail(
+      `No OpenCode login found for provider "${model.providerID}" — sign in or choose a different model`,
+      401,
+      { code: 'no-provider-login', model },
+    );
   }
 
   const { digest, files, idByAlias, fileCount, hunkCount, generatedFileCount } = await loadCurrentDiff(directory, source, deps);
@@ -493,6 +507,9 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     }
     if (error?.code === 'output-exhausted') {
       return fail(error.message, 409, { code: 'output-exhausted', model });
+    }
+    if (error?.code === 'no-provider-login') {
+      return fail(error.message, 401, { code: 'no-provider-login', model });
     }
     return null;
   };

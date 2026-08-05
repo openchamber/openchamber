@@ -522,6 +522,73 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariant).toBe('high');
   });
 
+  test('[issue-2404] setAgent keeps session model override over agent default model', () => {
+    // Custom agent default is model-a; user manually overrode to model-b for this session.
+    // Re-applying setAgent (e.g. after delegated subtask completion rematerializes the
+    // parent) must keep model-b rather than resetting to the agent pin.
+    const sessionId = 'ses_2404_model_override';
+    const multiModelProvider = {
+      ...provider('provider', 'model-a'),
+      models: [
+        provider('provider', 'model-a').models[0],
+        provider('provider', 'model-b').models[0],
+      ],
+    };
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useSelectionStore.getState().saveSessionModelSelection(sessionId, 'provider', 'model-b');
+    useSelectionStore.getState().saveAgentModelForSession(sessionId, 'custom-agent', 'provider', 'model-b');
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [multiModelProvider],
+      agents: [testAgent('custom-agent', { model: { providerID: 'provider', modelID: 'model-a' } })],
+      currentProviderId: 'provider',
+      currentModelId: 'model-b',
+      currentAgentName: 'custom-agent',
+      selectionSource: 'manual',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('custom-agent');
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('provider');
+    expect(state.currentModelId).toBe('model-b');
+    expect(useSelectionStore.getState().getAgentModelForSession(sessionId, 'custom-agent')).toEqual({
+      providerId: 'provider',
+      modelId: 'model-b',
+    });
+  });
+
+  test('[issue-2404] setAgent uses agent default when no session override exists', () => {
+    const sessionId = 'ses_2404_agent_default';
+    const multiModelProvider = {
+      ...provider('provider', 'model-a'),
+      models: [
+        provider('provider', 'model-a').models[0],
+        provider('provider', 'model-b').models[0],
+      ],
+    };
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [multiModelProvider],
+      agents: [testAgent('custom-agent', { model: { providerID: 'provider', modelID: 'model-a' } })],
+      currentProviderId: 'provider',
+      currentModelId: 'model-b',
+      currentAgentName: undefined,
+      selectionSource: 'auto',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('custom-agent');
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('provider');
+    expect(state.currentModelId).toBe('model-a');
+  });
+
   test('loadAgents does not fetch OpenCode config directly', async () => {
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,

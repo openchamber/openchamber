@@ -375,6 +375,8 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
   - SSE forwarders: `GET /api/global/event`, `GET /api/event`
     - Downstream heartbeats keep clients and intermediaries alive, while a separate upstream-only stall watchdog closes the downstream response when OpenCode stops producing bytes so clients reconnect instead of trusting synthetic heartbeats indefinitely. Each watchdog reset uses the current load-aware timeout, matching the shared event transport.
   - Session message forwarder: `POST /api/session/:sessionId/message`
+  - Interactive OAuth forwarder: `POST /api/provider/:providerID/oauth/callback`
+    - Upstream blocks inside this call for the whole browser sign-in (device-code polling or a loopback redirect), so it is exempt from the ordinary request deadline and uses a 15-minute proxy timeout instead of `LONG_REQUEST_TIMEOUT_MS`. All other `/api/provider/*` routes, including `oauth/authorize`, keep the ordinary deadline.
   - Generic `/api/*` forwarding with hop-by-hop header filtering
   - Windows `/session` merge fallback path behavior
   - OpenCode readiness gate for proxied `/api` requests

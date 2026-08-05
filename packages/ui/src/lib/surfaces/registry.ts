@@ -152,6 +152,10 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
 const SURFACE_BY_ID = new Map(CONTEXT_SURFACES.map((surface) => [surface.id, surface]));
 const FRACTION_BY_MODE = new Map(CONTEXT_SURFACES.map((surface) => [surface.mode, surface.defaultWidthFraction]));
 
+// Tablet width and up: below this the walkthrough cannot show a stop and its
+// code side by side, which is the whole point of the surface.
+export const WALKTHROUGH_MIN_WIDTH = 768;
+
 export const getContextSurfaceWidthFraction = (mode: ContextPanelMode): number => {
   return FRACTION_BY_MODE.get(mode) ?? 1 / 2;
 };
@@ -186,4 +190,37 @@ export const sortContextSurfaces = (railOrder: readonly string[]): ContextSurfac
   }
 
   return ordered;
+};
+
+type VisibleRailSurfacesOptions = {
+  railOrder: readonly string[];
+  planModeEnabled: boolean;
+  isVSCode: boolean;
+  screenWidth: number;
+  tabs: readonly { mode: ContextPanelMode }[];
+};
+
+/**
+ * The context panel rail's visible, user-ordered surfaces. Shared by the rail
+ * (for rendering and number badges) and the global surface-switch shortcut so
+ * both agree on which surface each digit maps to.
+ *
+ * Content-driven surfaces are hidden (not disabled) until content exists; an
+ * existing tab keeps them visible even if the content source went away.
+ */
+export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOptions): ContextSurfaceDescriptor[] => {
+  return sortContextSurfaces(options.railOrder).filter((surface) => {
+    if (surface.id === 'plan' && !options.planModeEnabled) {
+      return false;
+    }
+    // The walkthrough needs room for a stop list beside real code, and its
+    // diffs come from OpenChamber's Git routes, which VS Code does not serve.
+    if (surface.id === 'walkthrough' && (options.isVSCode || options.screenWidth < WALKTHROUGH_MIN_WIDTH)) {
+      return false;
+    }
+    if (surface.availability === 'has-content') {
+      return options.tabs.some((tab) => tab.mode === surface.mode);
+    }
+    return true;
+  });
 };

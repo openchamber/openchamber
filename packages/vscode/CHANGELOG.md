@@ -1,3 +1,11 @@
+## [1.18.1] - 2026-08-04
+
+- **Providers:** signing in to an OAuth-only provider (such as Cursor) now completes in the browser — the login is stored and the provider updates instead of remaining signed out. OAuth-only providers show a Connect flow instead of an API key form, and their models stay hidden until you are signed in.
+- **Sessions:** archived sessions can now be restored to the active list — from the sidebar context menu, the archived-sessions page, or the bulk-selection bar (thanks to @makeittech).
+- Providers: sign-ins that need extra details (such as GitHub Copilot Enterprise) now ask for them before opening the browser, and device codes come with a working copy button.
+- Chat: a manually chosen model now stays selected after a delegated subtask finishes, instead of reverting to the agent's default model.
+- Chat: Ctrl/Cmd+L now adds the selected text to the chat input, or focuses it when nothing is selected.
+
 ## [1.18.0] - 2026-08-04
 
 - **Providers:** custom OpenAI-compatible providers can now be added and edited from Settings, including their endpoint, models, credentials, headers, and configuration scope (thanks to @makeittech).
