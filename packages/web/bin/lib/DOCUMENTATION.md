@@ -59,6 +59,7 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Implements `openchamber guardian status|start|stop|reload` on POSIX and Windows.
   - Prefers authenticated IPC for reload/stop. POSIX direct PID fallback is allowed only after the persisted guardian marker's process identity and authoritative OS liveness are revalidated; missing or ambiguous identity fails closed. Windows refuses PID signaling after IPC failure to avoid a PID-reuse TOCTOU and reports that authenticated IPC must recover.
   - Preserves human, `--quiet`, `--json`, and non-TTY output contracts while keeping marker ownership and guardian lifecycle logic in the server guardian modules. On POSIX, startup atomically records the verified helper-bound transport identity under the current marker token; stale cleanup refuses old markers or artifact replacements. Standalone startup releases its marker only when guardian rollback reports settled cleanup; transport, store, or recovered-child uncertainty retains guardian/marker retry authority.
+  - `shouldAutoStartGuardian` derives a single CLI-boundary skip-start decision (`isSkipStartConfigured`, reading `OPENCODE_SKIP_START` / `OPENCHAMBER_SKIP_OPENCODE_START`). When the operator has explicitly configured external OpenCode, the CLI does NOT autostart the guardian merely for OpenCode ownership — the configured external OpenCode is used as requested and a previously running guardian (possibly a separate service) is left untouched.
 
 - `commands-connect-url.js`
   - Implements `openchamber connect-url`.

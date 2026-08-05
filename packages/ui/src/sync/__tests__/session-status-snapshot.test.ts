@@ -6,7 +6,7 @@ import { INITIAL_STATE, type State } from "../types"
 import type { DirectoryStore } from "../child-store"
 import {
   applySessionStatusSnapshot,
-  clearDirectorySessionStatusesForUnavailable,
+  markDirectorySessionStatusesUnavailable,
   needsSnapshotAfterStatusPoll,
   reconcileDirectorySessionStatusSnapshot,
   shouldTriggerStaleResync,
@@ -116,7 +116,7 @@ describe("applySessionStatusSnapshot", () => {
       expect(useGlobalSessionStatusStore.getState().statusById.has("ses_a")).toBe(false)
     })
 
-    test("does not treat unavailable OpenCode as an empty snapshot, but removes stale live evidence", () => {
+    test("does not treat unavailable OpenCode as an empty snapshot: preserves last known status and marks unavailable", () => {
       const messages = streamingMessage()
       const store = createDirectoryStore({
         session: [{ id: "ses_a" } as State["session"][number]],
@@ -128,12 +128,16 @@ describe("applySessionStatusSnapshot", () => {
         properties: { sessionID: "ses_a", status: { type: "busy" } },
       } as never)
 
-      const changed = clearDirectorySessionStatusesForUnavailable("/repo", store, ["ses_a"])
+      const changed = markDirectorySessionStatusesUnavailable()
 
-      expect(changed).toBe(true)
-      expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
+      // A transient unavailability must NOT lower busy to idle and must NOT
+      // destroy the global live index. Status data is preserved as last known;
+      // only the freshness flag flips so consumers can show "reconnecting".
+      expect(changed).toBe(false)
+      expect(store.getState().session_status.ses_a).toEqual(BUSY)
       expect(store.getState().message.ses_a).toBe(messages)
-      expect(useGlobalSessionStatusStore.getState().statusById.has("ses_a")).toBe(false)
+      expect(useGlobalSessionStatusStore.getState().statusById.get("ses_a")?.status).toEqual(BUSY)
+      expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(true)
     })
 
     test("replacement followed by a new runtime's empty snapshot cannot retain old busy state", () => {
@@ -146,11 +150,22 @@ describe("applySessionStatusSnapshot", () => {
         properties: { sessionID: "ses_a", status: { type: "busy" } },
       } as never)
 
-      clearDirectorySessionStatusesForUnavailable("/repo", store, ["ses_a"])
+      // A real runtime replacement destroys stale data and blocks old events
+      // (issue #2421). resetGlobalSessionStatus clears the index and resets
+      // the freshness flag (a clean reset, not a transient failure).
+      resetGlobalSessionStatus({ blockEventUpdates: true })
+      expect(useGlobalSessionStatusStore.getState().statusById.has("ses_a")).toBe(false)
+      expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(false)
+      expect(useGlobalSessionStatusStore.getState().acceptEventUpdates).toBe(false)
+
+      // The new runtime's authoritative empty snapshot lowers the child store
+      // to idle and re-enables event updates, clearing the unavailability flag.
       reconcileDirectorySessionStatusSnapshot("/repo", store, {}, ["ses_a"], "authoritative")
 
       expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
       expect(useGlobalSessionStatusStore.getState().statusById.has("ses_a")).toBe(false)
+      expect(useGlobalSessionStatusStore.getState().acceptEventUpdates).toBe(true)
+      expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(false)
     })
   })
 })
@@ -232,5 +247,164 @@ describe("shouldTriggerStaleResync", () => {
     expect(shouldTriggerStaleResync(now - 25_000, now - 20_000, now)).toBe(true)
     // 10s since last activity (< 20s default)
     expect(shouldTriggerStaleResync(now - 10_000, 0, now)).toBe(false)
+  })
+})
+
+// Regression tests for issue #2421 / PR #2485: transient unavailability
+// (null watchdog fetch, SSE disconnect, transport switch) must preserve last
+// known busy/retry status and mark it unavailable, NOT lower it to idle.
+describe("transient unavailability preserves busy/retry status (unknown != idle)", () => {
+  beforeEach(() => {
+    resetGlobalSessionStatus()
+    resetSessionOrdering()
+  })
+
+  function busyStore() {
+    return createDirectoryStore({
+      session: [{ id: "ses_a" } as State["session"][number]],
+      session_status: { ses_a: BUSY },
+      message: { ses_a: streamingMessage() },
+    })
+  }
+
+  function seedGlobalBusy() {
+    applyGlobalSessionStatusEvent("/repo", {
+      type: "session.status",
+      properties: { sessionID: "ses_a", status: { type: "busy" } },
+    } as never)
+  }
+
+  test("busy + one failed/null watchdog status fetch → status preserved, unavailable flag set", () => {
+    const store = busyStore()
+    seedGlobalBusy()
+    expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(false)
+
+    // Watchdog null-fetch path (resyncDirectorySessionStatuses calls this).
+    const changed = markDirectorySessionStatusesUnavailable()
+
+    expect(changed).toBe(false)
+    // Child store: busy preserved, NOT lowered to idle.
+    expect(store.getState().session_status.ses_a).toEqual(BUSY)
+    // Global index: busy preserved, NOT destroyed.
+    expect(useGlobalSessionStatusStore.getState().statusById.get("ses_a")?.status).toEqual(BUSY)
+    // Freshness flag set.
+    expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(true)
+  })
+
+  test("busy + repeated failed/null status fetches → status preserved, flag stays set", () => {
+    const store = busyStore()
+    seedGlobalBusy()
+
+    markDirectorySessionStatusesUnavailable()
+    markDirectorySessionStatusesUnavailable()
+    markDirectorySessionStatusesUnavailable()
+
+    expect(store.getState().session_status.ses_a).toEqual(BUSY)
+    expect(useGlobalSessionStatusStore.getState().statusById.get("ses_a")?.status).toEqual(BUSY)
+    expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(true)
+  })
+
+  test("busy + transient SSE disconnect (markDirectorySessionStatusesUnavailable) → status preserved, NOT idle", () => {
+    const store = busyStore()
+    seedGlobalBusy()
+
+    // onDisconnect path marks unavailable without destroying data.
+    markDirectorySessionStatusesUnavailable()
+
+    expect(store.getState().session_status.ses_a).toEqual(BUSY)
+    expect(useGlobalSessionStatusStore.getState().statusById.get("ses_a")?.status).toEqual(BUSY)
+    expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(true)
+  })
+
+  test("busy + transport switch (markDirectorySessionStatusesUnavailable) → status preserved, NOT idle", () => {
+    const store = busyStore()
+    seedGlobalBusy()
+
+    // onTransportSwitch path marks unavailable without destroying data.
+    markDirectorySessionStatusesUnavailable()
+
+    expect(store.getState().session_status.ses_a).toEqual(BUSY)
+    expect(useGlobalSessionStatusStore.getState().statusById.get("ses_a")?.status).toEqual(BUSY)
+    expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(true)
+  })
+
+  test("successful authoritative {} after reconnect → idle applied, unavailable flag cleared", () => {
+    const store = busyStore()
+    seedGlobalBusy()
+    markDirectorySessionStatusesUnavailable()
+    expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(true)
+
+    // Reconnect brings a fresh authoritative empty snapshot.
+    const changed = reconcileDirectorySessionStatusSnapshot("/repo", store, {}, ["ses_a"], "authoritative")
+
+    expect(changed).toBe(true)
+    expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
+    expect(useGlobalSessionStatusStore.getState().statusById.has("ses_a")).toBe(false)
+    expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(false)
+  })
+
+  test("successful authoritative busy snapshot after reconnect → busy applied, flag cleared", () => {
+    const store = busyStore()
+    seedGlobalBusy()
+    markDirectorySessionStatusesUnavailable()
+
+    reconcileDirectorySessionStatusSnapshot(
+      "/repo", store, { ses_a: { type: "busy" } }, ["ses_a"], "authoritative",
+    )
+
+    expect(store.getState().session_status.ses_a).toEqual(BUSY)
+    expect(useGlobalSessionStatusStore.getState().statusById.get("ses_a")?.status).toEqual(BUSY)
+    expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(false)
+  })
+
+  test("monotonic poll after unavailability does NOT lower busy to idle (escalation still applies)", () => {
+    const store = busyStore()
+    seedGlobalBusy()
+    markDirectorySessionStatusesUnavailable()
+
+    // A monotonic poll (the watchdog's default) never lowers busy to idle from
+    // omission; it would escalate via needsSnapshotAfterStatusPoll instead.
+    const changed = applySessionStatusSnapshot(store, {} as StatusSnapshot, ["ses_a"], "monotonic")
+
+    expect(changed).toBe(false)
+    expect(store.getState().session_status.ses_a).toEqual(BUSY)
+  })
+
+  test("real runtime replacement (resetGlobalSessionStatus) clears stale data and blocks events", () => {
+    const store = busyStore()
+    seedGlobalBusy()
+
+    // Real runtime replacement: stale activity from the old runtime must NOT
+    // be presented as current (issue #2421).
+    resetGlobalSessionStatus({ blockEventUpdates: true })
+
+    expect(useGlobalSessionStatusStore.getState().statusById.has("ses_a")).toBe(false)
+    expect(useGlobalSessionStatusStore.getState().acceptEventUpdates).toBe(false)
+    expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(false)
+
+    // A stale status event from the old runtime is blocked.
+    applyGlobalSessionStatusEvent("/repo", {
+      type: "session.status",
+      properties: { sessionID: "ses_a", status: { type: "busy" } },
+    } as never)
+    expect(useGlobalSessionStatusStore.getState().statusById.has("ses_a")).toBe(false)
+
+    // The new runtime's authoritative snapshot re-enables events.
+    reconcileDirectorySessionStatusSnapshot("/repo", store, {}, ["ses_a"], "authoritative")
+    expect(useGlobalSessionStatusStore.getState().acceptEventUpdates).toBe(true)
+    expect(useGlobalSessionStatusStore.getState().statusUnavailable).toBe(false)
+  })
+
+  test("markDirectorySessionStatusesUnavailable does not touch the child store's session_status map", () => {
+    const store = createDirectoryStore({
+      session: [{ id: "ses_a" } as State["session"][number]],
+      session_status: { ses_a: BUSY, ses_b: { type: "retry", attempt: 1, message: "x", next: 5 } },
+    })
+    const before = { ...store.getState().session_status }
+
+    markDirectorySessionStatusesUnavailable()
+
+    // The child store's status map is byte-for-byte preserved.
+    expect(store.getState().session_status).toEqual(before)
   })
 })

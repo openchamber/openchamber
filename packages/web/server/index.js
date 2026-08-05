@@ -582,6 +582,16 @@ const {
 
 const ENV_SKIP_OPENCODE_START = process.env.OPENCODE_SKIP_START === 'true' ||
                                     process.env.OPENCHAMBER_SKIP_OPENCODE_START === 'true';
+// Normalized ownership decision: does this OpenChamber instance own a managed
+// local OpenCode? `OPENCODE_SKIP_START` / `OPENCHAMBER_SKIP_START` (explicit
+// operator opt-out) OR a runtime-detected external OpenCode server means this
+// instance does NOT own/manage a local OpenCode process. Guardian autostart,
+// guardian adoption, guardian-managed spawn, restart handoff, and legacy
+// managed spawn all route through this single decision instead of re-reading
+// the raw env flag at every call site. `isExternalOpenCode` is the runtime
+// mirror of the same operator decision, set during bootstrap; reading both
+// keeps the predicate authoritative before and after bootstrap.
+const ownsManagedLocalOpenCode = () => !ENV_SKIP_OPENCODE_START && !isExternalOpenCode;
 const ENV_DESKTOP_NOTIFY = (() => {
   if (process.env.OPENCHAMBER_DESKTOP_NOTIFY === 'true') {
     return true;
@@ -1276,6 +1286,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
     messageStreamRuntime = value;
   },
   shouldSkipOpenCodeStop: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode,
+  ownsManagedLocalOpenCode: () => ownsManagedLocalOpenCode(),
   getOpenCodePort: () => openCodePort,
   getOpenCodeProcess: () => openCodeProcess,
   setOpenCodeProcess: (value) => {
@@ -1797,7 +1808,7 @@ async function main(options = {}) {
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
     getOpenCodeProcessInfo: () => {
-      const managed = Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode);
+      const managed = Boolean((openCodeProcess || openCodePort) && ownsManagedLocalOpenCode());
       // Only ever expose pid/port for a server WE manage. The Electron-side
       // killer kills by port (lsof + kill -KILL), so returning a port we don't
       // own — e.g. an external/desktop OpenCode on 4096 we attached to — would

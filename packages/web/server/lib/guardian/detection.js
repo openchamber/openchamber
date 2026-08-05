@@ -35,11 +35,15 @@ import { isSupportedGuardianPlatform } from './ipc-transport.js';
  *       ACL'd to the current Windows user via `icacls`; the IPC server
  *       binds `127.0.0.1` only on an ephemeral port and atomically publishes
  *       the port in the discovery file. Trust boundary: same-Windows-user
- *       local processes. This is **weaker** than the Linux `0600` socket
- *       model because any process running as that user can read the
- *       discovery file and dial the loopback port; the Linux trust boundary
- *       additionally requires the caller to own the socket file. Documented
- *       in `plans/vscode-handoff-design-notes.md` ("T2 trust model" section).
+ *       local processes. Both platforms share the same OS-user/UID trust
+ *       boundary: POSIX `0600` restricts socket access to the owning UID,
+ *       not to the creating process, so any process running as that UID can
+ *       connect — an additional peer-credential mechanism (e.g.
+ *       `SO_PEERCRED`) would be required for process-level restriction and
+ *       is not enforced here. The Windows ACL + loopback binding provides
+ *       the equivalent user-scoped boundary through a different mechanism.
+ *       Documented in `plans/vscode-handoff-design-notes.md` ("T2 trust
+ *       model" section).
  *
  *   Cross-process adoption with a `claimCapability` (i.e. authenticating a
  *   caller that holds the spawn-time credential) is intentionally out of

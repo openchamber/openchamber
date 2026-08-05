@@ -388,6 +388,22 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       runtimeIdentity: guardianRuntimeIdentity,
     }
     : null;
+
+  // Normalized ownership decision: does this OpenChamber instance own a
+  // managed local OpenCode? `OPENCODE_SKIP_START` / `OPENCHAMBER_SKIP_START`
+  // (or auto-detected external OpenCode) mean the operator told OpenChamber
+  // NOT to own/manage a local OpenCode process. Guardian autostart, guardian
+  // adoption, guardian-managed spawn, restart handoff, and legacy managed
+  // spawn all route through this single decision instead of re-reading the
+  // raw env flag at every call site.
+  //
+  // `ENV_SKIP_OPENCODE_START` is the explicit operator opt-out; the
+  // auto-detected external branch is reflected at runtime via
+  // `state.isExternalOpenCode`, which the bootstrap/restart paths set after
+  // probing. The bootstrap reordering below ensures adoption is skipped
+  // before `state.isExternalOpenCode` is ever set, so this predicate is
+  // authoritative at every guardian entry point.
+  const ownsManagedLocalOpenCode = () => !env.ENV_SKIP_OPENCODE_START;
   // Keep credential values in explicit launch leases rather than one runtime-
   // lifetime Set. A lease remains active while its child or cleanup path can
   // still produce the associated startup output; confirmed child/pipe cleanup
@@ -513,6 +529,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     return fences.filter((fence) => fence && typeof fence === 'object');
   };
   const getGuardianOutcomeUnknownFence = () => getGuardianOutcomeUnknownFences()[0] || null;
+  // A fence is keyed by its durable operation ID when present, falling back to
+  // a synthetic kind/incarnation/owner key for legacy injected clients. The
+  // replacement operation must remove the previous fence's key and add the
+  // next fence's key in a single state transition even when the operation ID
+  // changes between prepareHandoff and abortHandoff.
+  const guardianFenceKey = (fence) => fence?.operationId
+    || `${fence?.kind}:${fence?.incarnation || ''}:${fence?.owner?.ownerInstanceId || ''}`;
   const setGuardianOutcomeUnknownFence = (fence) => {
     const fences = getGuardianOutcomeUnknownFences();
     if (!fence) {
@@ -522,11 +545,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       syncToHmrState();
       return;
     }
-    const key = fence.operationId || `${fence.kind}:${fence.incarnation || ''}:${fence.owner?.ownerInstanceId || ''}`;
+    const key = guardianFenceKey(fence);
     const next = [...fences];
-    const index = next.findIndex((candidate) => (
-      (candidate.operationId || `${candidate.kind}:${candidate.incarnation || ''}:${candidate.owner?.ownerInstanceId || ''}`) === key
-    ));
+    const index = next.findIndex((candidate) => guardianFenceKey(candidate) === key);
     if (index >= 0) next[index] = fence;
     else next.push(fence);
     state.guardianOutcomeUnknownFences = next;
@@ -536,12 +557,46 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
   const clearGuardianOutcomeUnknownFence = (fence) => {
     const fences = getGuardianOutcomeUnknownFences();
-    const key = fence?.operationId || `${fence?.kind}:${fence?.incarnation || ''}:${fence?.owner?.ownerInstanceId || ''}`;
-    const next = fences.filter((candidate) => (
-      (candidate.operationId || `${candidate.kind}:${candidate.incarnation || ''}:${candidate.owner?.ownerInstanceId || ''}`) !== key
-    ));
+    const key = guardianFenceKey(fence);
+    const next = fences.filter((candidate) => guardianFenceKey(candidate) !== key);
     state.guardianOutcomeUnknownFences = next;
     state.guardianOutcomeUnknownFence = next[0] || null;
+    syncToHmrState();
+  };
+  // Replace a previous fence with a built replacement fence in a single state
+  // transition and a single HMR sync, even when the operation ID changes. The
+  // replacement must be built and validated BEFORE this call so a build failure
+  // leaves the old fence untouched. This is the atomic supersession primitive:
+  // it never reduces fence state to an intermediate "no fence" window between
+  // clearing the old key and adding the new key.
+  const replaceGuardianOutcomeUnknownFence = (previousFence, nextFence) => {
+    if (!nextFence || typeof nextFence !== 'object' || Array.isArray(nextFence)) {
+      throw new Error('Guardian outcome-unknown fence replacement requires a built fence object');
+    }
+    const previousKey = guardianFenceKey(previousFence);
+    const nextKey = guardianFenceKey(nextFence);
+    const fences = getGuardianOutcomeUnknownFences();
+    // One state transition: drop the previous-key entry, then upsert the
+    // replacement by its (possibly different) key. The old fence is removed and
+    // the new fence is added in the same `state.guardianOutcomeUnknownFences`
+    // assignment, so there is no intermediate window with no fail-closed fence.
+    const withoutPrevious = previousKey === nextKey
+      ? fences
+      : fences.filter((candidate) => guardianFenceKey(candidate) !== previousKey);
+    const next = [];
+    let upserted = false;
+    for (const candidate of withoutPrevious) {
+      if (guardianFenceKey(candidate) === nextKey) {
+        next.push(nextFence);
+        upserted = true;
+      } else {
+        next.push(candidate);
+      }
+    }
+    if (!upserted) next.push(nextFence);
+    state.guardianOutcomeUnknownFences = next;
+    state.guardianOutcomeUnknownFence = next[0] || null;
+    state.guardianOutcomeUnknownLease = guardianOutcomeUnknownLease || null;
     syncToHmrState();
   };
   const releaseGuardianOutcomeUnknownLease = () => {
@@ -573,7 +628,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       );
     }
   };
-  const persistGuardianOutcomeUnknownFence = ({
+  // Build and validate a fence object from a lost-response description WITHOUT
+  // mutating fence state, the lease closure variable, or HMR state. This is a
+  // pure builder: throwing here (e.g. missing owner identity) must leave the
+  // existing fence state untouched so callers can perform atomic supersession
+  // as build-then-replace rather than clear-then-persist.
+  const buildGuardianOutcomeUnknownFence = ({
     kind,
     incarnation,
     owner,
@@ -585,7 +645,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     launchSpec,
     oldStopped,
     source,
-    lease,
     operationId,
   }) => {
     const initialSpawn = kind === 'initial-spawn';
@@ -607,18 +666,17 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       && source.code !== GUARDIAN_AMBIGUOUS_REQUEST_CODE
       ? source.code
       : source?.originalCode;
-    guardianOutcomeUnknownLease = lease || guardianOutcomeUnknownLease;
-    setGuardianOutcomeUnknownFence({
+    return {
       version: 1,
       kind,
       ...(typeof durableOperationId === 'string' && durableOperationId.length > 0 ? { operationId: durableOperationId } : {}),
       ...(incarnation ? { incarnation } : {}),
       owner: { ...fenceOwner },
-       ...(Number.isSafeInteger(boundRecord?.revision) ? { revision: boundRecord.revision } : {}),
-       ...(Number.isSafeInteger(boundRecord?.leaseExpiresAt)
-         ? { leaseExpiresAt: boundRecord.leaseExpiresAt }
-         : {}),
-       ...(typeof boundRecord?.mac === 'string' ? { mac: boundRecord.mac } : {}),
+      ...(Number.isSafeInteger(boundRecord?.revision) ? { revision: boundRecord.revision } : {}),
+      ...(Number.isSafeInteger(boundRecord?.leaseExpiresAt)
+        ? { leaseExpiresAt: boundRecord.leaseExpiresAt }
+        : {}),
+      ...(typeof boundRecord?.mac === 'string' ? { mac: boundRecord.mac } : {}),
       ...(successorOwner ? { successorOwner: { ...successorOwner } } : {}),
       ...(cleanupTarget ? { cleanupTarget } : {}),
       ...(rollbackIncarnation ? { rollbackIncarnation } : {}),
@@ -629,7 +687,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       ...(typeof originalCode === 'string' && originalCode !== GUARDIAN_AMBIGUOUS_REQUEST_CODE
         ? { originalCode }
         : {}),
-    });
+    };
+  };
+  const persistGuardianOutcomeUnknownFence = (params) => {
+    const fence = buildGuardianOutcomeUnknownFence(params);
+    // Retain the startup-secret lease for this fence. This assignment happens
+    // only after the pure builder has succeeded, so a validation failure does
+    // not silently retain a lease for a fence that was never constructed.
+    guardianOutcomeUnknownLease = params.lease || guardianOutcomeUnknownLease;
+    setGuardianOutcomeUnknownFence(fence);
   };
 
   // Reset the OpenCode API prefix detection state. Mirrors the legacy
@@ -1601,12 +1667,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             // prepared record in scope at this catch point is `oldChild`
             // (the authenticated handoff-prepared candidate matched to the
             // fence). The abort-handoff ambiguity fence supersedes the
-            // prepare-kind fence being reconciled: clearing `boundFence`
-            // before persisting keeps a single fence keyed by the new kind
-            // so a later reconciliation does not replay the non-idempotent
-            // abortHandoff RPC against the still-prepared child.
-            clearGuardianOutcomeUnknownFence(boundFence);
-            persistGuardianOutcomeUnknownFence({
+            // prepare-kind fence being reconciled as a single atomic
+            // replacement: build the replacement first, then replace the old
+            // fence in one state transition + one HMR sync. If the build throws
+            // (e.g. missing owner identity) the old prepare fence stays in
+            // place. The replacement is keyed by the abort operation ID (which
+            // differs from the prepare operation ID), so a later
+            // reconciliation does not replay the non-idempotent abortHandoff RPC
+            // against the still-prepared child.
+            const replacementFence = buildGuardianOutcomeUnknownFence({
               kind: 'abort-handoff',
               incarnation: boundFence.incarnation,
               owner: boundFence.owner,
@@ -1614,6 +1683,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
               source: error,
               lease: guardianOutcomeUnknownLease,
             });
+            replaceGuardianOutcomeUnknownFence(boundFence, replacementFence);
           }
           throw error;
         }
@@ -1655,8 +1725,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       state.isOpenCodeReady = true;
       state.lastOpenCodeError = null;
       state.openCodeNotReadySince = 0;
-        releaseGuardianOutcomeUnknownLease();
-        clearGuardianOutcomeUnknownFence(boundFence);
+      releaseGuardianOutcomeUnknownLease();
+      clearGuardianOutcomeUnknownFence(boundFence);
       syncToHmrState();
       return { adopted: true };
     }
@@ -1666,39 +1736,39 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       // terminal state. Never issue a second stop: first require an exact
       // owner/incarnation/revision/lease/MAC record proving the target is
       // terminal, then do the final owner-scoped successor reconciliation.
-        let terminalConfirmation;
-        try {
-          terminalConfirmation = await confirmGuardianTerminal(client, boundFence);
-        } catch (error) {
-          throw createGuardianOutcomeUnknownError(
-            boundFence,
-            `Guardian stop fence terminal confirmation remains unresolved: ${error?.message || String(error)}`,
-          );
-        }
-        const terminalFence = terminalConfirmation.fence;
-        const finalChildren = await readGuardianChildList(client);
+      let terminalConfirmation;
+      try {
+        terminalConfirmation = await confirmGuardianTerminal(client, boundFence);
+      } catch (error) {
+        throw createGuardianOutcomeUnknownError(
+          boundFence,
+          `Guardian stop fence terminal confirmation remains unresolved: ${error?.message || String(error)}`,
+        );
+      }
+      const terminalFence = terminalConfirmation.fence;
+      const finalChildren = await readGuardianChildList(client);
 
-       if (terminalFence.cleanupTarget === 'old') {
-         const successor = finalChildren.find((child) => (
-           child?.state === 'active'
-           && guardianChildMatchesOwner(child, terminalFence.successorOwner)
-           && child?.incarnation !== terminalFence.incarnation
-         )) || null;
-         if (!successor) {
-           if (!terminalFence.successorOwner) {
+      if (terminalFence.cleanupTarget === 'old') {
+        const successor = finalChildren.find((child) => (
+          child?.state === 'active'
+          && guardianChildMatchesOwner(child, terminalFence.successorOwner)
+          && child?.incarnation !== terminalFence.incarnation
+        )) || null;
+        if (!successor) {
+          if (!terminalFence.successorOwner) {
             state.openCodeProcess = null;
             state.currentIncarnation = null;
             state.currentOwner = null;
-              releaseGuardianOutcomeUnknownLease();
-              clearGuardianOutcomeUnknownFence(terminalFence);
+            releaseGuardianOutcomeUnknownLease();
+            clearGuardianOutcomeUnknownFence(terminalFence);
             syncToHmrState();
             return { adopted: false };
           }
           throw createGuardianOutcomeUnknownError(boundFence);
         }
-         const successorFence = bindGuardianFenceSuccessor(terminalFence, successor);
-         const checkedSuccessor = await confirmGuardianFenceAdoption(client, successorFence, { successor: true });
-         const successorOwner = checkedSuccessor.owner;
+        const successorFence = bindGuardianFenceSuccessor(terminalFence, successor);
+        const checkedSuccessor = await confirmGuardianFenceAdoption(client, successorFence, { successor: true });
+        const successorOwner = checkedSuccessor.owner;
         retainGuardianStartupSecretLease(checkedSuccessor.child.incarnation, guardianOutcomeUnknownLease);
         state.openCodeProcess = createGuardianChildProxy({
           pid: checkedSuccessor.child.pid,
@@ -1726,19 +1796,19 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         return { adopted: true };
       }
 
-       if (terminalFence.cleanupTarget === 'successor') {
-         if (terminalFence.oldStopped === true) {
+      if (terminalFence.cleanupTarget === 'successor') {
+        if (terminalFence.oldStopped === true) {
           state.openCodeProcess = null;
           state.currentIncarnation = null;
           state.currentOwner = null;
-            releaseGuardianOutcomeUnknownLease();
-            clearGuardianOutcomeUnknownFence(terminalFence);
+          releaseGuardianOutcomeUnknownLease();
+          clearGuardianOutcomeUnknownFence(terminalFence);
           syncToHmrState();
           return { adopted: false };
         }
         const rollbackChild = finalChildren.find((child) => (
-           child?.incarnation === terminalFence.rollbackIncarnation
-           && guardianChildMatchesOwner(child, terminalFence.rollbackOwner)
+          child?.incarnation === terminalFence.rollbackIncarnation
+          && guardianChildMatchesOwner(child, terminalFence.rollbackOwner)
           && ['active', 'handoff-prepared'].includes(child.state)
         )) || null;
         if (!rollbackChild || !hasCompleteGuardianRecordBinding(rollbackChild)) {
@@ -1748,14 +1818,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           version: 1,
           kind: 'prepare',
           incarnation: rollbackChild.incarnation,
-           owner: { ...terminalFence.rollbackOwner },
+          owner: { ...terminalFence.rollbackOwner },
           revision: rollbackChild.revision,
           leaseExpiresAt: rollbackChild.leaseExpiresAt,
           mac: rollbackChild.mac,
           oldStopped: false,
         };
         setGuardianOutcomeUnknownFence(rollbackFence);
-         return reconcileGuardianOutcomeUnknownFence({ client, fence: rollbackFence });
+        return reconcileGuardianOutcomeUnknownFence({ client, fence: rollbackFence });
       }
     }
 
@@ -1776,11 +1846,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       );
     }
     const successorFence = bindGuardianFenceSuccessor(boundFence, successor);
-     const checkedSuccessor = await confirmGuardianFenceAdoption(client, successorFence, { successor: true });
+    const checkedSuccessor = await confirmGuardianFenceAdoption(client, successorFence, { successor: true });
     const authoritativeSuccessor = checkedSuccessor.child;
     const successorOwner = checkedSuccessor.owner;
 
-      if (boundFence.kind !== 'initial-spawn' && !boundFence.oldStopped) {
+    if (boundFence.kind !== 'initial-spawn' && !boundFence.oldStopped) {
       if (!oldChild || ['retired', 'interrupted'].includes(oldChild.state)) {
         throw createGuardianOutcomeUnknownError(boundFence, 'Guardian outcome-unknown fence cannot prove the old child was stopped');
       }
@@ -1834,7 +1904,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     state.lastOpenCodeError = null;
     state.openCodeNotReadySince = 0;
     guardianOutcomeUnknownLease = null;
-     clearGuardianOutcomeUnknownFence(boundFence);
+    clearGuardianOutcomeUnknownFence(boundFence);
     syncToHmrState();
     return { adopted: true };
   };
@@ -2625,6 +2695,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     if (fenceResolution.resolved && state.openCodeProcess) {
       return state.openCodeProcess;
     }
+    // Legacy managed spawn only applies when this OpenChamber instance owns a
+    // managed local OpenCode. Explicit external/skip-start mode must never spawn
+    // a local child; the bootstrap reordering makes this unreachable in the
+    // normal startup path, but the guard keeps the contract explicit so a
+    // direct caller in external mode fails fast instead of spawning.
+    if (!ownsManagedLocalOpenCode()) {
+      throw new Error('Managed OpenCode spawn is disabled in external/skip-start mode');
+    }
     let lastError = null;
     for (let attempt = 1; attempt <= START_OPEN_CODE_MAX_ATTEMPTS; attempt += 1) {
       try {
@@ -2663,6 +2741,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
     if (!canUseGuardian) {
       throw new Error('Guardian launch requires a stable OpenChamber owner identity');
+    }
+    // Guardian-managed initial spawn only applies when this OpenChamber instance
+    // owns a managed local OpenCode. Explicit external/skip-start mode must never
+    // spawn through the guardian; the bootstrap reordering makes this unreachable
+    // in the normal startup path, but the guard keeps the contract explicit for
+    // direct callers (e.g. tests, restart handoff).
+    if (!ownsManagedLocalOpenCode()) {
+      throw new Error('Guardian-managed OpenCode spawn is disabled in external/skip-start mode');
     }
     const client = createGuardianClient({ connectTimeoutMs: 5000 });
     let successor = null;
@@ -2899,6 +2985,19 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           ensureOpenCodeApiPrefix();
         }
         return;
+      }
+
+      // Restart handoff/legacy spawn only applies when this OpenChamber instance
+      // owns a managed local OpenCode. `state.isExternalOpenCode` (set during
+      // bootstrap) normally short-circuits above, but guard the handoff section
+      // with the normalized ownership decision too: an explicit external/skip-start
+      // configuration must never perform guardian handoff or managed spawn, and
+      // a restart invoked before bootstrap set the external flag must still be
+      // safe. The running guardian (possibly a separate service) is NOT shut down
+      // here — external mode only means this instance does not manage OpenCode
+      // through it.
+      if (!ownsManagedLocalOpenCode()) {
+        throw new Error('OpenCode restart handoff is disabled in external/skip-start mode');
       }
 
       resetSessionRuntimeForOpenCodeReplacement();
@@ -3603,41 +3702,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         state.openCodeProcess = null;
         state.currentIncarnation = null;
         state.currentOwner = null;
-        // W-C: previously this branch was gated `else if (process.platform
-        // !== 'win32')` and the Windows path was duplicated below. The
-        // platform gate is removed; `detectAndAdoptGuardianChild()` now
-        // works on both platforms (loopback TCP via `portPath` on
-        // Windows; Unix-domain socket via `socketPath` on Linux). The
-        // post-adoption cascade (skip-start, external probe, fresh
-        // spawn) is the same on every platform.
-        const portPath = getWindowsPortPath();
-        const guardianChild = canUseGuardian
-          ? await detectAndAdoptGuardianChild(getGuardianSocket(), portPath, getGuardianAdoptionOptions())
-          : null;
-        if (guardianChild) {
-          console.log(`[lifecycle] Adopted guardian-managed OpenCode on port ${guardianChild.port}`);
-          // Construct a fresh GuardianClient for the adopted child so the
-          // proxy can later ask the guardian to stop it. The client lazily
-          // connects on first use; if the guardian is unreachable when
-          // shutdown runs, ownership is preserved rather than killing a
-          // potentially unrelated listener on that port.
-          const adoptionClient = createGuardianClient();
-          state.openCodeProcess = createGuardianChildProxy({
-            pid: guardianChild.pid,
-            incarnation: guardianChild.incarnation,
-            client: adoptionClient,
-            owner: guardianChild.owner || null,
-          });
-          state.openCodeBaseUrl = getAuthoritativeGuardianOrigin({ child: guardianChild });
-          setOpenCodePort(guardianChild.port);
-          resetOpenCodeApiPrefixState();
-          state.isOpenCodeReady = true;
-          state.isExternalOpenCode = false;
-          state.isRestartingOpenCode = false;
-          state.currentIncarnation = guardianChild.incarnation;
-          state.currentOwner = guardianChild.owner || null;
-          syncToHmrState();
-        } else if (env.ENV_SKIP_OPENCODE_START && env.ENV_EFFECTIVE_PORT) {
+        // Explicit external/skip-start mode is an operator decision that this
+        // OpenChamber instance does NOT own a managed local OpenCode. It must
+        // win over guardian adoption: a previously-running guardian (possibly
+        // a separate operator-owned service) may still hold a child matching
+        // our persisted owner metadata, but adopting it would couple our
+        // lifecycle to a process we explicitly declined to manage. Resolve the
+        // skip-start/external branch first; guardian adoption only runs when
+        // this instance owns managed local OpenCode.
+        if (env.ENV_SKIP_OPENCODE_START && env.ENV_EFFECTIVE_PORT) {
           const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
           console.log(`Using external OpenCode server at ${label} (skip-start mode)`);
           state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
@@ -3662,62 +3735,100 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           state.openCodeNotReadySince = 0;
           syncToHmrState();
         } else {
-          // We never auto-attach to an arbitrary pre-existing OpenCode instance.
-          // Attaching to an external server requires explicit opt-in via env
-          // (OPENCODE_HOST / OPENCODE_PORT / OPENCODE_SKIP_START), handled by the
-          // branches above. Without that opt-in we always start our OWN managed
-          // instance on a freshly-allocated port. A blind probe of the default
-          // port 4096 used to hijack a user's separately-running OpenCode (e.g.
-          // the OpenCode desktop app), coupling our lifecycle to theirs and
-          // breaking init against an unexpected server version/config.
-           // Probe even when this runtime lacks a stable owner identity. A
-           // live guardian is not the same as an unavailable guardian, and
-           // direct startup beside it would create an unowned duplicate.
-            const guardianRunning = await probeGuardianRunning();
-          if (guardianRunning) {
-            try {
-              await startOpenCodeThroughGuardian();
-            } catch (error) {
-              const safeError = sanitizeManagedStartupError(error);
-              const guardianFailure = new Error(
-                `Guardian is running but initial OpenCode launch failed; refusing legacy fallback: ${safeError.message}`,
-              );
-              guardianFailure.code = isAmbiguousGuardianRequestError(safeError)
-                ? GUARDIAN_AMBIGUOUS_REQUEST_CODE
-                : safeError?.code === 'GUARDIAN_CLEANUP_UNCERTAIN'
-                ? safeError.code
-                : 'GUARDIAN_LIVE_START_FAILED';
-              if (isAmbiguousGuardianRequestError(safeError)) {
-                copyStructuredStartupErrorMetadata(guardianFailure, safeError);
-              }
-              guardianFailure.cause = safeError;
-              state.isOpenCodeReady = false;
-              state.openCodeNotReadySince = Date.now();
-              state.lastOpenCodeError = guardianFailure.message;
-              syncToHmrState();
-              console.error(`[lifecycle] ${guardianFailure.message}`);
-              throw guardianFailure;
-            }
-          } else if (env.ENV_EFFECTIVE_PORT) {
-            console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
-            setOpenCodePort(env.ENV_EFFECTIVE_PORT);
-          } else {
-            state.openCodePort = null;
+          // W-C: previously this branch was gated `else if (process.platform
+          // !== 'win32')` and the Windows path was duplicated below. The
+          // platform gate is removed; `detectAndAdoptGuardianChild()` now
+          // works on both platforms (loopback TCP via `portPath` on
+          // Windows; Unix-domain socket via `socketPath` on Linux). The
+          // post-adoption cascade is the same on every platform.
+          //
+          // Adoption only runs after the skip-start/external branches above
+          // declined, i.e. when this instance owns managed local OpenCode.
+          const portPath = getWindowsPortPath();
+          const guardianChild = canUseGuardian
+            ? await detectAndAdoptGuardianChild(getGuardianSocket(), portPath, getGuardianAdoptionOptions())
+            : null;
+          if (guardianChild) {
+            console.log(`[lifecycle] Adopted guardian-managed OpenCode on port ${guardianChild.port}`);
+            // Construct a fresh GuardianClient for the adopted child so the
+            // proxy can later ask the guardian to stop it. The client lazily
+            // connects on first use; if the guardian is unreachable when
+            // shutdown runs, ownership is preserved rather than killing a
+            // potentially unrelated listener on that port.
+            const adoptionClient = createGuardianClient();
+            state.openCodeProcess = createGuardianChildProxy({
+              pid: guardianChild.pid,
+              incarnation: guardianChild.incarnation,
+              client: adoptionClient,
+              owner: guardianChild.owner || null,
+            });
+            state.openCodeBaseUrl = getAuthoritativeGuardianOrigin({ child: guardianChild });
+            setOpenCodePort(guardianChild.port);
+            resetOpenCodeApiPrefixState();
+            state.isOpenCodeReady = true;
+            state.isExternalOpenCode = false;
+            state.isRestartingOpenCode = false;
+            state.currentIncarnation = guardianChild.incarnation;
+            state.currentOwner = guardianChild.owner || null;
             syncToHmrState();
-            state.currentIncarnation = null;
-            state.currentOwner = null;
-          }
+          } else {
+            // We never auto-attach to an arbitrary pre-existing OpenCode instance.
+            // Attaching to an external server requires explicit opt-in via env
+            // (OPENCODE_HOST / OPENCODE_PORT / OPENCODE_SKIP_START), handled by the
+            // branches above. Without that opt-in we always start our OWN managed
+            // instance on a freshly-allocated port. A blind probe of the default
+            // port 4096 used to hijack a user's separately-running OpenCode (e.g.
+            // the OpenCode desktop app), coupling our lifecycle to theirs and
+            // breaking init against an unexpected server version/config.
+            // Probe even when this runtime lacks a stable owner identity. A
+            // live guardian is not the same as an unavailable guardian, and
+            // direct startup beside it would create an unowned duplicate.
+            const guardianRunning = await probeGuardianRunning();
+            if (guardianRunning) {
+              try {
+                await startOpenCodeThroughGuardian();
+              } catch (error) {
+                const safeError = sanitizeManagedStartupError(error);
+                const guardianFailure = new Error(
+                  `Guardian is running but initial OpenCode launch failed; refusing legacy fallback: ${safeError.message}`,
+                );
+                guardianFailure.code = isAmbiguousGuardianRequestError(safeError)
+                  ? GUARDIAN_AMBIGUOUS_REQUEST_CODE
+                  : safeError?.code === 'GUARDIAN_CLEANUP_UNCERTAIN'
+                  ? safeError.code
+                  : 'GUARDIAN_LIVE_START_FAILED';
+                if (isAmbiguousGuardianRequestError(safeError)) {
+                  copyStructuredStartupErrorMetadata(guardianFailure, safeError);
+                }
+                guardianFailure.cause = safeError;
+                state.isOpenCodeReady = false;
+                state.openCodeNotReadySince = Date.now();
+                state.lastOpenCodeError = guardianFailure.message;
+                syncToHmrState();
+                console.error(`[lifecycle] ${guardianFailure.message}`);
+                throw guardianFailure;
+              }
+            } else if (env.ENV_EFFECTIVE_PORT) {
+              console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
+              setOpenCodePort(env.ENV_EFFECTIVE_PORT);
+            } else {
+              state.openCodePort = null;
+              syncToHmrState();
+              state.currentIncarnation = null;
+              state.currentOwner = null;
+            }
 
-          if (!state.openCodeProcess) {
-            state.lastOpenCodeError = null;
-            state.openCodeProcess = await startOpenCode();
+            if (!state.openCodeProcess) {
+              state.lastOpenCodeError = null;
+              state.openCodeProcess = await startOpenCode();
+            }
+            state.isExternalOpenCode = false;
+            state.currentIncarnation = state.currentIncarnation || null;
+            state.currentOwner = state.currentOwner || null;
+            syncToHmrState();
           }
-          state.isExternalOpenCode = false;
-          state.currentIncarnation = state.currentIncarnation || null;
-          state.currentOwner = state.currentOwner || null;
-          syncToHmrState();
+          }
         }
-      }
       await waitForOpenCodePort();
       try {
       await waitForOpenCodeReady();
@@ -3948,6 +4059,17 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   });
   Object.defineProperty(runtime, '__testReconcileGuardianOutcomeUnknownFence', {
     value: reconcileGuardianOutcomeUnknownFenceForLifecycle,
+    enumerable: false,
+  });
+  // Exposed so the atomic supersession contract can be tested directly: the
+  // pure builder must throw before any state mutation, and the replacement
+  // must swap keys in one state transition + one HMR sync.
+  Object.defineProperty(runtime, '__testBuildGuardianOutcomeUnknownFence', {
+    value: buildGuardianOutcomeUnknownFence,
+    enumerable: false,
+  });
+  Object.defineProperty(runtime, '__testReplaceGuardianOutcomeUnknownFence', {
+    value: replaceGuardianOutcomeUnknownFence,
     enumerable: false,
   });
   return runtime;

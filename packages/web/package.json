@@ -20,6 +20,7 @@
     "build:watch": "vite build --watch",
     "type-check": "tsc --noEmit",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js",
+    "lint:runtime": "eslint \"./server/lib/guardian/**/*.js\" \"./server/lib/opencode/lifecycle.js\" \"./server/lib/opencode/lifecycle-guardian-integration.test.js\" \"./bin/**/*.js\" --config ../../eslint.config.js --rule '{\"no-control-regex\": \"off\", \"no-useless-escape\": \"off\"}'",
     "test": "vitest run",
     "test:node-boundary": "node ./node_modules/vitest/vitest.mjs run server/lib/guardian/process-boundary.test.js && node --test server/lib/guardian/ipc-transport.boundary.mjs",
     "start": "node bin/cli.js serve"

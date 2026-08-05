@@ -222,11 +222,14 @@ support or a process-bound transport is a separate protocol/runtime change.
 ### Lifecycle integration (`lifecycle.js`)
 
 **`bootstrapOpenCodeAtStartup()`**
-- After orphan reaping and HMR state check, attempts to detect a guardian-managed child on every supported platform.
-   - Requires the stable `OPENCHAMBER_GUARDIAN_OWNER_ID` supplied by the CLI. If a guardian child is found:
-   - Sets a closeable guardian proxy, `state.openCodePort`, `state.isOpenCodeReady`, `state.currentIncarnation`, and the exact owner identity.
-   - Retrieves the child credential through the exact owner/incarnation guardian RPC and restores it through `auth-state-runtime.js`; the raw value is not returned in adoption records, lists, or logs.
-   - Skips spawning a new child process
+- After orphan reaping and HMR state check, resolves the OpenCode ownership mode using a single normalized decision (`ownsManagedLocalOpenCode`, derived from `ENV_SKIP_OPENCODE_START`). The branch order is intentional and load-bearing:
+   1. Explicit external/skip-start mode (`OPENCODE_SKIP_START` / `OPENCHAMBER_SKIP_OPENCODE_START` with an effective port) wins first. This is an operator decision that this OpenChamber instance does NOT own a managed local OpenCode; the configured external OpenCode is used as requested, no guardian adoption occurs, and the running guardian (possibly a separate service) is NOT shut down.
+   2. Auto-detected external OpenCode on the effective port is tried next.
+   3. Only when this instance owns managed local OpenCode does guardian adoption run. Requires the stable `OPENCHAMBER_GUARDIAN_OWNER_ID` supplied by the CLI. If a guardian child is found:
+    - Sets a closeable guardian proxy, `state.openCodePort`, `state.isOpenCodeReady`, `state.currentIncarnation`, and the exact owner identity.
+    - Retrieves the child credential through the exact owner/incarnation guardian RPC and restores it through `auth-state-runtime.js`; the raw value is not returned in adoption records, lists, or logs.
+    - Skips spawning a new child process
+   - Reordering rationale: a previously-running guardian may still hold a child matching persisted owner metadata even when this instance selected external mode. Adopting it would couple the lifecycle to a process the operator explicitly declined to manage. The skip-start/external branches must decline before `detectAndAdoptGuardianChild` is ever called.
 - If the guardian is running but has no child, performs the initial managed spawn through the guardian. If that live guardian launch fails, lifecycle records an explicit error and refuses a legacy spawn; direct startup is allowed only when the guardian probe was false or guardian use was explicitly disabled.
 - A rejected guardian-running probe is treated as unknown, not as `false`; startup/restart record the probe failure and refuse a legacy lifecycle spawn beside an uncertain guardian.
 - Guardian startup requires a successful recovery-store `list()` before publishing IPC. A list failure aborts startup and leaves no healthy endpoint. Before transport bind, a prior guardian's POSIX socket or Windows discovery lock/temp/final artifacts may be removed only when the O_EXCL PID marker has a complete identity and its recorded process is authoritatively dead; stale-marker recovery holds a cross-process lease until the replacement marker is published, and Windows cleanup revalidates existing ancestors, ACLs, reparse points, and file identity before unlinking explicit transport paths. Strict Windows recovery propagates a replaced or identity-uncertain final discovery artifact, so the stale marker remains the authority and acquisition cannot claim `{ recovered: true }`; normal close remains idempotent and never unlinks a new transport. Legacy, live, PID-reused, or ambiguous markers leave startup blocked. Transport close also removes only the socket inode or discovery port that the current listener published. Administrative stop keeps the authenticated IPC service and durable `stopping` child records available when termination fails, so the operation can be retried instead of hiding a live child. If startup rollback cannot clean the transport, the guardian retains its IPC/store ownership and marker for a later stop retry rather than invoking `onStopped`. Lease expiry never deletes an unresolved `stopping` or `handoff-prepared` record; rehydration verifies those records through the explicit recovery path, retains a live child, or surfaces typed attention until liveness/termination is authoritative. Timeout, connection, 5xx, malformed, and unhealthy responses are recoverable health attention; credential rejection, credential unavailability, identity uncertainty, and confirmed death are distinct recovery conditions. Confirmed-dead active, expired-handoff, and stopping paths durably/idempotently remove credentials before terminal transitions. `reserved`, `launch-delivering`, and `launching` records without a durable process identity become attention records that block conflicting launch rather than being silently discarded. Guardian launch, stop, handoff, abort, reload, and shutdown mutations share one serialized queue; read-only list and health requests remain unqueued.
@@ -243,6 +246,7 @@ support or a process-bound transport is a separate protocol/runtime change.
 - POSIX startup readiness uses a two-phase acknowledged handle fence: after publication and an actual-listener probe, the helper transfers one accepted probe socket with a random publication token as a candidate. The parent validates the helper-issued marker on that held handle, corroborates the public/owner pathnames, and sends acceptance. The helper re-probes and sends the final tokened `ready` frame; the parent acknowledges over the held handle, the helper re-probes again, and emits a commit marker. The parent then identity-corrobates the committed proof against both current pathnames, sends a bounded commit acknowledgement, and waits for the helper's post-acknowledgement re-probe confirmation before corroborating the pair once more. Only that final helper-proof/parent-corroboration exchange resolves `listen()`. The token is destroyed deterministically on commit, confirmation, or failure; pathname checks remain identity-safe and are never timing delays or unbounded waits. Pair cleanup and rollback likewise refresh a surviving hard link only after its object identity matches the prior descriptor/proof identity, so ctime-only mutations cannot authorize a different sibling.
 
 **`restartOpenCode()`**
+- External/skip-start mode short-circuits before any guardian handoff: if `state.isExternalOpenCode` is true, restart only re-probes the external server's health. A normalized `ownsManagedLocalOpenCode()` guard also blocks the handoff/legacy-spawn section, so an explicit external configuration never performs guardian handoff or managed spawn even if invoked before bootstrap set the external flag. The running guardian is NOT shut down in external mode.
 - Before stopping the existing child, checks if the guardian is running on the current platform.
    - If the in-memory incarnation is missing, first queries/adopts the exact stable-owner child. Multiple, ownerless, unhealthy, or unavailable records fail closed rather than selecting a list entry.
    - Restart adoption restores the exact guardian credential before the child is marked ready, so proxy and readiness requests use the adopted auth state.
@@ -306,10 +310,19 @@ support or a process-bound transport is a separate protocol/runtime change.
   foreground server is imported inline and before the daemon-mode
   `spawn(runtimeBin, serverArgs, …)`.
 - `maybeAutoStartGuardian` is a no-op when any of these are true:
-  - `options.guardian === false` (i.e. `--no-guardian`)
-  - `options.handoff === false` (the user has already opted out of the
-    entire guardian branch)
-  - `process.env.OPENCHAMBER_GUARDIAN_AUTOSTART === 'disabled'`
+   - `options.guardian === false` (i.e. `--no-guardian`)
+   - `options.handoff === false` (the user has already opted out of the
+     entire guardian branch)
+   - `process.env.OPENCHAMBER_GUARDIAN_AUTOSTART === 'disabled'`
+   - Explicit external/skip-start mode: `OPENCODE_SKIP_START=true` or
+     `OPENCHAMBER_SKIP_OPENCODE_START=true`. This is an operator decision
+     that this OpenChamber instance does NOT own a managed local OpenCode,
+     so the guardian is not autostarted merely for OpenCode ownership. A
+     previously-running guardian (possibly a separate service) is left
+     untouched. The CLI derives this from the env flags at the CLI boundary
+     (`isSkipStartConfigured` in `commands-guardian.js`); the server side
+     normalizes the same decision as `ownsManagedLocalOpenCode()` in
+     `server/index.js`.
 - When the gate passes, the helper probes the platform-specific guardian
   transport via `isGuardianRunning(socketPath, portPath)`. If a guardian
   is already running, it logs `guardian already running (pid N)` and

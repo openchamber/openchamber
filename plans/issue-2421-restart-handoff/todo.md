@@ -43,7 +43,7 @@
 - [x] Foreground/web shutdown never tears down the guardian service automatically; ordinary stop is owner-scoped and restart/update detach with `{ preserveGuardian: true }`.
 - [x] SIGTERM → SIGKILL escalation in `stopGuardianViaIpc` if the IPC shutdown path fails.
 - [x] `runReloadAction` sends `SIGHUP` to the running guardian PID; the entrypoint already handles SIGHUP by restarting its timers.
-- [x] Windows: loopback TCP/discovery-file transport, ACL enforcement, authenticated IPC, and `taskkill.exe` child termination.
+- [x] Windows: loopback TCP/discovery-file transport, ACL enforcement, authenticated IPC, and retained PowerShell/.NET process-handle child termination (`runTaskkillForce` is compatibility/test infrastructure only, not the production rehydrated-child path).
 - [x] PID file moved under `managed-opencode-handoff-v2/` root so it honors `--data-dir` / `OPENCHAMBER_DATA_DIR` (H2 fix during review round).
 - [x] IPC `shutdown` RPC now sends `{ acknowledged: true }` BEFORE `guardian.stop()` destroys the sockets (`ipc-server.js` one-line protocol fix surfaced by the smoke test).
 - [x] Linux and Windows end-to-end smoke tests launch a real managed-child fixture, cover negative IPC authentication, and print `ok` on success.

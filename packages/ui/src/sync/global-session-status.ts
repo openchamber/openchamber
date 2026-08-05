@@ -28,22 +28,39 @@ type GlobalSessionStatusState = {
   statusById: Map<string, GlobalSessionStatusEntry>;
   /** False while a runtime boundary is waiting for its first new snapshot. */
   acceptEventUpdates: boolean;
+  /**
+   * True when the last status fetch failed or the runtime is temporarily
+   * unreachable (transient HTTP failure, 502, network/SSE disconnect,
+   * transport switch). Status data is preserved as last known but should be
+   * presented as "temporarily unavailable/reconnecting", NOT as idle. A
+   * successful authoritative snapshot clears it.
+   *
+   * This is distinct from `acceptEventUpdates`, which gates the runtime
+   * boundary: `acceptEventUpdates: false` means a real runtime replacement
+   * (issue #2421) and old data was cleared; `statusUnavailable: true` means a
+   * transient transport/fetch problem and old data is preserved.
+   */
+  statusUnavailable: boolean;
 };
 
 export const useGlobalSessionStatusStore = create<GlobalSessionStatusState>(() => ({
   statusById: new Map(),
   acceptEventUpdates: true,
+  statusUnavailable: false,
 }));
 
 /**
- * Clear all live status evidence when the active OpenCode runtime is no
- * longer authoritative. This intentionally does not touch the global session
- * cache or any durable session/message state.
+ * Clear all live status evidence when the active OpenCode runtime is replaced.
+ * Used by the real-runtime-replacement path (issue #2421): stale activity from
+ * the old runtime must not be presented as current. This intentionally does
+ * not touch the global session cache or any durable session/message state,
+ * and marks status as fresh (a clean reset, not a transient failure).
  */
 export const resetGlobalSessionStatus = (options?: { blockEventUpdates?: boolean }): void => {
   useGlobalSessionStatusStore.setState({
     statusById: new Map(),
     acceptEventUpdates: options?.blockEventUpdates !== true,
+    statusUnavailable: false,
   });
 };
 
@@ -188,39 +205,36 @@ export const applyGlobalSessionStatusSnapshot = (
       }
     }
 
+    // A fresh authoritative snapshot arrived: re-enable event updates and clear
+    // any transient unavailability flag. Either condition forces a re-render so
+    // consumers stop showing "reconnecting" and see the fresh live state.
     if (!state.acceptEventUpdates) changed = true;
-    return changed ? { statusById: next, acceptEventUpdates: true } : state;
+    if (state.statusUnavailable) changed = true;
+    return changed ? { statusById: next, acceptEventUpdates: true, statusUnavailable: false } : state;
   });
 };
 
 /**
- * A failed status request is not an authoritative empty snapshot. It does,
- * however, mean that entries from the unavailable runtime cannot remain
- * confirmed live activity. Remove only the live index evidence and let the
- * process/connection health surface describe the unavailable runtime.
+ * A failed status request is not an authoritative empty snapshot and must not
+ * be treated as one. A transient HTTP failure, 502, network interruption, relay
+ * interruption, or temporary SSE disconnect does not prove the underlying
+ * OpenCode session became idle.
+ *
+ * This preserves the last known status data (busy/retry entries stay in
+ * `statusById`) and only sets the global `statusUnavailable` freshness flag so
+ * consumers can present the state as "temporarily unavailable/reconnecting"
+ * instead of as a confirmed active spinner or as idle. It does NOT delete
+ * entries, does NOT call `reconcileSessionActivitySnapshot([], known)` (that
+ * would clear ordering as if idle), and does NOT call `removeSessionOrdering`.
+ *
+ * The flag is global: every consumer observes the same freshness. The next
+ * successful authoritative snapshot (`applyGlobalSessionStatusSnapshot`) clears
+ * it with fresh data. A real runtime replacement uses
+ * `resetGlobalSessionStatus({ blockEventUpdates: true })` instead, which does
+ * destroy stale data and blocks old events.
  */
-export const clearGlobalSessionStatusForUnavailable = (
-  rawDirectory: string,
-  knownSessionIds?: Iterable<string>,
-): void => {
-  const directory = normalizeDirectory(rawDirectory);
-  const known = new Set(knownSessionIds ?? []);
-  for (const [sessionId, entry] of useGlobalSessionStatusStore.getState().statusById) {
-    if (entry.directory === directory) known.add(sessionId);
-  }
-  reconcileSessionActivitySnapshot([], known);
-
-  const removedSessionIds: string[] = [];
-  useGlobalSessionStatusStore.setState((state) => {
-    let changed = false;
-    const next = new Map(state.statusById);
-    for (const [sessionId, entry] of state.statusById) {
-      if (entry.directory !== directory && !known.has(sessionId)) continue;
-      next.delete(sessionId);
-      removedSessionIds.push(sessionId);
-      changed = true;
-    }
-    return changed ? { statusById: next } : state;
-  });
-  for (const sessionId of removedSessionIds) removeSessionOrdering(sessionId);
+export const markGlobalSessionStatusUnavailable = (): void => {
+  useGlobalSessionStatusStore.setState((state) => (
+    state.statusUnavailable ? state : { statusUnavailable: true }
+  ));
 };

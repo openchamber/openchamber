@@ -427,6 +427,66 @@ describe('Guardian integration', () => {
       expect(state.currentIncarnation).toBe('test-incarnation-123');
     }, 10000);
 
+    it('explicit external/skip-start config wins over guardian adoption and does not shut down the guardian', async () => {
+      // Regression for issue #2421: OPENCODE_SKIP_START=true is an operator
+      // decision that this OpenChamber instance does NOT own a managed local
+      // OpenCode. A previously-running guardian may still hold a child matching
+      // our persisted owner metadata, but adopting it would couple our lifecycle
+      // to a process we explicitly declined to manage. The skip-start/external
+      // branch must win: no guardian adoption, the configured external OpenCode
+      // is used as requested, and the running guardian is NOT shut down.
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ healthy: true }),
+      });
+
+      const restoreManagedOpenCodeCredential = vi.fn();
+      const { runtime, state, deps } = createRuntime({
+        restoreManagedOpenCodeCredential,
+        env: {
+          ENV_CONFIGURED_OPENCODE_PORT: undefined,
+          ENV_CONFIGURED_OPENCODE_HOST: null,
+          ENV_EFFECTIVE_PORT: 45678,
+          ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+          ENV_SKIP_OPENCODE_START: true,
+        },
+      });
+
+      // Guardian IS running and WOULD adopt a matching child if reached.
+      isGuardianRunning.mockResolvedValue(true);
+      detectAndAdoptGuardianChild.mockImplementation(async (_socketPath, _portPath, options) => {
+        await options.restoreCredential({ username: 'opencode', password: 'adopted-password' });
+        return {
+          incarnation: 'would-be-adopted-incarnation',
+          pid: 12345,
+          port: 4096,
+          url: 'http://127.0.0.1:4096',
+          owner: {
+            ownerInstanceId: 'owner-test-instance',
+            runtimeIdentity: 'runtime-test-instance',
+            launchFingerprint: 'adopted-fingerprint',
+          },
+        };
+      });
+
+      await runtime.bootstrapOpenCodeAtStartup();
+
+      // Explicit external config wins: no guardian adoption occurs.
+      expect(detectAndAdoptGuardianChild).not.toHaveBeenCalled();
+      expect(restoreManagedOpenCodeCredential).not.toHaveBeenCalled();
+      // The configured external OpenCode is used as requested.
+      expect(state.isExternalOpenCode).toBe(true);
+      expect(state.openCodePort).toBe(45678);
+      expect(state.isOpenCodeReady).toBe(true);
+      expect(state.openCodeProcess).toBeNull();
+      expect(state.currentIncarnation).toBeNull();
+      expect(state.currentOwner).toBeNull();
+      // The running guardian is NOT shut down — external mode only means this
+      // instance does not manage OpenCode through it. No stop/kill RPC issued.
+      // (The mock GuardianClient.stop would record any shutdown attempt.)
+      expect(deps.setOpenCodePort).toHaveBeenCalledWith(45678);
+    }, 10000);
+
     it('uses the adopted launch origin when configured host changed, including IPv6', async () => {
       const launchSpec = {
         binary: 'opencode',
@@ -2126,6 +2186,324 @@ describe('Guardian integration', () => {
         incarnation: prepared.incarnation,
       });
     }, 15000);
+
+    it('atomically replaces a durable prepare fence with an abort-handoff fence keyed by the abort operation ID', async () => {
+      // Durable-operation variant of issue-2421: when the ambiguous prepare and
+      // ambiguous abort each carry their own durable operation ID, the
+      // supersession must be a single atomic replacement that removes the
+      // prepare-operation key and adds the abort-operation key in one state
+      // transition + one HMR sync. The replacement fence must use the abort
+      // operation ID (not the prepare operation ID), retain the authoritative
+      // prepared record binding, and a later reconciliation must not replay the
+      // non-idempotent abortHandoff RPC.
+      const owner = {
+        ownerInstanceId: 'owner-durable-prepare-abort',
+        runtimeIdentity: 'runtime-durable-prepare-abort',
+        launchFingerprint: 'durable-prepare-abort-fingerprint',
+      };
+      const prepareOperationId = 'durable-prepare-op-000000000000000000000000000';
+      const abortOperationId = 'durable-abort-op-111111111111111111111111111';
+      const prepared = {
+        incarnation: 'durable-prepare-then-ambiguous-abort',
+        state: 'handoff-prepared',
+        revision: 5,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'durable-prepare-then-ambiguous-abort-prepared-mac',
+        pid: 12345,
+        port: 45678,
+        launchSpec: {
+          binary: 'opencode',
+          args: [],
+          hostname: '127.0.0.1',
+          port: 45678,
+          cwd: '/tmp/project',
+        },
+        ...owner,
+      };
+      // The prepare operation is resolved with its target binding matching the
+      // prepared record so reconcileDurableGuardianOperation passes the fence
+      // through to the child-list/abort path.
+      const prepareOperation = {
+        operationId: prepareOperationId,
+        kind: 'prepare-handoff',
+        incarnation: prepared.incarnation,
+        ...owner,
+        targetRevision: prepared.revision,
+        targetLeaseExpiresAt: prepared.leaseExpiresAt,
+        targetMac: prepared.mac,
+        state: 'resolved',
+        revision: 1,
+        confirmationExpiresAt: Date.now() + 60_000,
+        mac: 'prepare-operation-mac',
+      };
+      // The abort operation is resolved with its target binding matching the
+      // same prepared record (the pre-abort state). Restart 3 reconciles this
+      // operation, then sees the still-prepared child and throws without
+      // replaying abortHandoff.
+      const abortOperation = {
+        operationId: abortOperationId,
+        kind: 'abort-handoff',
+        incarnation: prepared.incarnation,
+        ...owner,
+        targetRevision: prepared.revision,
+        targetLeaseExpiresAt: prepared.leaseExpiresAt,
+        targetMac: prepared.mac,
+        state: 'resolved',
+        revision: 2,
+        confirmationExpiresAt: Date.now() + 60_000,
+        mac: 'abort-operation-mac',
+      };
+      const clientPrepareHandoff = vi.fn().mockRejectedValue(Object.assign(
+        new Error('durable prepare response was lost'),
+        {
+          code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          ambiguous: true,
+          retryable: false,
+          originalCode: 'connection_closed',
+          operationId: prepareOperationId,
+        },
+      ));
+      const clientAbort = vi.fn().mockRejectedValue(Object.assign(
+        new Error('durable abort response was lost'),
+        {
+          code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+          ambiguous: true,
+          retryable: false,
+          originalCode: 'connection_closed',
+          operationId: abortOperationId,
+        },
+      ));
+      const operationStatus = vi.fn(async ({ operationId }) => {
+        if (operationId === prepareOperationId) {
+          return { operation: prepareOperation, record: null, expired: false };
+        }
+        if (operationId === abortOperationId) {
+          return { operation: abortOperation, record: null, expired: false };
+        }
+        return { operation: null, record: null, expired: false };
+      });
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: clientPrepareHandoff,
+        abortHandoff: clientAbort,
+        spawn: vi.fn(),
+        stop: vi.fn(),
+        health: vi.fn().mockResolvedValue({ healthy: true }),
+        list: vi.fn().mockResolvedValue([prepared]),
+        operationList: vi.fn().mockResolvedValue([]),
+        operationStatus,
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const legacySpawn = (await import('node:child_process')).spawn;
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: prepared.pid, close: vi.fn() };
+      state.openCodePort = prepared.port;
+      state.currentIncarnation = prepared.incarnation;
+      state.currentOwner = owner;
+      state.isOpenCodeReady = true;
+
+      // First restart: prepareHandoff response is lost after the guardian
+      // transitioned to handoff-prepared. The restart catch persists a
+      // prepare-kind fence keyed by the prepare operation ID. The prepared
+      // record is not available at the catch point (the response was lost), so
+      // the record binding is attached later during reconciliation; the fence
+      // carries only the durable operation ID and owner/incarnation identity.
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+        originalCode: 'connection_closed',
+      });
+      expect(clientPrepareHandoff).toHaveBeenCalledOnce();
+      expect(clientAbort).not.toHaveBeenCalled();
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'prepare',
+        operationId: prepareOperationId,
+        incarnation: prepared.incarnation,
+        owner,
+        ambiguous: true,
+      });
+      expect(state.guardianOutcomeUnknownFences).toHaveLength(1);
+      expect(state.guardianOutcomeUnknownFences[0].operationId).toBe(prepareOperationId);
+
+      // Second restart: reconciliation reconciles the durable prepare
+      // operation, finds the still-handoff-prepared child, calls abortHandoff,
+      // and that response is also lost. The catch must atomically replace the
+      // prepare fence with an abort-handoff fence keyed by the ABORT operation
+      // ID (not the prepare operation ID), retaining the authoritative prepared
+      // record binding, in a single state transition.
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+      });
+      expect(clientAbort).toHaveBeenCalledOnce();
+      expect(legacySpawn).not.toHaveBeenCalled();
+
+      // Exactly one replacement fence exists, keyed by the abort operation ID.
+      expect(state.guardianOutcomeUnknownFences).toHaveLength(1);
+      expect(state.guardianOutcomeUnknownFences[0].operationId).toBe(abortOperationId);
+      // No old prepare fence remains.
+      expect(state.guardianOutcomeUnknownFences.some((fence) => fence.operationId === prepareOperationId))
+        .toBe(false);
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'abort-handoff',
+        operationId: abortOperationId,
+        incarnation: prepared.incarnation,
+        owner,
+        ambiguous: true,
+        // The authoritative prepared record binding from oldChild is retained.
+        revision: prepared.revision,
+        leaseExpiresAt: prepared.leaseExpiresAt,
+        mac: prepared.mac,
+      });
+      // The startup-secret lease is retained (not cleared) through the
+      // replacement so diagnostics remain protected until authoritative
+      // resolution.
+      expect(state.guardianOutcomeUnknownLease).toBeNull();
+
+      // Third restart: reconciliation reconciles the durable abort operation,
+      // then sees the abort-handoff fence against a still-handoff-prepared
+      // child. It must throw WITHOUT calling abortHandoff again (the
+      // non-idempotent RPC must not be replayed) and WITHOUT legacy-spawning.
+      await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        retryable: false,
+      });
+      expect(clientAbort).toHaveBeenCalledOnce();
+      expect(client.spawn).not.toHaveBeenCalled();
+      expect(legacySpawn).not.toHaveBeenCalled();
+      expect(client.stop).not.toHaveBeenCalled();
+      // The replacement fence is still the single durable fence, keyed by the
+      // abort operation ID.
+      expect(state.guardianOutcomeUnknownFences).toHaveLength(1);
+      expect(state.guardianOutcomeUnknownFences[0].operationId).toBe(abortOperationId);
+      expect(state.guardianOutcomeUnknownFence).toMatchObject({
+        kind: 'abort-handoff',
+        operationId: abortOperationId,
+        incarnation: prepared.incarnation,
+      });
+    }, 15000);
+
+    it('leaves the old fence untouched when replacement fence construction throws (atomic supersession)', async () => {
+      // Atomicity invariant for issue-2421: the abort-handoff supersession is
+      // implemented as build-then-replace. If the replacement fence construction
+      // throws (e.g. missing owner identity), the old prepare fence must remain
+      // exactly in place — no intermediate "no fence" window, no partial state
+      // mutation, and no HMR sync for a replacement that was never built. This
+      // directly exercises the build/replace primitives exposed for testing.
+      const owner = {
+        ownerInstanceId: 'owner-atomicity-invariant',
+        runtimeIdentity: 'runtime-atomicity-invariant',
+        launchFingerprint: 'atomicity-fingerprint',
+      };
+      const prepareOperationId = 'atomicity-prepare-op-00000000000000000000000';
+      const abortOperationId = 'atomicity-abort-op-111111111111111111111111111';
+      const preparedRecord = {
+        incarnation: 'atomicity-prepare-incarnation',
+        state: 'handoff-prepared',
+        revision: 7,
+        leaseExpiresAt: Date.now() + 60_000,
+        mac: 'atomicity-prepared-mac',
+        ...owner,
+      };
+      const prepareFence = {
+        version: 1,
+        kind: 'prepare',
+        operationId: prepareOperationId,
+        incarnation: preparedRecord.incarnation,
+        owner: { ...owner },
+        revision: preparedRecord.revision,
+        leaseExpiresAt: preparedRecord.leaseExpiresAt,
+        mac: preparedRecord.mac,
+        ambiguous: true,
+        oldStopped: false,
+      };
+      const retainedLease = { incarnation: preparedRecord.incarnation, secret: 'atomicity-lease-secret' };
+      const ambiguousAbortError = Object.assign(new Error('abort lost'), {
+        code: 'GUARDIAN_REQUEST_AMBIGUOUS',
+        ambiguous: true,
+        operationId: abortOperationId,
+      });
+
+      // Build the runtime AFTER pre-populating state with the prepare fence and
+      // lease. The lifecycle closure reads state.guardianOutcomeUnknownLease at
+      // construction time, so the lease must be present before construction for
+      // replaceGuardianOutcomeUnknownFence to preserve it.
+      const { state, deps } = createRuntime();
+      state.guardianOutcomeUnknownFences = [prepareFence];
+      state.guardianOutcomeUnknownFence = prepareFence;
+      state.guardianOutcomeUnknownLease = retainedLease;
+      const runtime = createOpenCodeLifecycleRuntime({ ...deps, state });
+      // createOpenCodeLifecycleRuntime does not reset fence fields, but restate
+      // them defensively in case a future constructor touches state.
+      state.guardianOutcomeUnknownFences = [prepareFence];
+      state.guardianOutcomeUnknownFence = prepareFence;
+      state.guardianOutcomeUnknownLease = retainedLease;
+
+      const syncToHmrState = deps.syncToHmrState;
+      const initialSyncCount = syncToHmrState.mock.calls.length;
+
+      // 1) Building a replacement with a missing owner identity must throw
+      //    BEFORE any state mutation.
+      expect(() => runtime.__testBuildGuardianOutcomeUnknownFence({
+        kind: 'abort-handoff',
+        incarnation: preparedRecord.incarnation,
+        owner: { ownerInstanceId: '', runtimeIdentity: 'runtime-incomplete', launchFingerprint: 'fp' },
+        preparedRecord,
+        source: ambiguousAbortError,
+        lease: retainedLease,
+      })).toThrow(Object.assign(
+        new Error('Guardian ambiguous handoff outcome has no complete owner identity'),
+        { code: 'GUARDIAN_OUTCOME_UNKNOWN_OWNER' },
+      ));
+
+      // The build failure must NOT have touched fence state, the lease, or HMR.
+      expect(state.guardianOutcomeUnknownFences).toHaveLength(1);
+      expect(state.guardianOutcomeUnknownFences[0]).toBe(prepareFence);
+      expect(state.guardianOutcomeUnknownFence).toBe(prepareFence);
+      expect(state.guardianOutcomeUnknownLease).toBe(retainedLease);
+      expect(syncToHmrState.mock.calls.length).toBe(initialSyncCount);
+
+      // 2) Building a replacement with complete identity succeeds and produces a
+      //    fence keyed by the abort operation ID with the prepared record
+      //    binding, WITHOUT mutating state (pure builder).
+      const replacementFence = runtime.__testBuildGuardianOutcomeUnknownFence({
+        kind: 'abort-handoff',
+        incarnation: preparedRecord.incarnation,
+        owner: { ...owner },
+        preparedRecord,
+        source: ambiguousAbortError,
+        lease: retainedLease,
+      });
+      expect(replacementFence.kind).toBe('abort-handoff');
+      expect(replacementFence.operationId).toBe(abortOperationId);
+      expect(replacementFence.incarnation).toBe(preparedRecord.incarnation);
+      expect(replacementFence.owner).toEqual(owner);
+      expect(replacementFence.revision).toBe(preparedRecord.revision);
+      expect(replacementFence.leaseExpiresAt).toBe(preparedRecord.leaseExpiresAt);
+      expect(replacementFence.mac).toBe(preparedRecord.mac);
+      expect(replacementFence.ambiguous).toBe(true);
+      // The pure builder must not have mutated state or HMR.
+      expect(state.guardianOutcomeUnknownFences).toHaveLength(1);
+      expect(state.guardianOutcomeUnknownFences[0]).toBe(prepareFence);
+      expect(syncToHmrState.mock.calls.length).toBe(initialSyncCount);
+
+      // 3) The replacement swaps the prepare-operation key for the abort-operation
+      //    key in a single state transition + single HMR sync, preserving the
+      //    lease. The old prepare fence must not remain.
+      const syncCountBeforeReplace = syncToHmrState.mock.calls.length;
+      runtime.__testReplaceGuardianOutcomeUnknownFence(prepareFence, replacementFence);
+      expect(state.guardianOutcomeUnknownFences).toHaveLength(1);
+      expect(state.guardianOutcomeUnknownFences[0]).toBe(replacementFence);
+      expect(state.guardianOutcomeUnknownFences[0].operationId).toBe(abortOperationId);
+      expect(state.guardianOutcomeUnknownFences.some((fence) => fence.operationId === prepareOperationId))
+        .toBe(false);
+      expect(state.guardianOutcomeUnknownFence).toBe(replacementFence);
+      expect(state.guardianOutcomeUnknownLease).toBe(retainedLease);
+      // Exactly one HMR sync for the replacement.
+      expect(syncToHmrState.mock.calls.length).toBe(syncCountBeforeReplace + 1);
+    }, 10000);
 
     it('does not legacy-spawn or abort after an ambiguous successor spawn', async () => {
       const { spawn } = await import('node:child_process');

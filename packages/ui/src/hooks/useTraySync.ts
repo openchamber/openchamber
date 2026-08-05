@@ -12,7 +12,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import {
   useGlobalSessionStatusStore,
   applyGlobalSessionStatusSnapshot,
-  clearGlobalSessionStatusForUnavailable,
+  markGlobalSessionStatusUnavailable,
 } from '@/sync/global-session-status';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useNotificationStore } from '@/sync/notification-store';
@@ -507,9 +507,12 @@ export const useTraySync = (): void => {
         const raw = await opencodeClient.getSessionStatusForDirectory(directory).catch(() => null);
         if (disposed || !runtimeGeneration.isCurrent(requestGeneration)) return;
         if (raw === null) {
-          // A failed fetch is not an empty snapshot. Remove stale live
-          // evidence explicitly while preserving the global session cache.
-          clearGlobalSessionStatusForUnavailable(directory, sessionIds);
+          // A failed fetch is not an empty snapshot. Preserve last known
+          // busy/retry status and mark it temporarily unavailable so the tray
+          // can show "reconnecting" instead of destroying live evidence or
+          // flipping to idle. The runtime-generation guard already prevents a
+          // stale completion from a previous runtime from writing here.
+          markGlobalSessionStatusUnavailable();
           return;
         }
         applyGlobalSessionStatusSnapshot(directory, raw, sessionIds);

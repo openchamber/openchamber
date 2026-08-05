@@ -320,12 +320,30 @@ async function getGuardianStatus({
   };
 }
 
+// CLI-boundary derivation of the "this OpenChamber instance owns a managed
+// local OpenCode" decision. The CLI runs before the server, so it cannot read
+// the server's normalized `ownsManagedLocalOpenCode()`; instead it derives the
+// same answer from the operator env flags here. This is the single CLI call
+// site that needs the decision — it is not a scattered raw env check. The
+// server side normalizes the same flag in `packages/web/server/index.js`.
+const SKIP_OPENCODE_START_ENV_KEYS = ['OPENCODE_SKIP_START', 'OPENCHAMBER_SKIP_OPENCODE_START'];
+const isSkipStartConfigured = () => SKIP_OPENCODE_START_ENV_KEYS.some(
+  (key) => process.env[key] === 'true',
+);
+
 function shouldAutoStartGuardian({ options } = {}) {
-  // W-C: Windows is supported; the only opt-outs remain the CLI flags
-  // (`--no-guardian`, `--no-handoff`) and the env-var kill switch.
+  // W-C: Windows is supported; the opt-outs are the CLI flags
+  // (`--no-guardian`, `--no-handoff`), the env-var kill switch, and explicit
+  // external/skip-start mode. When an operator configures external OpenCode
+  // (`OPENCODE_SKIP_START` / `OPENCHAMBER_SKIP_OPENCODE_START`), this instance
+  // does not own a managed local OpenCode, so we must not autostart the
+  // guardian merely for OpenCode ownership. A previously-running guardian
+  // (possibly a separate service) is left untouched; autostart only spawns a
+  // new one when this instance will actually manage OpenCode through it.
   if (!options || options.guardian === false) return false;
   if (options.handoff === false) return false;
   if (process.env[GUARDIAN_AUTOSTART_ENV] === 'disabled') return false;
+  if (isSkipStartConfigured()) return false;
   return true;
 }
 
@@ -762,4 +780,5 @@ export {
   getDefaultGuardianPidFile,
   _resetCachedGuardianPathsForTest,
   GUARDIAN_AUTOSTART_ENV,
+  isSkipStartConfigured,
 };

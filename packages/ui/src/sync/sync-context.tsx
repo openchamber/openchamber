@@ -29,7 +29,7 @@ import {
 } from "./live-aggregate"
 import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
-import { resetStreamingState, touchStreamingSession, updateChangedStreamingSessions, updateStreamingState } from "./streaming"
+import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingState } from "./streaming"
 import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { setActionRefs } from "./session-actions"
@@ -54,11 +54,9 @@ import {
   applyGlobalSessionStatusEvent,
   applyGlobalSessionStatusSnapshot,
   areGlobalSessionStatusEventsEnabled,
-  clearGlobalSessionStatusForUnavailable,
-  resetGlobalSessionStatus,
+  markGlobalSessionStatusUnavailable,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
-import { resetSessionOrdering } from "./session-ordering"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
@@ -211,6 +209,20 @@ const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
 export function useGlobalSessionStatus(sessionId: string): SessionStatus | undefined {
   return useGlobalSessionStatusStore(
     useCallback((state) => state.statusById.get(sessionId)?.status, [sessionId]),
+  )
+}
+
+/**
+ * Read whether the global live status index is temporarily unavailable
+ * (transient fetch failure / disconnect / transport switch). When true, the
+ * status data returned by `useGlobalSessionStatus` is preserved last-known
+ * state and should be presented as "reconnecting", NOT as a confirmed active
+ * spinner or as idle. A real runtime replacement clears `statusById` instead
+ * and leaves this flag false.
+ */
+export function useGlobalSessionStatusUnavailable(): boolean {
+  return useGlobalSessionStatusStore(
+    useCallback((state) => state.statusUnavailable, []),
   )
 }
 
@@ -655,34 +667,31 @@ export function reconcileDirectorySessionStatusSnapshot(
 }
 
 /**
- * Clear live activity evidence after the current OpenCode runtime becomes
- * unavailable. This is intentionally separate from an empty snapshot: the
- * caller still receives a failed/null fetch result and can preserve retry or
- * error handling, while the UI no longer presents old busy/retry state as
- * confirmed activity. Messages and durable session history are untouched.
+ * Mark live activity as temporarily unavailable after a failed/null status
+ * fetch, a transport disconnect, or a transport switch. This is intentionally
+ * separate from an empty snapshot and from a real runtime replacement:
+ *
+ * - It does NOT mutate any child store's `session_status`: last known
+ *   busy/retry state is preserved so the UI does not flip to idle on a
+ *   transient HTTP failure, 502, network interruption, relay interruption, or
+ *   temporary SSE disconnect. Messages and durable session history are
+ *   untouched.
+ * - It sets the global `statusUnavailable` freshness flag (via
+ *   `markGlobalSessionStatusUnavailable`) so consumers can present the state
+ *   as "reconnecting" rather than as confirmed activity or as idle.
+ *
+ * The next successful authoritative snapshot clears the flag with fresh data.
+ * A real OpenCode runtime replacement (issue #2421) uses
+ * `resetGlobalSessionStatus({ blockEventUpdates: true })` (via
+ * `resetAppForRuntimeEndpointChange`) instead, which destroys stale data and
+ * blocks old events.
  */
-export function clearDirectorySessionStatusesForUnavailable(
-  directory: string,
-  store: StoreApi<DirectoryStore>,
-  candidateSessionIds: string[],
-): boolean {
-  let changed = false
-  store.setState((state: DirectoryStore) => {
-    const current = state.session_status ?? {}
-    let next: Record<string, SessionStatus> | undefined
-    const draft = () => (next ??= { ...current })
-
-    for (const sessionId of candidateSessionIds) {
-      const existing = current[sessionId]
-      if (!existing || existing.type === "idle") continue
-      draft()[sessionId] = { type: "idle" }
-      changed = true
-    }
-
-    return next ? { session_status: next } : state
-  })
-  clearGlobalSessionStatusForUnavailable(directory, candidateSessionIds)
-  return changed
+export function markDirectorySessionStatusesUnavailable(): boolean {
+  // Preserve last known status data; only flag unavailability. Child stores'
+  // session_status maps are intentionally not mutated. The flag is global, so
+  // every consumer observes the same freshness.
+  markGlobalSessionStatusUnavailable()
+  return false
 }
 
 async function resyncDirectorySessionStatuses(
@@ -695,10 +704,13 @@ async function resyncDirectorySessionStatuses(
   const nextStatuses = await opencodeClient.getSessionStatusForDirectory(directory)
   if (expectedRuntimeKey !== getRuntimeKey()) return null
   // null = fetch failed. It is not an empty snapshot and is returned as such
-  // to the caller, but unavailable OpenCode must not leave stale busy/retry
-  // evidence looking like confirmed activity.
+  // to the caller. A transient failure must not destroy last known busy/retry
+  // state or lower it to idle: it only marks status as temporarily
+  // unavailable so the UI can show "reconnecting". The watchdog's
+  // `needsSnapshotAfterStatusPoll` escalation logic still runs on the next
+  // successful poll.
   if (nextStatuses === null) {
-    clearDirectorySessionStatusesForUnavailable(directory, store, candidateSessionIds)
+    markDirectorySessionStatusesUnavailable()
     return null
   }
   reconcileDirectorySessionStatusSnapshot(directory, store, nextStatuses, candidateSessionIds, mode)
@@ -1948,17 +1960,23 @@ export function SyncProvider(props: {
       })
   }, [childStores, routingIndex])
 
-  const clearLiveSessionStatusesForUnavailableRuntime = useCallback(() => {
-    for (const [directory, store] of childStores.children) {
-      const candidates = getAuthoritativeSessionCandidateIds(directory, store.getState())
-      clearDirectorySessionStatusesForUnavailable(directory, store, candidates)
-    }
-    // Global events can cover directories without child stores. Clear that
-    // volatile index as well; no durable session/message state is involved.
-    resetGlobalSessionStatus({ blockEventUpdates: true })
-    resetSessionOrdering()
-    resetStreamingState()
-  }, [childStores])
+  // A transport disconnect or transport switch is NOT authoritative proof of
+  // an OpenCode runtime replacement (issue #2421). It is a transient transport
+  // event: the same runtime is expected to come back (reconnect) or a fresh
+  // snapshot will be fetched over HTTP (transport switch). Last known busy/retry
+  // status is preserved and only the global `statusUnavailable` freshness flag
+  // is set, so the UI shows "reconnecting" instead of destroying live evidence
+  // or flipping to idle. The reconnect/transport-switch resyncs call
+  // `applyGlobalSessionStatusSnapshot`, which clears the flag with fresh data.
+  //
+  // A real runtime replacement (runtime key change) is handled separately by
+  // `resetAppForRuntimeEndpointChange` -> `resetGlobalSessionStatus({ blockEventUpdates: true })`,
+  // which does destroy stale data and block old events.
+  const markLiveSessionStatusesUnavailable = useCallback(() => {
+    // The freshness flag is global; one set covers every directory (with or
+    // without a child store). Status data is preserved.
+    markGlobalSessionStatusUnavailable()
+  }, [])
 
   // Configure child store manager
   useEffect(() => {
@@ -2189,7 +2207,11 @@ export function SyncProvider(props: {
         }
       },
       onDisconnect: (reason) => {
-        clearLiveSessionStatusesForUnavailableRuntime()
+        // A transport disconnect is transient, not a runtime replacement: mark
+        // status as unavailable (preserve last known data) so the UI shows
+        // "reconnecting" instead of destroying live evidence or flipping to
+        // idle. The reconnect resyncs clear the flag with fresh data.
+        markLiveSessionStatusesUnavailable()
         if (!pipelineHasConnectedRef.current) {
           pipelineDisconnectedBeforeFirstConnectRef.current = true
         }
@@ -2201,9 +2223,10 @@ export function SyncProvider(props: {
         })
       },
       onTransportSwitch: () => {
-        // Transport changes are gap-prone in real networks. Treat them like a
-        // reconnect and refresh active session snapshots from HTTP.
-        clearLiveSessionStatusesForUnavailableRuntime()
+        // Transport changes are gap-prone in real networks. Mark status as
+        // unavailable (preserve last known data) and refresh active session
+        // snapshots from HTTP; the resyncs clear the flag with fresh data.
+        markLiveSessionStatusesUnavailable()
         useConfigStore.setState({
           isConnected: true,
           hasEverConnected: true,
@@ -2228,7 +2251,7 @@ export function SyncProvider(props: {
     messageStreamTransport,
     runtimeKey,
     triggerDirectoryResync,
-    clearLiveSessionStatusesForUnavailableRuntime,
+    markLiveSessionStatusesUnavailable,
   ])
 
   useEffect(() => {

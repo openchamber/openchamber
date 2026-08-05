@@ -31,8 +31,11 @@ import path from 'node:path';
   *       hard-link publication.
  *     - the IPC server binds `127.0.0.1` only on an ephemeral port.
  *     - same-Windows-user local processes are the documented trust
- *       boundary (weaker than the Linux `0600` socket model because
- *       any process running as that user can read the discovery file).
+ *       boundary. Both platforms share the same OS-user/UID boundary:
+ *       POSIX `0600` restricts socket access to the owning UID, not to
+ *       the creating process, so any same-UID process can connect; the
+ *       Windows ACL + loopback binding provides the equivalent user-scoped
+ *       boundary through a different mechanism.
  *
  *   Cross-process adoption with a `claimCapability` is tracked separately
  *   and intentionally NOT exposed by this module. Earlier revisions shipped
@@ -125,7 +128,6 @@ const unresolvedAttentionCleanupError = (cause) => {
 };
 
 const defaultLog = (message) => {
-  // eslint-disable-next-line no-console
   console.log(message);
 };
 

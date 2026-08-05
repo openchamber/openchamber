@@ -81,9 +81,9 @@ jobs:
         # accidentally calls `process.getuid`, `chmodSync`, or otherwise
         # references POSIX-only behavior at module top-level, this
         # dynamic import will throw on Windows long before any test
-         # would. The factory must load on Windows before the real TCP/ACL
-         # smoke begins, so accidental POSIX-only module-top-level code fails
-         # visibly.
+        # would. The factory must load on Windows before the real TCP/ACL
+        # smoke begins, so accidental POSIX-only module-top-level code fails
+        # visibly.
         #
         # Note: we use a dynamic `import()` rather than `require()`
         # because `packages/web/package.json` is `"type": "module"`
@@ -93,7 +93,7 @@ jobs:
         # real signal we want this step to surface.
         shell: bash
         run: |
-          bunx node --input-type=module -e "import('./packages/web/server/lib/guardian/ipc-transport.js').then(m => { if (typeof m.createIpcServer !== 'function') { console.error('FAIL: createIpcServer is not a function'); process.exit(1); } if (typeof m.createIpcDialer !== 'function') { console.error('FAIL: createIpcDialer is not a function'); process.exit(1); } console.log('OK: ipc-transport namespace loaded; createIpcServer and createIpcDialer are both functions'); }).catch(err => { console.error('FAIL: ipc-transport module failed to load on Windows:', err && err.stack ? err.stack : err); process.exit(1); });"
+          node --input-type=module -e "import('./packages/web/server/lib/guardian/ipc-transport.js').then(m => { if (typeof m.createIpcServer !== 'function') { console.error('FAIL: createIpcServer is not a function'); process.exit(1); } if (typeof m.createIpcDialer !== 'function') { console.error('FAIL: createIpcDialer is not a function'); process.exit(1); } console.log('OK: ipc-transport namespace loaded; createIpcServer and createIpcDialer are both functions'); }).catch(err => { console.error('FAIL: ipc-transport module failed to load on Windows:', err && err.stack ? err.stack : err); process.exit(1); });"
 
       - name: Run Phase 2E credential, secret, protocol, and health tests on Windows
         # This is a required cross-platform unit/integration gate for the
@@ -116,11 +116,11 @@ jobs:
         # `process.platform` and `net.createServer`. The `npx vitest`
         # invocation is intentional: `bun run test` would dispatch to
         # the bun vitest-compat runner, and at least one existing
-         # integration test (lifecycle-guardian-integration.test.js)
-         # comments that `vi.stubGlobal` is not available there.
-         # These unit/injected paths do not claim native restart or
-         # rehydration evidence; the real Windows smoke and a future native
-         # rehydration run remain separate evidence gates.
+        # integration test (lifecycle-guardian-integration.test.js)
+        # comments that `vi.stubGlobal` is not available there.
+        # These unit/injected paths do not claim native restart or
+        # rehydration evidence; the real Windows smoke and a future native
+        # rehydration run remain separate evidence gates.
         working-directory: packages/web
         run: >-
           npx vitest run
@@ -131,8 +131,8 @@ jobs:
       - name: PowerShell smoke test
         # W-E: real-Windows end-to-end smoke for the standalone
         # guardian. Spawns the entrypoint, reads the discovery file,
-         # sends negative-auth, `list`, real managed-child lifecycle, and
-         # `shutdown` requests over TCP, asserts the process
+        # sends negative-auth, `list`, real managed-child lifecycle, and
+        # `shutdown` requests over TCP, asserts the process
         # exits and the discovery file is removed. The script itself
         # is a no-op on non-Windows (`skip: not Windows`) so this
         # step is safe to add even if the workflow ever runs on
@@ -177,7 +177,7 @@ jobs:
       - name: Upload smoke artifacts
         # W-E: upload the smoke script, the entrypoint log directory
         # (under `<data-dir>/run/`), and the v2 filesystem helper
-         # (so a reviewer can confirm `icacls` / handle-helper invocation
+        # (so a reviewer can confirm `icacls` / handle-helper invocation
         # paths on a failed run without re-cloning). The artifact
         # name now reflects the W-E smoke scope; existing W-A
         # downloads continue to work because GitHub artifacts are
