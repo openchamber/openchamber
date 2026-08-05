@@ -254,6 +254,26 @@ const readAuthFile = (): AuthFile => {
   }
 };
 
+const writeAuthFile = (auth: AuthFile): void => {
+  try {
+    if (!fs.existsSync(OPENCODE_DATA_DIR)) {
+      fs.mkdirSync(OPENCODE_DATA_DIR, { recursive: true });
+    }
+
+    if (fs.existsSync(AUTH_FILE)) {
+      const backupFile = `${AUTH_FILE}.openchamber.backup`;
+      fs.copyFileSync(AUTH_FILE, backupFile);
+      console.log(`Created auth backup: ${backupFile}`);
+    }
+
+    fs.writeFileSync(AUTH_FILE, JSON.stringify(auth, null, 2), 'utf8');
+    console.log('Successfully wrote auth file');
+  } catch (error) {
+    console.error('Failed to write auth file:', error);
+    throw new Error('Failed to write OpenCode auth configuration');
+  }
+};
+
 const readJsonFile = (filePath: string): Record<string, unknown> | null => {
   if (!fs.existsSync(filePath)) {
     return null;
@@ -921,6 +941,150 @@ const fetchGoogleQuota = async (): Promise<ProviderResult> => {
   });
 };
 
+// Public OAuth contract used by the OpenCode Anthropic plugin
+// (packages/opencode/src/auth/anthropic.ts): refresh-token exchange against the
+// console token endpoint with this client id, returning a rotated refresh token.
+const ANTHROPIC_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const ANTHROPIC_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
+const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
+const ANTHROPIC_REQUEST_TIMEOUT_MS = 30_000;
+// Renew while the token is still valid so a request in flight cannot fall into
+// the expired window between a model call and the usage refresh.
+const ANTHROPIC_EXPIRY_MARGIN_MS = 60_000;
+
+// Single-flight renewal: concurrent usage refreshes share one token exchange
+// instead of firing several renewals at the same time.
+let claudeRefreshPromise: Promise<Record<string, unknown>> | null = null;
+
+const decodeJwtExpiryMs = (token: string): number | null => {
+  try {
+    const payload = token.split('.')[1];
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { exp?: number };
+    return typeof claims?.exp === 'number' ? claims.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+};
+
+const normalizeExpiryMs = (value: unknown): number | null => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+  // OpenCode stores `expires` in milliseconds; tolerate seconds for older entries.
+  return value < 1_000_000_000_000 ? value * 1000 : value;
+};
+
+const refreshClaudeOauth = (entry: Record<string, unknown>, authKey: string): Promise<Record<string, unknown>> => {
+  if (!claudeRefreshPromise) {
+    claudeRefreshPromise = (async () => {
+      const response = await fetch(ANTHROPIC_OAUTH_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'refresh_token',
+          refresh_token: entry.refresh,
+          client_id: ANTHROPIC_OAUTH_CLIENT_ID,
+        }),
+        signal: AbortSignal.timeout(ANTHROPIC_REQUEST_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        throw new Error(`Claude token refresh failed with ${response.status}`);
+      }
+      const payload = await response.json() as Record<string, unknown>;
+      const access = typeof payload?.access_token === 'string' ? payload.access_token : '';
+      if (!access) {
+        throw new Error('Claude token refresh returned no access token');
+      }
+      const refreshed = {
+        ...entry,
+        type: 'oauth',
+        access,
+        refresh: typeof payload?.refresh_token === 'string' && payload.refresh_token
+          ? payload.refresh_token
+          : entry.refresh,
+        expires: Date.now() + (Number(payload?.expires_in) > 0 ? Number(payload.expires_in) : 3600) * 1000,
+      };
+      const auth = readAuthFile();
+      auth[authKey] = refreshed;
+      writeAuthFile(auth);
+      return refreshed;
+    })().finally(() => {
+      claudeRefreshPromise = null;
+    });
+  }
+  return claudeRefreshPromise;
+};
+
+/**
+ * Return the entry with a usable access token, renewing it when the stored
+ * token is expired (or about to expire). Returns null when the entry has no
+ * refresh token, so callers fall back to the stored token as-is.
+ */
+const ensureFreshClaudeOauth = async (
+  entry: Record<string, unknown>,
+  authKey: string,
+): Promise<Record<string, unknown> | null> => {
+  const expires = normalizeExpiryMs(entry.expires) ?? decodeJwtExpiryMs(entry.access as string);
+  if (entry.access && expires !== null && expires > Date.now() + ANTHROPIC_EXPIRY_MARGIN_MS) {
+    return entry;
+  }
+  if (!entry.refresh) {
+    return null;
+  }
+  return refreshClaudeOauth(entry, authKey);
+};
+
+const fetchClaudeUsage = async (accessToken: string): Promise<{ status: number; windows: Record<string, UsageWindow> }> => {
+  const response = await fetch(ANTHROPIC_USAGE_URL, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'anthropic-beta': 'oauth-2025-04-20',
+    },
+    signal: AbortSignal.timeout(ANTHROPIC_REQUEST_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    return { status: response.status, windows: {} };
+  }
+
+  const payload = await response.json() as Record<string, unknown>;
+  const windows: Record<string, UsageWindow> = {};
+  const fiveHour = payload.five_hour as Record<string, unknown> | undefined;
+  const sevenDay = payload.seven_day as Record<string, unknown> | undefined;
+  const sevenDaySonnet = payload.seven_day_sonnet as Record<string, unknown> | undefined;
+  const sevenDayOpus = payload.seven_day_opus as Record<string, unknown> | undefined;
+
+  if (fiveHour) {
+    windows['5h'] = toUsageWindow({
+      usedPercent: toNumber(fiveHour.utilization),
+      windowSeconds: null,
+      resetAt: toTimestamp(fiveHour.resets_at),
+    });
+  }
+  if (sevenDay) {
+    windows['7d'] = toUsageWindow({
+      usedPercent: toNumber(sevenDay.utilization),
+      windowSeconds: null,
+      resetAt: toTimestamp(sevenDay.resets_at),
+    });
+  }
+  if (sevenDaySonnet) {
+    windows['7d-sonnet'] = toUsageWindow({
+      usedPercent: toNumber(sevenDaySonnet.utilization),
+      windowSeconds: null,
+      resetAt: toTimestamp(sevenDaySonnet.resets_at),
+    });
+  }
+  if (sevenDayOpus) {
+    windows['7d-opus'] = toUsageWindow({
+      usedPercent: toNumber(sevenDayOpus.utilization),
+      windowSeconds: null,
+      resetAt: toTimestamp(sevenDayOpus.resets_at),
+    });
+  }
+
+  return { status: 200, windows };
+};
+
 const fetchClaudeQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude'])) as Record<string, unknown> | null;
@@ -936,58 +1100,69 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
     });
   }
 
-  try {
-    const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'anthropic-beta': 'oauth-2025-04-20',
-      },
-    });
+  // Write renewed credentials back under the key the entry was read from, so
+  // the OpenCode Anthropic plugin keeps using them.
+  const authKey = auth.anthropic !== undefined ? 'anthropic' : 'claude';
 
-    if (!response.ok) {
+  try {
+    // Renew first when the stored token is expired (or about to expire) — the
+    // window between model calls and the usage refresh must not 401.
+    let current = entry;
+    let token = accessToken;
+    if (entry?.type === 'oauth' && entry.refresh) {
+      const fresh = await ensureFreshClaudeOauth(entry, authKey);
+      if (fresh) {
+        current = fresh;
+        if (fresh.access) {
+          token = fresh.access as string;
+        }
+      }
+    }
+
+    const result = await fetchClaudeUsage(token);
+
+    if (result.status === 401 && current?.type === 'oauth' && current.refresh) {
+      // The usage API rejected even a fresh token — renew once more (with the
+      // rotated refresh token from the last renewal) and retry before declaring
+      // the session dead.
+      const renewed = await refreshClaudeOauth(current, authKey);
+      const retryResult = await fetchClaudeUsage(renewed.access as string);
+      if (retryResult.status === 200) {
+        return buildResult({
+          providerId: 'claude',
+          providerName: 'Claude',
+          ok: true,
+          configured: true,
+          usage: { windows: retryResult.windows },
+        });
+      }
+      if (retryResult.status === 401) {
+        return buildResult({
+          providerId: 'claude',
+          providerName: 'Claude',
+          ok: false,
+          configured: true,
+          error: 'Session expired — please re-authenticate with Claude',
+        });
+      }
       return buildResult({
         providerId: 'claude',
         providerName: 'Claude',
         ok: false,
         configured: true,
-        error: `API error: ${response.status}`,
+        error: `API error: ${retryResult.status}`,
       });
     }
 
-    const payload = await response.json() as Record<string, unknown>;
-    const windows: Record<string, UsageWindow> = {};
-    const fiveHour = (payload as Record<string, unknown>).five_hour as Record<string, unknown> | undefined;
-    const sevenDay = (payload as Record<string, unknown>).seven_day as Record<string, unknown> | undefined;
-    const sevenDaySonnet = (payload as Record<string, unknown>).seven_day_sonnet as Record<string, unknown> | undefined;
-    const sevenDayOpus = (payload as Record<string, unknown>).seven_day_opus as Record<string, unknown> | undefined;
-
-    if (fiveHour) {
-      windows['5h'] = toUsageWindow({
-        usedPercent: toNumber(fiveHour.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(fiveHour.resets_at),
-      });
-    }
-    if (sevenDay) {
-      windows['7d'] = toUsageWindow({
-        usedPercent: toNumber(sevenDay.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(sevenDay.resets_at),
-      });
-    }
-    if (sevenDaySonnet) {
-      windows['7d-sonnet'] = toUsageWindow({
-        usedPercent: toNumber(sevenDaySonnet.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(sevenDaySonnet.resets_at),
-      });
-    }
-    if (sevenDayOpus) {
-      windows['7d-opus'] = toUsageWindow({
-        usedPercent: toNumber(sevenDayOpus.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(sevenDayOpus.resets_at),
+    if (result.status !== 200) {
+      return buildResult({
+        providerId: 'claude',
+        providerName: 'Claude',
+        ok: false,
+        configured: true,
+        error: result.status === 401
+          ? 'Session expired — please re-authenticate with Claude'
+          : `API error: ${result.status}`,
       });
     }
 
@@ -996,7 +1171,7 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
       providerName: 'Claude',
       ok: true,
       configured: true,
-      usage: { windows },
+      usage: { windows: result.windows },
     });
   } catch (error) {
     return buildResult({

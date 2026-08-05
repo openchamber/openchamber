@@ -12,9 +12,16 @@ const AUTH = JSON.stringify({
   neuralwatt: { key: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
+  anthropic: { type: 'oauth', access: 'expired-access', refresh: 'refresh-token', expires: 1 },
 });
+let writtenAuth: string | null = null;
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
+((fs as unknown) as { writeFileSync: (path: string, data: string) => void }).writeFileSync = (_path, data) => {
+  writtenAuth = data;
+};
+((fs as unknown) as { copyFileSync: () => void }).copyFileSync = () => undefined;
+((fs as unknown) as { mkdirSync: () => void }).mkdirSync = () => undefined;
 
 import { fetchQuotaForProvider } from './quotaProviders';
 
@@ -508,5 +515,79 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
     const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
     fsMock.existsSync = ORIGINAL_FS.existsSync;
     fsMock.readFileSync = ORIGINAL_FS.readFileSync;
+  });
+});
+
+describe('Claude quota provider (VS Code parity)', () => {
+  const tokenUrl = 'https://console.anthropic.com/v1/oauth/token';
+  const usageUrl = 'https://api.anthropic.com/api/oauth/usage';
+  const usagePayload = {
+    five_hour: { utilization: 0.42, resets_at: '2026-08-05T12:00:00Z' },
+    seven_day: { utilization: 0.15, resets_at: '2026-08-08T12:00:00Z' },
+  };
+
+  beforeEach(() => {
+    writtenAuth = null;
+    // Later describe blocks restore real fs in their teardown; re-install the
+    // auth stubs so this block reads the fixture entry.
+    ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
+    ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
+    ((fs as unknown) as { writeFileSync: (path: string, data: string) => void }).writeFileSync = (_path, data) => {
+      writtenAuth = data;
+    };
+    ((fs as unknown) as { copyFileSync: () => void }).copyFileSync = () => undefined;
+    ((fs as unknown) as { mkdirSync: () => void }).mkdirSync = () => undefined;
+  });
+
+  test('renews an expired oauth token before the usage call and persists it', async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === tokenUrl) {
+        return mockResponse({
+          access_token: 'fresh-access',
+          refresh_token: 'rotated-refresh',
+          expires_in: 3600,
+        });
+      }
+      assert.equal(url, usageUrl);
+      return mockResponse(usagePayload);
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('claude');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows['5h']!.usedPercent, 0.42);
+    const persisted = JSON.parse(writtenAuth ?? '{}');
+    assert.equal(persisted.anthropic.access, 'fresh-access');
+    assert.equal(persisted.anthropic.refresh, 'rotated-refresh');
+    assert.equal(typeof persisted.anthropic.expires, 'number');
+  });
+
+  test('reports session expiry instead of a raw 401 when refresh fails to help', async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === tokenUrl) {
+        return mockResponse({ access_token: 'fresh-access', refresh_token: 'rotated-refresh', expires_in: 3600 });
+      }
+      return mockResponse({}, { ok: false, status: 401 });
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('claude');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Session expired — please re-authenticate with Claude');
+  });
+
+  test('maps a 401 without a refresh token to session expiry', async () => {
+    ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => JSON.stringify({
+      anthropic: { type: 'oauth', access: 'expired-access' },
+    });
+    globalThis.fetch = (async () => mockResponse({}, { ok: false, status: 401 })) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('claude');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Session expired — please re-authenticate with Claude');
   });
 });
