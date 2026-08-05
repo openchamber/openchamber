@@ -130,6 +130,26 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
   }, [editingId, openSidebarMenuKey]);
 
   const visibleSections = sections.filter((section) => section.items.length > 0);
+
+  // When a collapsed recent-sessions block is expanded, scroll the sidebar so
+  // the expanded block is fully visible. Track each section's previous
+  // collapse state in a ref so the effect only fires on real toggles.
+  const sectionBlockRefs = React.useRef(new Map<string, HTMLDivElement | null>());
+  const prevCollapsedRef = React.useRef(new Map<string, boolean>());
+  React.useLayoutEffect(() => {
+    const prev = prevCollapsedRef.current;
+    for (const [key, wasCollapsed] of prev) {
+      if (wasCollapsed && !collapsed.has(key)) {
+        const element = sectionBlockRefs.current.get(key);
+        if (element && typeof window !== 'undefined') {
+          const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          element.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+        }
+      }
+    }
+    prevCollapsedRef.current = new Map(visibleSections.map((section) => [section.key, collapsed.has(section.key)]));
+  }, [collapsed, visibleSections]);
+
   if (visibleSections.length === 0) {
     return null;
   }
@@ -177,7 +197,14 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
         }
 
         return (
-          <div key={section.key} className="relative space-y-1">
+          <div
+            key={section.key}
+            ref={(element) => {
+              if (element) sectionBlockRefs.current.set(section.key, element);
+              else sectionBlockRefs.current.delete(section.key);
+            }}
+            className="relative space-y-1"
+          >
             <div className={cn(
               '-ml-2.5 -mr-2',
               stickyZoneHeaders && 'sticky top-0 z-20 bg-sidebar',

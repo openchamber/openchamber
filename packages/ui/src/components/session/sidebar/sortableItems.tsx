@@ -167,6 +167,26 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
   const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
 
+  // When a collapsed project block is expanded, scroll the sidebar so the
+  // expanded block is fully visible. Track the previous state in a ref so the
+  // effect only fires on a real collapse→expand toggle.
+  const projectBlockRef = React.useRef<HTMLDivElement | null>(null);
+  const wasCollapsedRef = React.useRef(isCollapsed);
+  React.useLayoutEffect(() => {
+    const wasCollapsed = wasCollapsedRef.current;
+    wasCollapsedRef.current = isCollapsed;
+    if (!wasCollapsed || isCollapsed) return;
+    const element = projectBlockRef.current;
+    if (!element || typeof window === 'undefined') return;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    element.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+  }, [isCollapsed]);
+
+  const setProjectBlockRef = React.useCallback((element: HTMLDivElement | null) => {
+    projectBlockRef.current = element;
+    setNodeRef(element);
+  }, [setNodeRef]);
+
   const handleMenuOpenChange = React.useCallback((open: boolean) => {
     if (open) setIsContextMenuOpen(false);
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
@@ -230,7 +250,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
 
   return (
     <div
-      ref={setNodeRef}
+      ref={setProjectBlockRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn('relative', isDragging && 'opacity-30')}
     >

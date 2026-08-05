@@ -338,6 +338,23 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
   const foldersMap = useSessionFoldersStore((state) => state.foldersMap);
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
+  // When a collapsed sessions block is expanded, scroll the sidebar so the
+  // expanded block is fully visible. Track the previous state in a ref so the
+  // effect only fires on a real collapse→expand toggle, not on every render
+  // where the group stays collapsed or expanded.
+  const groupBlockRef = React.useRef<HTMLDivElement | null>(null);
+  const wasCollapsedRef = React.useRef(isCollapsed);
+  React.useLayoutEffect(() => {
+    const wasCollapsed = wasCollapsedRef.current;
+    wasCollapsedRef.current = isCollapsed;
+    // Search results force-expand groups without a user toggle; never
+    // scroll for that, or the sidebar would jump while typing.
+    if (hasSessionSearchQuery || !wasCollapsed || isCollapsed) return;
+    const element = groupBlockRef.current;
+    if (!element || typeof window === 'undefined') return;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    element.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+  }, [hasSessionSearchQuery, isCollapsed]);
   // PR state for the worktree sub-header (grouped display mode).
   const groupPrKey = React.useMemo(() => {
     if (group.isMain || group.isArchivedBucket || hideGroupLabel) return null;
@@ -1029,11 +1046,11 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   const groupBodyPaddingClass = 'pb-2';
 
   if (hideGroupLabel) {
-    return <div className="oc-group"><div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div></div>;
+    return <div ref={groupBlockRef} className="oc-group"><div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div></div>;
   }
 
   return (
-    <div className="oc-group">
+    <div ref={groupBlockRef} className="oc-group">
       <div
         className={cn('group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}
         onClick={() => onToggleCollapsedGroup(groupKey)}
