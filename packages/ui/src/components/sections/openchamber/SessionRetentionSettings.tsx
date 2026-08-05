@@ -10,6 +10,7 @@ import {
   SettingsChipGroup,
   SettingsInset,
   SETTINGS_ICON_BUTTON_CLASS,
+  SETTINGS_FIELDS_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
@@ -75,7 +76,7 @@ export const SessionRetentionSettings: React.FC = () => {
         ariaLabel={t('settings.openchamber.sessionRetention.field.enableAutoCleanupAria')}
       />
 
-      <SettingsInset className="space-y-0">
+      <SettingsInset className={SETTINGS_FIELDS_STACK_CLASS}>
         <SettingsFieldRow
           settingsItem="sessions.retention-period"
           label={t('settings.openchamber.sessionRetention.field.retentionPeriod')}
@@ -119,7 +120,7 @@ export const SessionRetentionSettings: React.FC = () => {
         </SettingsFieldRow>
       </SettingsInset>
 
-      <div className="mt-1 py-1.5 space-y-1">
+      <SettingsInset className="space-y-1">
         <SettingsFieldRow
           label={t('settings.openchamber.sessionRetention.manualCleanup.title')}
         >
@@ -139,7 +140,7 @@ export const SessionRetentionSettings: React.FC = () => {
             ? t('settings.openchamber.sessionRetention.manualCleanup.eligibleArchiveNow', { count: pendingCount })
             : t('settings.openchamber.sessionRetention.manualCleanup.eligibleDeleteNow', { count: pendingCount })}
         </p>
-      </div>
+      </SettingsInset>
     </SettingsSection>
   );
 };

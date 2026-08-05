@@ -12,6 +12,7 @@ import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SETTINGS_SELECT_SIZE,
   SETTINGS_OPTION_STACK_CLASS,
+  SETTINGS_FIELDS_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -330,7 +331,7 @@ export const DefaultsSettings: React.FC = () => {
   return (
     <>
       <SettingsSection title={t('settings.openchamber.defaults.title')} divider={false}>
-        <div className="space-y-0">
+        <div className={SETTINGS_FIELDS_STACK_CLASS}>
           <div className="mt-0 mb-1 typography-meta text-muted-foreground">
             {t('settings.openchamber.defaults.summaryPrefix')}
             {' '}
@@ -350,7 +351,7 @@ export const DefaultsSettings: React.FC = () => {
             )}
           </div>
 
-          <div>
+          <div className={SETTINGS_FIELDS_STACK_CLASS}>
             <SettingsFieldRow
               settingsItem="sessions.default-model"
               label={t('settings.openchamber.defaults.field.defaultModel')}
