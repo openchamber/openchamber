@@ -179,6 +179,68 @@ const SLOW_HEALTH_POLL_MAX_MS = 2000;
 
 const hasValue = <T>(value: T | null | undefined): value is T => value !== null && value !== undefined;
 
+/**
+ * Convert a "provider/model" model identifier (as sent by the settings form)
+ * into the SDK Agent `model` shape used by the agents list.
+ */
+function parseModelString(model: string | null | undefined): Agent['model'] | undefined {
+  if (typeof model !== 'string' || model.trim().length === 0) {
+    return undefined;
+  }
+  const trimmed = model.trim();
+  const slashIndex = trimmed.indexOf('/');
+  if (slashIndex <= 0 || slashIndex === trimmed.length - 1) {
+    return undefined;
+  }
+  return {
+    providerID: trimmed.slice(0, slashIndex),
+    modelID: trimmed.slice(slashIndex + 1),
+  };
+}
+
+/**
+ * Optimistically reflect a just-saved agent config in the in-memory agents
+ * list. The page derives its form state (and its dirty indicator) from the
+ * selected agent in this list, so without this the UI keeps showing pre-save
+ * values whenever the post-save reload is delayed, stale, or fails — the save
+ * itself already persisted to disk. The next successful reload replaces the
+ * list with authoritative server data.
+ */
+function applyAgentConfigToStore(name: string, config: Partial<AgentConfig>): void {
+  const { agents } = useAgentsStore.getState();
+  const index = agents.findIndex((agent) => agent.name === name);
+  if (index === -1) {
+    return;
+  }
+
+  const updated = { ...agents[index] } as AgentWithExtras;
+  if (config.description !== undefined) {
+    updated.description = config.description ?? undefined;
+  }
+  if (config.mode !== undefined) {
+    updated.mode = config.mode;
+  }
+  if (config.model !== undefined) {
+    updated.model = parseModelString(config.model) ?? updated.model;
+  }
+  if (config.variant !== undefined) {
+    updated.variant = config.variant ?? undefined;
+  }
+  if (config.temperature !== undefined) {
+    updated.temperature = config.temperature ?? undefined;
+  }
+  if (config.top_p !== undefined) {
+    updated.topP = config.top_p ?? undefined;
+  }
+  if (config.prompt !== undefined) {
+    updated.prompt = config.prompt ?? undefined;
+  }
+
+  const next = [...agents];
+  next[index] = updated;
+  useAgentsStore.setState({ agents: next });
+}
+
 export interface AgentDraft {
   name: string;
   scope: AgentScope;
@@ -447,6 +509,12 @@ export const useAgentsStore = create<AgentsStore>()(
 
             invalidateAgentsLoadCache(configDirectory);
 
+            // The write succeeded. Reflect it in the local agents list so the
+            // page can settle its dirty state and show the saved values even
+            // when the background reload is delayed, stale, or unavailable
+            // (e.g. an external server that only re-reads config on restart).
+            applyAgentConfigToStore(name, config);
+
             // External OpenCode server: persisted to disk but not reloaded.
             // Skip the reload so the form keeps the just-saved values instead of
             // reverting to the server's stale, startup-cached config.
@@ -463,6 +531,9 @@ export const useAgentsStore = create<AgentsStore>()(
                 scopes: ["agents"],
                 mode: "projects",
               });
+              // The refresh may have served a pre-save snapshot (cache or
+              // in-flight reuse); reconcile once more with what we saved.
+              applyAgentConfigToStore(name, config);
               return { ok: true };
             }
 
