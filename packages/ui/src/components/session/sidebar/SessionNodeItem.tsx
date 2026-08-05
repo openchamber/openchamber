@@ -229,10 +229,15 @@ const QuickSessionAction = React.memo(function QuickSessionAction({
         <button
           type="button"
           className={cn(
-            'inline-flex items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+            // Visible button chrome (elevated fill + hairline border) so the
+            // quick archive action reads as a clickable button, not a passive
+            // status glyph. Mirror of the shared Button outline variant, kept
+            // inline because this memoized row button needs tiny sizes and
+            // Shift-aware handlers the shared Button cannot express.
+            'inline-flex items-center justify-center rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-[opacity,background-color,border-color]',
             shiftHeld
-              ? 'text-destructive hover:text-destructive'
-              : 'text-muted-foreground hover:text-foreground',
+              ? 'border-destructive/50 bg-[var(--surface-elevated)] text-destructive hover:bg-destructive/10 hover:text-destructive'
+              : 'border-border/60 bg-[var(--surface-elevated)] text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
             buttonSizeClass,
           )}
           aria-label={label}
