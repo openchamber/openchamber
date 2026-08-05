@@ -71,8 +71,34 @@ import { Icon } from '@/components/icon/Icon';
 
 Use `IconName` for icon values stored in arrays, objects, state, or config. `Icon` has no `size` prop. Run `bun run icons:generate` when introducing a sprite name, and never edit `sprite.ts` manually. Load `references/icons.md` for the complete workflow.
 
+## Animation Contract
+
+Animate only `transform` and `opacity`. The compositor drives those; every other
+property recalculates style on each frame for as long as the animation runs, and
+geometry properties add layout on top. Measured on this repository's fixture,
+identical at any element count from 1 to 32:
+
+| Animated property | Style recalculations/sec | Layouts/sec |
+|---|---|---|
+| `transform`, `opacity`, `filter` | 0 | 0 |
+| `rotate` (the individual property) | 60 | 0 |
+| `background-position`, `border-color`, `box-shadow` | 60 | 0 |
+| `width` and other geometry | 60 | 60 |
+
+- `rotate: 360deg` is not a cheap synonym for `transform: rotate(360deg)`.
+  Prefer the `transform` form.
+- Cost applies for the entire time an animation runs, so an indicator tied to a
+  long-running operation pays it continuously. An indicator that is not
+  conveying anything should not be animating.
+- `will-change`, wrapper elements, `contain`, and `steps()` timing do not make a
+  non-composited property cheap. Only changing the property does.
+- Verify with `bun run profile:animation` rather than reasoning about it; add a
+  variant to `scripts/perf/animation-fixture.html` for a technique not covered.
+  See `scripts/perf/DOCUMENTATION.md`.
+
 ## Verification
 
+- Animations are limited to `transform` and `opacity`, or their cost was measured and accepted.
 - No hardcoded/palette colors were introduced.
 - Buttons use shared variants and sizes.
 - Icons use `Icon`/`IconName`, and generated sprite changes are intentional.

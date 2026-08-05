@@ -31,15 +31,20 @@ import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
 import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingState } from "./streaming"
 import { countSyncPerformance } from "./performance-diagnostics"
+import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { setActionRefs } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
+import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { applySessionEventToGlobalSessions } from "./session-event-router"
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
-import { processVSCodePermissionAutoAccept } from "./vscode-permission-auto-accept"
+import {
+  processVSCodePermissionAutoAccept,
+  processVSCodeReconciledPermissionAutoAccept,
+} from "./vscode-permission-auto-accept"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
@@ -242,6 +247,16 @@ const ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS = 5_000
 const ACTIVE_SESSION_STALE_EVENT_MS = 20_000
 const ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS = 15_000
 const CHILD_SESSION_DISCOVERY_INTERVAL_MS = 15_000
+
+// Active-session watchdog network calls run under the shared
+// background-network gate (see lib/background-network.ts). The watchdog walks
+// every initialized child store each tick and fires a status poll plus a
+// child-session discovery list per directory with active candidates — on
+// startup with many cache-hydrated directories that is dozens of simultaneous
+// requests, which would otherwise queue interactive traffic (opening a
+// session) behind them on the browser's ~6 sockets per origin. Later ticks
+// still cover every directory via the per-directory timestamps.
+
 const requestSignature = (items: Array<{ id: string }> | undefined): string => {
   if (!items || items.length === 0) return ""
   return items
@@ -1236,7 +1251,7 @@ export async function resyncBlockingRequestsForDirectory(
       const acceptedIdsBySession = new Map<string, Set<string>>()
       await Promise.all(Object.entries(grouped).flatMap(([sessionId, permissions]) =>
         permissions.map(async (permission) => {
-          if (!(await processVSCodePermissionAutoAccept(permission, directory))) return
+          if (!(await processVSCodeReconciledPermissionAutoAccept(permission, directory))) return
           const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
           accepted.add(permission.id)
           acceptedIdsBySession.set(sessionId, accepted)
@@ -1781,6 +1796,7 @@ export function SyncProvider(props: {
     })
   }
   const messageLoader = messageLoaderRef.current
+  const messageLoaderDisposalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   messageLoader.configure({ sdk: props.sdk, runtimeKey })
   const routingIndexRef = useRef<EventRoutingIndex | null>(null)
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
@@ -1934,6 +1950,16 @@ export function SyncProvider(props: {
 
         const result = await runBootstrap(0)
         if (result === "failed") throw new Error(`Directory bootstrap failed for ${directory}`)
+
+        // Selecting a session whose directory this client had not indexed yet
+        // routes it through the active directory as a documented guess. This is
+        // the moment that guess can be settled: the owning store now holds the
+        // session, so the authoritative directory is finally readable. Without
+        // this the guess survives, every fetch is addressed to a directory that
+        // does not own the session, and the session never renders.
+        if (result === "complete") {
+          useSessionUIStore.getState().adoptAuthoritativeSessionDirectory()
+        }
       },
       onDispose: (directory) => {
         messageLoader.invalidateDirectory(directory)
@@ -2071,7 +2097,7 @@ export function SyncProvider(props: {
       if (parentSessionIds.length === 0) return
       try {
         const scopedClient = opencodeClient.getScopedSdkClient(directory)
-        const result = await scopedClient.session.list({ directory, limit: 200 })
+        const result: unknown = await runBackgroundNetworkTask(() => scopedClient.session.list({ directory, limit: 200 }))
         const allSessions = ((result as { data?: unknown }).data ?? []) as Session[]
         const state = store.getState()
         const existingIds = new Set(state.session.map((s) => s.id))
@@ -2120,7 +2146,7 @@ export function SyncProvider(props: {
       polling.add(directory)
       try {
         const before = store.getState()
-        const statuses = await resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "monotonic")
+        const statuses = await runBackgroundNetworkTask(() => resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "monotonic"))
         if (!statuses) return
         const needsSnapshot = candidateSessionIds.some((sessionId) => (
           needsSnapshotAfterStatusPoll(before, sessionId, statuses[sessionId])
@@ -2242,9 +2268,22 @@ export function SyncProvider(props: {
     }
   }, [props.sdk, props.directory, childStores, messageLoader, routingIndex])
 
-  useEffect(() => () => {
-    messageLoader.dispose()
-    childStores.disposeAll()
+  useEffect(() => {
+    if (messageLoaderDisposalTimerRef.current) {
+      clearTimeout(messageLoaderDisposalTimerRef.current)
+      messageLoaderDisposalTimerRef.current = null
+    }
+    messageLoader.activate()
+    return () => {
+      // Strict Mode probes effects with setup → cleanup → setup in one task.
+      // Deferring destruction lets child effects issue their second setup load
+      // before this provider is installed again and cancels the cleanup.
+      messageLoaderDisposalTimerRef.current = setTimeout(() => {
+        messageLoaderDisposalTimerRef.current = null
+        messageLoader.dispose()
+        childStores.disposeAll()
+      }, 0)
+    }
   }, [childStores, messageLoader])
 
   // Subscribe to child store for streaming state derivation

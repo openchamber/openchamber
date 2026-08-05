@@ -18,6 +18,7 @@
 import React from 'react';
 import { flushSync } from 'react-dom';
 
+import { observeEditorFocus } from '@/lib/hardwareKeyboard';
 import { isCapacitorApp } from '@/lib/platform';
 import type { ComposerEditorHandle } from '../editor/ComposerEditor';
 
@@ -41,6 +42,13 @@ export interface MobileComposerShellOptions {
     formRef: React.RefObject<HTMLFormElement | null>;
     setExpandedInput: (expanded: boolean) => void;
     holders: MobileComposerHolders;
+    /**
+     * Keep the full composer up permanently and never fall back to the pill.
+     * The pill exists to buy screen back from the soft keyboard; with a
+     * hardware keyboard on a tablet there is no soft keyboard to hide from,
+     * and collapsing between keystrokes would only cost the user a tap.
+     */
+    alwaysExpanded?: boolean;
 }
 
 export interface MobileComposerShell {
@@ -65,9 +73,9 @@ export interface MobileComposerShell {
 export function useMobileComposerShell(
     options: MobileComposerShellOptions,
 ): MobileComposerShell {
-    const { isMobile, editorRef, formRef, setExpandedInput, holders } = options;
+    const { isMobile, editorRef, formRef, setExpandedInput, holders, alwaysExpanded = false } = options;
 
-    const [expanded, setExpanded] = React.useState(false);
+    const [expanded, setExpanded] = React.useState(alwaysExpanded && isMobile);
     const [focused, setFocused] = React.useState(false);
     const [overlayHostBusy, setOverlayHostBusy] = React.useState(false);
     const [dictationActive, setDictationActive] = React.useState(false);
@@ -88,6 +96,16 @@ export function useMobileComposerShell(
         expandedRef.current = expanded;
     });
 
+    // A hardware keyboard can be attached (or detached) at any moment, so this
+    // is a live condition rather than a mount-time one. Detaching does NOT
+    // force a collapse — the normal idle/keyboard-hide paths take over again.
+    const alwaysExpandedRef = React.useRef(alwaysExpanded);
+    alwaysExpandedRef.current = alwaysExpanded;
+    React.useEffect(() => {
+        if (!isMobile || !alwaysExpanded) return;
+        setExpanded(true);
+    }, [alwaysExpanded, isMobile]);
+
     // The draft screen restructures itself around the composer: its starter
     // chips leave once the full composer is up, and its centered title
     // re-centers over whatever room remains. Announced as a root class from a
@@ -95,12 +113,16 @@ export function useMobileComposerShell(
     // swap — keyed on the keyboard instead (oc-keyboard-open arrives with the
     // keyboardWillShow bridge event, ~100ms later), the chips vanished
     // mid-rise as a second visible jump.
+    //
+    // Not announced while `alwaysExpanded`: there the full composer is the
+    // resting state, not a keyboard takeover, so claiming otherwise would hide
+    // the starters permanently. The keyboard classes still cover that case.
     React.useLayoutEffect(() => {
         if (!isMobile || typeof document === 'undefined') return;
         const root = document.documentElement;
-        root.classList.toggle('oc-composer-expanded', expanded);
+        root.classList.toggle('oc-composer-expanded', expanded && !alwaysExpanded);
         return () => root.classList.remove('oc-composer-expanded');
-    }, [expanded, isMobile]);
+    }, [alwaysExpanded, expanded, isMobile]);
 
     const expand = React.useCallback(() => {
         expandIntentRef.current = 'focus';
@@ -151,7 +173,7 @@ export function useMobileComposerShell(
         // insert-and-send) collapse straight back to the pill rather than
         // parking on the normal composer for the usual grace period.
         window.setTimeout(() => {
-            if (!expandedRef.current) return;
+            if (!expandedRef.current || alwaysExpandedRef.current) return;
             if (editorRef.current?.isFocused()) return;
             setExpanded(false);
             setExpandedInput(false);
@@ -288,7 +310,7 @@ export function useMobileComposerShell(
         || holders.isDragging;
 
     React.useEffect(() => {
-        if (!isMobile || !expanded || busy) return;
+        if (!isMobile || !expanded || busy || alwaysExpanded) return;
         const timer = window.setTimeout(() => {
             // Authoritative DOM check: the React focus state can lag a
             // programmatic refocus (the overlay-close restore above).
@@ -299,7 +321,7 @@ export function useMobileComposerShell(
             setExpandedInput(false);
         }, 250);
         return () => window.clearTimeout(timer);
-    }, [busy, editorRef, expanded, isMobile, setExpandedInput]);
+    }, [alwaysExpanded, busy, editorRef, expanded, isMobile, setExpandedInput]);
 
     const busyRef = React.useRef(false);
     busyRef.current = busy;
@@ -344,7 +366,7 @@ export function useMobileComposerShell(
         const handleIntent = (event: Event) => {
             const detail = (event as CustomEvent<{ open?: boolean }>).detail;
             if (!detail || detail.open !== false) return;
-            if (!expandedRef.current) return;
+            if (!expandedRef.current || alwaysExpandedRef.current) return;
             // Something still holds the composer open (dictation, an overlay
             // that closed the keyboard, a drag) — the fallback path handles it.
             if (busyRef.current) return;
@@ -360,6 +382,9 @@ export function useMobileComposerShell(
 
     const onEditorFocus = React.useCallback(() => {
         if (!isMobile) return;
+        // Focus is the only moment a soft keyboard would be presented, so it is
+        // also the only moment its ABSENCE tells us a hardware one is attached.
+        if (isCapacitorApp()) observeEditorFocus();
         if (blurTimerRef.current !== null) {
             window.clearTimeout(blurTimerRef.current);
             blurTimerRef.current = null;

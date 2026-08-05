@@ -133,19 +133,6 @@ const ensureWindowsNodeAddonApiForNodePty = async (rebuildRootPath) => {
 
 console.log(`[electron] rebuilding native modules against Electron ${electronVersion}...`);
 
-await rebuild({
-  buildPath: electronDir,
-  electronVersion,
-  force: true,
-  arch: targetArchitecture.electronBuilder,
-  onlyModules: ['better-sqlite3'],
-});
-const betterSqliteDir = path.dirname(require.resolve('better-sqlite3/package.json'));
-const betterSqliteBinary = path.join(betterSqliteDir, 'build', 'Release', 'better_sqlite3.node');
-if (!existsSync(betterSqliteBinary)) {
-  throw new Error(`better-sqlite3 rebuild did not produce ${betterSqliteBinary}`);
-}
-
 // Rebuild against the hoisted root node_modules (bun workspace layout).
 // force=true re-links regardless of cached state; prebuild-install lookup is
 // bypassed by @electron/rebuild in favor of direct node-gyp builds.

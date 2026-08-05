@@ -13,6 +13,7 @@ import {
   formatShortcutForDisplay,
   getCustomizableShortcutActions,
   getEffectiveShortcutCombo,
+  getEffectiveShortcutPrefix,
   isRiskyBrowserShortcut,
   keyToShortcutToken,
   normalizeCombo,
@@ -47,6 +48,35 @@ const keyboardEventToCombo = (event: React.KeyboardEvent<HTMLInputElement>): Sho
 
   parts.push(keyToken);
   return normalizeCombo(parts.join('+'));
+};
+
+// Prefix capture for chord-style shortcuts (e.g. "switch context panel
+// surface"): a bare modifier press is accepted so the prefix can be just the
+// primary modifier (default) or a modifier + key chord like `mod+p`.
+const keyboardEventToPrefixCombo = (event: React.KeyboardEvent<HTMLInputElement>): ShortcutCombo | null => {
+  const parts: string[] = [];
+
+  if (event.metaKey || event.ctrlKey) {
+    parts.push('mod');
+  }
+  if (event.shiftKey) {
+    parts.push('shift');
+  }
+  if (event.altKey) {
+    parts.push('alt');
+  }
+
+  if (MODIFIER_KEYS.has(event.key.toLowerCase())) {
+    return parts.length > 0 ? normalizeCombo(parts.join('+')) : null;
+  }
+
+  const keyToken = keyToShortcutToken(event.key);
+  if (!keyToken) {
+    return null;
+  }
+
+  parts.push(keyToken);
+  return parts.length > 0 ? normalizeCombo(parts.join('+')) : null;
 };
 
 export const KeyboardShortcutsSettings: React.FC = () => {
@@ -211,10 +241,19 @@ export const KeyboardShortcutsSettings: React.FC = () => {
 
       <div>
         {actions.map((action, index) => {
-          const effective = getEffectiveShortcutCombo(action.id, shortcutOverrides);
+          const isSurfaceSwitch = action.id === 'switch_context_surface';
+          const effective = isSurfaceSwitch
+            ? getEffectiveShortcutPrefix(action.id, shortcutOverrides)
+            : getEffectiveShortcutCombo(action.id, shortcutOverrides);
           const draft = draftByAction[action.id];
           const displayCombo = draft ?? effective;
           const hasDraft = typeof draft === 'string' && normalizeCombo(draft) !== normalizeCombo(effective);
+          const isUnassignedDisplay = displayCombo === '' || normalizeCombo(displayCombo) === UNASSIGNED_SHORTCUT;
+          const displayValue = capturingActionId === action.id
+            ? t('settings.openchamber.keyboardShortcuts.field.pressKeys')
+            : isSurfaceSwitch && !isUnassignedDisplay
+              ? `${formatShortcutForDisplay(displayCombo)}${t('settings.openchamber.keyboardShortcuts.action.switch_context_surface.suffix')}`
+              : formatShortcutForDisplay(displayCombo);
 
           return (
             <div key={action.id} className={cn("py-1.5", index > 0 && "border-t border-border/40")}>
@@ -224,7 +263,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
               >
                 <Input
                   readOnly
-                  value={capturingActionId === action.id ? t('settings.openchamber.keyboardShortcuts.field.pressKeys') : formatShortcutForDisplay(displayCombo)}
+                  value={displayValue}
                   onFocus={() => {
                     setCapturingActionId(action.id);
                     setErrorText('');
@@ -243,7 +282,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                       return;
                     }
 
-                    const combo = keyboardEventToCombo(event);
+                    const combo = isSurfaceSwitch ? keyboardEventToPrefixCombo(event) : keyboardEventToCombo(event);
                     if (!combo) {
                       return;
                     }

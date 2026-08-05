@@ -97,6 +97,28 @@ For streaming-frequency work, also load `performance-engineering`.
 - Key runtime-scoped caches by runtime identity when IDs or paths can collide.
 - Clean optimistic and local cache state after partial failures.
 
+### Never Evict What Is In Use
+
+An entry acquired during render but protected only after commit is unprotected
+for the whole render pass. Eviction that runs on acquisition therefore disposes
+entries that are actively mounting; the next render recreates them in a loading
+state, which issues another fetch, which repeats forever. The symptom is an
+endless request loop and sawtoothing listeners, heap, and CPU, and it appears
+only once live entries outnumber the limit, so it never reproduces on a small
+workspace.
+
+- Define what protects an entry from eviction, and prove that protection is in
+  place before eviction can observe the entry, not one commit later.
+- Treat capacity as a soft target. Overflowing briefly is always cheaper than
+  evict/recreate cycles; bound the cache with idle-time eviction instead.
+- Never run an eviction scan on the acquisition path. Coalesce it into one
+  deferred pass so a render mounting many entries scans once, not once per
+  entry.
+- Keep explicit lifecycle edges, such as the last consumer releasing an entry,
+  synchronous. Deferring those changes an observable contract.
+- Raising a limit is a workaround, not a fix. It relocates the cliff and hides
+  the loop from everyone whose workload is smaller than the new number.
+
 ## Persisted Snapshot Ordering
 
 When state exists in memory and one or more persistent stores, define an explicit authority and ordering protocol:
@@ -136,5 +158,6 @@ Cover the relevant lifecycle, not only static state:
 - New session lookup assumes SSE already indexed it.
 - Optimistic data has no shadow entry or rollback.
 - Snapshot-difference cleanup treats its first startup snapshot as a disappearance event.
+- Eviction runs on the acquisition path, or a cache limit is raised in response to a request loop.
 - Missing or malformed persistence becomes authoritative empty state.
 - Debounced writes are canceled on owner/lifecycle change without completing against the captured owner or an explicit durability/data-loss contract.

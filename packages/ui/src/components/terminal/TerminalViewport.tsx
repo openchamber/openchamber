@@ -18,6 +18,42 @@ import type { TerminalChunk } from '@/stores/useTerminalStore';
 let ghosttyPromise: Promise<Ghostty> | null = null;
 const loadGhostty = (): Promise<Ghostty> => ghosttyPromise ??= Ghostty.load();
 
+type TerminalSize = { cols: number; rows: number };
+
+const getProvisionalTerminalSize = (
+  container: HTMLDivElement,
+  fontFamily: string,
+  fontSize: number,
+): TerminalSize | null => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return null;
+
+  const context = document.createElement('canvas').getContext('2d');
+  if (!context || container.clientWidth < 24 || container.clientHeight < 24) return null;
+
+  context.font = `${fontSize}px ${fontFamily}`;
+  const metrics = context.measureText('M');
+  const cellWidth = Math.ceil(metrics.width);
+  const cellHeight = Math.ceil(
+    (metrics.actualBoundingBoxAscent || fontSize * 0.8) +
+    (metrics.actualBoundingBoxDescent || fontSize * 0.2),
+  ) + 2;
+  if (cellWidth < 1 || cellHeight < 1) return null;
+
+  const style = window.getComputedStyle(container);
+  const horizontalPadding =
+    (Number.parseInt(style.paddingLeft, 10) || 0) +
+    (Number.parseInt(style.paddingRight, 10) || 0);
+  const verticalPadding =
+    (Number.parseInt(style.paddingTop, 10) || 0) +
+    (Number.parseInt(style.paddingBottom, 10) || 0);
+
+  // Match Ghostty FitAddon's 15px scrollbar reservation and minimum dimensions.
+  return {
+    cols: Math.max(2, Math.floor((container.clientWidth - horizontalPadding - 15) / cellWidth)),
+    rows: Math.max(1, Math.floor((container.clientHeight - verticalPadding) / cellHeight)),
+  };
+};
+
 export type TerminalController = {
   focus: () => void;
   fit: () => void;
@@ -47,12 +83,16 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
   const fitRef = React.useRef<FitAddon | null>(null);
   const inputRef = React.useRef(onInput);
   const resizeRef = React.useRef(onResize);
-  const lastSizeRef = React.useRef<{ cols: number; rows: number } | null>(null);
+  const lastSizeRef = React.useRef<TerminalSize | null>(null);
+  const provisionalSizeRef = React.useRef<TerminalSize | null>(null);
   const lastChunkRef = React.useRef<number | null>(null);
   const writeQueueRef = React.useRef('');
   const outputRewriteCarryRef = React.useRef('');
   const safeResetRef = React.useRef(getGhosttySafeResetSequence(theme.background));
   const writingRef = React.useRef(false);
+  // Incremented whenever the replay stream restarts, so a write completing from
+  // before the restart cannot clear the in-flight flag of a newer write.
+  const writeEpochRef = React.useRef(0);
   const visibleRef = React.useRef(isVisible);
   const rendererReadyRef = React.useRef(false);
   const [ready, setReady] = React.useState(0);
@@ -61,6 +101,14 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
   resizeRef.current = onResize;
   visibleRef.current = isVisible;
   safeResetRef.current = getGhosttySafeResetSequence(theme.background);
+
+  React.useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const size = getProvisionalTerminalSize(container, fontFamily, fontSize);
+    provisionalSizeRef.current = size;
+    if (size) resizeRef.current(size.cols, size.rows);
+  }, [fontFamily, fontSize]);
 
   const fit = React.useCallback(() => {
     const container = containerRef.current;
@@ -98,19 +146,39 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       return;
     }
     writingRef.current = true;
+    const epoch = writeEpochRef.current;
     terminal.write(rewritten.data, () => {
-      if (terminalRef.current !== terminal) return;
+      if (terminalRef.current !== terminal || writeEpochRef.current !== epoch) return;
       writingRef.current = false;
       if (writeQueueRef.current) flush();
     });
   }, []);
 
+  /**
+   * Replay discontinuities (restart, reconnect, buffer reset) only need the VT
+   * state cleared. `Terminal.reset()` frees and rebuilds the WASM terminal while
+   * keeping the canvas, renderer and font atlas, so prefer it over remounting the
+   * whole terminal; the generation bump remains the fallback before the terminal
+   * exists.
+   */
   const recreateRenderer = React.useCallback(() => {
     lastChunkRef.current = null;
     writeQueueRef.current = '';
     outputRewriteCarryRef.current = '';
     writingRef.current = false;
-    setRendererGeneration((value) => value + 1);
+    writeEpochRef.current += 1;
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      setRendererGeneration((value) => value + 1);
+      return;
+    }
+    try {
+      terminal.reset();
+      const safeReset = safeResetRef.current;
+      if (safeReset) terminal.write(`${safeReset}\u001b[2J\u001b[H`);
+    } catch {
+      setRendererGeneration((value) => value + 1);
+    }
   }, []);
 
   React.useEffect(() => {
@@ -145,7 +213,10 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
 
     loadGhostty().then((ghostty) => {
       if (disposed) return;
-      terminal = new GhosttyTerminal(getGhosttyTerminalOptions(fontFamily, fontSize, theme, ghostty, false));
+      terminal = new GhosttyTerminal({
+        ...getGhosttyTerminalOptions(fontFamily, fontSize, theme, ghostty, false),
+        ...(provisionalSizeRef.current ?? {}),
+      });
       const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
@@ -195,6 +266,7 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       writeQueueRef.current = '';
       outputRewriteCarryRef.current = '';
       writingRef.current = false;
+      writeEpochRef.current += 1;
       rendererReadyRef.current = false;
     };
   }, [fit, fontFamily, fontSize, rendererGeneration, theme]);
@@ -214,10 +286,20 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       return;
     }
     const previous = lastChunkRef.current;
-    const previousIndex = previous === null ? -1 : chunks.findIndex((chunk) => chunk.id === previous);
-    if (previous !== null && previousIndex < 0) {
-      recreateRenderer();
-      return;
+    // Chunk ids are monotonic and the store appends, so the already-written chunk
+    // is normally the last one. Scanning from the end keeps this O(1) per chunk
+    // instead of O(chunks) on every streamed write.
+    let previousIndex = -1;
+    if (previous !== null) {
+      for (let index = chunks.length - 1; index >= 0; index -= 1) {
+        const id = chunks[index].id;
+        if (id === previous) { previousIndex = index; break; }
+        if (id < previous) break;
+      }
+      if (previousIndex < 0) {
+        recreateRenderer();
+        return;
+      }
     }
     const isReplay = previousIndex < 0;
     const pending = previousIndex >= 0 ? chunks.slice(previousIndex + 1) : chunks;

@@ -9,23 +9,30 @@ import {
 } from "@/lib/configUpdate";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { runBackgroundNetworkTask } from "@/lib/background-network";
+import { useProjectsStore } from "@/stores/useProjectsStore";
 
 import { opencodeClient } from '@/lib/opencode/client';
 
-const getCurrentDirectory = (): string | null => {
-  const opencodeDirectory = opencodeClient.getDirectory();
-  if (typeof opencodeDirectory === 'string' && opencodeDirectory.trim().length > 0) {
-    return opencodeDirectory;
-  }
-
+// Prefer the active project path so Settings/Skills discovery matches the
+// project selector (and Commands/Agents). Falling back only to the session
+// directory misses repository-local `.agents/skills` when the client directory
+// is unset or points elsewhere while an active project exists.
+const getRequestDirectory = (): string | null => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const store = (window as any).__zustand_directory_store__;
-    if (store) {
-      return store.getState().currentDirectory;
+    const projectsStore = useProjectsStore.getState();
+    const activeProject = projectsStore.getActiveProject?.();
+
+    if (activeProject?.path?.trim()) {
+      return activeProject.path.trim();
     }
-  } catch {
-    // ignore
+
+    const clientDir = opencodeClient.getDirectory();
+    if (clientDir?.trim()) {
+      return clientDir.trim();
+    }
+  } catch (err) {
+    console.warn('[SkillsStore] Error resolving config directory:', err);
   }
 
   return null;
@@ -69,6 +76,8 @@ export interface DiscoveredSkill {
   description?: string;
   /** Domain folder parsed from file path, e.g. "automation-ai", "lark-ecosystem" */
   group?: string;
+  /** Authoritative server flag: skill lives under a managed root and can be renamed in place. */
+  renamable?: boolean;
 }
 
 /** Parse the domain group folder from a skill file path.
@@ -92,6 +101,7 @@ interface RawSkillResponse {
   path: string;
   scope?: SkillScope;
   source?: SkillSource;
+  renamable?: boolean;
   sources?: {
     md?: {
       description?: string;
@@ -142,6 +152,7 @@ interface SkillsStore {
   getSkillDetail: (name: string) => Promise<SkillDetail | null>;
   createSkill: (config: SkillConfig) => Promise<boolean>;
   updateSkill: (name: string, config: Partial<SkillConfig>) => Promise<boolean>;
+  renameSkill: (name: string, newName: string) => Promise<boolean>;
   deleteSkill: (name: string) => Promise<boolean>;
   getSkillByName: (name: string) => DiscoveredSkill | undefined;
   
@@ -168,7 +179,7 @@ const getSkillsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_SKILLS_CACHE_KEY;
 };
 
-export const invalidateSkillsLoadCache = (directory: string | null = getCurrentDirectory()) => {
+export const invalidateSkillsLoadCache = (directory: string | null = getRequestDirectory()) => {
   skillsLastLoadedAt.delete(getSkillsCacheKey(directory));
 };
 
@@ -197,8 +208,8 @@ export const useSkillsStore = create<SkillsStore>()(
         },
 
         loadSkills: async () => {
-          const currentDirectory = getCurrentDirectory();
-          const cacheKey = getSkillsCacheKey(currentDirectory);
+          const directory = getRequestDirectory();
+          const cacheKey = getSkillsCacheKey(directory);
           const now = Date.now();
           const loadedAt = skillsLastLoadedAt.get(cacheKey) ?? 0;
           const hasCachedSkills = get().skills.length > 0;
@@ -219,9 +230,12 @@ export const useSkillsStore = create<SkillsStore>()(
 
             for (let attempt = 0; attempt < 3; attempt++) {
               try {
-                const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
+                const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-                const response = await runtimeFetch(`/api/config/skills${queryParams}`);
+                const response = await runBackgroundNetworkTask(() => runtimeFetch(`/api/config/skills${queryParams}`, {
+                  priority: 'low',
+                  headers: directory ? { 'x-opencode-directory': directory } : undefined,
+                }));
                 if (!response.ok) {
                   throw new Error(`Failed to list skills: ${response.status}`);
                 }
@@ -235,6 +249,7 @@ export const useSkillsStore = create<SkillsStore>()(
                   source: s.source ?? 'opencode',
                   description: s.sources?.md?.description || '',
                   group: parseSkillGroup(s.path),
+                  renamable: s.renamable === true,
                 }));
 
                 set({ skills: configSkills, isLoading: false });
@@ -262,10 +277,12 @@ export const useSkillsStore = create<SkillsStore>()(
 
         getSkillDetail: async (name: string) => {
           try {
-            const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
+            const directory = getRequestDirectory();
+            const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
             
-            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`);
+            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
+              headers: directory ? { 'x-opencode-directory': directory } : undefined,
+            });
             if (!response.ok) {
               return null;
             }
@@ -290,12 +307,15 @@ export const useSkillsStore = create<SkillsStore>()(
             if (config.source) skillConfig.source = config.source;
             if (config.supportingFiles) skillConfig.supportingFiles = config.supportingFiles;
 
-            const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
+            const directory = getRequestDirectory();
+            const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
             const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(config.name)}${queryParams}`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                ...(directory ? { 'x-opencode-directory': directory } : {}),
+              },
               body: JSON.stringify(skillConfig)
             });
 
@@ -306,7 +326,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? false;
-            invalidateSkillsLoadCache(currentDirectory);
+            invalidateSkillsLoadCache(directory);
             if (needsReload) {
               requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({
@@ -341,12 +361,15 @@ export const useSkillsStore = create<SkillsStore>()(
             if (config.supportingFiles !== undefined) skillConfig.supportingFiles = config.supportingFiles;
             if (config.targetPath !== undefined) skillConfig.targetPath = config.targetPath;
 
-            const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
+            const directory = getRequestDirectory();
+            const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
             const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
               method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                ...(directory ? { 'x-opencode-directory': directory } : {}),
+              },
               body: JSON.stringify(skillConfig)
             });
 
@@ -357,7 +380,54 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? false;
-            invalidateSkillsLoadCache(currentDirectory);
+            invalidateSkillsLoadCache(directory);
+            if (needsReload) {
+              requiresReload = true;
+              await refreshSkillsAfterOpenCodeRestart({
+                message: payload?.message,
+                delayMs: payload?.reloadDelayMs,
+              });
+              return true;
+            }
+
+            const loaded = await get().loadSkills();
+            if (loaded) {
+              emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
+            }
+            return loaded;
+          } catch {
+            return false;
+          } finally {
+            if (!requiresReload) {
+              finishConfigUpdate();
+            }
+          }
+        },
+
+        renameSkill: async (name: string, newName: string) => {
+          startConfigUpdate("Renaming skill...");
+          let requiresReload = false;
+          try {
+            const directory = getRequestDirectory();
+            const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+
+            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(directory ? { 'x-opencode-directory': directory } : {}),
+              },
+              body: JSON.stringify({ renameTo: newName }),
+            });
+
+            const payload = await response.json().catch(() => null);
+            if (!response.ok) {
+              const message = payload?.error || 'Failed to rename skill';
+              throw new Error(message);
+            }
+
+            const needsReload = payload?.requiresReload ?? false;
+            invalidateSkillsLoadCache(directory);
             if (needsReload) {
               requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({
@@ -385,11 +455,12 @@ export const useSkillsStore = create<SkillsStore>()(
           startConfigUpdate("Deleting skill...");
           let requiresReload = false;
           try {
-            const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
+            const directory = getRequestDirectory();
+            const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
             const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
-              method: 'DELETE'
+              method: 'DELETE',
+              headers: directory ? { 'x-opencode-directory': directory } : undefined,
             });
 
             const payload = await response.json().catch(() => null);
@@ -399,7 +470,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? false;
-            invalidateSkillsLoadCache(currentDirectory);
+            invalidateSkillsLoadCache(directory);
             if (needsReload) {
               requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({
@@ -435,11 +506,12 @@ export const useSkillsStore = create<SkillsStore>()(
 
         readSupportingFile: async (skillName: string, filePath: string) => {
           try {
-            const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `&directory=${encodeURIComponent(currentDirectory)}` : '';
+            const directory = getRequestDirectory();
+            const queryParams = directory ? `&directory=${encodeURIComponent(directory)}` : '';
             
             const response = await runtimeFetch(
-              `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}?${queryParams.slice(1)}`
+              `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}?${queryParams.slice(1)}`,
+              { headers: directory ? { 'x-opencode-directory': directory } : undefined },
             );
             if (!response.ok) {
               return null;
@@ -454,14 +526,17 @@ export const useSkillsStore = create<SkillsStore>()(
 
         writeSupportingFile: async (skillName: string, filePath: string, content: string) => {
           try {
-            const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
+            const directory = getRequestDirectory();
+            const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
             
             const response = await runtimeFetch(
               `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}${queryParams}`,
               {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(directory ? { 'x-opencode-directory': directory } : {}),
+                },
                 body: JSON.stringify({ content })
               }
             );
@@ -474,12 +549,15 @@ export const useSkillsStore = create<SkillsStore>()(
 
         deleteSupportingFile: async (skillName: string, filePath: string) => {
           try {
-            const currentDirectory = getCurrentDirectory();
-            const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
+            const directory = getRequestDirectory();
+            const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
             
             const response = await runtimeFetch(
               `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}${queryParams}`,
-              { method: 'DELETE' }
+              {
+                method: 'DELETE',
+                headers: directory ? { 'x-opencode-directory': directory } : undefined,
+              }
             );
             
             return response.ok;

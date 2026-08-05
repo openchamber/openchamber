@@ -1,0 +1,15 @@
+<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g fill="white" stroke="black" stroke-width="3" stroke-linejoin="round">
+    <path d="M12 40L24 34L36 40V52L24 59L12 52V40Z"/>
+    <path d="M36 40L48 34L60 40V52L48 59L36 52V40Z"/>
+  </g>
+  <g stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 40L24 46L36 40M24 46V59"/>
+    <path d="M36 40L48 46L60 40M48 46V59"/>
+  </g>
+  <circle cx="36" cy="25" r="16" fill="white" stroke="black" stroke-width="3"/>
+  <rect x="27" y="22" width="7" height="9" rx="1.5" fill="black"/>
+  <rect x="29.5" y="25" width="2" height="6" fill="white"/>
+  <rect x="38" y="22" width="7" height="9" rx="1.5" fill="black"/>
+  <rect x="40.5" y="25" width="2" height="6" fill="white"/>
+</svg>

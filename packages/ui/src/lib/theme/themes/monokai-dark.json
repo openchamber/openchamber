@@ -27,7 +27,7 @@
       "elevated": "#21221a",
       "elevatedForeground": "#F8F8F2",
       "overlay": "#FFFFFF20",
-      "subtle": "#36372a"
+      "subtle": "#303126"
     },
     "interactive": {
       "border": "#343528",

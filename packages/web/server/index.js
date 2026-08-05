@@ -1059,6 +1059,26 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
   getActiveSessionCount,
+  // Most-recently-used directories first: OpenCode initializes each directory
+  // lazily on first request (seconds on large session stores), so the
+  // lifecycle warms these right after readiness — before the UI's first
+  // interactive request would otherwise pay that cost.
+  getWarmupDirectories: async () => {
+    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    if (!settings) return [];
+    const directories = [];
+    if (typeof settings.lastDirectory === 'string' && settings.lastDirectory) {
+      directories.push(settings.lastDirectory);
+    }
+    const projects = Array.isArray(settings.projects) ? [...settings.projects] : [];
+    projects.sort((a, b) => (b?.lastOpenedAt ?? 0) - (a?.lastOpenedAt ?? 0));
+    for (const project of projects) {
+      if (typeof project?.path === 'string' && project.path) {
+        directories.push(project.path);
+      }
+    }
+    return [...new Set(directories)];
+  },
   getManagedOpenCodeEnv: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     const managedEnv = settings?.agentControlToolEnabled === false
@@ -1397,7 +1417,9 @@ async function main(options = {}) {
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
-  const sayTTSCapability = await detectSayTtsCapability(process);
+  // Voice enumeration is independent from route registration. Start it now,
+  // but do not hold server listen or managed OpenCode startup on `say -v "?"`.
+  const sayTTSCapability = detectSayTtsCapability(process);
 
   const app = express();
   const serverStartedAt = new Date().toISOString();

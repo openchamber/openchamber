@@ -1,0 +1,34 @@
+---
+title: OpenCode-Verbindung
+description: Beheben Sie, dass OpenChamber keine Verbindung zu seinem OpenCode-Server herstellt.
+---
+
+# OpenCode-Verbindung
+
+Wenn OpenChamber lädt, aber nie über „OpenCode is restarting“ hinauskommt, oder der Chat nicht antwortet, ist der Server, mit dem es spricht, nicht erreichbar. Gehen Sie diese Punkte durch.
+
+## Es hängt bei „OpenCode is restarting“
+
+- geben Sie ihm direkt nach dem Start einen Moment — dieser Zustand ist normal, während der Server hochfährt
+- prüfen Sie mit `openchamber status`, ob der Server noch läuft
+- starten Sie ihn mit `openchamber restart` neu
+- sehen Sie sich mit `openchamber logs` die Startdetails an
+
+## Sie verbinden sich mit Ihrem eigenen Server
+
+Wenn Sie OpenChamber so konfiguriert haben, dass es einen vorhandenen Server nutzt, prüfen Sie die Einrichtung aus [OpenCode Server](/opencode-server/) noch einmal:
+
+- `OPENCODE_HOST` muss den Port enthalten, aber keinen Pfad — zum Beispiel `http://localhost:4096`
+- setzen Sie `OPENCODE_SKIP_START=true`, damit OpenChamber nicht auch noch seinen eigenen Server startet
+- wenn die Adresse ungültig ist, ignoriert OpenChamber sie und startet stattdessen seinen eigenen Server — achten Sie in den Logs auf eine `[config]`-Warnung
+
+## Es schlägt immer noch fehl
+
+- bestätigen Sie, dass Node.js Version `20` oder neuer ist
+- installieren Sie die neueste CLI neu
+- öffnen Sie `http://localhost:3000` direkt, bevor Sie einen Tunnel- oder Remote-Link testen
+
+## Verwandt
+
+- [OpenCode Server](/opencode-server/) — wie OpenChamber den Server findet und verwaltet
+- [Fehlerbehebung](/troubleshooting/) — weitere häufige Probleme

@@ -32,7 +32,15 @@ other.
   requires observed activity or a newly completed assistant message.
 - Timeout and cancellation are failures, never authoritative idle results.
 - Validation that protects side effects runs before session creation or
-  dispatch.
+  dispatch. An explicitly requested model, agent, or variant is checked against
+  the directory's own OpenCode agent and provider lists before any session,
+  worktree, or goal is created, because `prompt_async` accepts an unusable
+  selection and then fails only on the event stream. A failed or empty lookup
+  never turns a valid selection into a rejection.
+- `promptDispatched` reports an observed dispatch, never an accepted request.
+  After `prompt_async` the service confirms a new user message reached the
+  session; when it does not, the result reports `promptDispatched: false` with
+  `promptError` instead of claiming success.
 - Send and fork dispatches without an explicit model/agent/variant reuse the
   target session's last user-message selection before falling back to the
   configured defaults; only session creation resolves defaults directly.

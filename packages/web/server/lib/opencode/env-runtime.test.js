@@ -131,6 +131,43 @@ describe('OpenCode env runtime', () => {
     expect(process.env.PATH).toBe(defaultDir);
   });
 
+  it('clears AppImage ARGV0 when applying a login-shell env snapshot', () => {
+    const previousArgv0 = process.env.ARGV0;
+    process.env.ARGV0 = '/path/to/OpenChamber.AppImage';
+    delete process.env.OPENCHAMBER_ARGV0_TEST_MARKER;
+    const { runtime, state } = createRuntime({});
+    state.cachedLoginShellEnvSnapshot = {
+      PATH: '/usr/bin',
+      ARGV0: '/leaked/from/shell.AppImage',
+      OPENCHAMBER_ARGV0_TEST_MARKER: '1',
+    };
+
+    try {
+      runtime.applyLoginShellEnvSnapshot();
+      expect(process.env.ARGV0).toBeUndefined();
+      expect(process.env.OPENCHAMBER_ARGV0_TEST_MARKER).toBe('1');
+    } finally {
+      delete process.env.OPENCHAMBER_ARGV0_TEST_MARKER;
+      if (previousArgv0 === undefined) delete process.env.ARGV0;
+      else process.env.ARGV0 = previousArgv0;
+    }
+  });
+
+  it('clears AppImage ARGV0 even when no login-shell snapshot is available', () => {
+    const previousArgv0 = process.env.ARGV0;
+    process.env.ARGV0 = '/path/to/OpenChamber.AppImage';
+    const { runtime, state } = createRuntime({});
+    state.cachedLoginShellEnvSnapshot = null;
+
+    try {
+      runtime.applyLoginShellEnvSnapshot();
+      expect(process.env.ARGV0).toBeUndefined();
+    } finally {
+      if (previousArgv0 === undefined) delete process.env.ARGV0;
+      else process.env.ARGV0 = previousArgv0;
+    }
+  });
+
   it('throws a specific error for a missing configured OpenCode binary in strict mode', async () => {
     const { runtime } = createRuntime({ opencodeBinary: '/missing/opencode' });
 

@@ -37,6 +37,7 @@ import type { ComposerLanguageContext } from '../language/tokenize';
 import { composerLanguage, setLanguageContext } from './composerLanguage';
 import type { ComposerEditorViewStore } from './viewStore';
 import { composerEditorTheme, composerNativeSelectionExtension } from './theme';
+import { handleComposerHostMouseDown } from './hostMouseDown';
 
 export interface ComposerSelection {
     start: number;
@@ -417,17 +418,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
          * extend into the padding, so the click has to be forwarded.
          */
         const handleHostMouseDown = React.useCallback((event: React.MouseEvent) => {
-            const view = viewRef.current;
-            if (!view || view.state.readOnly || !view.contentDOM.isContentEditable) return;
-            // A click that already landed in the text needs no help, and
-            // forwarding it would break drag-selection.
-            if (view.contentDOM.contains(event.target as Node)) return;
-
-            event.preventDefault();
-            const position = view.posAtCoords({ x: event.clientX, y: event.clientY })
-                ?? view.state.doc.length;
-            view.dispatch({ selection: { anchor: position } });
-            view.focus();
+            handleComposerHostMouseDown(viewRef.current, event);
         }, []);
 
         React.useImperativeHandle(ref, (): ComposerEditorHandle => ({

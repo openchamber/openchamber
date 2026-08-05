@@ -11,6 +11,7 @@ const AUTH = JSON.stringify({
   crof: { key: 'test-token' },
   neuralwatt: { key: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
+  deepseek: { key: 'test-token' },
 });
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
@@ -413,6 +414,96 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
   });
 
   // Restore fs so other test files (which use the real auth file) are unaffected.
+  test('teardown: restore fs', () => {
+    const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
+    fsMock.existsSync = ORIGINAL_FS.existsSync;
+    fsMock.readFileSync = ORIGINAL_FS.readFileSync;
+  });
+});
+
+describe('DeepSeek quota provider (VS Code parity)', () => {
+  beforeEach(() => {
+    const fsMock = fs as unknown as { existsSync: () => boolean; readFileSync: () => string };
+    fsMock.existsSync = () => true;
+    fsMock.readFileSync = () => AUTH;
+  });
+
+  test('builds credits_balance window from documented USD payload (string balance)', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      is_available: true,
+      balance_infos: [
+        { currency: 'USD', total_balance: '7.54', granted_balance: '0.00', topped_up_balance: '7.54' },
+      ],
+    })));
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.providerId, 'deepseek');
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$7.54');
+    assert.equal(result.usage!.windows.credits_balance!.usedPercent, null);
+    assert.equal(result.usage!.windows.credits_balance!.windowSeconds, null);
+    assert.equal(result.usage!.windows.credits_balance!.resetAt, null);
+  });
+
+  test('falls back to CNY entry with ¥ symbol when no USD entry is present', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      is_available: true,
+      balance_infos: [
+        { currency: 'CNY', total_balance: '100.00', granted_balance: '0.00', topped_up_balance: '100.00' },
+      ],
+    })));
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '¥100.00');
+  });
+
+  test('maps 401 to session-expired', async () => {
+    stubFetchFailing(async () => ({}), { ok: false, status: 401 });
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Session expired — please re-authenticate with DeepSeek');
+  });
+
+  test('reports a normalized timeout error', async () => {
+    stubFetchReturning(() => Promise.reject(new DOMException('The operation timed out.', 'TimeoutError')));
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Request timed out');
+  });
+
+  test('returns no-quota-data on a 200 payload with no usable balance', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      is_available: true,
+      balance_infos: [{ currency: 'USD', total_balance: '', granted_balance: '0.00', topped_up_balance: '0.00' }],
+    })));
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'No quota data in response');
+    assert.equal(result.usage, null);
+  });
+
+  test('keeps a literal zero balance as a valid valueLabel', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      is_available: true,
+      balance_infos: [{ currency: 'USD', total_balance: '0.00', granted_balance: '0.00', topped_up_balance: '0.00' }],
+    })));
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$0.00');
+  });
+
   test('teardown: restore fs', () => {
     const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
     fsMock.existsSync = ORIGINAL_FS.existsSync;

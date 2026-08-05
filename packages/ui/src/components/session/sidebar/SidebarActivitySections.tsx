@@ -10,7 +10,6 @@ import {
   resolveMenuOpenSessionId,
 } from './sessionNodeItemUtils';
 import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
-import { useStickyHeader } from './hooks/useStickyProjectHeaders';
 
 type ActivityItem = {
   node: SessionNode;
@@ -62,17 +61,12 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
     variant = 'section',
     initialVisibleCount = MAX_VISIBLE_RECENT_SESSIONS,
     batchSize = MAX_VISIBLE_RECENT_SESSIONS,
-    isDesktopShellRuntime,
   } = props;
   const { t } = useI18n();
   const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
   const [visibleCountBySection, setVisibleCountBySection] = React.useState<Map<string, number>>(new Map());
   const flatVariant = variant === 'flat';
-  const { isStuck: isRecentHeaderStuck, sentinelRef: recentHeaderSentinelRef } = useStickyHeader({
-    enabled: stickyZoneHeaders && !flatVariant,
-    isDesktopShellRuntime,
-  });
 
   const resetSectionLimit = React.useCallback((key: string) => {
     setVisibleCountBySection((prev) => {
@@ -184,18 +178,10 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
 
         return (
           <div key={section.key} className="relative space-y-1">
-            {/* Zone header styled like a project header band; its solid
-                backing applies only after the header is actually stuck. */}
-            <div
-              ref={recentHeaderSentinelRef}
-              className="absolute top-0 h-px w-full pointer-events-none"
-              aria-hidden="true"
-            />
             <div className={cn(
               '-ml-2.5 -mr-2',
               stickyZoneHeaders && 'sticky top-0 z-20 bg-sidebar',
-              stickyZoneHeaders && isRecentHeaderStuck && 'oc-zone-header-backing',
-            )}>
+            )} data-sidebar-sticky-header={stickyZoneHeaders ? 'true' : undefined}>
               <button
                 type="button"
                 onClick={() => toggleSection(section.key)}

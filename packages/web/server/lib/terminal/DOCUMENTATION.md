@@ -10,11 +10,12 @@
 
 - `attach` registers a connection for one terminal. One socket may attach to many terminals.
 - Every attach and reconnect begins with an authoritative `snapshot` containing bounded history and the current sequence.
+- A current socket that closes or errors before its initial `open` invalidates its URL-scoped auth token before retrying, so retries mint a fresh token instead of backing off against a rejected upgrade. Hidden or offline clients wait 60 seconds and wake promptly on visibility/online recovery.
 - `output`, `exit`, and `restarted` carry monotonically increasing per-terminal sequences. Output carries raw live bytes plus replay-safe bytes with terminal query exchanges removed.
 - Attach registers before capturing the snapshot, buffers concurrent events, drops events represented by the snapshot sequence, then enters live delivery.
 - `write` always includes the terminal ID; sockets never have mutable single-terminal binding state.
 - `detach` removes only that attachment.
-- Creation carries the active UI appearance. The PTY sets `COLORFGBG` and answers OSC 10, OSC 11, and Mode 2031 queries immediately, including queries emitted before a WebSocket attachment exists. Subscribed TUIs receive a Mode 2031 notification when the appearance changes.
+- Creation carries the active UI appearance. The PTY sets `COLORFGBG` and answers OSC 10, OSC 11, Mode 2031, and primary-device-attribute queries immediately, including queries emitted before a WebSocket attachment exists. The DA1 fallback prevents Fish from waiting ten seconds for a renderer that cannot observe or answer its startup query. Subscribed TUIs receive a Mode 2031 notification when the appearance changes.
 
 HTTP remains the authenticated command plane for create, resize, appearance updates, restart, close, and force-kill. There is no SSE output or HTTP input compatibility path.
 
@@ -23,7 +24,9 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 - IDs are client-provided or generated with `randomUUID()`.
 - Concurrent creates for one ID are single-flight only when working directory and shell preference match. Existing IDs cannot be reused for another working directory.
 - Dimensions are bounded to 1-1000 columns and 1-500 rows; input is capped at 64 KiB.
+- A client may create before its renderer has mounted. It derives an initial size from the container and font metrics (falling back to 80x24 when unavailable), then sends a resize once Ghostty reports its final dimensions. This allows shell startup and renderer initialization to overlap.
 - PTY children explicitly clear `NODE_CHANNEL_FD`; daemon IPC descriptors are host-private and invalid after PTY descriptor cleanup.
+- PTY children also strip AppImage `ARGV0` (and other host-private shell vars such as `ELECTRON_RUN_AS_NODE`, `BASH_ENV`, `ENV`, `BASH_XTRACEFD`). An exported `ARGV0` makes zsh rewrite argv[0] for every external command, which breaks Python venv detection and other argv[0]/$0 consumers while leaving `/proc/self/exe` correct. On Linux, PTY spawn is wrapped with `env -u ARGV0` because `bun-pty` merges the native OS environ and would otherwise reintroduce `ARGV0` after a JS-only delete.
 - `GET /api/terminal/shells` reports shell IDs available on the active server using the same augmented PATH provided to spawned PTYs, plus whether each executable has a supported login-mode argument. `auto` preserves environment/platform fallback order; an explicit unavailable shell fails creation instead of silently running a different shell. Login mode is opt-in and uses only built-in arguments for known shells. Preference changes affect new sessions and explicit restarts, not running PTYs.
 - PTY data and exit callbacks enter one FIFO queue. Stale callbacks from replaced processes are ignored.
 - Scrollback is retained on the server and capped at 512 KiB with UTF-8-safe trimming. Device-status, device-attribute, cursor-position reply, and color-query exchanges are removed from replay history with incomplete control sequences carried across PTY chunks; live output remains byte-for-byte unchanged.

@@ -1,8 +1,13 @@
 {
   "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "ignore": [
+    "packages/mobile/android/app/src/main/assets/public/**",
+    "packages/mobile/ios/App/App/public/**"
+  ],
   "workspaces": {
     ".": {
       "entry": [
+        "postcss.config.js",
         "scripts/**/*.{js,cjs,mjs,ts}"
       ],
       "project": [
@@ -12,6 +17,8 @@
     },
     "packages/ui": {
       "entry": [
+        "src/apps/renderVSCodeApp.tsx",
+        "src/**/*.bench.{ts,tsx}",
         "src/**/*.{test,spec}.{js,cjs,mjs,jsx,ts,tsx}",
         "src/**/__tests__/**/*.{js,cjs,mjs,jsx,ts,tsx}"
       ],
@@ -23,7 +30,9 @@
       "entry": [
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
+        "src/main.tsx",
         "src/sw.ts",
+        "bin/**/*.{test,spec}.{js,cjs,mjs}",
         "server/**/*.{test,spec}.{js,cjs,mjs}",
         "src/**/*.{test,spec}.{ts,tsx}"
       ],
@@ -50,12 +59,22 @@
     },
     "packages/vscode": {
       "entry": [
+        "webview/main.tsx",
         "src/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}",
         "webview/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}"
       ],
       "project": [
         "src/**/*.{ts,tsx}",
         "webview/**/*.{ts,tsx}"
+      ]
+    },
+    "packages/mobile": {
+      "entry": [
+        "scripts/**/*.{js,cjs,mjs,ts}"
+      ],
+      "project": [
+        "*.{js,cjs,mjs,ts}",
+        "scripts/**/*.{js,cjs,mjs,ts}"
       ]
     }
   }

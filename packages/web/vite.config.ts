@@ -11,6 +11,31 @@ const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.jso
 const pwaDevEnabled = process.env.OPENCHAMBER_DISABLE_PWA_DEV !== '1';
 const reactScanToggle = (process.env.VITE_ENABLE_REACT_SCAN ?? '').toLowerCase();
 const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' || reactScanToggle === 'on' || reactScanToggle === 'yes';
+const themeDirectory = path.resolve(__dirname, '../ui/src/lib/theme/themes');
+
+const themeJsonHmrPlugin = () => ({
+  name: 'openchamber-theme-json-hmr',
+  handleHotUpdate({ file, server }: { file: string; server: { ws: { send: (payload: unknown) => void } } }) {
+    if (!file.startsWith(`${themeDirectory}${path.sep}`) || path.extname(file) !== '.json') {
+      return;
+    }
+
+    try {
+      server.ws.send({
+        type: 'custom',
+        event: 'openchamber:theme-updated',
+        data: JSON.parse(readFileSync(file, 'utf-8')),
+      });
+      // Theme JSON is applied by the runtime event listener. Returning no
+      // modules prevents Vite's otherwise unavoidable page-reload fallback.
+      return [];
+    } catch {
+      // Leave the previous valid theme active while an editor writes invalid
+      // or incomplete JSON; the next valid save will replace it.
+      return [];
+    }
+  },
+});
 
 export default defineConfig({
   root: path.resolve(__dirname, '.'),
@@ -39,6 +64,7 @@ export default defineConfig({
       },
     },
     themeStoragePlugin(),
+    themeJsonHmrPlugin(),
     VitePWA({
       strategies: 'injectManifest',
       srcDir: 'src',
@@ -109,9 +135,23 @@ export default defineConfig({
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
       output: {
         manualChunks(id) {
+          // Pin Vite's tiny runtime helpers to their own stable chunk. Otherwise
+          // Rollup co-locates the `__vitePreload` helper into an arbitrary vendor
+          // chunk (e.g. `shiki`), and since every dynamic import pulls the helper,
+          // that whole vendor (here Shiki core + the 629KB oniguruma engine) gets
+          // dragged into the eager bootstrap graph.
+          if (id.includes('vite/preload-helper') || id.includes('vite/modulepreload-polyfill')) {
+            return 'vendor-vite-runtime';
+          }
           if (!id.includes('node_modules')) return undefined;
 
-          const match = id.split('node_modules/')[1];
+          // Resolve the real package from the LAST `node_modules/` segment.
+          // bun's isolated install nests packages as
+          // `node_modules/.bun/<pkg>@<ver>/node_modules/<pkg>/...`, so the first
+          // `node_modules/` segment is `.bun` — using it collapses every dependency
+          // (incl. lazy-only ones) into a single giant eager `vendor-.bun` chunk.
+          const lastNodeModules = id.lastIndexOf('node_modules/');
+          const match = id.slice(lastNodeModules + 'node_modules/'.length);
           if (!match) return undefined;
 
           const segments = match.split('/');
@@ -123,7 +163,6 @@ export default defineConfig({
           if (packageName === '@opencode-ai/sdk') return 'vendor-opencode-sdk';
           if (packageName.includes('remark') || packageName.includes('rehype') || packageName === 'react-markdown') return 'vendor-markdown';
           if (packageName === '@base-ui/react' || packageName.startsWith('@base-ui')) return 'vendor-base-ui';
-          if (packageName.includes('react-syntax-highlighter') || packageName.includes('highlight.js')) return 'vendor-syntax';
 
           const sanitized = packageName.replace(/^@/, '').replace(/\//g, '-');
           return `vendor-${sanitized}`;

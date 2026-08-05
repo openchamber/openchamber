@@ -34,7 +34,6 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { toPng } from 'html-to-image';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { formatTimestampForDisplay } from './timeFormat';
@@ -1532,6 +1531,9 @@ const AssistantMessageBody = React.memo(({
 
             let wrapper: HTMLDivElement | null = null;
             try {
+                // Load the exporter before attaching its temporary clone so a slow
+                // chunk request cannot leave export-only content in the page layout.
+                const { toPng } = await import('html-to-image');
                 const originalElement = sourceElement;
                 const computedStyle = window.getComputedStyle(originalElement);
                 const rootStyle = window.getComputedStyle(document.documentElement);

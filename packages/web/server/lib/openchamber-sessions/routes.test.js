@@ -11,6 +11,53 @@ const createWorktreeMock = vi.fn(async () => ({
 const sessionCreateMock = vi.fn(async () => ({ data: { id: 'ses_123' } }));
 const sessionForkMock = vi.fn(async () => ({ data: { id: 'ses_fork', title: 'Forked session' } }));
 const sessionMessagesMock = vi.fn(async () => ({ data: [] }));
+
+let existingSessionMessages = [];
+let dispatchedUserMessageSeq = 0;
+
+// The service confirms a prompt landed by watching for a new user message, so
+// the default mock behaves like OpenCode recording each dispatched prompt.
+const setSessionMessages = (messages) => {
+  existingSessionMessages = messages;
+};
+
+const recordedSessionMessages = async () => {
+  dispatchedUserMessageSeq += 1;
+  return {
+    data: [
+      ...existingSessionMessages,
+      {
+        info: {
+          id: `msg_dispatched_${dispatchedUserMessageSeq}`,
+          role: 'user',
+          time: { created: 1000 + dispatchedUserMessageSeq },
+        },
+      },
+    ],
+  };
+};
+
+// Selection inputs are fetched whenever a request names a model, agent, or
+// variant, so every prompt-dispatching fetch mock must answer them.
+const selectionInputResponse = (url) => {
+  const text = String(url);
+  if (text.includes('/config/providers')) {
+    return {
+      ok: true,
+      json: async () => ({
+        providers: [
+          { id: 'openai', models: [{ id: 'gpt-5.5', variants: { high: {} } }] },
+          { id: 'anthropic', models: [{ id: 'claude-sonnet-5', variants: { high: {} } }] },
+        ],
+      }),
+    };
+  }
+  if (text.includes('/agent')) {
+    return { ok: true, json: async () => [{ name: 'build', mode: 'primary' }, { name: 'plan', mode: 'primary' }] };
+  }
+  if (text.includes('/config')) return { ok: true, json: async () => ({}) };
+  return null;
+};
 const sessionCommandMock = vi.fn(async () => ({ data: {} }));
 const commandListMock = vi.fn(async () => ({ data: [] }));
 globalThis.__openchamberCreateWorktreeMock = createWorktreeMock;
@@ -62,8 +109,10 @@ describe('openchamber session routes', () => {
     createWorktreeMock.mockClear();
     sessionCreateMock.mockClear();
     sessionForkMock.mockClear();
+    existingSessionMessages = [];
+    dispatchedUserMessageSeq = 0;
     sessionMessagesMock.mockReset();
-    sessionMessagesMock.mockResolvedValue({ data: [] });
+    sessionMessagesMock.mockImplementation(recordedSessionMessages);
     sessionCommandMock.mockReset();
     sessionCommandMock.mockResolvedValue({ data: {} });
     commandListMock.mockReset();
@@ -319,13 +368,11 @@ describe('openchamber session routes', () => {
 
   it('sends a goal prompt to an existing session after creating goal metadata', async () => {
     const originalFetch = globalThis.fetch;
-    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '' }));
+    const fetchMock = vi.fn(async (url) => selectionInputResponse(url) || { ok: true, text: async () => '' });
     const createSessionGoal = vi.fn(async () => undefined);
     globalThis.fetch = fetchMock;
     try {
-      sessionMessagesMock.mockResolvedValue({
-        data: [{ info: { id: 'msg_before', role: 'assistant', time: { created: 10, completed: 20 } } }],
-      });
+      setSessionMessages([{ info: { id: 'msg_before', role: 'assistant', time: { created: 10, completed: 20 } } }]);
       const { app } = createApp({ createSessionGoal });
       const response = await request(app)
         .post('/api/openchamber/sessions/ses_source/send')
@@ -370,7 +417,7 @@ describe('openchamber session routes', () => {
         template: 'Take $ARGUMENTS from issue through a verified pull request. Confirm the PR covers $ARGUMENTS.',
       }],
     });
-    globalThis.fetch = vi.fn();
+    globalThis.fetch = vi.fn(async (url) => selectionInputResponse(url));
     try {
       const { app } = createApp({ createSessionGoal });
       const response = await request(app)
@@ -393,7 +440,7 @@ describe('openchamber session routes', () => {
       }));
       expect(createSessionGoal.mock.invocationCallOrder[0]).toBeLessThan(sessionCommandMock.mock.invocationCallOrder[0]);
       expect(response.body).toMatchObject({ goalEnabled: true, dispatchedAsCommand: true });
-      expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(globalThis.fetch.mock.calls.some(([url]) => String(url).includes('/prompt_async'))).toBe(false);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -401,11 +448,10 @@ describe('openchamber session routes', () => {
 
   it('reuses the previous session selection when send omits model, agent, and variant', async () => {
     const originalFetch = globalThis.fetch;
-    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '' }));
+    const fetchMock = vi.fn(async (url) => selectionInputResponse(url) || { ok: true, text: async () => '' });
     globalThis.fetch = fetchMock;
     try {
-      sessionMessagesMock.mockResolvedValue({
-        data: [
+      setSessionMessages([
           {
             info: {
               id: 'msg_user',
@@ -416,8 +462,7 @@ describe('openchamber session routes', () => {
             },
           },
           { info: { id: 'msg_before', role: 'assistant', time: { created: 10, completed: 20 } } },
-        ],
-      });
+      ]);
       const { app } = createApp();
       const response = await request(app)
         .post('/api/openchamber/sessions/ses_source/send')
@@ -449,7 +494,7 @@ describe('openchamber session routes', () => {
   it('forks from a message, dispatches the prompt, and emits the new session', async () => {
     const originalFetch = globalThis.fetch;
     const emitSessionCreatedEvent = vi.fn();
-    globalThis.fetch = vi.fn(async () => ({ ok: true, text: async () => '' }));
+    globalThis.fetch = vi.fn(async (url) => selectionInputResponse(url) || { ok: true, text: async () => '' });
     try {
       const { app } = createApp({ emitSessionCreatedEvent });
       const response = await request(app)
@@ -519,7 +564,7 @@ describe('openchamber session routes', () => {
 
   it('reports the forked session when prompt dispatch fails', async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 500, text: async () => 'dispatch failed' }));
+    globalThis.fetch = vi.fn(async (url) => selectionInputResponse(url) || { ok: false, status: 500, text: async () => 'dispatch failed' });
     try {
       const { app } = createApp();
       const response = await request(app)
@@ -584,9 +629,77 @@ describe('openchamber session routes', () => {
     }
   });
 
+  it('rejects an unknown agent before creating a session or worktree', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => selectionInputResponse(url) || { ok: true, json: async () => ({ id: 'ses_123' }) });
+    globalThis.fetch = fetchMock;
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({
+          directory: '/repo/app',
+          prompt: 'Run this',
+          agent: 'not-an-agent',
+          worktree: { name: 'side-task' },
+        })
+        .expect(400, { error: "Unknown agent 'not-an-agent' for /repo/app" });
+
+      expect(createWorktreeMock).not.toHaveBeenCalled();
+      expect(fetchMock.mock.calls.some(([url]) => String(url) === 'http://opencode.test/session?directory=%2Frepo%2Fapp')).toBe(false);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/prompt_async'))).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects an unknown model and an unknown variant before dispatching', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => selectionInputResponse(url) || { ok: true, json: async () => ({ id: 'ses_123' }) });
+    globalThis.fetch = fetchMock;
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-nope' })
+        .expect(400, { error: "Unknown model 'openai/gpt-nope' for /repo/app" });
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5', variant: 'ultra' })
+        .expect(400, { error: "Unknown variant 'ultra' for model 'openai/gpt-5.5'" });
+
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/prompt_async'))).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('reports promptDispatched false when the accepted prompt never reaches the session', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => {
+      if (String(url).includes('/prompt_async')) return { ok: true, text: async () => '' };
+      return selectionInputResponse(url) || { ok: true, json: async () => ({ id: 'ses_123' }) };
+    });
+    globalThis.fetch = fetchMock;
+    sessionMessagesMock.mockResolvedValue({ data: [] });
+    try {
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5' })
+        .expect(200);
+
+      expect(response.body.sessionId).toBe('ses_123');
+      expect(response.body.promptDispatched).toBe(false);
+      expect(response.body.promptError).toBeTruthy();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }, 20_000);
+
   it('does not retry a failed slash command as a normal prompt', async () => {
     const originalFetch = globalThis.fetch;
-    const fetchMock = vi.fn();
+    const fetchMock = vi.fn(async (url) => selectionInputResponse(url));
     commandListMock.mockResolvedValue({ data: [{ name: 'review' }] });
     sessionCommandMock.mockRejectedValue(new Error('command response failed'));
     globalThis.fetch = fetchMock;
@@ -604,7 +717,7 @@ describe('openchamber session routes', () => {
         .expect(500);
 
       expect(sessionCommandMock).toHaveBeenCalledTimes(1);
-      expect(fetchMock).not.toHaveBeenCalled();
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/prompt_async'))).toBe(false);
     } finally {
       globalThis.fetch = originalFetch;
     }

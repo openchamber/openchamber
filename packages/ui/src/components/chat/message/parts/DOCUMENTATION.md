@@ -51,11 +51,15 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 ## Current important behavior
 
+- Assistant markdown treats raw HTML as inert visible text. The final generated
+  HTML is sanitized as defense in depth, with script and style elements
+  forbidden, so message content cannot inject active DOM or application-wide
+  CSS into any runtime surface.
 - `read` and `skill` are **static navigation tools** and render via `StaticToolRow`.
 - Every other tool, including search/fetch, OpenCode built-ins, custom tools, plugins, and MCP tools, is **expandable** and renders through `ToolPart`.
 - The managed `openchamber` plugin tool uses the expandable path and hides its broad protocol input. The plugin supplies the selected action's human description as the native tool title; the UI renders that metadata without owning an action map. The full versioned result envelope renders through the same neutral JSON summary/tree/raw views as other tools, without a tool-specific output card.
 - `ToolPart` defers expanded content after a user toggle, preventing large tool input/output payloads from mounting during the initial chat render.
-- Running bash output falls back to `state.metadata.output` until canonical `state.output` arrives. Its fixed-height output viewport follows new output until the user scrolls up, then resumes following when the user returns to the bottom. Live output appends or replaces rewritten snapshots as plain text without worker highlighting; finalized output bypasses the throttle and receives the normal one-time highlighted rendering.
+- Running bash output falls back to `state.metadata.output` until canonical `state.output` arrives. Its fixed-height output viewport follows new output until the user scrolls up, then resumes following when the user returns to the bottom. Live output appends or replaces rewritten snapshots as plain text without worker highlighting; finalized output normalizes ANSI terminal controls with a bounded synthetic-cell budget, bypasses the throttle, and receives the normal one-time highlighted rendering.
 - Thinking/Justification duration is hidden in `sorted` mode (handled in `ReasoningPart.tsx` + `JustificationBlock.tsx`).
 
 ## "I want to change description for Perplexity" (example recipe)

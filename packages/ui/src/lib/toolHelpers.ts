@@ -705,6 +705,84 @@ export function isPdfFile(filePath: string): boolean {
   return ext === 'pdf';
 }
 
+export function isSvgFile(filePath: string): boolean {
+  return filePath.toLowerCase().endsWith('.svg');
+}
+
+/** Known non-text extensions that must not be opened or saved as UTF-8 text. */
+const BINARY_FILE_EXTENSIONS = new Set([
+  // Documents / office
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp',
+  // Archives / packages
+  'zip', 'rar', '7z', 'gz', 'tgz', 'tar', 'bz2', 'xz', 'jar', 'war', 'apk', 'dmg', 'iso',
+  'deb', 'rpm', 'msi',
+  // Images (svg is text and is excluded via isSvgFile)
+  ...IMAGE_EXTENSIONS.filter((ext) => ext !== 'svg'),
+  // Audio / video
+  'mp3', 'mp4', 'm4a', 'aac', 'flac', 'ogg', 'wav', 'wma', 'avi', 'mov', 'mkv', 'webm', 'wmv',
+  // Fonts
+  'ttf', 'otf', 'woff', 'woff2', 'eot',
+  // Native / bytecode
+  'exe', 'dll', 'so', 'dylib', 'bin', 'class', 'o', 'a', 'lib', 'wasm', 'node',
+  // Databases / locks / misc binary
+  'sqlite', 'sqlite3', 'db', 'dat', 'parquet', 'feather', 'pickle', 'pyc', 'pyo', 'lockb',
+]);
+
+export function getFileExtension(filePath: string): string {
+  const base = filePath.split(/[/\\]/).pop() ?? filePath;
+  const dot = base.lastIndexOf('.');
+  if (dot <= 0 || dot === base.length - 1) {
+    return '';
+  }
+  return base.slice(dot + 1).toLowerCase();
+}
+
+/** True for known binary extensions (including images/PDF). SVG is not binary. */
+export function isBinaryFile(filePath: string): boolean {
+  if (isSvgFile(filePath)) {
+    return false;
+  }
+  const ext = getFileExtension(filePath);
+  return BINARY_FILE_EXTENSIONS.has(ext);
+}
+
+/**
+ * Heuristic for UTF-8 text that is actually binary (or was lossily decoded).
+ * Used as defense-in-depth when extension checks miss a binary file.
+ */
+export function looksLikeBinaryText(content: string): boolean {
+  if (!content) {
+    return false;
+  }
+
+  const sample = content.length > 8192 ? content.slice(0, 8192) : content;
+  if (sample.includes('\0')) {
+    return true;
+  }
+  if (sample.startsWith('%PDF')) {
+    return true;
+  }
+  // ZIP-based formats (docx/xlsx/pptx/jar/apk…) and raw ZIP.
+  if (sample.startsWith('PK\u0003\u0004') || sample.startsWith('PK\u0005\u0006') || sample.startsWith('PK\u0007\u0008')) {
+    return true;
+  }
+
+  let suspicious = 0;
+  for (let index = 0; index < sample.length; index += 1) {
+    const code = sample.charCodeAt(index);
+    if (code === 0xFFFD) {
+      suspicious += 1;
+      continue;
+    }
+    // C0 controls excluding common whitespace (TAB/LF/VT/FF/CR).
+    if (code < 9 || (code > 13 && code < 32) || code === 127) {
+      suspicious += 1;
+    }
+  }
+
+  return sample.length > 0 && suspicious / sample.length > 0.1;
+}
+
 export function getImageMimeType(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase();
   const mimeMap: Record<string, string> = {

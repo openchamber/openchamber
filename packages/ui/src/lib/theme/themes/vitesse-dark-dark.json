@@ -28,10 +28,10 @@
       "elevated": "#1a1a1a",
       "elevatedForeground": "#dbd7caee",
       "overlay": "#12121280",
-      "subtle": "#212020"
+      "subtle": "#1e1e1e"
     },
     "interactive": {
-      "border": "#393939",
+      "border": "#313131",
       "borderHover": "#3c3c3c",
       "borderFocus": "#00000000",
       "selection": "#eeeeee18",
@@ -133,7 +133,7 @@
       "headerHover": "#ffffff1550",
       "icon": "#dedcd5a4",
       "title": "#dbd7caee",
-      "description": "#dedcd550",
+      "description": "#e9e8e27f",
       "edit": {
         "added": "#4d9375",
         "addedBackground": "#4d937520",

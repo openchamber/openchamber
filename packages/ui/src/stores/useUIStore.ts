@@ -10,10 +10,11 @@ import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobi
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { TerminalShell } from '@/lib/api/types';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
+import { isWindowsArm64 } from '@/lib/platform';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
-export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal';
+export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
@@ -22,6 +23,7 @@ export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
 export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
 export type DesktopWindowControlsPosition = 'left' | 'right';
+export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 export type FileEditorKeymap = 'default' | 'vim';
 export type MessageTimestampFormatPreference = 'hidden' | 'relative' | 'absolute' | 'hybrid';
 
@@ -295,7 +297,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    if (candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'preview' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal') {
+    if (candidate.mode !== 'diff' && candidate.mode !== 'walkthrough' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'preview' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal') {
       continue;
     }
 
@@ -629,6 +631,8 @@ interface UIStore {
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
+  /** Global file-editor autosave. Default true for backward compatibility. */
+  autoSaveEnabled: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   autoDeleteLastRunAt: number | null;
@@ -659,6 +663,8 @@ interface UIStore {
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
   diffWrapLines: boolean;
+  /** Width of the walkthrough table of contents, in pixels. */
+  walkthroughTocWidth: number;
   gitChangesViewMode: 'flat' | 'tree';
   isTimelineDialogOpen: boolean;
   isPromptNavigatorPanelOpen: boolean;
@@ -702,6 +708,7 @@ interface UIStore {
   timeFormatPreference: TimeFormatPreference;
   weekStartPreference: WeekStartPreference;
   desktopWindowControlsPosition: DesktopWindowControlsPosition;
+  desktopWindowControlsStyle: DesktopWindowControlsStyle;
   mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
   collapsibleUserMessages: boolean;
@@ -710,9 +717,6 @@ interface UIStore {
   expandedEditorToolbar: boolean;
   showSplitAssistantMessageActions: boolean;
   allowPromptingSubagentSessions: boolean;
-  isMobileSessionStatusBarCollapsed: boolean;
-  mobileSessionPanelOpen: boolean;
-  mobileSessionFilterProjectId: string | null;
   isExpandedInput: boolean;
   reportUsage: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
@@ -793,6 +797,7 @@ interface UIStore {
   setActivityRenderMode: (value: ActivityRenderMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
+  setAutoSaveEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
@@ -833,6 +838,7 @@ interface UIStore {
   setDiffLayoutPreference: (mode: 'dynamic' | 'inline' | 'side-by-side') => void;
   setDiffFileLayout: (filePath: string, mode: 'inline' | 'side-by-side') => void;
   setDiffWrapLines: (wrap: boolean) => void;
+  setWalkthroughTocWidth: (width: number) => void;
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
@@ -865,6 +871,7 @@ interface UIStore {
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
   setWeekStartPreference: (value: WeekStartPreference) => void;
   setDesktopWindowControlsPosition: (value: DesktopWindowControlsPosition) => void;
+  setDesktopWindowControlsStyle: (value: DesktopWindowControlsStyle) => void;
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setCollapsibleUserMessages: (value: boolean) => void;
@@ -873,9 +880,6 @@ interface UIStore {
   setExpandedEditorToolbar: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
   setAllowPromptingSubagentSessions: (value: boolean) => void;
-  setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
-  setMobileSessionPanelOpen: (value: boolean) => void;
-  setMobileSessionFilterProjectId: (value: string | null) => void;
   viewPagerPage: 'left' | 'center' | 'right';
   setViewPagerPage: (page: 'left' | 'center' | 'right') => void;
   toggleExpandedInput: () => void;
@@ -951,6 +955,7 @@ export const useUIStore = create<UIStore>()(
         activityRenderMode: 'summary',
         showDeletionDialog: true,
         autoDeleteEnabled: false,
+        autoSaveEnabled: true,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         autoDeleteLastRunAt: null,
@@ -977,6 +982,7 @@ export const useUIStore = create<UIStore>()(
         diffLayoutPreference: 'inline',
         diffFileLayout: {},
         diffWrapLines: false,
+        walkthroughTocWidth: 224,
         gitChangesViewMode: 'flat',
         isTimelineDialogOpen: false,
         isPromptNavigatorPanelOpen: false,
@@ -1005,7 +1011,7 @@ export const useUIStore = create<UIStore>()(
 
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
-        showOpenCodeUpdateNotifications: true,
+        showOpenCodeUpdateNotifications: !isWindowsArm64(),
         agentControlToolEnabled: true,
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
@@ -1017,6 +1023,7 @@ export const useUIStore = create<UIStore>()(
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
         desktopWindowControlsPosition: 'right',
+        desktopWindowControlsStyle: 'classic',
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
@@ -1026,9 +1033,6 @@ export const useUIStore = create<UIStore>()(
         showSplitAssistantMessageActions: false,
         allowPromptingSubagentSessions: false,
         draftStartersVisible: true,
-        isMobileSessionStatusBarCollapsed: false,
-        mobileSessionPanelOpen: false,
-        mobileSessionFilterProjectId: null,
         isExpandedInput: false,
         reportUsage: true,
         shortcutOverrides: {},
@@ -1693,6 +1697,10 @@ export const useUIStore = create<UIStore>()(
           set({ autoDeleteEnabled: value });
         },
 
+        setAutoSaveEnabled: (value) => {
+          set({ autoSaveEnabled: value });
+        },
+
         setAutoDeleteAfterDays: (days) => {
           const clampedDays = Math.max(1, Math.min(365, days));
           set({ autoDeleteAfterDays: clampedDays });
@@ -1837,6 +1845,10 @@ export const useUIStore = create<UIStore>()(
 
         setDiffWrapLines: (wrap) => {
           set({ diffWrapLines: wrap });
+        },
+
+        setWalkthroughTocWidth: (width) => {
+          set({ walkthroughTocWidth: Math.round(width) });
         },
 
         setGitChangesViewMode: (mode) => {
@@ -2184,6 +2196,9 @@ export const useUIStore = create<UIStore>()(
         setDesktopWindowControlsPosition: (value) => {
           set({ desktopWindowControlsPosition: value === 'left' ? 'left' : 'right' });
         },
+        setDesktopWindowControlsStyle: (value) => {
+          set({ desktopWindowControlsStyle: value === 'traffic-lights' ? 'traffic-lights' : 'classic' });
+        },
         setMermaidRenderingMode: (value) => {
           set({ mermaidRenderingMode: value });
         },
@@ -2207,15 +2222,6 @@ export const useUIStore = create<UIStore>()(
         },
         setAllowPromptingSubagentSessions: (value) => {
           set({ allowPromptingSubagentSessions: value });
-        },
-        setIsMobileSessionStatusBarCollapsed: (value) => {
-          set({ isMobileSessionStatusBarCollapsed: value });
-        },
-        setMobileSessionPanelOpen: (value) => {
-          set({ mobileSessionPanelOpen: value });
-        },
-        setMobileSessionFilterProjectId: (value) => {
-          set({ mobileSessionFilterProjectId: value });
         },
         setReportUsage: (value) => {
           set({ reportUsage: value });
@@ -2270,12 +2276,31 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 12,
+        version: 13,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v12 -> v13: promote FilesView localStorage autosave toggle into the store.
+          if (version < 13) {
+            if (typeof state.autoSaveEnabled !== 'boolean') {
+              let legacyEnabled = true;
+              try {
+                if (typeof localStorage !== 'undefined') {
+                  const legacy = localStorage.getItem('openchamber:files:auto-save-enabled');
+                  if (legacy !== null) {
+                    legacyEnabled = legacy !== 'false';
+                    localStorage.removeItem('openchamber:files:auto-save-enabled');
+                  }
+                }
+              } catch {
+                legacyEnabled = true;
+              }
+              state.autoSaveEnabled = legacyEnabled;
+            }
+          }
 
           // v11 -> v12: drop legacy window-controls "auto" (always meant right).
           if (version < 12) {
@@ -2376,6 +2401,10 @@ export const useUIStore = create<UIStore>()(
 
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
 
+          if (typeof state.autoSaveEnabled !== 'boolean') {
+            state.autoSaveEnabled = true;
+          }
+
           state.contextRailOrder = Array.isArray(state.contextRailOrder)
             ? (state.contextRailOrder as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
             : [];
@@ -2412,6 +2441,7 @@ export const useUIStore = create<UIStore>()(
           activityRenderMode: state.activityRenderMode,
           showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
+          autoSaveEnabled: state.autoSaveEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
@@ -2435,6 +2465,7 @@ export const useUIStore = create<UIStore>()(
           recentEfforts: state.recentEfforts,
           diffLayoutPreference: state.diffLayoutPreference,
           diffWrapLines: state.diffWrapLines,
+          walkthroughTocWidth: state.walkthroughTocWidth,
           gitChangesViewMode: state.gitChangesViewMode,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
@@ -2462,6 +2493,7 @@ export const useUIStore = create<UIStore>()(
           timeFormatPreference: state.timeFormatPreference,
           weekStartPreference: state.weekStartPreference,
           desktopWindowControlsPosition: state.desktopWindowControlsPosition,
+          desktopWindowControlsStyle: state.desktopWindowControlsStyle,
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,
@@ -2471,8 +2503,6 @@ export const useUIStore = create<UIStore>()(
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
           draftStartersVisible: state.draftStartersVisible,
-          isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
-          mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,
           fileEditorKeymap: state.fileEditorKeymap,
           messageTimestampFormat: state.messageTimestampFormat,

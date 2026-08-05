@@ -1,0 +1,35 @@
+---
+title: Geplante Aufgaben
+description: Führe einen Prompt automatisch nach Zeitplan aus.
+---
+
+# Geplante Aufgaben
+
+Eine geplante Aufgabe führt für dich nach Zeitplan einen Prompt aus — zum Beispiel täglich „die Änderungen von gestern zusammenfassen“ oder wöchentlich eine Bereinigung. Wenn sie läuft, startet OpenChamber eine neue Session und sendet den Prompt selbst. Öffne den Scheduler über die Schaltfläche oben in der Session-Seitenleiste.
+
+## Eine Aufgabe erstellen
+
+1. Öffne den Dialog für geplante Aufgaben in der Session-Seitenleiste.
+2. Füge eine Aufgabe hinzu und gib ihr einen Namen.
+3. Wähle, wann sie läuft:
+   - **daily** — zu einer oder mehreren Zeiten pro Tag
+   - **weekly** — an ausgewählten Wochentagen und Uhrzeiten
+   - **once** — ein einzelnes Datum und eine einzelne Uhrzeit
+4. Lege fest, was sie tut: den zu sendenden Prompt sowie Provider, Modell und Agent, die verwendet werden sollen. Der Prompt kann ein Slash-Befehl sein, zum Beispiel `/review`.
+5. Speichern und sicherstellen, dass die Aufgabe aktiviert ist.
+
+Du kannst jede Aufgabe sofort mit **run now** ausführen, um zu prüfen, ob sie das tut, was du erwartest.
+
+Aktiviere **Run as goal**, damit der Lauf seinen Prompt bis zum Abschluss verfolgt, statt nach einer Antwort zu stoppen — siehe [Session Goals](/session-goals/).
+
+## Woran du Erfolg erkennst
+
+Nach einem Lauf zeigt die Aufgabe, wann sie zuletzt gelaufen ist, ob sie erfolgreich war und einen Link zur Session, die sie erstellt hat. Wenn ein Lauf fehlschlägt, wird dort auch der Fehler angezeigt.
+
+## Wichtig zu wissen
+
+Aufgaben werden nur ausgelöst, während der OpenChamber-Server läuft. Wenn du ihn schließt, sind geplante Läufe pausiert, bis er wieder online ist.
+
+## Verwandtes
+
+- [Commands & Snippets](/commands-snippets/) — einen Slash-Befehl als Prompt wiederverwenden

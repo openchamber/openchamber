@@ -2,8 +2,11 @@ import { createConfiguredWebAPIs, getDesktopRelayRestoreReady } from './runtimeC
 import { registerSW } from 'virtual:pwa-register';
 
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
-import { getStoredMobileLayoutPreference } from '@openchamber/ui/lib/mobileLayoutPreference';
-import type { HostedSurface } from '@openchamber/ui/lib/runtimeSurface';
+import { resolveHostedSurface, type HostedSurface } from '@openchamber/ui/lib/runtimeSurface';
+import {
+  isEmbeddedSessionChat,
+  requestEmbeddedSessionRuntimeBootstrap,
+} from '@openchamber/ui/components/layout/contextPanelEmbeddedChat';
 import '@openchamber/ui/index.css';
 import '@openchamber/ui/styles/fonts';
 
@@ -14,30 +17,7 @@ declare global {
   }
 }
 
-window.__OPENCHAMBER_RUNTIME_APIS__ = createConfiguredWebAPIs();
-
-const isCoarsePointer = (): boolean => {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-    return false;
-  }
-
-  return window.matchMedia('(pointer: coarse)').matches;
-};
-
-const detectHostedSurface = (): HostedSurface => {
-  const params = new URLSearchParams(window.location.search);
-  const override = params.get('surface');
-  if (override === 'mobile') return 'mobile';
-  if (override === 'desktop') return 'desktop';
-
-  const width = Math.min(window.innerWidth || 0, window.screen?.width || window.innerWidth || 0);
-  const touchPoints = navigator.maxTouchPoints || 0;
-  const likelyPhone = width > 0 && width <= 760 && (touchPoints > 0 || isCoarsePointer());
-  return likelyPhone && getStoredMobileLayoutPreference() === 'new' ? 'mobile' : 'desktop';
-};
-
-const hostedSurface = detectHostedSurface();
-window.__OPENCHAMBER_SURFACE__ = hostedSurface;
+const hostedSurface: HostedSurface = resolveHostedSurface();
 
 type PrerenderingDocument = Document & {
   prerendering?: boolean;
@@ -104,17 +84,29 @@ const unregisterDevelopmentServiceWorkers = (): void => {
   });
 };
 
-if (hostedSurface === 'mobile') {
-  void import('@openchamber/ui/apps/renderMobileApp')
-    .then(({ renderMobileApp }) => {
-      renderMobileApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createConfiguredWebAPIs());
-    });
-} else {
-  // Hold the render (HTML splash stays up) until a desktop relay-host restore
-  // has picked its transport — otherwise the app boots against a not-yet-chosen
-  // endpoint and flashes the auth screen before the tunnel connects. Resolves
-  // immediately when no relay host is involved.
-  void getDesktopRelayRestoreReady().then(() => import('@openchamber/ui/main'));
+const start = async (): Promise<void> => {
+  const embeddedBootstrap = isEmbeddedSessionChat()
+    ? await requestEmbeddedSessionRuntimeBootstrap()
+    : null;
+  window.__OPENCHAMBER_RUNTIME_APIS__ = createConfiguredWebAPIs(embeddedBootstrap);
+
+  if (hostedSurface === 'mobile') {
+    const { renderMobileApp } = await import('@openchamber/ui/apps/renderMobileApp');
+    renderMobileApp(window.__OPENCHAMBER_RUNTIME_APIS__);
+    return;
+  }
+
+  // Hold the render until a desktop relay-host restore has picked its transport.
+  await getDesktopRelayRestoreReady();
+  await import('@openchamber/ui/main');
+};
+
+void start();
+
+if (import.meta.hot) {
+  import.meta.hot.on('openchamber:theme-updated', (theme: unknown) => {
+    window.dispatchEvent(new CustomEvent('openchamber:theme-hmr', { detail: theme }));
+  });
 }
 
 if (import.meta.env.PROD) {

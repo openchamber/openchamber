@@ -16,6 +16,7 @@ import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { isWindowsArm64 } from '@/lib/platform';
 
 export const OpenCodeCliSettings: React.FC = () => {
   const { t } = useI18n();
@@ -151,13 +152,15 @@ export const OpenCodeCliSettings: React.FC = () => {
         </SettingsFieldRow>
 
         <SettingsInset className={SETTINGS_OPTION_STACK_CLASS}>
-          <SettingsCheckboxRow
-            settingsItem="sessions.opencode-update-notifications"
-            checked={showOpenCodeUpdateNotifications}
-            onChange={handleShowUpdateNotificationsChange}
-            label={t('settings.openchamber.opencodeCli.field.showUpdateNotifications')}
-            ariaLabel={t('settings.openchamber.opencodeCli.field.showUpdateNotificationsAria')}
-          />
+          {!isWindowsArm64() && (
+            <SettingsCheckboxRow
+              settingsItem="sessions.opencode-update-notifications"
+              checked={showOpenCodeUpdateNotifications}
+              onChange={handleShowUpdateNotificationsChange}
+              label={t('settings.openchamber.opencodeCli.field.showUpdateNotifications')}
+              ariaLabel={t('settings.openchamber.opencodeCli.field.showUpdateNotificationsAria')}
+            />
+          )}
 
           <SettingsCheckboxRow
             settingsItem="sessions.agent-control-tool"
