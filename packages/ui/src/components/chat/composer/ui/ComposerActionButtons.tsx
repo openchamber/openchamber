@@ -100,7 +100,15 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                 onClick={onAbort}
                 className={cn(
                     footerIconButtonClass,
-                    'text-[var(--status-error)] hover:text-[var(--status-error)]'
+                    // Solid error fill so the stop control reads as a red
+                    // square even from across the room (OPE-195). The glyph
+                    // flips to the theme's error foreground, which every
+                    // theme defines for its own light/dark contrast. Hover
+                    // and active use opacity so no extra colour values are
+                    // introduced and both themes stay correct.
+                    'bg-[var(--status-error)] text-[var(--status-error-foreground)]',
+                    'hover:bg-[var(--status-error)] hover:text-[var(--status-error-foreground)]',
+                    'hover:opacity-90 active:opacity-75'
                 )}
                 aria-label={t('chat.chatInput.actions.stopGeneratingAria')}
             >
