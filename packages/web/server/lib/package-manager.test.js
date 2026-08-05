@@ -9,6 +9,7 @@ vi.mock('node:child_process', () => ({
 const {
   checkForUpdates,
   detectPackageManager,
+  detectPackageManagerDetails,
   executeUpdate,
   getCurrentVersion,
 } = await import('./package-manager.js');
@@ -329,5 +330,76 @@ describe('CLI update exports', () => {
   it('exports package-manager helpers used by the update command', () => {
     expect(typeof detectPackageManager).toBe('function');
     expect(typeof executeUpdate).toBe('function');
+  });
+});
+
+describe('detectPackageManagerDetails', () => {
+  // Each test re-imports a fresh module instance (resetting the in-module
+  // detection cache) together with a fresh child_process mock, so the
+  // spawnSync behavior can be controlled without disturbing other tests.
+
+  it('falls back to default-fallback without probing every package manager when nothing owns the install', async () => {
+    vi.resetModules();
+    const { spawnSync: freshSpawnSync } = await import('node:child_process');
+    const { detectPackageManagerDetails: freshDetect } = await import('./package-manager.js');
+
+    // Every PM binary exists, but none of the global queries reveals an
+    // openchamber install (no ownership match, no `list -g` match).
+    freshSpawnSync.mockImplementation((command, args) => {
+      if (Array.isArray(args) && args.includes('--version')) {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      if (Array.isArray(args) && args.includes('-g')) {
+        return { status: 0, stdout: '/tmp/global-bin', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+
+    const details = freshDetect();
+
+    expect(details.reason).toBe('default-fallback');
+    expect(details.packageManager).toBe('npm');
+
+    // The ownership-check cap stops the per-PM `bin -g`/`root -g` storm before
+    // bun is ever ownership-probed (only the first two candidates are checked).
+    const bunOwnershipProbes = freshSpawnSync.mock.calls.filter(
+      ([command, args]) => command === 'bun' && Array.isArray(args) && args[0] === 'pm' && args[1] === 'bin',
+    );
+    expect(bunOwnershipProbes).toHaveLength(0);
+
+    // A second call is served from the cache: no global `-g` queries are
+    // re-run (only the cheap `--version` command-resolution check), and the
+    // fallback reason is preserved instead of being reported as 'cached'.
+    const spawnCallsBeforeSecondCall = freshSpawnSync.mock.calls.length;
+    const cached = freshDetect();
+    const callsDuringCached = freshSpawnSync.mock.calls.slice(spawnCallsBeforeSecondCall);
+    expect(cached.reason).toBe('default-fallback');
+    expect(callsDuringCached.filter(([, args]) => Array.isArray(args) && args.includes('-g'))).toHaveLength(0);
+  });
+
+  it('still detects a genuinely global npm install after the ownership-check cap', async () => {
+    vi.resetModules();
+    const { spawnSync: freshSpawnSync } = await import('node:child_process');
+    const { detectPackageManagerDetails: freshDetect } = await import('./package-manager.js');
+
+    // `npm list -g` reports the package; everything else finds nothing, so the
+    // npm-global install is only discoverable through the fallback checks.
+    freshSpawnSync.mockImplementation((command, args) => {
+      if (command === 'npm' && Array.isArray(args) && args[0] === 'list') {
+        return { status: 0, stdout: '@openchamber/web@1.2.3', stderr: '' };
+      }
+      if (Array.isArray(args) && args.includes('--version')) {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      if (Array.isArray(args) && args.includes('-g')) {
+        return { status: 0, stdout: '/tmp/global-bin', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+
+    const details = freshDetect();
+
+    expect(details.packageManager).toBe('npm');
+    expect(details.reason).not.toBe('default-fallback');
   });
 });

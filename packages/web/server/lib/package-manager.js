@@ -15,6 +15,15 @@ const CHANGELOG_URL = 'https://raw.githubusercontent.com/openchamber/openchamber
 const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/openchamber/openchamber/releases';
 let cachedDetectedPm = null;
+let cachedDetectedPmReason = null;
+let cachedGlobalNodeModulesRoot = null;
+// Cap how many package-manager ownership checks (each spawns several
+// `spawnSync(pm, ['bin'|'root'|'prefix', '-g'])` processes) run before giving
+// up on ownership detection. A non-global install (tarball/docker extraction)
+// must not hang for seconds probing every candidate; the remaining candidates
+// are still covered by the hint / runtime-path / last-resort checks below, so
+// genuinely-global installs keep resolving to the same package manager.
+const MAX_PACKAGE_MANAGER_OWNERSHIP_CHECKS = 2;
 
 function getSpawnSyncBaseOptions() {
   return process.platform === 'win32' ? { windowsHide: true } : {};
@@ -379,6 +388,11 @@ function packageManagerOwnsCurrentInstall(pm) {
   return false;
 }
 
+function cacheCurrentDetection(reason) {
+  cachedDetectedPmReason = reason;
+  cachedGlobalNodeModulesRoot = getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null;
+}
+
 export function detectPackageManagerDetails() {
   // In desktop (Electron) runtime, package-manager detection is worthless —
   // the app ships as a .app bundle, not installed via npm/pnpm/yarn/bun, and
@@ -397,13 +411,13 @@ export function detectPackageManagerDetails() {
   }
 
   if (cachedDetectedPm) {
-      return {
-        packageManager: cachedDetectedPm,
-        reason: 'cached',
-        packagePath: getCurrentPackagePath(),
-        packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-        globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
-      };
+    return {
+      packageManager: cachedDetectedPm,
+      reason: cachedDetectedPmReason || 'cached',
+      packagePath: getCurrentPackagePath(),
+      packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
+      globalNodeModulesRoot: cachedGlobalNodeModulesRoot,
+    };
   }
 
   const forcedPm = process.env.OPENCHAMBER_PACKAGE_MANAGER?.trim();
@@ -411,12 +425,13 @@ export function detectPackageManagerDetails() {
     const forcedPmCommand = resolvePackageManagerCommand(forcedPm);
     if (isCommandAvailable(forcedPmCommand)) {
       cachedDetectedPm = forcedPm;
+      cacheCurrentDetection('forced-env');
       return {
         packageManager: cachedDetectedPm,
         reason: 'forced-env',
         packagePath: getCurrentPackagePath(),
         packageManagerCommand: forcedPmCommand,
-        globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
+        globalNodeModulesRoot: cachedGlobalNodeModulesRoot,
       };
     }
   }
@@ -425,25 +440,27 @@ export function detectPackageManagerDetails() {
   const installPathPm = detectPackageManagerFromCurrentInstallPath();
   if (installPathPm && packageManagerOwnsCurrentInstall(installPathPm)) {
     cachedDetectedPm = installPathPm;
+    cacheCurrentDetection('install-path-owner');
     return {
       packageManager: cachedDetectedPm,
       reason: 'install-path-owner',
       packagePath: getCurrentPackagePath(),
       packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-      globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
+      globalNodeModulesRoot: cachedGlobalNodeModulesRoot,
     };
   }
 
   const ownershipCandidates = ['pnpm', 'yarn', 'bun', 'npm'];
-  for (const candidate of ownershipCandidates) {
+  for (const candidate of ownershipCandidates.slice(0, MAX_PACKAGE_MANAGER_OWNERSHIP_CHECKS)) {
     if (packageManagerOwnsCurrentInstall(candidate)) {
       cachedDetectedPm = candidate;
+      cacheCurrentDetection('global-root-owner');
       return {
         packageManager: cachedDetectedPm,
         reason: 'global-root-owner',
         packagePath: getCurrentPackagePath(),
         packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-        globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
+        globalNodeModulesRoot: cachedGlobalNodeModulesRoot,
       };
     }
   }
@@ -478,24 +495,26 @@ export function detectPackageManagerDetails() {
   // Validate the hint against package visibility, but only after ownership checks failed.
   if (hintedPm && isCommandAvailable(resolvePackageManagerCommand(hintedPm)) && isPackageInstalledWith(hintedPm)) {
     cachedDetectedPm = hintedPm;
+    cacheCurrentDetection('hinted-visible-install');
     return {
       packageManager: cachedDetectedPm,
       reason: 'hinted-visible-install',
       packagePath: getCurrentPackagePath(),
       packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-      globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
+      globalNodeModulesRoot: cachedGlobalNodeModulesRoot,
     };
   }
 
   const runtimePm = detectPackageManagerFromRuntimePath(process.execPath);
   if (runtimePm && isCommandAvailable(resolvePackageManagerCommand(runtimePm)) && isPackageInstalledWith(runtimePm)) {
     cachedDetectedPm = runtimePm;
+    cacheCurrentDetection('runtime-visible-install');
     return {
       packageManager: cachedDetectedPm,
       reason: 'runtime-visible-install',
       packagePath: getCurrentPackagePath(),
       packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-      globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
+      globalNodeModulesRoot: cachedGlobalNodeModulesRoot,
     };
   }
 
@@ -512,24 +531,26 @@ export function detectPackageManagerDetails() {
       // Verify this PM actually has the package installed globally
       if (isPackageInstalledWith(name)) {
         cachedDetectedPm = name;
+        cacheCurrentDetection('last-resort-visible-install');
         return {
           packageManager: cachedDetectedPm,
           reason: 'last-resort-visible-install',
           packagePath: getCurrentPackagePath(),
           packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-          globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
+          globalNodeModulesRoot: cachedGlobalNodeModulesRoot,
         };
       }
     }
   }
 
   cachedDetectedPm = 'npm';
+  cacheCurrentDetection('default-fallback');
   return {
     packageManager: cachedDetectedPm,
     reason: 'default-fallback',
     packagePath: getCurrentPackagePath(),
     packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-    globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
+    globalNodeModulesRoot: cachedGlobalNodeModulesRoot,
   };
 }
 

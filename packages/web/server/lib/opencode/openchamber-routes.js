@@ -67,6 +67,16 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       }
 
       const pmDetails = detectPackageManagerDetails();
+      if (pmDetails.reason === 'default-fallback') {
+        // No package manager owns this installation (e.g. tarball/docker
+        // extraction). Blindly running `npm install -g @openchamber/web@latest`
+        // would install into an unrelated global root and hang or fail.
+        return res.status(409).json({
+          error:
+            'Automatic update is not available for this installation. OpenChamber was not installed through a global package manager (npm, pnpm, yarn, or bun), so it cannot update itself in place. Please update manually: reinstall the new version using your original installation method, or download it from the GitHub releases page.',
+        });
+      }
+
       const pm = pmDetails.packageManager;
       const updateCmd = getUpdateCommand(pm);
       const isContainer =

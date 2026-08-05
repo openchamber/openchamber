@@ -342,7 +342,12 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
 ## Public exports (openchamber-routes.js)
 - `registerOpenChamberRoutes(app, dependencies)`: registers OpenChamber endpoints:
   - `GET /api/openchamber/update-check`
-  - `POST /api/openchamber/update-install`
+  - `POST /api/openchamber/update-install` — returns `400` when no update is
+    available; returns `409` with a manual-update message when the installation
+    is not owned by a global package manager (`default-fallback` detection
+    reason, e.g. tarball/docker extraction) so a blind `npm install -g` is
+    never attempted; otherwise responds `200` and runs the detected package
+    manager's update command.
   - `GET /api/openchamber/models-metadata`
   - `GET /api/zen/models`
 
