@@ -33,6 +33,7 @@ import type {
   CherryPickResponse,
   RevertCommitResponse,
   ResetToCommitResponse,
+  WorktreeCommandResult,
 } from './api/types';
 import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
@@ -598,6 +599,35 @@ export async function getGitWorktreeBootstrapStatus(directory: string): Promise<
     throw new Error(error.error || 'Failed to get worktree bootstrap status');
   }
   return response.json();
+}
+
+export async function getWorktreeSetupLog(directory: string): Promise<WorktreeCommandResult | null> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/setup-log`, directory));
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to get worktree setup log');
+  }
+  const payload = await response.json() as { log?: WorktreeCommandResult | null };
+  return payload.log ?? null;
+}
+
+export async function runWorktreeCommand(directory: string, command: string): Promise<WorktreeCommandResult> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/run-command`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to run worktree command');
+  }
+  const result = await response.json() as Partial<WorktreeCommandResult>;
+  return {
+    success: result.success === true,
+    output: typeof result.output === 'string' ? result.output : '',
+    timedOut: result.timedOut === true,
+    message: result.message ?? null,
+  };
 }
 
 export async function previewGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> {

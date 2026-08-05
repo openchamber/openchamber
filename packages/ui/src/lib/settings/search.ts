@@ -558,6 +558,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['worktree', 'branch', 'repository'],
   },
   {
+    id: 'projects.worktree.start',
+    page: 'projects',
+    titleKey: 'settings.openchamber.worktrees.start.label',
+    keywords: ['worktree', 'start commands', 'run', 'dev servers'],
+  },
+  {
+    id: 'projects.worktree.shutdown',
+    page: 'projects',
+    titleKey: 'settings.openchamber.worktrees.shutdown.label',
+    keywords: ['worktree', 'shutdown commands', 'stop', 'cleanup'],
+  },
+  {
     id: 'projects.worktree.setup.wait',
     page: 'projects',
     titleKey: 'settings.openchamber.worktrees.setup.waitForCommands',

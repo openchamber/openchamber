@@ -1116,6 +1116,51 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.get('/api/git/worktrees/setup-log', async (req, res) => {
+    const { getWorktreeSetupLog } = await getGitLibraries();
+    if (typeof getWorktreeSetupLog !== 'function') {
+      return res.status(501).json({ error: 'Worktree setup log is not available' });
+    }
+
+    try {
+      const directory = req.query.directory;
+      if (!directory || typeof directory !== 'string') {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const log = getWorktreeSetupLog(directory);
+      res.json({ log });
+    } catch (error) {
+      console.error('Failed to get worktree setup log:', error);
+      res.status(500).json({ error: error.message || 'Failed to get worktree setup log' });
+    }
+  });
+
+  app.post('/api/git/worktrees/run-command', async (req, res) => {
+    const { runWorktreeCommand } = await getGitLibraries();
+    if (typeof runWorktreeCommand !== 'function') {
+      return res.status(501).json({ error: 'Worktree command execution is not available' });
+    }
+
+    try {
+      const directory = req.query.directory;
+      if (!directory || typeof directory !== 'string') {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const command = typeof req.body?.command === 'string' ? req.body.command.trim() : '';
+      if (!command) {
+        return res.status(400).json({ error: 'command is required' });
+      }
+
+      const result = await runWorktreeCommand(directory, command);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to run worktree command:', error);
+      res.status(500).json({ error: error.message || 'Failed to run worktree command' });
+    }
+  });
+
   app.delete('/api/git/worktrees', async (req, res) => {
     const { removeWorktree } = await getGitLibraries();
     if (typeof removeWorktree !== 'function') {

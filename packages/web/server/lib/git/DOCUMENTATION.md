@@ -51,6 +51,8 @@ The following functions are exported and used by the web server:
 - `createWorktree(directory, input)`: Create a new worktree (supports 'new' and 'existing' modes, upstream setup).
 - `removeWorktree(directory, input)`: Remove a worktree (optionally delete local branch).
 - `isLinkedWorktree(directory)`: Check if directory is a linked worktree (not primary).
+- `runWorktreeCommand(directory, command, options)`: Run a command (start/shutdown script) inside a worktree directory and return its captured output `{ success, output, timedOut, message }`. Reuses the bootstrap command runner (`bash -lc` / `cmd /c`) with a bounded timeout (default 2 minutes): a long-running command is terminated and the partial output is returned with `timedOut: true`. Exposed as `POST /api/git/worktrees/run-command`.
+- `getWorktreeSetupLog(directory)`: Return the captured output of the setup/start scripts that ran during this worktree's bootstrap, or `null` when nothing was recorded (no commands configured, or the server restarted since bootstrap — the log is in-memory). Setup output is recorded by `runWorktreeStartScripts` (project start command plus the create-payload `startCommand`) and cleared on worktree removal. Exposed as `GET /api/git/worktrees/setup-log`.
 
 ### Commit and Remote Operations
 - `commit(directory, message, options)`: Create a commit from the current index. `options.stageFiles` may be provided with `options.files` by older callers to stage only selected unstaged rows before committing, but the shared Git panel now stages/unstages explicitly before commit.
@@ -135,6 +137,7 @@ The following functions are internal helpers used by exported functions:
 - Fast-create background failures remove OpenCode sandbox metadata for directories that never became Git worktrees, and remove the pre-created directory only if it is still empty. User-created files are never recursively deleted by this cleanup.
 - Worktree removal waits for any active create/bootstrap task for that directory before deleting it, preventing a background Git or setup task from restoring removed state or racing filesystem cleanup.
 - Worktree bootstrap retries transient `index.lock` conflicts. If the lock remains byte-for-byte and metadata-identical across the retry window, it is treated as stale, removed, and population continues automatically; changing locks are left untouched and reported as failures.
+- Setup/start script output is captured per worktree directory (in-memory) and exposed via `GET /api/git/worktrees/setup-log` so the UI can show bootstrap command output; the log is cleared when the worktree is removed.
 
 ### Log Response
 - `all`: Array of commit objects with hash, date, message, author info, stats.

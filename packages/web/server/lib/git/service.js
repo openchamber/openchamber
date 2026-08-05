@@ -1598,37 +1598,44 @@ const findBranchInUse = async (primaryWorktree, localBranchName) => {
   }) || null;
 };
 
-const runWorktreeStartCommand = async (directory, command) => {
+const runWorktreeStartCommand = async (directory, command, options = {}) => {
   const text = String(command || '').trim();
   if (!text) {
-    return { success: true };
+    return { success: true, stdout: '', stderr: '' };
+  }
+
+  const execOptions = {
+    cwd: directory,
+    env: await buildGitEnv(),
+    maxBuffer: 20 * 1024 * 1024,
+  };
+  if (options.timeoutMs) {
+    execOptions.timeout = options.timeoutMs;
   }
 
   if (process.platform === 'win32') {
     const result = await execFileAsync('cmd', ['/c', text], {
-      cwd: directory,
-      env: await buildGitEnv(),
+      ...execOptions,
       windowsHide: true,
-      maxBuffer: 20 * 1024 * 1024,
     }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
       success: false,
       stdout: error?.stdout,
       stderr: error?.stderr,
       message: parseGitErrorText(error),
+      timedOut: Boolean(error?.killed) || error?.signal === 'SIGTERM' || error?.code === 'ETIMEDOUT',
     }));
     return result;
   }
 
-  const result = await execFileAsync('bash', ['-lc', text], {
-    cwd: directory,
-    env: await buildGitEnv(),
-    maxBuffer: 20 * 1024 * 1024,
-  }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
-    success: false,
-    stdout: error?.stdout,
-    stderr: error?.stderr,
-    message: parseGitErrorText(error),
-  }));
+  const result = await execFileAsync('bash', ['-lc', text], execOptions)
+    .then(({ stdout, stderr }) => ({ success: true, stdout, stderr }))
+    .catch((error) => ({
+      success: false,
+      stdout: error?.stdout,
+      stderr: error?.stderr,
+      message: parseGitErrorText(error),
+      timedOut: Boolean(error?.killed) || error?.signal === 'SIGTERM' || error?.code === 'ETIMEDOUT',
+    }));
   return result;
 };
 
@@ -1643,6 +1650,125 @@ const loadProjectStartCommand = async (projectID) => {
     return '';
   }
 };
+
+// ---------------------------------------------------------------------------
+// Worktree setup/start/shutdown command logs
+//
+// The setup commands run during worktree bootstrap used to be invisible: their
+// output was only surfaced through a console.warn on failure. These helpers
+// capture the output of every bootstrap script (project start command plus the
+// create-payload start command) per worktree directory and expose it so the UI
+// can show it in a dialog. The same command runner is reused for the on-demand
+// start/shutdown invocations, with a bounded timeout so a long-running script
+// returns partial output instead of hanging the request.
+// ---------------------------------------------------------------------------
+
+const worktreeSetupLogs = new Map();
+const WORKTREE_COMMAND_TIMEOUT_MS = 120_000;
+
+const formatWorktreeCommandOutput = (result) => {
+  const parts = [result.stdout, result.stderr].filter((value) => typeof value === 'string' && value.trim().length > 0);
+  return parts.join('\n');
+};
+
+const recordWorktreeSetupLog = (directory, entry) => {
+  const key = toBootstrapStateKey(directory);
+  if (!key) {
+    return;
+  }
+  worktreeSetupLogs.set(key, entry);
+};
+
+const clearWorktreeSetupLog = (directory) => {
+  const key = toBootstrapStateKey(directory);
+  if (key) {
+    worktreeSetupLogs.delete(key);
+  }
+};
+
+const runWorktreeStartScripts = async (directory, projectID, startCommand) => {
+  const chunks = [];
+  let overallSuccess = true;
+
+  const projectStart = await loadProjectStartCommand(projectID);
+  if (projectStart) {
+    const projectResult = await runWorktreeStartCommand(directory, projectStart);
+    chunks.push(`$ ${projectStart}\n${formatWorktreeCommandOutput(projectResult)}`);
+    if (!projectResult.success) {
+      overallSuccess = false;
+      console.warn('Worktree project start command failed:', projectResult.message || projectResult.stderr || projectResult.stdout);
+    }
+  }
+
+  const extraCommand = String(startCommand || '').trim();
+  if (extraCommand) {
+    const extraResult = await runWorktreeStartCommand(directory, extraCommand);
+    chunks.push(`$ ${extraCommand}\n${formatWorktreeCommandOutput(extraResult)}`);
+    if (!extraResult.success) {
+      overallSuccess = false;
+      console.warn('Worktree start command failed:', extraResult.message || extraResult.stderr || extraResult.stdout);
+    }
+  }
+
+  if (chunks.length === 0) {
+    // No setup/start commands configured — nothing to record.
+    clearWorktreeSetupLog(directory);
+    return;
+  }
+
+  recordWorktreeSetupLog(directory, {
+    output: chunks.filter((chunk) => chunk.trim().length > 0).join('\n\n'),
+    success: overallSuccess,
+    timedOut: false,
+    message: null,
+    at: Date.now(),
+  });
+};
+
+/**
+ * Run a command inside a worktree directory (start/shutdown scripts) and return
+ * its captured output. Reuses the bootstrap command runner; a bounded timeout
+ * (default 2 minutes) terminates long-running commands and reports the partial
+ * output with `timedOut: true` so the UI can label it instead of hanging.
+ */
+export async function runWorktreeCommand(directory, command, options = {}) {
+  const text = String(command || '').trim();
+  const normalized = normalizeDirectoryPath(directory);
+  if (!text || typeof normalized !== 'string' || !normalized || !fs.existsSync(normalized)) {
+    return { success: false, output: '', timedOut: false, message: 'Invalid directory or empty command' };
+  }
+
+  const result = await runWorktreeStartCommand(normalized, text, {
+    timeoutMs: options.timeoutMs ?? WORKTREE_COMMAND_TIMEOUT_MS,
+  });
+
+  return {
+    success: result.success,
+    output: formatWorktreeCommandOutput(result),
+    timedOut: result.timedOut === true,
+    message: result.message ?? null,
+  };
+}
+
+/**
+ * Return the captured output of the setup scripts that ran during this
+ * worktree's bootstrap, or null when none is recorded (e.g. no setup commands
+ * configured, or the server restarted since bootstrap).
+ */
+export function getWorktreeSetupLog(directory) {
+  const key = toBootstrapStateKey(directory);
+  const entry = key ? worktreeSetupLogs.get(key) : null;
+  if (!entry) {
+    return null;
+  }
+  return {
+    output: typeof entry.output === 'string' ? entry.output : '',
+    success: entry.success === true,
+    timedOut: entry.timedOut === true,
+    message: entry.message ?? null,
+    at: entry.at ?? null,
+  };
+}
 
 // OpenCode owns its own project/sandbox registry. It records a worktree as a
 // sandbox itself when an instance boots for that directory, and filters entries
@@ -1680,26 +1806,6 @@ const cleanupFailedFastWorktreeCreate = async (context, candidate) => {
     if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error?.code)) {
       console.warn('Failed to clean up empty worktree directory after creation failure:', error instanceof Error ? error.message : String(error));
     }
-  }
-};
-
-const runWorktreeStartScripts = async (directory, projectID, startCommand) => {
-  const projectStart = await loadProjectStartCommand(projectID);
-  if (projectStart) {
-    const projectResult = await runWorktreeStartCommand(directory, projectStart);
-    if (!projectResult.success) {
-      console.warn('Worktree project start command failed:', projectResult.message || projectResult.stderr || projectResult.stdout);
-      return;
-    }
-  }
-
-  const extraCommand = String(startCommand || '').trim();
-  if (!extraCommand) {
-    return;
-  }
-  const extraResult = await runWorktreeStartCommand(directory, extraCommand);
-  if (!extraResult.success) {
-    console.warn('Worktree start command failed:', extraResult.message || extraResult.stderr || extraResult.stdout);
   }
 };
 
@@ -4088,6 +4194,7 @@ export async function removeWorktree(directory, input = {}) {
     }
 
     clearWorktreeBootstrapState(targetDirectory);
+    clearWorktreeSetupLog(targetDirectory);
 
     return true;
   }
@@ -4110,6 +4217,7 @@ export async function removeWorktree(directory, input = {}) {
   }
 
   clearWorktreeBootstrapState(matchedEntry.worktree);
+  clearWorktreeSetupLog(matchedEntry.worktree);
 
   return true;
 }

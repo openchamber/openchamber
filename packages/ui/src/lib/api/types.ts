@@ -374,6 +374,19 @@ export interface GitWorktreeBootstrapStatus {
   updatedAt: number;
 }
 
+/**
+ * Result of running a script/command inside a worktree directory (setup/start/
+ * shutdown commands). `output` is the captured stdout+stderr; `timedOut` marks
+ * a command that exceeded the server-side time limit and was terminated, with
+ * `output` holding everything produced up to that point.
+ */
+export interface WorktreeCommandResult {
+  success: boolean;
+  output: string;
+  timedOut?: boolean;
+  message?: string | null;
+}
+
 export interface CreateGitWorktreePayload {
   mode?: 'new' | 'existing';
   /** Worktree folder name (falls back to OpenCode name generation when omitted). */
@@ -487,6 +500,18 @@ export interface GitAPI {
   listGitWorktrees(directory: string): Promise<GitWorktreeInfo[]>;
   validateGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult>;
   getGitWorktreeBootstrapStatus?(directory: string): Promise<GitWorktreeBootstrapStatus>;
+  /**
+   * Return the captured output of the setup/start scripts that ran during this
+   * worktree's bootstrap, or null when nothing was recorded. Optional: VS Code
+   * (which serves Git through its own bridge) omits it and the UI hides the
+   * setup-log action.
+   */
+  getWorktreeSetupLog?(directory: string): Promise<WorktreeCommandResult | null>;
+  /**
+   * Run a start/shutdown script inside a worktree directory and return its
+   * captured output. Optional for the same reason as `getWorktreeSetupLog`.
+   */
+  runWorktreeCommand?(directory: string, command: string): Promise<WorktreeCommandResult>;
   previewGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   createGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   deleteGitWorktree?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;

@@ -5,6 +5,8 @@ const gitLibraries = {
   unstageFiles: vi.fn(),
   isGitRepository: vi.fn(),
   getStatus: vi.fn(),
+  getWorktreeSetupLog: vi.fn(),
+  runWorktreeCommand: vi.fn(),
 };
 
 vi.mock('./index.js', () => ({
@@ -12,6 +14,8 @@ vi.mock('./index.js', () => ({
   unstageFiles: gitLibraries.unstageFiles,
   isGitRepository: gitLibraries.isGitRepository,
   getStatus: gitLibraries.getStatus,
+  getWorktreeSetupLog: gitLibraries.getWorktreeSetupLog,
+  runWorktreeCommand: gitLibraries.runWorktreeCommand,
 }));
 
 const { registerGitRoutes } = await import('./routes.js');
@@ -206,5 +210,90 @@ describe('git routes status discovery', () => {
     expect(gitLibraries.isGitRepository).toHaveBeenCalledWith('/opened/git-project');
     expect(gitLibraries.getStatus).toHaveBeenCalledWith('/opened/git-project', { mode: undefined });
     expect(response.body).toMatchObject({ current: 'main' });
+  });
+});
+
+describe('git routes worktree commands', () => {
+  beforeEach(() => {
+    gitLibraries.getWorktreeSetupLog.mockReset();
+    gitLibraries.runWorktreeCommand.mockReset();
+  });
+
+  it('returns the recorded setup log for a worktree directory', async () => {
+    gitLibraries.getWorktreeSetupLog.mockReturnValue({
+      output: '$ echo hi\nhi',
+      success: true,
+      timedOut: false,
+      message: null,
+      at: 123,
+    });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/worktrees/setup-log')(
+      { query: { directory: '/worktrees/w1' } },
+      response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({ log: { output: '$ echo hi\nhi', success: true } });
+    expect(gitLibraries.getWorktreeSetupLog).toHaveBeenCalledWith('/worktrees/w1');
+  });
+
+  it('returns a null log when nothing was recorded', async () => {
+    gitLibraries.getWorktreeSetupLog.mockReturnValue(null);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/worktrees/setup-log')(
+      { query: { directory: '/worktrees/w1' } },
+      response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ log: null });
+  });
+
+  it('runs a command in a worktree directory and returns its output', async () => {
+    gitLibraries.runWorktreeCommand.mockResolvedValue({
+      success: true,
+      output: 'started',
+      timedOut: false,
+      message: null,
+    });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/worktrees/run-command')(
+      { query: { directory: '/worktrees/w1' }, body: { command: './scripts/run.sh' } },
+      response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({ success: true, output: 'started' });
+    expect(gitLibraries.runWorktreeCommand).toHaveBeenCalledWith('/worktrees/w1', './scripts/run.sh');
+  });
+
+  it('rejects run-command requests without a directory or command', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+
+    const noDirectory = createMockResponse();
+    await getRoute('POST', '/api/git/worktrees/run-command')(
+      { query: {}, body: { command: 'echo hi' } },
+      noDirectory,
+    );
+    expect(noDirectory.statusCode).toBe(400);
+
+    const noCommand = createMockResponse();
+    await getRoute('POST', '/api/git/worktrees/run-command')(
+      { query: { directory: '/worktrees/w1' }, body: { command: '   ' } },
+      noCommand,
+    );
+    expect(noCommand.statusCode).toBe(400);
+    expect(gitLibraries.runWorktreeCommand).not.toHaveBeenCalled();
   });
 });

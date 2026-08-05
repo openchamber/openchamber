@@ -34,6 +34,8 @@ interface OpenChamberConfig {
   projectPath?: string;
   'setup-worktree'?: string[];
   'setup-worktree-wait'?: boolean;
+  'worktree-start'?: string[];
+  'worktree-shutdown'?: string[];
   projectNotes?: string;
   projectTodos?: OpenChamberProjectTodoItem[];
   projectPlanFiles?: OpenChamberProjectPlanFileLink[];
@@ -707,6 +709,35 @@ export async function getWorktreeSetupWaitEnabled(project: ProjectRef): Promise<
 
 export async function saveWorktreeSetupWaitEnabled(project: ProjectRef, enabled: boolean): Promise<boolean> {
   return updateOpenChamberConfig(project, { 'setup-worktree-wait': enabled });
+}
+
+/**
+ * Start commands: run on demand per worktree (e.g. boot dev servers) with the
+ * output shown in a dialog. Reuses the setup-command infrastructure on the
+ * server (`POST /api/git/worktrees/run-command`).
+ */
+export async function getWorktreeStartCommands(project: ProjectRef): Promise<string[]> {
+  const config = await readOpenChamberConfig(project);
+  return config?.['worktree-start'] ?? [];
+}
+
+export async function saveWorktreeStartCommands(project: ProjectRef, commands: string[]): Promise<boolean> {
+  const filtered = commands.filter((cmd) => cmd.trim().length > 0);
+  return updateOpenChamberConfig(project, { 'worktree-start': filtered });
+}
+
+/**
+ * Shutdown commands: run on demand per worktree (e.g. close tunnels, stop
+ * servers) with the output shown in a dialog.
+ */
+export async function getWorktreeShutdownCommands(project: ProjectRef): Promise<string[]> {
+  const config = await readOpenChamberConfig(project);
+  return config?.['worktree-shutdown'] ?? [];
+}
+
+export async function saveWorktreeShutdownCommands(project: ProjectRef, commands: string[]): Promise<boolean> {
+  const filtered = commands.filter((cmd) => cmd.trim().length > 0);
+  return updateOpenChamberConfig(project, { 'worktree-shutdown': filtered });
 }
 
 /**

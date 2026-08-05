@@ -10,6 +10,8 @@ import {
   cherryPick,
   createWorktree,
   getWorktreeBootstrapStatus,
+  getWorktreeSetupLog,
+  runWorktreeCommand,
   getBranches,
   getRangeDiff,
   getStatus,
@@ -648,6 +650,134 @@ describe('createWorktree', () => {
 
       const candidateDirectory = path.join(dataHome, 'opencode', 'worktree', projectID, 'feature-in-use');
       expect(fs.existsSync(candidateDirectory)).toBe(false);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runWorktreeCommand / getWorktreeSetupLog
+// ---------------------------------------------------------------------------
+
+describe('runWorktreeCommand', () => {
+  it('runs a command in the worktree directory and returns captured output', async () => {
+    if (!canRunGit()) return;
+
+    const directory = createTempDir();
+    const result = await runWorktreeCommand(directory, `printf 'hello-ope-177' && pwd`);
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('hello-ope-177');
+    expect(result.output).toContain(directory);
+    expect(result.timedOut).toBe(false);
+  });
+
+  it('reports failure output without throwing', async () => {
+    const directory = createTempDir();
+    const result = await runWorktreeCommand(directory, `printf 'boom-ope-177'; exit 7`);
+
+    expect(result.success).toBe(false);
+    expect(result.output).toContain('boom-ope-177');
+    expect(result.message).toBeTruthy();
+  });
+
+  it('rejects an empty command and a missing directory', async () => {
+    const directory = createTempDir();
+    const empty = await runWorktreeCommand(directory, '   ');
+    expect(empty).toMatchObject({ success: false, output: '' });
+
+    const missing = await runWorktreeCommand(path.join(createTempDir(), 'nope'), 'echo hi');
+    expect(missing).toMatchObject({ success: false, output: '' });
+  });
+
+  it('times out long-running commands and returns partial output', async () => {
+    if (!canRunGit()) return;
+
+    const directory = createTempDir();
+    const result = await runWorktreeCommand(directory, `printf 'partial-ope-177'; sleep 10`, { timeoutMs: 1500 });
+
+    expect(result.timedOut).toBe(true);
+    expect(result.output).toContain('partial-ope-177');
+  });
+});
+
+describe('getWorktreeSetupLog', () => {
+  it('captures the setup command output produced during worktree bootstrap', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/setup-log',
+        worktreeName: 'setup-log',
+        returnAfterDirectoryCreated: true,
+        startCommand: `printf 'setup-log-output-ope-177'`,
+      });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
+        { timeout: 5_000 },
+      ).toBe('setup-ready');
+
+      const log = getWorktreeSetupLog(created.path);
+      expect(log).not.toBeNull();
+      expect(log.output).toContain('setup-log-output-ope-177');
+      expect(log.success).toBe(true);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('returns null when no setup commands ran', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/setup-log-none',
+        worktreeName: 'setup-log-none',
+        returnAfterDirectoryCreated: true,
+      });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
+        { timeout: 5_000 },
+      ).toBe('setup-ready');
+
+      expect(getWorktreeSetupLog(created.path)).toBeNull();
     } finally {
       if (previousXdgDataHome === undefined) {
         delete process.env.XDG_DATA_HOME;
