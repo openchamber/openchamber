@@ -2880,7 +2880,6 @@ export const Header: React.FC<HeaderProps> = ({
       <header
         ref={headerRef}
         className={headerClassName}
-        style={{ ['--padding-scale' as string]: '1' } as React.CSSProperties}
       >
         {isMobile ? renderMobile() : renderDesktop()}
       </header>

@@ -1,6 +1,7 @@
 import type { SVGProps } from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { cn } from '@/lib/utils';
 
 interface DiffIconProps extends Omit<SVGProps<SVGSVGElement>, 'children'> {
   size?: number | string;
@@ -25,7 +26,7 @@ export function DiffIcon({ size, className, style, ...props }: DiffIconProps) {
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 256 256"
       fill="currentColor"
-      className={className}
+      className={cn('remixicon', className)}
       style={{
         width: typeof size === 'number' ? `${size}px` : size,
         height: typeof size === 'number' ? `${size}px` : size,

@@ -455,6 +455,14 @@ button svg,
   shape-rendering: geometricPrecision;
 }
 
+/* Icons keep their intrinsic size regardless of the spacing-density scale:
+   sizing utilities (size-4 / h-4 / w-4 …) resolve --spacing-* which is
+   multiplied by --padding-scale, so re-pin the scale to 1 on the icon
+   element itself. Surrounding layout (paddings, gaps) still scales. */
+svg.remixicon {
+  --padding-scale: 1;
+}
+
 /* GPU acceleration for non-spinning SVGs */
 button svg:not(.animate-spin),
 [role="button"] svg:not(.animate-spin) {
