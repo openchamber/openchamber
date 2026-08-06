@@ -7,6 +7,11 @@ import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
 import { getDataDir } from './cli-paths.js';
 import { hasUiPasswordConfigured } from './cli-network.js';
 import { searchPathFor } from './cli-executables.js';
+import {
+  OPENCHAMBER_SYSTEMD_USER_SERVICE,
+  getSystemdUserServicePath,
+  getSystemdUserServiceStatus,
+} from '../../server/lib/systemd-user-service.js';
 
 const STARTUP_SERVICE_ID = 'dev.openchamber.web';
 
@@ -20,7 +25,7 @@ function getStartupServicePaths() {
   if (process.platform === 'linux') {
     return {
       platform: 'linux',
-      servicePath: path.join(os.homedir(), '.config', 'systemd', 'user', 'openchamber.service'),
+      servicePath: getSystemdUserServicePath(),
     };
   }
   if (process.platform === 'win32') {
@@ -271,16 +276,14 @@ function getStartupStatus() {
     return { supported: true, platform: paths.platform, enabled: result.status === 0, active: null, servicePath: paths.servicePath };
   }
   if (paths.platform === 'linux') {
-    const enabledResult = runStartupCommand('systemctl', ['--user', 'is-enabled', 'openchamber.service'], { allowFailure: true });
-    const activeResult = runStartupCommand('systemctl', ['--user', 'is-active', 'openchamber.service'], { allowFailure: true });
-    const activeState = (activeResult.stdout || '').trim() || 'inactive';
+    const status = getSystemdUserServiceStatus();
     return {
-      supported: true,
+      supported: status.supported,
       platform: paths.platform,
-      enabled: enabledResult.status === 0 || fs.existsSync(paths.servicePath),
-      active: activeState === 'active',
-      activeState,
-      servicePath: paths.servicePath,
+      enabled: status.enabled,
+      active: status.active,
+      activeState: status.activeState,
+      servicePath: status.servicePath,
     };
   }
   return {
@@ -314,7 +317,7 @@ function enableStartupService(options = {}) {
     fs.mkdirSync(path.dirname(paths.servicePath), { recursive: true, mode: 0o700 });
     fs.writeFileSync(paths.servicePath, buildSystemdUserService(options), { mode: 0o600 });
     runStartupCommand('systemctl', ['--user', 'daemon-reload']);
-    runStartupCommand('systemctl', ['--user', 'enable', '--now', 'openchamber.service']);
+    runStartupCommand('systemctl', ['--user', 'enable', '--now', OPENCHAMBER_SYSTEMD_USER_SERVICE]);
     return getStartupStatus();
   }
 
@@ -351,7 +354,7 @@ function disableStartupService() {
   }
 
   if (paths.platform === 'linux') {
-    runStartupCommand('systemctl', ['--user', 'disable', '--now', 'openchamber.service'], { allowFailure: true });
+    runStartupCommand('systemctl', ['--user', 'disable', '--now', OPENCHAMBER_SYSTEMD_USER_SERVICE], { allowFailure: true });
     try { fs.unlinkSync(paths.servicePath); } catch {}
     runStartupCommand('systemctl', ['--user', 'daemon-reload'], { allowFailure: true });
     return getStartupStatus();
