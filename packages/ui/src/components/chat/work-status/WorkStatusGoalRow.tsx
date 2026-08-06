@@ -4,6 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useSessionGoal } from '@/hooks/useSessionGoal';
 import { setSessionGoalStatus } from '@/lib/sessionGoalActions';
+import { sessionGoalStatusColor } from '@/lib/sessionGoalPresentation';
 import { SessionGoalDialog } from '@/components/chat/SessionGoalDialog';
 import { WorkStatusRow, WorkStatusRowAction } from './WorkStatusPrimitives';
 
@@ -12,22 +13,7 @@ type Props = {
   directory: string | null;
 };
 
-/**
- * The session goal, mirroring the composer's target button rather than the
- * informational strip above the input.
- *
- * Those two disagree today — the strip paints `paused` muted and `blocked`
- * warning, the button paints both info and error. The button is what sits
- * beside the composer where this panel's reader last saw the goal, so its
- * mapping is the one reproduced here. Unifying them is a separate change.
- */
-const goalIconColor = (status: string | undefined): string | undefined => {
-  if (status === 'complete') return 'var(--status-success)';
-  if (status === 'blocked' || status === 'budgetLimited') return 'var(--status-error)';
-  if (status === 'active' || status === 'paused') return 'var(--status-info)';
-  return undefined;
-};
-
+/** The session goal, on the mapping every other goal surface uses. */
 export const WorkStatusGoalRow: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
   const { goal, enabled } = useSessionGoal(sessionId ?? '', directory ?? undefined);
@@ -62,7 +48,7 @@ export const WorkStatusGoalRow: React.FC<Props> = ({ sessionId, directory }) => 
           <Icon
             name={goal?.status ? 'target-fill' : 'target'}
             className="size-4 shrink-0"
-            style={{ color: goalIconColor(goal?.status) }}
+            style={{ color: goal ? sessionGoalStatusColor[goal.status] : undefined }}
           />
         )}
         label={objective}

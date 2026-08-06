@@ -2956,7 +2956,6 @@ export const dict = {
   'chat.workStatus.section.mcp': 'MCP',
   'chat.workStatus.section.pinned': 'Épinglés',
   'chat.workStatus.section.tasks': 'Tâches',
-  'chat.workStatus.row.changes': 'Modifications',
   'chat.workStatus.subagent.working': 'travaille',
   'chat.workStatus.subagent.needsPermission': 'demande une autorisation',
   'chat.workStatus.subagent.askedQuestion': 'a posé une question',
@@ -2976,6 +2975,20 @@ export const dict = {
   'chat.workStatus.pinned.reveal': 'Aller au message',
   'chat.workStatus.pinned.unpinFailed': 'Impossible de détacher le message',
   'chat.workStatus.action.openContext': 'Ouvrir le panneau de contexte',
+  'chat.workStatus.section.linkedIssues': 'Liés',
+  'chat.workStatus.linkedIssues.open': 'Ouvrir #{number} sur GitHub',
+  'chat.workStatus.linkedIssues.unlink': 'Retirer le lien',
+  'chat.workStatus.linkedIssues.unlinkFailed': 'Impossible de retirer le lien',
+  'chat.workStatus.linkedIssues.link': 'Lier à la session',
+  'chat.workStatus.linkedIssues.linkFailed': 'Impossible de lier',
+  'chat.workStatus.breakdown.issueCountSingle': '{count} ticket',
+  'chat.workStatus.breakdown.issueCountPlural': '{count} tickets',
+  'chat.workStatus.breakdown.prCountSingle': '{count} PR',
+  'chat.workStatus.breakdown.prCountPlural': '{count} PR',
+  'chat.workStatus.breakdown.skillCountSingle': '{count} compétence',
+  'chat.workStatus.breakdown.skillCountPlural': '{count} compétences',
+  'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
+  'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
 } as const;
 
 export type I18nKey = keyof typeof dict;

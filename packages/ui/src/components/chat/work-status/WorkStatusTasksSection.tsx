@@ -72,7 +72,10 @@ export const WorkStatusTasksSection: React.FC<Props> = ({ sessionId, directory }
   const doneCount = visibleTodos.filter((todo) => todo.status === 'completed').length;
 
   return (
-    <WorkStatusSection title={t('chat.workStatus.section.tasks')}>
+    <WorkStatusSection
+      title={t('chat.workStatus.section.tasks')}
+      summary={`${doneCount}/${visibleTodos.length}`}
+    >
       {visibleTodos.map((todo, index) => {
         const done = todo.status === 'completed';
         const icon = statusIcon(todo.status);
@@ -90,9 +93,6 @@ export const WorkStatusTasksSection: React.FC<Props> = ({ sessionId, directory }
                   )}
                   muted={done}
                   label={<span className={done ? 'line-through' : undefined}>{todo.content}</span>}
-                  value={index === 0 ? (
-                    <span className="text-muted-foreground">{`${doneCount}/${visibleTodos.length}`}</span>
-                  ) : undefined}
                 />
               </div>
             </TooltipTrigger>

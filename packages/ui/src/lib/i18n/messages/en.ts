@@ -2958,7 +2958,6 @@ export const dict = {
   'chat.workStatus.section.mcp': 'MCP',
   'chat.workStatus.section.pinned': 'Pinned',
   'chat.workStatus.section.tasks': 'Tasks',
-  'chat.workStatus.row.changes': 'Changes',
   'chat.workStatus.subagent.working': 'is working',
   'chat.workStatus.subagent.needsPermission': 'needs permission',
   'chat.workStatus.subagent.askedQuestion': 'asked a question',
@@ -2978,6 +2977,20 @@ export const dict = {
   'chat.workStatus.pinned.reveal': 'Go to message',
   'chat.workStatus.pinned.unpinFailed': 'Could not unpin the message',
   'chat.workStatus.action.openContext': 'Open context panel',
+  'chat.workStatus.section.linkedIssues': 'Linked',
+  'chat.workStatus.linkedIssues.open': 'Open #{number} on GitHub',
+  'chat.workStatus.linkedIssues.unlink': 'Remove link',
+  'chat.workStatus.linkedIssues.unlinkFailed': 'Could not remove the link',
+  'chat.workStatus.linkedIssues.link': 'Link to session',
+  'chat.workStatus.linkedIssues.linkFailed': 'Could not link',
+  'chat.workStatus.breakdown.issueCountSingle': '{count} issue',
+  'chat.workStatus.breakdown.issueCountPlural': '{count} issues',
+  'chat.workStatus.breakdown.prCountSingle': '{count} PR',
+  'chat.workStatus.breakdown.prCountPlural': '{count} PRs',
+  'chat.workStatus.breakdown.skillCountSingle': '{count} skill',
+  'chat.workStatus.breakdown.skillCountPlural': '{count} skills',
+  'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
+  'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
 } as const;
 
 export type I18nKey = keyof typeof dict;

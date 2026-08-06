@@ -7,6 +7,8 @@ import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrSt
 import { useSession, useSessionMessages } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { normalizeProjectPath } from '@/lib/projectResolution';
 import { resolveUsageTone } from '@/lib/quota';
 import { computeContextUsage } from './contextUsage';
 import {
@@ -60,6 +62,29 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   }, [directory, git, ensureStatus]);
 
   const branch = gitStatus?.current?.trim() || null;
+
+  // The panel's directory can be a worktree, so the project is the registered
+  // one whose path contains it — longest match wins, since projects can nest.
+  const projectLabel = useProjectsStore(
+    React.useCallback((state) => {
+      const normalizedDirectory = normalizeProjectPath(directory ?? null);
+      if (!normalizedDirectory) return null;
+      let best: { path: string; label: string } | null = null;
+      for (const project of state.projects) {
+        const projectPath = normalizeProjectPath(project.path);
+        if (!projectPath) continue;
+        const contains = normalizedDirectory === projectPath
+          || normalizedDirectory.startsWith(`${projectPath}/`);
+        if (!contains) continue;
+        if (best && best.path.length >= projectPath.length) continue;
+        const label = project.label?.trim()
+          || projectPath.split('/').filter(Boolean).pop()
+          || projectPath;
+        best = { path: projectPath, label };
+      }
+      return best?.label ?? null;
+    }, [directory]),
+  );
 
   // Read-only: PR watching is owned by the background tracker. Starting a watch
   // here would multiply GitHub requests per open session, which is exactly the
@@ -192,7 +217,10 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
       ) : null}
 
       {hasRepository ? (
-        <WorkStatusSection title={t('chat.workStatus.section.repository')}>
+        <WorkStatusSection
+          title={t('chat.workStatus.section.repository')}
+          summary={projectLabel}
+        >
           {attentionLabel ? <WorkStatusCallout>{attentionLabel}</WorkStatusCallout> : null}
 
           {/* Branch first: the changes below are the changes *on it*, and the
@@ -219,7 +247,11 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               icon="file-edit"
               onClick={directory ? openChanges : undefined}
               ariaLabel={t('chat.workStatus.action.openChanges')}
-              label={t('chat.workStatus.row.changes')}
+              // The count names the row, matching the composer's changed-files
+              // bar; the diffstat stays the trailing value.
+              label={changed.files === 1
+                ? t('chat.workStatus.git.changedFileSingle', { count: changed.files })
+                : t('chat.workStatus.git.changedFilePlural', { count: changed.files })}
               value={changed.hasStats && (changed.additions > 0 || changed.deletions > 0) ? (
                 <>
                   <WorkStatusValue tone="success">{`+${changed.additions}`}</WorkStatusValue>
@@ -228,13 +260,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                   <WorkStatusValue tone="muted">/</WorkStatusValue>
                   <WorkStatusValue tone="error">{`−${changed.deletions}`}</WorkStatusValue>
                 </>
-              ) : (
-                <WorkStatusValue tone="muted">
-                  {changed.files === 1
-                    ? t('chat.workStatus.git.changedFileSingle', { count: changed.files })
-                    : t('chat.workStatus.git.changedFilePlural', { count: changed.files })}
-                </WorkStatusValue>
-              )}
+              ) : undefined}
             />
           ) : null}
 

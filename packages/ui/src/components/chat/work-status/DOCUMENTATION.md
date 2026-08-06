@@ -232,10 +232,36 @@ a tab.
 
 ## Context sources
 
-Skills and MCP servers only. Agents are deliberately absent: an agent is who
-does the work, not material loaded into the context. Tools are absent too —
-`Agent.tools` is a per-agent override map rather than a registry, so its size
-would be a number that means something other than "tools available".
+Linked GitHub threads first, then skills and MCP counts.
+
+Agents are deliberately absent: an agent is who does the work, not material
+loaded into the context. Tools are absent too — `Agent.tools` is a per-agent
+override map rather than a registry, so its size would be a number that means
+something other than "tools available".
+
+### Linked issues and pull requests
+
+Written by the flows that already attach a thread — the composer's issue/PR
+pickers, and session creation from an issue or PR in `NewWorktreeDialog` and
+`GitHubIssuePickerDialog`. There is no manual "link this" control: attaching a
+thread to the work *is* the act of linking it.
+
+Stored in session metadata as a **snapshot** (`lib/linkedIssues.ts`, namespace
+`openchamber.linked_issues`), riding the same `patchSessionMetadata` channel as
+pinned messages. Number, title, url, author and avatar only — the body,
+comments and state belong to GitHub, and mirroring them would mean owning their
+staleness. The stored title can drift; that is the price of a store that never
+needs refreshing. The row opens the real thread, which is where current state
+lives.
+
+Writes happen **after** the send promise resolves and are deliberately
+swallowed on failure: the message went out, and a missing bookkeeping entry
+must not surface as a send error.
+
+The entry id comes from the thread URL rather than a separate owner/repo pair,
+because every attach flow has the URL and only some carry the repo separately.
+Issues and pull requests share one id shape, since they share a numbering space
+per repository.
 
 ## Loading data the header used to own
 

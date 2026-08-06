@@ -97,7 +97,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory }) => {
         <WorkStatusTasksSection sessionId={sessionId} directory={directory} />
         <WorkStatusMcpSection directory={directory} />
         <WorkStatusPinnedSection sessionId={sessionId} directory={directory} />
-        <WorkStatusContextSection directory={directory} />
+        <WorkStatusContextSection sessionId={sessionId} directory={directory} />
       </ScrollShadow>
     </aside>
   );
