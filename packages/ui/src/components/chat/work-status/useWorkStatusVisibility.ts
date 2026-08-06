@@ -1,0 +1,100 @@
+import React from 'react';
+import { useUIStore } from '@/stores/useUIStore';
+import { normalizePath } from '@/lib/pathNormalization';
+
+/**
+ * Fixed panel width. The panel is not user-resizable: it is an object inside
+ * the chat rather than a docked pane, so it has no resizer and no persisted
+ * width.
+ */
+export const WORK_STATUS_PANEL_WIDTH = 300;
+
+/**
+ * Minimum width the message column must keep for itself. Below this the panel
+ * yields — a squeezed transcript costs more than the status it displaces.
+ */
+const WORK_STATUS_MIN_CHAT_WIDTH = 560;
+
+/** Outer margin between the panel card and the window edge. */
+const WORK_STATUS_PANEL_GUTTER = 16;
+
+/** Row width below which the panel gives its space back to the transcript. */
+export const WORK_STATUS_REQUIRED_ROW_WIDTH =
+  WORK_STATUS_PANEL_WIDTH + WORK_STATUS_PANEL_GUTTER + WORK_STATUS_MIN_CHAT_WIDTH;
+
+type Options = {
+  directory: string | null | undefined;
+  isMobile: boolean;
+  isVSCode: boolean;
+};
+
+type Result = {
+  /**
+   * Attach to the flex row that contains the chat column and the panel.
+   *
+   * A callback ref, not an object ref: an object ref gives no signal when the
+   * node attaches, so a measuring effect that reads `.current` would silently
+   * observe nothing whenever the row mounts after the effect first ran, and
+   * would only recover on the next unrelated dependency change.
+   */
+  rowRef: (node: HTMLDivElement | null) => void;
+  visible: boolean;
+};
+
+/**
+ * Decides whether the work-status panel may occupy space inside the chat.
+ *
+ * The width test measures the ROW (chat column + panel), never the chat column
+ * alone. The chat column's width is an output of this decision: hiding the
+ * panel widens it, which would re-satisfy a chat-width test and re-show the
+ * panel, oscillating forever. The row width is independent of the panel, so it
+ * is the only stable input.
+ */
+export const useWorkStatusVisibility = ({ directory, isMobile, isVSCode }: Options): Result => {
+  const [rowNode, setRowNode] = React.useState<HTMLDivElement | null>(null);
+  const [rowWidth, setRowWidth] = React.useState<number | null>(null);
+  const rowRef = React.useCallback((node: HTMLDivElement | null) => { setRowNode(node); }, []);
+
+  const directoryKey = React.useMemo(() => normalizePath(directory ?? null), [directory]);
+
+  // Mirrors ContextPanel's own derivation: a panel with `isOpen` but no
+  // resolvable active tab renders nothing, and must not displace this panel.
+  const contextPanelOpen = useUIStore(
+    React.useCallback(
+      (state) => {
+        const panel = directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined;
+        if (!panel?.isOpen) return false;
+        const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId)
+          ?? panel.tabs[panel.tabs.length - 1]
+          ?? null;
+        return Boolean(activeTab);
+      },
+      [directoryKey],
+    ),
+  );
+
+  const measurementEnabled = !isMobile && !isVSCode && !contextPanelOpen;
+
+  React.useEffect(() => {
+    if (!measurementEnabled || !rowNode) {
+      // Drop the stale measurement so a re-enabled panel waits for a fresh one
+      // instead of flashing at the previous layout's width.
+      setRowWidth(null);
+      return undefined;
+    }
+    if (typeof ResizeObserver === 'undefined') return undefined;
+
+    setRowWidth(rowNode.getBoundingClientRect().width);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setRowWidth(entry.contentRect.width);
+    });
+    observer.observe(rowNode);
+    return () => observer.disconnect();
+  }, [measurementEnabled, rowNode]);
+
+  const visible = measurementEnabled && rowWidth !== null && rowWidth >= WORK_STATUS_REQUIRED_ROW_WIDTH;
+
+  return { rowRef, visible };
+};

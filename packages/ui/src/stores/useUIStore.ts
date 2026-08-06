@@ -578,6 +578,10 @@ interface UIStore {
   contextEditorTreeWidth: number;
   notesPanelHeight: number;
   todoPanelHeight: number;
+  /** Expanded collapsible sections of the in-chat work-status panel, by id. */
+  workStatusExpandedSections: Record<string, boolean>;
+  /** Scroll offset of that panel, so it survives being unmounted. */
+  workStatusScrollTop: number;
   isSessionSwitcherOpen: boolean;
   isSessionDropdownOpen: boolean;
   activeMainTab: MainTab;
@@ -737,6 +741,8 @@ interface UIStore {
   toggleContextPanelExpanded: (directory: string) => void;
   setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number) => void;
   setNotesPanelHeight: (height: number) => void;
+  setWorkStatusSectionExpanded: (sectionId: string, expanded: boolean) => void;
+  setWorkStatusScrollTop: (scrollTop: number) => void;
   setTodoPanelHeight: (height: number) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
@@ -899,6 +905,8 @@ export const useUIStore = create<UIStore>()(
         contextEditorTreeVisible: true,
         contextEditorTreeWidth: 240,
         notesPanelHeight: 112,
+        workStatusExpandedSections: {},
+        workStatusScrollTop: 0,
         todoPanelHeight: 259,
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
@@ -1430,6 +1438,23 @@ export const useUIStore = create<UIStore>()(
 
         setNotesPanelHeight: (height) => {
           set({ notesPanelHeight: height });
+        },
+
+        setWorkStatusSectionExpanded: (sectionId, expanded) => {
+          set((state) => (
+            state.workStatusExpandedSections[sectionId] === expanded
+              ? state
+              : {
+                workStatusExpandedSections: {
+                  ...state.workStatusExpandedSections,
+                  [sectionId]: expanded,
+                },
+              }
+          ));
+        },
+
+        setWorkStatusScrollTop: (scrollTop) => {
+          set({ workStatusScrollTop: Math.max(0, scrollTop) });
         },
 
         setTodoPanelHeight: (height) => {
@@ -2298,6 +2323,12 @@ export const useUIStore = create<UIStore>()(
 
           // v8 -> v9: initialize notes/todo panel height fields
           if (version < 9) {
+            if (!state.workStatusExpandedSections || typeof state.workStatusExpandedSections !== 'object') {
+              state.workStatusExpandedSections = {};
+            }
+            if (typeof state.workStatusScrollTop !== 'number' || !Number.isFinite(state.workStatusScrollTop)) {
+              state.workStatusScrollTop = 0;
+            }
             if (typeof state.notesPanelHeight !== 'number' || !Number.isFinite(state.notesPanelHeight)) {
               state.notesPanelHeight = 112;
             }
@@ -2397,6 +2428,8 @@ export const useUIStore = create<UIStore>()(
           contextEditorTreeVisible: state.contextEditorTreeVisible,
           contextEditorTreeWidth: state.contextEditorTreeWidth,
           notesPanelHeight: state.notesPanelHeight,
+          workStatusExpandedSections: state.workStatusExpandedSections,
+          workStatusScrollTop: state.workStatusScrollTop,
           todoPanelHeight: state.todoPanelHeight,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
           activeMainTab: state.activeMainTab,

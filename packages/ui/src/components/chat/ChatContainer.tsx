@@ -50,6 +50,8 @@ import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { WorkStatusPanel } from './work-status/WorkStatusPanel';
+import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
 import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
@@ -694,6 +696,21 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     // composer enters the same fullscreen-input mode via its drag handle.
     const isDesktopExpandedInput = isExpandedInput;
     const useCompactDraftLayout = isMobile || isVSCode || chatSurfaceMode === 'mini-chat';
+    // Work-status panel: a borderless column to the right of the transcript.
+    // It yields to the context panel and to a narrow chat; `rowRef` goes on the
+    // row that holds both columns, so its width never depends on the panel's
+    // own visibility.
+    const { rowRef: workStatusRowRef, visible: workStatusFits } = useWorkStatusVisibility({
+        directory: effectiveSessionDirectory,
+        isMobile,
+        isVSCode,
+    });
+    // Shown on a new-session draft too: the repository readouts apply before
+    // the session exists, and that is exactly when branch and working-tree
+    // state inform what to ask for.
+    const showWorkStatusPanel = workStatusFits
+        && chatSurfaceMode !== 'mini-chat'
+        && !isDesktopExpandedInput;
     const messageListRef = React.useRef<MessageListHandle | null>(null);
     const currentSession = useSession(currentSessionId, effectiveSessionDirectory);
     const parentSession = useParentSession(currentSessionId, effectiveSessionDirectory);
@@ -1152,7 +1169,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     }
 
 	return (
-		<div data-composer-bound className="relative flex flex-col h-full bg-background">
+		<div ref={workStatusRowRef} className="flex h-full min-h-0 bg-background">
+		<div data-composer-bound className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
 			{returnToParentButton}
 			<ChatViewport
 				currentSessionId={currentSessionId}
@@ -1215,6 +1233,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
                 isLoadingEarlier={timelineController.isLoadingOlder}
                 onLoadEarlier={handleLoadOlderClick}
             />
+        </div>
+        {showWorkStatusPanel ? (
+            <WorkStatusPanel
+                sessionId={currentSessionId ?? null}
+                directory={effectiveSessionDirectory ?? null}
+            />
+        ) : null}
         </div>
     );
 };
