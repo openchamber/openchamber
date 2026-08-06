@@ -15,11 +15,17 @@ Command modules implement user-facing commands and preserve output contracts acr
 
 - `commands-serve.js`
   - Implements `openchamber serve`.
-  - Owns OpenCode CLI checks, port resolution, log rotation, PID/instance registry writes, foreground/background server launch, startup summaries, and foreground shutdown behavior.
+  - Owns OpenCode CLI checks, port resolution, log rotation, PID/instance registry writes, stable `guardianOwnerInstanceId` persistence and `OPENCHAMBER_GUARDIAN_OWNER_ID` propagation, foreground/background server launch, startup summaries, and owner-scoped foreground shutdown behavior.
 
 - `commands-lifecycle.js`
   - Implements `openchamber stop` and `openchamber restart`.
-  - Owns lifecycle stop/restart semantics, desktop-managed port rejection, unmanaged instance shutdown attempts, PID/instance cleanup, and restart reuse of stored instance options.
+  - Owns lifecycle stop/restart semantics, including explicit `{ mode: 'restart' }` shutdown requests that preserve the guardian child, desktop-managed port rejection, unmanaged instance shutdown attempts, PID/instance cleanup, and restart reuse of stored instance options/owner identity. Dead or unconfirmed web-PID cleanup retains guardian owner metadata so the next startup can adopt the same guardian child instead of creating a duplicate.
+
+### Foreground and service-manager semantics
+
+- `--foreground` keeps the OpenChamber CLI process attached so systemd (or another process manager) owns its lifecycle.
+- Ordinary `SIGTERM` is an explicit stop request. It must not be interpreted as an implicit restart signal.
+- The supported `openchamber restart` command is the restart contract; service-manager restart behavior should use that explicit command rather than inferring intent from `SIGTERM`.
 
 - `commands-status.js`
   - Implements `openchamber status`.
@@ -48,6 +54,12 @@ Command modules implement user-facing commands and preserve output contracts acr
 - `commands-startup.js`
   - Implements `openchamber startup`.
   - Handles startup subcommand dispatch and presentation around the lower-level startup service helpers.
+
+- `commands-guardian.js`
+  - Implements `openchamber guardian status|start|stop|reload` on POSIX and Windows.
+  - Prefers authenticated IPC for reload/stop. POSIX direct PID fallback is allowed only after the persisted guardian marker's process identity and authoritative OS liveness are revalidated; missing or ambiguous identity fails closed. Windows refuses PID signaling after IPC failure to avoid a PID-reuse TOCTOU and reports that authenticated IPC must recover.
+  - Preserves human, `--quiet`, `--json`, and non-TTY output contracts while keeping marker ownership and guardian lifecycle logic in the server guardian modules. On POSIX, startup atomically records the verified helper-bound transport identity under the current marker token; stale cleanup refuses old markers or artifact replacements. Standalone startup releases its marker only when guardian rollback reports settled cleanup; transport, store, or recovered-child uncertainty retains guardian/marker retry authority.
+  - `shouldAutoStartGuardian` derives a single CLI-boundary skip-start decision (`isSkipStartConfigured`, reading `OPENCODE_SKIP_START` / `OPENCHAMBER_SKIP_OPENCODE_START`). When the operator has explicitly configured external OpenCode, the CLI does NOT autostart the guardian merely for OpenCode ownership — the configured external OpenCode is used as requested and a previously running guardian (possibly a separate service) is left untouched.
 
 - `commands-connect-url.js`
   - Implements `openchamber connect-url`.

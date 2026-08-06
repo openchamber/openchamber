@@ -17,7 +17,16 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
     return value.trim();
   };
 
+  const normalizeOpenCodeUsername = (value) => {
+    if (typeof value !== 'string') return '';
+    return value.trim();
+  };
+
   const isValidOpenCodePassword = (password) => typeof password === 'string' && password.trim().length > 0;
+  const isValidOpenCodeUsername = (username) => typeof username === 'string'
+    && username.length > 0
+    && username.length <= 256
+    && !/[\x00-\x1F\x7F]/.test(username);
 
   const generateSecureOpenCodePassword = () =>
     crypto
@@ -42,6 +51,37 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
     process.env.OPENCODE_SERVER_PASSWORD = normalized;
     syncToHmrState();
     return normalized;
+  };
+
+  // Handoff restart may rotate the password before the successor is known to
+  // be healthy. Keep the previous state behind an opaque restore callback so
+  // a confirmed rollback can put the still-running child and request headers
+  // back in sync without exposing credentials to callers or logs.
+  const captureOpenCodeAuthState = () => {
+    const previousPassword = getAuthPassword();
+    const previousSource = getAuthSource();
+    const previousUsername = process.env.OPENCODE_SERVER_USERNAME;
+    return () => {
+      if (isValidOpenCodeUsername(previousUsername?.trim?.())) {
+        process.env.OPENCODE_SERVER_USERNAME = previousUsername.trim();
+      } else {
+        delete process.env.OPENCODE_SERVER_USERNAME;
+      }
+      return setOpenCodeAuthState(previousPassword, previousSource);
+    };
+  };
+
+  const restoreManagedOpenCodeCredential = ({ username, password } = {}) => {
+    const normalizedUsername = normalizeOpenCodeUsername(username);
+    const normalizedPassword = normalizeOpenCodePassword(password);
+    if (!isValidOpenCodeUsername(normalizedUsername) || !isValidOpenCodePassword(normalizedPassword)) {
+      throw new Error('Managed OpenCode credential is malformed');
+    }
+    // The credential is applied through this owning runtime so all subsequent
+    // proxy, API, and readiness requests use the adopted child's auth state.
+    process.env.OPENCODE_SERVER_USERNAME = normalizedUsername;
+    setOpenCodeAuthState(normalizedPassword, 'guardian-adopted');
+    return true;
   };
 
   const getOpenCodeAuthHeaders = () => {
@@ -85,5 +125,7 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
     getOpenCodeAuthHeaders,
     isOpenCodeConnectionSecure,
     ensureLocalOpenCodeServerPassword,
+    captureOpenCodeAuthState,
+    restoreManagedOpenCodeCredential,
   };
 };

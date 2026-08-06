@@ -8,8 +8,9 @@ import { isPortAvailable, resolveAvailablePort } from './cli-ports.js';
 import { ensureLogsDir, getLogFilePath } from './cli-paths.js';
 import { rotateLogFile } from './cli-log-files.js';
 import { discoverOpenChamberInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
-import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
+import { getPidFilePath, getInstanceFilePath, readInstanceOptions, writePidFile, writeInstanceOptions, removePidFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
+import { createOwnerInstanceId, normalizeOwnerInstanceId } from '../../server/lib/guardian/owner-identity.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -21,7 +22,16 @@ import {
   logStatus,
 } from '../cli-output.js';
 
+import { maybeAutoStartGuardian } from './commands-guardian.js';
+
 const DAEMON_READY_TIMEOUT_MS = 30000;
+
+const resolveGuardianOwnerInstanceId = (options = {}) => {
+  const configured = normalizeOwnerInstanceId(
+    options.guardianOwnerInstanceId || process.env.OPENCHAMBER_GUARDIAN_OWNER_ID,
+  );
+  return configured || createOwnerInstanceId();
+};
 
 function createServeCommand({
   serverPath,
@@ -65,6 +75,13 @@ async function serveCommand(options) {
     const explicitPort = options.explicitPort === true;
     const effectiveHost = resolveServeHost(options.host);
     const targetPort = await resolveAvailablePort(options.port, explicitPort, emitNotice);
+    const storedOwnerInstanceId = targetPort > 0
+      ? readInstanceOptions(await getInstanceFilePath(targetPort))?.guardianOwnerInstanceId
+      : undefined;
+    const guardianOwnerInstanceId = resolveGuardianOwnerInstanceId({
+      ...options,
+      guardianOwnerInstanceId: options.guardianOwnerInstanceId || storedOwnerInstanceId,
+    });
 
     if (targetPort !== 0 && !options.suppressUnsafePortWarning) {
       assertSafeBrowserPort(targetPort, { context: 'OpenChamber serve' });
@@ -163,6 +180,14 @@ async function serveCommand(options) {
       }
       process.env.OPENCHAMBER_HOST = effectiveHost;
       process.env.OPENCHAMBER_RUNTIME = 'web';
+      process.env.OPENCHAMBER_GUARDIAN_OWNER_ID = guardianOwnerInstanceId;
+      // Default-true opt-out: when handoff is disabled, the server's
+      // restartOpenCode() must skip the guardian handoff branch and use the
+      // legacy restart path. Only override the env var when explicitly
+      // disabled so unrelated process.env values are preserved.
+      if (options.handoff === false) {
+        process.env.OPENCHAMBER_RESTART_HANDOFF = 'disabled';
+      }
 
       // In --quiet mode, redirect stdout/stderr to the log file so that
       // server runtime output (console.log calls) does not pollute the
@@ -193,15 +218,35 @@ async function serveCommand(options) {
         console.log(`Starting OpenChamber on port ${targetPort === 0 ? 'auto' : targetPort} (foreground)`);
       }
 
+      // The log fd is closed in human (non-quiet) mode above. Re-open a fresh
+      // fd against the same path so maybeAutoStartGuardian → startGuardianDetached
+      // can hand the child a real descriptor; in quiet mode the original logFd
+      // is still open and we keep using it.
+      const guardianLogFd = isQuietMode(options) ? logFd : fs.openSync(initialLogPath, 'a');
+      try {
+        await maybeAutoStartGuardian({ logFd: guardianLogFd, options, emitNotice });
+      } finally {
+        if (!isQuietMode(options)) {
+          try { fs.closeSync(guardianLogFd); } catch { /* ignore */ }
+        }
+      }
       const { startWebUiServer } = await import(pathToFileURL(serverPath).href);
-      const controller = await startWebUiServer({
-        port: targetPort,
-        host: effectiveHost,
-        uiPassword: effectiveUiPassword,
-        apiOnly: options.apiOnly === true,
-        attachSignals: false,
-        exitOnShutdown: false,
-      });
+      let controller;
+      try {
+        controller = await startWebUiServer({
+          port: targetPort,
+          host: effectiveHost,
+          uiPassword: effectiveUiPassword,
+          apiOnly: options.apiOnly === true,
+          attachSignals: false,
+          exitOnShutdown: false,
+        });
+      } catch (startError) {
+        // The guardian intentionally outlives the web server. A failed web
+        // startup must not tear down an operator-owned or already-running
+        // guardian; the next serve attempt can reuse the singleton.
+        throw startError;
+      }
 
       const resolvedPort = controller.getPort();
 
@@ -210,13 +255,16 @@ async function serveCommand(options) {
       const fgPidFilePath = await getPidFilePath(resolvedPort);
       const fgInstanceFilePath = await getInstanceFilePath(resolvedPort);
       writePidFile(fgPidFilePath, process.pid, emitNotice);
-      writeInstanceOptions(fgInstanceFilePath, {
+      const foregroundInstanceOptions = {
         port: resolvedPort,
         host: effectiveHost,
         launchMode: 'foreground',
         uiPassword: effectiveUiPassword,
         apiOnly: options.apiOnly === true,
-      }, emitNotice);
+        guardianOwnerInstanceId,
+        startedAt: Date.now(),
+      };
+      writeInstanceOptions(fgInstanceFilePath, foregroundInstanceOptions, emitNotice);
 
       if (isQuietMode(options)) {
         if (!options.suppressQuietOutput) {
@@ -231,10 +279,14 @@ async function serveCommand(options) {
         console.log('Save this password — it is not shown again.');
       }
 
-      // Clean up PID / instance files.
+      // Remove the liveness marker on exit but retain an owner-only instance
+      // record. A foreground service manager may restart this command without
+      // going through `openchamber restart`; the next serve must still reuse
+      // the same guardian owner identity. Explicit `openchamber stop` removes
+      // the retained metadata after the process has exited.
       const cleanupFiles = () => {
         removePidFile(fgPidFilePath);
-        removeInstanceFile(fgInstanceFilePath);
+        writeInstanceOptions(fgInstanceFilePath, foregroundInstanceOptions, emitNotice);
       };
 
       process.on('exit', cleanupFiles);
@@ -246,7 +298,17 @@ async function serveCommand(options) {
         shutdownInProgress = true;
         try {
           await controller.stop({ exitProcess: false });
-        } catch {
+        } catch (error) {
+          // A failed owner-scoped guardian stop leaves the web process and its
+          // owner metadata authoritative for a retry. Do not remove the PID
+          // marker or exit here, otherwise the next startup loses the stable
+          // owner identity while the guardian child is still live.
+          shutdownInProgress = false;
+          console.error(
+            'Foreground shutdown failed; preserving OpenChamber metadata for retry:',
+            error?.message || error,
+          );
+          return false;
         }
         cleanupFiles();
         setForegroundServerActive(false);
@@ -268,6 +330,7 @@ async function serveCommand(options) {
       await new Promise(() => {});
     }
 
+    await maybeAutoStartGuardian({ logFd, options, emitNotice });
     const serverArgs = [serverPath, '--port', String(targetPort)];
     serverArgs.push('--host', effectiveHost);
     if (options.apiOnly === true) {
@@ -289,6 +352,8 @@ async function serveCommand(options) {
         ...(effectiveUiPassword ? { OPENCHAMBER_UI_PASSWORD: effectiveUiPassword } : {}),
         ...(options.apiOnly === true ? { OPENCHAMBER_API_ONLY: 'true' } : {}),
         ...(process.env.OPENCODE_SKIP_START ? { OPENCHAMBER_SKIP_OPENCODE_START: process.env.OPENCODE_SKIP_START } : {}),
+        ...(options.handoff === false ? { OPENCHAMBER_RESTART_HANDOFF: 'disabled' } : {}),
+        OPENCHAMBER_GUARDIAN_OWNER_ID: guardianOwnerInstanceId,
       },
     });
 
@@ -367,6 +432,7 @@ async function serveCommand(options) {
       launchMode: 'daemon',
       uiPassword: effectiveUiPassword,
       apiOnly: options.apiOnly === true,
+      guardianOwnerInstanceId,
     }, emitNotice);
 
     const serveResult = {

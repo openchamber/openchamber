@@ -13,10 +13,11 @@ Cuando OpenChamber arranca, busca un servidor en este orden:
 
 1. reutilizar un servidor que ya inició
 2. conectarse a uno externo si se lo indicaste (ver más abajo)
-3. detectar automáticamente un servidor en el puerto predeterminado (`4096`)
-4. de lo contrario, iniciar y gestionar el suyo propio
+3. de lo contrario, iniciar y gestionar el suyo propio
 
-Si no hay nada configurado, el paso 4 ocurre automáticamente y ya tienes todo en marcha.
+Si no hay nada configurado, el paso 3 ocurre automáticamente y ya tienes todo en marcha.
+OpenChamber no se conecta a ciegas a un servidor ajeno en el puerto predeterminado; solo adopta
+un hijo guardian existente cuando coinciden su propietario y la identidad de proceso persistidos.
 
 ## Conéctate a un servidor que ya ejecutas
 

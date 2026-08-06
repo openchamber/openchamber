@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Guardian:** cross-platform (Linux/POSIX + Windows). The Linux/POSIX path uses a Unix-domain socket at `mode 0600` (same as before). The Windows path uses loopback TCP at `127.0.0.1:<ephemeral>` with an `icacls`-granted per-user ACL on the discovery file under `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\port`. Live children use their process handles; rehydrated children use a hidden PowerShell/.NET handle helper that verifies persisted identity before terminating, with no PID-only fallback.
+- **Guardian/restart:** owner identity is persisted in each OpenChamber instance's metadata and propagated through `OPENCHAMBER_GUARDIAN_OWNER_ID`; restart detaches from the matching child, while ordinary stop is owner-scoped and `openchamber guardian stop` remains the explicit administrative shutdown.
+- **Guardian/downgrade hint:** downgrading from a Windows-aware guardian build to an older build leaves the Windows discovery file as a harmless orphan; remove it with `Remove-Item "$env:LOCALAPPDATA\openchamber\managed-opencode-handoff-v2\port"` in PowerShell if desired. No automatic migration is required.
+
 ## [1.18.1] - 2026-08-04
 
 - **Providers:** signing in to an OAuth-only provider now actually completes — the browser login is stored and the provider list updates instead of remaining signed out. OAuth-only providers show a Connect flow instead of an API key form, and their models stay hidden until you are signed in.

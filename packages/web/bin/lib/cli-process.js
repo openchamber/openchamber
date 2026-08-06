@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { getRunDir } from './cli-paths.js';
+import { normalizeOwnerInstanceId } from '../../server/lib/guardian/owner-identity.js';
 
 async function getPidFilePath(port) {
   return path.join(getRunDir(), `openchamber-${port}.pid`);
@@ -60,6 +61,7 @@ function writeInstanceOptions(instanceFilePath, options, onNotice) {
       uiPassword: typeof options.uiPassword === 'string' ? options.uiPassword : undefined,
       hasUiPassword: typeof options.uiPassword === 'string',
       apiOnly: options.apiOnly === true,
+      guardianOwnerInstanceId: normalizeOwnerInstanceId(options.guardianOwnerInstanceId) || undefined,
       startedAt: Number.isFinite(options.startedAt) ? options.startedAt : Date.now(),
     };
     fs.writeFileSync(instanceFilePath, JSON.stringify(toStore, null, 2), { mode: 0o600 });
@@ -264,9 +266,19 @@ async function stopInstanceProcess(pid, options = {}) {
   const shutdownWaitMs = Number.isFinite(options.shutdownWaitMs) && options.shutdownWaitMs >= 0
     ? Math.trunc(options.shutdownWaitMs)
     : 5000;
+  const allowForce = options.allowForce !== false;
 
   if (await waitForProcessExit(pid, shutdownWaitMs)) {
     return true;
+  }
+
+  // An owner-scoped guardian stop may still be in flight or may have failed.
+  // Do not kill the web process behind it: that would discard the persisted
+  // owner metadata while the guardian child remains live and unrecoverable by
+  // the next startup. Callers can report failure and let an explicit retry
+  // repeat the authenticated owner-scoped stop instead.
+  if (!allowForce) {
+    return false;
   }
 
   return terminateProcessTree(pid, options);

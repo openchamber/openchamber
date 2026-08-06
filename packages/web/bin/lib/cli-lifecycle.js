@@ -15,6 +15,7 @@ import {
   getOpenchamberProcessState,
   hasOpenchamberRuntimeInfo,
 } from './cli-process.js';
+import { normalizeOwnerInstanceId } from '../../server/lib/guardian/owner-identity.js';
 import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './cli-tunnel-capabilities.js';
 
 function createLivePortInstance(port, info, host) {
@@ -32,6 +33,18 @@ function createLivePortInstance(port, info, host) {
     host: typeof host === 'string' && host.length > 0 ? host : undefined,
   };
 }
+
+const hasGuardianOwnerMetadata = (options) => Boolean(
+  normalizeOwnerInstanceId(options?.guardianOwnerInstanceId),
+);
+
+const removeStaleInstanceFiles = (pidFilePath, instanceFilePath, storedOptions) => {
+  removePidFile(pidFilePath);
+  // A dead web PID does not prove that its guardian-owned OpenCode child is
+  // dead. Keep the owner metadata as the handle that the next startup uses to
+  // adopt that exact child instead of creating a duplicate.
+  if (!hasGuardianOwnerMetadata(storedOptions)) removeInstanceFile(instanceFilePath);
+};
 
 function normalizeProbeHost(host) {
   return typeof host === 'string' && host.trim().length > 0 ? host.trim() : undefined;
@@ -175,18 +188,16 @@ async function discoverRunningInstances(options = {}) {
       if (!Number.isFinite(port) || port <= 0) continue;
       const pidFilePath = path.join(runDir, file);
       const pid = readPidFile(pidFilePath);
+      const instanceFilePath = path.join(runDir, `openchamber-${port}.json`);
+      const storedOptions = readInstanceOptions(instanceFilePath);
       if (!pid) {
-        removePidFile(pidFilePath);
-        removeInstanceFile(path.join(runDir, `openchamber-${port}.json`));
+        removeStaleInstanceFiles(pidFilePath, instanceFilePath, storedOptions);
         continue;
       }
 
-      const instanceFilePath = path.join(runDir, `openchamber-${port}.json`);
-      const storedOptions = readInstanceOptions(instanceFilePath);
       const processState = getProcessState(pid);
       if (processState === 'dead') {
-        removePidFile(pidFilePath);
-        removeInstanceFile(instanceFilePath);
+        removeStaleInstanceFiles(pidFilePath, instanceFilePath, storedOptions);
         continue;
       }
 
@@ -204,8 +215,7 @@ async function discoverRunningInstances(options = {}) {
       const livePid = Number.isFinite(liveInfo?.pid) ? liveInfo.pid : null;
       if (!hasOpenchamberRuntimeInfo(liveInfo)) {
         if (processState === 'mismatched') {
-          removePidFile(pidFilePath);
-          removeInstanceFile(instanceFilePath);
+          removeStaleInstanceFiles(pidFilePath, instanceFilePath, storedOptions);
         }
         continue;
       }
@@ -292,8 +302,7 @@ async function discoverUnconfirmedRegistryInstanceOnPort(port, options = {}) {
   const storedOptions = readInstanceOptions(instanceFilePath);
   const processState = getOpenchamberProcessState(pid);
   if (processState === 'dead') {
-    removePidFile(pidFilePath);
-    removeInstanceFile(instanceFilePath);
+    removeStaleInstanceFiles(pidFilePath, instanceFilePath, storedOptions);
     return null;
   }
 
@@ -303,8 +312,7 @@ async function discoverUnconfirmedRegistryInstanceOnPort(port, options = {}) {
 
   const host = storedOptions?.host || options.host;
   if (await isPortAvailable(port, host)) {
-    removePidFile(pidFilePath);
-    removeInstanceFile(instanceFilePath);
+    removeStaleInstanceFiles(pidFilePath, instanceFilePath, storedOptions);
     return null;
   }
 

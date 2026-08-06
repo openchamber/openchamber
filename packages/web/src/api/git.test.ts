@@ -4,6 +4,7 @@ vi.mock('@openchamber/ui/lib/gitApiHttp', () => ({
   checkIsGitRepository: vi.fn(),
   getGitStatus: vi.fn(),
   getGitDiff: vi.fn(),
+  getGitRangeDiff: vi.fn(),
   getGitFileDiff: vi.fn(),
   revertGitFile: vi.fn(),
   stageGitFile: vi.fn(),

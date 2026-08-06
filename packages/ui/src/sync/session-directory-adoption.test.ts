@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from "bun:test"
 import { ChildStoreManager } from "./child-store"
 import { setSyncRefs } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
+import { adoptAuthoritativeSessionDirectoryAfterResync } from "./sync-context"
 
 /**
  * Selecting a session whose directory this client has not indexed yet routes it
@@ -94,5 +95,35 @@ describe("adoptAuthoritativeSessionDirectory", () => {
 
     expect(useSessionUIStore.getState().currentSessionId).toBe("ses_other")
     expect(useSessionUIStore.getState().currentSessionDirectory).toBe(before)
+  })
+
+  test("does not adopt after the bootstrap becomes stale during status resync", async () => {
+    useSessionUIStore.getState().setCurrentSession(SESSION_ID)
+    useSessionUIStore.setState({ currentSessionDirectory: PARENT })
+    indexSessionIn(manager, WORKTREE)
+
+    let resolveResync!: () => void
+    const resync = new Promise<void>((resolve) => {
+      resolveResync = resolve
+    })
+    let bootstrapContext: { isCurrent: () => boolean } | undefined
+    const cleanup = manager.configure({
+      onBootstrap: async (context) => {
+        bootstrapContext = context
+        await adoptAuthoritativeSessionDirectoryAfterResync(context, () => resync)
+      },
+    })
+
+    manager.requestBootstrap({ directory: WORKTREE, priority: "selected", reason: "selected-session" })
+    await Promise.resolve()
+    expect(bootstrapContext?.isCurrent()).toBe(true)
+
+    cleanup()
+    resolveResync()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe(PARENT)
+    manager.disposeAll()
   })
 })

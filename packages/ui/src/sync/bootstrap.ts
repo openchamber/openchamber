@@ -168,7 +168,6 @@ export async function bootstrapDirectory(input: {
         if (next) commit({ project: next })
       }),
     ),
-    retry(() => sdk.session.status().then((x) => commit({ session_status: unwrap(x, "session.status") }))),
   ])
 
   if (input.isStale?.()) return "stale"
@@ -180,8 +179,6 @@ export async function bootstrapDirectory(input: {
   // De-block the UI: only a total failure (OpenCode genuinely unreachable)
   // should abort the directory. Don't let one transient initial fetch strand
   // the directory in "loading" forever and skip phase 2/3 (sessions).
-  //   - session.status is LIVE data the event pipeline keeps current — a failed
-  //     initial snapshot is harmless; SSE will deliver the real status.
   //   - path.get feeds project resolution, but if we already resolved a project
   //     (from global projects) its failure is tolerable; the worktree path is
   //     refreshed by later events.

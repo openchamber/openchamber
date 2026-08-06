@@ -1,21 +1,11 @@
+import { buildManagedOpenCodeOrigin } from '../guardian/host.js';
+
 export const createOpenCodeNetworkRuntime = (deps) => {
   const {
     state,
     getOpenCodeAuthHeaders,
     configuredOpenCodeHostname = '127.0.0.1',
   } = deps;
-
-  const resolveConnectHostname = () => {
-    const raw = typeof configuredOpenCodeHostname === 'string' ? configuredOpenCodeHostname.trim() : '';
-    const hostname = raw || '127.0.0.1';
-    if (hostname === '0.0.0.0' || hostname === '::' || hostname === '[::]') {
-      return '127.0.0.1';
-    }
-    if (hostname.startsWith('[') && hostname.endsWith(']')) {
-      return hostname;
-    }
-    return hostname.includes(':') ? `[${hostname}]` : hostname;
-  };
 
   const normalizeApiPrefix = (prefix) => {
     if (!prefix) {
@@ -40,6 +30,13 @@ export const createOpenCodeNetworkRuntime = (deps) => {
   };
 
   const waitForReady = async (url, timeoutMs = 10000) => {
+    // Guardian-managed children must be checked through their authenticated,
+    // owner-scoped GuardianClient. This generic runtime is intentionally
+    // limited to external/legacy readiness, where its configured auth headers
+    // are the existing compatibility contract.
+    if (state.openCodeProcess?.isGuardianManaged === true) {
+      return false;
+    }
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       let timeout = null;
@@ -90,7 +87,10 @@ export const createOpenCodeNetworkRuntime = (deps) => {
     const normalizedPath = path.startsWith('/') ? path : `/${path}`;
     const prefix = normalizeApiPrefix(prefixOverride !== undefined ? prefixOverride : '');
     const fullPath = `${prefix}${normalizedPath}`;
-    const base = state.openCodeBaseUrl ?? `http://${resolveConnectHostname()}:${state.openCodePort}`;
+    const base = state.openCodeBaseUrl ?? buildManagedOpenCodeOrigin({
+      hostname: configuredOpenCodeHostname,
+      port: state.openCodePort,
+    });
     return `${base}${fullPath}`;
   };
 

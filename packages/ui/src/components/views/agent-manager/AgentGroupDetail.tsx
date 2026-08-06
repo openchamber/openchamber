@@ -7,7 +7,7 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useAgentGroupsStore, type AgentGroup, type AgentGroupSession } from '@/stores/useAgentGroupsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useGlobalSessionStatus, useAllSessionStatuses } from '@/sync/sync-context';
+import { useSessionDisplayStatus, useAllSessionStatuses } from '@/sync/sync-context';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
 import {
@@ -33,10 +33,28 @@ interface AgentGroupDetailProps {
 }
 
 const SessionStatusDot: React.FC<{ sessionId: string }> = ({ sessionId }) => {
-  const status = useGlobalSessionStatus(sessionId);
-  if (!status || status.type === 'idle') return null;
+  const { t } = useI18n();
+  const displayStatus = useSessionDisplayStatus(sessionId);
+  // `reconnecting` is NOT confirmed active: no animated amber ping. Instead it
+  // shows a static cloud-off icon so the session is identifiable as needing
+  // attention without implying a running turn. Fresh busy/retry keeps the
+  // ping animation; preserved busy/retry during unavailability does not.
+  if (displayStatus.type === 'reconnecting') {
+    const label = t('sessions.sidebar.session.status.reconnecting');
+    return (
+      <span
+        className="inline-flex flex-shrink-0 items-center"
+        title={label}
+        aria-label={label}
+      >
+        <Icon name="cloud-off" className="h-2 w-2 text-muted-foreground/70" />
+      </span>
+    );
+  }
+  if (displayStatus.type !== 'busy' && displayStatus.type !== 'retry') return null;
+  const status = displayStatus.rawStatus;
   return (
-    <span className="relative flex h-2 w-2 flex-shrink-0" title={status.type}>
+    <span className="relative flex h-2 w-2 flex-shrink-0" title={status?.type}>
       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
       <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
     </span>

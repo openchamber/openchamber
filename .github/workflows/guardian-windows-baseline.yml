@@ -1,0 +1,223 @@
+name: Guardian Windows Baseline
+
+# Real-Windows lifecycle gate for the standalone guardian. The job keeps the
+# cross-platform transport, authenticated IPC, process termination, CLI
+# wiring, and smoke test hard-gated on `windows-latest`.
+#
+# Trigger model:
+#   - push: every `fix/issue-*` branch — so every branch push to a fix
+#     branch runs the baseline.
+#   - pull_request: any PR targeting `main` — so the merge to main is
+#     gated by a green Windows run, including this PR.
+
+on:
+  push:
+    branches:
+      - 'fix/issue-*'
+  pull_request:
+    branches:
+      - main
+
+# Read-only is sufficient: we only need the source tree to run tests and
+# type-check, and to upload a single diagnostic artifact. No secrets, no
+# release publishing, no PR-write back.
+permissions:
+  contents: read
+
+# Cancel a previous in-flight run on the same ref so a fast-follow push
+# doesn't burn extra Windows runner minutes.
+concurrency:
+  group: guardian-windows-baseline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-baseline:
+    name: windows-baseline
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # Pinned to match `mobile-ci.yml` — the only workflow in this
+          # repo that pins a specific bun version.
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Rebuild better-sqlite3 native binding for Node
+        # Bun's runtime cannot load better-sqlite3. Resolve the hoisted
+        # workspace package from the web package, then run its install script
+        # under Node/npm so the smoke process and the test runner use the same
+        # supported native-module ABI. This does not change the lockfile or
+        # package manifests.
+        shell: pwsh
+        working-directory: packages/web
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $packageJson = (node --eval "process.stdout.write(require.resolve('better-sqlite3/package.json'))").Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($packageJson)) {
+            throw 'could not resolve better-sqlite3/package.json from packages/web after bun install'
+          }
+          $nativePackage = Split-Path -Parent $packageJson
+
+          npm rebuild --prefix $nativePackage --foreground-scripts
+          if ($LASTEXITCODE -ne 0) {
+            throw "better-sqlite3 native binding rebuild failed (npm exit code $LASTEXITCODE)"
+          }
+
+          node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close(); console.log('OK: better-sqlite3 native binding loaded under Node');"
+          if ($LASTEXITCODE -ne 0) {
+            throw 'better-sqlite3 native binding failed to load under Node; refusing to run the Windows test gate'
+          }
+
+      - name: Smoke-import the IPC transport namespace on Windows
+        # Why this step matters: the W-A refactor moves the v2 namespace
+        # behind `createIpcServer` / `createIpcDialer`. If the module
+        # accidentally calls `process.getuid`, `chmodSync`, or otherwise
+        # references POSIX-only behavior at module top-level, this
+        # dynamic import will throw on Windows long before any test
+        # would. The factory must load on Windows before the real TCP/ACL
+        # smoke begins, so accidental POSIX-only module-top-level code fails
+        # visibly.
+        #
+        # Note: we use a dynamic `import()` rather than `require()`
+        # because `packages/web/package.json` is `"type": "module"`
+        # and the file is pure ESM. `require()` of an ESM file raises
+        # `ERR_REQUIRE_ESM` on modern Node even when the module never
+        # touches a POSIX-only API — that failure mode would mask the
+        # real signal we want this step to surface.
+        shell: bash
+        run: |
+          node --input-type=module -e "import('./packages/web/server/lib/guardian/ipc-transport.js').then(m => { if (typeof m.createIpcServer !== 'function') { console.error('FAIL: createIpcServer is not a function'); process.exit(1); } if (typeof m.createIpcDialer !== 'function') { console.error('FAIL: createIpcDialer is not a function'); process.exit(1); } console.log('OK: ipc-transport namespace loaded; createIpcServer and createIpcDialer are both functions'); }).catch(err => { console.error('FAIL: ipc-transport module failed to load on Windows:', err && err.stack ? err.stack : err); process.exit(1); });"
+
+      - name: Run Phase 2E credential, secret, protocol, and health tests on Windows
+        # This is a required cross-platform unit/integration gate for the
+        # protected credential contract. Keep it separate from the existing
+        # lifecycle and real-process smoke gates below; failures remain hard.
+        working-directory: packages/web
+        run: >-
+          npx vitest run
+          server/lib/opencode/managed-opencode-handoff-v2/credential-store.test.js
+          server/lib/opencode/managed-opencode-handoff-v2/secret-provider.test.js
+          server/lib/opencode/managed-opencode-handoff-v2/protocol.test.js
+          server/lib/guardian/health-client.test.js
+          server/lib/guardian/health-proof.test.js
+
+      - name: Run guardian and lifecycle vitest suites on Windows
+        # The guardian transport tests plus the owner-filtered lifecycle
+        # integration suite run on the real Windows runner. They
+        # run on Windows because (a) vitest itself is cross-platform
+        # and (b) the guardian tests use only in-process mocks for
+        # `process.platform` and `net.createServer`. The `npx vitest`
+        # invocation is intentional: `bun run test` would dispatch to
+        # the bun vitest-compat runner, and at least one existing
+        # integration test (lifecycle-guardian-integration.test.js)
+        # comments that `vi.stubGlobal` is not available there.
+        # These unit/injected paths do not claim native restart or
+        # rehydration evidence; the real Windows smoke and a future native
+        # rehydration run remain separate evidence gates.
+        working-directory: packages/web
+        run: >-
+          npx vitest run
+          server/lib/guardian/
+          server/lib/opencode/lifecycle-guardian-integration.test.js
+          server/lib/opencode/shutdown-runtime.test.js
+
+      - name: PowerShell smoke test
+        # W-E: real-Windows end-to-end smoke for the standalone
+        # guardian. Spawns the entrypoint, reads the discovery file,
+        # sends negative-auth, `list`, real managed-child lifecycle, and
+        # `shutdown` requests over TCP, asserts the process
+        # exits and the discovery file is removed. The script itself
+        # is a no-op on non-Windows (`skip: not Windows`) so this
+        # step is safe to add even if the workflow ever runs on
+        # `ubuntu-latest` for triage. The `shell: pwsh` declaration
+        # is the one place the workflow file mentions `pwsh`; the
+        # `powershell -File` invocation below is the other — see
+        # the W-E stale-orphan grep in the plan.
+        #
+        # This is intentionally a hard gate. If native SQLite bindings or
+        # the authenticated runtime smoke fail on Windows, the lifecycle
+        # contract is not validated and the job must fail visibly.
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: powershell -ExecutionPolicy Bypass -File scripts/guardian-smoke-test.ps1
+
+      - name: CLI bin tests on Windows
+        # W-E: the CLI bin tests exercise the `cli.js` dispatch
+        # surface that the standalone guardian's CLI commands (start,
+        # status, stop) are wired through. They run on Windows because
+        # they mock `process.platform` and `child_process.spawnSync`
+        # in-process; no real `node` child is launched.
+        working-directory: packages/web
+        run: npx vitest run bin/cli.test.js
+
+      - name: Type-check the web package on Windows
+        working-directory: packages/web
+        run: bun run type-check
+
+      - name: Lint the web package on Windows
+        # Keep lint hard-gated on the real Windows runner; a platform-only
+        # lint regression must be fixed rather than softened.
+        working-directory: packages/web
+        run: bun run lint
+
+      - name: Lint runtime JavaScript on Windows
+        # `bun run lint` only covers `src/**/*.{ts,tsx}`. The guardian,
+        # opencode lifecycle, and CLI bin JavaScript is plain JS outside
+        # that glob, so lint:runtime is gated here too — a Windows-only
+        # runtime lint regression must be fixed rather than softened.
+        working-directory: packages/web
+        run: bun run lint:runtime
+
+      - name: Validate docs
+        # W-A does not touch docs, but `bun run docs:validate` is the
+        # repo-wide "no broken cross-references" check. Cheap, and
+        # catches accidental doc links introduced in any follow-up
+        # commit on the same branch before it lands.
+        run: bun run docs:validate
+
+      - name: Upload smoke artifacts
+        # W-E: upload the smoke script, the entrypoint log directory
+        # (under `<data-dir>/run/`), and the v2 filesystem helper
+        # (so a reviewer can confirm `icacls` / handle-helper invocation
+        # paths on a failed run without re-cloning). The artifact
+        # name now reflects the W-E smoke scope; existing W-A
+        # downloads continue to work because GitHub artifacts are
+        # addressable by run id.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: guardian-windows-smoke-${{ github.run_id }}
+          path: |
+            scripts/guardian-smoke-test.ps1
+            scripts/guardian-smoke-client.js
+            scripts/guardian-test-opencode.js
+            packages/web/server/lib/guardian/
+            packages/web/server/lib/opencode/managed-opencode-handoff-v2/filesystem.js
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload smoke logs (always)
+        # Captures the runtime stdout/stderr the spawned entrypoint
+        # redirected to `$LogFile` / `$LogErrFile`. The .ps1 writes
+        # those files under `<workspace>/scripts/.smoke-logs/` (rather than
+        # the runner's ephemeral temp dir) so they survive the job
+        # and the upload step can pick them up. On a smoke failure,
+        # this is the artifact a reviewer opens to see the actual
+        # entrypoint output instead of guessing from `gh run view`.
+        # `Fail()` in the .ps1 also dumps the same contents to the
+        # script's own stdout, so the run log itself carries the
+        # signal even when the artifact download is skipped.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: guardian-smoke-logs-${{ github.run_id }}
+          path: scripts/.smoke-logs/
+          if-no-files-found: ignore
+          retention-days: 7

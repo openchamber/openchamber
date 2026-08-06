@@ -13,10 +13,11 @@ Gdy OpenChamber się uruchamia, szuka serwera w tej kolejności:
 
 1. ponownie używa serwera, który już uruchomił
 2. łączy się z zewnętrznym, jeśli mu to wskazałeś (zobacz niżej)
-3. automatycznie wykrywa serwer na domyślnym porcie (`4096`)
-4. w przeciwnym razie uruchamia i obsługuje własny
+3. w przeciwnym razie uruchamia i obsługuje własny
 
-Jeśli nic nie jest skonfigurowane, krok 4 dzieje się automatycznie i od razu możesz pracować.
+Jeśli nic nie jest skonfigurowane, krok 3 dzieje się automatycznie i od razu możesz pracować.
+OpenChamber nie łączy się w ciemno z niezależnym serwerem na domyślnym porcie; istniejący proces
+guardian jest adoptowany tylko wtedy, gdy zapisany właściciel i tożsamość procesu pasują do tej instancji OpenChamber.
 
 ## Połącz się z serwerem, który już uruchamiasz
 
