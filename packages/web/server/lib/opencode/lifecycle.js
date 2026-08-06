@@ -48,11 +48,24 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     getActiveSessionCount = () => 0,
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
     getWarmupDirectories = async () => [],
+    // Fired (best-effort, never awaited by the lifecycle) after the OpenCode
+    // server comes up — both the initial bootstrap and every restart. Used by
+    // session-assist to recover sessions stranded by a serve restart.
+    onOpenCodeReady = null,
     now = Date.now,
   } = deps;
 
-  const killProcessOnPort = (port) => {
-    if (!port || process.platform === 'win32') return;
+  // Best-effort notification that the OpenCode server is (re)started. Never
+  // awaited: a slow or failing consumer (e.g. the session-assist startup
+  // recovery scan) must not delay or break the lifecycle.
+  const notifyOpenCodeReady = () => {
+    if (typeof onOpenCodeReady !== 'function') return;
+    Promise.resolve(onOpenCodeReady()).catch((error) => {
+      console.warn(`[lifecycle] onOpenCodeReady hook failed: ${error?.message || error}`);
+    });
+  };
+
+  const killProcessOnPort = (port) => {    if (!port || process.platform === 'win32') return;
     try {
       const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000, windowsHide: true });
       const output = result.stdout || '';
@@ -698,6 +711,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     try {
       await state.currentRestartPromise;
+      notifyOpenCodeReady();
     } catch (error) {
       console.error(`Failed to restart OpenCode: ${error.message}`);
       state.lastOpenCodeError = error.message;
@@ -925,6 +939,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       },
     );
     if (!bootstrapError) {
+      notifyOpenCodeReady();
       void warmOpenCodeDirectories();
     }
   };

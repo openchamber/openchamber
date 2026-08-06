@@ -5,14 +5,28 @@
 // assist.forMessageID — a new message makes the payload stale everywhere
 // without any extra writes.
 //
+// Failed-turn recovery: when the last assistant turn is broken — it COMPLETED
+// with no content (empty stream: provider usage limit, transient failure) or
+// never completed at all (the OpenCode serve process died mid-stream and left
+// an unfinished turn) — a recap of that turn would be meaningless. Instead
+// the runtime retries the session up to FAILED_TURN_RETRY_MAX times via
+// prompt_async with a continuation prompt, tracking attempts in
+// metadata.openchamber.assistRetry (scoped to the last message id), then
+// writes an honest recap telling the user the reply failed.
+//
 // Purely event-driven: only sessions that transition busy→idle while the
-// server is running ever generate anything. No backfill, no session scans.
+// server is running ever generate anything. No backfill, no session scans —
+// EXCEPT one startup recovery pass (runStartupRecovery) that compensates for
+// a serve restart, which loses all in-flight events: sessions whose last turn
+// is broken get the same recovery, so a restart never silently strands a
+// session on an unfinished turn.
 
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const OPENCHAMBER_SETTINGS_FILE = path.join(
+// Resolved lazily so tests can point OPENCHAMBER_DATA_DIR before first use.
+const getOpenChamberSettingsFile = () => path.join(
   process.env.OPENCHAMBER_DATA_DIR
     ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
     : path.join(os.homedir(), '.config', 'openchamber'),
@@ -24,23 +38,48 @@ const OPENCHAMBER_SETTINGS_FILE = path.join(
 // payloads stay untouched — clients keep showing them and dismissal still works.
 const getSessionAssistTargets = () => {
   try {
-    const raw = fs.readFileSync(OPENCHAMBER_SETTINGS_FILE, 'utf8');
+    const raw = fs.readFileSync(getOpenChamberSettingsFile(), 'utf8');
     const settings = JSON.parse(raw);
     return {
       recap: settings?.sessionRecapEnabled !== false,
       suggestion: settings?.sessionSuggestionEnabled !== false,
+      // Auto-retry of empty completions is a behavior switch too: when off,
+      // an empty turn immediately gets the honest recap instead.
+      autoRetry: settings?.sessionAutoRetryEnabled !== false,
     };
   } catch {
-    return { recap: true, suggestion: true };
+    return { recap: true, suggestion: true, autoRetry: true };
   }
 };
 
 const IDLE_QUIET_MS = 60_000;
+// Pause between auto-retries of a failed turn: providers usually reset usage
+// windows within ~2 minutes, so a single quiet period is not enough.
+const RETRY_QUIET_MS = 60_000;
+// Hard cap on auto-retries per failed assistant turn (scoped via
+// assistRetry.lastMessageID, so a new turn resets the counter).
+const FAILED_TURN_RETRY_MAX = 2;
+// Startup recovery: after the server (re)starts, OpenCode re-emits no status
+// for sessions whose turn was interrupted by the previous process dying.
+// One bounded scan over the warm directories finds those sessions.
+const STARTUP_RECOVERY_DELAY_MS = 30_000;
+const STARTUP_RECOVERY_MAX_ATTEMPTS = 3;
+// Serve restarts can fire rapidly (health-check storms) — never scan more
+// often than this, whatever the trigger.
+const STARTUP_RECOVERY_MIN_INTERVAL_MS = 60_000;
+const STARTUP_DIRECTORY_LIMIT = 5;
+const STARTUP_SESSION_LIMIT = 8;
+const STARTUP_SESSION_AGE_LIMIT_MS = 30 * 60 * 1000;
 const TRANSCRIPT_MESSAGE_LIMIT = 12;
 const TRANSCRIPT_PART_CHAR_LIMIT = 6_000;
 const RECAP_CHAR_LIMIT = 320;
 const SUGGESTION_CHAR_LIMIT = 500;
 const FETCH_TIMEOUT_MS = 5_000;
+// Last-resort honest recap when the small model cannot generate one (e.g. the
+// same provider limit that killed the turn). English by necessity — the
+// runtime cannot invent the conversation's language without a model call.
+const FAILED_TURN_FALLBACK_RECAP = 'The agent\'s last reply came back empty — likely a provider usage limit or a transient failure. Auto-retries are exhausted; send "Continue" or switch the model.';
+const FAILED_TURN_FALLBACK_SUGGESTION = 'Continue the work.';
 
 const buildAssistSystemPrompt = ({ recap, suggestion }) => [
   'You assist a user who chats with a coding agent. Based on the conversation transcript, return exactly one JSON object and nothing else — no prose, no markdown, no code fences.',
@@ -88,6 +127,27 @@ const buildAssistSystemPrompt = ({ recap, suggestion }) => [
   'All requested values MUST be written in the same language as the conversation text itself. Ignore any other language preferences or personalization you may have — only the conversation text decides the language.',
   'Use double quotes for JSON strings, no trailing commas.',
 ].filter(Boolean).join('\n');
+
+// Continuation prompt injected into the session on a failed turn: the agent's
+// last turn produced nothing (or never finished), so it must not repeat
+// finished work.
+const buildFailedTurnContinuationPrompt = () => [
+  'Your previous response came back empty — the model stream ended without any output (likely a transient provider failure or usage limit).',
+  'The host received no reply from you for the last turn.',
+  'Do NOT repeat tool calls that already completed successfully.',
+  'Continue the task where you left off: take the next concrete action or give your final answer now.',
+].join('\n');
+// Prompt for the honest recap written when the agent's last turn failed (empty
+// stream or interrupted by a restart): state the failure plainly, never invent
+// content the agent produced.
+const buildFailedTurnSystemPrompt = () => [
+  'You assist a user who chats with a coding agent. The agent\'s LAST reply came back EMPTY — the model stream produced no text and no tool calls (typically a provider usage limit or a transient failure).',
+  'Return exactly one JSON object and nothing else — no prose, no markdown, no code fences.',
+  'Shape: {"recap": string, "suggestion": string}',
+  'recap: at most 20 words, in the SAME language as the conversation sample in the user message. State plainly that the agent\'s reply failed with an empty response (likely a provider limit) and that the user can send "Continue" or switch models. Do not summarize any work — there is none to summarize.',
+  'suggestion: ONE immediately sendable next user message addressed to the coding agent, in the SAME language as the sample, telling it to continue the work.',
+  'Use double quotes for JSON strings, no trailing commas.',
+].join('\n');
 
 const extractJsonObject = (value) => {
   const text = String(value ?? '').trim();
@@ -145,15 +205,76 @@ const messagePartsToText = (message) => {
     .slice(0, TRANSCRIPT_PART_CHAR_LIMIT);
 };
 
+// A broken assistant turn that needs recovery: either it never completed
+// (time.completed missing — the serve process died mid-stream and left an
+// unfinished turn; an idle session cannot legitimately have one, so it is
+// always a failure regardless of any running tool parts) or it COMPLETED with
+// no content at all (no text, no tool calls, no reasoning parts — the model
+// stream ended empty). Aborted turns (user cancel) and compaction summaries
+// are explicitly excluded.
+const isFailedAssistantTurn = (message) => {
+  const info = message?.info;
+  if (!info || info.role !== 'assistant') return false;
+  if (info.summary === true) return false;
+  if (info.error) return false;
+  if (!(info.time?.completed > 0)) return true;
+  const parts = Array.isArray(message?.parts) ? message.parts : [];
+  return !parts.some(
+    (part) => part?.type === 'text' || part?.type === 'tool' || part?.type === 'reasoning',
+  );
+};
+
+// Retry bookkeeping for failed turns, stored under
+// metadata.openchamber.assistRetry. Scoped to lastMessageID: any new last
+// assistant turn resets the counter, so retries never accumulate across
+// unrelated turns.
+const parseAssistRetry = (session) => {
+  const metadata = session?.metadata && typeof session.metadata === 'object' ? session.metadata : {};
+  const namespace = metadata.openchamber && typeof metadata.openchamber === 'object'
+    ? metadata.openchamber
+    : {};
+  const retry = namespace.assistRetry && typeof namespace.assistRetry === 'object'
+    ? namespace.assistRetry
+    : {};
+  return {
+    count: Number.isFinite(retry.count) && retry.count > 0 ? Math.min(Math.floor(retry.count), FAILED_TURN_RETRY_MAX) : 0,
+    lastMessageID: typeof retry.lastMessageID === 'string' ? retry.lastMessageID : '',
+    lastAttemptAt: Number.isFinite(retry.lastAttemptAt) ? retry.lastAttemptAt : 0,
+  };
+};
+
+// Id of the newest assistant message in a tail, or null when the tail ends on
+// a user message or is unavailable. Shared by the stale-result checks.
+const findLatestAssistantId = (messages) => {
+  if (!messages) return null;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const info = messages[i]?.info;
+    if (info?.role === 'assistant') return info.id;
+    if (info?.role === 'user') return null;
+  }
+  return null;
+};
+
 export const createSessionAssistRuntime = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getSmallModelService,
   quietMs = IDLE_QUIET_MS,
+  retryQuietMs = RETRY_QUIET_MS,
+  maxEmptyRetries = FAILED_TURN_RETRY_MAX,
+  // Startup recovery deps: when provided, one bounded scan runs after the
+  // server starts to recover sessions stranded by a serve restart. External
+  // triggers (lifecycle onOpenCodeReady) may also call runStartupRecovery.
+  getStartupDirectories = null,
+  startupRecoveryDelayMs = STARTUP_RECOVERY_DELAY_MS,
+  startupRecoveryMinIntervalMs = STARTUP_RECOVERY_MIN_INTERVAL_MS,
 }) => {
   const timers = new Map();
   const inflight = new Set();
   let stopped = false;
+  let startupRecoveryTimer = null;
+  let startupRecoveryAttempts = 0;
+  let lastStartupScanAt = 0;
 
   const clearTimer = (sessionId) => {
     const existing = timers.get(sessionId);
@@ -163,9 +284,12 @@ export const createSessionAssistRuntime = ({
     }
   };
 
-  const openCodeFetch = async (path, { directory, method = 'GET', body } = {}) => {
+  const openCodeFetch = async (path, { directory, method = 'GET', body, query } = {}) => {
     const base = buildOpenCodeUrl(path, '');
-    const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
+    const params = new URLSearchParams(query || {});
+    if (directory) params.set('directory', directory);
+    const search = params.toString();
+    const url = search ? `${base}?${search}` : base;
     const response = await fetch(url, {
       method,
       headers: {
@@ -196,6 +320,21 @@ export const createSessionAssistRuntime = ({
     return Array.isArray(messages) ? messages : null;
   };
 
+  const fetchSessionStatuses = async (directory) => {
+    const base = buildOpenCodeUrl('/session/status', '');
+    const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    const statuses = await response.json().catch(() => null);
+    return statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : null;
+  };
+
+  const isWorkingStatus = (status) => status?.type === 'busy' || status?.type === 'retry';
+
   const generateAssist = async (sessionId, directory) => {
     const targets = getSessionAssistTargets();
     if (!targets.recap && !targets.suggestion) return;
@@ -224,6 +363,15 @@ export const createSessionAssistRuntime = ({
     }
     const lastAssistantInfo = lastAssistant?.info;
     if (!lastAssistantInfo?.id) return;
+
+    // Failed-turn recovery: the last turn finished with no output at all or
+    // never finished (serve died mid-stream). A recap of that would be
+    // nonsense — retry first, then write an honest recap explaining the
+    // failure.
+    if (isFailedAssistantTurn(lastAssistant)) {
+      await handleFailedTurn({ sessionId, directory, session, messages, lastAssistant, targets });
+      return;
+    }
 
     // Only the last exchange: the assistant reply plus the user message it
     // answered (assistant info.parentID → user info.id). Everything else is
@@ -291,26 +439,21 @@ export const createSessionAssistRuntime = ({
     }
     if (!recap && !suggestion) return;
 
-    // The session may have moved on while we generated — a stale patch would
-    // flash outdated content, so re-check the tail before writing.
+    console.log(`[session-assist] generated for ${sessionId} via ${generated.providerID}/${generated.modelID}`);
+    await writeAssistPayload({ sessionId, directory, session, forMessageID: lastAssistantInfo.id, recap, suggestion });
+  };
+
+  // Shared write tail of both recap paths: re-check the session tail (the
+  // user may have moved on while we generated), then merge the payload into
+  // the metadata from a FRESH read so concurrent metadata writes (suggestion
+  // dismissals, review links, retry bookkeeping, …) survive.
+  const writeAssistPayload = async ({ sessionId, directory, session, forMessageID, recap, suggestion }) => {
     const latest = await fetchRecentMessages(sessionId, directory);
-    const latestAssistantId = (() => {
-      if (!latest) return null;
-      for (let i = latest.length - 1; i >= 0; i -= 1) {
-        const info = latest[i]?.info;
-        if (info?.role === 'assistant') return info.id;
-        if (info?.role === 'user') return null;
-      }
-      return null;
-    })();
-    if (latestAssistantId !== lastAssistantInfo.id) {
+    if (findLatestAssistantId(latest) !== forMessageID) {
       console.log('[session-assist] tail moved on, dropping result');
       return;
     }
 
-    // Merge from a FRESH read: generation takes tens of seconds, and merging
-    // from the session snapshot fetched before it would clobber any metadata
-    // written meanwhile (suggestion dismissals, review links, …).
     const freshSession = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
       .catch(() => null);
     const currentMetadata = freshSession?.metadata && typeof freshSession.metadata === 'object'
@@ -320,7 +463,6 @@ export const createSessionAssistRuntime = ({
       ? currentMetadata.openchamber
       : {};
 
-    console.log(`[session-assist] generated for ${sessionId} via ${generated.providerID}/${generated.modelID}`);
     await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, {
       directory,
       method: 'PATCH',
@@ -332,13 +474,268 @@ export const createSessionAssistRuntime = ({
             assist: {
               recap,
               suggestion,
-              forMessageID: lastAssistantInfo.id,
+              forMessageID,
               generatedAt: Date.now(),
             },
           },
         },
       },
     });
+  };
+
+  // Persist the empty-completion retry counter, merging from a fresh read so
+  // concurrent metadata writes survive.
+  const writeAssistRetry = async ({ sessionId, directory, count, lastMessageID }) => {
+    const freshSession = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
+      .catch(() => null);
+    const currentMetadata = freshSession?.metadata && typeof freshSession.metadata === 'object'
+      ? freshSession.metadata
+      : {};
+    const currentNamespace = currentMetadata.openchamber && typeof currentMetadata.openchamber === 'object'
+      ? currentMetadata.openchamber
+      : {};
+    await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, {
+      directory,
+      method: 'PATCH',
+      body: {
+        metadata: {
+          ...currentMetadata,
+          openchamber: {
+            ...currentNamespace,
+            assistRetry: { count, lastMessageID, lastAttemptAt: Date.now() },
+          },
+        },
+      },
+    });
+  };
+
+  // Honest recap for a failed turn: say the reply failed, never invent
+  // content. Small-model generation first (keeps the conversation language),
+  // then a fixed English fallback so the failure is never silent.
+  const writeHonestFailedTurnRecap = async ({ sessionId, directory, session, messages, lastAssistant }) => {
+    const lastAssistantInfo = lastAssistant?.info;
+    const messageId = lastAssistantInfo.id;
+    const parentUserMessage = typeof lastAssistantInfo.parentID === 'string' && lastAssistantInfo.parentID
+      ? messages.find((message) => message?.info?.id === lastAssistantInfo.parentID && message?.info?.role === 'user')
+      : null;
+    const userText = parentUserMessage ? messagePartsToText(parentUserMessage) : '';
+    const languageSample = userText.slice(0, 200).replace(/\s+/g, ' ').trim();
+
+    let recap = FAILED_TURN_FALLBACK_RECAP;
+    let suggestion = FAILED_TURN_FALLBACK_SUGGESTION;
+    try {
+      const { generateSmallModelText } = await getSmallModelService();
+      const generated = await generateSmallModelText({
+        // Background feature: conversation content must never leave the
+        // session's own provider unless the user explicitly picked a small
+        // model (settings override / opencode config).
+        restrictToPreferredProvider: true,
+        prompt: `The agent's last reply in this conversation came back EMPTY (no text, no tool calls).\n\nWrite the recap and suggestion in the SAME language as this sample from the conversation: "${languageSample || 'no text available'}"`,
+        system: buildFailedTurnSystemPrompt(),
+        directory,
+        preferredProviderID: typeof lastAssistantInfo.providerID === 'string' ? lastAssistantInfo.providerID : undefined,
+        preferredModelID: typeof lastAssistantInfo.modelID === 'string' ? lastAssistantInfo.modelID : undefined,
+      });
+      const structured = extractJsonObject(generated?.text);
+      if (structured && typeof structured?.recap === 'string' && structured.recap.trim()) {
+        recap = structured.recap.trim().slice(0, RECAP_CHAR_LIMIT);
+      }
+      if (structured && typeof structured?.suggestion === 'string' && structured.suggestion.trim()) {
+        suggestion = structured.suggestion.trim().slice(0, SUGGESTION_CHAR_LIMIT);
+      }
+      // Same language guard as the normal path: a hallucinated script must not
+      // leak into a conversation that never used it.
+      const hasCyrillic = (text) => /[\u0400-\u04FF]/.test(text);
+      const hasCjk = (text) => /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/.test(text);
+      const scriptMismatch = (text) => (hasCyrillic(text) && !hasCyrillic(userText))
+        || (hasCjk(text) && !hasCjk(userText));
+      if (recap !== FAILED_TURN_FALLBACK_RECAP && scriptMismatch(recap)) {
+        console.warn('[session-assist] dropped failed-turn recap: language mismatch');
+        recap = FAILED_TURN_FALLBACK_RECAP;
+      }
+      if (suggestion !== FAILED_TURN_FALLBACK_SUGGESTION && scriptMismatch(suggestion)) {
+        console.warn('[session-assist] dropped failed-turn suggestion: language mismatch');
+        suggestion = FAILED_TURN_FALLBACK_SUGGESTION;
+      }
+    } catch (error) {
+      // No authenticated small model (404) or a transient failure — the
+      // fixed-language fallback still surfaces the failure.
+      if (Number(error?.statusCode) !== 404) {
+        console.warn('[session-assist] failed-turn recap generation failed:', error?.message || error);
+      }
+    }
+
+    console.log(`[session-assist] failed turn on ${sessionId}, writing honest recap`);
+    await writeAssistPayload({ sessionId, directory, session, forMessageID: messageId, recap, suggestion });
+  };
+
+  // A broken turn (empty stream, or interrupted by a serve restart): retry the
+  // session with a continuation prompt up to maxEmptyRetries (tracked per
+  // last message id), then write an honest recap that tells the user the
+  // reply failed.
+  const handleFailedTurn = async ({ sessionId, directory, session, messages, lastAssistant, targets, isWorking = null }) => {
+    const lastAssistantInfo = lastAssistant?.info;
+    const messageId = lastAssistantInfo.id;
+    const retry = parseAssistRetry(session);
+    const scopedRetry = retry.lastMessageID === messageId
+      ? retry
+      : { count: 0, lastMessageID: messageId, lastAttemptAt: 0 };
+
+    const providerID = typeof lastAssistantInfo.providerID === 'string' ? lastAssistantInfo.providerID : '';
+    const modelID = typeof lastAssistantInfo.modelID === 'string' ? lastAssistantInfo.modelID : '';
+    const canRetry = targets.autoRetry && scopedRetry.count < maxEmptyRetries && providerID && modelID;
+    if (!canRetry) {
+      await writeHonestFailedTurnRecap({ sessionId, directory, session, messages, lastAssistant });
+      return;
+    }
+
+    // Write-first bookkeeping: if the prompt below fails, the recorded count
+    // keeps the next idle tick from retrying forever.
+    await writeAssistRetry({ sessionId, directory, count: scopedRetry.count + 1, lastMessageID: messageId });
+    console.log(`[session-assist] failed turn on ${sessionId}, retrying (${scopedRetry.count + 1}/${maxEmptyRetries})`);
+
+    // Providers usually reset usage windows within a couple of minutes —
+    // wait before re-prompting instead of hammering the same limit.
+    await new Promise((resolve) => setTimeout(resolve, retryQuietMs));
+    if (stopped) return;
+
+    // The tail must not have moved during the wait (the user sent a message).
+    const latest = await fetchRecentMessages(sessionId, directory);
+    if (findLatestAssistantId(latest) !== messageId) {
+      console.log('[session-assist] tail moved on, dropping failed-turn retry');
+      return;
+    }
+
+    // The session must still be idle: a turn that merely LOOKS unfinished
+    // because it is genuinely running right now (race with a user message)
+    // must never get a duplicate prompt. isWorking is three-valued: true =
+    // busy (drop), false = idle already confirmed by the caller (startup
+    // scan), null = unknown — fetch the live status, and if it cannot be
+    // confirmed (fetch failed), drop the retry: never re-prompt without
+    // proof that the session is idle.
+    let statusConfirmed = false;
+    let isBusy = false;
+    if (isWorking === true) {
+      statusConfirmed = true;
+      isBusy = true;
+    } else if (isWorking === false) {
+      statusConfirmed = true;
+    } else {
+      const statuses = await fetchSessionStatuses(directory);
+      statusConfirmed = Boolean(statuses);
+      isBusy = statusConfirmed && isWorkingStatus(statuses[sessionId]);
+    }
+    if (!statusConfirmed || isBusy) {
+      console.log(`[session-assist] ${isBusy ? 'session is busy' : 'status unavailable'}, dropping failed-turn retry`);
+      return;
+    }
+
+    const agent = typeof lastAssistantInfo.agent === 'string' && lastAssistantInfo.agent
+      ? lastAssistantInfo.agent
+      : (typeof lastAssistantInfo.mode === 'string' ? lastAssistantInfo.mode : '');
+    const variant = typeof lastAssistantInfo.variant === 'string' ? lastAssistantInfo.variant : '';
+    await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/prompt_async`, {
+      directory,
+      method: 'POST',
+      body: {
+        model: { providerID, modelID },
+        ...(agent ? { agent } : {}),
+        ...(variant ? { variant } : {}),
+        parts: [{ type: 'text', text: buildFailedTurnContinuationPrompt() }],
+      },
+    });
+  };
+
+  // One bounded startup pass over the warm directories: after a serve (or
+  // server) restart, OpenCode re-emits no status for sessions whose turn was
+  // interrupted by the previous process dying — they would stay silently
+  // stranded on an unfinished turn forever. Recover them with the same
+  // failed-turn path. Best-effort: fetch failures are logged and retried a
+  // few times, then abandoned.
+  //
+  // Called from three places: the startup timer, the lifecycle
+  // onOpenCodeReady hook (every serve restart), and the internal retry loop
+  // (fromRetry bypasses the debounce so a single scan cycle can retry while
+  // upstream is not ready).
+  const runStartupRecovery = async ({ fromRetry = false } = {}) => {
+    if (stopped || typeof getStartupDirectories !== 'function') return;
+    const nowMs = Date.now();
+    if (!fromRetry) {
+      // Serve restarts can fire rapidly — a bounded rate keeps repeated
+      // triggers from stacking scans on top of each other.
+      if (lastStartupScanAt && nowMs - lastStartupScanAt < startupRecoveryMinIntervalMs) return;
+      startupRecoveryAttempts = 0;
+      lastStartupScanAt = nowMs;
+    }
+    let directories = [];
+    try {
+      directories = await getStartupDirectories();
+    } catch (error) {
+      console.warn('[session-assist] startup recovery: directory list failed:', error?.message || error);
+      return;
+    }
+    if (!Array.isArray(directories)) return;
+    const targets = getSessionAssistTargets();
+    let anyDirectoryFailed = false;
+
+    for (const directory of directories.slice(0, STARTUP_DIRECTORY_LIMIT)) {
+      if (!directory || stopped) return;
+      if (inflight.has(`startup:${directory}`)) continue;
+      inflight.add(`startup:${directory}`);
+      try {
+        const statuses = await fetchSessionStatuses(directory);
+        const sessionList = await openCodeFetch('/session', { directory, query: { limit: String(STARTUP_SESSION_LIMIT) } })
+          .catch(() => null);
+        if (!statuses || !Array.isArray(sessionList)) {
+          anyDirectoryFailed = true;
+          continue;
+        }
+        for (const session of sessionList) {
+          if (stopped) return;
+          if (typeof session?.id !== 'string' || !session.id) continue;
+          if (typeof session.parentID === 'string' && session.parentID) continue;
+          if (isWorkingStatus(statuses[session.id])) continue;
+          const updated = Number.isFinite(session?.time?.updated) ? session.time.updated : 0;
+          if (nowMs - updated > STARTUP_SESSION_AGE_LIMIT_MS) continue;
+
+          const messages = await fetchRecentMessages(session.id, directory);
+          let lastAssistant = null;
+          if (messages) {
+            for (let i = messages.length - 1; i >= 0; i -= 1) {
+              if (messages[i]?.info?.role === 'assistant') {
+                lastAssistant = messages[i];
+                break;
+              }
+            }
+          }
+          if (!lastAssistant || !isFailedAssistantTurn(lastAssistant)) continue;
+
+          console.log(`[session-assist] startup recovery: failed turn on ${session.id}`);
+          await handleFailedTurn({
+            sessionId: session.id,
+            directory,
+            session,
+            messages,
+            lastAssistant,
+            targets,
+            isWorking: isWorkingStatus(statuses[session.id]),
+          });
+        }
+      } catch (error) {
+        anyDirectoryFailed = true;
+        console.warn(`[session-assist] startup recovery failed for ${directory}:`, error?.message || error);
+      } finally {
+        inflight.delete(`startup:${directory}`);
+      }
+    }
+
+    // Upstream may not be ready yet on first attempts — retry the whole pass
+    // a bounded number of times.
+    if (anyDirectoryFailed && !stopped && startupRecoveryAttempts < STARTUP_RECOVERY_MAX_ATTEMPTS) {
+      startupRecoveryAttempts += 1;
+      startupRecoveryTimer = setTimeout(() => runStartupRecovery({ fromRetry: true }), startupRecoveryDelayMs);
+      if (typeof startupRecoveryTimer?.unref === 'function') startupRecoveryTimer.unref();
+    }
   };
 
   const armTimer = (sessionId, directory) => {
@@ -384,11 +781,22 @@ export const createSessionAssistRuntime = ({
 
   const stop = () => {
     stopped = true;
+    if (startupRecoveryTimer) {
+      clearTimeout(startupRecoveryTimer);
+      startupRecoveryTimer = null;
+    }
     for (const { timer } of timers.values()) {
       clearTimeout(timer);
     }
     timers.clear();
   };
 
-  return { processPayload, stop };
+  // One startup recovery pass (see runStartupRecovery) when the server has
+  // warm directories to scan — compensates for serve restarts losing events.
+  if (typeof getStartupDirectories === 'function') {
+    startupRecoveryTimer = setTimeout(runStartupRecovery, startupRecoveryDelayMs);
+    if (typeof startupRecoveryTimer?.unref === 'function') startupRecoveryTimer.unref();
+  }
+
+  return { processPayload, stop, runStartupRecovery };
 };

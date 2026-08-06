@@ -257,6 +257,76 @@ describe('OpenCode lifecycle', () => {
     warn.mockRestore();
   });
 
+  it('notifies onOpenCodeReady after a successful bootstrap', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ healthy: true }),
+    }));
+    const onOpenCodeReady = vi.fn(async () => {});
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      onOpenCodeReady,
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(onOpenCodeReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not notify onOpenCodeReady when bootstrap fails', async () => {
+    const onOpenCodeReady = vi.fn(async () => {});
+    const runtime = createRuntime({
+      syncFromHmrState: vi.fn(() => {
+        throw new Error('bootstrap failed');
+      }),
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      onOpenCodeReady,
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+
+    expect(onOpenCodeReady).not.toHaveBeenCalled();
+  });
+
+  it('notifies onOpenCodeReady after restarting an exited managed process', async () => {
+    const close = vi.fn(async () => {});
+    const replacement = createMockChild();
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      json: async () => null,
+    }));
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        replacement.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return replacement;
+    });
+    const onOpenCodeReady = vi.fn(async () => {});
+    const runtime = createRuntime({ onOpenCodeReady }, {
+      openCodePort: 45678,
+      openCodeProcess: {
+        pid: null,
+        exitCode: 1,
+        signalCode: null,
+        close,
+      },
+    });
+
+    await runtime.triggerHealthCheck();
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(onOpenCodeReady).toHaveBeenCalledTimes(1);
+  });
+
   it('restarts an exited managed process without waiting for the failure interval', async () => {
     const close = vi.fn(async () => {});
     const replacement = createMockChild();
