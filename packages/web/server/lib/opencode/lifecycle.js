@@ -339,6 +339,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     waitForPortRelease: injectedWaitForPortRelease,
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
     getWarmupDirectories = async () => [],
+    onOpenCodeRestarted = null,
     now = Date.now,
   } = deps;
 
@@ -3548,6 +3549,17 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (state.expressApp) {
         setupProxy(state.expressApp);
         ensureOpenCodeApiPrefix();
+      }
+
+      // The restart may have landed on a NEW port (the old one can remain
+      // occupied by an orphaned process, e.g. Windows killProcessOnPort is a
+      // no-op). Upstream event readers pinned to the old process would keep
+      // the UI silent forever, so rebind them to the current port. Best
+      // effort: a failure here must not fail the restart itself.
+      try {
+        onOpenCodeRestarted?.();
+      } catch (error) {
+        console.warn('Failed to rebind event stream after OpenCode restart:', error?.message ?? error);
       }
     })();
 

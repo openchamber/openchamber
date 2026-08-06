@@ -6,6 +6,9 @@ export type ScheduledTask = {
   id: string;
   name: string;
   enabled: boolean;
+  /** Absolute path of the `.agents/loops/*.md` file driving this task, when
+   *  any. Present only for loop-sourced tasks; unknown to older clients. */
+  loopFile?: string;
   schedule: {
     kind: 'daily' | 'weekly' | 'once' | 'cron';
     times?: string[];

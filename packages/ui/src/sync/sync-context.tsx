@@ -745,6 +745,19 @@ export function reconcileDirectorySessionStatusSnapshot(
   const changed = applySessionStatusSnapshot(store, snapshot, candidateSessionIds, mode)
   if (mode === "authoritative") {
     applyGlobalSessionStatusSnapshot(directory, snapshot, candidateSessionIds)
+    // An authoritative snapshot that settles sessions previously observed
+    // busy/retry can orphan running tool parts (managed process died
+    // mid-turn, #2577): finalize them now. The snapshot write above already
+    // lowered their status to explicit idle, which is the gate the helper
+    // requires — a session the snapshot reports busy stays untouched.
+    for (const sessionId of candidateSessionIds) {
+      const interrupted = interruptedTurnToolParts(store.getState(), sessionId)
+      if (interrupted) {
+        store.setState((state) => ({
+          part: { ...state.part, [interrupted.messageID]: interrupted.parts },
+        }))
+      }
+    }
   }
   return changed
 }
@@ -1960,9 +1973,96 @@ function handleEvent(
         messageID,
       })
     }
+    // The reducer already wrote the idle/error status into `draft`; mark the
+    // orphaned tools using the batched state and publish through the batch.
+    if (sessionID) {
+      const interrupted = interruptedTurnToolParts(state, sessionID)
+      if (interrupted) {
+        cloneField("part", (value) => ({ ...(value ?? {}) }))
+        ;(draft as DirectoryStore).part[interrupted.messageID] = interrupted.parts
+        if (batch) {
+          batch.states.set(store, draft as DirectoryStore)
+          batch.changedStores.add(store)
+        } else {
+          store.setState({ part: { ...(store.getState().part), [interrupted.messageID]: interrupted.parts } })
+        }
+      }
+    }
   }
 
   updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
+}
+
+// ---------------------------------------------------------------------------
+// Interrupted-turn reconciliation
+//
+// A managed OpenCode process can die mid-turn (crash, health-check restart).
+// The persisted turn then never settles: the trailing assistant message has
+// no `time.completed` and its tool parts stay `pending`/`running` forever —
+// the server never finalizes them (anomalyco/opencode#19023). The
+// settle-triggered tail refresh above refetches the same stale records, so
+// the UI would keep running tool timers and "working" styling indefinitely
+// (#2577).
+//
+// OpenCode keeps a turn's session busy while it is genuinely alive —
+// including while waiting for a question/permission reply — so once a
+// session is AUTHORITATIVELY settled (a `session.idle`/`session.error`
+// event, or an authoritative status snapshot that lowers a previously busy
+// session) and the trailing assistant message is still unfinished with
+// active tool parts and no pending question/permission, the turn is
+// definitively interrupted. Finalize the orphaned parts locally as
+// `error`/`Interrupted` with an end time — the same shape OpenCode itself
+// writes for cancelled tools. A later terminal part event or a refresh that
+// carries the true terminal state supersedes the mark; a stale refresh that
+// still reports `running` is rejected by the reducer's and the materializer's
+// final-status preservation.
+export function interruptedTurnToolParts(
+  state: DirectoryStore,
+  sessionID: string,
+  now = Date.now(),
+): { messageID: string; parts: Part[] } | null {
+  if ((state.question?.[sessionID] ?? []).length > 0) return null
+  if ((state.permission?.[sessionID] ?? []).length > 0) return null
+
+  const status = state.session_status?.[sessionID]
+  if (!status || status.type !== "idle") {
+    // Absent status is "unknown", not settled (the reducer maps both
+    // session.idle and session.error to {type:"idle"}): never judge an
+    // interrupted turn without an authoritative settle signal.
+    return null
+  }
+
+  const messageID = getStaleRunningToolMessageID(state, sessionID)
+  if (!messageID) return null
+  const message = (state.message[sessionID] ?? []).find((candidate) => candidate.id === messageID)
+  if (!message) return null
+  if (typeof (message as { time?: { completed?: unknown } }).time?.completed === "number") {
+    // The turn finished; a missed terminal tool event is the tail refresh's
+    // job, not an interruption.
+    return null
+  }
+
+  const current = state.part[messageID]
+  if (!current) return null
+
+  let changed = false
+  const nextParts = current.map((part) => {
+    if (part.type !== "tool") return part
+    const partState = (part as { state?: { status?: unknown; time?: { start?: number } } }).state
+    if (!partState) return part
+    if (partState.status !== "pending" && partState.status !== "running") return part
+    changed = true
+    return {
+      ...part,
+      state: {
+        ...partState,
+        status: "error",
+        error: "Interrupted",
+        time: { ...(partState.time ?? {}), end: now },
+      },
+    } as Part
+  })
+  return changed ? { messageID, parts: nextParts } : null
 }
 
 // ---------------------------------------------------------------------------

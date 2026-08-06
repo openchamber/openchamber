@@ -49,9 +49,36 @@ function ensureDirs() {
 
 // ============== MARKDOWN FILE OPERATIONS ==============
 
+// Mirror of OpenCode's markdown frontmatter sanitizer (packages/opencode/src/
+// config/markdown.ts): other coding agents accept unquoted colons in YAML
+// values (e.g. `description: Build agent: creates builds`), which strict YAML
+// rejects. Rewrite those values as block scalars and retry the parse, so files
+// OpenCode accepts are parsed identically here.
+function sanitizeFrontmatter(frontmatter) {
+  return frontmatter
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      if (line.trim().startsWith('#') || line.trim() === '' || /^\s+/.test(line)) return [line];
+      const entry = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.*)$/);
+      if (!entry) return [line];
+      const value = entry[2].trim();
+      if (value === '' || value === '>' || value === '|' || value.startsWith('"') || value.startsWith("'")) return [line];
+      if (!value.includes(':')) return [line];
+      return [`${entry[1]}: |-`, `  ${value}`];
+    })
+    .join('\n');
+}
+
 function parseMdFile(filePath) {
-  const content = fs.readFileSync(filePath, 'utf8');
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
+  const rawContent = fs.readFileSync(filePath, 'utf8');
+  // Strip a UTF-8 BOM so frontmatter is recognized regardless of the editor
+  // that saved the file.
+  const content = rawContent.charCodeAt(0) === 0xfeff ? rawContent.slice(1) : rawContent;
+  // The closing `---` may sit at end-of-file without a trailing newline.
+  // gray-matter (used by OpenCode) accepts that, so we must too: otherwise the
+  // whole file is treated as the prompt body and a later save rewrites the
+  // existing YAML block into the body, duplicating the frontmatter.
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/);
 
   if (!match) {
     return { frontmatter: {}, body: content.trim() };
@@ -61,8 +88,14 @@ function parseMdFile(filePath) {
   try {
     frontmatter = yaml.parse(match[1]) || {};
   } catch (error) {
-    console.warn(`Failed to parse markdown frontmatter ${filePath}, treating as empty:`, error);
-    frontmatter = {};
+    // Lenient fallback for frontmatter that strict YAML rejects but OpenCode
+    // still accepts (unquoted colons in scalar values).
+    try {
+      frontmatter = yaml.parse(sanitizeFrontmatter(match[1])) || {};
+    } catch {
+      console.warn(`Failed to parse markdown frontmatter ${filePath}, treating as empty:`, error);
+      frontmatter = {};
+    }
   }
 
   const body = match[2].trim();

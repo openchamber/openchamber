@@ -35,12 +35,14 @@ import {
   discoverRunningInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
   ensureTunnelProfilesMigrated,
+  generateUiPassword,
   getInstanceFilePath,
   getPidFilePath,
   isOpenchamberCmdline,
   isOpenchamberProcessRunning,
   parseArgs,
   resolveServeHost,
+  resolveServeUiPassword,
 } from './cli.js';
 import { readInstanceOptions, stopInstanceProcess, writeInstanceOptions } from './lib/cli-process.js';
 
@@ -714,6 +716,43 @@ describe('network-exposed auth validation', () => {
         delete process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN;
       }
     }
+  });
+});
+
+describe('serve UI password resolution', () => {
+  it('keeps a configured password untouched', () => {
+    expect(resolveServeUiPassword({ uiPassword: 'secret', explicitUiPassword: true }))
+      .toEqual({ password: 'secret', generated: false });
+  });
+
+  it('generates a password for an explicit --ui-password flag without a value', () => {
+    const resolved = resolveServeUiPassword({ uiPassword: '', explicitUiPassword: true });
+    expect(resolved.generated).toBe(true);
+    expect(typeof resolved.password).toBe('string');
+    expect(resolved.password.length).toBe(16);
+  });
+
+  it('does not generate a password when the flag is absent', () => {
+    expect(resolveServeUiPassword({ uiPassword: undefined, explicitUiPassword: false }))
+      .toEqual({ password: undefined, generated: false });
+  });
+
+  it('generates passwords from an ambiguity-free charset', () => {
+    const resolved = resolveServeUiPassword({ uiPassword: '', explicitUiPassword: true });
+    expect(resolved.password).toMatch(/^[A-HJ-NP-Za-km-z2-9]{16}$/);
+    expect(resolved.password).not.toMatch(/[0O1Il]/);
+  });
+
+  it('generates distinct passwords on repeated calls', () => {
+    const a = generateUiPassword();
+    const b = generateUiPassword();
+    expect(a).not.toBe(b);
+  });
+
+  it('parses --ui-password without a value as explicit but empty', () => {
+    const parsed = parseArgs(['serve', '--ui-password']);
+    expect(parsed.options.explicitUiPassword).toBe(true);
+    expect(parsed.options.uiPassword).toBe('');
   });
 });
 

@@ -635,3 +635,78 @@ describe('fs raw download Content-Disposition', () => {
     expect(cd).toContain("filename*=UTF-8''readme.txt");
   });
 });
+
+describe('fs list symlink path space (issue 2627)', () => {
+  const registerList = (fsPromises) => {
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path: path.posix,
+      fsPromises: {
+        realpath: async (targetPath) => targetPath,
+        ...fsPromises,
+      },
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: '/workspace' }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    return getRoute('GET', '/api/fs/list');
+  };
+
+  const callList = async (handler, query) => {
+    const res = createMockResponse();
+    await handler({ query }, res);
+    return res;
+  };
+
+  it('keeps entry paths in the requested path space when listing through a symlink', async () => {
+    const dirents = [
+      {
+        name: 'src',
+        isDirectory: () => true,
+        isSymbolicLink: () => false,
+        isFile: () => false,
+      },
+      {
+        name: 'README.md',
+        isDirectory: () => false,
+        isSymbolicLink: () => false,
+        isFile: () => true,
+      },
+    ];
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => (
+        targetPath === '/workspace/pkg' ? '/real/pkg' : targetPath
+      )),
+      stat: vi.fn(async () => ({ isDirectory: () => true })),
+      readdir: vi.fn(async () => dirents),
+    };
+    const handler = registerList(fsPromises);
+
+    const res = await callList(handler, { path: '/workspace/pkg' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.path).toBe('/workspace/pkg');
+    expect(res.body.entries).toEqual([
+      {
+        name: 'src',
+        path: '/workspace/pkg/src',
+        isDirectory: true,
+        isFile: false,
+        isSymbolicLink: false,
+      },
+      {
+        name: 'README.md',
+        path: '/workspace/pkg/README.md',
+        isDirectory: false,
+        isFile: true,
+        isSymbolicLink: false,
+      },
+    ]);
+    expect(fsPromises.readdir).toHaveBeenCalledWith('/real/pkg', { withFileTypes: true });
+  });
+});

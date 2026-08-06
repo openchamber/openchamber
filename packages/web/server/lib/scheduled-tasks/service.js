@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 
@@ -78,6 +79,19 @@ export const createScheduledTaskService = (dependencies) => {
     await findProjectByID(projectID);
     const normalizedTaskID = asNonEmptyString(taskID);
     if (!normalizedTaskID) throw new OpenChamberControlError('taskId is required', 400);
+    const current = await projectConfigRuntime.listScheduledTasks(projectID);
+    const existing = current.find((task) => task.id === normalizedTaskID) || null;
+    if (existing?.loopFile && fs.existsSync(existing.loopFile)) {
+      // Loop tasks are owned by their `.agents/loops` markdown file: deleting
+      // the JSON row would be silently undone by the next reconcile while the
+      // file exists. The file itself is the removal surface. Once the file is
+      // gone (the task is an orphan that the next sync would remove anyway),
+      // deleting the row is safe and allowed.
+      throw new OpenChamberControlError(
+        'Loop task is managed by its .agents/loops markdown file; delete the file to remove the task',
+        400,
+      );
+    }
     const result = await projectConfigRuntime.deleteScheduledTask(projectID, normalizedTaskID);
     if (!result.deleted) throw new OpenChamberControlError('Task not found', 404);
     await scheduledTasksRuntime.syncProject(projectID);
