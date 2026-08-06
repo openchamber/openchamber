@@ -454,7 +454,7 @@ export const registerFsRoutes = (app, dependencies) => {
   // Non-cacheable commands always execute and are never stored.
   const runCommandWithGitReadCache = async ({ shell, shellFlag, command, resolvedCwd }) => {
     const cacheable = gitReadCacheTtlMs > 0 && isCacheableGitReadCommand(command);
-    const cacheKey = cacheable ? `${resolvedCwd} ${normalizeCommand(command)}` : null;
+    const cacheKey = cacheable ? `${resolvedCwd}${normalizeCommand(command)}` : null;
 
     if (cacheKey) {
       const cached = gitReadCache.get(cacheKey);
@@ -1296,6 +1296,11 @@ export const registerFsRoutes = (app, dependencies) => {
       ? req.query.path.trim()
       : os.homedir();
     const respectGitignore = req.query.respectGitignore === 'true';
+    // Logical (requested) path stays in the caller's path space. Realpath is
+    // only used to read directory contents — returning real paths for entries
+    // breaks file-tree expansion when listing through a symlink, because the
+    // UI rejects expanded paths that fall outside the workspace root.
+    let requestedPath = '';
     let resolvedPath = '';
 
     const isPlansDirectory = (value) => {
@@ -1305,7 +1310,8 @@ export const registerFsRoutes = (app, dependencies) => {
     };
 
     try {
-      resolvedPath = await realpathCache.resolve(path.resolve(normalizeDirectoryPath(rawPath)));
+      requestedPath = path.resolve(normalizeDirectoryPath(rawPath));
+      resolvedPath = await realpathCache.resolve(requestedPath);
 
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {
@@ -1364,8 +1370,8 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const entries = await Promise.all(
         dirents.map(async (dirent) => {
-          const entryPath = path.join(resolvedPath, dirent.name);
-          if (respectGitignore && ignoredPaths.has(entryPath)) {
+          const physicalEntryPath = path.join(resolvedPath, dirent.name);
+          if (respectGitignore && ignoredPaths.has(physicalEntryPath)) {
             return null;
           }
 
@@ -1374,7 +1380,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
           if (!isDirectory && isSymbolicLink) {
             try {
-              const linkStats = await fsPromises.stat(entryPath);
+              const linkStats = await fsPromises.stat(physicalEntryPath);
               isDirectory = linkStats.isDirectory();
             } catch {
               isDirectory = false;
@@ -1383,7 +1389,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
           return {
             name: dirent.name,
-            path: entryPath,
+            path: path.join(requestedPath, dirent.name),
             isDirectory,
             isFile: dirent.isFile(),
             isSymbolicLink,
@@ -1392,19 +1398,23 @@ export const registerFsRoutes = (app, dependencies) => {
       );
 
       return res.json({
-        path: resolvedPath,
+        path: requestedPath,
         entries: entries.filter(Boolean),
       });
     } catch (error) {
       const err = error;
       const code = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
-      const isPlansPath = code === 'ENOENT' && (isPlansDirectory(resolvedPath) || isPlansDirectory(rawPath));
+      const isPlansPath = code === 'ENOENT' && (
+        isPlansDirectory(resolvedPath)
+        || isPlansDirectory(requestedPath)
+        || isPlansDirectory(rawPath)
+      );
       if (code !== 'ENOENT') {
         console.error('Failed to list directory:', error);
       }
       if (code === 'ENOENT') {
         if (isPlansPath) {
-          return res.json({ path: resolvedPath || rawPath, entries: [] });
+          return res.json({ path: requestedPath || resolvedPath || rawPath, entries: [] });
         }
         return res.status(404).json({ error: 'Directory not found' });
       }
