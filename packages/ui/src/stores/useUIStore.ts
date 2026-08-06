@@ -11,6 +11,10 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { TerminalShell } from '@/lib/api/types';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
+import {
+  DEFAULT_EVENT_SOUNDS,
+  type NotificationSoundEventSounds,
+} from '@/lib/notificationSound';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
@@ -670,6 +674,7 @@ interface UIStore {
   notifyOnCompletion: boolean;
   notifyOnError: boolean;
   notifyOnQuestion: boolean;
+  notifyOnPermission: boolean;
 
   // Per-event notification templates
   notificationTemplates: {
@@ -678,6 +683,13 @@ interface UIStore {
     question: { title: string; message: string };
     subtask: { title: string; message: string };
   };
+
+  // Notification sounds (audio cues)
+  notificationSoundEnabled: boolean;
+  notificationSoundVolume: number; // 0..1
+  notificationSoundEventSounds: NotificationSoundEventSounds;
+  /** When true, all sounds play only when the session is not being viewed. */
+  notificationSoundFocusOnly: boolean;
 
   // Summarization settings
   summarizeLastMessage: boolean;
@@ -842,7 +854,13 @@ interface UIStore {
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
   setNotifyOnQuestion: (value: boolean) => void;
+  setNotifyOnPermission: (value: boolean) => void;
   setNotificationTemplates: (templates: UIStore['notificationTemplates']) => void;
+  setNotificationSoundEnabled: (value: boolean) => void;
+  setNotificationSoundVolume: (value: number) => void;
+  setNotificationSoundEventSounds: (sounds: NotificationSoundEventSounds) => void;
+  setNotificationSoundFocusOnly: (value: boolean) => void;
+  setNotificationSoundForEvent: (event: keyof NotificationSoundEventSounds, soundId: string) => void;
   setSummarizeLastMessage: (value: boolean) => void;
   setSummaryThreshold: (value: number) => void;
   setSummaryLength: (value: number) => void;
@@ -983,12 +1001,19 @@ export const useUIStore = create<UIStore>()(
         notifyOnCompletion: true,
         notifyOnError: true,
         notifyOnQuestion: true,
+        notifyOnPermission: true,
         notificationTemplates: {
           completion: { ...EMPTY_NOTIFICATION_TEMPLATES.completion },
           error: { ...EMPTY_NOTIFICATION_TEMPLATES.error },
           question: { ...EMPTY_NOTIFICATION_TEMPLATES.question },
           subtask: { ...EMPTY_NOTIFICATION_TEMPLATES.subtask },
         },
+
+        // Notification sounds (audio cues) - off by default
+        notificationSoundEnabled: false,
+        notificationSoundVolume: 0.5,
+        notificationSoundEventSounds: { ...DEFAULT_EVENT_SOUNDS },
+        notificationSoundFocusOnly: false,
 
         // Summarization settings
         summarizeLastMessage: false,
@@ -2135,7 +2160,20 @@ export const useUIStore = create<UIStore>()(
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
         setNotifyOnError: (value) => { set({ notifyOnError: value }); },
         setNotifyOnQuestion: (value) => { set({ notifyOnQuestion: value }); },
+        setNotifyOnPermission: (value) => { set({ notifyOnPermission: value }); },
         setNotificationTemplates: (templates) => { set({ notificationTemplates: templates }); },
+        setNotificationSoundEnabled: (value) => { set({ notificationSoundEnabled: value }); },
+        setNotificationSoundVolume: (value) => { set({ notificationSoundVolume: value }); },
+        setNotificationSoundEventSounds: (sounds) => { set({ notificationSoundEventSounds: sounds }); },
+        setNotificationSoundFocusOnly: (value) => { set({ notificationSoundFocusOnly: value }); },
+        setNotificationSoundForEvent: (event, soundId) => {
+          set((state) => ({
+            notificationSoundEventSounds: {
+              ...state.notificationSoundEventSounds,
+              [event]: soundId,
+            },
+          }));
+        },
         setSummarizeLastMessage: (value) => { set({ summarizeLastMessage: value }); },
         setSummaryThreshold: (value) => { set({ summaryThreshold: value }); },
         setSummaryLength: (value) => { set({ summaryLength: value }); },
@@ -2452,7 +2490,12 @@ export const useUIStore = create<UIStore>()(
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,
+          notifyOnPermission: state.notifyOnPermission,
           notificationTemplates: state.notificationTemplates,
+          notificationSoundEnabled: state.notificationSoundEnabled,
+          notificationSoundVolume: state.notificationSoundVolume,
+          notificationSoundEventSounds: state.notificationSoundEventSounds,
+          notificationSoundFocusOnly: state.notificationSoundFocusOnly,
           summarizeLastMessage: state.summarizeLastMessage,
           summaryThreshold: state.summaryThreshold,
           summaryLength: state.summaryLength,

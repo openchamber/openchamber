@@ -50,6 +50,8 @@ import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
+import { playSoundForEvent } from "@/lib/notificationSound"
+import { useUIStore } from "@/stores/useUIStore"
 import { applyGlobalSessionStatusEvent, applyGlobalSessionStatusSnapshot, useGlobalSessionStatusStore } from "./global-session-status"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
@@ -408,6 +410,22 @@ function pruneExternallyViewedSessions(now = Date.now()) {
 const pendingQuestionToastIds = new Set<string>()
 const pendingPermissionToastIds = new Set<string>()
 const pendingVSCodePermissionEvents = new Map<string, symbol>()
+
+// Tracks sessions that received a `session.error` event. opencode always
+// emits `session.idle` immediately after `session.error` (both are published
+// inside the same `halt()` call in the session processor). Without this set,
+// the idle handler would play the success cue right after the error cue,
+// effectively masking the error. opencode's own TUI uses the same pattern.
+const erroredSessionIds = new Map<string, number>()
+const ERRORED_SESSION_TTL_MS = 30_000
+
+function pruneErroredSessionIds(now = Date.now()): void {
+  for (const [key, expiresAt] of erroredSessionIds.entries()) {
+    if (expiresAt <= now) {
+      erroredSessionIds.delete(key)
+    }
+  }
+}
 
 const getVSCodePermissionEventKey = (
   runtimeKey: string,
@@ -1517,6 +1535,7 @@ function handleEvent(
       show: (title, options) => toast.info(title, options),
       openSession: openSessionFromToast,
     })
+    playSoundForEvent("permission", useUIStore.getState(), isViewed)
   }
 
   if (payload.type === "permission.replied") {
@@ -1548,6 +1567,7 @@ function handleEvent(
           onClick: () => openSessionFromToast(sessionID, resolvedDirectory),
         },
       })
+      playSoundForEvent("question", useUIStore.getState(), isViewed)
     }
   }
 
@@ -1561,25 +1581,56 @@ function handleEvent(
   }
 
   // Notification dispatch for session turn-complete and error events.
-  // These are NOT handled by the event reducer — only the notification store.
+  // These are NOT handled by the event reducer - only the notification store.
   if (payload.type === "session.idle" || payload.type === "session.error") {
     const props = payload.properties as { sessionID?: string; error?: { message?: string; code?: string } }
     const sessionID = props.sessionID
-    // Skip subtask sessions — only top-level sessions generate notifications
+    // opencode publishes `session.error` then `session.idle` (both inside the
+    // same halt() call). Track errored sessions so the subsequent idle event
+    // does not play the success cue and mask the error sound.
+    const now = Date.now()
+    pruneErroredSessionIds(now)
+    const hadError = sessionID ? erroredSessionIds.has(sessionID) : false
+    if (payload.type === "session.error" && sessionID) {
+      erroredSessionIds.set(sessionID, now + ERRORED_SESSION_TTL_MS)
+    } else if (payload.type === "session.idle" && hadError && sessionID) {
+      erroredSessionIds.delete(sessionID)
+    }
+    // Skip subtask sessions - only top-level sessions generate notifications
     const storeState = getDirectoryEventState(store, batch)
     const session = storeState.session.find((s) => s.id === sessionID)
     if (session && (session as { parentID?: string }).parentID) {
-      // subtask — skip notification
+      // subtask - skip notification, but still play a sound if enabled.
+      // A subtask that errors plays the error cue. When a session.idle arrives
+      // for a session that just errored, suppress the success cue so the error
+      // sound is audible. Issue #2386 only maps subagent_done -> subtask;
+      // there is no subagent-error mapping, so an errored subtask surfaces as
+      // the error sound rather than a success cue.
+      if (sessionID) {
+        if (payload.type === "session.error") {
+          const subtaskIsViewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
+          playSoundForEvent("error", useUIStore.getState(), subtaskIsViewed)
+        } else if (!hadError) {
+          const subtaskIsViewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
+          playSoundForEvent("subtask", useUIStore.getState(), subtaskIsViewed)
+        }
+      }
     } else if (sessionID) {
+      const isViewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
       appendNotification({
         directory: resolvedDirectory,
         session: sessionID,
         time: Date.now(),
-        viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
+        viewed: isViewed,
         ...(payload.type === "session.error"
           ? { type: "error" as const, error: props.error }
           : { type: "turn-complete" as const }),
       })
+      if (payload.type === "session.error") {
+        playSoundForEvent("error", useUIStore.getState(), isViewed)
+      } else if (!hadError) {
+        playSoundForEvent("completion", useUIStore.getState(), isViewed)
+      }
     }
   }
 
