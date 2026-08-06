@@ -226,12 +226,14 @@ const ProjectAggregateStatusIndicator: React.FC<{ directories: Array<string | nu
     return set;
   }, [directories]);
   const hasBusySession = useGlobalSessionStatusStore(React.useCallback((state) => {
-    // While the global status index is unavailable, preserved busy/retry is
+    // While a session's directory is unavailable, preserved busy/retry is
     // last-known data and must NOT be presented as confirmed active — the
     // collapsed-project aggregate dot stays off until freshness returns.
-    if (state.statusUnavailable) return false;
+    // Freshness is directory-scoped: a failed fetch for one directory does
+    // not suppress another directory's confirmed active status.
     for (const entry of state.statusById.values()) {
       if (entry.status.type !== 'busy' && entry.status.type !== 'retry') continue;
+      if (state.transportUnavailable || state.unavailableDirectories.has(entry.directory)) continue;
       const directory = normalizePath(entry.directory)?.toLowerCase();
       if (directory && directorySet.has(directory)) return true;
     }
@@ -310,12 +312,19 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     [isVisible],
   ));
   const activeSessionIds = useGlobalSessionStatusStore(useShallow(
-    // While the global status index is unavailable, preserved busy/retry is
-    // last-known data and must NOT be presented as confirmed active. Return an
-    // empty set so the sidebar shows no active markers until freshness returns.
-    (state) => (isVisible && !state.statusUnavailable)
-      ? [...state.statusById.keys()].sort()
-      : EMPTY_STRING_ARRAY,
+    // While a session's directory is unavailable, preserved busy/retry is
+    // last-known data and must NOT be presented as confirmed active. Exclude
+    // entries whose directory is unavailable so the sidebar shows no active
+    // markers for those sessions until freshness returns.
+    (state) => {
+      if (!isVisible) return EMPTY_STRING_ARRAY;
+      const result: string[] = [];
+      for (const [id, entry] of state.statusById) {
+        if (state.transportUnavailable || state.unavailableDirectories.has(entry.directory)) continue;
+        result.push(id);
+      }
+      return result.length ? result.sort() : EMPTY_STRING_ARRAY;
+    },
   ));
   const activeSessionIdSet = React.useMemo(() => new Set(activeSessionIds), [activeSessionIds]);
   const unreadSessionIds = useNotificationStore(useShallow(

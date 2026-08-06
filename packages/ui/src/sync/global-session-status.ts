@@ -29,24 +29,34 @@ type GlobalSessionStatusState = {
   /** False while a runtime boundary is waiting for its first new snapshot. */
   acceptEventUpdates: boolean;
   /**
-   * True when the last status fetch failed or the runtime is temporarily
-   * unreachable (transient HTTP failure, 502, network/SSE disconnect,
-   * transport switch). Status data is preserved as last known but should be
-   * presented as "temporarily unavailable/reconnecting", NOT as idle. A
-   * successful authoritative snapshot clears it.
+   * Directories whose last `/session/status?directory=X` fetch failed or
+   * whose status data is otherwise temporarily unavailable. Freshness is
+   * scoped to the status authority that produced the data: a failed fetch
+   * for `/repo-a` marks only `/repo-a` unavailable, so a concurrent
+   * successful snapshot for `/repo-b` cannot make `/repo-a`'s preserved
+   * busy/retry entries appear fresh again.
    *
-   * This is distinct from `acceptEventUpdates`, which gates the runtime
-   * boundary: `acceptEventUpdates: false` means a real runtime replacement
-   * (issue #2421) and old data was cleared; `statusUnavailable: true` means a
-   * transient transport/fetch problem and old data is preserved.
+   * Uses the same normalized directory keys as `statusById` entries.
    */
-  statusUnavailable: boolean;
+  unavailableDirectories: Set<string>;
+  /**
+   * True when a transport-wide disconnect or transport switch affects every
+   * directory at once (SSE drop, relay interruption). This is distinct from
+   * a per-directory fetch failure: a transport disconnect marks all
+   * directories stale deterministically, while a single failed poll marks
+   * only that directory. A successful snapshot for any directory clears
+   * that directory from `unavailableDirectories`; `transportUnavailable`
+   * is cleared by the first successful snapshot after a transport-wide
+   * event, and `resetGlobalSessionStatus` clears both.
+   */
+  transportUnavailable: boolean;
 };
 
 export const useGlobalSessionStatusStore = create<GlobalSessionStatusState>(() => ({
   statusById: new Map(),
   acceptEventUpdates: true,
-  statusUnavailable: false,
+  unavailableDirectories: new Set(),
+  transportUnavailable: false,
 }));
 
 /**
@@ -60,7 +70,8 @@ export const resetGlobalSessionStatus = (options?: { blockEventUpdates?: boolean
   useGlobalSessionStatusStore.setState({
     statusById: new Map(),
     acceptEventUpdates: options?.blockEventUpdates !== true,
-    statusUnavailable: false,
+    unavailableDirectories: new Set(),
+    transportUnavailable: false,
   });
 };
 
@@ -83,6 +94,19 @@ const statusesEqual = (left: SessionStatus, right: SessionStatus): boolean => (
 // the two sources format the same path differently (trailing slash, …).
 const normalizeDirectory = (directory: string): string =>
   normalizeProjectPath(directory) ?? directory;
+
+/**
+ * Check whether a session's status data is currently fresh (not unavailable).
+ * Freshness is determined from the session's own directory: a failed fetch for
+ * `/repo-a` does not make `/repo-b`'s status stale.
+ */
+export const isSessionStatusFresh = (sessionId: string): boolean => {
+  const state = useGlobalSessionStatusStore.getState();
+  if (state.transportUnavailable) return false;
+  const entry = state.statusById.get(sessionId);
+  if (!entry) return true; // no preserved data → nothing to be stale
+  return !state.unavailableDirectories.has(entry.directory);
+};
 
 const setStatus = (sessionId: string, directory: string, status: SessionStatus | { type: 'idle' }): void => {
   useGlobalSessionStatusStore.setState((state) => {
@@ -205,36 +229,56 @@ export const applyGlobalSessionStatusSnapshot = (
       }
     }
 
-    // A fresh authoritative snapshot arrived: re-enable event updates and clear
-    // any transient unavailability flag. Either condition forces a re-render so
-    // consumers stop showing "reconnecting" and see the fresh live state.
+    // A fresh authoritative snapshot for this directory arrived: re-enable
+    // event updates and clear this directory's unavailable flag. Only this
+    // directory's freshness is cleared — a concurrent failure in another
+    // directory must not be freshened by this snapshot.
     if (!state.acceptEventUpdates) changed = true;
-    if (state.statusUnavailable) changed = true;
-    return changed ? { statusById: next, acceptEventUpdates: true, statusUnavailable: false } : state;
+    if (state.unavailableDirectories.has(directory) || state.transportUnavailable) changed = true;
+    const nextUnavailable = new Set(state.unavailableDirectories);
+    nextUnavailable.delete(directory);
+    return changed
+      ? { statusById: next, acceptEventUpdates: true, unavailableDirectories: nextUnavailable, transportUnavailable: false }
+      : state;
   });
 };
 
 /**
- * A failed status request is not an authoritative empty snapshot and must not
- * be treated as one. A transient HTTP failure, 502, network interruption, relay
- * interruption, or temporary SSE disconnect does not prove the underlying
- * OpenCode session became idle.
+ * A failed status request for a specific directory is not an authoritative
+ * empty snapshot and must not be treated as one. A transient HTTP failure,
+ * 502, network interruption, relay interruption, or temporary SSE disconnect
+ * does not prove the underlying OpenCode session became idle.
  *
  * This preserves the last known status data (busy/retry entries stay in
- * `statusById`) and only sets the global `statusUnavailable` freshness flag so
+ * `statusById`) and marks only the given directory as unavailable so
  * consumers can present the state as "temporarily unavailable/reconnecting"
  * instead of as a confirmed active spinner or as idle. It does NOT delete
  * entries, does NOT call `reconcileSessionActivitySnapshot([], known)` (that
  * would clear ordering as if idle), and does NOT call `removeSessionOrdering`.
  *
- * The flag is global: every consumer observes the same freshness. The next
- * successful authoritative snapshot (`applyGlobalSessionStatusSnapshot`) clears
- * it with fresh data. A real runtime replacement uses
- * `resetGlobalSessionStatus({ blockEventUpdates: true })` instead, which does
- * destroy stale data and blocks old events.
+ * Freshness is directory-scoped: a failed fetch for `/repo-a` does not mark
+ * `/repo-b` unavailable. A successful snapshot for `/repo-b` does not clear
+ * `/repo-a`'s unavailable flag.
  */
-export const markGlobalSessionStatusUnavailable = (): void => {
+export const markDirectoryStatusUnavailable = (rawDirectory: string): void => {
+  const directory = normalizeDirectory(rawDirectory);
+  useGlobalSessionStatusStore.setState((state) => {
+    if (state.unavailableDirectories.has(directory)) return state;
+    const next = new Set(state.unavailableDirectories);
+    next.add(directory);
+    return { unavailableDirectories: next };
+  });
+};
+
+/**
+ * Mark every directory as temporarily unavailable after a transport-wide
+ * disconnect or transport switch. This is distinct from a per-directory fetch
+ * failure: a transport disconnect affects all directories deterministically.
+ * Each directory's freshness is restored individually when its next
+ * successful authoritative snapshot arrives.
+ */
+export const markTransportStatusUnavailable = (): void => {
   useGlobalSessionStatusStore.setState((state) => (
-    state.statusUnavailable ? state : { statusUnavailable: true }
+    state.transportUnavailable ? state : { transportUnavailable: true }
   ));
 };

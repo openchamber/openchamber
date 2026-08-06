@@ -22,7 +22,7 @@ import { isSessionPinned, type SessionPinnedTarget } from '@/stores/useSessionPi
 import { Icon } from "@/components/icon/Icon";
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useSessionDisplayStatus, useSessionPermissions } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useSessionDisplayStatus, useSessionKnownInactive, useSessionPermissions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
@@ -454,6 +454,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   // tick of the counter it only decides to mount.
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
+  // Control predicate: move-to-worktree requires the session to be KNOWN
+  // inactive. `reconnecting` (unavailable + preserved busy/retry) means
+  // "current truth = unknown", NOT inactive — the operation must fail closed.
+  const isSessionKnownInactive = useSessionKnownInactive(session.id);
+  const canMutateSessionLocation = isSessionKnownInactive && !isMovingToWorktree;
   const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined, { bootstrap: false });
   const sessionGoal = getSessionGoal(resolvedSession);
   const sessionGoalGlyph = sessionGoal ? (
@@ -957,9 +962,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           <TooltipTrigger asChild>
             <span className="block">
               <Item
-                disabled={!sessionDirectory || isStreaming || isMovingToWorktree}
+                disabled={!sessionDirectory || !canMutateSessionLocation}
                 onClick={() => {
-                  if (!sessionDirectory || isStreaming || isMovingToWorktree) return;
+                  if (!sessionDirectory || !canMutateSessionLocation) return;
                   startSessionTreeWorktreeMove({
                     root: resolvedSession,
                     descendants: collectNodeDescendantSessions(node),
@@ -978,7 +983,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           <TooltipContent side="right" className="max-w-72">
             {isMovingToWorktree
               ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
-              : isStreaming
+              : !canMutateSessionLocation
                 ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
                 : t('sessions.sidebar.session.moveToWorktree.tooltip')}
           </TooltipContent>

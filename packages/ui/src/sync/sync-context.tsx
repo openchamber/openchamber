@@ -54,7 +54,8 @@ import {
   applyGlobalSessionStatusEvent,
   applyGlobalSessionStatusSnapshot,
   areGlobalSessionStatusEventsEnabled,
-  markGlobalSessionStatusUnavailable,
+  markDirectoryStatusUnavailable,
+  markTransportStatusUnavailable,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
 import type { State } from "./types"
@@ -213,29 +214,36 @@ export function useGlobalSessionStatus(sessionId: string): SessionStatus | undef
 }
 
 /**
- * Read whether the global live status index is temporarily unavailable
- * (transient fetch failure / disconnect / transport switch). When true, the
- * status data returned by `useGlobalSessionStatus` is preserved last-known
- * state and should be presented as "reconnecting", NOT as a confirmed active
- * spinner or as idle. A real runtime replacement clears `statusById` instead
- * and leaves this flag false.
+ * Read whether a specific session's status data is currently fresh (not
+ * unavailable). Freshness is determined from the session's own directory:
+ * a failed fetch for `/repo-a` does not make `/repo-b`'s status stale.
+ * A transport-wide disconnect or transport switch marks all directories
+ * unavailable; a per-directory fetch failure marks only that directory.
  */
-export function useGlobalSessionStatusUnavailable(): boolean {
+export function useSessionStatusFresh(sessionId: string): boolean {
   return useGlobalSessionStatusStore(
-    useCallback((state) => state.statusUnavailable, []),
+    useCallback((state) => {
+      if (state.transportUnavailable) return false;
+      const entry = state.statusById.get(sessionId);
+      if (!entry) return true;
+      return !state.unavailableDirectories.has(entry.directory);
+    }, [sessionId]),
   )
 }
 
 /**
  * Derived presentation status for a session. Combines the raw last-known
- * status from `useGlobalSessionStatus` with the `statusUnavailable` freshness
- * flag so consumers don't each have to check freshness separately.
+ * status from `useGlobalSessionStatus` with directory-scoped freshness so
+ * consumers don't each have to check freshness separately.
  *
  * - `fresh + busy/retry` → `'busy'` / `'retry'`
  * - `fresh + no status`   → `'idle'`
  * - `unavailable + last known busy/retry` → `'reconnecting'`
  *   (preserved data stays in `rawStatus` for when freshness returns)
  * - `unavailable + no status` → `'idle'`
+ *
+ * Freshness is scoped to the session's own directory: a failed fetch for
+ * `/repo-a` does not make `/repo-b`'s status appear as `reconnecting`.
  *
  * The raw last-known status is always available in `rawStatus` so consumers
  * that need the underlying data (e.g. retry details) can still read it without
@@ -250,11 +258,35 @@ export type SessionDisplayStatus = {
 
 export function useSessionDisplayStatus(sessionId: string): SessionDisplayStatus {
   const status = useGlobalSessionStatus(sessionId);
-  const unavailable = useGlobalSessionStatusUnavailable();
-  if (unavailable && status && (status.type === 'busy' || status.type === 'retry')) {
+  const fresh = useSessionStatusFresh(sessionId);
+  if (!fresh && status && (status.type === 'busy' || status.type === 'retry')) {
     return { type: 'reconnecting', rawStatus: status };
   }
   return { type: status?.type ?? 'idle', rawStatus: status };
+}
+
+/**
+ * Derived control predicate: whether the session is KNOWN to be inactive
+ * (idle). This is separate from presentation status because `reconnecting`
+ * means "last known = busy/retry, current truth = unknown" — it does NOT
+ * mean inactive. Operations that require the session to be definitely
+ * inactive (e.g. move-to-worktree) must fail closed while status is
+ * unavailable.
+ *
+ * - `fresh + idle` → `true` (confirmed inactive, operation allowed)
+ * - `fresh + busy/retry` → `false` (confirmed active, operation blocked)
+ * - `unavailable + last known busy/retry` → `false` (unknown, operation blocked)
+ * - `unavailable + no status` → `false` (unknown, operation blocked)
+ */
+export function useSessionKnownInactive(sessionId: string): boolean {
+  const status = useGlobalSessionStatus(sessionId);
+  const fresh = useSessionStatusFresh(sessionId);
+  if (!fresh) return false;
+  // `status.type === 'error'` is defensive: the SDK's SessionStatus type is
+  // currently idle/busy/retry, but a future or alternate status authority could
+  // report error. The cast preserves the runtime check without tripping TS's
+  // no-overlap narrowing on the current union.
+  return !status || status.type === 'idle' || (status.type as string) === 'error';
 }
 
 /** Read all session statuses (for sidebar) */
@@ -698,30 +730,30 @@ export function reconcileDirectorySessionStatusSnapshot(
 }
 
 /**
- * Mark live activity as temporarily unavailable after a failed/null status
- * fetch, a transport disconnect, or a transport switch. This is intentionally
- * separate from an empty snapshot and from a real runtime replacement:
+ * Mark live activity for a specific directory as temporarily unavailable after
+ * a failed/null status fetch. This is intentionally separate from an empty
+ * snapshot and from a real runtime replacement:
  *
  * - It does NOT mutate any child store's `session_status`: last known
  *   busy/retry state is preserved so the UI does not flip to idle on a
  *   transient HTTP failure, 502, network interruption, relay interruption, or
  *   temporary SSE disconnect. Messages and durable session history are
  *   untouched.
- * - It sets the global `statusUnavailable` freshness flag (via
- *   `markGlobalSessionStatusUnavailable`) so consumers can present the state
+ * - It marks only the given directory as unavailable (via
+ *   `markDirectoryStatusUnavailable`) so consumers can present the state
  *   as "reconnecting" rather than as confirmed activity or as idle.
  *
- * The next successful authoritative snapshot clears the flag with fresh data.
- * A real OpenCode runtime replacement (issue #2421) uses
- * `resetGlobalSessionStatus({ blockEventUpdates: true })` (via
- * `resetAppForRuntimeEndpointChange`) instead, which destroys stale data and
- * blocks old events.
+ * Freshness is directory-scoped: a failed fetch for `/repo-a` does not mark
+ * `/repo-b` unavailable. The next successful authoritative snapshot for this
+ * directory clears the flag with fresh data. A real OpenCode runtime
+ * replacement (issue #2421) uses `resetGlobalSessionStatus({ blockEventUpdates: true })`
+ * (via `resetAppForRuntimeEndpointChange`) instead, which destroys stale data
+ * and blocks old events.
  */
-export function markDirectorySessionStatusesUnavailable(): boolean {
-  // Preserve last known status data; only flag unavailability. Child stores'
-  // session_status maps are intentionally not mutated. The flag is global, so
-  // every consumer observes the same freshness.
-  markGlobalSessionStatusUnavailable()
+export function markDirectorySessionStatusesUnavailable(directory: string): boolean {
+  // Preserve last known status data; only flag this directory as unavailable.
+  // Child stores' session_status maps are intentionally not mutated.
+  markDirectoryStatusUnavailable(directory)
   return false
 }
 
@@ -741,7 +773,7 @@ async function resyncDirectorySessionStatuses(
   // `needsSnapshotAfterStatusPoll` escalation logic still runs on the next
   // successful poll.
   if (nextStatuses === null) {
-    markDirectorySessionStatusesUnavailable()
+    markDirectorySessionStatusesUnavailable(directory)
     return null
   }
   reconcileDirectorySessionStatusSnapshot(directory, store, nextStatuses, candidateSessionIds, mode)
@@ -1995,18 +2027,22 @@ export function SyncProvider(props: {
   // an OpenCode runtime replacement (issue #2421). It is a transient transport
   // event: the same runtime is expected to come back (reconnect) or a fresh
   // snapshot will be fetched over HTTP (transport switch). Last known busy/retry
-  // status is preserved and only the global `statusUnavailable` freshness flag
-  // is set, so the UI shows "reconnecting" instead of destroying live evidence
-  // or flipping to idle. The reconnect/transport-switch resyncs call
-  // `applyGlobalSessionStatusSnapshot`, which clears the flag with fresh data.
+  // status is preserved and all directories are marked unavailable via
+  // `transportUnavailable`, so the UI shows "reconnecting" instead of
+  // destroying live evidence or flipping to idle. The reconnect/transport-switch
+  // resyncs call `applyGlobalSessionStatusSnapshot`, which clears each
+  // directory's freshness individually with fresh data.
   //
   // A real runtime replacement (runtime key change) is handled separately by
   // `resetAppForRuntimeEndpointChange` -> `resetGlobalSessionStatus({ blockEventUpdates: true })`,
   // which does destroy stale data and block old events.
   const markLiveSessionStatusesUnavailable = useCallback(() => {
-    // The freshness flag is global; one set covers every directory (with or
-    // without a child store). Status data is preserved.
-    markGlobalSessionStatusUnavailable()
+    // A transport-wide disconnect or transport switch affects every directory
+    // at once. Mark all directories stale deterministically — do not depend on
+    // the ordering of concurrent per-directory resync completions. Status data
+    // is preserved; each directory's freshness is restored individually when
+    // its next successful authoritative snapshot arrives.
+    markTransportStatusUnavailable()
   }, [])
 
   // Configure child store manager

@@ -12,7 +12,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import {
   useGlobalSessionStatusStore,
   applyGlobalSessionStatusSnapshot,
-  markGlobalSessionStatusUnavailable,
+  markDirectoryStatusUnavailable,
 } from '@/sync/global-session-status';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useNotificationStore } from '@/sync/notification-store';
@@ -403,15 +403,20 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
   const globalStatusById = globalStatusState.statusById;
   const resolveStatus = (id: string): TraySessionStatus => {
     const fromStores = live.statusById.get(id);
-    const fromGlobal = globalStatusById.get(id)?.status.type;
+    const globalEntry = globalStatusById.get(id);
+    const fromGlobal = globalEntry?.status.type;
     const raw: TraySessionStatus = (fromStores && fromStores !== 'idle')
       ? fromStores
       : (fromGlobal ?? fromStores ?? 'idle');
-    // While the global status index is unavailable, preserved busy/retry is
+    // While this session's directory is unavailable, preserved busy/retry is
     // last-known data and must NOT be presented as confirmed active. Convert
     // it to 'reconnecting' so the tray shows the session is there but not
-    // confirmed running — neither a busy spinner nor idle.
-    if (globalStatusState.statusUnavailable && (raw === 'busy' || raw === 'retry')) {
+    // confirmed running — neither a busy spinner nor idle. Freshness is
+    // directory-scoped: a failed fetch for one directory does not make
+    // another directory's status appear as reconnecting.
+    const unavailable = globalStatusState.transportUnavailable
+      || (globalEntry ? globalStatusState.unavailableDirectories.has(globalEntry.directory) : false);
+    if (unavailable && (raw === 'busy' || raw === 'retry')) {
       return 'reconnecting';
     }
     return raw;
@@ -524,7 +529,7 @@ export const useTraySync = (): void => {
           // can show "reconnecting" instead of destroying live evidence or
           // flipping to idle. The runtime-generation guard already prevents a
           // stale completion from a previous runtime from writing here.
-          markGlobalSessionStatusUnavailable();
+          markDirectoryStatusUnavailable(directory);
           return;
         }
         applyGlobalSessionStatusSnapshot(directory, raw, sessionIds);
