@@ -281,9 +281,16 @@ export const ProjectActionsButton = ({
   }), [t]);
 
   const canUseAutoDiscover = !isMobile && devServerDetected === true;
+  const autoDiscoverRunActive = React.useMemo(() => {
+    if (!normalizedDirectory) return false;
+    const runKey = toProjectActionRunKey(normalizedDirectory, AUTO_DISCOVER_ACTION_ID);
+    const run = projectActionRuns[runKey];
+    return run?.status === 'running' || run?.status === 'waiting-for-preview' || run?.status === 'stopping';
+  }, [normalizedDirectory, projectActionRuns]);
+  const shouldShowAutoDiscover = canUseAutoDiscover || autoDiscoverRunActive;
   const displayActions = React.useMemo(
-    () => canUseAutoDiscover ? [autoDiscoverAction, ...actions] : actions,
-    [actions, autoDiscoverAction, canUseAutoDiscover]
+    () => shouldShowAutoDiscover ? [autoDiscoverAction, ...actions] : actions,
+    [actions, autoDiscoverAction, shouldShowAutoDiscover]
   );
 
   React.useEffect(() => {
@@ -319,13 +326,13 @@ export const ProjectActionsButton = ({
     if (!selectedActionId) {
       return;
     }
-    if (selectedActionId === AUTO_DISCOVER_ACTION_ID && canUseAutoDiscover) {
+    if (selectedActionId === AUTO_DISCOVER_ACTION_ID && shouldShowAutoDiscover) {
       return;
     }
     if (!actions.some((entry) => entry.id === selectedActionId)) {
       setSelectedActionId(null);
     }
-  }, [actions, canUseAutoDiscover, devServerDetected, selectedActionId]);
+  }, [actions, devServerDetected, selectedActionId, shouldShowAutoDiscover]);
 
   React.useEffect(() => {
     const monitorRuns = () => {
