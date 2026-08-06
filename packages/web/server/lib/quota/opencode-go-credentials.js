@@ -1,6 +1,4 @@
-import { deleteManagedCredential, getManagedCredentialStatus, normalizers, readManagedCredential, writeManagedCredential } from './credentials/providers.js';
-
-export const normalizeOpenCodeGoCredential = normalizers['opencode-go'];
+import { deleteManagedCredential, getManagedCredentialStatus, readManagedCredential, writeManagedCredential } from './credentials/providers.js';
 
 export const readOpenCodeGoCredential = () => readManagedCredential('opencode-go');
 

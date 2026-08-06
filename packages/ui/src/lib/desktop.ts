@@ -254,7 +254,7 @@ const getDesktopBridge = (): DesktopBridgeGlobal | null => {
 
 export const isElectronShell = (): boolean => getElectronRuntime()?.runtime === 'electron';
 
-export const getElectronPlatform = (): string | null => {
+const getElectronPlatform = (): string | null => {
   if (typeof window === 'undefined') return null;
   const platform = (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__;
   return typeof platform === 'string' ? platform : null;

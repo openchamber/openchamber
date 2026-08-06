@@ -230,6 +230,7 @@
     "watch:webview": "vite build --watch",
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
     "lint": "bun x eslint --ext .ts,.tsx src webview",
+    "test": "node ../../scripts/run-isolated-tests.mjs src webview",
     "package": "vsce package --no-dependencies"
   },
   "devDependencies": {

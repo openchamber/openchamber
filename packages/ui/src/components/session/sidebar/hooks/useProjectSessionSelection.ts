@@ -25,7 +25,7 @@ type Args = {
   setSessionSwitcherOpen: (open: boolean) => void;
 };
 
-export const useProjectSessionSelection = (args: Args): void => {
+const useProjectSessionSelection = (args: Args): void => {
   const {
     projectSections,
     activeProjectId,

@@ -370,7 +370,9 @@ describe('routeMessage skill invocation', () => {
 
     // Minimal optimistic + connection machinery so routeMessage can dispatch.
     const childStore = {
-      getState: () => ({ session_status: {} }),
+      // `session` is read before dispatch to resolve the target session, so the
+      // stub must expose the list even when no session is materialized yet.
+      getState: () => ({ session: [], session_status: {} }),
       setState: () => {},
     };
     const childStores = {

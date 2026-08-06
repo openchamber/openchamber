@@ -1,7 +1,7 @@
 const MISSING_UPDATE_FEED_RE =
   /404|ENOTFOUND|Cannot find (?:channel|latest)|latest-linux(?:-arm64)?\.yml|HttpError:\s*404|status code 404/i;
 
-export const isMissingUpdateFeedError = (error) => {
+const isMissingUpdateFeedError = (error) => {
   const message = error instanceof Error ? error.message : String(error ?? '');
   return MISSING_UPDATE_FEED_RE.test(message);
 };

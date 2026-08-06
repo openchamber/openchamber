@@ -114,5 +114,3 @@ function matchMention(
     });
     return query === null ? null : { kind: 'mention', query };
 }
-
-export type { FileMentionAutocompleteInputSource };

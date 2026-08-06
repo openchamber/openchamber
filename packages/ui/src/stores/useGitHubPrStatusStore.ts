@@ -932,11 +932,8 @@ const deriveSummary = (entry: PrStatusEntry): PrVisualSummary | null => {
 const summarySignature = (s: PrVisualSummary): string =>
   `${s.number}:${s.visualState}:${s.prState}:${s.draft}:${s.title ?? ''}:${s.url ?? ''}:${s.base ?? ''}:${s.head ?? ''}:${s.canMerge ?? ''}:${s.mergeableState ?? ''}:${s.checks?.state ?? ''}:${s.checks?.total ?? ''}:${s.checks?.success ?? ''}:${s.checks?.failure ?? ''}:${s.checks?.pending ?? ''}:${s.repo?.owner ?? ''}:${s.repo?.repo ?? ''}`;
 
-let prKeyedCacheSigs = new Map<string, string>();
-let prKeyedCacheResult: Map<string, PrVisualSummary> = new Map();
-
 // Per-key summary cache so many independent row subscribers (one key each)
-// keep referential stability without fighting over the multi-key cache above.
+// keep referential stability.
 // Practically bounded by the number of worktree branches observed in a
 // session; the explicit cap below guards long-running documents that rotate
 // through many branches/runtimes (entries are tiny; insertion-order eviction
@@ -962,36 +959,5 @@ export const usePrVisualSummary = (key: string | null): PrVisualSummary | null =
     }
     prSummaryCacheByKey.set(key, { sig, summary });
     return summary;
-  });
-};
-
-export const usePrVisualSummaryByKeys = (keys: string[]) => {
-  return useGitHubPrStatusStore((state) => {
-    // Derive summaries for requested keys only
-    const nextSigs = new Map<string, string>();
-    const nextSummaries = new Map<string, PrVisualSummary>();
-
-    for (const key of keys) {
-      const entry = state.entries[key];
-      if (!entry) continue;
-      const summary = deriveSummary(entry);
-      if (!summary) continue;
-      const sig = summarySignature(summary);
-      nextSigs.set(key, sig);
-      nextSummaries.set(key, summary);
-    }
-
-    // Compare with cached signatures
-    if (nextSigs.size === prKeyedCacheSigs.size) {
-      let same = true;
-      for (const [k, sig] of nextSigs) {
-        if (prKeyedCacheSigs.get(k) !== sig) { same = false; break; }
-      }
-      if (same) return prKeyedCacheResult;
-    }
-
-    prKeyedCacheSigs = nextSigs;
-    prKeyedCacheResult = nextSummaries;
-    return nextSummaries;
   });
 };

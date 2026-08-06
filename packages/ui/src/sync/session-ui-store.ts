@@ -240,9 +240,6 @@ function notifyMessageSent(sessionId: string): void {
 // Types
 // ---------------------------------------------------------------------------
 
-export type { SyntheticContextPart } from "./input-store"
-export type { SessionMemoryState } from "./viewport-store"
-
 export type NewSessionDraftState = {
   open: boolean
   selectedProjectId?: string | null
