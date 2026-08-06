@@ -231,17 +231,22 @@ export async function bootstrapDirectory(input: {
       )
       const current = getState()
       const merged = { ...current.question }
-      for (const [sessionID, questions] of Object.entries(grouped)) {
-        merged[sessionID] = questions
-          .filter((q) => !!q?.id)
-          .sort((a, b) => cmp(a.id, b.id))
-      }
-      for (const sessionID of beforeSignatures.keys()) {
-        if (grouped[sessionID]) continue
+      for (const sessionID of new Set([...Object.keys(grouped), ...beforeSignatures.keys()])) {
+        // A `question.asked`/`question.replied` SSE event that landed while
+        // this list request was in flight is newer than the response. Skip the
+        // session entirely so a stale payload can neither overwrite the live
+        // addition nor resurrect an already-resolved request.
         const beforeSignature = beforeSignatures.get(sessionID) ?? ""
         const currentSignature = requestSignature(current.question[sessionID])
         if (currentSignature !== beforeSignature) continue
-        delete merged[sessionID]
+        const questions = grouped[sessionID]
+        if (questions) {
+          merged[sessionID] = questions
+            .filter((q) => !!q?.id)
+            .sort((a, b) => cmp(a.id, b.id))
+        } else {
+          delete merged[sessionID]
+        }
       }
       commit({ question: merged })
     }),
@@ -262,17 +267,22 @@ export async function bootstrapDirectory(input: {
       )
       const current = getState()
       const merged = { ...current.permission }
-      for (const [sessionID, perms] of Object.entries(grouped)) {
-        merged[sessionID] = perms
-          .filter((p) => !!p?.id)
-          .sort((a, b) => cmp(a.id, b.id))
-      }
-      for (const sessionID of beforeSignatures.keys()) {
-        if (grouped[sessionID]) continue
+      for (const sessionID of new Set([...Object.keys(grouped), ...beforeSignatures.keys()])) {
+        // A `permission.asked`/`permission.replied` SSE event that landed while
+        // this list request was in flight is newer than the response. Skip the
+        // session entirely so a stale payload can neither overwrite the live
+        // addition nor resurrect an already-resolved request.
         const beforeSignature = beforeSignatures.get(sessionID) ?? ""
         const currentSignature = requestSignature(current.permission[sessionID])
         if (currentSignature !== beforeSignature) continue
-        delete merged[sessionID]
+        const perms = grouped[sessionID]
+        if (perms) {
+          merged[sessionID] = perms
+            .filter((p) => !!p?.id)
+            .sort((a, b) => cmp(a.id, b.id))
+        } else {
+          delete merged[sessionID]
+        }
       }
       commit({ permission: merged })
     }),
