@@ -1,4 +1,5 @@
 import { discordIntegrationI18n } from './discord-integration.i18n';
+import { jiraIntegrationI18n } from './jira-integration.i18n';
 
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go usage tracking',
@@ -2094,4 +2095,5 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...discordIntegrationI18n.en,
+  ...jiraIntegrationI18n.en,
 } as const;

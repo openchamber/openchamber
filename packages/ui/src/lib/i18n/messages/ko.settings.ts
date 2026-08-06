@@ -1,4 +1,5 @@
 import { discordIntegrationI18n } from './discord-integration.i18n';
+import { jiraIntegrationI18n } from './jira-integration.i18n';
 
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 사용량 추적',
@@ -2103,6 +2104,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...discordIntegrationI18n.ko,
+  ...jiraIntegrationI18n.ko,
   'settings.integrations.discord.commands.category.project': '프로젝트',
   'settings.integrations.discord.commands.category.mcp': 'MCP 서버',
   'settings.integrations.discord.commands.category.ops': '세션 작업',

@@ -939,6 +939,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.page.integrations.title',
     keywords: ['discord', 'messenger', 'bot', 'slack', 'chat', 'connect', 'bridge'],
   },
+  {
+    id: 'integrations.jira',
+    page: 'integrations',
+    titleKey: 'settings.integrations.jira.title',
+    descriptionKey: 'settings.integrations.jira.description',
+    keywords: ['jira', 'atlassian', 'issue', 'ticket', 'tracker', 'connect', 'session'],
+  },
 ] as const;
 
 interface BuildSettingsSearchResultsOptions {

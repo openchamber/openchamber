@@ -1,4 +1,5 @@
 import { discordIntegrationI18n } from './discord-integration.i18n';
+import { jiraIntegrationI18n } from './jira-integration.i18n';
 
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 用量追蹤',
@@ -2103,6 +2104,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...discordIntegrationI18n['zh-TW'],
+  ...jiraIntegrationI18n['zh-TW'],
   'settings.integrations.discord.commands.category.project': '專案',
   'settings.integrations.discord.commands.category.mcp': 'MCP 伺服器',
   'settings.integrations.discord.commands.category.ops': '工作階段操作',

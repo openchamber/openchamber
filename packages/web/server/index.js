@@ -92,6 +92,7 @@ import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createMessengerSyncRouter } from './lib/messenger/messenger-sync.js';
+import { createJiraIntegrationRuntime } from './lib/jira/index.js';
 import { syncSystemSkills } from './lib/opencode/system-skills.js';
 import {
   createOpenChamberAgentEventsWebSocketRuntime,
@@ -1739,6 +1740,20 @@ async function main(options = {}) {
   // Legacy aliases — same router, kept for in-flight clients / system skills.
   app.use('/api/openchamber-agent/messenger', messengerRouter);
   app.use('/api/otto/messenger', messengerRouter);
+
+  // Jira integration: issue-to-session initiation, session/issue linkage, and
+  // lifecycle status updates. The polling issue listener re-reads its
+  // enablement and the stored connection on every tick, so starting it here is
+  // a no-op until the user connects Jira and enables the listener.
+  const jiraIntegrationRuntime = createJiraIntegrationRuntime({
+    sessionService: openChamberSessionService,
+    globalEventHub: globalMessageStreamHub,
+    // Status updates ride on the shared global event hub — make sure it runs
+    // even when no browser client is connected.
+    ensureEventStream: () => ensureGlobalWatcherStarted(),
+  });
+  jiraIntegrationRuntime.registerRoutes(app);
+  jiraIntegrationRuntime.start();
 
   const previewProxyRuntime = createPreviewProxyRuntime({
     crypto,
