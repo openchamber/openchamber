@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Project actions: Auto-discover is now hidden for projects where no dev server can be detected (no matching project action, no package.json dev/start/preview/serve script, no index.html) instead of always appearing and failing on click (thanks to @lukelabonte).
+
 ## [1.18.1] - 2026-08-04
 
 - **Providers:** signing in to an OAuth-only provider now actually completes — the browser login is stored and the provider list updates instead of remaining signed out. OAuth-only providers show a Connect flow instead of an API key form, and their models stay hidden until you are signed in.

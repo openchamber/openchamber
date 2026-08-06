@@ -178,6 +178,8 @@ export const ProjectActionsButton = ({
   const [actions, setActions] = React.useState<OpenChamberProjectAction[]>([]);
   const [selectedActionId, setSelectedActionId] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
+  const [devServerDetected, setDevServerDetected] = React.useState<boolean | null>(null);
+  const detectionDirectoryRef = React.useRef<string | null>(null);
   const tabByKeyRef = React.useRef<Record<string, string>>({});
   const urlWatchByRunKeyRef = React.useRef<Record<string, UrlWatchEntry>>({});
   const streamCleanupByRunKeyRef = React.useRef<Record<string, () => void>>({});
@@ -211,6 +213,12 @@ export const ProjectActionsButton = ({
       return;
     }
 
+    const detectedDirectory = normalizeProjectActionDirectory(directory || stableProjectRef?.path || '');
+    if (detectionDirectoryRef.current !== detectedDirectory) {
+      detectionDirectoryRef.current = detectedDirectory;
+      setDevServerDetected(null);
+    }
+
     const requestId = loadRequestIdRef.current + 1;
     loadRequestIdRef.current = requestId;
 
@@ -231,6 +239,16 @@ export const ProjectActionsButton = ({
         }
         return null;
       });
+
+      const scripts = await readPackageJsonScripts(detectedDirectory);
+      if (loadRequestIdRef.current !== requestId) {
+        return;
+      }
+      const devServer = await detectDevServerCommand(detectedDirectory, filtered, scripts);
+      if (loadRequestIdRef.current !== requestId) {
+        return;
+      }
+      setDevServerDetected(devServer !== null);
     } catch {
       if (loadRequestIdRef.current !== requestId) {
         return;
@@ -241,7 +259,7 @@ export const ProjectActionsButton = ({
         setIsLoading(false);
       }
     }
-  }, [stableProjectRef]);
+  }, [directory, stableProjectRef]);
 
   const normalizedDirectory = React.useMemo(() => {
     return normalizeProjectActionDirectory(directory || stableProjectRef?.path || '');
@@ -262,7 +280,7 @@ export const ProjectActionsButton = ({
     autoOpenUrl: true,
   }), [t]);
 
-  const canUseAutoDiscover = !isMobile;
+  const canUseAutoDiscover = !isMobile && devServerDetected === true;
   const displayActions = React.useMemo(
     () => canUseAutoDiscover ? [autoDiscoverAction, ...actions] : actions,
     [actions, autoDiscoverAction, canUseAutoDiscover]
@@ -295,6 +313,9 @@ export const ProjectActionsButton = ({
   }, [loadActions, projectId]);
 
   React.useEffect(() => {
+    if (devServerDetected === null) {
+      return;
+    }
     if (!selectedActionId) {
       return;
     }
@@ -304,7 +325,7 @@ export const ProjectActionsButton = ({
     if (!actions.some((entry) => entry.id === selectedActionId)) {
       setSelectedActionId(null);
     }
-  }, [actions, canUseAutoDiscover, selectedActionId]);
+  }, [actions, canUseAutoDiscover, devServerDetected, selectedActionId]);
 
   React.useEffect(() => {
     const monitorRuns = () => {
@@ -321,7 +342,8 @@ export const ProjectActionsButton = ({
 
         const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: false, tail: '', openInPreview: false };
         urlWatchByRunKeyRef.current[runKey] = watch;
-        const action = displayActions.find((item) => item.id === entry.actionId);
+        const action = displayActions.find((item) => item.id === entry.actionId)
+          ?? (entry.actionId === AUTO_DISCOVER_ACTION_ID ? autoDiscoverAction : undefined);
         const bufferChunks = terminalStore.getBuffer(entry.directory, entry.tabId).chunks;
         if (!action || bufferChunks.length === 0) continue;
 
@@ -368,7 +390,7 @@ export const ProjectActionsButton = ({
     return useTerminalStore.subscribe((state, previousState) => {
       if (state.sessions !== previousState.sessions || state.buffers !== previousState.buffers) monitorRuns();
     });
-  }, [displayActions, openContextPreview, openExternal, projectActionRuns, removeProjectActionRun, setTabPreviewUrl, t, updateProjectActionRunStatus]);
+  }, [autoDiscoverAction, displayActions, openContextPreview, openExternal, projectActionRuns, removeProjectActionRun, setTabPreviewUrl, t, updateProjectActionRunStatus]);
 
   const getOrCreateActionTab = React.useCallback(async (action: OpenChamberProjectAction, options: { revealTerminal?: boolean } = {}) => {
     if (!normalizedDirectory) {
