@@ -447,9 +447,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const sessionDisplayStatus = useSessionDisplayStatus(session.id);
   const statusType = sessionDisplayStatus.type;
   // `reconnecting` (statusUnavailable + preserved busy/retry) is NOT confirmed
-  // active: no spinner. The last-known busy/retry data stays in rawStatus for
-  // when freshness returns, but is not presented as a running turn.
+  // active: no spinner. It is distinct from idle, though — show a static
+  // cloud-off icon so the session is identifiable as needing attention. The
+  // last-known busy/retry data stays in rawStatus for when freshness returns,
+  // but is not presented as a running turn.
   const isStreaming = statusType === 'busy' || statusType === 'retry';
+  const isReconnecting = statusType === 'reconnecting';
   // Read as a boolean, not as the value: the row must not re-render on every
   // tick of the counter it only decides to mount.
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
@@ -684,11 +687,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   }
 
   const pendingPermissionCount = sessionPermissions.length;
-  const showUnreadStatus = !isMovingToWorktree && !isStreaming && needsAttention && !isActive;
-  const showStatusMarker = isStreaming || showUnreadStatus;
-  // Both states are the same static dot; only the color separates "running"
+  const showUnreadStatus = !isMovingToWorktree && !isStreaming && !isReconnecting && needsAttention && !isActive;
+  const showStatusMarker = isStreaming || isReconnecting || showUnreadStatus;
+  // Both dot states are the same static shape; only the color separates "running"
   // from "unread". The elapsed-turn readout on the right carries the motion
   // that a spinner used to, at one repaint per second instead of per frame.
+  // `reconnecting` is distinct from both: a static cloud-off icon (no pulse,
+  // no spinner) signalling the session needs attention without implying a run.
   const statusMarkerLabel = isStreaming
     ? t('sessions.sidebar.session.status.active')
     : t('sessions.sidebar.session.status.unread');
@@ -701,6 +706,16 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       aria-label={statusMarkerLabel}
       title={statusMarkerLabel}
     />
+  );
+  const reconnectingMarkerLabel = t('sessions.sidebar.session.status.reconnecting');
+  const reconnectingMarkerContent = (
+    <span
+      className="inline-flex items-center"
+      title={reconnectingMarkerLabel}
+      aria-label={reconnectingMarkerLabel}
+    >
+      <Icon name="cloud-off" className="h-3 w-3 text-muted-foreground/70" />
+    </span>
   );
   // The settled duration lives exactly as long as the unread marker does, so a
   // session read (or watched) while it finishes never keeps a stale total.
@@ -728,6 +743,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           className="h-3 w-3 animate-spin text-primary"
           aria-label={t('sessions.sidebar.session.status.movingToWorktree')}
         />
+      ) : isReconnecting ? (
+        reconnectingMarkerContent
       ) : showStatusMarker ? statusMarkerContent : showPinnedMarker ? pinnedMarkerContent : null}
     </span>
   ) : null;

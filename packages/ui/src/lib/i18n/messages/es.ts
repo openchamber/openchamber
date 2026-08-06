@@ -536,6 +536,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.permissionRequired": "Permiso requerido",
   "sessions.sidebar.session.status.activeFor": "Activa desde hace {duration}",
   "sessions.sidebar.session.status.lastTurnDuration": "El último turno duró {duration}",
+  "sessions.sidebar.session.status.reconnecting": "Reconectando…",
   "sessions.sidebar.session.subsessions.collapse": "Colapsar subsesiones",
   "sessions.sidebar.session.subsessions.expand": "Expandir subsesiones",
   "sessions.sidebar.dialogs.deleteSession.title": "¿Eliminar sesión?",

@@ -33,10 +33,24 @@ interface AgentGroupDetailProps {
 }
 
 const SessionStatusDot: React.FC<{ sessionId: string }> = ({ sessionId }) => {
+  const { t } = useI18n();
   const displayStatus = useSessionDisplayStatus(sessionId);
-  // `reconnecting` is NOT confirmed active: no animated dot. The ping animation
-  // only runs for fresh busy/retry; preserved busy/retry during unavailability
-  // is shown as idle here (no dot) until freshness returns.
+  // `reconnecting` is NOT confirmed active: no animated amber ping. Instead it
+  // shows a static cloud-off icon so the session is identifiable as needing
+  // attention without implying a running turn. Fresh busy/retry keeps the
+  // ping animation; preserved busy/retry during unavailability does not.
+  if (displayStatus.type === 'reconnecting') {
+    const label = t('sessions.sidebar.session.status.reconnecting');
+    return (
+      <span
+        className="inline-flex flex-shrink-0 items-center"
+        title={label}
+        aria-label={label}
+      >
+        <Icon name="cloud-off" className="h-2 w-2 text-muted-foreground/70" />
+      </span>
+    );
+  }
   if (displayStatus.type !== 'busy' && displayStatus.type !== 'retry') return null;
   const status = displayStatus.rawStatus;
   return (

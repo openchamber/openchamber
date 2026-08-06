@@ -41,6 +41,17 @@ jobs:
         working-directory: packages/web
         run: bun run lint:runtime
 
+      - name: Session status reconciliation tests
+        # UI session-status/freshness regression tests. Run from
+        # packages/ui because bun test resolves paths relative to the
+        # package root. Keeps the scope focused on session-status
+        # snapshot/global status/tray sync, not the full UI test suite.
+        working-directory: packages/ui
+        run: |
+          bun test src/sync/__tests__/session-status-snapshot.test.ts
+          bun test src/sync/global-session-status.test.ts
+          bun test src/hooks/useTraySync.test.ts
+
       - name: Electron Linux packaging unit tests
         working-directory: packages/electron
         run: |

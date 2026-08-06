@@ -536,6 +536,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.permissionRequired': '需要权限',
   'sessions.sidebar.session.status.activeFor': '已活动 {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': '上一轮耗时 {duration}',
+  'sessions.sidebar.session.status.reconnecting': '正在重新连接…',
   'sessions.sidebar.session.subsessions.collapse': '折叠子会话',
   'sessions.sidebar.session.subsessions.expand': '展开子会话',
   'sessions.sidebar.dialogs.deleteSession.title': '删除会话？',

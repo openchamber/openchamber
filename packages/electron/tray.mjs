@@ -34,9 +34,13 @@ const truncate = (value, max) => {
 
 // Which status icon key a session maps to. 'blank' (a transparent image)
 // reserves the same left gutter for idle rows so every row aligns.
-// 'reconnecting' (statusUnavailable + preserved busy/retry) falls back to the
-// blank icon: the row is present but not confirmed active, so it should not
-// show a busy/retry spinner. A dedicated reconnecting icon can be added later.
+// 'reconnecting' (statusUnavailable + preserved busy/retry) intentionally falls
+// back to the blank icon for per-session tray rows: no dedicated native
+// template icon is added for it, so the row renders blank (not confirmed
+// active, so no busy/retry spinner). The aggregate tray tooltip still surfaces
+// the reconnecting count ("N reconnecting") so users can see sessions needing
+// attention at a glance. This is an intentional native-tray limitation — a
+// dedicated reconnecting tray icon is not added here.
 const statusIconKey = (session) => {
   if (session.status === 'busy') return 'busy';
   if (session.status === 'retry') return 'retry';

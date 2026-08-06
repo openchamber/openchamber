@@ -536,6 +536,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.permissionRequired": "Потрібен дозвіл",
   "sessions.sidebar.session.status.activeFor": "Активна вже {duration}",
   "sessions.sidebar.session.status.lastTurnDuration": "Останній хід тривав {duration}",
+  "sessions.sidebar.session.status.reconnecting": "Повторне підключення…",
   "sessions.sidebar.session.subsessions.collapse": "Згорнути підсесії",
   "sessions.sidebar.session.subsessions.expand": "Розгорнути підсесії",
   "sessions.sidebar.dialogs.deleteSession.title": "Видалити сесія?",

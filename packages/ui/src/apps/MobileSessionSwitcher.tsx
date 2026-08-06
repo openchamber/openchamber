@@ -4,6 +4,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { useSwitcherItems } from '@/components/session/sidebar/hooks/useSwitcherItems';
+import { Icon } from '@/components/icon/Icon';
 import { useTabletLayout } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -35,9 +36,12 @@ const SwitcherRow: React.FC<{
   const unseenCount = useSessionUnseenCount(session.id);
   const statusType = displayStatus.type;
   // `reconnecting` (statusUnavailable + preserved busy/retry) is NOT confirmed
-  // active: no spinner/dot. Last-known data is preserved for when freshness returns.
+  // active: no spinner/dot. It is distinct from idle, though — show a static
+  // cloud-off icon so the session is identifiable as needing attention. Last-
+  // known data is preserved for when freshness returns.
   const isStreaming = statusType === 'busy' || statusType === 'retry';
-  const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
+  const isReconnecting = statusType === 'reconnecting';
+  const showUnreadDot = !isStreaming && !isReconnecting && unseenCount > 0 && !active;
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
   const timeLabel = formatSessionCompactDateLabel(session.time?.updated ?? session.time?.created ?? 0);
@@ -61,14 +65,22 @@ const SwitcherRow: React.FC<{
         ) : null}
       </span>
       {/* Activity sits on the right, before the time — no reserved left gutter. */}
-      {isStreaming || showUnreadDot ? (
-        <span
-          className={cn(
-            'size-1.5 shrink-0 rounded-full',
-            isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-          )}
-          aria-hidden
-        />
+      {isStreaming || showUnreadDot || isReconnecting ? (
+        isReconnecting ? (
+          <Icon
+            name="cloud-off"
+            className="size-3.5 shrink-0 text-muted-foreground/70"
+            aria-hidden
+          />
+        ) : (
+          <span
+            className={cn(
+              'size-1.5 shrink-0 rounded-full',
+              isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
+            )}
+            aria-hidden
+          />
+        )
       ) : null}
       {/* The elapsed turn takes the time slot while it matters, then hands it
           back to the relative timestamp. */}

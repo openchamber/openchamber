@@ -474,12 +474,15 @@ const SessionRow: React.FC<{
   // Live indicators, same conventions as the desktop sidebar: busy/retry →
   // spinner; unseen activity on a non-active row → attention dot. When the
   // global status index is unavailable, preserved busy/retry is presented as
-  // reconnecting (no spinner) — not as confirmed active and not as idle.
+  // reconnecting — a static cloud-off icon (no spinner, no pulse) so the row
+  // is identifiable as needing attention without implying a running turn. It is
+  // not confirmed active and not a normal idle session.
   const liveDisplayStatus = useSessionDisplayStatus(session.id);
   const unseenCount = useSessionUnseenCount(session.id);
   const statusType = liveDisplayStatus.type;
   const isStreaming = statusType === 'busy' || statusType === 'retry';
-  const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
+  const isReconnecting = statusType === 'reconnecting';
+  const showUnreadDot = !isStreaming && !isReconnecting && unseenCount > 0 && !active;
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
 
@@ -608,7 +611,7 @@ const SessionRow: React.FC<{
         {/* Left gutter slot: live activity indicator takes priority over the
             subsession chevron — same position, so rows never shift. When the
             row has children the slot still toggles them either way. */}
-        {isStreaming || showUnreadDot || (hasChildren && onToggleChildren) ? (
+        {isStreaming || showUnreadDot || isReconnecting || (hasChildren && onToggleChildren) ? (
           <button
             type="button"
             className="absolute z-10 flex w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -622,7 +625,9 @@ const SessionRow: React.FC<{
               onToggleChildren?.();
             }}
           >
-            {isStreaming || showUnreadDot ? (
+            {isReconnecting ? (
+              <Icon name="cloud-off" className="size-4 text-muted-foreground/70" aria-hidden />
+            ) : isStreaming || showUnreadDot ? (
               <span
                 className={cn(
                   'size-1.5 rounded-full',

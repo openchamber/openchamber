@@ -200,9 +200,12 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
   const needsAttention = unseenCount > 0 && (!isSubtask || notifyOnSubtasks);
   const statusType = sessionDisplayStatus.type;
   // `reconnecting` (statusUnavailable + preserved busy/retry) is NOT confirmed
-  // active: no busy pulse dot. Last-known data is preserved for freshness return.
+  // active: no busy pulse dot. It is distinct from idle, though — render a
+  // static cloud-off icon so the session is identifiable as needing attention.
+  // Last-known data is preserved for freshness return.
   const isStreaming = statusType === 'busy' || statusType === 'retry';
-  const showUnreadDot = !isStreaming && needsAttention && !isActive;
+  const isReconnecting = statusType === 'reconnecting';
+  const showUnreadDot = !isStreaming && !isReconnecting && needsAttention && !isActive;
 
   const timestamp = session.time?.updated || session.time?.created || Date.now();
   const timeLabel = formatSessionCompactDateLabel(timestamp);
@@ -292,9 +295,17 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
         ) : null}
       </div>
 
-      {isStreaming || showUnreadDot ? (
+      {isStreaming || showUnreadDot || isReconnecting ? (
         <span className="flex h-3 w-3 flex-shrink-0 items-center justify-center self-center">
-          {isStreaming ? (
+          {isReconnecting ? (
+            <span
+              className="inline-flex items-center"
+              aria-label={t('sessions.sidebar.session.status.reconnecting')}
+              title={t('sessions.sidebar.session.status.reconnecting')}
+            >
+              <Icon name="cloud-off" className="h-3 w-3 text-muted-foreground/70" />
+            </span>
+          ) : isStreaming ? (
             <span
               className="h-1.5 w-1.5 rounded-full bg-primary animate-busy-pulse"
               aria-label={t('sessions.sidebar.session.status.active')}
