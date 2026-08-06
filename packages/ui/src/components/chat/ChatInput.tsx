@@ -937,6 +937,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, []);
 
     const handleSubmit = async (options?: SubmitOptions) => {
+        const currentSessionDirectory = currentSessionId
+            ? useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory
+            : currentDirectory;
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
         const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
@@ -1012,7 +1015,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const sendMessageOptions = delivery ? { delivery } : undefined;
+        const sessionOption = currentSessionId
+            ? { sessionId: currentSessionId, directory: currentSessionDirectory }
+            : { directory: currentSessionDirectory };
+        const deliveryOption = delivery ? { delivery } : {};
+        const sendMessageOptions = currentSessionId || delivery || currentSessionDirectory
+            ? { ...sessionOption, ...deliveryOption }
+            : undefined;
 
         // Inline review comments and synthetic context are consumed before
         // assembly so a failed send can restore exactly what it took.
@@ -1149,9 +1158,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const currentSessionDirectory = currentSessionId
-            ? useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory
-            : currentDirectory;
         const shouldAddResponseStyle = newSessionDraftOpen || (currentSessionId ? !hasUserMessages(currentSessionId, currentSessionDirectory) : false);
         if (shouldAddResponseStyle) {
             const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
