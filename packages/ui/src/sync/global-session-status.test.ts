@@ -104,9 +104,8 @@ describe("global session status index", () => {
 // every directory stale; each directory is freshened individually by its next
 // successful authoritative snapshot.
 describe("directory-scoped unavailability preserves status data", () => {
-  test("initial state is fresh (no unavailable directories, transport flag false)", () => {
+  test("initial state is fresh (no unavailable directories)", () => {
     const state = useGlobalSessionStatusStore.getState()
-    expect(state.transportUnavailable).toBe(false)
     expect(state.unavailableDirectories.size).toBe(0)
   })
 
@@ -122,23 +121,50 @@ describe("directory-scoped unavailability preserves status data", () => {
     // Status data preserved, not destroyed; only /repo marked unavailable.
     expect(useGlobalSessionStatusStore.getState().statusById.get("session-a")?.status.type).toBe("busy")
     expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/repo")).toBe(true)
-    expect(useGlobalSessionStatusStore.getState().transportUnavailable).toBe(false)
     // A different directory is NOT marked unavailable by a /repo failure.
     expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/other")).toBe(false)
   })
 
-  test("markTransportStatusUnavailable sets the transport-wide flag without touching the per-directory set", () => {
+  test("markTransportStatusUnavailable adds every known directory to unavailableDirectories", () => {
+    // With no active statusById entries and no knownDirectories, nothing is
+    // added. The transport-wide flag is now modelled as the per-directory set
+    // containing every known directory, NOT as a separate boolean.
     markTransportStatusUnavailable()
-    expect(useGlobalSessionStatusStore.getState().transportUnavailable).toBe(true)
-    // Transport flag is independent of the per-directory set.
     expect(useGlobalSessionStatusStore.getState().unavailableDirectories.size).toBe(0)
+
+    applyGlobalSessionStatusEvent("/repo-a", {
+      type: "session.status",
+      properties: { sessionID: "session-a", status: { type: "busy" } },
+    } as Event)
+    applyGlobalSessionStatusEvent("/repo-b", {
+      type: "session.status",
+      properties: { sessionID: "session-b", status: { type: "busy" } },
+    } as Event)
+
+    markTransportStatusUnavailable()
+    // Every directory that has a statusById entry is now unavailable.
+    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/repo-a")).toBe(true)
+    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/repo-b")).toBe(true)
+    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.size).toBe(2)
+  })
+
+  test("markTransportStatusUnavailable accepts knownDirectories for idle-only directories", () => {
+    // A directory with only idle sessions has no statusById entry; pass it via
+    // knownDirectories so its freshness can still be determined.
+    markTransportStatusUnavailable(["/repo-idle"])
+    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/repo-idle")).toBe(true)
   })
 
   test("markTransportStatusUnavailable is idempotent", () => {
+    applyGlobalSessionStatusEvent("/repo", {
+      type: "session.status",
+      properties: { sessionID: "session-a", status: { type: "busy" } },
+    } as Event)
     markTransportStatusUnavailable()
     markTransportStatusUnavailable()
     markTransportStatusUnavailable()
-    expect(useGlobalSessionStatusStore.getState().transportUnavailable).toBe(true)
+    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/repo")).toBe(true)
+    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.size).toBe(1)
   })
 
   test("markDirectoryStatusUnavailable is idempotent for the same directory", () => {
@@ -227,25 +253,33 @@ describe("directory-scoped unavailability preserves status data", () => {
     expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/repo-a")).toBe(true)
   })
 
-  test("a successful snapshot clears the transport-wide flag (first snapshot after a transport event)", () => {
+  test("transport-wide marks all known directories; a successful snapshot clears only that directory", () => {
+    // After a transport-wide event, every known directory is in
+    // unavailableDirectories. A successful snapshot for one directory clears
+    // only that directory; the others remain unavailable until their own
+    // snapshots arrive.
+    applyGlobalSessionStatusSnapshot("/repo-a", { "session-a": { type: "busy" } }, ["session-a"])
+    applyGlobalSessionStatusSnapshot("/repo-b", { "session-b": { type: "busy" } }, ["session-b"])
+
     markTransportStatusUnavailable()
-    expect(useGlobalSessionStatusStore.getState().transportUnavailable).toBe(true)
+    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/repo-a")).toBe(true)
+    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/repo-b")).toBe(true)
 
-    // The first successful snapshot after a transport-wide event re-enables
-    // event updates and clears the transport flag.
-    applyGlobalSessionStatusSnapshot("/repo", { "session-a": { type: "busy" } }, ["session-a"])
+    // /repo-a's reconnect succeeds first.
+    applyGlobalSessionStatusSnapshot("/repo-a", { "session-a": { type: "busy" } }, ["session-a"])
 
-    expect(useGlobalSessionStatusStore.getState().transportUnavailable).toBe(false)
-    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/repo")).toBe(false)
+    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/repo-a")).toBe(false)
+    // /repo-b stays unavailable — A's success does not freshen B.
+    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/repo-b")).toBe(true)
   })
 
-  test("resetGlobalSessionStatus clears data, blocks events, and clears both unavailableDirectories and transportUnavailable (real runtime replacement)", () => {
+  test("resetGlobalSessionStatus clears data, blocks events, and clears unavailableDirectories (real runtime replacement)", () => {
     applyGlobalSessionStatusEvent("/repo", {
       type: "session.status",
       properties: { sessionID: "session-a", status: { type: "busy" } },
     } as Event)
     markDirectoryStatusUnavailable("/repo")
-    markTransportStatusUnavailable()
+    markTransportStatusUnavailable(["/repo"])
 
     // Real runtime replacement: destroy stale data, block events, clean reset.
     resetGlobalSessionStatus({ blockEventUpdates: true })
@@ -253,7 +287,6 @@ describe("directory-scoped unavailability preserves status data", () => {
     expect(useGlobalSessionStatusStore.getState().statusById.has("session-a")).toBe(false)
     expect(useGlobalSessionStatusStore.getState().acceptEventUpdates).toBe(false)
     expect(useGlobalSessionStatusStore.getState().unavailableDirectories.size).toBe(0)
-    expect(useGlobalSessionStatusStore.getState().transportUnavailable).toBe(false)
   })
 
   test("events are still applied while a directory is unavailable (flag is freshness, not a gate)", () => {
@@ -288,11 +321,11 @@ describe("isSessionStatusFresh (directory-scoped freshness)", () => {
       type: "session.status",
       properties: { sessionID: "session-a", status: { type: "busy" } },
     } as Event)
-    expect(isSessionStatusFresh("session-a")).toBe(true)
+    expect(isSessionStatusFresh("session-a", "/repo")).toBe(true)
   })
 
-  test("returns true for an unknown session (no preserved data → nothing stale)", () => {
-    expect(isSessionStatusFresh("never-seen")).toBe(true)
+  test("returns true for an unknown session in a fresh directory (no preserved data → nothing stale)", () => {
+    expect(isSessionStatusFresh("never-seen", "/repo")).toBe(true)
   })
 
   test("returns false when the session's directory is in unavailableDirectories", () => {
@@ -301,19 +334,36 @@ describe("isSessionStatusFresh (directory-scoped freshness)", () => {
       properties: { sessionID: "session-a", status: { type: "busy" } },
     } as Event)
     markDirectoryStatusUnavailable("/repo")
-    expect(isSessionStatusFresh("session-a")).toBe(false)
+    expect(isSessionStatusFresh("session-a", "/repo")).toBe(false)
   })
 
-  test("returns false when transportUnavailable is true, even for a directory not in the per-directory set", () => {
-    applyGlobalSessionStatusEvent("/repo", {
+  test("returns false when the directory is unavailable even with no statusById entry (key fix for #2421)", () => {
+    // A session with no active-status entry whose directory is unavailable
+    // must NOT be treated as fresh. This is the key fix: the unavailable
+    // flag gates control decisions regardless of whether preserved busy/retry
+    // data exists. `statusById` stores only busy/retry; absence means "last
+    // known was idle", NOT "definitely idle right now while unavailable".
+    markDirectoryStatusUnavailable("/repo")
+    expect(isSessionStatusFresh("session-a", "/repo")).toBe(false)
+  })
+
+  test("returns true when the directory is not in unavailableDirectories (fresh), even with no statusById entry", () => {
+    expect(isSessionStatusFresh("never-seen", "/repo")).toBe(true)
+  })
+
+  test("returns false for every known directory after a transport-wide event", () => {
+    applyGlobalSessionStatusEvent("/repo-a", {
       type: "session.status",
       properties: { sessionID: "session-a", status: { type: "busy" } },
     } as Event)
+    applyGlobalSessionStatusEvent("/repo-b", {
+      type: "session.status",
+      properties: { sessionID: "session-b", status: { type: "busy" } },
+    } as Event)
     markTransportStatusUnavailable()
-    // /repo is not in unavailableDirectories, but the transport flag makes
-    // every directory stale.
-    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has("/repo")).toBe(false)
-    expect(isSessionStatusFresh("session-a")).toBe(false)
+    // Both directories are in unavailableDirectories, so both sessions are stale.
+    expect(isSessionStatusFresh("session-a", "/repo-a")).toBe(false)
+    expect(isSessionStatusFresh("session-b", "/repo-b")).toBe(false)
   })
 
   test("a failed fetch for /repo-a does not make a /repo-b session stale (directory scoping)", () => {
@@ -328,9 +378,9 @@ describe("isSessionStatusFresh (directory-scoped freshness)", () => {
 
     markDirectoryStatusUnavailable("/repo-a")
 
-    expect(isSessionStatusFresh("session-a")).toBe(false)
+    expect(isSessionStatusFresh("session-a", "/repo-a")).toBe(false)
     // /repo-b's session is unaffected by /repo-a's failure.
-    expect(isSessionStatusFresh("session-b")).toBe(true)
+    expect(isSessionStatusFresh("session-b", "/repo-b")).toBe(true)
   })
 
   test("freshness is restored for a directory by its own successful snapshot", () => {
@@ -339,19 +389,47 @@ describe("isSessionStatusFresh (directory-scoped freshness)", () => {
       properties: { sessionID: "session-a", status: { type: "busy" } },
     } as Event)
     markDirectoryStatusUnavailable("/repo")
-    expect(isSessionStatusFresh("session-a")).toBe(false)
+    expect(isSessionStatusFresh("session-a", "/repo")).toBe(false)
 
     applyGlobalSessionStatusSnapshot("/repo", { "session-a": { type: "busy" } }, ["session-a"])
-    expect(isSessionStatusFresh("session-a")).toBe(true)
+    expect(isSessionStatusFresh("session-a", "/repo")).toBe(true)
+  })
+
+  test("after a transport-wide event, each directory is freshened independently by its own snapshot", () => {
+    applyGlobalSessionStatusEvent("/repo-a", {
+      type: "session.status",
+      properties: { sessionID: "session-a", status: { type: "busy" } },
+    } as Event)
+    applyGlobalSessionStatusEvent("/repo-b", {
+      type: "session.status",
+      properties: { sessionID: "session-b", status: { type: "busy" } },
+    } as Event)
+    markTransportStatusUnavailable()
+    expect(isSessionStatusFresh("session-a", "/repo-a")).toBe(false)
+    expect(isSessionStatusFresh("session-b", "/repo-b")).toBe(false)
+
+    // /repo-a's snapshot arrives and freshens only /repo-a.
+    applyGlobalSessionStatusSnapshot("/repo-a", { "session-a": { type: "busy" } }, ["session-a"])
+    expect(isSessionStatusFresh("session-a", "/repo-a")).toBe(true)
+    // /repo-b stays stale until its own snapshot arrives.
+    expect(isSessionStatusFresh("session-b", "/repo-b")).toBe(false)
+
+    applyGlobalSessionStatusSnapshot("/repo-b", { "session-b": { type: "busy" } }, ["session-b"])
+    expect(isSessionStatusFresh("session-b", "/repo-b")).toBe(true)
   })
 })
 
-// Control-path regression: `useSessionKnownInactive(sessionId)` is a pure
-// selector over the same store state used by `isSessionStatusFresh` and the
-// raw status entry. It is the gate for operations that require the session to
-// be DEFINITELY inactive (e.g. move-to-worktree). `reconnecting` means
+// Control-path regression: `useSessionKnownInactive(sessionId, directory)` is
+// a pure selector over the same store state used by `isSessionStatusFresh` and
+// the raw status entry. It is the gate for operations that require the session
+// to be DEFINITELY inactive (e.g. move-to-worktree). `reconnecting` means
 // "last known = busy/retry, current truth = unknown" — it must NOT be treated
 // as inactive, so the operation fails closed while status is unavailable.
+//
+// The `directory` parameter is required: a session with no active-status entry
+// whose directory is unavailable must fail closed, because absence in
+// `statusById` means "last known was idle", NOT "definitely idle right now
+// while the directory is unavailable".
 //
 // The hook renders in React, but its logic is a pure function of store state,
 // so we exercise the same selector directly to avoid a React test harness.
@@ -360,13 +438,10 @@ describe("useSessionKnownInactive selector logic (control path)", () => {
   // `status.type === "error"` branch is defensive (the SDK's SessionStatus type
   // is currently idle/busy/retry); the cast preserves the hook's runtime
   // semantics without tripping TS's no-overlap narrowing.
-  const knownInactive = (sessionId: string): boolean => {
+  const knownInactive = (sessionId: string, directory: string): boolean => {
     const state = useGlobalSessionStatusStore.getState()
-    const fresh = !state.transportUnavailable && (() => {
-      const entry = state.statusById.get(sessionId)
-      if (!entry) return true
-      return !state.unavailableDirectories.has(entry.directory)
-    })()
+    if (!directory) return true
+    const fresh = !state.unavailableDirectories.has(directory)
     if (!fresh) return false
     const status = state.statusById.get(sessionId)?.status
     return !status || status.type === "idle" || (status.type as string) === "error"
@@ -377,23 +452,23 @@ describe("useSessionKnownInactive selector logic (control path)", () => {
       type: "session.status",
       properties: { sessionID: "session-a", status: { type: "busy" } },
     } as Event)
-    expect(knownInactive("session-a")).toBe(false)
+    expect(knownInactive("session-a", "/repo")).toBe(false)
   })
 
   test("fresh + retry → false (operation blocked)", () => {
     applyGlobalSessionStatusSnapshot("/repo", {
       "session-a": { type: "retry", attempt: 1, message: "x", next: 5 },
     } as Record<string, { type?: string }>, ["session-a"])
-    expect(knownInactive("session-a")).toBe(false)
+    expect(knownInactive("session-a", "/repo")).toBe(false)
   })
 
   test("fresh + idle → true (operation allowed)", () => {
     applyGlobalSessionStatusSnapshot("/repo", { "session-a": { type: "idle" } }, ["session-a"])
-    expect(knownInactive("session-a")).toBe(true)
+    expect(knownInactive("session-a", "/repo")).toBe(true)
   })
 
   test("fresh + no status (unknown) → true (operation allowed)", () => {
-    expect(knownInactive("never-seen")).toBe(true)
+    expect(knownInactive("never-seen", "/repo")).toBe(true)
   })
 
   test("unavailable + last known busy → false (blocked — the key fix for #2421)", () => {
@@ -403,19 +478,19 @@ describe("useSessionKnownInactive selector logic (control path)", () => {
     } as Event)
     markDirectoryStatusUnavailable("/repo")
     // The session looks "reconnecting" — current truth unknown, NOT inactive.
-    expect(knownInactive("session-a")).toBe(false)
+    expect(knownInactive("session-a", "/repo")).toBe(false)
   })
 
-  test("unavailable + no preserved status → true (no data to be stale; treated as fresh idle)", () => {
-    // A session with no preserved busy/retry entry has nothing to be stale, so
-    // `isSessionStatusFresh` returns true regardless of directory unavailability
-    // (the flag only matters when preserved data exists). With fresh=true and
-    // no status, the selector treats it as idle → allowed. This matches the
-    // implementation contract: the unavailable flag gates *preserved* data, it
-    // does not invent unknown-idle-blocking for sessions we never saw active.
+  test("unavailable + no active status entry → false (blocked — key fix for #2421)", () => {
+    // A session with no active-status entry whose directory is unavailable
+    // must fail closed. `statusById` stores only busy/retry; absence means
+    // "last known was idle", NOT "definitely idle right now while the
+    // directory is unavailable". The unavailable flag is a freshness signal
+    // over the directory, independent of whether preserved busy/retry data
+    // exists, so control decisions fail closed.
     markDirectoryStatusUnavailable("/repo")
-    expect(isSessionStatusFresh("session-a")).toBe(true)
-    expect(knownInactive("session-a")).toBe(true)
+    expect(isSessionStatusFresh("session-a", "/repo")).toBe(false)
+    expect(knownInactive("session-a", "/repo")).toBe(false)
   })
 
   test("transport-wide unavailable + last known busy → false (blocked)", () => {
@@ -424,7 +499,14 @@ describe("useSessionKnownInactive selector logic (control path)", () => {
       properties: { sessionID: "session-a", status: { type: "busy" } },
     } as Event)
     markTransportStatusUnavailable()
-    expect(knownInactive("session-a")).toBe(false)
+    expect(knownInactive("session-a", "/repo")).toBe(false)
+  })
+
+  test("transport-wide unavailable + no active status entry → false (blocked)", () => {
+    // After a transport-wide event, the directory is in unavailableDirectories
+    // even for sessions with no statusById entry.
+    markTransportStatusUnavailable(["/repo"])
+    expect(knownInactive("session-a", "/repo")).toBe(false)
   })
 
   test("successful authoritative empty/idle snapshot → true (allowed)", () => {
@@ -436,7 +518,7 @@ describe("useSessionKnownInactive selector logic (control path)", () => {
 
     // Reconnect: authoritative empty snapshot confirms idle.
     applyGlobalSessionStatusSnapshot("/repo", {}, ["session-a"])
-    expect(knownInactive("session-a")).toBe(true)
+    expect(knownInactive("session-a", "/repo")).toBe(true)
   })
 
   test("successful authoritative busy snapshot → false (blocked)", () => {
@@ -448,7 +530,7 @@ describe("useSessionKnownInactive selector logic (control path)", () => {
 
     // Reconnect: authoritative busy snapshot confirms still active.
     applyGlobalSessionStatusSnapshot("/repo", { "session-a": { type: "busy" } }, ["session-a"])
-    expect(knownInactive("session-a")).toBe(false)
+    expect(knownInactive("session-a", "/repo")).toBe(false)
   })
 
   test("a failed fetch for /repo-a does not unblock a /repo-b idle session (directory scoping)", () => {
@@ -458,9 +540,9 @@ describe("useSessionKnownInactive selector logic (control path)", () => {
     markDirectoryStatusUnavailable("/repo-a")
 
     // /repo-a's session is blocked (unavailable + busy).
-    expect(knownInactive("session-a")).toBe(false)
+    expect(knownInactive("session-a", "/repo-a")).toBe(false)
     // /repo-b's session is fresh + idle → allowed. A failure in another
     // directory must not block this directory's confirmed-idle session.
-    expect(knownInactive("session-b")).toBe(true)
+    expect(knownInactive("session-b", "/repo-b")).toBe(true)
   })
 })

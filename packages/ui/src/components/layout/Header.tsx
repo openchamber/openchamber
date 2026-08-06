@@ -1431,7 +1431,7 @@ export const Header: React.FC<HeaderProps> = ({
   // "current truth = unknown", NOT inactive — the operation must fail closed.
   // Presentation status (useSessionDisplayStatus) drives the spinner only;
   // this control predicate is separate and stricter.
-  const isCurrentSessionKnownInactive = useSessionKnownInactive(currentSessionId ?? '');
+  const isCurrentSessionKnownInactive = useSessionKnownInactive(currentSessionId ?? '', sessionDirectory || '');
   const isCurrentSessionActive = !isCurrentSessionKnownInactive;
   const moveCurrentSessionToWorktree = React.useCallback(() => {
     if (!currentSessionId || !sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree) return;

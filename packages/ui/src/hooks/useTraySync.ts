@@ -414,8 +414,9 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
     // confirmed running — neither a busy spinner nor idle. Freshness is
     // directory-scoped: a failed fetch for one directory does not make
     // another directory's status appear as reconnecting.
-    const unavailable = globalStatusState.transportUnavailable
-      || (globalEntry ? globalStatusState.unavailableDirectories.has(globalEntry.directory) : false);
+    const unavailable = globalEntry
+      ? globalStatusState.unavailableDirectories.has(globalEntry.directory)
+      : false;
     if (unavailable && (raw === 'busy' || raw === 'retry')) {
       return 'reconnecting';
     }

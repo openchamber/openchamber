@@ -36,27 +36,21 @@ type GlobalSessionStatusState = {
    * successful snapshot for `/repo-b` cannot make `/repo-a`'s preserved
    * busy/retry entries appear fresh again.
    *
+   * A transport-wide disconnect or transport switch populates this set with
+   * every currently known directory (from `statusById` entries). Each
+   * directory's freshness is then restored independently when its own next
+   * successful authoritative snapshot arrives — a successful snapshot for
+   * one directory does NOT implicitly freshen another.
+   *
    * Uses the same normalized directory keys as `statusById` entries.
    */
   unavailableDirectories: Set<string>;
-  /**
-   * True when a transport-wide disconnect or transport switch affects every
-   * directory at once (SSE drop, relay interruption). This is distinct from
-   * a per-directory fetch failure: a transport disconnect marks all
-   * directories stale deterministically, while a single failed poll marks
-   * only that directory. A successful snapshot for any directory clears
-   * that directory from `unavailableDirectories`; `transportUnavailable`
-   * is cleared by the first successful snapshot after a transport-wide
-   * event, and `resetGlobalSessionStatus` clears both.
-   */
-  transportUnavailable: boolean;
 };
 
 export const useGlobalSessionStatusStore = create<GlobalSessionStatusState>(() => ({
   statusById: new Map(),
   acceptEventUpdates: true,
   unavailableDirectories: new Set(),
-  transportUnavailable: false,
 }));
 
 /**
@@ -71,7 +65,6 @@ export const resetGlobalSessionStatus = (options?: { blockEventUpdates?: boolean
     statusById: new Map(),
     acceptEventUpdates: options?.blockEventUpdates !== true,
     unavailableDirectories: new Set(),
-    transportUnavailable: false,
   });
 };
 
@@ -99,13 +92,17 @@ const normalizeDirectory = (directory: string): string =>
  * Check whether a session's status data is currently fresh (not unavailable).
  * Freshness is determined from the session's own directory: a failed fetch for
  * `/repo-a` does not make `/repo-b`'s status stale.
+ *
+ * The `directory` parameter is required because `statusById` intentionally
+ * stores only busy/retry entries — absence means "last known was idle", NOT
+ * "definitely idle right now while the directory is unavailable". A session
+ * with no active-status entry whose directory is unavailable must NOT be
+ * treated as fresh for control decisions.
  */
-export const isSessionStatusFresh = (sessionId: string): boolean => {
+export const isSessionStatusFresh = (sessionId: string, directory: string): boolean => {
   const state = useGlobalSessionStatusStore.getState();
-  if (state.transportUnavailable) return false;
-  const entry = state.statusById.get(sessionId);
-  if (!entry) return true; // no preserved data → nothing to be stale
-  return !state.unavailableDirectories.has(entry.directory);
+  const normalized = normalizeDirectory(directory);
+  return !state.unavailableDirectories.has(normalized);
 };
 
 const setStatus = (sessionId: string, directory: string, status: SessionStatus | { type: 'idle' }): void => {
@@ -234,11 +231,11 @@ export const applyGlobalSessionStatusSnapshot = (
     // directory's freshness is cleared — a concurrent failure in another
     // directory must not be freshened by this snapshot.
     if (!state.acceptEventUpdates) changed = true;
-    if (state.unavailableDirectories.has(directory) || state.transportUnavailable) changed = true;
+    if (state.unavailableDirectories.has(directory)) changed = true;
     const nextUnavailable = new Set(state.unavailableDirectories);
     nextUnavailable.delete(directory);
     return changed
-      ? { statusById: next, acceptEventUpdates: true, unavailableDirectories: nextUnavailable, transportUnavailable: false }
+      ? { statusById: next, acceptEventUpdates: true, unavailableDirectories: nextUnavailable }
       : state;
   });
 };
@@ -271,14 +268,38 @@ export const markDirectoryStatusUnavailable = (rawDirectory: string): void => {
 };
 
 /**
- * Mark every directory as temporarily unavailable after a transport-wide
- * disconnect or transport switch. This is distinct from a per-directory fetch
- * failure: a transport disconnect affects all directories deterministically.
- * Each directory's freshness is restored individually when its next
- * successful authoritative snapshot arrives.
+ * Mark every currently known directory as temporarily unavailable after a
+ * transport-wide disconnect or transport switch. This is distinct from a
+ * per-directory fetch failure: a transport disconnect affects all
+ * directories deterministically.
+ *
+ * Populates `unavailableDirectories` with every directory that has an entry in
+ * `statusById`, so each directory's freshness is restored independently when
+ * its own next successful authoritative snapshot arrives — a successful
+ * snapshot for one directory does NOT implicitly freshen another.
+ *
+ * `knownDirectories` may be passed to include directories that have no active
+ * `statusById` entry (e.g. directories with only idle sessions). This ensures
+ * freshness can be determined even for idle sessions whose directory is
+ * unavailable.
  */
-export const markTransportStatusUnavailable = (): void => {
-  useGlobalSessionStatusStore.setState((state) => (
-    state.transportUnavailable ? state : { transportUnavailable: true }
-  ));
+export const markTransportStatusUnavailable = (knownDirectories?: Iterable<string>): void => {
+  useGlobalSessionStatusStore.setState((state) => {
+    const next = new Set(state.unavailableDirectories);
+    for (const entry of state.statusById.values()) {
+      next.add(entry.directory);
+    }
+    if (knownDirectories) {
+      for (const dir of knownDirectories) {
+        next.add(normalizeDirectory(dir));
+      }
+    }
+    if (next.size === state.unavailableDirectories.size) {
+      // Check if contents are identical
+      let same = true;
+      for (const d of next) { if (!state.unavailableDirectories.has(d)) { same = false; break; } }
+      if (same) return state;
+    }
+    return { unavailableDirectories: next };
+  });
 };

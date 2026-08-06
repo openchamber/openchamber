@@ -217,17 +217,21 @@ export function useGlobalSessionStatus(sessionId: string): SessionStatus | undef
  * Read whether a specific session's status data is currently fresh (not
  * unavailable). Freshness is determined from the session's own directory:
  * a failed fetch for `/repo-a` does not make `/repo-b`'s status stale.
- * A transport-wide disconnect or transport switch marks all directories
+ * A transport-wide disconnect or transport switch marks all known directories
  * unavailable; a per-directory fetch failure marks only that directory.
+ *
+ * The `directory` parameter is required because `statusById` intentionally
+ * stores only busy/retry entries — absence means "last known was idle", NOT
+ * "definitely idle right now while the directory is unavailable". A session
+ * with no active-status entry whose directory is unavailable must NOT be
+ * treated as fresh for control decisions.
  */
-export function useSessionStatusFresh(sessionId: string): boolean {
+export function useSessionStatusFresh(sessionId: string, directory: string): boolean {
   return useGlobalSessionStatusStore(
     useCallback((state) => {
-      if (state.transportUnavailable) return false;
-      const entry = state.statusById.get(sessionId);
-      if (!entry) return true;
-      return !state.unavailableDirectories.has(entry.directory);
-    }, [sessionId]),
+      if (!directory) return true;
+      return !state.unavailableDirectories.has(directory);
+    }, [directory]),
   )
 }
 
@@ -256,9 +260,20 @@ export type SessionDisplayStatus = {
   rawStatus: SessionStatus | undefined;
 };
 
-export function useSessionDisplayStatus(sessionId: string): SessionDisplayStatus {
+export function useSessionDisplayStatus(sessionId: string, directory?: string): SessionDisplayStatus {
   const status = useGlobalSessionStatus(sessionId);
-  const fresh = useSessionStatusFresh(sessionId);
+  const entryDirectory = useGlobalSessionStatusStore(
+    useCallback((state) => state.statusById.get(sessionId)?.directory, [sessionId]),
+  );
+  // Resolve the directory: prefer the explicit parameter (callers that know
+  // it), then fall back to the status entry's own directory (for sessions with
+  // preserved busy/retry data). If neither is available, the session has no
+  // known status and no known directory — treat it as fresh idle.
+  const dir = directory ?? entryDirectory ?? '';
+  // Always call the hook unconditionally (rules-of-hooks). When dir is empty,
+  // the selector returns true (fresh) since an empty directory can't be in the
+  // unavailable set.
+  const fresh = useSessionStatusFresh(sessionId, dir);
   if (!fresh && status && (status.type === 'busy' || status.type === 'retry')) {
     return { type: 'reconnecting', rawStatus: status };
   }
@@ -273,14 +288,19 @@ export function useSessionDisplayStatus(sessionId: string): SessionDisplayStatus
  * inactive (e.g. move-to-worktree) must fail closed while status is
  * unavailable.
  *
+ * The `directory` parameter is required because `statusById` intentionally
+ * stores only busy/retry entries — absence means "last known was idle", NOT
+ * "definitely idle right now while the directory is unavailable". A session
+ * with no active-status entry whose directory is unavailable must fail closed.
+ *
  * - `fresh + idle` → `true` (confirmed inactive, operation allowed)
  * - `fresh + busy/retry` → `false` (confirmed active, operation blocked)
  * - `unavailable + last known busy/retry` → `false` (unknown, operation blocked)
  * - `unavailable + no status` → `false` (unknown, operation blocked)
  */
-export function useSessionKnownInactive(sessionId: string): boolean {
+export function useSessionKnownInactive(sessionId: string, directory: string): boolean {
   const status = useGlobalSessionStatus(sessionId);
-  const fresh = useSessionStatusFresh(sessionId);
+  const fresh = useSessionStatusFresh(sessionId, directory);
   if (!fresh) return false;
   // `status.type === 'error'` is defensive: the SDK's SessionStatus type is
   // currently idle/busy/retry, but a future or alternate status authority could
@@ -2028,7 +2048,7 @@ export function SyncProvider(props: {
   // event: the same runtime is expected to come back (reconnect) or a fresh
   // snapshot will be fetched over HTTP (transport switch). Last known busy/retry
   // status is preserved and all directories are marked unavailable via
-  // `transportUnavailable`, so the UI shows "reconnecting" instead of
+  // all known directories are marked unavailable, so the UI shows "reconnecting" instead of
   // destroying live evidence or flipping to idle. The reconnect/transport-switch
   // resyncs call `applyGlobalSessionStatusSnapshot`, which clears each
   // directory's freshness individually with fresh data.
@@ -2038,12 +2058,15 @@ export function SyncProvider(props: {
   // which does destroy stale data and block old events.
   const markLiveSessionStatusesUnavailable = useCallback(() => {
     // A transport-wide disconnect or transport switch affects every directory
-    // at once. Mark all directories stale deterministically — do not depend on
-    // the ordering of concurrent per-directory resync completions. Status data
-    // is preserved; each directory's freshness is restored individually when
-    // its next successful authoritative snapshot arrives.
-    markTransportStatusUnavailable()
-  }, [])
+    // at once. Mark all currently known directories stale deterministically —
+    // do not depend on the ordering of concurrent per-directory resync
+    // completions. Status data is preserved; each directory's freshness is
+    // restored individually when its own next successful authoritative snapshot
+    // arrives. Include child-store directories (which may have only idle
+    // sessions and no statusById entry) so freshness can be determined even
+    // for idle sessions whose directory is unavailable.
+    markTransportStatusUnavailable(childStores.children.keys())
+  }, [childStores])
 
   // Configure child store manager
   useEffect(() => {

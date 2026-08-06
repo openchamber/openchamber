@@ -63,9 +63,11 @@ describe('tray status poll unavailability preserves busy state as reconnecting',
     const raw = globalEntry?.status.type ?? 'idle';
     // Directory-scoped: a failed fetch for one directory does not make another
     // directory's status appear as reconnecting. A transport-wide event marks
-    // all directories stale.
-    const unavailable = state.transportUnavailable
-      || (globalEntry ? state.unavailableDirectories.has(globalEntry.directory) : false);
+    // all known directories stale (every known directory is in
+    // unavailableDirectories).
+    const unavailable = globalEntry
+      ? state.unavailableDirectories.has(globalEntry.directory)
+      : false;
     if (unavailable && (raw === 'busy' || raw === 'retry')) return 'reconnecting';
     return raw;
   };
@@ -81,7 +83,7 @@ describe('tray status poll unavailability preserves busy state as reconnecting',
     // Raw data preserved internally.
     expect(useGlobalSessionStatusStore.getState().statusById.get('session-a')?.status.type).toBe('busy');
     expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has('/repo')).toBe(true);
-    expect(isSessionStatusFresh('session-a')).toBe(false);
+    expect(isSessionStatusFresh('session-a', '/repo')).toBe(false);
     // Tray presentation: reconnecting, NOT busy and NOT idle.
     expect(resolveTrayStatus('session-a')).toBe('reconnecting');
   });
@@ -112,10 +114,11 @@ describe('tray status poll unavailability preserves busy state as reconnecting',
   });
 
   test('SSE disconnect (transport-wide) → tray reports reconnecting (not busy, not idle)', () => {
-    // onDisconnect calls markTransportStatusUnavailable.
+    // onDisconnect calls markTransportStatusUnavailable. The seeded busy entry
+    // for /repo puts /repo into unavailableDirectories via the statusById entry.
     applyGlobalSessionStatusSnapshot('/repo', { 'session-a': { type: 'busy' } }, ['session-a']);
     markTransportStatusUnavailable();
-    expect(useGlobalSessionStatusStore.getState().transportUnavailable).toBe(true);
+    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has('/repo')).toBe(true);
     expect(resolveTrayStatus('session-a')).toBe('reconnecting');
   });
 
@@ -123,7 +126,7 @@ describe('tray status poll unavailability preserves busy state as reconnecting',
     // onTransportSwitch calls markTransportStatusUnavailable.
     applyGlobalSessionStatusSnapshot('/repo', { 'session-a': { type: 'busy' } }, ['session-a']);
     markTransportStatusUnavailable();
-    expect(useGlobalSessionStatusStore.getState().transportUnavailable).toBe(true);
+    expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has('/repo')).toBe(true);
     expect(resolveTrayStatus('session-a')).toBe('reconnecting');
   });
 
@@ -137,7 +140,7 @@ describe('tray status poll unavailability preserves busy state as reconnecting',
 
     expect(useGlobalSessionStatusStore.getState().statusById.get('session-a')?.status.type).toBe('busy');
     expect(useGlobalSessionStatusStore.getState().unavailableDirectories.has('/repo')).toBe(false);
-    expect(isSessionStatusFresh('session-a')).toBe(true);
+    expect(isSessionStatusFresh('session-a', '/repo')).toBe(true);
     expect(resolveTrayStatus('session-a')).toBe('busy');
   });
 
@@ -162,7 +165,6 @@ describe('tray status poll unavailability preserves busy state as reconnecting',
 
     expect(useGlobalSessionStatusStore.getState().statusById.has('session-a')).toBe(false);
     expect(useGlobalSessionStatusStore.getState().unavailableDirectories.size).toBe(0);
-    expect(useGlobalSessionStatusStore.getState().transportUnavailable).toBe(false);
     // No preserved data → idle, not reconnecting.
     expect(resolveTrayStatus('session-a')).toBe('idle');
   });
@@ -210,10 +212,10 @@ describe('tray status poll unavailability preserves busy state as reconnecting',
 
     // /repo-a: unavailable + preserved busy → reconnecting.
     expect(resolveTrayStatus('session-a')).toBe('reconnecting');
-    expect(isSessionStatusFresh('session-a')).toBe(false);
+    expect(isSessionStatusFresh('session-a', '/repo-a')).toBe(false);
     // /repo-b: still fresh → busy, NOT reconnecting.
     expect(resolveTrayStatus('session-b')).toBe('busy');
-    expect(isSessionStatusFresh('session-b')).toBe(true);
+    expect(isSessionStatusFresh('session-b', '/repo-b')).toBe(true);
   });
 
   // Multi-directory race: completion order must not matter. Whether A fails
@@ -228,8 +230,8 @@ describe('tray status poll unavailability preserves busy state as reconnecting',
 
     expect(resolveTrayStatus('session-a')).toBe('reconnecting');
     expect(resolveTrayStatus('session-b')).toBe('idle');
-    expect(isSessionStatusFresh('session-a')).toBe(false);
-    expect(isSessionStatusFresh('session-b')).toBe(true);
+    expect(isSessionStatusFresh('session-a', '/repo-a')).toBe(false);
+    expect(isSessionStatusFresh('session-b', '/repo-b')).toBe(true);
   });
 
   test('multi-directory race: B succeeds, A fails → same result (A reconnecting, B fresh)', () => {
@@ -242,8 +244,8 @@ describe('tray status poll unavailability preserves busy state as reconnecting',
 
     expect(resolveTrayStatus('session-a')).toBe('reconnecting');
     expect(resolveTrayStatus('session-b')).toBe('idle');
-    expect(isSessionStatusFresh('session-a')).toBe(false);
-    expect(isSessionStatusFresh('session-b')).toBe(true);
+    expect(isSessionStatusFresh('session-a', '/repo-a')).toBe(false);
+    expect(isSessionStatusFresh('session-b', '/repo-b')).toBe(true);
   });
 
   test('both unavailable, then a successful snapshot for A → A fresh, B still unavailable', () => {
@@ -257,9 +259,9 @@ describe('tray status poll unavailability preserves busy state as reconnecting',
 
     // A: freshened by its own snapshot → busy.
     expect(resolveTrayStatus('session-a')).toBe('busy');
-    expect(isSessionStatusFresh('session-a')).toBe(true);
+    expect(isSessionStatusFresh('session-a', '/repo-a')).toBe(true);
     // B: still unavailable — A's success did not freshen B → reconnecting.
     expect(resolveTrayStatus('session-b')).toBe('reconnecting');
-    expect(isSessionStatusFresh('session-b')).toBe(false);
+    expect(isSessionStatusFresh('session-b', '/repo-b')).toBe(false);
   });
 });

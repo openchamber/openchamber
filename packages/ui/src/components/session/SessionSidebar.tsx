@@ -233,7 +233,7 @@ const ProjectAggregateStatusIndicator: React.FC<{ directories: Array<string | nu
     // not suppress another directory's confirmed active status.
     for (const entry of state.statusById.values()) {
       if (entry.status.type !== 'busy' && entry.status.type !== 'retry') continue;
-      if (state.transportUnavailable || state.unavailableDirectories.has(entry.directory)) continue;
+      if (state.unavailableDirectories.has(entry.directory)) continue;
       const directory = normalizePath(entry.directory)?.toLowerCase();
       if (directory && directorySet.has(directory)) return true;
     }
@@ -320,7 +320,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       if (!isVisible) return EMPTY_STRING_ARRAY;
       const result: string[] = [];
       for (const [id, entry] of state.statusById) {
-        if (state.transportUnavailable || state.unavailableDirectories.has(entry.directory)) continue;
+        if (state.unavailableDirectories.has(entry.directory)) continue;
         result.push(id);
       }
       return result.length ? result.sort() : EMPTY_STRING_ARRAY;
