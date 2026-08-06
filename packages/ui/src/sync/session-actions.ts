@@ -30,6 +30,8 @@ import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { isAmbiguousTransportFailure } from "@/lib/relay/transport-error"
+import { getStaleRunningToolMessageID } from "./materialization"
+import { normalizePath } from "@/lib/pathNormalization"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -52,6 +54,10 @@ const UNREVERT_REFETCH_RETRY_MS = 150
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
+// Optional ref into the sync layer's session-tail materialization queue. Used
+// to reconcile a trailing running tool part after a blocking request is
+// confirmed stale server-side (see recoverStaleBlockingRequest).
+let _enqueueSessionMaterialization: ((directory: string, sessionID: string, messageID: string) => void) | null = null
 type OptimisticAddInput = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
 type OptimisticRemoveInput = { sessionID: string; directory?: string | null; messageID: string }
 type OptimisticConfirmInput = OptimisticRemoveInput
@@ -139,10 +145,12 @@ export function setActionRefs(
   sdk: OpencodeClient,
   childStores: ChildStoreManager,
   getDirectory: () => string,
+  enqueueSessionMaterialization?: (directory: string, sessionID: string, messageID: string) => void,
 ) {
   _sdk = sdk
   _childStores = childStores
   _getDirectory = getDirectory
+  _enqueueSessionMaterialization = enqueueSessionMaterialization ?? null
 }
 
 export function setOptimisticRefs(
@@ -480,6 +488,29 @@ function restoreFilePartsToInput(fileParts: Array<Record<string, unknown>>): voi
   }
 }
 
+/**
+ * Server-confirmed directory that owns a session, from the session record
+ * (`directory`, then `project.worktree`). Mirrors the authoritative source in
+ * session-directory-resolution: holding a session in a child store proves
+ * containment, not ownership — a project's session list legitimately includes
+ * the sessions of its worktrees so the sidebar can group them — so reading
+ * ownership from the containing store reports the parent for a session that
+ * lives in a worktree, and every fetch is then addressed to a directory that
+ * does not own it.
+ */
+function resolveSessionOwnedDirectory(session: Session): string | null {
+  const record = session as Session & {
+    directory?: string | null
+    project?: { worktree?: string | null } | null
+  }
+  const raw = typeof record.directory === "string" && record.directory.trim().length > 0
+    ? record.directory
+    : typeof record.project?.worktree === "string" && record.project.worktree.trim().length > 0
+      ? record.project.worktree
+      : null
+  return raw ? normalizePath(raw) : null
+}
+
 function resolveDirectoryForBlockingRequest(
   type: "permission" | "question",
   sessionId: string,
@@ -493,10 +524,28 @@ function resolveDirectoryForBlockingRequest(
   for (const [directory, store] of stores.children) {
     const state = store.getState()
     const requestMap = type === "permission" ? state.permission : state.question
-    for (const requests of Object.values(requestMap) as Array<Array<{ id: string }> | undefined>) {
-      if (requests?.some((request) => request.id === requestId)) {
-        return directory
-      }
+    for (const requests of Object.values(requestMap) as Array<Array<{ id: string; sessionID?: string }> | undefined>) {
+      const request = requests?.find((candidate) => candidate.id === requestId)
+      if (!request) continue
+
+      // Ownership beats containment. The request belongs to one specific
+      // session, and the reply must reach the instance that actually tracks
+      // it — the directory the session record's server-confirmed `directory`
+      // names. The containing store's key only proves containment: a project
+      // store holds its worktree sessions too, and a reply addressed to the
+      // parent instance makes the server answer QuestionNotFoundError while
+      // the question stays pending in the worktree instance, leaving the
+      // session stuck on the running question tool. Fall back to the store
+      // key only when the session record carries no directory.
+      const requestSessionID = typeof request.sessionID === "string" && request.sessionID.length > 0
+        ? request.sessionID
+        : sessionId
+      const sessionRecord = requestSessionID
+        ? state.session.find((s) => s.id === requestSessionID)
+        : undefined
+      const ownedDirectory = sessionRecord ? resolveSessionOwnedDirectory(sessionRecord) : null
+      if (ownedDirectory) return ownedDirectory
+      return directory
     }
   }
 
@@ -535,6 +584,38 @@ export function isQuestionRequestNotFoundError(error: unknown): boolean {
   }
 
   return /Question(?:\.)?NotFoundError|Question request not found/i.test(message)
+}
+
+/**
+ * Reconcile the trailing assistant tool part after a blocking request turned
+ * out to be stale server-side (reply/reject answered with not-found). The
+ * local request is removed (the server no longer tracks it), but the
+ * question/permission tool part can remain `running` with the session busy —
+ * the UI would stay on "asking question" with no recovery until the user
+ * stops the run. Enqueue the sync layer's settled-running-tool tail
+ * materialization so the part converges to the server's actual state.
+ */
+function recoverStaleBlockingRequest(sessionId: string): void {
+  const stores = _childStores
+  const enqueue = _enqueueSessionMaterialization
+  if (!stores || !enqueue || !sessionId) return
+
+  for (const [directory, store] of stores.children) {
+    const state = store.getState()
+    if (
+      !state.session.some((session) => session.id === sessionId)
+      && !Object.prototype.hasOwnProperty.call(state.message, sessionId)
+      && !Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionId)
+      && !Object.prototype.hasOwnProperty.call(state.question ?? {}, sessionId)
+    ) {
+      continue
+    }
+    const messageID = getStaleRunningToolMessageID(state, sessionId)
+    if (messageID) {
+      enqueue(directory, sessionId, messageID)
+    }
+    return
+  }
 }
 
 function removeQuestionRequestFromChildStores(sessionId: string, requestId: string): boolean {
@@ -1581,6 +1662,7 @@ export async function respondToQuestion(
   } catch (error) {
     if (isQuestionRequestNotFoundError(error)) {
       removeQuestionRequestFromChildStores(sessionId, requestId)
+      recoverStaleBlockingRequest(sessionId)
     }
     throw error
   }
@@ -1605,6 +1687,7 @@ export async function rejectQuestion(
   } catch (error) {
     if (isQuestionRequestNotFoundError(error)) {
       removeQuestionRequestFromChildStores(sessionId, requestId)
+      recoverStaleBlockingRequest(sessionId)
     }
     throw error
   }

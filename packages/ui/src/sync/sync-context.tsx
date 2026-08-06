@@ -14,6 +14,7 @@ import {
   ChildStoreManager,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
+  subscribeDirectoryQuestions,
   subscribeDirectorySessionMessages,
   type DirectoryBootstrapContext,
   type DirectoryBootstrapReason,
@@ -1835,6 +1836,12 @@ function handleEvent(
     case "session.deleted":
       cloneField("session", (value) => [...value])
       cloneField("permission", (value) => ({ ...value }))
+      if (
+        payload.type === "session.deleted"
+        || (payload.type === "session.updated" && Boolean((payload.properties as { info?: Session }).info?.time.archived))
+      ) {
+        cloneField("question", (value) => ({ ...value }))
+      }
       cloneField("todo", (value) => ({ ...value }))
       cloneField("part", (value) => ({ ...value }))
       cloneField("sessionEventRevision", (value) => ({ ...(value ?? {}) }))
@@ -2619,6 +2626,12 @@ export function SyncProvider(props: {
       props.sdk,
       childStores,
       () => opencodeClient.getDirectory() || props.directory,
+      (directory, sessionID, messageID) => {
+        enqueueSessionMaterialization(directory, sessionID, childStores, {
+          reason: "settled-running-tool",
+          messageID,
+        })
+      },
     )
     return () => {
       if (getImperativeSessionMessageLoader() === messageLoader) {
@@ -2793,6 +2806,46 @@ export function useSessionQuestions(sessionID: string, directory?: string) {
     useCallback((state: State) => state.question[sessionID] ?? EMPTY_QUESTION_REQUESTS, [sessionID]),
     directory,
   )
+}
+
+/**
+ * Total number of pending questions across the given session scopes. Each
+ * scope names a directory store plus the session IDs to count inside it, so
+ * collapsed subtree rows can roll up pending questions of hidden descendants
+ * from their owning directory stores without bootstrapping them.
+ *
+ * Subscribes through the per-session question sidecar channel, so unrelated
+ * streaming or session activity does not re-render rows.
+ */
+export function useSessionQuestionCount(scopes: readonly { directory: string; sessionIDs: readonly string[] }[]) {
+  const { childStores } = useSyncSystem()
+  const scopedStores = React.useMemo(() => scopes.map((scope) => ({
+    sessionIDs: scope.sessionIDs,
+    store: childStores.ensureChild(scope.directory, { bootstrap: false }),
+  })), [childStores, scopes])
+  React.useEffect(() => {
+    for (const scope of scopes) childStores.pin(scope.directory)
+    return () => {
+      for (const scope of scopes) childStores.unpin(scope.directory)
+    }
+  }, [childStores, scopes])
+  const getSnapshot = React.useCallback(() => {
+    let count = 0
+    for (const { sessionIDs, store } of scopedStores) {
+      const questions = store.getState().question
+      for (const sessionID of sessionIDs) count += questions[sessionID]?.length ?? 0
+    }
+    return count
+  }, [scopedStores])
+  const subscribe = React.useCallback((notify: () => void) => {
+    const unsubscribers = scopedStores.map(({ sessionIDs, store }) => (
+      subscribeDirectoryQuestions(store, sessionIDs, notify)
+    ))
+    return () => {
+      for (const unsubscribe of unsubscribers) unsubscribe()
+    }
+  }, [scopedStores])
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /** Get sessions list for a directory */

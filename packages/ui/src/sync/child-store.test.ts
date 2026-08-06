@@ -4,6 +4,8 @@ import {
   ChildStoreManager,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
+  subscribeDirectoryQuestion,
+  subscribeDirectoryQuestions,
   subscribeDirectorySessionMessages,
 } from './child-store';
 import {
@@ -116,6 +118,132 @@ describe('ChildStoreManager permission subscriptions', () => {
     expect(getSyncPerformanceDiagnostics()?.permissionChangeCallbacks).toBe(1);
     for (const unsubscribe of unsubscribers) unsubscribe();
     setSyncPerformanceDiagnosticsEnabled(false);
+    manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager question subscriptions', () => {
+  test('notifies only the owning session and ignores unrelated high-frequency updates', () => {
+    const manager = new ChildStoreManager();
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    const notifications = new Map<string, number>();
+    const unsubscribers = Array.from({ length: 50 }, (_, index) => {
+      const sessionID = `session-${index}`;
+      return subscribeDirectoryQuestion(child, sessionID, () => {
+        notifications.set(sessionID, (notifications.get(sessionID) ?? 0) + 1);
+      });
+    });
+    setSyncPerformanceDiagnosticsEnabled(true);
+
+    for (let index = 0; index < 10_000; index += 1) {
+      child.setState({ part: { [`message-${index}`]: [] } });
+    }
+
+    expect(notifications.size).toBe(0);
+    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(0);
+
+    child.setState({ question: { 'session-17': [{ id: 'question-1' }] as never[] } });
+
+    expect(notifications.get('session-17')).toBe(1);
+    expect(notifications.size).toBe(1);
+    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(1);
+
+    // A new map that preserves session-17's bucket must not notify it again.
+    child.setState({ question: { ...child.getState().question, 'session-18': [{ id: 'question-2' }] as never[] } });
+
+    expect(notifications.get('session-17')).toBe(1);
+    expect(notifications.get('session-18')).toBe(1);
+    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(2);
+
+    child.setState({ question: {} });
+
+    expect(notifications.get('session-17')).toBe(2);
+    expect(notifications.get('session-18')).toBe(2);
+    expect(getSyncPerformanceDiagnostics()?.questionChangeCallbacks).toBe(4);
+
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    setSyncPerformanceDiagnosticsEnabled(false);
+    manager.disposeAll();
+  });
+
+  test('notifies subtree and exact-session rows once for each relevant replacement', () => {
+    const manager = new ChildStoreManager();
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    let parentNotifications = 0;
+    let childNotifications = 0;
+    const unsubscribeParent = subscribeDirectoryQuestions(child, ['parent', 'child'], () => {
+      parentNotifications += 1;
+    });
+    const unsubscribeChild = subscribeDirectoryQuestion(child, 'child', () => {
+      childNotifications += 1;
+    });
+    const parentQuestions = [{ id: 'question-parent' }] as never[];
+    const childQuestions = [{ id: 'question-child' }] as never[];
+
+    child.setState({ question: { parent: parentQuestions, child: childQuestions } });
+
+    expect(parentNotifications).toBe(1);
+    expect(childNotifications).toBe(1);
+
+    child.setState({ part: { message: [] } });
+    expect(parentNotifications).toBe(1);
+    expect(childNotifications).toBe(1);
+
+    child.setState({
+      question: {
+        parent: parentQuestions,
+        child: [{ id: 'question-child-replacement' }] as never[],
+      },
+    });
+
+    expect(parentNotifications).toBe(2);
+    expect(childNotifications).toBe(2);
+
+    child.setState({ question: {} });
+
+    expect(parentNotifications).toBe(3);
+    expect(childNotifications).toBe(3);
+
+    unsubscribeParent();
+    unsubscribeChild();
+    manager.disposeAll();
+  });
+
+  test('aggregates exact question buckets across directory stores', () => {
+    const manager = new ChildStoreManager();
+    const parentStore = manager.ensureChild('/repo', { bootstrap: false });
+    const childStore = manager.ensureChild('/worktrees/feature', { bootstrap: false });
+    let notifications = 0;
+    const notify = () => {
+      notifications += 1;
+    };
+    const unsubscribers = [
+      subscribeDirectoryQuestions(parentStore, ['parent'], notify),
+      subscribeDirectoryQuestions(childStore, ['child'], notify),
+    ];
+    const questionCount = () => (
+      (parentStore.getState().question.parent?.length ?? 0)
+      + (childStore.getState().question.child?.length ?? 0)
+    );
+
+    childStore.setState({ question: { child: [{ id: 'child-question' }] as never[] } });
+    expect(questionCount()).toBe(1);
+    expect(notifications).toBe(1);
+
+    childStore.setState({
+      question: {
+        ...childStore.getState().question,
+        unrelated: [{ id: 'unrelated-question' }] as never[],
+      },
+    });
+    expect(questionCount()).toBe(1);
+    expect(notifications).toBe(1);
+
+    parentStore.setState({ question: { parent: [{ id: 'parent-question' }] as never[] } });
+    expect(questionCount()).toBe(2);
+    expect(notifications).toBe(2);
+
+    for (const unsubscribe of unsubscribers) unsubscribe();
     manager.disposeAll();
   });
 });

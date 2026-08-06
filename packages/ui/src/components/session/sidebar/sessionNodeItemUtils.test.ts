@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
-import { computeNodeStructureKey, nodeHasPinnedMembershipChange, selectFolderRootNodes } from './sessionNodeItemUtils';
+import { computeNodeStructureKey, nodeHasPinnedMembershipChange, selectFolderRootNodes, selectQuestionBadgeSessionScopes } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
 
 const session = (id: string, title: string): Session => ({
@@ -29,6 +29,41 @@ describe('computeNodeStructureKey', () => {
     const next = { ...previous, title: 'After' };
 
     expect(computeNodeStructureKey(rootWithChild(previous))).not.toBe(computeNodeStructureKey(rootWithChild(next)));
+  });
+});
+
+describe('selectQuestionBadgeSessionScopes', () => {
+  const withDirectory = (node: SessionNode, directory: string | null): SessionNode => ({
+    ...node,
+    session: { ...node.session, directory } as Session,
+  });
+
+  test('rolls up the hidden subtree by owning directory when a parent is collapsed', () => {
+    const grandchild = withDirectory({ session: session('grandchild', 'Grandchild'), children: [], worktree: null }, '/worktrees/feature');
+    const child = withDirectory({ session: session('child', 'Child'), children: [grandchild], worktree: null }, '/worktrees/feature');
+    const root = withDirectory({ session: session('root', 'Root'), children: [child], worktree: null }, '/repo');
+
+    expect(selectQuestionBadgeSessionScopes(root, false, '/repo')).toEqual([
+      { directory: '/repo', sessionIDs: ['root'] },
+      { directory: '/worktrees/feature', sessionIDs: ['child', 'grandchild'] },
+    ]);
+  });
+
+  test('keeps expanded rows accurate to their own session only', () => {
+    const child = withDirectory({ session: session('child', 'Child'), children: [], worktree: null }, '/worktrees/feature');
+    const root = withDirectory({ session: session('root', 'Root'), children: [child], worktree: null }, '/repo');
+
+    expect(selectQuestionBadgeSessionScopes(root, true, '/repo')).toEqual([
+      { directory: '/repo', sessionIDs: ['root'] },
+    ]);
+  });
+
+  test('falls back to the group directory when the session has none', () => {
+    const root: SessionNode = { session: session('root', 'Root'), children: [], worktree: null };
+
+    expect(selectQuestionBadgeSessionScopes(root, false, '/fallback')).toEqual([
+      { directory: '/fallback', sessionIDs: ['root'] },
+    ]);
   });
 });
 

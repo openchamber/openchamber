@@ -1461,6 +1461,165 @@ describe("rejectQuestion passes directory", () => {
   })
 })
 
+describe("blocking request reply routing and stale recovery (issue OPE-236)", () => {
+  const materializationCalls: Array<{ directory: string; sessionID: string; messageID: string }> = []
+  const enqueueMaterialization = (directory: string, sessionID: string, messageID: string) => {
+    materializationCalls.push({ directory, sessionID, messageID })
+  }
+
+  beforeEach(() => {
+    replyCalls.length = 0
+    scopedClientDirectories.length = 0
+    questionReplyError = null
+    questionRejectError = null
+    materializationCalls.length = 0
+  })
+
+  test("routes the question reply by the request's own session directory, not the containing store key", async () => {
+    // The question was asked by a worktree session whose record lives in the
+    // parent store (containment). The reply must be addressed to the session's
+    // own server-confirmed directory — otherwise the server resolves the
+    // parent instance, does not find the pending question, and answers
+    // QuestionNotFoundError, leaving the session stuck on "asking question".
+    const question = buildQuestion("q-wt", "session-wt")
+    const store = createStore({}, {
+      session: [{ id: "session-wt", directory: "/test/project/wt" } as Session],
+      question: { "session-wt": [question] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project", enqueueMaterialization)
+
+    await respondToQuestion("session-wt", "q-wt", [["Yes"]])
+
+    expect(scopedClientDirectories).toEqual(["/test/project/wt"])
+    expect(replyCalls[0]?.params.directory).toBe("/test/project/wt")
+    expect(replyCalls[0]?.params.requestID).toBe("q-wt")
+  })
+
+  test("routes permission replies by the request's own session directory", async () => {
+    const permission = buildPermission("perm-wt", "session-wt")
+    const store = createStore(
+      { "session-wt": [permission] },
+      {
+        session: [{ id: "session-wt", directory: "/test/project/wt" } as Session],
+      },
+    )
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, respondToPermission } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project", enqueueMaterialization)
+
+    await respondToPermission("session-wt", "perm-wt", "once")
+
+    expect(scopedClientDirectories).toEqual(["/test/project/wt"])
+    expect(replyCalls[0]?.params.directory).toBe("/test/project/wt")
+    expect(replyCalls[0]?.params.requestID).toBe("perm-wt")
+  })
+
+  test("falls back to the containing store key when the session record carries no directory", async () => {
+    const question = buildQuestion("q-1", "session-a")
+    const store = createStore({}, {
+      session: [{ id: "session-a" } as Session],
+      question: { "session-a": [question] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project", enqueueMaterialization)
+
+    await respondToQuestion("session-a", "q-1", [["Yes"]])
+
+    expect(scopedClientDirectories).toEqual(["/test/project"])
+    expect(replyCalls[0]?.params.directory).toBe("/test/project")
+  })
+
+  test("enqueues settled-running-tool tail recovery when the question reply is not found", async () => {
+    const question = buildQuestion("q-stale", "session-a")
+    const store = createStore({}, {
+      session: [{ id: "session-a" } as Session],
+      question: { "session-a": [question] },
+      message: {
+        "session-a": [{ id: "msg-1", sessionID: "session-a", role: "assistant", time: { created: 1 } } as Message],
+      },
+      part: {
+        "msg-1": [{
+          id: "prt-1",
+          messageID: "msg-1",
+          sessionID: "session-a",
+          type: "tool",
+          tool: "question",
+          state: { status: "running" },
+        } as Part],
+      },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+    questionReplyError = Object.assign(new Error("question.reply failed (404): QuestionNotFoundError"), { status: 404 })
+
+    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project", enqueueMaterialization)
+
+    let thrown: unknown
+    try {
+      await respondToQuestion("session-a", "q-stale", [["Yes"]])
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    // The stale request is gone from the store and the trailing running tool
+    // part is reconciled instead of leaving the UI stuck on "asking question".
+    expect(store.getState().question["session-a"]).toBe(undefined)
+    expect(materializationCalls).toEqual([{ directory: "/test/project", sessionID: "session-a", messageID: "msg-1" }])
+  })
+
+  test("enqueues tail recovery on reject not-found but not on success", async () => {
+    const question = buildQuestion("q-1", "session-a")
+    const store = createStore({}, {
+      session: [{ id: "session-a" } as Session],
+      question: { "session-a": [question] },
+      message: {
+        "session-a": [{ id: "msg-1", sessionID: "session-a", role: "assistant", time: { created: 1 } } as Message],
+      },
+      part: {
+        "msg-1": [{
+          id: "prt-1",
+          messageID: "msg-1",
+          sessionID: "session-a",
+          type: "tool",
+          tool: "question",
+          state: { status: "running" },
+        } as Part],
+      },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, rejectQuestion } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project", enqueueMaterialization)
+
+    // Success: no recovery enqueued — the normal question.rejected event flow clears state.
+    await rejectQuestion("session-a", "q-1")
+    expect(materializationCalls).toEqual([])
+
+    // Not-found: the request is stale server-side; the tail must be reconciled.
+    questionRejectError = Object.assign(new Error("question.reject failed (404): QuestionNotFoundError"), { status: 404 })
+    const stale = buildQuestion("q-stale", "session-a")
+    store.setState({ question: { "session-a": [stale] } })
+
+    let thrown: unknown
+    try {
+      await rejectQuestion("session-a", "q-stale")
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect(store.getState().question["session-a"]).toBe(undefined)
+    expect(materializationCalls).toEqual([{ directory: "/test/project", sessionID: "session-a", messageID: "msg-1" }])
+  })
+})
+
 function buildQuestion(id: string, sessionId: string): QuestionRequest {
   return {
     id,
