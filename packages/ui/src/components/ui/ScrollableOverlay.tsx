@@ -19,6 +19,8 @@ type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   /** Suppress the top fade (e.g. when sticky headers sit at the top edge). */
   hideTopScrollShadow?: boolean;
   userIntentOnly?: boolean;
+  /** Keep the overlay thumb visible whenever content overflows. */
+  alwaysVisible?: boolean;
   /** Forwarded to the inner element (e.g. textarea). */
   disabled?: boolean;
 };
@@ -41,6 +43,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     scrollShadowSize,
     hideTopScrollShadow = false,
     userIntentOnly = false,
+    alwaysVisible = false,
     ...rest
   }, ref) => {
     const containerRef = React.useRef<HTMLElement | null>(null);
@@ -98,6 +101,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
           disableHorizontal={disableHorizontal}
           observeMutations={observeMutations}
           userIntentOnly={userIntentOnly}
+          alwaysVisible={alwaysVisible}
         />
       </div>
     );

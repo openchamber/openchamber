@@ -53,6 +53,10 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
     <ScrollableOverlay
       outerClassName={cn('h-full', outerClassName)}
       className="w-full @container"
+      // Settings pages are expected to expose a persistent scrollbar when
+      // content overflows (desktop/macOS users have no native scrollbar to
+      // fall back on because overlay targets hide it).
+      alwaysVisible
     >
       <div
         className={cn(

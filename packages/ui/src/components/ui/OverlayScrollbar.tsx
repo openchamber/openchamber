@@ -10,6 +10,10 @@ type OverlayScrollbarProps = {
   observeMutations?: boolean;
   suppressVisibility?: boolean;
   userIntentOnly?: boolean;
+  /** Keep the thumb visible whenever the container overflows, instead of
+   *  revealing it only while scrolling and fading it out after hideDelayMs.
+   *  Used by surfaces where an always-on scrollbar is expected (Settings). */
+  alwaysVisible?: boolean;
 };
 
 type ThumbMetrics = {
@@ -34,8 +38,9 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   observeMutations = true,
   suppressVisibility = false,
   userIntentOnly = false,
+  alwaysVisible = false,
 }) => {
-  const [visible, setVisible] = React.useState(false);
+  const [visible, setVisible] = React.useState(alwaysVisible);
   const [vertical, setVertical] = React.useState<ThumbMetrics>({ length: 0, offset: 0 });
   const [horizontal, setHorizontal] = React.useState<ThumbMetrics>({ length: 0, offset: 0 });
   const hideTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,6 +126,10 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   }, []);
 
   const scheduleHide = React.useCallback(() => {
+    // Always-visible scrollbars never fade on their own.
+    if (alwaysVisible) {
+      return;
+    }
     if (hideTimeoutRef.current) {
       clearTimeout(hideTimeoutRef.current);
     }
@@ -129,7 +138,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       return;
     }
     hideTimeoutRef.current = setTimeout(() => setVisible(false), hideDelayMs);
-  }, [hideDelayMs]);
+  }, [alwaysVisible, hideDelayMs]);
 
   const markUserIntent = React.useCallback(() => {
     lastUserIntentAtRef.current = Date.now();
@@ -141,6 +150,10 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     }
     frameRef.current = requestAnimationFrame(() => {
       updateMetrics();
+      if (alwaysVisible) {
+        setVisible(true);
+        return;
+      }
       if (suppressVisibility && !isDraggingRef.current) {
         setVisible(false);
         return;
@@ -155,14 +168,14 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       setVisible(true);
       scheduleHide();
     });
-  }, [scheduleHide, suppressVisibility, updateMetrics, userIntentOnly]);
+  }, [alwaysVisible, scheduleHide, suppressVisibility, updateMetrics, userIntentOnly]);
 
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     updateMetrics();
-    setVisible(false);
+    setVisible(alwaysVisible);
 
     const onScroll = () => handleScroll();
     const onKeyDown = (event: KeyboardEvent) => {
@@ -226,10 +239,10 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       if (metricsFrameRef.current) cancelAnimationFrame(metricsFrameRef.current);
     };
-  }, [containerRef, handleScroll, markUserIntent, observeMutations, scheduleMetricsUpdate, syncObservedElements, updateMetrics, userIntentOnly]);
+  }, [alwaysVisible, containerRef, handleScroll, markUserIntent, observeMutations, scheduleMetricsUpdate, syncObservedElements, updateMetrics, userIntentOnly]);
 
   React.useEffect(() => {
-    if (!suppressVisibility) {
+    if (!suppressVisibility || alwaysVisible) {
       return;
     }
     if (isDraggingRef.current) {
@@ -240,7 +253,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       clearTimeout(hideTimeoutRef.current);
       hideTimeoutRef.current = null;
     }
-  }, [suppressVisibility]);
+  }, [alwaysVisible, suppressVisibility]);
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>, axis: "vertical" | "horizontal") => {
     const container = containerRef.current;
