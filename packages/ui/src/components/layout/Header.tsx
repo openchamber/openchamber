@@ -33,11 +33,12 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
+import { useKeybinds } from '@/hooks/useKeybind';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
-import { cn, hasModifier } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -46,7 +47,11 @@ import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { formatTimeForPreference } from '@/lib/timeFormat';
-import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import {
+  formatShortcutForDisplay,
+  getEffectiveShortcutCombo,
+  type ShortcutActionId,
+} from '@/lib/shortcuts';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import {
   getAllModelFamilies,
@@ -285,7 +290,7 @@ type DesktopServicesMenuProps = {
   rateLimitGroups: RateLimitGroup[];
   expandedFamilies: Record<string, string[]>;
   toggleFamilyExpanded: (providerId: string, familyId: string) => void;
-  shortcutLabel: (actionId: string) => string;
+  shortcutLabel: (actionId: ShortcutActionId) => string;
   showDevShutdown: boolean;
   isDevShutdownInFlight: boolean;
   onDevShutdown: () => Promise<void>;
@@ -1935,7 +1940,7 @@ export const Header: React.FC<HeaderProps> = ({
     return [];
   }, [isMobile, showPlanTab, t]);
 
-  const shortcutLabel = React.useCallback((actionId: string) => {
+  const shortcutLabel = React.useCallback((actionId: ShortcutActionId) => {
     return formatShortcutForDisplay(getEffectiveShortcutCombo(actionId, shortcutOverrides));
   }, [shortcutOverrides]);
 
@@ -2043,82 +2048,53 @@ export const Header: React.FC<HeaderProps> = ({
     ];
   }, [t]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (hasModifier(e) && !e.shiftKey && !e.altKey) {
-        const num = parseInt(e.key, 10);
-        if (num >= 1 && num <= tabs.length) {
-          e.preventDefault();
-          if (isMobile) {
-            blurActiveElement();
-            closeMobileHeaderPanels();
-          }
-          setActiveMainTab(tabs[num - 1].id);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [blurActiveElement, closeMobileHeaderPanels, isMobile, setActiveMainTab, tabs]);
+  const switchToIndexedTab = (index: number) => {
+    const tab = tabs[index];
+    if (!tab) return false;
+    if (isMobile) {
+      blurActiveElement();
+      closeMobileHeaderPanels();
+    }
+    setActiveMainTab(tab.id);
+  };
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const toggleServicesCombo = getEffectiveShortcutCombo('toggle_services_menu', shortcutOverrides);
-      if (eventMatchesShortcut(e, toggleServicesCombo)) {
-        e.preventDefault();
-
-        if (isDesktopServicesOpen) {
-          setIsDesktopServicesOpen(false);
-        } else {
-          setIsDesktopServicesOpen(true);
-          void refreshCurrentInstanceLabel();
-          if (desktopServicesTab === 'usage' && quotaResults.length === 0) {
-            void fetchAllQuotas();
-          }
-        }
+  useKeybinds({
+    switch_tab_1: () => switchToIndexedTab(0),
+    switch_tab_2: () => switchToIndexedTab(1),
+    switch_tab_3: () => switchToIndexedTab(2),
+    switch_tab_4: () => switchToIndexedTab(3),
+    switch_tab_5: () => switchToIndexedTab(4),
+    switch_tab_6: () => switchToIndexedTab(5),
+    switch_tab_7: () => switchToIndexedTab(6),
+    switch_tab_8: () => switchToIndexedTab(7),
+    switch_tab_9: () => switchToIndexedTab(8),
+    toggle_services_menu: () => {
+      if (isDesktopServicesOpen) {
+        setIsDesktopServicesOpen(false);
         return;
       }
-
-      const cycleServicesCombo = getEffectiveShortcutCombo('cycle_services_tab', shortcutOverrides);
-      if (eventMatchesShortcut(e, cycleServicesCombo)) {
-        e.preventDefault();
-
-        const tabValues = servicesTabs.map((tab) => tab.value) as Array<'instance' | 'usage' | 'mcp'>;
-        if (tabValues.length === 0) {
-          return;
-        }
-
-        const currentIndex = tabValues.indexOf(desktopServicesTab);
-        const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % tabValues.length;
-        const nextTab = tabValues[nextIndex];
-        setDesktopServicesTab(nextTab);
-        setIsDesktopServicesOpen(true);
-        void refreshCurrentInstanceLabel();
-        if (nextTab === 'usage' && quotaResults.length === 0) {
-          void fetchAllQuotas();
-        }
-        return;
+      setIsDesktopServicesOpen(true);
+      void refreshCurrentInstanceLabel();
+      if (desktopServicesTab === 'usage' && quotaResults.length === 0) {
+        void fetchAllQuotas();
       }
-
-      const toggleContextPlanCombo = getEffectiveShortcutCombo('toggle_context_plan', shortcutOverrides);
-      if (eventMatchesShortcut(e, toggleContextPlanCombo)) {
-        e.preventDefault();
-        handleOpenContextPlan();
+    },
+    cycle_services_tab: () => {
+      const tabValues = servicesTabs.map((tab) => tab.value) as Array<'instance' | 'usage' | 'mcp'>;
+      if (tabValues.length === 0) return false;
+      const currentIndex = tabValues.indexOf(desktopServicesTab);
+      const nextTab = tabValues[currentIndex === -1 ? 0 : (currentIndex + 1) % tabValues.length];
+      setDesktopServicesTab(nextTab);
+      setIsDesktopServicesOpen(true);
+      void refreshCurrentInstanceLabel();
+      if (nextTab === 'usage' && quotaResults.length === 0) {
+        void fetchAllQuotas();
       }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    shortcutOverrides,
-    isDesktopServicesOpen,
-    desktopServicesTab,
-    servicesTabs,
-    quotaResults.length,
-    fetchAllQuotas,
-    refreshCurrentInstanceLabel,
-    handleOpenContextPlan,
-  ]);
+    },
+    toggle_context_plan: () => {
+      handleOpenContextPlan();
+    },
+  });
 
   const renderTab = (tab: TabConfig) => {
     const isActive = activeMainTab === tab.id;

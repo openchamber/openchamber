@@ -64,6 +64,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { TerminalShellOption } from '@/lib/api/types';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { formatShortcutForDisplay } from '@/lib/shortcuts';
 
 interface Option<T extends string> {
     id: T;
@@ -1543,7 +1544,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     label={t('settings.openchamber.visual.field.terminalQuickKeys')}
                                     ariaLabel={t('settings.openchamber.visual.field.terminalQuickKeysAria')}
                                     settingsItem="appearance.terminal-quick-keys"
-                                    info={t('settings.openchamber.visual.field.terminalQuickKeysTooltip')}
+                                    info={t('settings.openchamber.visual.field.terminalQuickKeysTooltip', {
+                                        control: formatShortcutForDisplay('ctrl'),
+                                        alt: formatShortcutForDisplay('alt'),
+                                    })}
                                 />
                             )}
                             {showTerminalShellSetting && (

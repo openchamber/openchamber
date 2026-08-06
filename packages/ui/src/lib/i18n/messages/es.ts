@@ -1504,7 +1504,7 @@ export const dict: Record<I18nKey, string> = {
   "rightSidebar.contextNotesTodo.toast.planImported": "Plan importado",
   "rightSidebar.contextNotesTodo.toast.readPlanFileFailed": "No se pudo leer el archivo del plan",
   "inlineComment.range.lines": "Líneas {start}-{end}",
-  "inlineComment.input.placeholder": "Añadir un comentario... (Cmd+Enter para guardar)",
+  "inlineComment.input.placeholder": "Añadir un comentario... ({shortcut} para guardar)",
   "inlineComment.input.placeholderShort": "Añadir un comentario...",
   "inlineComment.actions.cancel": "Cancelar",
   "inlineComment.actions.save": "Guardar",

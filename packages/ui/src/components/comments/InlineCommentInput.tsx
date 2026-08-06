@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
+import { formatShortcutForDisplay } from '@/lib/shortcuts';
 
 export interface InlineCommentInputProps {
   initialText?: string;
@@ -35,6 +36,7 @@ export function InlineCommentInput({
   const { isMobile } = useDeviceInfo();
   const [text, setText] = React.useState(initialText);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const saveShortcut = formatShortcutForDisplay('mod+enter');
 
   const handleTextChange = (value: string) => {
     setText(value);
@@ -154,7 +156,9 @@ export function InlineCommentInput({
           value={text}
           onChange={(e) => handleTextChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={isMobile ? t('inlineComment.input.placeholderShort') : t('inlineComment.input.placeholder')}
+          placeholder={isMobile
+            ? t('inlineComment.input.placeholderShort')
+            : t('inlineComment.input.placeholder', { shortcut: saveShortcut })}
           outerClassName="rounded-[var(--radius-xl)] bg-[var(--surface-subtle)] ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-[var(--interactive-focus-ring)]"
           className="min-h-[80px] px-3 py-2.5 text-sm resize-y"
         />

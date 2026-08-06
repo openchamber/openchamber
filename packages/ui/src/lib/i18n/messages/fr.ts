@@ -1346,7 +1346,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.planImported': 'Forfait importé',
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'Échec de la lecture du fichier de plan',
   'inlineComment.range.lines': 'Lignes {start}-{end}',
-  'inlineComment.input.placeholder': 'Ajouter un commentaire... (Cmd+Entrée pour enregistrer)',
+  'inlineComment.input.placeholder': 'Ajouter un commentaire... ({shortcut} pour enregistrer)',
   'inlineComment.actions.cancel': 'Annuler',
   'inlineComment.actions.save': 'Sauvegarder',
   'inlineComment.actions.comment': 'Commentaire',

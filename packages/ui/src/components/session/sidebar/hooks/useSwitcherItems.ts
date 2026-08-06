@@ -24,6 +24,7 @@ const MAX_PARENT_SESSIONS = 7;
 
 type SwitcherItemsOptions = {
   scopeProjectId?: string | null;
+  currentSessionId?: string | null;
   /** How many parent sessions to return (default 7 — the desktop dropdown). */
   maxParents?: number;
 };
@@ -43,8 +44,65 @@ const formatProjectLabel = (project: { label?: string | null; path: string } | n
   return segments[segments.length - 1] ?? null;
 };
 
+export const findSwitcherItemAncestorIds = (items: SwitcherItem[], sessionId: string): string[] | null => {
+  const visit = (node: SessionNode, ancestors: string[]): string[] | null => {
+    if (node.session.id === sessionId) return ancestors;
+    for (const child of node.children) {
+      const result = visit(child, [...ancestors, node.session.id]);
+      if (result) return result;
+    }
+    return null;
+  };
+
+  for (const item of items) {
+    const result = visit(item.node, []);
+    if (result) return result;
+  }
+  return null;
+};
+
+export const selectSwitcherParents = (
+  activeSessions: Session[],
+  pinnedSessionIds: Set<string>,
+  sessionOrderRanks: Map<string, number>,
+  scopeProjectId: string | null,
+  currentSessionId: string | null,
+  getProjectId: (session: Session) => string | null,
+  maxParents = MAX_PARENT_SESSIONS,
+): Session[] => {
+  const sessionsById = new Map(activeSessions.map((session) => [session.id, session]));
+  const isEligibleParent = (session: Session): boolean => {
+    if (session.time?.archived) return false;
+    if ((session as Session & { parentID?: string | null }).parentID) return false;
+    return !scopeProjectId || getProjectId(session) === scopeProjectId;
+  };
+  const parents = activeSessions
+    .filter(isEligibleParent)
+    .sort((a, b) => compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks));
+
+  const currentSession = currentSessionId ? sessionsById.get(currentSessionId) ?? null : null;
+  let currentRoot: Session | null = currentSession?.time?.archived ? null : currentSession;
+  const visited = new Set<string>();
+  while (currentRoot) {
+    const parentId = (currentRoot as Session & { parentID?: string | null }).parentID;
+    if (!parentId) break;
+    if (visited.has(parentId)) {
+      currentRoot = null;
+      break;
+    }
+    visited.add(parentId);
+    currentRoot = sessionsById.get(parentId) ?? null;
+  }
+
+  const currentRootIndex = currentRoot && isEligibleParent(currentRoot) ? parents.indexOf(currentRoot) : -1;
+  if (currentRootIndex >= maxParents) {
+    return [...parents.slice(0, Math.max(0, maxParents - 1)), currentRoot!];
+  }
+  return parents.slice(0, maxParents);
+};
+
 export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions = {}): SwitcherItem[] => {
-  const { scopeProjectId = null, maxParents = MAX_PARENT_SESSIONS } = options;
+  const { scopeProjectId = null, currentSessionId = null, maxParents = MAX_PARENT_SESSIONS } = options;
   const activeSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const projects = useProjectsStore((state) => state.projects);
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
@@ -112,16 +170,15 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
       list.sort((a, b) => compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks));
     });
 
-    const parents = activeSessions
-      .filter((session) => !session.time?.archived)
-      .filter((session) => !(session as Session & { parentID?: string | null }).parentID)
-      .filter((session) => {
-        if (!scopeProjectId) return true;
-        const directory = resolveGlobalSessionDirectory(session);
-        return findProjectForDirectory(directory)?.id === scopeProjectId;
-      })
-      .sort((a, b) => compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks))
-      .slice(0, maxParents);
+    const parents = selectSwitcherParents(
+      activeSessions,
+      pinnedSessionIds,
+      sessionOrderRanks,
+      scopeProjectId,
+      currentSessionId,
+      (session) => findProjectForDirectory(resolveGlobalSessionDirectory(session))?.id ?? null,
+      maxParents,
+    );
 
     const buildNode = (session: Session): SessionNode => {
       const childSessions = childrenByParent.get(session.id) ?? [];
@@ -151,7 +208,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
         },
       };
     });
-  }, [activeSessions, branchesByDirectory, enabled, findProjectForDirectory, maxParents, pinnedSessionIds, scopeProjectId, sessionOrderRanks, worktreeInfoByPath]);
+  }, [activeSessions, branchesByDirectory, currentSessionId, enabled, findProjectForDirectory, maxParents, pinnedSessionIds, scopeProjectId, sessionOrderRanks, worktreeInfoByPath]);
 
   return items;
 };

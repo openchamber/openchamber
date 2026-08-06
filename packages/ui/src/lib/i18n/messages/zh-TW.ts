@@ -1502,7 +1502,7 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.toast.planImported': '計畫已匯入',
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': '讀取計畫檔案失敗',
   'inlineComment.range.lines': '行 {start}-{end}',
-  'inlineComment.input.placeholder': '新增留言...（Cmd+Enter 儲存）',
+  'inlineComment.input.placeholder': '新增留言...（{shortcut} 儲存）',
   'inlineComment.input.placeholderShort': '新增留言…',
   'inlineComment.actions.cancel': '取消',
   'inlineComment.actions.save': '儲存',

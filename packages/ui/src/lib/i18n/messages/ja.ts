@@ -1522,7 +1522,7 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.toast.planImported': '計画をインポートしました',
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': '計画ファイルの読み込みに失敗しました',
   'inlineComment.range.lines': '{start}行目～{end}行目',
-  'inlineComment.input.placeholder': 'コメントを追加...（Cmd+Enterで保存）',
+  'inlineComment.input.placeholder': 'コメントを追加...（{shortcut}で保存）',
   'inlineComment.input.placeholderShort': 'コメントを追加...',
   'inlineComment.actions.cancel': 'キャンセル',
   'inlineComment.actions.save': '保存',

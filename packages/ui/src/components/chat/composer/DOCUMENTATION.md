@@ -101,6 +101,9 @@ and the send path reading the same grammar.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
   branch list, or the selector snaps back to the project root mid-creation.
+- `ui/DraftTargetSelectors.tsx` owns the controlled project/worktree picker
+  state and registers its application shortcuts locally. The selectors only
+  consume their shared prefix while the draft target UI is mounted.
 
 ## Mobile
 

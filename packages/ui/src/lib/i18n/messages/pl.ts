@@ -2369,7 +2369,7 @@ export const dict: Record<I18nKey, string> = {
   'inlineComment.actions.save': 'Zapisz',
   'inlineComment.actions.showLess': 'Show less',
   'inlineComment.actions.showMore': 'Show more',
-  'inlineComment.input.placeholder': 'Add a comment... (Cmd+Enter to save)',
+  'inlineComment.input.placeholder': 'Dodaj komentarz... ({shortcut}, aby zapisać)',
   'inlineComment.input.placeholderShort': 'Dodaj komentarz...',
   'inlineComment.range.lines': 'Lines {start}-{end}',
   'inlineComment.toast.selectSessionToSave': 'Select a session to save comment',

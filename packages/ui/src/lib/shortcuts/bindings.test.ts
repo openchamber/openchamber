@@ -2,10 +2,15 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   eventMatchesShortcutPrefix,
+  formatShortcutForDisplay,
   getEffectiveShortcutPrefix,
+  getShortcutConflict,
+  isRiskyBrowserShortcut,
   isShortcutPrefixHeld,
+  normalizeCombo,
+  parseShortcut,
   UNASSIGNED_SHORTCUT,
-} from './shortcuts';
+} from './index';
 
 describe('getEffectiveShortcutPrefix', () => {
   test('falls back to the action default (bare mod) when unset', () => {
@@ -76,5 +81,48 @@ describe('eventMatchesShortcutPrefix', () => {
 
   test('false for an unassigned prefix', () => {
     expect(eventMatchesShortcutPrefix(keydown('1', { ctrl: true }), UNASSIGNED_SHORTCUT)).toBe(false);
+  });
+});
+
+describe('shortcut sequences', () => {
+  test('normalizes, parses, and formats up to two chords', () => {
+    expect(normalizeCombo(' command + S   P ')).toBe('mod+s p');
+    expect(parseShortcut('mod+s p')?.chords).toHaveLength(2);
+    expect(formatShortcutForDisplay('mod+s p')).toBe('Ctrl + S, P');
+  });
+
+  test('rejects bindings with more than two chords', () => {
+    expect(normalizeCombo('mod+s p q')).toBe('');
+    expect(parseShortcut('mod+s p q')).toBe(undefined);
+  });
+
+  test('reports exact and prefix conflicts but allows sibling sequences', () => {
+    expect(getShortcutConflict('mod+s', 'mod+s')).toBe('exact');
+    expect(getShortcutConflict('mod+s', 'mod+s p')).toBe('prefix');
+    expect(getShortcutConflict('mod+s p', 'mod+s q')).toBe(undefined);
+  });
+
+  test('warns when a sequence leader conflicts with a browser shortcut', () => {
+    expect(isRiskyBrowserShortcut('mod+s p')).toBe(true);
+  });
+});
+
+describe('platform shortcut labels', () => {
+  test('normalizes Command and Option to platform-neutral modifiers', () => {
+    expect(normalizeCombo('command+option+n')).toBe('mod+alt+n');
+  });
+
+  test('uses macOS modifier symbols', () => {
+    expect(formatShortcutForDisplay('mod+ctrl+shift+alt+n', 'Unassigned', 'macos')).toBe(
+      '⌘ + ⌃ + ⇧ + ⌥ + N',
+    );
+    expect(formatShortcutForDisplay('alt', 'Unassigned', 'macos')).toBe('⌥');
+  });
+
+  test('uses named modifiers on other platforms', () => {
+    expect(formatShortcutForDisplay('mod+shift+alt+n', 'Unassigned', 'other')).toBe(
+      'Ctrl + Shift + Alt + N',
+    );
+    expect(formatShortcutForDisplay('alt', 'Unassigned', 'other')).toBe('Alt');
   });
 });

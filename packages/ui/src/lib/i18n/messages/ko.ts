@@ -1529,7 +1529,7 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.toast.planImported': '플랜 가져옴',
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': '플랜 파일 읽기 실패',
   'inlineComment.range.lines': '줄 {start}-{end}',
-  'inlineComment.input.placeholder': '댓글 추가… (Cmd+Enter로 저장)',
+  'inlineComment.input.placeholder': '댓글 추가… ({shortcut}로 저장)',
   'inlineComment.input.placeholderShort': '댓글 추가…',
   'inlineComment.actions.cancel': '취소',
   'inlineComment.actions.save': '저장',

@@ -1504,7 +1504,7 @@ export const dict: Record<I18nKey, string> = {
   "rightSidebar.contextNotesTodo.toast.planImported": "План імпортовано",
   "rightSidebar.contextNotesTodo.toast.readPlanFileFailed": "Не вдалося прочитати файл плану",
   "inlineComment.range.lines": "Рядки {start}-{end}",
-  "inlineComment.input.placeholder": "Додайте коментар... (Cmd+Enter, щоб зберегти)",
+  "inlineComment.input.placeholder": "Додайте коментар... ({shortcut}, щоб зберегти)",
   "inlineComment.input.placeholderShort": "Додайте коментар...",
   "inlineComment.actions.cancel": "Скасувати",
   "inlineComment.actions.save": "Зберегти",

@@ -51,7 +51,16 @@ mock.module('@/stores/useUIStore', () => ({
   },
 }));
 
-const { addSelectionToChat, captureSelectionMarkdownForChat } = await import('./addSelectionToChat');
+const {
+  addSelectionToChat,
+  captureSelectionMarkdownForChat,
+  dismissActiveSelectionToolbar,
+  getActiveSelectionToolbarVersion,
+  hasActiveSelectionToolbar,
+  invokeActiveSelectionAddToChat,
+  registerActiveSelectionToolbar,
+} = await import('./addSelectionToChat');
+const { shortcutRegistry } = await import('./shortcuts');
 
 const originalDocument = globalThis.document;
 const originalWindow = globalThis.window;
@@ -294,5 +303,111 @@ describe('addSelectionToChat', () => {
 
     await Promise.resolve();
     expect(focusChatInputCalls.length).toBe(1);
+  });
+});
+
+describe('active selection toolbar shortcut', () => {
+  beforeEach(() => {
+    clearCalls();
+  });
+
+  test('does not use the generic selection fallback without a visible toolbar', () => {
+    const textarea = {
+      tagName: 'TEXTAREA',
+      value: 'selected',
+      selectionStart: 0,
+      selectionEnd: 8,
+      closest: () => null,
+    } as unknown as HTMLTextAreaElement;
+    installSelectionEnvironment({ activeElement: textarea });
+
+    expect(invokeActiveSelectionAddToChat()).toBe(false);
+    expect(textarea.selectionStart).toBe(0);
+    expect(textarea.selectionEnd).toBe(8);
+    expect(pendingInputCalls).toEqual([]);
+    expect(activeMainTabCalls).toEqual([]);
+  });
+
+  test('becomes inactive when the selection toolbar hides', () => {
+    const calls: number[] = [];
+    const cleanup = registerActiveSelectionToolbar({
+      addToChat: () => calls.push(1),
+      dismiss: () => undefined,
+    });
+
+    expect(hasActiveSelectionToolbar()).toBe(true);
+    expect(shortcutRegistry.isSuspended()).toBe(true);
+    cleanup();
+    expect(hasActiveSelectionToolbar()).toBe(false);
+    expect(shortcutRegistry.isSuspended()).toBe(false);
+    expect(invokeActiveSelectionAddToChat()).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  test('invokes the active toolbar action once', () => {
+    const calls: number[] = [];
+    const cleanup = registerActiveSelectionToolbar({
+      addToChat: () => calls.push(1),
+      dismiss: () => undefined,
+    });
+
+    expect(invokeActiveSelectionAddToChat()).toBe(true);
+    expect(shortcutRegistry.isSuspended()).toBe(false);
+    expect(invokeActiveSelectionAddToChat()).toBe(false);
+    expect(calls).toEqual([1]);
+    cleanup();
+  });
+
+  test('keeps the newest visible toolbar active', () => {
+    const calls: string[] = [];
+    const cleanupFirst = registerActiveSelectionToolbar({
+      addToChat: () => calls.push('first'),
+      dismiss: () => undefined,
+    });
+    const cleanupSecond = registerActiveSelectionToolbar({
+      addToChat: () => calls.push('second'),
+      dismiss: () => undefined,
+    });
+
+    cleanupFirst();
+    expect(shortcutRegistry.isSuspended()).toBe(true);
+    expect(invokeActiveSelectionAddToChat()).toBe(true);
+    expect(shortcutRegistry.isSuspended()).toBe(false);
+    expect(calls).toEqual(['second']);
+    cleanupSecond();
+  });
+
+  test('restores the previous visible toolbar when the newest one unmounts', () => {
+    const calls: string[] = [];
+    const cleanupFirst = registerActiveSelectionToolbar({
+      addToChat: () => calls.push('first'),
+      dismiss: () => undefined,
+    });
+    const cleanupSecond = registerActiveSelectionToolbar({
+      addToChat: () => calls.push('second'),
+      dismiss: () => undefined,
+    });
+
+    cleanupSecond();
+    expect(shortcutRegistry.isSuspended()).toBe(true);
+    expect(invokeActiveSelectionAddToChat()).toBe(true);
+    expect(shortcutRegistry.isSuspended()).toBe(false);
+    expect(calls).toEqual(['first']);
+    cleanupFirst();
+  });
+
+  test('dismisses the active toolbar and advances its ownership version', () => {
+    const calls: string[] = [];
+    const before = getActiveSelectionToolbarVersion();
+    const cleanup = registerActiveSelectionToolbar({
+      addToChat: () => calls.push('add'),
+      dismiss: () => calls.push('dismiss'),
+    });
+
+    expect(getActiveSelectionToolbarVersion()).toBeGreaterThan(before);
+    expect(dismissActiveSelectionToolbar()).toBe(true);
+    expect(calls).toEqual(['dismiss']);
+    expect(hasActiveSelectionToolbar()).toBe(false);
+    cleanup();
   });
 });

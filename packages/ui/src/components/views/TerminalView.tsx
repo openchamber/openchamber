@@ -21,6 +21,7 @@ import { useI18n } from '@/lib/i18n';
 import { PROJECT_ACTION_ICON_MAP, type ProjectActionIconKey } from '@/lib/projectActions';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { applyTerminalModifier, terminalControlCharacter, terminalSequenceForKey, type TerminalModifier as Modifier, type TerminalQuickKey as MobileKey } from '@/lib/terminalInput';
+import { formatShortcutForDisplay } from '@/lib/shortcuts';
 
 type TerminalViewProps = {
     visible?: boolean;
@@ -924,7 +925,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                 onClick={() => handleModifierToggle('ctrl')}
                 disabled={quickKeysDisabled}
             >
-                <span className="text-xs font-medium">{t('terminalView.quickKeys.controlLabel')}</span>
+                <span className="text-xs font-medium">{formatShortcutForDisplay('ctrl')}</span>
                 <span className="sr-only">{t('terminalView.quickKeys.controlModifierAria')}</span>
             </Button>
             <Button
@@ -937,7 +938,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                 onClick={() => handleModifierToggle('alt')}
                 disabled={quickKeysDisabled}
             >
-                <span className="text-xs font-medium">{t('terminalView.quickKeys.altLabel')}</span>
+                <span className="text-xs font-medium">{formatShortcutForDisplay('alt')}</span>
                 <span className="sr-only">{t('terminalView.quickKeys.altModifierAria')}</span>
             </Button>
             <Button

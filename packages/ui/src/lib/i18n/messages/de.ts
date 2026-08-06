@@ -1373,7 +1373,7 @@ export const dict = {
   'rightSidebar.contextNotesTodo.toast.planImported': 'Plan importiert',
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': 'Fehler beim Lesen der Plan-Datei',
   'inlineComment.range.lines': 'Zeilen {start}-{end}',
-  'inlineComment.input.placeholder': 'Kommentar hinzufügen... (Cmd+Enter zum Speichern)',
+  'inlineComment.input.placeholder': 'Kommentar hinzufügen... ({shortcut} zum Speichern)',
   'inlineComment.input.placeholderShort': 'Kommentar hinzufügen...',
   'inlineComment.actions.cancel': 'Abbrechen',
   'inlineComment.actions.save': 'Speichern',

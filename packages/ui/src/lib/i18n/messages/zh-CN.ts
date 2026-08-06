@@ -1492,7 +1492,7 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.toast.planImported': '计划已导入',
   'rightSidebar.contextNotesTodo.toast.readPlanFileFailed': '读取计划文件失败',
   'inlineComment.range.lines': '行 {start}-{end}',
-  'inlineComment.input.placeholder': '添加评论...（Cmd+Enter 保存）',
+  'inlineComment.input.placeholder': '添加评论...（{shortcut} 保存）',
   'inlineComment.input.placeholderShort': '添加评论…',
   'inlineComment.actions.cancel': '取消',
   'inlineComment.actions.save': '保存',
