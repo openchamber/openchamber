@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'bun:test';
 
 import { NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS, registerNotificationRoutes } from './lib/notifications/routes.js';
+import { createRequestSecurityRuntime } from './lib/security/request-security.js';
 import { registerScheduledTaskRoutes } from './lib/scheduled-tasks/routes.js';
 
 const createRouteRegistry = () => {
@@ -104,6 +105,35 @@ const createMockResponse = () => {
 };
 
 describe('local SSE routes', () => {
+  it('serves push visibility for the configured UI session cookie', () => {
+    const { app, getRoute } = createRouteRegistry();
+    const requestSecurity = createRequestSecurityRuntime({
+      readSettingsFromDiskMigrated: async () => ({}),
+      uiSessionCookieName: 'oc_ui_session_3000',
+    });
+    const isUiVisible = vi.fn(() => true);
+
+    registerNotificationRoutes(app, {
+      getUiSessionTokenFromRequest: requestSecurity.getUiSessionTokenFromRequest,
+      isUiVisible,
+    });
+
+    const handler = getRoute('GET', '/api/push/visibility');
+    const req = createMockRequest();
+    req.headers.cookie = 'oc_ui_session_3000=session-token';
+    const res = createMockResponse();
+
+    handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(isUiVisible).toHaveBeenCalledTimes(1);
+    expect(isUiVisible).toHaveBeenCalledWith('session-token');
+    expect(JSON.parse(res.body)).toEqual({
+      ok: true,
+      visible: true,
+    });
+  });
+
   it('serves notification SSE with nginx-safe headers', async () => {
     vi.useFakeTimers();
     const { app, getRoute } = createRouteRegistry();

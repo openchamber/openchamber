@@ -351,6 +351,7 @@ async function restartCommand(options, serveCommand) {
           host: instanceHost,
           explicitPort: true,
           uiPassword: options.explicitUiPassword ? options.uiPassword : (storedOptions.uiPassword || options.uiPassword),
+          uiSessionCookieName: storedOptions.uiSessionCookieName,
           apiOnly: storedOptions.apiOnly === true || options.apiOnly === true,
           suppressStartupSummary: true,
           quiet: true,

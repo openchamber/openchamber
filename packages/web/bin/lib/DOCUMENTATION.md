@@ -80,6 +80,7 @@ These modules hold reusable, non-presentational logic for commands.
 
 - `cli-process.js`
   - PID files, instance registry files, process identity checks, runtime metadata checks, and process termination helpers.
+  - Instance records persist the resolved per-port UI session cookie name alongside launch/auth metadata so later CLI processes and lifecycle restarts do not depend on their current environment.
 
 - `cli-lifecycle.js`
   - Instance discovery, live health probing, attachability checks, provider discovery, and status aggregation used by lifecycle/status/tunnel commands.
@@ -87,6 +88,7 @@ These modules hold reusable, non-presentational logic for commands.
 - `cli-http.js`
   - HTTP helpers for health checks, shutdown requests, JSON API calls, tunnel provider fetches, and system info fetches.
   - Owns local desktop bearer auth and managed CLI-instance UI password retry for control-plane requests.
+  - Password-auth retries read both the password and cookie name from the target port's instance record. Legacy records without `uiSessionCookieName` fall back to `oc_ui_session`.
 
 - `cli-control.js`
   - Sends one typed action request to the authenticated OpenChamber control endpoint and maps HTTP failures to CLI exit behavior.

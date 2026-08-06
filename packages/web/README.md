@@ -25,6 +25,7 @@ openchamber                          # Start on port 3000
 openchamber --port 8080              # Custom port
 openchamber --lan --port 3000        # Listen on LAN (0.0.0.0)
 openchamber --ui-password secret     # Password-protect UI
+OPENCHAMBER_SESSION_COOKIE_NAME=oc_ui_session_3000 openchamber --ui-password secret # Isolate same-host instance sessions
 openchamber startup enable           # Start at login as a native service
 OPENCHAMBER_UI_PASSWORD=secret openchamber startup enable # Save service password env
 openchamber startup status           # Show startup service status
@@ -46,6 +47,8 @@ OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber  # Connec
 openchamber stop                     # Stop server
 openchamber update                   # Update to latest version
 ```
+
+CLI-managed instances record the resolved session cookie name per port. Later commands such as `openchamber tunnel start --port 3000` reuse that stored name, so the environment assignment does not need to be repeated. Existing instance records without a stored name continue to use `oc_ui_session`.
 
 `startup enable` snapshots your current environment into the native service so startup behaves like you launched `openchamber` from the same shell. This preserves provider tokens, PATH, SSH agent settings, and other CLI auth/config env vars. Use `--no-env-snapshot` for a minimal service env.
 
@@ -115,6 +118,7 @@ OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
 | `OPENCHAMBER_VERBOSE_REQUEST_LOGS` | Set to `true` to log every HTTP request; disabled by default to keep user logs small |
 | `OPENCHAMBER_SKIP_API_COMPRESSION` | Set to `true` to disable gzip compression for `/api/*` responses |
 | `OPENCHAMBER_COMPRESS_API` | Set to `true` to force `/api/*` compression, or `false` to disable it. Desktop runtime disables API compression by default to reduce local sidecar CPU use |
+| `OPENCHAMBER_SESSION_COOKIE_NAME` | Browser session cookie name (default: `oc_ui_session`). Set a unique value per instance when multiple instances share one host |
 | `OPENCHAMBER_TERMINAL_SHELL` | Preferred terminal shell executable used by the `Auto` setting before platform defaults |
 
 </details>
