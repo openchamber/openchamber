@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/icon/Icon';
+import { SessionStatusIndicator } from '@/components/session/SessionStatusIndicator';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionDisplayStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
@@ -295,31 +296,12 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
         ) : null}
       </div>
 
-      {isStreaming || showUnreadDot || isReconnecting ? (
-        <span className="flex h-3 w-3 flex-shrink-0 items-center justify-center self-center">
-          {isReconnecting ? (
-            <span
-              className="inline-flex items-center"
-              aria-label={t('sessions.sidebar.session.status.reconnecting')}
-              title={t('sessions.sidebar.session.status.reconnecting')}
-            >
-              <Icon name="cloud-off" className="h-3 w-3 text-muted-foreground/70" />
-            </span>
-          ) : isStreaming ? (
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-primary animate-busy-pulse"
-              aria-label={t('sessions.sidebar.session.status.active')}
-              title={t('sessions.sidebar.session.status.active')}
-            />
-          ) : (
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
-              aria-label={t('sessions.sidebar.session.status.unread')}
-              title={t('sessions.sidebar.session.status.unread')}
-            />
-          )}
-        </span>
-      ) : null}
+      <SessionStatusIndicator
+        statusType={statusType}
+        showUnread={showUnreadDot}
+        size="sm"
+        className="flex h-3 w-3 flex-shrink-0 items-center justify-center self-center"
+      />
     </BaseMenu.Item>
   );
 }

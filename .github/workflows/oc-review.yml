@@ -51,6 +51,7 @@ jobs:
           bun test src/sync/__tests__/session-status-snapshot.test.ts
           bun test src/sync/global-session-status.test.ts
           bun test src/hooks/useTraySync.test.ts
+          bun test src/components/session/__tests__/session-status-presentation.test.tsx
 
       - name: Electron Linux packaging unit tests
         working-directory: packages/electron

@@ -65,22 +65,22 @@ const SwitcherRow: React.FC<{
         ) : null}
       </span>
       {/* Activity sits on the right, before the time — no reserved left gutter. */}
-      {isStreaming || showUnreadDot || isReconnecting ? (
-        isReconnecting ? (
-          <Icon
-            name="cloud-off"
-            className="size-3.5 shrink-0 text-muted-foreground/70"
-            aria-hidden
-          />
-        ) : (
-          <span
-            className={cn(
-              'size-1.5 shrink-0 rounded-full',
-              isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-            )}
-            aria-hidden
-          />
-        )
+      {isReconnecting ? (
+        <span
+          className="shrink-0"
+          aria-label={t('sessions.sidebar.session.status.reconnecting')}
+          title={t('sessions.sidebar.session.status.reconnecting')}
+        >
+          <Icon name="cloud-off" className="size-3.5 text-muted-foreground/70" aria-hidden />
+        </span>
+      ) : isStreaming || showUnreadDot ? (
+        <span
+          className={cn(
+            'size-1.5 shrink-0 rounded-full',
+            isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
+          )}
+          aria-hidden
+        />
       ) : null}
       {/* The elapsed turn takes the time slot while it matters, then hands it
           back to the relative timestamp. */}

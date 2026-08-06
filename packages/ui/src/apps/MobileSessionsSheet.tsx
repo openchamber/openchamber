@@ -608,10 +608,24 @@ const SessionRow: React.FC<{
             : 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]'),
         )}
       >
-        {/* Left gutter slot: live activity indicator takes priority over the
-            subsession chevron — same position, so rows never shift. When the
-            row has children the slot still toggles them either way. */}
-        {isStreaming || showUnreadDot || isReconnecting || (hasChildren && onToggleChildren) ? (
+        {/* Left gutter slot: the reconnecting indicator owns its own
+            accessibility (a `<span>` with aria-label, NOT the expand button)
+            so screen readers announce "Reconnecting…" instead of "Expand
+            subsessions". When NOT reconnecting, the expand/collapse control
+            keeps its correct label. Same absolute position, so rows never
+            shift. */}
+        {isReconnecting ? (
+          <span
+            className="absolute z-10 flex w-6 items-center justify-center text-muted-foreground/70"
+            style={{ left: Math.max(indent - 32, 2), top: 0, bottom: 0 }}
+            aria-label={t('sessions.sidebar.session.status.reconnecting')}
+            title={t('sessions.sidebar.session.status.reconnecting')}
+          >
+            <Icon name="cloud-off" className="size-4" aria-hidden />
+          </span>
+        ) : null}
+
+        {!isReconnecting && (isStreaming || showUnreadDot || (hasChildren && onToggleChildren)) ? (
           <button
             type="button"
             className="absolute z-10 flex w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -625,9 +639,7 @@ const SessionRow: React.FC<{
               onToggleChildren?.();
             }}
           >
-            {isReconnecting ? (
-              <Icon name="cloud-off" className="size-4 text-muted-foreground/70" aria-hidden />
-            ) : isStreaming || showUnreadDot ? (
+            {isStreaming || showUnreadDot ? (
               <span
                 className={cn(
                   'size-1.5 rounded-full',
