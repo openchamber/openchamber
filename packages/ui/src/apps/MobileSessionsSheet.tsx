@@ -608,15 +608,15 @@ const SessionRow: React.FC<{
             : 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]'),
         )}
       >
-        {/* Left gutter slot: the reconnecting indicator owns its own
-            accessibility (a `<span>` with aria-label, NOT the expand button)
-            so screen readers announce "Reconnecting…" instead of "Expand
-            subsessions". When NOT reconnecting, the expand/collapse control
-            keeps its correct label. Same absolute position, so rows never
-            shift. */}
+        {/* Left gutter slot: the reconnecting indicator is an informational
+            `<span>` with its own aria-label ("Reconnecting…"), NOT a button and
+            NOT a replacement for the expand/collapse control. The expand/collapse
+            button is a separate action that renders independently whenever the
+            row has children. Both occupy the same visual gutter; they do not
+            remove or hide each other. */}
         {isReconnecting ? (
           <span
-            className="absolute z-10 flex w-6 items-center justify-center text-muted-foreground/70"
+            className="absolute z-10 flex w-6 items-center justify-center text-muted-foreground/70 pointer-events-none"
             style={{ left: Math.max(indent - 32, 2), top: 0, bottom: 0 }}
             aria-label={t('sessions.sidebar.session.status.reconnecting')}
             title={t('sessions.sidebar.session.status.reconnecting')}
@@ -625,7 +625,7 @@ const SessionRow: React.FC<{
           </span>
         ) : null}
 
-        {!isReconnecting && (isStreaming || showUnreadDot || (hasChildren && onToggleChildren)) ? (
+        {(isStreaming || showUnreadDot || (hasChildren && onToggleChildren)) ? (
           <button
             type="button"
             className="absolute z-10 flex w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
