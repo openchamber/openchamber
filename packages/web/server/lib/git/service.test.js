@@ -537,6 +537,154 @@ describe('createWorktree', () => {
     }
   });
 
+  const installPostCheckoutHook = (repo, script, executable = true) => {
+    const hookPath = path.join(repo, '.git', 'hooks', 'post-checkout');
+    fs.writeFileSync(hookPath, script);
+    if (executable) {
+      fs.chmodSync(hookPath, 0o755);
+    }
+    return hookPath;
+  };
+
+  it('runs the post-checkout hook after populating a created worktree', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      const head = runGit(repo, ['rev-parse', 'HEAD']).trim();
+
+      const hookLog = path.join(dataHome, 'post-checkout.log');
+      installPostCheckoutHook(
+        repo,
+        `#!/bin/sh\nprintf '%s|%s|%s|%s' "$1" "$2" "$3" "$(pwd -P)" > ${JSON.stringify(hookLog)}\n`,
+      );
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        worktreeName: 'hook-test',
+        branchName: 'openchamber/hook-test',
+        returnAfterDirectoryCreated: true,
+      });
+
+      await expect.poll(() => {
+        try {
+          return fs.readFileSync(hookLog, 'utf8');
+        } catch {
+          return '';
+        }
+      }, { timeout: 5_000 }).not.toBe('');
+
+      const [previousHead, newHead, flag, cwd] = fs.readFileSync(hookLog, 'utf8').split('|');
+      expect(previousHead).toBe('0000000000000000000000000000000000000000');
+      expect(newHead).toBe(head);
+      expect(flag).toBe('1');
+      expect(cwd).toBe(fs.realpathSync(created.path));
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('skips a non-executable post-checkout hook', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const hookLog = path.join(dataHome, 'post-checkout-skipped.log');
+      installPostCheckoutHook(
+        repo,
+        `#!/bin/sh\nprintf 'ran' > ${JSON.stringify(hookLog)}\n`,
+        false,
+      );
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        worktreeName: 'hook-skip-test',
+        branchName: 'openchamber/hook-skip-test',
+        returnAfterDirectoryCreated: true,
+      });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).status,
+        { timeout: 5_000 },
+      ).toBe('ready');
+      expect(fs.existsSync(hookLog)).toBe(false);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('does not fail worktree bootstrap when the post-checkout hook fails', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const hookLog = path.join(dataHome, 'post-checkout-failed.log');
+      installPostCheckoutHook(
+        repo,
+        `#!/bin/sh\nprintf 'ran' > ${JSON.stringify(hookLog)}\nexit 1\n`,
+      );
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        worktreeName: 'hook-fail-test',
+        branchName: 'openchamber/hook-fail-test',
+        returnAfterDirectoryCreated: true,
+      });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).status,
+        { timeout: 5_000 },
+      ).toBe('ready');
+      expect(fs.readFileSync(hookLog, 'utf8')).toBe('ran');
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
   it('waits for active bootstrap work before removing a worktree', async () => {
     if (!canRunGit()) return;
 
