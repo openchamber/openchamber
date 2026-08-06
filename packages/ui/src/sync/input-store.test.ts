@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import { strToU8, zipSync } from "fflate"
-import { useInputStore } from "./input-store"
+import { restoreAttachmentsAfterSendFailure, useInputStore } from "./input-store"
 
 class MockFileReader {
   result: string | ArrayBuffer | null = null
@@ -61,6 +61,23 @@ describe("input-store attachments", () => {
       activeEditorFile: null,
     })
     useInputStore.getState().setAttachedFiles([])
+  })
+
+  test("restores attachments after a send failure", () => {
+    const restored = new File(["restored"], "restored.txt", { type: "text/plain" })
+    const attachments = [{
+      id: "restored",
+      file: restored,
+      dataUrl: "data:text/plain;base64,cmVzdG9yZWQ=",
+      mimeType: "text/plain",
+      filename: "restored.txt",
+      size: restored.size,
+      source: "local" as const,
+    }]
+
+    restoreAttachmentsAfterSendFailure(attachments)
+
+    expect(useInputStore.getState().attachedFiles).toEqual(attachments)
   })
 
   testWithMockFileReader("does not attach a local file that finishes reading after attachments are cleared", async () => {

@@ -5,6 +5,7 @@ import { expandSnippets } from '../opencode/snippets.js';
 import { expandCommandGoalObjective, parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { OpenChamberControlError, asControlError } from '../openchamber-control/error.js';
+import { assertPromptResponse, assertPromptSdkResult } from '../opencode/prompt-response.js';
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') return null;
@@ -187,10 +188,7 @@ const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, directory, payl
     body: JSON.stringify(payload),
   });
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`prompt_async failed (${response.status})${body ? `: ${body}` : ''}`);
-  }
+  await assertPromptResponse(response, 'prompt_async');
 };
 
 const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
@@ -481,7 +479,7 @@ export const createOpenChamberSessionService = (dependencies) => {
 
     if (resolvedCommand) {
       try {
-        await client.session.command({
+        const result = await client.session.command({
           sessionID,
           directory,
           command: resolvedCommand.command,
@@ -490,6 +488,7 @@ export const createOpenChamberSessionService = (dependencies) => {
           model: `${model.providerID}/${model.modelID}`,
           ...(variant ? { variant } : {}),
         });
+        assertPromptSdkResult(result, 'session.command');
       } catch (error) {
         throw markGoalPartial(error);
       }

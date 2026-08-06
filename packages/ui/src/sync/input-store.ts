@@ -294,3 +294,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
     set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
   },
 }))
+
+export const restoreAttachmentsAfterSendFailure = (attachments: AttachedFile[]) => {
+  if (attachments.length > 0) useInputStore.getState().setAttachedFiles(attachments)
+}

@@ -3,6 +3,7 @@ import { DateTime } from 'luxon';
 import parser from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
+import { assertPromptResponse, assertPromptSdkResult } from '../opencode/prompt-response.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -465,10 +466,7 @@ export const createScheduledTasksRuntime = (deps) => {
       body: JSON.stringify(buildPromptAsyncPayload(task, projectPath)),
     });
 
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`prompt_async failed (${response.status})${body ? `: ${body}` : ''}`);
-    }
+    await assertPromptResponse(response, 'prompt_async');
   };
 
   const resolveScheduledCommand = async ({ client, projectPath, task }) => {
@@ -490,7 +488,7 @@ export const createScheduledTasksRuntime = (deps) => {
   };
 
   const runScheduledCommand = async ({ client, projectPath, sessionID, task, command }) => {
-    await client.session.command({
+    const result = await client.session.command({
       sessionID,
       directory: projectPath,
       command: command.command,
@@ -499,7 +497,7 @@ export const createScheduledTasksRuntime = (deps) => {
       model: `${task.execution.providerID}/${task.execution.modelID}`,
       ...(task.execution.variant ? { variant: task.execution.variant } : {}),
     });
-
+    assertPromptSdkResult(result, 'session.command');
   };
 
   const runTaskWithWatchdog = async (projectID, task, reason) => {

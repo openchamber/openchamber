@@ -261,6 +261,28 @@ describe('openchamber session routes', () => {
     }
   });
 
+  it('rejects a successful HTML response instead of reporting the prompt as dispatched', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url).includes('/prompt_async')) {
+        return new Response('<!doctype html><title>OpenChamber</title>', {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        });
+      }
+      return { ok: true, json: async () => ({ id: 'ses_123' }) };
+    });
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5' })
+        .expect(500);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('creates goal metadata before dispatching the initial goal prompt', async () => {
     const originalFetch = globalThis.fetch;
     const fetchMock = vi.fn(async (url) => {
@@ -718,6 +740,31 @@ describe('openchamber session routes', () => {
 
       expect(sessionCommandMock).toHaveBeenCalledTimes(1);
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/prompt_async'))).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects a slash command SDK error result', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn();
+    commandListMock.mockResolvedValue({ data: [{ name: 'review' }] });
+    sessionCommandMock.mockResolvedValue({ error: { message: 'command rejected' }, response: { status: 503 } });
+    globalThis.fetch = fetchMock;
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions/ses_source/send')
+        .send({
+          directory: '/repo/app',
+          prompt: '/review fix this',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+        })
+        .expect(500);
+
+      expect(sessionCommandMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       globalThis.fetch = originalFetch;
     }
