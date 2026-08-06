@@ -92,6 +92,7 @@ import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createMessengerSyncRouter } from './lib/messenger/messenger-sync.js';
+import { createLinearIntegrationRuntime, registerLinearRoutes } from './lib/linear/index.js';
 import { syncSystemSkills } from './lib/opencode/system-skills.js';
 import {
   createOpenChamberAgentEventsWebSocketRuntime,
@@ -1654,6 +1655,18 @@ async function main(options = {}) {
   relayServiceInstance = relayService;
   relayService.registerRoutes(app);
 
+  // Linear issue-tracker integration: issue-triggered session starts,
+  // issue ↔ session links, and lifecycle status comments posted back to the
+  // originating Linear issue. Sessions go through the shared OpenChamber
+  // session service so defaults and validation match the web UI.
+  const linearIntegrationRuntime = createLinearIntegrationRuntime({
+    sessionService: openChamberSessionService,
+    globalEventHub: globalMessageStreamHub,
+    getAppBaseUrl: () => `http://127.0.0.1:${tunnelRuntimeContext.getActivePort() || port}`,
+    ensureEventStream: () => ensureGlobalWatcherStarted(),
+  });
+  registerLinearRoutes(app, { runtime: linearIntegrationRuntime });
+
   await featureRoutesRuntime.registerRoutes(app, {
     crypto,
     fs,
@@ -1968,6 +1981,15 @@ async function main(options = {}) {
     healthCheckTimer.unref();
   })();
 
+  // Resume Linear integration watchers (label-trigger polling and lifecycle
+  // status comments) from persisted state. Best-effort — a failure here must
+  // never block startup.
+  try {
+    linearIntegrationRuntime.start();
+  } catch (error) {
+    console.warn('[Linear] Startup failed:', error?.message ?? error);
+  }
+
   // Only opens a relay control socket when the user opted in (config enabled).
   // Reconcile the relay lifecycle from demand on startup: run it if any relay
   // device/session exists, stop it (and clear a stale enabled flag) otherwise.
@@ -2013,6 +2035,11 @@ async function main(options = {}) {
     stop: (shutdownOptions = {}) => {
       realtimeProxyRuntime.stop();
       clearInterval(relayReconcileTimer);
+      try {
+        linearIntegrationRuntime.stop();
+      } catch {
+        // best-effort teardown of Linear polling/event subscription
+      }
       try {
         relayService.stop();
       } catch {

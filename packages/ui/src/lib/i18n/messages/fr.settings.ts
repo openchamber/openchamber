@@ -1,4 +1,5 @@
 import { discordIntegrationI18n } from './discord-integration.i18n';
+import { linearIntegrationI18n } from './linear-integration.i18n';
 
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Suivi de l’utilisation d’OpenCode Go',
@@ -2103,6 +2104,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...discordIntegrationI18n.fr,
+  ...linearIntegrationI18n.fr,
   'settings.integrations.discord.commands.category.project': 'Projets',
   'settings.integrations.discord.commands.category.mcp': 'Serveurs MCP',
   'settings.integrations.discord.commands.category.ops': 'Opérations de session',

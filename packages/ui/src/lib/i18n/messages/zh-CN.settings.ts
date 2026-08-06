@@ -1,4 +1,5 @@
 import { discordIntegrationI18n } from './discord-integration.i18n';
+import { linearIntegrationI18n } from './linear-integration.i18n';
 
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 用量跟踪',
@@ -2103,6 +2104,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
   ...discordIntegrationI18n['zh-CN'],
+  ...linearIntegrationI18n['zh-CN'],
   'settings.integrations.discord.commands.category.project': '项目',
   'settings.integrations.discord.commands.category.mcp': 'MCP 服务器',
   'settings.integrations.discord.commands.category.ops': '会话操作',
