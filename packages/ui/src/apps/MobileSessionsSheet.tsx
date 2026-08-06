@@ -65,11 +65,12 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions, useSessionDisplayStatus } from '@/sync/sync-context';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
-import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
+import { MobileSessionChildToggle } from './MobileSessionChildToggle';
+import { MobileSessionRowStatus } from './MobileSessionRowStatus';
 
 type MobileSessionsSheetProps = {
   open: boolean;
@@ -471,12 +472,11 @@ const SessionRow: React.FC<{
   const time = formatRelativeShort(getSessionTimestamp(session));
   const title = session.title?.trim() || t('mobile.sessions.untitled');
   const swipeEnabled = Boolean(onRevealedChange && onArchive);
-  // Live indicators, same conventions as the desktop sidebar: busy/retry →
-  // spinner; unseen activity on a non-active row → attention dot. When the
-  // global status index is unavailable, preserved busy/retry is presented as
-  // reconnecting — a static cloud-off icon (no spinner, no pulse) so the row
-  // is identifiable as needing attention without implying a running turn. It is
-  // not confirmed active and not a normal idle session.
+  // Live status indicators render in the row's status area (right side)
+  // via SessionStatusIndicator, NOT in the left gutter. The left gutter
+  // is exclusively the subsession expand/collapse control. Reconnecting
+  // is a static cloud-off icon (no animation) — distinct from busy (pulse)
+  // and from idle (no indicator).
   const liveDisplayStatus = useSessionDisplayStatus(session.id);
   const unseenCount = useSessionUnseenCount(session.id);
   const statusType = liveDisplayStatus.type;
@@ -608,49 +608,17 @@ const SessionRow: React.FC<{
             : 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]'),
         )}
       >
-        {/* Left gutter slot: the reconnecting indicator is an informational
-            `<span>` with its own aria-label ("Reconnecting…"), NOT a button and
-            NOT a replacement for the expand/collapse control. The expand/collapse
-            button is a separate action that renders independently whenever the
-            row has children. Both occupy the same visual gutter; they do not
-            remove or hide each other. */}
-        {isReconnecting ? (
-          <span
-            className="absolute z-10 flex w-6 items-center justify-center text-muted-foreground/70 pointer-events-none"
-            style={{ left: Math.max(indent - 32, 2), top: 0, bottom: 0 }}
-            aria-label={t('sessions.sidebar.session.status.reconnecting')}
-            title={t('sessions.sidebar.session.status.reconnecting')}
-          >
-            <Icon name="cloud-off" className="size-4" aria-hidden />
-          </span>
-        ) : null}
-
-        {(isStreaming || showUnreadDot || (hasChildren && onToggleChildren)) ? (
-          <button
-            type="button"
-            className="absolute z-10 flex w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            style={{ left: Math.max(indent - 32, 2), top: 0, bottom: 0, touchAction: 'manipulation' }}
-            aria-label={expanded
-              ? t('sessions.sidebar.session.subsessions.collapse')
-              : t('sessions.sidebar.session.subsessions.expand')}
-            disabled={!hasChildren || !onToggleChildren}
-            onClick={(event) => {
-              event.stopPropagation();
-              onToggleChildren?.();
-            }}
-          >
-            {isStreaming || showUnreadDot ? (
-              <span
-                className={cn(
-                  'size-1.5 rounded-full',
-                  isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-                )}
-                aria-hidden
-              />
-            ) : (
-              <RiArrowDownSLine className={cn('size-[18px] transition-transform duration-150', expanded ? 'rotate-0' : '-rotate-90')} />
-            )}
-          </button>
+        {/* Left gutter: subsession expand/collapse control ONLY. Status
+            indicators (busy/retry/reconnecting/unread) are rendered separately
+            in the row's status area via MobileSessionRowStatus, not in this
+            gutter. The child toggle stays available regardless of live-status
+            presentation. */}
+        {hasChildren && onToggleChildren ? (
+          <MobileSessionChildToggle
+            expanded={expanded}
+            onToggle={onToggleChildren}
+            left={Math.max(indent - 32, 2)}
+          />
         ) : null}
         {renaming && onSubmitRename && onCancelRename ? (
           <SessionRenameForm
@@ -692,16 +660,17 @@ const SessionRow: React.FC<{
                 {title}
               </span>
               {/* The elapsed turn takes the time slot while it matters, then
-                  hands it back to the relative timestamp. */}
-              {showActivityDuration ? (
-                <SessionActivityDuration
-                  sessionId={session.id}
-                  running={isStreaming}
-                  className="typography-micro"
-                />
-              ) : time ? (
-                <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{time}</span>
-              ) : null}
+                  hands it back to the relative timestamp. Live status
+                  (busy/retry/reconnecting/unread) is owned by the status area
+                  via MobileSessionRowStatus. */}
+              <MobileSessionRowStatus
+                statusType={statusType}
+                showUnread={showUnreadDot}
+                showActivityDuration={showActivityDuration}
+                sessionId={session.id}
+                isStreaming={isStreaming}
+                time={time}
+              />
             </span>
             {contextLabel ? (
               <span className="block truncate typography-micro text-muted-foreground">{contextLabel}</span>

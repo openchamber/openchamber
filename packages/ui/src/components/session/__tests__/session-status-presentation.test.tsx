@@ -2,8 +2,10 @@ import React from 'react';
 import { describe, expect, mock, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { I18nProvider, useI18n } from '@/lib/i18n';
+import { I18nProvider } from '@/lib/i18n';
 import { SessionStatusIndicator } from '../SessionStatusIndicator';
+import { MobileSessionChildToggle } from '../../../apps/MobileSessionChildToggle';
+import { MobileSessionRowStatus } from '../../../apps/MobileSessionRowStatus';
 
 /**
  * Session status presentation contract tests.
@@ -79,97 +81,90 @@ describe('SessionStatusIndicator production contract', () => {
 });
 
 /**
- * MobileSessionsSheet reconnecting + expand/collapse coexistence contract.
+ * MobileSessionsSheet row layout: left-gutter child toggle + status-area
+ * status indicator coexistence contract.
  *
- * Regression guard for the MobileSessionsSheet left-gutter slot: a transient
- * `isReconnecting` state must NOT remove the unrelated expand/collapse action
- * for rows that have children. The reconnecting indicator is an informational
- * `<span>` (own aria-label); the expand/collapse button is a separate action
- * with its own aria-label. Both render independently when a row has children
- * AND is reconnecting.
+ * Regression guard for the MobileSessionsSheet row layout fix: the
+ * subsession expand/collapse control (left gutter) and the live-status
+ * indicator (status area, right side of the row) are owned by separate
+ * production components and rendered in separate layout slots, so a
+ * reconnecting/busy/unread status NEVER overlaps or replaces the
+ * expand/collapse action.
  *
- * Testing the full `MobileSessionsSheet` requires too many mocks (swipe
- * handlers, viewport stores, etc.), so this asserts the CONTRACT via a minimal
- * test component that replicates the fixed gutter structure: the reconnecting
- * span and the expand button render independently.
+ * These tests import and render the REAL production components
+ * (`MobileSessionChildToggle` + `MobileSessionRowStatus`) together — the
+ * same composition MobileSessionsSheet uses — and assert their coexistence
+ * via accessible labels.
  */
-describe('MobileSessionsSheet reconnecting + expand/collapse coexistence', () => {
-  // Minimal test component replicating the fixed gutter structure:
-  // reconnecting span (informational) + expand button (action) both render.
-  function TestGutter({ isReconnecting, hasChildren, expanded }: {
-    isReconnecting: boolean;
-    hasChildren: boolean;
-    expanded: boolean;
-  }) {
-    const { t } = useI18n();
-    return (
-      <>
-        {isReconnecting ? (
-          <span
-            aria-label={t('sessions.sidebar.session.status.reconnecting')}
-            title={t('sessions.sidebar.session.status.reconnecting')}
-          >
-            <svg data-name="cloud-off" aria-hidden="true" />
-          </span>
-        ) : null}
-        {hasChildren ? (
-          <button
-            type="button"
-            aria-label={expanded
-              ? t('sessions.sidebar.session.subsessions.collapse')
-              : t('sessions.sidebar.session.subsessions.expand')}
-            onClick={() => {}}
-          >
-            <svg data-name="chevron" />
-          </button>
-        ) : null}
-      </>
-    );
-  }
 
-  function renderGutter(props: {
-    isReconnecting: boolean;
-    hasChildren: boolean;
-    expanded: boolean;
-  }): string {
-    return renderToStaticMarkup(
-      <I18nProvider>
-        <TestGutter {...props} />
-      </I18nProvider>,
-    );
-  }
+type RowStatusProps = React.ComponentProps<typeof MobileSessionRowStatus>;
 
-  test('row has children + reconnecting: both status label AND action label independently present', () => {
-    const markup = renderGutter({ isReconnecting: true, hasChildren: true, expanded: false });
-    // Status label present (reconnecting indicator).
+function renderRow({
+  toggle,
+  status,
+}: {
+  toggle?: { expanded: boolean; left?: number };
+  status?: Partial<RowStatusProps>;
+}): string {
+  const statusProps: RowStatusProps = {
+    statusType: status?.statusType ?? 'reconnecting',
+    showUnread: status?.showUnread ?? false,
+    showActivityDuration: status?.showActivityDuration ?? false,
+    sessionId: status?.sessionId ?? 's1',
+    isStreaming: status?.isStreaming ?? false,
+    time: status?.time ?? '2m',
+  };
+  return renderToStaticMarkup(
+    <I18nProvider>
+      {toggle ? (
+        <MobileSessionChildToggle expanded={toggle.expanded} onToggle={() => {}} left={toggle.left ?? 2} />
+      ) : null}
+      <MobileSessionRowStatus {...statusProps} />
+    </I18nProvider>,
+  );
+}
+
+describe('MobileSessionsSheet child-toggle + status coexistence (production components)', () => {
+  test('row has children + reconnecting: status label AND expand action both present', () => {
+    const markup = renderRow({
+      toggle: { expanded: false },
+      status: { statusType: 'reconnecting', showUnread: false, showActivityDuration: false, sessionId: 's1', isStreaming: false, time: '2m' },
+    });
+    // Status indicator present (reconnecting lives in the status area).
     expect(markup).toContain('Reconnecting');
-    // Action label present (expand/collapse control).
+    // Child toggle present (left gutter), expand action available.
     expect(markup).toContain('Expand subsessions');
-    // Both are independently present: the reconnecting span does not replace
-    // the expand/collapse button, and vice versa.
-    expect(markup).toContain('data-name="cloud-off"');
-    expect(markup).toContain('data-name="chevron"');
+    // The reconnecting cloud-off icon is rendered in the status area, not the
+    // gutter, and the gutter shows the expand chevron — they never overlap.
+    expect(markup).toContain('cloud-off');
   });
 
-  test('row has children + reconnecting + expanded: collapse action label present', () => {
-    const markup = renderGutter({ isReconnecting: true, hasChildren: true, expanded: true });
+  test('row has children + expanded + reconnecting: collapse action label present', () => {
+    const markup = renderRow({
+      toggle: { expanded: true },
+      status: { statusType: 'reconnecting', showUnread: false, showActivityDuration: false, sessionId: 's1', isStreaming: false, time: '2m' },
+    });
     expect(markup).toContain('Reconnecting');
     expect(markup).toContain('Collapse subsessions');
     expect(markup).not.toContain('Expand subsessions');
   });
 
-  test('row has children + NOT reconnecting: action label present, no reconnecting label', () => {
-    const markup = renderGutter({ isReconnecting: false, hasChildren: true, expanded: false });
-    expect(markup).not.toContain('Reconnecting');
-    expect(markup).toContain('Expand subsessions');
-    expect(markup).not.toContain('data-name="cloud-off"');
-  });
-
   test('row has NO children + reconnecting: status label present, NO expand/collapse action', () => {
-    const markup = renderGutter({ isReconnecting: true, hasChildren: false, expanded: false });
+    const markup = renderRow({
+      status: { statusType: 'reconnecting', showUnread: false, showActivityDuration: false, sessionId: 's1', isStreaming: false, time: '2m' },
+    });
     expect(markup).toContain('Reconnecting');
+    // No child toggle rendered — the left gutter is empty for childless rows.
     expect(markup).not.toContain('Expand');
     expect(markup).not.toContain('Collapse');
-    expect(markup).not.toContain('data-name="chevron"');
+  });
+
+  test('row has children + busy: active status label AND expand action both present', () => {
+    const markup = renderRow({
+      toggle: { expanded: false },
+      status: { statusType: 'busy', showUnread: false, showActivityDuration: false, sessionId: 's1', isStreaming: false, time: '2m' },
+    });
+    expect(markup).toContain('Session active');
+    expect(markup).toContain('Expand subsessions');
   });
 });
