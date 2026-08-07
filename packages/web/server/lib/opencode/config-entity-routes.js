@@ -27,12 +27,27 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
   } = dependencies;
 
   // Build the response for a config mutation based on whether OpenCode actually
-  // reloaded the change. When connected to an external OpenCode server that
-  // OpenChamber cannot restart, the change is persisted to disk but the running
-  // server will not serve it until the user restarts that server. We must not
-  // report a clean "reloading" success in that case, otherwise the UI silently
-  // reverts the edit to the stale value on the next refresh.
-  const buildConfigMutationResponse = (refreshResult, { liveMessage, manualRestartMessage }) => {
+  // reloaded the change. Three outcomes:
+  //   1. deferred — OpenCode has active sessions, restart is queued until they
+  //      drain. The change is on disk; UI should show a non-blocking toast.
+  //   2. external — OpenChamber cannot restart the external OpenCode server,
+  //      so the change is on disk but the running server keeps serving stale
+  //      startup-cached config until the user restarts it themselves. We must
+  //      not report a clean "reloading" success or the UI silently reverts the
+  //      edit to the stale value on the next refresh.
+  //   3. reloaded — the managed OpenCode process was restarted and re-read the
+  //      config from disk; the change is live.
+  const buildConfigMutationResponse = (refreshResult, { liveMessage, manualRestartMessage, deferredMessage }) => {
+    if (refreshResult && refreshResult.deferred) {
+      return {
+        success: true,
+        requiresReload: false,
+        deferred: true,
+        pendingActiveSessions: refreshResult.pendingActiveSessions || 0,
+        message: deferredMessage || liveMessage,
+      };
+    }
+
     if (refreshResult && refreshResult.external) {
       return {
         success: true,
@@ -54,13 +69,12 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     applyChange();
 
     try {
-      await refreshOpenCodeAfterConfigChange(`mcp ${action}`);
-      return res.json({
-        success: true,
-        requiresReload: true,
-        message: `MCP server "${name}" ${action}d. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      const refreshResult = await refreshOpenCodeAfterConfigChange(`mcp ${action}`);
+      return res.json(buildConfigMutationResponse(refreshResult, {
+        liveMessage: `MCP server "${name}" ${action}d. Reloading interface…`,
+        manualRestartMessage: `MCP server "${name}" ${action}d. Restart your connected OpenCode server to apply the change.`,
+        deferredMessage: `MCP server "${name}" ${action}d. OpenCode will reload when active tasks finish.`,
+      }));
     } catch (error) {
       console.error(`[API:MCP ${action}] Reload failed after config write:`, error);
       return res.json({
@@ -135,6 +149,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       res.json(buildConfigMutationResponse(refreshResult, {
         liveMessage: `Agent ${agentName} created successfully. Reloading interface…`,
         manualRestartMessage: `Agent ${agentName} saved. Restart your connected OpenCode server to apply the change.`,
+        deferredMessage: `Agent ${agentName} saved. OpenCode will reload when active tasks finish.`,
       }));
     } catch (error) {
       console.error('Failed to create agent:', error);
@@ -163,6 +178,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       res.json(buildConfigMutationResponse(refreshResult, {
         liveMessage: `Agent ${agentName} updated successfully. Reloading interface…`,
         manualRestartMessage: `Agent ${agentName} saved. Restart your connected OpenCode server to apply the change.`,
+        deferredMessage: `Agent ${agentName} saved. OpenCode will reload when active tasks finish.`,
       }));
     } catch (error) {
       console.error('[Server] Failed to update agent:', error);
@@ -186,6 +202,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       res.json(buildConfigMutationResponse(refreshResult, {
         liveMessage: `Agent ${agentName} deleted successfully. Reloading interface…`,
         manualRestartMessage: `Agent ${agentName} deleted. Restart your connected OpenCode server to apply the change.`,
+        deferredMessage: `Agent ${agentName} deleted. OpenCode will reload when active tasks finish.`,
       }));
     } catch (error) {
       console.error('Failed to delete agent:', error);
@@ -323,16 +340,15 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
       createCommand(commandName, config, directory, scope);
-      await refreshOpenCodeAfterConfigChange('command creation', {
+      const refreshResult = await refreshOpenCodeAfterConfigChange('command creation', {
         commandName
       });
 
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Command ${commandName} created successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildConfigMutationResponse(refreshResult, {
+        liveMessage: `Command ${commandName} created successfully. Reloading interface…`,
+        manualRestartMessage: `Command ${commandName} saved. Restart your connected OpenCode server to apply the change.`,
+        deferredMessage: `Command ${commandName} saved. OpenCode will reload when active tasks finish.`,
+      }));
     } catch (error) {
       console.error('Failed to create command:', error);
       res.status(500).json({ error: error.message || 'Failed to create command' });
@@ -353,16 +369,15 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Working directory:', directory);
 
       updateCommand(commandName, updates, directory);
-      await refreshOpenCodeAfterConfigChange('command update');
+      const refreshResult = await refreshOpenCodeAfterConfigChange('command update');
 
       console.log(`[Server] Command ${commandName} updated successfully`);
 
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Command ${commandName} updated successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildConfigMutationResponse(refreshResult, {
+        liveMessage: `Command ${commandName} updated successfully. Reloading interface…`,
+        manualRestartMessage: `Command ${commandName} saved. Restart your connected OpenCode server to apply the change.`,
+        deferredMessage: `Command ${commandName} saved. OpenCode will reload when active tasks finish.`,
+      }));
     } catch (error) {
       console.error('[Server] Failed to update command:', error);
       console.error('[Server] Error stack:', error.stack);
@@ -379,14 +394,13 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
 
       deleteCommand(commandName, directory);
-      await refreshOpenCodeAfterConfigChange('command deletion');
+      const refreshResult = await refreshOpenCodeAfterConfigChange('command deletion');
 
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Command ${commandName} deleted successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildConfigMutationResponse(refreshResult, {
+        liveMessage: `Command ${commandName} deleted successfully. Reloading interface…`,
+        manualRestartMessage: `Command ${commandName} deleted. Restart your connected OpenCode server to apply the change.`,
+        deferredMessage: `Command ${commandName} deleted. OpenCode will reload when active tasks finish.`,
+      }));
     } catch (error) {
       console.error('Failed to delete command:', error);
       res.status(500).json({ error: error.message || 'Failed to delete command' });
