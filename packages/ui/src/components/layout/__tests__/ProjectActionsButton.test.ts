@@ -4,7 +4,9 @@
  * Auto-discover should be hidden from the project actions menu when no dev
  * server can be detected, but in-progress Auto-discover runs must keep their
  * URL-watch behavior, stop affordance, and the click path must still perform
- * fresh detection.
+ * fresh detection. When a project has no configured actions and Auto-discover
+ * is hidden, the control still renders as a dropdown with the Add new action
+ * settings entry.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -142,5 +144,71 @@ describe('issue #2723: Auto-discover hidden when no dev server is detectable', (
 
     expect(runAction).toContain('detectDevServerCommand(normalizedDirectory, actionsState.actions, scripts)');
     expect(runAction).toContain("t('contextPanel.preview.noDevServer')");
+  });
+});
+
+describe('issue #2743 follow-up: empty project actions keep the dropdown entry', () => {
+  test('the early return for an empty actions list is removed and the resolved selection still exists', () => {
+    expect(source).not.toContain('if (!resolvedSelected) {');
+    expect(source).toContain('const resolvedSelected = selectedAction ?? displayActions[0] ?? null;');
+  });
+
+  test('the resolved-selected downstream values stay null-safe so rendering can continue without an action', () => {
+    expect(source).toContain("const selectedIconKey = (resolvedSelected?.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;");
+    expect(source).toContain('const selectedIconName = resolvedSelected?.id === AUTO_DISCOVER_ACTION_ID');
+    expect(source).toContain('const selectedRunKey = resolvedSelected ? toProjectActionRunKey(normalizedDirectory, resolvedSelected.id) : null;');
+    expect(source).toContain('const selectedRunning = selectedRunKey ? projectActionRuns[selectedRunKey] : null;');
+    expect(source).toContain('const isAutoDiscoverSelected = resolvedSelected?.id === AUTO_DISCOVER_ACTION_ID;');
+  });
+
+  test('the primary action button is guarded by the resolved-selected conditional in both variants', () => {
+    const guardMarker = '{resolvedSelected ? (';
+    const firstGuardIndex = source.indexOf(guardMarker);
+    expect(firstGuardIndex).toBeGreaterThan(-1);
+    const secondGuardIndex = source.indexOf(guardMarker, firstGuardIndex + guardMarker.length);
+    expect(secondGuardIndex).toBeGreaterThan(firstGuardIndex);
+    expect(source.indexOf(guardMarker, secondGuardIndex + guardMarker.length)).toBe(-1);
+  });
+
+  test('the preview button also requires a resolved selection in both variants', () => {
+    const previewGuardMarker = '{resolvedSelected && showSelectedPreviewButton ? (';
+    const firstPreviewGuardIndex = source.indexOf(previewGuardMarker);
+    expect(firstPreviewGuardIndex).toBeGreaterThan(-1);
+    const secondPreviewGuardIndex = source.indexOf(previewGuardMarker, firstPreviewGuardIndex + previewGuardMarker.length);
+    expect(secondPreviewGuardIndex).toBeGreaterThan(firstPreviewGuardIndex);
+    expect(source.indexOf(previewGuardMarker, secondPreviewGuardIndex + previewGuardMarker.length)).toBe(-1);
+  });
+
+  test('the dropdown separator renders only when there are actions in both variants', () => {
+    const separatorMarker = '{displayActions.length > 0 ? <DropdownMenuSeparator /> : null}';
+    const firstSeparatorIndex = source.indexOf(separatorMarker);
+    expect(firstSeparatorIndex).toBeGreaterThan(-1);
+    const secondSeparatorIndex = source.indexOf(separatorMarker, firstSeparatorIndex + separatorMarker.length);
+    expect(secondSeparatorIndex).toBeGreaterThan(firstSeparatorIndex);
+    expect(source.indexOf(separatorMarker, secondSeparatorIndex + separatorMarker.length)).toBe(-1);
+  });
+
+  test('the Add new action dropdown item renders outside the resolved-selected guard in both variants', () => {
+    const addNewActionMarker = "t('projectActions.actions.addNewAction')";
+    const firstAddNewActionIndex = source.indexOf(addNewActionMarker);
+    expect(firstAddNewActionIndex).toBeGreaterThan(-1);
+    const secondAddNewActionIndex = source.indexOf(addNewActionMarker, firstAddNewActionIndex + addNewActionMarker.length);
+    expect(secondAddNewActionIndex).toBeGreaterThan(firstAddNewActionIndex);
+    expect(source.indexOf(addNewActionMarker, secondAddNewActionIndex + addNewActionMarker.length)).toBe(-1);
+
+    const compactGuardCloseMarker = '</Tooltip>\n        ) : null}';
+    const firstCompactGuardCloseIndex = source.indexOf(compactGuardCloseMarker);
+    expect(firstCompactGuardCloseIndex).toBeGreaterThan(-1);
+    const nonCompactGuardCloseMarker = '</Tooltip>\n      ) : null}';
+    const nonCompactGuardCloseIndex = source.indexOf(nonCompactGuardCloseMarker, firstCompactGuardCloseIndex);
+    expect(nonCompactGuardCloseIndex).toBeGreaterThan(firstCompactGuardCloseIndex);
+
+    const triggerMarker = "t('projectActions.actions.chooseActionAria')";
+    const firstTriggerIndex = source.indexOf(triggerMarker);
+    expect(firstTriggerIndex).toBeGreaterThan(-1);
+
+    expect(firstAddNewActionIndex).toBeGreaterThan(firstCompactGuardCloseIndex);
+    expect(secondAddNewActionIndex).toBeGreaterThan(nonCompactGuardCloseIndex);
+    expect(firstAddNewActionIndex).toBeGreaterThan(firstTriggerIndex);
   });
 });

@@ -747,16 +747,13 @@ export const ProjectActionsButton = ({
   }
 
   const resolvedSelected = selectedAction ?? displayActions[0] ?? null;
-  if (!resolvedSelected) {
-    return null;
-  }
 
-  const selectedIconKey = (resolvedSelected.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
-  const selectedIconName = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID
+  const selectedIconKey = (resolvedSelected?.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
+  const selectedIconName = resolvedSelected?.id === AUTO_DISCOVER_ACTION_ID
     ? 'scan-2'
     : PROJECT_ACTION_ICON_MAP[selectedIconKey] || 'play';
-  const selectedRunKey = toProjectActionRunKey(normalizedDirectory, resolvedSelected.id);
-  const selectedRunning = projectActionRuns[selectedRunKey];
+  const selectedRunKey = resolvedSelected ? toProjectActionRunKey(normalizedDirectory, resolvedSelected.id) : null;
+  const selectedRunning = selectedRunKey ? projectActionRuns[selectedRunKey] : null;
   const isStoppingSelected = selectedRunning?.status === 'stopping';
   const isWaitingForSelectedPreview = selectedRunning?.status === 'waiting-for-preview';
   const showSelectedPreviewButton = Boolean(selectedRunning && selectedRunPreviewUrl);
@@ -766,40 +763,42 @@ export const ProjectActionsButton = ({
     }
     openContextPreview(selectedRunning.directory, selectedRunPreviewUrl);
   };
-  const isAutoDiscoverSelected = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID;
+  const isAutoDiscoverSelected = resolvedSelected?.id === AUTO_DISCOVER_ACTION_ID;
 
   if (compact) {
     return (
       <div className="inline-flex items-center">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              disabled={isLoading || isStoppingSelected}
-              className={cn(
-                'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] p-2',
-                'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                'disabled:cursor-not-allowed',
-                className
-              )}
-              onClick={handlePrimaryClick}
-              aria-label={selectedRunning
-                ? t('projectActions.actions.stopNamedAria', { name: resolvedSelected.name })
-                : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
-            >
-              {isStoppingSelected || isWaitingForSelectedPreview
-                ? <Icon name="loader-4" className="h-5 w-5 animate-spin text-[var(--status-warning)]" />
-                : selectedRunning
-                  ? <Icon name="stop" className="h-5 w-5 text-[var(--status-warning)]" />
-                  : <Icon name={selectedIconName} className="h-5 w-5" />}
-            </button>
-          </TooltipTrigger>
-          {isAutoDiscoverSelected ? (
-            <TooltipContent sideOffset={6}>{t('projectActions.actions.autoDiscoverTooltip')}</TooltipContent>
-          ) : null}
-        </Tooltip>
-        {showSelectedPreviewButton ? (
+        {resolvedSelected ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                disabled={isLoading || isStoppingSelected}
+                className={cn(
+                  'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] p-2',
+                  'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                  'disabled:cursor-not-allowed',
+                  className
+                )}
+                onClick={handlePrimaryClick}
+                aria-label={selectedRunning
+                  ? t('projectActions.actions.stopNamedAria', { name: resolvedSelected.name })
+                  : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
+              >
+                {isStoppingSelected || isWaitingForSelectedPreview
+                  ? <Icon name="loader-4" className="h-5 w-5 animate-spin text-[var(--status-warning)]" />
+                  : selectedRunning
+                    ? <Icon name="stop" className="h-5 w-5 text-[var(--status-warning)]" />
+                    : <Icon name={selectedIconName} className="h-5 w-5" />}
+              </button>
+            </TooltipTrigger>
+            {isAutoDiscoverSelected ? (
+              <TooltipContent sideOffset={6}>{t('projectActions.actions.autoDiscoverTooltip')}</TooltipContent>
+            ) : null}
+          </Tooltip>
+        ) : null}
+        {resolvedSelected && showSelectedPreviewButton ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -829,7 +828,7 @@ export const ProjectActionsButton = ({
               <Icon name="add" className="h-4 w-4" />
               <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
+            {displayActions.length > 0 ? <DropdownMenuSeparator /> : null}
             {displayActions.map((entry) => {
               const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
               const iconName = entry.id === AUTO_DISCOVER_ACTION_ID
@@ -874,36 +873,38 @@ export const ProjectActionsButton = ({
         className
       )}
     >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={handlePrimaryClick}
-            disabled={isLoading || isStoppingSelected}
-            className={cn(
-              'inline-flex h-full items-center justify-center typography-ui-label font-medium text-foreground hover:bg-interactive-hover',
-              compact ? 'w-9 px-0' : 'px-2.5',
-              'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed'
-            )}
-            aria-label={selectedRunning
-              ? t('projectActions.actions.stopNamedAria', { name: resolvedSelected.name })
-              : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
-          >
-            <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center">
-              {isStoppingSelected || isWaitingForSelectedPreview
-                ? <Icon name="loader-4" className="h-4 w-4 animate-spin text-[var(--status-warning)]" />
-                : selectedRunning
-                  ? <Icon name="stop" className="h-4 w-4 text-[var(--status-warning)]" />
-                  : <Icon name={selectedIconName} className="h-4 w-4" />}
-            </span>
-          </button>
-        </TooltipTrigger>
-        {isAutoDiscoverSelected ? (
-          <TooltipContent sideOffset={6}>{t('projectActions.actions.autoDiscoverTooltip')}</TooltipContent>
-        ) : null}
-      </Tooltip>
+      {resolvedSelected ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={handlePrimaryClick}
+              disabled={isLoading || isStoppingSelected}
+              className={cn(
+                'inline-flex h-full items-center justify-center typography-ui-label font-medium text-foreground hover:bg-interactive-hover',
+                compact ? 'w-9 px-0' : 'px-2.5',
+                'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed'
+              )}
+              aria-label={selectedRunning
+                ? t('projectActions.actions.stopNamedAria', { name: resolvedSelected.name })
+                : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
+            >
+              <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center">
+                {isStoppingSelected || isWaitingForSelectedPreview
+                  ? <Icon name="loader-4" className="h-4 w-4 animate-spin text-[var(--status-warning)]" />
+                  : selectedRunning
+                    ? <Icon name="stop" className="h-4 w-4 text-[var(--status-warning)]" />
+                    : <Icon name={selectedIconName} className="h-4 w-4" />}
+              </span>
+            </button>
+          </TooltipTrigger>
+          {isAutoDiscoverSelected ? (
+            <TooltipContent sideOffset={6}>{t('projectActions.actions.autoDiscoverTooltip')}</TooltipContent>
+          ) : null}
+        </Tooltip>
+      ) : null}
 
-      {showSelectedPreviewButton ? (
+      {resolvedSelected && showSelectedPreviewButton ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -942,7 +943,7 @@ export const ProjectActionsButton = ({
             <Icon name="add" className="h-4 w-4" />
             <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
+          {displayActions.length > 0 ? <DropdownMenuSeparator /> : null}
           {displayActions.map((entry) => {
             const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
             const iconName = entry.id === AUTO_DISCOVER_ACTION_ID
