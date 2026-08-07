@@ -145,7 +145,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         >
             {isOpen && (
                 <div
-                    className="pointer-events-none absolute inset-y-0 right-0 z-30 w-3 shadow-[inset_-2px_0_10px_-2px_rgb(0_0_0_/_0.06)]"
+                    className="pointer-events-none absolute inset-0 z-30 shadow-[inset_-2px_0_10px_-2px_rgb(0_0_0_/_0.06)]"
                     aria-hidden="true"
                 />
             )}
