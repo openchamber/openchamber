@@ -211,13 +211,18 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     };
   }, [sidebarWidth, workspacePanelWidth]);
 
-  // Apply the shared width mode on tablets, where the chat column can use it.
+  // Message width: the shared chat columns key off these root classes. Applied
+  // for every mobile surface; on a phone the viewport is narrower than the
+  // normal clamp, so wider modes are a no-op there.
   React.useEffect(() => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
     root.classList.toggle('chat-message-width-wide', chatMessageWidthMode === 'wide');
     root.classList.toggle('chat-message-width-fluid', chatMessageWidthMode === 'fluid');
-    return () => root.classList.remove('chat-message-width-wide', 'chat-message-width-fluid');
+    return () => {
+      root.classList.remove('chat-message-width-wide');
+      root.classList.remove('chat-message-width-fluid');
+    };
   }, [chatMessageWidthMode]);
 
   // The draft screen keeps its starter chips while the keyboard is up when
