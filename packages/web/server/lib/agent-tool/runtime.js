@@ -4,11 +4,20 @@ import {
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
   OPENCHAMBER_AGENT_TOOL_ACTIONS,
 } from '../openchamber-control/actions.js';
+import {
+  OPENCHAMBER_BROWSER_ACTION_DEFINITIONS,
+  OPENCHAMBER_BROWSER_ACTIONS,
+  OPENCHAMBER_BROWSER_TOOL_PARAMETERS,
+} from '../browser/agent-actions.js';
 
 const TOOL_SCHEMA_VERSION = 1;
 const ACTIONS = new Set(OPENCHAMBER_AGENT_TOOL_ACTIONS);
+const BROWSER_ACTIONS = new Set(OPENCHAMBER_BROWSER_ACTIONS);
 const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action, title }) => [action, title]),
+);
+const BROWSER_ACTION_TITLES = Object.fromEntries(
+  OPENCHAMBER_BROWSER_ACTION_DEFINITIONS.map(({ action, title }) => [action, title]),
 );
 
 const PLUGIN_PARAMETER_PROPERTIES = {
@@ -68,9 +77,50 @@ const isLoopbackAddress = (value) => {
     || address === '::ffff:127.0.0.1';
 };
 
+const createBrowserToolSource = () => String.raw`
+      openchamber_browser: {
+        description: "Drive OpenChamber's shared browser surface the user is watching: open tabs, navigate, click, type, press keys, scroll, evaluate page state, wait for conditions, resize the viewport, capture screenshots, and record activity. Use one action per call and operate on the active tab unless you pass tabId. Screenshots and recordings become inspectable artifacts in the browser panel. Only http and https URLs can be opened.",
+        args: {
+          action: { type: "string", enum: ${JSON.stringify(OPENCHAMBER_BROWSER_ACTIONS)}, oneOf: ${JSON.stringify(OPENCHAMBER_BROWSER_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "Browser action to perform" },
+          parameters: { type: "object", properties: ${JSON.stringify(OPENCHAMBER_BROWSER_TOOL_PARAMETERS)}, additionalProperties: false, description: "Inputs for the action; use an empty object when none are needed" },
+        },
+        async execute(input, context) {
+          const args = { ...(input.parameters ?? {}), action: input.action }
+          const actionTitles = ${JSON.stringify(BROWSER_ACTION_TITLES)}
+          const title = Object.hasOwn(actionTitles, args.action) ? actionTitles[args.action] : args.action
+          context.metadata({ title, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title } } })
+          const endpoint = process.env.OPENCHAMBER_AGENT_TOOL_URL
+          const token = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN
+          const failure = (payload) => ({ title, output: JSON.stringify(payload), metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: false } } })
+          if (!endpoint || !token) {
+            return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber managed tool connection is unavailable" } })
+          }
+          try {
+            const response = await fetch(endpoint, {
+              method: "POST",
+              headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+              body: JSON.stringify({ tool: "browser", input: args }),
+              signal: context.abort,
+            })
+            const output = await response.text()
+            let result = null
+            try { result = JSON.parse(output) } catch {}
+            const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
+            context.metadata({ title, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: valid && result.ok === true } } })
+            if (valid) return { title, output, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true } } }
+            return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
+          } catch (error) {
+            if (context.abort.aborted) throw error
+            return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
+          }
+        },
+      },
+`;
+
 const createPluginSource = () => String.raw`
 export const OpenChamberPlugin = async () => ({
   tool: {
+${createBrowserToolSource()}
     openchamber: {
       description: "Control OpenChamber projects, sessions, and scheduled tasks on the user's behalf. Sessions and scheduled tasks you create are for the user to follow and interact with; never use this tool to delegate parts of your own current task. Use one action per call. Scope with projectId or directory; omit both to use the current session directory. Session dispatches return immediately by default and you receive no notification when a dispatched session finishes, so never promise to report back on it; the user follows it in OpenChamber; a dispatched session needs no follow-up from you. If the user later asks how it went, use session.messages (add wait to block until it is idle, lastAssistant for just the final answer) — session.send always sends a NEW prompt and never just waits. Set wait only when the user asks or the next step requires the completed result. Session and worktree deletion are unavailable.",
       args: {
@@ -164,6 +214,7 @@ export const createAgentToolRuntime = (dependencies) => {
     dataDir,
     getActivePort,
     executeAction,
+    executeBrowserAction,
     env = process.env,
   } = dependencies;
   const pluginDirectory = path.join(dataDir, 'agent-tool');
@@ -195,7 +246,34 @@ export const createAgentToolRuntime = (dependencies) => {
     return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
   };
 
+  const executeBrowser = async (payload = {}) => {
+    const action = asNonEmptyString(payload.input?.action);
+    if (!action || !BROWSER_ACTIONS.has(action)) {
+      return createResult({ ok: false, action, error: { message: `Unsupported browser action: ${action || 'missing'}`, kind: 'usage' } });
+    }
+    if (typeof executeBrowserAction !== 'function') {
+      return createResult({ ok: false, action, error: { message: 'OpenChamber browser surface is unavailable', kind: 'runtime' } });
+    }
+    try {
+      const { action: _action, ...params } = payload.input;
+      const data = await executeBrowserAction(action, params);
+      return createResult({ ok: true, action, data });
+    } catch (error) {
+      return createResult({
+        ok: false,
+        action,
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+          kind: 'runtime',
+        },
+      });
+    }
+  };
+
   const execute = async (payload = {}, options = {}) => {
+    if (payload.tool === 'browser') {
+      return executeBrowser(payload);
+    }
     const action = asNonEmptyString(payload.input?.action);
     if (!action || !ACTIONS.has(action)) {
       return createResult({ ok: false, action, error: { message: `Unsupported OpenChamber action: ${action || 'missing'}`, kind: 'usage' } });

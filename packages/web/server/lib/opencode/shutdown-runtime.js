@@ -16,6 +16,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     clearHealthCheckInterval,
     getTerminalRuntime,
     setTerminalRuntime,
+    getBrowserRuntime,
+    setBrowserRuntime,
     getMessageStreamRuntime,
     setMessageStreamRuntime,
     getOpenChamberAgentEventsWebSocketRuntime,
@@ -63,6 +65,16 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       } catch {
       } finally {
         setTerminalRuntime(null);
+      }
+    }
+
+    const browserRuntime = getBrowserRuntime?.();
+    if (browserRuntime) {
+      try {
+        await browserRuntime.shutdown();
+      } catch {
+      } finally {
+        setBrowserRuntime?.(null);
       }
     }
 

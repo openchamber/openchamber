@@ -177,9 +177,105 @@ function buildReadSessionSkill({ apiBaseUrl }) {
   };
 }
 
+/**
+ * The `agent-browser` system skill — teaches agents how and when to drive the
+ * shared OpenChamber browser surface the user is watching (navigate, click,
+ * type, evaluate, screenshot, record) through the managed `openchamber_browser`
+ * tool.
+ */
+function buildAgentBrowserSkill() {
+  const body = [
+    '# Drive the OpenChamber agent browser',
+    '',
+    'Use this skill when the user asks you to open, inspect, interact with, or capture a **web application** — a local or remote site — and wants to watch the same browser surface while you work.',
+    '',
+    'This skill file is managed by OpenChamber and refreshed on server start. Remove the `managed-by` frontmatter field to take ownership of your edits.',
+    '',
+    '## Tool',
+    '',
+    'Use the managed OpenCode tool **`openchamber_browser`**. One action per call. Operate on the active tab unless you pass `tabId`. Screenshots and recordings become inspectable artifacts in the Agent Browser panel the user can open from the context rail.',
+    '',
+    'Only `http` and `https` URLs can be opened. Bare `localhost:PORT`, `127.0.0.1:PORT`, and `:PORT` shorthands resolve against the OpenChamber server host where local/private dev servers live.',
+    '',
+    '## When to use',
+    '',
+    '- The user asks you to open, browse, click through, fill forms, or verify a web UI.',
+    '- The user wants a screenshot or a recording of browser activity as an inspectable artifact.',
+    '- The user asks you to check a local preview (`localhost`, `:5173`, a Vite/Next/etc. URL) that is running on the same machine as OpenChamber.',
+    '',
+    'Do **not** use this tool for:',
+    '',
+    '- Reading docs you can fetch with a normal web-fetch tool when the user does not need a live shared browser.',
+    '- Delegating work that belongs in another session or scheduled task.',
+    '',
+    '## Workflow',
+    '',
+    '### 1. Inspect current state',
+    '',
+    'Call `openchamber_browser` with `action: "state"` and empty `parameters` to see open tabs, the active tab, and whether a recording is already running. If the surface reports it is unsupported, tell the user a Chrome-compatible browser is missing on the server (install Chrome/Chromium or set `OPENCHAMBER_BROWSER_PATH`) instead of inventing results.',
+    '',
+    '### 2. Open or navigate',
+    '',
+    '- New tab: `action: "tab.create"` with optional `url` and viewport `preset` (`desktop`, `laptop`, `tablet`, `mobile`).',
+    '- Existing tab: `action: "navigate"` with `url` (and optional `tabId`).',
+    '',
+    'Prefer creating a tab when none exist. Prefer navigating the active tab when one already matches the task. Tell the user they can open **Agent Browser** in the context rail to watch live.',
+    '',
+    '### 3. Interact',
+    '',
+    '- `click` — requires viewport coordinates `x` and `y` in CSS pixels.',
+    '- `type` — inserts `text` at the current focus (click or evaluate-to-focus first).',
+    '- `key` — dispatches a key or combo such as `Enter`, `Tab`, `Escape`, `Control+A`, `Meta+Shift+ArrowLeft`.',
+    '- `scroll` — optional `x`/`y` plus `deltaX`/`deltaY`.',
+    '- `evaluate` — run a JavaScript `expression` in the page and return its value (use this to discover element positions, titles, and readiness).',
+    '- `wait` — wait until a CSS `selector` exists or an `expression` is truthy; optional `timeout` in ms.',
+    '- `viewport` — set a `preset` or custom `width`/`height` so responsive layouts can be checked.',
+    '',
+    'Discover click targets by evaluating the DOM (`getBoundingClientRect`) rather than guessing pixel coordinates. After each meaningful interaction, re-evaluate or wait so you act on authoritative page state.',
+    '',
+    '### 4. Capture',
+    '',
+    '- `screenshot` — capture the tab as an inspectable PNG artifact (`fullPage` optional).',
+    '- `recording.start` / `recording.stop` — start and stop an explicit recording; stop produces an inspectable recording artifact. Only one recording can be active at a time. Start only when the user asks to record, or when a short capture of the interaction is clearly needed.',
+    '',
+    '### 5. Report back',
+    '',
+    'Tell the user, briefly:',
+    '',
+    '- which URL/tab you used,',
+    '- what you verified or changed,',
+    '- that screenshots/recordings are available as Captures in the Agent Browser panel.',
+    '',
+    'Never promise to keep watching a page after your turn ends; the user follows live activity in OpenChamber.',
+    '',
+    '## Rules',
+    '',
+    '- Prefer the shared browser surface over a private fetch when the user wants to see and control the same session.',
+    '- Never open `file:`, `chrome:`, `javascript:`, or `data:` URLs — they are rejected.',
+    '- Never invent page content; evaluate or screenshot to prove what you saw.',
+    '- Keep recording visibility explicit: start and stop with the dedicated actions so the recording indicator is accurate for the user.',
+    '- If a call returns `ok: false`, report the error and recover (for example create a tab first, or wait for a selector) instead of retrying blindly.',
+  ].join('\n');
+
+  return {
+    name: 'agent-browser',
+    frontmatter: {
+      name: 'agent-browser',
+      description:
+        'Use when the user asks you to open, inspect, interact with, or capture a web application in the shared OpenChamber browser surface they can watch live. Drive tabs with the openchamber_browser tool: navigate, click, type, key, scroll, evaluate, wait, resize viewport, screenshot, and record.',
+      [MANAGED_BY_KEY]: MANAGED_BY_VALUE,
+    },
+    body,
+  };
+}
+
 /** Build every OpenChamber system skill for the given local API base URL. */
 export function buildSystemSkills({ apiBaseUrl }) {
-  return [buildCreateProjectSkill({ apiBaseUrl }), buildReadSessionSkill({ apiBaseUrl })];
+  return [
+    buildCreateProjectSkill({ apiBaseUrl }),
+    buildReadSessionSkill({ apiBaseUrl }),
+    buildAgentBrowserSkill(),
+  ];
 }
 
 /**

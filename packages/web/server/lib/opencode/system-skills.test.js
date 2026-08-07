@@ -38,15 +38,38 @@ describe('system-skills', () => {
     expect(readSession.body).toContain(`${API_BASE}/api/messenger/agent/resolve-reference`);
   });
 
+  it('builds the agent-browser skill teaching openchamber_browser', () => {
+    const skills = buildSystemSkills({ apiBaseUrl: API_BASE });
+    const agentBrowser = skills.find((s) => s.name === 'agent-browser');
+    expect(agentBrowser).toBeTruthy();
+    expect(agentBrowser.frontmatter['managed-by']).toBe('openchamber');
+    expect(agentBrowser.frontmatter.description).toMatch(/openchamber_browser/i);
+    expect(agentBrowser.body).toContain('openchamber_browser');
+    expect(agentBrowser.body).toContain('tab.create');
+    expect(agentBrowser.body).toContain('navigate');
+    expect(agentBrowser.body).toContain('screenshot');
+    expect(agentBrowser.body).toContain('recording.start');
+    expect(agentBrowser.body).toContain('OPENCHAMBER_BROWSER_PATH');
+  });
+
   it('installs a missing system skill', () => {
     const results = syncSystemSkills({ apiBaseUrl: API_BASE, skillRootDir });
-    expect(results.map((entry) => entry.name).sort()).toEqual(['create-project', 'read-session']);
+    expect(results.map((entry) => entry.name).sort()).toEqual([
+      'agent-browser',
+      'create-project',
+      'read-session',
+    ]);
     expect(results.every((entry) => entry.action === 'installed')).toBe(true);
     const createProject = results.find((entry) => entry.name === 'create-project');
     const { frontmatter, body } = parseMdFile(createProject.path);
     expect(frontmatter.name).toBe('create-project');
     expect(frontmatter['managed-by']).toBe('openchamber');
     expect(body).toContain(API_BASE);
+    const agentBrowser = results.find((entry) => entry.name === 'agent-browser');
+    const agentSkill = parseMdFile(agentBrowser.path);
+    expect(agentSkill.frontmatter.name).toBe('agent-browser');
+    expect(agentSkill.frontmatter['managed-by']).toBe('openchamber');
+    expect(agentSkill.body).toContain('openchamber_browser');
   });
 
   it('is a no-op when the managed skill is already current', () => {
@@ -74,7 +97,9 @@ describe('system-skills', () => {
       'user content',
     );
     const results = syncSystemSkills({ apiBaseUrl: API_BASE, skillRootDir });
-    expect(results[0].action).toBe('skipped-user-owned');
+    expect(results.find((entry) => entry.name === 'create-project')?.action).toBe(
+      'skipped-user-owned',
+    );
     const { frontmatter, body } = parseMdFile(skillPath);
     expect(frontmatter.description).toBe('my customized version');
     expect(body).toBe('user content');

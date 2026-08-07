@@ -104,6 +104,8 @@ import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
+import { createBrowserRuntime } from './lib/browser/runtime.js';
+import { registerBrowserRoutes } from './lib/browser/routes.js';
 import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
@@ -515,6 +517,7 @@ const tunnelAuthController = createTunnelAuth();
 let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
+let browserRuntime = null;
 let dictationRuntime = null;
 let messageStreamRuntime = null;
 let openChamberAgentEventsWebSocketRuntime = null;
@@ -1269,6 +1272,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   setTerminalRuntime: (value) => {
     terminalRuntime = value;
   },
+  getBrowserRuntime: () => browserRuntime,
+  setBrowserRuntime: (value) => {
+    browserRuntime = value;
+  },
   getMessageStreamRuntime: () => messageStreamRuntime,
   setMessageStreamRuntime: (value) => {
     messageStreamRuntime = value;
@@ -1314,6 +1321,10 @@ async function main(options = {}) {
     dataDir: OPENCHAMBER_DATA_DIR,
     env: process.env,
     executeAction: (...args) => openChamberControlService.execute(...args),
+    executeBrowserAction: (action, params) => {
+      if (!browserRuntime) throw new Error('OpenChamber browser surface is not initialized');
+      return browserRuntime.executeAction(action, params);
+    },
     getActivePort: () => {
       const address = server?.address?.();
       return typeof address === 'object' && address ? address.port : null;
@@ -1753,6 +1764,21 @@ async function main(options = {}) {
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
   });
+
+  browserRuntime = createBrowserRuntime({
+    fs,
+    fsPromises,
+    path,
+    spawn,
+    crypto,
+    dataDir: OPENCHAMBER_DATA_DIR,
+    searchPathFor,
+    uiAuthController,
+    isRequestOriginAllowed,
+    rejectWebSocketUpgrade,
+  });
+  registerBrowserRoutes(app, { browserRuntime });
+  browserRuntime.attachWebSocket(server);
 
   const startupPipelineResult = await startupPipelineRuntime.run({
     app,

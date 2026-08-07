@@ -13,6 +13,7 @@ export type ContextSurfaceId =
   | 'notes'
   | 'context'
   | 'browser'
+  | 'agentBrowser'
   | 'preview'
   | 'chat';
 
@@ -127,6 +128,15 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     mode: 'browser',
     icon: 'global',
     labelKey: 'contextPanel.mode.browser',
+    availability: 'always',
+  },
+  {
+    id: 'agentBrowser',
+    descriptionKey: 'contextRail.surface.agentBrowser.description',
+    defaultWidthFraction: 0.5,
+    mode: 'agentBrowser',
+    icon: 'search-eye',
+    labelKey: 'contextPanel.mode.agentBrowser',
     availability: 'always',
   },
   {

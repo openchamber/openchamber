@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createAgentToolRuntime } from './runtime.js';
 import { OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS, OPENCHAMBER_CONTROL_ACTION_DEFINITIONS } from '../openchamber-control/actions.js';
+import { OPENCHAMBER_BROWSER_ACTION_DEFINITIONS } from '../browser/agent-actions.js';
 
 const temporaryDirectories = [];
 
@@ -112,6 +113,36 @@ describe('managed agent tool runtime', () => {
     expect(source).not.toContain('title: "OpenChamber"');
     expect(source).not.toContain('@opencode-ai/plugin');
     expect(source).not.toContain(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN);
+  });
+
+  it('materializes the browser tool and delegates browser actions', async () => {
+    const executeBrowserAction = vi.fn(async () => ({ tab: { id: 'tab-1' } }));
+    const { runtime, dataDir } = await createRuntime({ executeBrowserAction });
+    await runtime.prepareManagedOpenCodeEnv();
+    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+    const source = await fs.readFile(pluginPath, 'utf8');
+    expect(source).toContain('openchamber_browser: {');
+    for (const { action, description } of OPENCHAMBER_BROWSER_ACTION_DEFINITIONS) {
+      expect(source).toContain(JSON.stringify({ const: action, description }));
+    }
+
+    const result = await runtime.execute({ tool: 'browser', input: { action: 'navigate', url: 'https://example.com' } });
+    expect(result).toEqual({ schemaVersion: 1, ok: true, action: 'navigate', data: { tab: { id: 'tab-1' } } });
+    expect(executeBrowserAction).toHaveBeenCalledWith('navigate', { url: 'https://example.com' });
+  });
+
+  it('rejects unknown browser actions and unavailable browser surface', async () => {
+    const { runtime } = await createRuntime();
+    await expect(runtime.execute({ tool: 'browser', input: { action: 'bogus' } })).resolves.toEqual(expect.objectContaining({
+      ok: false,
+      action: 'bogus',
+      error: expect.objectContaining({ kind: 'usage' }),
+    }));
+    await expect(runtime.execute({ tool: 'browser', input: { action: 'navigate', url: 'https://example.com' } })).resolves.toEqual(expect.objectContaining({
+      ok: false,
+      action: 'navigate',
+      error: expect.objectContaining({ kind: 'runtime' }),
+    }));
   });
 
   it('executes actions through the shared control service', async () => {
