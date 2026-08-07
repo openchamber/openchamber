@@ -126,6 +126,62 @@ describe('useUIStore openContextSurface', () => {
 });
 
 describe('useUIStore context-panel persistence migration', () => {
+  test('registers the canonical-key migration after persisted version 13', () => {
+    expect(useUIStore.persist.getOptions().version).toBe(14);
+  });
+
+  test('rehydrates a version-13 snapshot through the version-14 canonical-key migration', async () => {
+    const originalStorage = useUIStore.persist.getOptions().storage;
+    const persistedState = {
+      contextPanelByDirectory: {
+        ' c:\\repo\\ ': {
+          isOpen: true,
+          expanded: false,
+          tabs: [{ mode: 'diff', touchedAt: 20 }],
+          activeTabId: 'diff',
+          widthByMode: { diff: 640 },
+          touchedAt: 20,
+        },
+      },
+    };
+
+    useUIStore.persist.setOptions({
+      storage: {
+        getItem: () => ({ state: persistedState, version: 13 }),
+        setItem: () => undefined,
+        removeItem: () => undefined,
+      },
+    });
+
+    try {
+      await useUIStore.persist.rehydrate();
+
+      expect(Object.keys(useUIStore.getState().contextPanelByDirectory)).toEqual(['C:/repo']);
+      expect(useUIStore.getState().contextPanelByDirectory['C:/repo']).toEqual({
+        isOpen: true,
+        expanded: false,
+        tabs: [{
+          id: 'diff',
+          mode: 'diff',
+          targetPath: null,
+          dedupeKey: 'diff',
+          label: null,
+          sessionTitleFallback: null,
+          readOnly: false,
+          stagedDiff: false,
+          diffScope: 'working',
+          touchedAt: 20,
+        }],
+        activeTabId: 'diff',
+        widthByMode: { diff: 640 },
+        touchedAt: 20,
+      });
+    } finally {
+      useUIStore.persist.setOptions({ storage: originalStorage });
+      useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
+    }
+  });
+
   test('merges historical keys that canonicalize to the same directory', async () => {
     const migrate = useUIStore.persist.getOptions().migrate;
     expect(typeof migrate).toBe('function');
