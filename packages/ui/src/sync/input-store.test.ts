@@ -339,7 +339,7 @@ describe("input-store attachments", () => {
     expect(await addPromise).toBe(true)
     const files = useInputStore.getState().attachedFiles
     expect(files).toHaveLength(1)
-    expect(files[0].sourceDocumentId).toBeUndefined()
+    expect(files[0].sourceDocumentId).toBe(undefined)
 
     useInputStore.getState().removeAttachedFile(files[0].id)
     expect(useInputStore.getState().attachedFiles).toEqual([])

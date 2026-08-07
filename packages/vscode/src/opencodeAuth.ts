@@ -5,7 +5,7 @@ import os from 'node:os';
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 const AUTH_FILE = path.join(OPENCODE_DATA_DIR, 'auth.json');
 
-type AuthEntry = Record<string, unknown>;
+export type AuthEntry = Record<string, unknown>;
 type AuthFile = Record<string, AuthEntry>;
 
 const readAuthFile = (): AuthFile => {
@@ -44,6 +44,16 @@ const writeAuthFile = (auth: AuthFile): void => {
     console.error('Failed to write auth file:', error);
     throw new Error('Failed to write OpenCode auth configuration');
   }
+};
+
+export const updateProviderAuth = (providerId: string, entry: AuthEntry): void => {
+  if (!providerId || typeof providerId !== 'string') {
+    throw new Error('Provider ID is required');
+  }
+
+  const auth = readAuthFile();
+  auth[providerId] = entry;
+  writeAuthFile(auth);
 };
 
 export const removeProviderAuth = (providerId: string): boolean => {

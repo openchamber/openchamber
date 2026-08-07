@@ -68,6 +68,7 @@ import { getPermissionToastKey, showPermissionNeededToast } from "./permission-t
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
+import { isFilesystemError } from "@/lib/api/files-errors"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
@@ -2068,7 +2069,21 @@ export function SyncProvider(props: {
         }
 
         const result = await runBootstrap(0)
-        if (result === "failed") throw new Error(`Directory bootstrap failed for ${directory}`)
+        if (result === "failed") {
+          // OpenCode can mask the underlying errno while initializing an
+          // inaccessible workspace. Probe the exact directory through the
+          // owning runtime filesystem API so only an authoritative local
+          // EPERM/EACCES becomes an actionable grant-access failure.
+          const files = getRegisteredRuntimeAPIs()?.files
+          if (files) {
+            try {
+              await files.listDirectory(directory)
+            } catch (error) {
+              if (isFilesystemError(error) && error.reason === "os-permission") throw error
+            }
+          }
+          throw new Error(`Directory bootstrap failed for ${directory}`)
+        }
 
         // Selecting a session whose directory this client had not indexed yet
         // routes it through the active directory as a documented guess. This is

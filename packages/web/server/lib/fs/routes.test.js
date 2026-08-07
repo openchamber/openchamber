@@ -807,4 +807,19 @@ describe('fs list symlink path space (issue 2627)', () => {
     ]);
     expect(fsPromises.readdir).toHaveBeenCalledWith('/real/pkg', { withFileTypes: true });
   });
+
+  for (const code of ['EACCES', 'EPERM']) {
+    it(`maps ${code} to the os-permission contract`, async () => {
+      const error = Object.assign(new Error('denied'), { code });
+      const handler = registerList({
+        stat: vi.fn(async () => ({ isDirectory: () => true })),
+        readdir: vi.fn(async () => { throw error; }),
+      });
+
+      const res = await callList(handler, { path: '/workspace/protected' });
+
+      expect(res.statusCode).toBe(403);
+      expect(res.body).toEqual({ error: 'Access to directory denied', reason: 'os-permission' });
+    });
+  }
 });

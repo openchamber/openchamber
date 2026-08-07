@@ -20,7 +20,8 @@ import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import { renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
-import { ensureMarkdownShikiTheme, getMarkdownSyntaxVars } from './markdown/markdownTheme';
+import { ensureMarkdownShikiTheme } from './markdown/markdownTheme';
+import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import {
   attachMarkdownInteractions,
   applyMarkdownCodeBlockWrapState,

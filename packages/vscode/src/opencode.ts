@@ -10,6 +10,7 @@ import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './opencodeProcessRegistry';
+import { applyProviderEnvAliases } from './provider-env-aliases';
 
 const t = vscode.l10n.t;
 
@@ -667,7 +668,7 @@ async function spawnManagedOpenCodeServer(
   const launch = resolveWindowsLaunchSpec(binary, ['serve', '--hostname', '127.0.0.1', '--port', String(port)]);
   const child = spawn(launch.binary, launch.args, {
     cwd: workingDirectory,
-    env: { ...process.env },
+    env: applyProviderEnvAliases({ ...process.env }),
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });

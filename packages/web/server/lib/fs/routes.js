@@ -16,6 +16,16 @@ const pruneOutsideFileGrants = () => {
   }
 };
 
+const isOsPermissionError = (error) => (
+  error
+  && typeof error === 'object'
+  && (error.code === 'EACCES' || error.code === 'EPERM')
+);
+
+const sendOsPermissionDenied = (res, message) => (
+  res.status(403).json({ error: message, reason: 'os-permission' })
+);
+
 export const mintOutsideFileGrant = async (targetPath, {
   scopes = ['stat', 'read', 'raw'],
   fsPromises = nodeFsPromises,
@@ -605,6 +615,9 @@ export const registerFsRoutes = (app, dependencies) => {
       await fsPromises.mkdir(resolvedPath, { recursive: true });
       return res.json({ success: true, path: resolvedPath });
     } catch (error) {
+      if (isOsPermissionError(error)) {
+        return sendOsPermissionDenied(res, 'Access denied');
+      }
       console.error('Failed to create directory:', error);
       return res.status(500).json({ error: error.message || 'Failed to create directory' });
     }
@@ -768,8 +781,8 @@ export const registerFsRoutes = (app, dependencies) => {
         }
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access to file denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to file denied');
       }
       console.error('Failed to stat file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to stat file' });
@@ -840,8 +853,8 @@ export const registerFsRoutes = (app, dependencies) => {
         }
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access to file denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to file denied');
       }
       console.error('Failed to read file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to read file' });
@@ -925,8 +938,8 @@ export const registerFsRoutes = (app, dependencies) => {
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access to file denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to file denied');
       }
       console.error('Failed to read raw file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to read file' });
@@ -986,8 +999,8 @@ export const registerFsRoutes = (app, dependencies) => {
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access to file denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to file denied');
       }
       console.error('Failed to serve file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to serve file' });
@@ -1048,8 +1061,8 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access denied');
       }
       console.error('Failed to write file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to write file' });
@@ -1083,8 +1096,8 @@ export const registerFsRoutes = (app, dependencies) => {
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'File or directory not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access denied');
       }
       console.error('Failed to delete path:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to delete path' });
@@ -1138,8 +1151,8 @@ export const registerFsRoutes = (app, dependencies) => {
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'Source path not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access denied');
       }
       console.error('Failed to rename path:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to rename path' });
@@ -1193,6 +1206,9 @@ export const registerFsRoutes = (app, dependencies) => {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'Path not found' });
+      }
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to path denied');
       }
       console.error('Failed to reveal path:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to reveal path' });
@@ -1336,7 +1352,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {
-        return res.status(400).json({ error: 'Specified path is not a directory' });
+        return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
       }
 
       const dirents = await fsPromises.readdir(resolvedPath, { withFileTypes: true });
@@ -1437,10 +1453,10 @@ export const registerFsRoutes = (app, dependencies) => {
         if (isPlansPath) {
           return res.json({ path: requestedPath || resolvedPath || rawPath, entries: [] });
         }
-        return res.status(404).json({ error: 'Directory not found' });
+        return res.status(404).json({ error: 'Directory not found', reason: 'not-found' });
       }
-      if (code === 'EACCES') {
-        return res.status(403).json({ error: 'Access to directory denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to directory denied');
       }
       return res.status(500).json({ error: (error && error.message) || 'Failed to list directory' });
     }

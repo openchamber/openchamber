@@ -13,6 +13,7 @@ import {
   setSyncPerformanceDiagnosticsEnabled,
 } from './performance-diagnostics';
 import { DIR_IDLE_TTL_MS } from './types';
+import { FilesystemError } from '@/lib/api/files-errors';
 
 const deferred = () => {
   let resolve!: () => void;
@@ -410,6 +411,40 @@ describe('ChildStoreManager directory bootstrap scheduler', () => {
     expect(started).toEqual(['/failed', '/healthy']);
     expect(manager.getBootstrapState('/failed')).toBe('failed');
     expect(manager.getBootstrapState('/healthy')).toBe('complete');
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('records os-permission failures and clears them on forced retry', async () => {
+    const manager = new ChildStoreManager();
+    let denied = true;
+    const cleanup = manager.configure({
+      onBootstrap: () => {
+        if (denied) {
+          throw new FilesystemError('Access denied', { reason: 'os-permission', status: 403 });
+        }
+      },
+    });
+
+    manager.requestBootstrap({ directory: '/protected', priority: 'selected', reason: 'current-directory' });
+    await settle();
+    await settle();
+
+    expect(manager.getBootstrapState('/protected')).toBe('failed');
+    expect(manager.getBootstrapFailure('/protected')).toBe('os-permission');
+
+    denied = false;
+    manager.requestBootstrap({
+      directory: '/protected',
+      priority: 'selected',
+      reason: 'action-demand',
+      force: true,
+    });
+    await settle();
+    await settle();
+
+    expect(manager.getBootstrapState('/protected')).toBe('complete');
+    expect(manager.getBootstrapFailure('/protected')).toBe(undefined);
     cleanup();
     manager.disposeAll();
   });

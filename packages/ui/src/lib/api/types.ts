@@ -1357,6 +1357,11 @@ export interface SkillsInstallResponse {
   skipped?: Array<{ skillName: string; reason: string }>;
   error?: SkillsInstallError;
   requiresReload?: boolean;
+  requiresRestart?: boolean;
+  restartDeferred?: boolean;
+  requiresManualRestart?: boolean;
+  reloadFailed?: boolean;
+  warning?: string;
   message?: string;
   reloadDelayMs?: number;
 }

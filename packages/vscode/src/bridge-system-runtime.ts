@@ -10,6 +10,7 @@ import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { credentialStatus, deleteCredential, importCursorCredential, normalizeCredential, readCredential, validateCredential, writeCredential, type ManagedProvider } from './quotaCredentials';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
+import { buildDeferredRestartResponse } from './config-mutation-response';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -442,21 +443,19 @@ export async function handleSystemBridgeMessage(
           return { id, type, success: false, error: 'Invalid scope' };
         }
 
-        if (removed) {
-          await ctx?.manager?.restart();
-        }
         return {
           id,
           type,
           success: true,
           data: {
-            success: true,
             removed,
-            requiresReload: removed,
-            message: removed
-              ? `Provider ${providerId} disconnected successfully. Reloading interface…`
-              : `Provider ${providerId} was not configured.`,
-            reloadDelayMs: removed ? deps.clientReloadDelayMs : undefined,
+            ...(removed
+              ? buildDeferredRestartResponse(`Provider ${providerId} disconnected successfully. Restart OpenCode to apply.`)
+              : {
+                success: true,
+                requiresReload: false,
+                message: `Provider ${providerId} was not configured.`,
+              }),
           },
         };
       } catch (error) {

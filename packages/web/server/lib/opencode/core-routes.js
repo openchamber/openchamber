@@ -1,3 +1,5 @@
+import { buildExternalManualRestartResponse } from './config-mutation-response.js';
+
 const parseLoopbackUrl = (rawUrl) => {
   if (typeof rawUrl !== 'string') {
     return null;
@@ -1032,7 +1034,13 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
     try {
       console.log('[Server] Manual configuration reload requested');
 
-      await refreshOpenCodeAfterConfigChange('manual configuration reload');
+      const refreshResult = await refreshOpenCodeAfterConfigChange('manual configuration reload');
+
+      if (refreshResult?.external) {
+        return res.json(buildExternalManualRestartResponse(
+          'Configuration is saved on disk. Restart your connected OpenCode server to apply the changes.',
+        ));
+      }
 
       res.json({
         success: true,

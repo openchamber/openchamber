@@ -460,6 +460,51 @@ describe('OpenCode lifecycle', () => {
     await server.close();
   });
 
+  it('mirrors Google credential env aliases into the managed OpenCode environment', async () => {
+    const previousGemini = process.env.GEMINI_API_KEY;
+    const previousGoogleGen = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    const previousGoogle = process.env.GOOGLE_API_KEY;
+    process.env.GEMINI_API_KEY = 'AIza-from-gemini';
+    delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+
+    try {
+      const child = createMockChild();
+      spawnMock.mockImplementationOnce(() => {
+        queueMicrotask(() => {
+          child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+        });
+        return child;
+      });
+
+      const runtime = createRuntime();
+      const server = await runtime.startOpenCode();
+      const [, , options] = spawnMock.mock.calls[0];
+
+      expect(options.env.GEMINI_API_KEY).toBe('AIza-from-gemini');
+      expect(options.env.GOOGLE_API_KEY).toBe('AIza-from-gemini');
+      expect(options.env.GOOGLE_GENERATIVE_AI_API_KEY).toBe('AIza-from-gemini');
+
+      await server.close();
+    } finally {
+      if (typeof previousGemini === 'string') {
+        process.env.GEMINI_API_KEY = previousGemini;
+      } else {
+        delete process.env.GEMINI_API_KEY;
+      }
+      if (typeof previousGoogleGen === 'string') {
+        process.env.GOOGLE_GENERATIVE_AI_API_KEY = previousGoogleGen;
+      } else {
+        delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+      }
+      if (typeof previousGoogle === 'string') {
+        process.env.GOOGLE_API_KEY = previousGoogle;
+      } else {
+        delete process.env.GOOGLE_API_KEY;
+      }
+    }
+  });
+
   it('falls back to buildAugmentedPath when buildManagedOpenCodePath is not provided', async () => {
     delete process.env.OPENCODE_BINARY;
     const child = createMockChild();

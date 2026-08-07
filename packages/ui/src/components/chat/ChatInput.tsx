@@ -32,7 +32,7 @@ import {
 } from '@/lib/chatDraftPersistence';
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
-import ToolOutputDialog from './message/ToolOutputDialog';
+import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { ToolPopupContent } from './message/types';
 import { QueuedMessageChips } from './QueuedMessageChips';
 import { AutoReviewBanner } from './AutoReviewBanner';
@@ -141,6 +141,10 @@ import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { RevertedMessageDock } from './composer/ui/RevertedMessageDock';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
+
+// Lazy like in ChatMessage: a static import would pull the @pierre/diffs and
+// Shiki stacks into the eager startup graph for a dialog opened on demand.
+const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
 const MAX_VISIBLE_COMPOSER_LINES = 8;
 /**
@@ -383,6 +387,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         title: '',
         content: '',
     });
+    // Mount the lazy preview dialog only after its first open; rendering it
+    // closed would fetch the ToolOutputDialog chunk (with the @pierre/diffs
+    // stack) on the draft screen before any preview is requested.
+    const [attachmentPreviewMounted, setAttachmentPreviewMounted] = React.useState(false);
+    React.useEffect(() => {
+        if (attachmentPreview.open) {
+            setAttachmentPreviewMounted(true);
+        }
+    }, [attachmentPreview.open]);
     const attachmentCompatibilityRef = React.useRef({
         modelKey: `${currentProviderId ?? ''}/${currentModelId ?? ''}`,
         modalitySignature: currentModelMetadata?.modalities?.input?.slice().sort().join(',') ?? null,
@@ -2786,11 +2799,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             submitting={reviewFlowSubmitting}
             onConfirm={handleStartReviewFlow}
         />
-        <ToolOutputDialog
-            popup={attachmentPreview}
-            onOpenChange={handleAttachmentPreviewOpenChange}
-            isMobile={isMobile}
-        />
+        {attachmentPreviewMounted ? (
+            <React.Suspense fallback={null}>
+                <ToolOutputDialog
+                    popup={attachmentPreview}
+                    onOpenChange={handleAttachmentPreviewOpenChange}
+                    isMobile={isMobile}
+                />
+            </React.Suspense>
+        ) : null}
 
         {/* Single always-mounted picker input. It must NOT live inside
             ComposerAttachmentControls: that component mounts once per composer

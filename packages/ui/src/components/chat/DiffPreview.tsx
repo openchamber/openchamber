@@ -2,7 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownTheme';
+import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
 import { useWorkerHighlightedLines } from '@/components/code/useWorkerHighlightedLines';
 import { parseDiffToUnified } from './message/toolRenderers';
 
