@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { CONTEXT_SURFACES, sortContextSurfaces } from '../lib/surfaces/registry';
-import { useUIStore } from './useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from './useUIStore';
 
 beforeEach(() => {
   useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
@@ -62,6 +62,33 @@ describe('useUIStore openContextSurface', () => {
     expect(state?.tabs.map((tab) => tab.mode)).toEqual(['diff']);
   });
 
+  test('uses one canonical key and closes an active surface across path variants', () => {
+    const pathVariant = '  \\repo\\nested///  ';
+    const canonicalDirectory = '/repo/nested';
+
+    useUIStore.getState().openContextSurface(pathVariant, 'diff');
+
+    expect(normalizeContextPanelDirectoryKey(pathVariant)).toBe(canonicalDirectory);
+    expect(useUIStore.getState().contextPanelByDirectory[canonicalDirectory]?.isOpen).toBe(true);
+    expect(Object.keys(useUIStore.getState().contextPanelByDirectory)).toEqual([canonicalDirectory]);
+
+    useUIStore.getState().openContextSurface(canonicalDirectory, 'diff');
+
+    expect(useUIStore.getState().contextPanelByDirectory[canonicalDirectory]?.isOpen).toBe(false);
+    expect(Object.keys(useUIStore.getState().contextPanelByDirectory)).toEqual([canonicalDirectory]);
+  });
+
+  test('normalizes Windows drive casing into the shared context-panel key', () => {
+    const pathVariant = ' c:\\repo\\nested/// ';
+    const canonicalDirectory = 'C:/repo/nested';
+
+    useUIStore.getState().openContextFile(pathVariant, 'C:/repo/nested/a.ts');
+
+    expect(normalizeContextPanelDirectoryKey(pathVariant)).toBe(canonicalDirectory);
+    expect(useUIStore.getState().contextPanelByDirectory[canonicalDirectory]?.tabs[0]?.targetPath)
+      .toBe('C:/repo/nested/a.ts');
+  });
+
   test('does nothing for content-driven modes without existing content', () => {
     useUIStore.getState().openContextSurface(directory, 'preview');
     useUIStore.getState().openContextSurface(directory, 'chat');
@@ -95,6 +122,122 @@ describe('useUIStore openContextSurface', () => {
     const activeTab = state?.tabs.find((tab) => tab.id === state.activeTabId);
     expect(activeTab?.mode).toBe('file');
     expect(activeTab?.targetPath).toBe('/repo/b.ts');
+  });
+});
+
+describe('useUIStore context-panel persistence migration', () => {
+  test('merges historical keys that canonicalize to the same directory', async () => {
+    const migrate = useUIStore.persist.getOptions().migrate;
+    expect(typeof migrate).toBe('function');
+
+    const migrated = await migrate?.({
+      contextPanelByDirectory: {
+        ' c:\\repo\\ ': {
+          isOpen: false,
+          expanded: false,
+          tabs: [{ mode: 'file', targetPath: 'C:/repo/a.ts', touchedAt: 10 }],
+          activeTabId: 'file:C:/repo/a.ts',
+          widthByMode: { file: 600, diff: 500 },
+          touchedAt: 10,
+        },
+        'C:/repo///': {
+          isOpen: true,
+          expanded: true,
+          tabs: [
+            { mode: 'file', targetPath: 'C:/repo/b.ts', touchedAt: 20 },
+            { mode: 'diff', touchedAt: 20 },
+          ],
+          activeTabId: 'diff',
+          widthByMode: { diff: 800 },
+          touchedAt: 20,
+        },
+      },
+    }, 13) as { contextPanelByDirectory?: Record<string, {
+      isOpen: boolean;
+      expanded: boolean;
+      tabs: Array<{ id: string; mode: string; targetPath: string | null }>;
+      activeTabId: string | null;
+      widthByMode: Record<string, number>;
+      touchedAt: number;
+    }> } | undefined;
+
+    const byDirectory = migrated?.contextPanelByDirectory ?? {};
+    expect(Object.keys(byDirectory)).toEqual(['C:/repo']);
+    expect({
+      isOpen: byDirectory['C:/repo']?.isOpen,
+      expanded: byDirectory['C:/repo']?.expanded,
+      activeTabId: byDirectory['C:/repo']?.activeTabId,
+      widthByMode: byDirectory['C:/repo']?.widthByMode,
+      touchedAt: byDirectory['C:/repo']?.touchedAt,
+    }).toEqual({
+      isOpen: true,
+      expanded: true,
+      activeTabId: 'diff',
+      widthByMode: { file: 600, diff: 800 },
+      touchedAt: 20,
+    });
+    expect(byDirectory['C:/repo']?.tabs.map((tab) => [tab.mode, tab.targetPath])).toEqual([
+      ['file', 'C:/repo/a.ts'],
+      ['file', 'C:/repo/b.ts'],
+      ['diff', null],
+    ]);
+  });
+
+  test('merges equal-timestamp key collisions independently of persisted key order', async () => {
+    const migrate = useUIStore.persist.getOptions().migrate;
+    expect(typeof migrate).toBe('function');
+
+    const legacyState = {
+      isOpen: false,
+      expanded: false,
+      tabs: [{ mode: 'diff', label: 'Legacy', touchedAt: 20 }],
+      activeTabId: 'diff',
+      widthByMode: { diff: 500 },
+      touchedAt: 20,
+    };
+    const canonicalState = {
+      isOpen: true,
+      expanded: true,
+      tabs: [{ mode: 'diff', label: 'Canonical', touchedAt: 20 }],
+      activeTabId: 'diff',
+      widthByMode: { diff: 800 },
+      touchedAt: 20,
+    };
+
+    const migrateCollision = async (entries: Array<[string, object]>) => {
+      const migrated = await migrate?.({
+        contextPanelByDirectory: Object.fromEntries(entries),
+      }, 13) as { contextPanelByDirectory?: Record<string, {
+        isOpen: boolean;
+        expanded: boolean;
+        tabs: Array<{ label: string | null }>;
+        widthByMode: Record<string, number>;
+      }> } | undefined;
+
+      return migrated?.contextPanelByDirectory?.['C:/repo'];
+    };
+
+    const legacyFirst = await migrateCollision([
+      [' c:\\repo\\ ', legacyState],
+      ['C:/repo///', canonicalState],
+    ]);
+    const canonicalFirst = await migrateCollision([
+      ['C:/repo///', canonicalState],
+      [' c:\\repo\\ ', legacyState],
+    ]);
+
+    expect(canonicalFirst).toEqual(legacyFirst);
+    expect({
+      isOpen: legacyFirst?.isOpen,
+      expanded: legacyFirst?.expanded,
+      tabLabels: legacyFirst?.tabs.map((tab) => tab.label),
+      widthByMode: legacyFirst?.widthByMode,
+    }).toEqual({
+      isOpen: true,
+      expanded: true,
+      tabLabels: ['Canonical'],
+      widthByMode: { diff: 800 },
+    });
   });
 });
 
