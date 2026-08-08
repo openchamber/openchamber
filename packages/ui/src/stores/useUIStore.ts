@@ -26,6 +26,51 @@ export type DesktopWindowControlsPosition = 'left' | 'right';
 export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 export type FileEditorKeymap = 'default' | 'vim';
 
+const CONTEXT_PANEL_MODES: ReadonlySet<string> = new Set<ContextPanelMode>([
+  'diff',
+  'walkthrough',
+  'file',
+  'context',
+  'plan',
+  'chat',
+  'preview',
+  'browser',
+  'git',
+  'pr',
+  'notes',
+  'terminal',
+]);
+
+const LEGACY_CONTEXT_PANEL_MODES: ReadonlySet<string> = new Set<ContextPanelMode>([
+  'diff',
+  'file',
+  'context',
+  'plan',
+  'chat',
+]);
+
+const PERSISTED_CONTEXT_PANEL_WIDTH_MODES: ReadonlySet<string> = new Set<ContextPanelMode>([
+  'diff',
+  'file',
+  'context',
+  'plan',
+  'chat',
+  'preview',
+  'browser',
+  'git',
+  'pr',
+  'notes',
+  'terminal',
+]);
+
+const isContextPanelMode = (value: unknown): value is ContextPanelMode => (
+  typeof value === 'string' && CONTEXT_PANEL_MODES.has(value)
+);
+
+const isPersistedContextPanelWidthMode = (value: string): value is ContextPanelMode => (
+  PERSISTED_CONTEXT_PANEL_WIDTH_MODES.has(value)
+);
+
 function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
   return value === 'vim' ? 'vim' : 'default';
 }
@@ -130,7 +175,7 @@ const runtimeMemoryKey = (value?: string | null): string => {
 };
 
 // Shared with rail/panel consumers so contextPanelByDirectory lookups agree on keys.
-export const normalizeContextPanelDirectoryKey = (value: string): string => normalizeDirectoryPath(value);
+export const normalizeContextPanelDirectoryKey = (value: string): string => normalizeDirectoryPath(value.trim());
 
 const normalizeDirectoryPath = (value: string): string => {
   if (!value) return '';
@@ -139,6 +184,7 @@ const normalizeDirectoryPath = (value: string): string => {
   const hadUncPrefix = raw.startsWith('//');
   let normalized = raw.replace(/\/+$/g, '');
   normalized = normalized.replace(/\/+/g, '/');
+  normalized = normalized.replace(/^([a-z]):/, (_, letter: string) => `${letter.toUpperCase()}:`);
 
   if (hadUncPrefix && !normalized.startsWith('//')) {
     normalized = `/${normalized}`;
@@ -149,6 +195,39 @@ const normalizeDirectoryPath = (value: string): string => {
   }
 
   return normalized;
+};
+
+const mergeContextPanelDirectoryStates = (
+  existing: ContextPanelDirectoryState,
+  incoming: ContextPanelDirectoryState,
+): ContextPanelDirectoryState => {
+  const incomingWins = incoming.touchedAt >= existing.touchedAt;
+  const preferred = incomingWins ? incoming : existing;
+  const older = incomingWins ? existing : incoming;
+  const newer = incomingWins ? incoming : existing;
+  const tabsByID = new Map<string, ContextPanelTab>();
+
+  for (const tab of [...older.tabs, ...newer.tabs]) {
+    const current = tabsByID.get(tab.id);
+    if (!current || tab.touchedAt >= current.touchedAt) {
+      tabsByID.set(tab.id, tab);
+    }
+  }
+
+  const tabs = clampContextPanelTabs(
+    Array.from(tabsByID.values()),
+    CONTEXT_PANEL_MAX_TABS,
+    preferred.activeTabId,
+  );
+
+  return {
+    isOpen: preferred.isOpen,
+    expanded: preferred.expanded,
+    tabs,
+    activeTabId: resolveActiveContextPanelTabID(tabs, preferred.activeTabId),
+    widthByMode: { ...older.widthByMode, ...newer.widthByMode },
+    touchedAt: Math.max(existing.touchedAt, incoming.touchedAt),
+  };
 };
 
 const clampContextPanelWidth = (width: number): number => {
@@ -288,7 +367,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    if (candidate.mode !== 'diff' && candidate.mode !== 'walkthrough' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'preview' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal') {
+    if (!isContextPanelMode(candidate.mode)) {
       continue;
     }
 
@@ -482,8 +561,12 @@ const sanitizeContextPanelByDirectory = (
   const source = value as Record<string, unknown>;
   const next: Record<string, ContextPanelDirectoryState> = {};
 
-  for (const [rawDirectory, rawState] of Object.entries(source)) {
-    const directory = normalizeDirectoryPath(rawDirectory);
+  const entries = Object.entries(source).sort(([left], [right]) => (
+    left < right ? -1 : left > right ? 1 : 0
+  ));
+
+  for (const [rawDirectory, rawState] of entries) {
+    const directory = normalizeContextPanelDirectoryKey(rawDirectory);
     if (!directory || !rawState || typeof rawState !== 'object') {
       continue;
     }
@@ -504,7 +587,7 @@ const sanitizeContextPanelByDirectory = (
     let tabs = sanitizeContextPanelTabs(candidate.tabs);
     let activeTabId = typeof candidate.activeTabId === 'string' ? candidate.activeTabId : null;
 
-    if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'plan' || candidate.mode === 'chat')) {
+    if (tabs.length === 0 && isContextPanelMode(candidate.mode) && LEGACY_CONTEXT_PANEL_MODES.has(candidate.mode)) {
       tabs = [createContextPanelTab({
         mode: candidate.mode,
         targetPath: typeof candidate.targetPath === 'string' ? candidate.targetPath : null,
@@ -523,7 +606,7 @@ const sanitizeContextPanelByDirectory = (
     if (candidate.widthByMode && typeof candidate.widthByMode === 'object') {
       for (const [mode, value] of Object.entries(candidate.widthByMode as Record<string, unknown>)) {
         if (
-          (mode === 'diff' || mode === 'file' || mode === 'context' || mode === 'plan' || mode === 'chat' || mode === 'preview' || mode === 'browser' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'terminal')
+          isPersistedContextPanelWidthMode(mode)
           && typeof value === 'number'
           && Number.isFinite(value)
         ) {
@@ -532,7 +615,7 @@ const sanitizeContextPanelByDirectory = (
       }
     }
 
-    next[directory] = {
+    const sanitizedState: ContextPanelDirectoryState = {
       isOpen: candidate.isOpen === true,
       expanded: candidate.expanded === true,
       tabs: clampedTabs,
@@ -542,6 +625,9 @@ const sanitizeContextPanelByDirectory = (
         ? candidate.touchedAt
         : Date.now(),
     };
+    next[directory] = next[directory]
+      ? mergeContextPanelDirectoryStates(next[directory], sanitizedState)
+      : sanitizedState;
   }
 
   return next;
@@ -1100,7 +1186,7 @@ export const useUIStore = create<UIStore>()(
         // mode, opens a fresh singleton tab when none exists, and toggles the
         // panel closed when the requested mode is already active and visible.
         openContextSurface: (directory, mode) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           if (!normalizedDirectory) {
             return;
           }
@@ -1135,7 +1221,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         openContextPanelTab: (directory, tab) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           if (!normalizedDirectory) {
             return;
           }
@@ -1153,7 +1239,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         openContextDiff: (directory, filePath, staged = false, scope = null) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           const normalizedFilePath = (filePath || '').trim();
           if (!normalizedDirectory || !normalizedFilePath) {
             return;
@@ -1170,7 +1256,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         openContextFile: (directory, filePath) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           const normalizedFilePath = normalizeContextTargetPath(filePath);
           if (!normalizedDirectory || !normalizedFilePath) {
             return;
@@ -1182,7 +1268,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         openContextFileAtLine: (directory, filePath, line, column) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           const normalizedFilePath = normalizeContextTargetPath(filePath);
           const normalizedLine = Number.isFinite(line) ? Math.max(1, Math.trunc(line)) : 1;
           const normalizedColumn = Number.isFinite(column) ? Math.max(1, Math.trunc(column as number)) : 1;
@@ -1200,7 +1286,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         openContextOverview: (directory) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           if (!normalizedDirectory) {
             return;
           }
@@ -1209,7 +1295,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         openContextPlan: (directory) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           if (!normalizedDirectory) {
             return;
           }
@@ -1218,7 +1304,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         openContextPreview: (directory, url) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           const normalizedUrl = (url || '').trim();
           if (!normalizedDirectory || !normalizedUrl) {
             return;
@@ -1242,7 +1328,7 @@ export const useUIStore = create<UIStore>()(
           });
         },
         openContextBrowser: (directory, url = '') => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           if (!normalizedDirectory) return;
           const targetUrl = typeof url === 'string' && url.trim().length > 0 ? url.trim() : '';
           get().openContextPanelTab(normalizedDirectory, {
@@ -1254,7 +1340,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         setContextPanelTabTargetPath: (directory, tabID, targetPath) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           const normalizedTabID = (tabID || '').trim();
           if (!normalizedDirectory || !normalizedTabID) return;
           set((state) => {
@@ -1270,7 +1356,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         setActiveContextPanelTab: (directory, tabID) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           const normalizedTabID = (tabID || '').trim();
           if (!normalizedDirectory || !normalizedTabID) {
             return;
@@ -1305,7 +1391,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         reorderContextPanelTabs: (directory, activeTabID, overTabID) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           const normalizedActiveTabID = (activeTabID || '').trim();
           const normalizedOverTabID = (overTabID || '').trim();
           if (!normalizedDirectory || !normalizedActiveTabID || !normalizedOverTabID) {
@@ -1334,7 +1420,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         closeContextPanelTab: (directory, tabID) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           const normalizedTabID = (tabID || '').trim();
           if (!normalizedDirectory || !normalizedTabID) {
             return;
@@ -1366,7 +1452,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         closeContextPanel: (directory) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           if (!normalizedDirectory) {
             return;
           }
@@ -1390,7 +1476,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         toggleContextPanelExpanded: (directory) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           if (!normalizedDirectory) {
             return;
           }
@@ -1411,7 +1497,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         setContextPanelWidth: (directory, mode, width) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedDirectory = normalizeContextPanelDirectoryKey(directory || '');
           if (!normalizedDirectory) {
             return;
           }
@@ -2269,7 +2355,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 13,
+        version: 14,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -2361,7 +2447,11 @@ export const useUIStore = create<UIStore>()(
           delete state.rightSidebarWidth;
           delete state.rightSidebarTab;
 
-          state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
+          // v13 -> v14: canonicalize context-panel directory keys and merge
+          // historical variants that now identify the same directory.
+          if (version < 14) {
+            state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
+          }
 
           if (version < 5) {
             if (!state.shortcutOverrides || typeof state.shortcutOverrides !== 'object') {
