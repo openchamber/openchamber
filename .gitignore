@@ -67,6 +67,9 @@ data/
 workspaces/
 *.pid
 .worktrees/
+
+# Internal superpower planning docs (not for upstream)
+docs/superpowers/
 test-results/
 artifacts/
 
