@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { useI18n } from "@/lib/i18n"
+import { getClientPlatform } from "@/lib/platform"
 import { cn } from "@/lib/utils"
 import { ScrollableOverlay } from "./ScrollableOverlay"
 
@@ -24,6 +25,8 @@ type TextareaProps = React.ComponentProps<"textarea"> & {
    * Typically a `<TextareaCharCounter />`.
    */
   endSlot?: React.ReactNode;
+  /** Opt in to native iOS autocorrection for prose fields. */
+  enableIOSAutocorrect?: boolean;
 };
 
 function ResizeHandle({
@@ -75,11 +78,14 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       disabled,
       simple,
       endSlot,
+      enableIOSAutocorrect = false,
       ...props
     },
     ref,
   ) => {
     const { t } = useI18n();
+    const isNativeIOS = enableIOSAutocorrect && getClientPlatform() === 'ios';
+    const correctionsDisabled = props.spellCheck === false || props.autoCorrect === 'off';
     const wrapperRef = React.useRef<HTMLDivElement>(null);
     const dragStateRef = React.useRef<{ startY: number; startHeight: number } | null>(null);
     const [resizedHeight, setResizedHeight] = React.useState<number | null>(null);
@@ -148,9 +154,9 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
             fillContainer ? "[field-sizing:fixed]" : "field-sizing-content",
             className,
           )}
-          spellCheck={false}
+          spellCheck={isNativeIOS}
           autoComplete="off"
-          autoCorrect="off"
+          autoCorrect={isNativeIOS && !correctionsDisabled ? 'on' : 'off'}
           autoCapitalize="off"
           disabled={disabled}
           {...props}
@@ -194,9 +200,9 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
                 disabled && "text-muted-foreground/60 placeholder:text-muted-foreground/60",
                 className,
               )}
-              spellCheck={false}
+              spellCheck={isNativeIOS}
               autoComplete="off"
-              autoCorrect="off"
+              autoCorrect={isNativeIOS && !correctionsDisabled ? 'on' : 'off'}
               autoCapitalize="off"
               disabled={disabled}
               {...props}

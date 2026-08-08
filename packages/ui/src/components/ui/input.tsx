@@ -1,8 +1,17 @@
 import * as React from "react"
 
+import { getClientPlatform } from "@/lib/platform"
 import { cn } from "@/lib/utils"
 
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+type InputProps = React.ComponentProps<"input"> & {
+  /** Opt in to native iOS autocorrection for prose fields. */
+  enableIOSAutocorrect?: boolean
+}
+
+function Input({ className, type, enableIOSAutocorrect = false, ...props }: InputProps) {
+  const isNativeIOS = enableIOSAutocorrect && getClientPlatform() === "ios"
+  const correctionsDisabled = props.spellCheck === false || props.autoCorrect === "off"
+
   return (
     <input
       type={type}
@@ -16,9 +25,9 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
         "aria-invalid:ring-[var(--status-error)] aria-invalid:focus:ring-[var(--status-error)]",
         className
       )}
-      spellCheck={false}
+      spellCheck={isNativeIOS}
       autoComplete="off"
-      autoCorrect="off"
+      autoCorrect={isNativeIOS && !correctionsDisabled ? "on" : "off"}
       autoCapitalize="off"
       {...props}
     />

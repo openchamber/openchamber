@@ -779,6 +779,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           useScrollShadow
           scrollShadowSize={56}
           disabled={isLoading}
+          enableIOSAutocorrect
         />
       </div>
 
@@ -818,6 +819,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             placeholder={t('rightSidebar.contextNotesTodo.todo.inputPlaceholder')}
             disabled={isLoading}
             className="h-8"
+            enableIOSAutocorrect
           />
           <button
             type="button"
