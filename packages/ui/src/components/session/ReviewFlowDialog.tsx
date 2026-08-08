@@ -13,10 +13,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { useAgentsStore } from '@/stores/useAgentsStore';
+import { useInitialSessionOverrides } from '@/hooks/useInitialSessionOverrides';
 
 export type ReviewFlowExecution = {
   providerID: string;
@@ -35,20 +33,6 @@ type ReviewFlowDialogProps = {
   onConfirm: (execution: ReviewFlowExecution) => Promise<void> | void;
 };
 
-const getInitialExecution = (params: {
-  providerID: string;
-  modelID: string;
-  variant: string;
-  agent: string;
-}): ReviewFlowExecution => ({
-  providerID: params.providerID,
-  modelID: params.modelID,
-  variant: params.variant,
-  agent: params.agent,
-  generateHandoff: true,
-  autoReview: false,
-});
-
 export function ReviewFlowDialog({
   open,
   onOpenChange,
@@ -57,78 +41,54 @@ export function ReviewFlowDialog({
   onConfirm,
 }: ReviewFlowDialogProps) {
   const { t } = useI18n();
-  const loadProviders = useConfigStore((state) => state.loadProviders);
-  const loadConfigAgents = useConfigStore((state) => state.loadAgents);
-  const loadAgentsStoreAgents = useAgentsStore((state) => state.loadAgents);
-  const providers = useConfigStore((state) => state.providers);
-  const currentProviderID = useConfigStore((state) => state.currentProviderId);
-  const currentModelID = useConfigStore((state) => state.currentModelId);
-  const currentVariant = useConfigStore((state) => state.currentVariant || '');
-  const currentAgentName = useConfigStore((state) => state.currentAgentName || '');
+  // Dialog-local flags (kept separate from the provider/model/variant/agent
+  // overrides so the two layers can evolve independently).
+  const [generateHandoff, setGenerateHandoff] = React.useState(true);
+  const [autoReview, setAutoReview] = React.useState(false);
 
-  const [execution, setExecution] = React.useState<ReviewFlowExecution>(() => getInitialExecution({
-    providerID: currentProviderID,
-    modelID: currentModelID,
-    variant: currentVariant,
-    agent: currentAgentName,
-  }));
+  // Shared session-override state (providers/agents loading, default prefill,
+  // provider/model fallback, variant reset, agent filter). See
+  // packages/ui/src/hooks/useInitialSessionOverrides.ts.
+  const {
+    providerID,
+    modelID,
+    variant,
+    agent,
+    setVariant,
+    setAgent,
+    variantOptions,
+    hasVariantOptions,
+    agentFilter,
+    setProviderAndModel,
+  } = useInitialSessionOverrides({
+    open,
+    projectDirectory,
+    source: 'reviewFlowDialog',
+  });
 
-  React.useEffect(() => {
-    if (!open) return;
-    void loadProviders({ directory: projectDirectory, source: 'reviewFlowDialog' });
-    void loadConfigAgents({ directory: projectDirectory });
-    void loadAgentsStoreAgents();
-  }, [open, loadProviders, loadConfigAgents, loadAgentsStoreAgents, projectDirectory]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    setExecution(getInitialExecution({
-      providerID: currentProviderID,
-      modelID: currentModelID,
-      variant: currentVariant,
-      agent: currentAgentName,
-    }));
-  }, [open, currentProviderID, currentModelID, currentVariant, currentAgentName]);
-
-  React.useEffect(() => {
-    if (!open || providers.length === 0) return;
-
-    const provider = providers.find((item) => item.id === execution.providerID) ?? providers[0];
-    const models = Array.isArray(provider?.models) ? provider.models : [];
-    const hasModel = models.some((item) => item.id === execution.modelID);
-    const fallbackModelID = models[0]?.id ?? '';
-
-    if (provider?.id === execution.providerID && hasModel) return;
-
-    setExecution((prev) => ({
-      ...prev,
-      providerID: provider?.id ?? '',
-      modelID: hasModel ? prev.modelID : fallbackModelID,
-      variant: '',
-    }));
-  }, [open, providers, execution.providerID, execution.modelID]);
-
-  const agentFilter = React.useCallback((agent: { mode?: string }) => isPrimaryMode(agent.mode), []);
-
-  const variantOptions = React.useMemo(() => {
-    const provider = providers.find((item) => item.id === execution.providerID);
-    const model = provider?.models?.find((item) => item.id === execution.modelID) as { variants?: Record<string, unknown> } | undefined;
-    return model?.variants ? Object.keys(model.variants) : [];
-  }, [providers, execution.providerID, execution.modelID]);
-
-  const hasVariantOptions = variantOptions.length > 0;
-
-  React.useEffect(() => {
-    if (hasVariantOptions || !execution.variant) return;
-    setExecution((prev) => ({ ...prev, variant: '' }));
-  }, [hasVariantOptions, execution.variant]);
-
-  const canConfirm = execution.providerID.trim().length > 0 && execution.modelID.trim().length > 0;
+  const canConfirm = providerID.trim().length > 0 && modelID.trim().length > 0;
 
   const handleSubmit = React.useCallback(() => {
     if (!canConfirm || submitting) return;
-    void onConfirm(execution);
-  }, [canConfirm, submitting, onConfirm, execution]);
+    void onConfirm({
+      providerID,
+      modelID,
+      variant,
+      agent,
+      generateHandoff,
+      autoReview,
+    });
+  }, [canConfirm, submitting, onConfirm, providerID, modelID, variant, agent, generateHandoff, autoReview]);
+
+  // Reset dialog-local flags on each open transition. The dialog stays mounted
+  // (parent controls `open`), so user changes to these checkboxes would
+  // otherwise persist across opens. Mirrors the `runAsGoal` reset pattern in
+  // TodoSendDialog.
+  React.useEffect(() => {
+    if (!open) return;
+    setGenerateHandoff(true);
+    setAutoReview(false);
+  }, [open]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -159,8 +119,8 @@ export function ReviewFlowDialog({
 
           <label className="flex items-center gap-2 typography-ui-label text-foreground">
             <Checkbox
-              checked={execution.generateHandoff}
-              onChange={(generateHandoff) => setExecution((prev) => ({ ...prev, generateHandoff }))}
+              checked={generateHandoff}
+              onChange={setGenerateHandoff}
               disabled={submitting}
               ariaLabel={t('diffView.reviewDialog.generateHandoff')}
             />
@@ -169,8 +129,8 @@ export function ReviewFlowDialog({
 
           <label className="flex items-center gap-2 typography-ui-label text-foreground">
             <Checkbox
-              checked={execution.autoReview}
-              onChange={(autoReview) => setExecution((prev) => ({ ...prev, autoReview }))}
+              checked={autoReview}
+              onChange={setAutoReview}
               disabled={submitting}
               ariaLabel={t('diffView.reviewDialog.autoReview')}
             />
@@ -180,33 +140,31 @@ export function ReviewFlowDialog({
           <div className="flex min-w-0 flex-col gap-1.5">
             <span className="typography-meta font-medium text-muted-foreground">{t('chat.modelControls.model')}</span>
             <ModelSelector
-              providerId={execution.providerID}
-              modelId={execution.modelID}
+              providerId={providerID}
+              modelId={modelID}
               className="max-w-[320px] justify-between"
               dropdownPortalToBody
-              onChange={(providerID, modelID) => {
-                setExecution((prev) => ({ ...prev, providerID, modelID, variant: '' }));
-              }}
+              onChange={setProviderAndModel}
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
             <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.thinkingLevel.label')}</span>
             <ThinkingPill
-              value={execution.variant}
+              value={variant}
               options={variantOptions}
               disabled={!hasVariantOptions || submitting}
-              onChange={(variant) => setExecution((prev) => ({ ...prev, variant }))}
+              onChange={setVariant}
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
             <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.agent.label')}</span>
             <AgentSelector
-              agentName={execution.agent}
+              agentName={agent}
               filter={agentFilter}
               dropdownPortalToBody
-              onChange={(agent) => setExecution((prev) => ({ ...prev, agent }))}
+              onChange={setAgent}
             />
           </div>
         </div>

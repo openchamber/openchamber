@@ -40,7 +40,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
-import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
+import { createWorktreeSessionForNewBranch, type WorktreeSessionSelection } from '@/lib/worktreeSessionCreator';
 import { cn } from '@/lib/utils';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
@@ -544,18 +544,32 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
         let sessionId: string | null = null;
         let directoryHint: string | null = projectRef.path;
+        let worktreeSelection: WorktreeSessionSelection | null = null;
 
         if (pendingSendTarget.kind === 'worktree') {
           if (!canCreateWorktree) {
             toast.error(t('rightSidebar.contextNotesTodo.toast.worktreeRequiresGitRepo'));
             return;
           }
-          const created = await createWorktreeSessionForNewBranch(projectRef.path, generateBranchName());
+          const created = await createWorktreeSessionForNewBranch(
+            projectRef.path,
+            generateBranchName(),
+            undefined,
+            {
+              overrides: {
+                providerID: execution.providerID,
+                modelID: execution.modelID,
+                variant: execution.variant,
+                agentName: execution.agent.trim() || undefined,
+              },
+            },
+          );
           if (!created?.id) {
             return;
           }
           sessionId = created.id;
           directoryHint = created.path;
+          worktreeSelection = created.selection;
         } else {
           const session = await createSession(undefined, projectRef.path, null);
           if (!session?.id) {
@@ -571,30 +585,39 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           return;
         }
 
-        const selectionState = useSelectionStore.getState();
-        selectionState.saveSessionModelSelection(sessionId, execution.providerID, execution.modelID);
-        if (execution.agent.trim()) {
-          selectionState.saveSessionAgentSelection(sessionId, execution.agent);
-          selectionState.saveAgentModelForSession(sessionId, execution.agent, execution.providerID, execution.modelID);
-          selectionState.saveAgentModelVariantForSession(
-            sessionId,
-            execution.agent,
-            execution.providerID,
-            execution.modelID,
-            execution.variant || undefined,
-          );
+        if (!worktreeSelection) {
+          const selectionState = useSelectionStore.getState();
+          selectionState.saveSessionModelSelection(sessionId, execution.providerID, execution.modelID);
+          if (execution.agent.trim()) {
+            selectionState.saveSessionAgentSelection(sessionId, execution.agent);
+            selectionState.saveAgentModelForSession(sessionId, execution.agent, execution.providerID, execution.modelID);
+            selectionState.saveAgentModelVariantForSession(
+              sessionId,
+              execution.agent,
+              execution.providerID,
+              execution.modelID,
+              execution.variant || undefined,
+            );
+          }
         }
+
+        const messageSelection = worktreeSelection ?? {
+          providerID: execution.providerID,
+          modelID: execution.modelID,
+          variant: execution.variant || undefined,
+          agentName: execution.agent.trim() || undefined,
+        };
 
         setCurrentSession(sessionId, directoryHint);
         await sendMessage(
           visiblePrompt,
-          execution.providerID,
-          execution.modelID,
-          execution.agent.trim() || undefined,
+          messageSelection.providerID,
+          messageSelection.modelID,
+          messageSelection.agentName,
           undefined,
           undefined,
           syntheticParts,
-          execution.variant || undefined,
+          messageSelection.variant,
         );
 
         toast.success(
