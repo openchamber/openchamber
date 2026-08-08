@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { useAgentsStore, isAgentBuiltIn, isAgentHidden, type AgentScope, type AgentDraft } from '@/stores/useAgentsStore';
+import { useAgentsStore, isAgentBuiltIn, isAgentHidden, isAgentManageable, type AgentScope, type AgentDraft } from '@/stores/useAgentsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import type { Agent } from '@opencode-ai/sdk/v2';
@@ -100,6 +100,27 @@ const rulesetToPermissionConfig = (ruleset: unknown): AgentDraft['permission'] =
   }
 
   return Object.keys(result).length > 0 ? (result as AgentDraft['permission']) : undefined;
+};
+
+// eslint-disable-next-line react-refresh/only-export-components -- Regression tests cover config copied by rename and duplicate flows.
+export const copyAgentConfig = (agent: Agent, name: string) => {
+  const extended = agent as Agent & { scope?: AgentScope; disable?: boolean };
+  return {
+    name,
+    description: agent.description,
+    model: agent.model?.providerID && agent.model?.modelID
+      ? `${agent.model.providerID}/${agent.model.modelID}`
+      : null,
+    variant: agent.variant,
+    temperature: agent.temperature,
+    top_p: agent.topP,
+    prompt: agent.prompt,
+    mode: agent.mode,
+    permission: rulesetToPermissionConfig(agent.permission),
+    disable: extended.disable,
+    ...(isAgentHidden(agent) ? { hidden: true } : {}),
+    scope: extended.scope,
+  };
 };
 
 export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) => {
@@ -226,24 +247,10 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       newName = `${baseName}-copy-${copyNumber}`;
     }
 
-    // Set draft with prefilled values from source agent
-    const extAgent = agent as Agent & { scope?: AgentScope };
-    const modelStr = agent.model?.providerID && agent.model?.modelID
-      ? `${agent.model.providerID}/${agent.model.modelID}`
-      : null;
-    const draftAgent = agent as Agent & { disable?: boolean };
+    const config = copyAgentConfig(agent, newName);
     setAgentDraft({
-      name: newName,
-      scope: extAgent.scope || 'user',
-      description: agent.description,
-      model: modelStr,
-      variant: agent.variant,
-      temperature: agent.temperature,
-      top_p: agent.topP,
-      prompt: agent.prompt,
-      mode: agent.mode,
-      permission: rulesetToPermissionConfig(agent.permission),
-      disable: draftAgent.disable,
+      ...config,
+      scope: config.scope || 'user',
     });
     setSelectedAgent(newName);
 
@@ -274,28 +281,12 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       return;
     }
 
-    // Create new agent with new name and all existing config
-    const renameModelStr = renameDialogAgent.model?.providerID && renameDialogAgent.model?.modelID
-      ? `${renameDialogAgent.model.providerID}/${renameDialogAgent.model.modelID}`
-      : null;
-    const renameExt = renameDialogAgent as Agent & { scope?: AgentScope; disable?: boolean };
-    const createResult = await createAgent({
-      name: sanitizedName,
-      description: renameDialogAgent.description,
-      model: renameModelStr,
-      variant: renameDialogAgent.variant,
-      temperature: renameDialogAgent.temperature,
-      top_p: renameDialogAgent.topP,
-      prompt: renameDialogAgent.prompt,
-      mode: renameDialogAgent.mode,
-      permission: rulesetToPermissionConfig(renameDialogAgent.permission),
-      disable: renameExt.disable,
-      scope: renameExt.scope,
-    });
+    const renameConfig = copyAgentConfig(renameDialogAgent, sanitizedName);
+    const createResult = await createAgent(renameConfig);
 
     if (createResult.ok) {
       // Delete old agent
-      const deleteResult = await deleteAgent(renameDialogAgent.name, renameExt.scope);
+      const deleteResult = await deleteAgent(renameDialogAgent.name, renameConfig.scope);
       if (deleteResult.ok) {
         if (createResult.requiresManualRestart || deleteResult.requiresManualRestart) {
           toast.warning(t('settings.agents.page.toast.savedManualRestart'));
@@ -326,10 +317,10 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     }
   };
 
-  // Filter out hidden agents (internal agents like title, compaction, summary)
-  const visibleAgents = agents.filter((agent) => !isAgentHidden(agent));
-  const builtInAgents = visibleAgents.filter(isAgentBuiltIn);
-  const customAgents = visibleAgents.filter((agent) => !isAgentBuiltIn(agent));
+  // Hidden custom agents stay manageable here even though pickers exclude them.
+  const manageableAgents = agents.filter(isAgentManageable);
+  const builtInAgents = manageableAgents.filter(isAgentBuiltIn);
+  const customAgents = manageableAgents.filter((agent) => !isAgentBuiltIn(agent));
 
   // Group custom agents by subfolder
   const { groupedCustomAgents, ungroupedCustomAgents } = useMemo(() => {
@@ -356,7 +347,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
         <h2 className={`${SETTINGS_PANEL_TITLE_CLASS} mb-3`}>{t('settings.agents.sidebar.title')}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
-          <span className="typography-meta text-muted-foreground">{t('settings.agents.sidebar.total', { count: visibleAgents.length })}</span>
+          <span className="typography-meta text-muted-foreground">{t('settings.agents.sidebar.total', { count: manageableAgents.length })}</span>
           <Button size="sm"
             data-settings-item="agents.create"
             variant="ghost"
@@ -369,7 +360,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
-        {visibleAgents.length === 0 ? (
+        {manageableAgents.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
             <Icon name="robot-2" className="mx-auto mb-3 h-10 w-10 opacity-50" />
             <p className="typography-ui-label font-medium">{t('settings.agents.sidebar.empty.title')}</p>
