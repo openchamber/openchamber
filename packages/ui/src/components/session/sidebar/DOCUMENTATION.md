@@ -36,6 +36,7 @@
 - `collapsedActivityIndicator.tsx`: Aggregate busy/unseen dot for collapsed groups and folders.
 - `ConfirmDialogs.tsx`: Shared confirm dialog wrappers for session delete and folder delete flows.
 - `sortableItems.tsx`: DnD sortable wrapper for project ordering plus the sticky zone-band project header and its action affordances.
+- Project labels preserve their source text: the directory basename is shown unchanged by default, while a non-empty user-defined label takes precedence unchanged. Clearing the project-name field, or setting it back to the exact basename, removes the override and restores the directory-derived default.
 - `sessionFolderDnd.tsx`: Folder/session DnD scope and wrappers for dropping/moving sessions into folders.
 - `sessionOwnership.ts`: Resolves session directories once into shared project/worktree ownership and folder-scope indexes.
 

@@ -19,12 +19,16 @@ export const normalizeProjectIconBackground = (value: string | null | undefined)
 };
 
 export type ProjectIdentitySaveData = {
-  label: string;
+  label: string | null;
   icon: string | null;
   color: string | null;
   iconBackground: string | null;
   defaultModel: string | null;
 };
+
+const getDefaultProjectName = (project: Pick<ProjectEntry, 'path'>): string => (
+  project.path.split(/[\\/]/).filter(Boolean).pop() || project.path
+);
 
 type EditableProject = Pick<
   ProjectEntry,
@@ -75,7 +79,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       setDefaultModel(undefined);
       return;
     }
-    setName(project.label ?? '');
+    setName(project.label?.trim() || getDefaultProjectName(project));
     setIcon(project.icon ?? null);
     setColor(project.color ?? null);
     setIconBackground(project.iconBackground ?? null);
@@ -105,7 +109,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
   const showImagePreview = !previewImageFailed && (hasPendingUploadImageIcon || showStoredImagePreview);
 
   const hasChanges = Boolean(project) && (
-    name.trim() !== (project?.label ?? '').trim()
+    name.trim() !== (project?.label?.trim() || (project ? getDefaultProjectName(project) : ''))
     || icon !== (project?.icon ?? null)
     || color !== (project?.color ?? null)
     || iconBackground !== (project?.iconBackground ?? null)
@@ -190,10 +194,6 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     }
 
     const trimmed = name.trim();
-    if (!trimmed) {
-      return null;
-    }
-
     if (pendingUploadIconFile) {
       setIsUploadingIcon(true);
       const uploadResult = await uploadProjectIcon(project.id, pendingUploadIconFile);
@@ -227,7 +227,9 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     }
 
     return {
-      label: trimmed,
+      label: trimmed && trimmed !== getDefaultProjectName(project)
+        ? trimmed
+        : null,
       icon,
       color,
       iconBackground: normalizeProjectIconBackground(willRemoveImageIcon ? null : iconBackground),
