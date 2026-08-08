@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { type OpenCodeManager } from './opencode';
 import { handleStandardGitBridgeMessage } from './bridge-git-runtime';
 import { handleSpecialGitBridgeMessage } from './bridge-git-special-runtime';
 import { handleFsBridgeMessage } from './bridge-fs-runtime';
@@ -34,25 +33,9 @@ import {
   collectHeaders,
   base64EncodeUtf8,
 } from './bridge-localfs-proxy-runtime';
+import type { BridgeRequest, BridgeResponse, BridgeContext } from './bridge-types';
 
-export interface BridgeRequest {
-  id: string;
-  type: string;
-  payload?: unknown;
-}
-
-export interface BridgeResponse {
-  id: string;
-  type: string;
-  success: boolean;
-  data?: unknown;
-  error?: string;
-}
-
-export interface BridgeContext {
-  manager?: OpenCodeManager;
-  context?: vscode.ExtensionContext;
-}
+export type { BridgeRequest, BridgeResponse, BridgeContext } from './bridge-types';
 
 const CLIENT_RELOAD_DELAY_MS = 800;
 

@@ -15,6 +15,21 @@
   "command.newSession.title": "Nouvelle session",
   "command.showSettings.title": "Paramètres",
   "command.attachExplorerToChat.title": "Joindre au chat OpenChamber",
+  "command.openWalkthrough.title": "Ouvrir le guide de démarrage",
   "configuration.apiUrl.description": "URL d’un serveur API OpenCode externe. Laissez vide pour démarrer automatiquement une instance locale.",
-  "configuration.opencodeBinary.description": "Chemin absolu facultatif vers le binaire CLI opencode. Utile si la recherche PATH échoue. Nécessite de recharger la fenêtre ou de redémarrer l’API pour être pris en compte."
+  "configuration.opencodeBinary.description": "Chemin absolu facultatif vers le binaire CLI opencode. Utile si la recherche PATH échoue. Nécessite de recharger la fenêtre ou de redémarrer l’API pour être pris en compte.",
+  "walkthrough.gettingStarted.title": "Démarrer avec OpenChamber",
+  "walkthrough.gettingStarted.description": "Configurez OpenChamber dans VS Code et commencez à discuter avec votre code.",
+  "walkthrough.gettingStarted.steps.openSidebar.title": "Ouvrir la barre latérale OpenChamber",
+  "walkthrough.gettingStarted.steps.openSidebar.description": "Cliquez sur l’icône OpenChamber dans la barre d’activité pour ouvrir le chat.",
+  "walkthrough.gettingStarted.steps.openSidebar.media": "Ouvrez la barre latérale OpenChamber depuis la barre d’activité pour accéder au chat.",
+  "walkthrough.gettingStarted.steps.installCli.title": "Installer la CLI OpenCode",
+  "walkthrough.gettingStarted.steps.installCli.description": "OpenChamber utilise la CLI OpenCode en local. Installez-la si ce n’est pas déjà fait.",
+  "walkthrough.gettingStarted.steps.installCli.media": "Exécutez `curl -fsSL https://opencode.ai/install | bash` dans votre terminal, puis redémarrez la connexion API si nécessaire.",
+  "walkthrough.gettingStarted.steps.configureBinary.title": "Configurer le chemin du binaire (si nécessaire)",
+  "walkthrough.gettingStarted.steps.configureBinary.description": "Si OpenCode n’est pas détecté automatiquement, définissez le chemin absolu vers le binaire `opencode` dans les paramètres OpenChamber.",
+  "walkthrough.gettingStarted.steps.configureBinary.media": "Ouvrez les Paramètres depuis la barre du chat ou définissez `openchamber.opencodeBinary` dans les paramètres VS Code.",
+  "walkthrough.gettingStarted.steps.startChatting.title": "Commencer à discuter",
+  "walkthrough.gettingStarted.steps.startChatting.description": "Créez une nouvelle session et posez des questions à OpenChamber sur votre code, vos fichiers ou vos tâches.",
+  "walkthrough.gettingStarted.steps.startChatting.media": "Utilisez **Nouvelle session** dans la vue chat. Ajoutez des fichiers au contexte via les commandes de l’éditeur ou le menu contextuel de l’explorateur."
 }

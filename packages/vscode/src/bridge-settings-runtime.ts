@@ -357,6 +357,23 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
   await writeSharedSettingsToDisk(persistable);
   await ctx?.context?.globalState.update(SETTINGS_KEY, persistable);
 
+  if ('opencodeBinary' in changes || keysToClear.has('opencodeBinary')) {
+    try {
+      const vscodeValue = keysToClear.has('opencodeBinary')
+        ? ''
+        : typeof persistable.opencodeBinary === 'string'
+          ? persistable.opencodeBinary
+          : '';
+      await vscode.workspace.getConfiguration('openchamber').update(
+        'opencodeBinary',
+        vscodeValue,
+        vscode.ConfigurationTarget.Global,
+      );
+    } catch {
+      // Best-effort mirror into VS Code settings.
+    }
+  }
+
   // Return the same shape as readSettings (with derived fields re-applied).
   return {
     ...persistable,

@@ -26,11 +26,68 @@ import { useAppFontEffects } from './useAppFontEffects';
 
 type VSCodePanelType = 'chat' | 'agentManager';
 
+type VSCodeConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
+
+type VSCodeConnectionState = {
+  status: VSCodeConnectionStatus;
+  error?: string;
+  cliAvailable?: boolean;
+};
+
 declare global {
   interface Window {
     __OPENCHAMBER_PANEL_TYPE__?: VSCodePanelType;
+    __OPENCHAMBER_CONNECTION__?: VSCodeConnectionState;
   }
 }
+
+const LocalSetupScreen = React.lazy(() =>
+  import('@/components/onboarding/LocalSetupScreen').then((module) => ({ default: module.LocalSetupScreen })),
+);
+
+const readVSCodeConnection = (): VSCodeConnectionState => {
+  const initial = window.__OPENCHAMBER_CONNECTION__;
+  if (initial) {
+    return initial;
+  }
+  const vscodeConfig = (window as Window & { __VSCODE_CONFIG__?: { connectionStatus?: string; cliAvailable?: boolean } }).__VSCODE_CONFIG__;
+  const configStatus = vscodeConfig?.connectionStatus;
+  const status = (configStatus as VSCodeConnectionStatus | undefined) || 'connecting';
+  return {
+    status,
+    cliAvailable: vscodeConfig?.cliAvailable ?? true,
+  };
+};
+
+const useVSCodeConnection = (): VSCodeConnectionState => {
+  const [connection, setConnection] = React.useState<VSCodeConnectionState>(() => readVSCodeConnection());
+
+  React.useEffect(() => {
+    const onConnectionStatus = (event: Event) => {
+      const detail = (event as CustomEvent<Partial<VSCodeConnectionState>>).detail;
+      const prev = window.__OPENCHAMBER_CONNECTION__ ?? readVSCodeConnection();
+      const next: VSCodeConnectionState = {
+        status: detail?.status ?? prev.status,
+        error: detail?.error ?? prev.error,
+        cliAvailable: typeof detail?.cliAvailable === 'boolean' ? detail.cliAvailable : prev.cliAvailable,
+      };
+      window.__OPENCHAMBER_CONNECTION__ = next;
+      setConnection(next);
+    };
+
+    window.addEventListener('openchamber:connection-status', onConnectionStatus);
+    return () => window.removeEventListener('openchamber:connection-status', onConnectionStatus);
+  }, []);
+
+  return connection;
+};
+
+const shouldShowLocalSetup = (connection: VSCodeConnectionState): boolean => {
+  if (connection.cliAvailable !== false) {
+    return false;
+  }
+  return connection.status === 'connecting' || connection.status === 'error' || connection.status === 'disconnected';
+};
 
 type VSCodeAppProps = {
   apis: RuntimeAPIs;
@@ -46,6 +103,16 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
   const panelType = typeof window !== 'undefined'
     ? window.__OPENCHAMBER_PANEL_TYPE__
     : 'chat';
+  const connection = useVSCodeConnection();
+  const showLocalSetup = panelType === 'chat' && shouldShowLocalSetup(connection);
+
+  const handleLocalSetupRestart = React.useCallback(async () => {
+    if (apis.settings.restartOpenCode) {
+      await apis.settings.restartOpenCode();
+      return;
+    }
+    await runtimeFetch('/api/config/reload', { method: 'POST' });
+  }, [apis.settings]);
 
   React.useEffect(() => {
     registerRuntimeAPIs(apis);
@@ -98,6 +165,21 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
     const timeout = window.setTimeout(() => clearError(), 5000);
     return () => window.clearTimeout(timeout);
   }, [clearError, error]);
+
+  if (showLocalSetup) {
+    return (
+      <ErrorBoundary>
+        <RuntimeAPIProvider apis={apis}>
+          <React.Suspense fallback={null}>
+            <LocalSetupScreen
+              onBack={() => void handleLocalSetupRestart()}
+              onCliAvailable={() => void handleLocalSetupRestart()}
+            />
+          </React.Suspense>
+        </RuntimeAPIProvider>
+      </ErrorBoundary>
+    );
+  }
 
   if (panelType === 'agentManager') {
     return (

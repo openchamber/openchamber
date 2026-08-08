@@ -15,6 +15,21 @@
   "command.newSession.title": "New Session",
   "command.showSettings.title": "Settings",
   "command.attachExplorerToChat.title": "Attach to OpenChamber Chat",
+  "command.openWalkthrough.title": "Open Getting Started Walkthrough",
   "configuration.apiUrl.description": "URL of an external OpenCode API server. Leave empty to auto-start a local instance.",
-  "configuration.opencodeBinary.description": "Optional absolute path to the opencode CLI binary. Useful if PATH lookup fails. Requires window reload or API restart to apply."
+  "configuration.opencodeBinary.description": "Optional absolute path to the opencode CLI binary. Useful if PATH lookup fails. Requires window reload or API restart to apply.",
+  "walkthrough.gettingStarted.title": "Get Started with OpenChamber",
+  "walkthrough.gettingStarted.description": "Set up OpenChamber in VS Code and start chatting with your codebase.",
+  "walkthrough.gettingStarted.steps.openSidebar.title": "Open the OpenChamber sidebar",
+  "walkthrough.gettingStarted.steps.openSidebar.description": "Click the OpenChamber icon in the Activity Bar to open the chat sidebar.",
+  "walkthrough.gettingStarted.steps.openSidebar.media": "Open the OpenChamber sidebar from the Activity Bar to access chat.",
+  "walkthrough.gettingStarted.steps.installCli.title": "Install the OpenCode CLI",
+  "walkthrough.gettingStarted.steps.installCli.description": "OpenChamber uses the OpenCode CLI locally. Install it if you have not already.",
+  "walkthrough.gettingStarted.steps.installCli.media": "Run `curl -fsSL https://opencode.ai/install | bash` in your terminal, then restart the API connection if prompted.",
+  "walkthrough.gettingStarted.steps.configureBinary.title": "Configure the binary path (if needed)",
+  "walkthrough.gettingStarted.steps.configureBinary.description": "If OpenCode is not detected automatically, set the absolute path to the `opencode` binary in OpenChamber settings.",
+  "walkthrough.gettingStarted.steps.configureBinary.media": "Open Settings from the chat view title bar or set `openchamber.opencodeBinary` in VS Code Settings.",
+  "walkthrough.gettingStarted.steps.startChatting.title": "Start chatting",
+  "walkthrough.gettingStarted.steps.startChatting.description": "Create a new session and ask OpenChamber about your code, files, or tasks.",
+  "walkthrough.gettingStarted.steps.startChatting.media": "Use **New Session** in the chat view to begin. Add files to context with editor commands or the explorer context menu."
 }
