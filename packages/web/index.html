@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
 
+    <!-- Desktop shell marker. The Electron main process recognizes OpenChamber
+         UI documents (local, packaged, or remote-origin) by this attribute and
+         skips its foreign-page overlay (drag strip + Back to OpenChamber) —
+         this UI renders its own window chrome everywhere, including when it is
+         served by a remote instance. Must run before any document listener. -->
+    <script>
+      document.documentElement.setAttribute('data-oc-ui', 'openchamber');
+    </script>
+
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" href="/favicon-32.png" sizes="32x32" />

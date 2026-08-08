@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTrayController } from './tray.mjs';
+import { buildRemoteShellInjectionScript } from './remote-shell.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
@@ -2573,6 +2574,19 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     if (initScript) {
       void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
     }
+    // Remote pages loaded in an OpenChamber window (e.g. an instance whose
+    // server serves a foreign UI such as opencode web) get a slim draggable
+    // bar with a "Back to OpenChamber" button. OpenChamber UI documents and
+    // local/packaged pages are detected in-page and skipped. Mini Chat is
+    // exempt: its own navigation guard never loads remote pages.
+    if (!browserWindow.__ocMiniChat) {
+      const localUiTarget = buildLocalUiBackTarget();
+      if (localUiTarget) {
+        void browserWindow.webContents.executeJavaScript(
+          buildRemoteShellInjectionScript({ localUiUrl: localUiTarget }),
+        ).catch(() => {});
+      }
+    }
   });
 
   browserWindow.webContents.on('did-finish-load', () => {
@@ -2650,6 +2664,16 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
     runtimeConfig,
   });
   return state.mainWindow;
+};
+
+// Where the main window boots when no saved host applies: the packaged UI in
+// bundled builds, otherwise the local server origin. Mirrors openMainWindow's
+// local UI resolution so the remote-page overlay and window startup agree.
+const buildLocalUiBackTarget = () => {
+  if (shouldUsePackagedUi()) {
+    return buildPackagedUiUrl('/index.html');
+  }
+  return state.sidecarUrl || state.localOrigin || '';
 };
 
 const openMainWindow = async () => {
