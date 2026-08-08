@@ -1,38 +1,38 @@
 import * as vscode from 'vscode';
-import { handleBridgeMessage, type BridgeRequest, type BridgeResponse } from './bridge';
-import { getThemeKindName } from './theme';
+import { handleBridgeMessage, type BridgeRequest } from './bridge';
 import type { OpenCodeManager, ConnectionStatus } from './opencode';
-import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
-import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders, type WorkspaceFolderCandidate } from './workspaceResolver';
-
-type ActiveEditorFilePayload = {
-  filePath: string;
-  fileName: string;
-  relativePath: string;
-  fileSize: number | null;
-  selection: { startLine: number; endLine: number; text: string } | null;
-};
-
-const isSameActiveEditorFilePayload = (a: ActiveEditorFilePayload | null, b: ActiveEditorFilePayload | null): boolean => {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  return a.filePath === b.filePath
-    && a.fileName === b.fileName
-    && a.relativePath === b.relativePath
-    && a.fileSize === b.fileSize
-    && a.selection?.startLine === b.selection?.startLine
-    && a.selection?.endLine === b.selection?.endLine
-    && a.selection?.text === b.selection?.text;
-};
+import { ActiveEditorFileBroadcaster } from './activeEditorFile';
+import {
+  postPermissionAutoAcceptSynced,
+  postSettingsSynced,
+  postThemeChange,
+  postWebviewCommand,
+  postWindowFocusChanged,
+  syncConnectionAndFocus,
+} from './webviewHostMessages';
+import { WebviewMessageRetryQueue } from './webviewMessageRetry';
+import {
+  abortAllSseStreams,
+  startWebviewSseProxy,
+  stopWebviewSseProxy,
+  type SseStreamMap,
+} from './webviewSseSession';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'openchamber.chatView';
 
   private _view?: vscode.WebviewView;
+  private _cachedStatus: ConnectionStatus = 'connecting';
+  private _cachedError?: string;
+  private _sseCounter = 0;
+  private readonly _sseStreams: SseStreamMap = new Map();
+  private readonly _webviewDevServerUrl: string | null;
+  private readonly _messageRetry: WebviewMessageRetryQueue;
+  private readonly _activeEditor: ActiveEditorFileBroadcaster;
 
   public isVisible() {
     return this._view?.visible ?? false;
@@ -42,51 +42,41 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return this._view !== undefined;
   }
 
-  // Cache latest status/URL for when webview is resolved after connection is ready
-  private _cachedStatus: ConnectionStatus = 'connecting';
-  private _cachedError?: string;
-  private _sseCounter = 0;
-  private _sseStreams = new Map<string, { controller: AbortController; view: vscode.WebviewView | undefined }>();
-  private readonly _webviewDevServerUrl: string | null;
-  private _broadcastSelectionDebounce: ReturnType<typeof setTimeout> | undefined;
-  private _clearActiveEditorFileTimer: ReturnType<typeof setTimeout> | undefined;
-  private _lastActiveEditorFilePayload: ActiveEditorFilePayload | null = null;
-
-  // Message delivery confirmation and retry
-  private readonly _pendingMessages = new Set<string>();
-  private readonly _messageTimeouts = new Map<string, NodeJS.Timeout>();
-  private readonly _MESSAGE_TIMEOUT = 5000; // 5 seconds
-  private readonly _MAX_RETRIES = 3;
-
-  private _createMessageId(): string {
-    return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  }
-
-  private _clearPendingMessages(): void {
-    for (const timeout of this._messageTimeouts.values()) {
-      clearTimeout(timeout);
-    }
-    this._messageTimeouts.clear();
-    this._pendingMessages.clear();
-  }
-
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
     private readonly _openCodeManager?: OpenCodeManager
   ) {
     this._webviewDevServerUrl = resolveWebviewDevServerUrl(this._context);
+    this._messageRetry = new WebviewMessageRetryQueue(
+      () => this._view?.webview,
+      {
+        onRetry: (messageId, retryCount, maxRetries) => {
+          console.warn(`[Message Retry] Message ${messageId} not confirmed, retrying (${retryCount}/${maxRetries})...`);
+        },
+        onExhausted: (messageId, maxRetries) => {
+          console.error(`[Message Retry] Message ${messageId} failed after ${maxRetries} retries`);
+        },
+        onSendError: (error) => {
+          console.error(`[Message Retry] Failed to send message:`, error);
+        },
+      },
+    );
+    this._activeEditor = new ActiveEditorFileBroadcaster({
+      hasTargets: () => this._view !== undefined,
+      postPayload: (payload) => {
+        postWebviewCommand(this._targets(), 'activeEditorFile', payload);
+      },
+    });
 
     this._context.subscriptions.push(
-      vscode.window.onDidChangeActiveTextEditor(() => void this._broadcastActiveEditorFile()),
-      vscode.window.onDidChangeTextEditorSelection(() => this._scheduleBroadcast()),
+      vscode.window.onDidChangeActiveTextEditor(() => void this._activeEditor.broadcast()),
+      vscode.window.onDidChangeTextEditorSelection(() => this._activeEditor.scheduleSelectionBroadcast()),
     );
   }
 
-  public resolveWebviewView(
-    webviewView: vscode.WebviewView
-  ) {
-    this._clearPendingMessages();
+  public resolveWebviewView(webviewView: vscode.WebviewView) {
+    this._messageRetry.clear();
     this._view = webviewView;
 
     const distUri = vscode.Uri.joinPath(this._extensionUri, 'dist');
@@ -97,39 +87,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     };
 
     webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
-    // Send theme payload (including optional Shiki theme JSON) after the webview is set up.
     void this.updateTheme(vscode.window.activeColorTheme.kind);
-
-    // Send cached connection status and API URL (may have been set before webview was resolved)
     this._sendCachedState();
-
-    // Send current active editor file state to the new webview
-    this._lastActiveEditorFilePayload = null;
-    void this._broadcastActiveEditorFile();
+    this._activeEditor.reset();
+    void this._activeEditor.broadcast();
 
     webviewView.onDidDispose(() => {
-      for (const [streamId, stream] of this._sseStreams) {
-        if (stream.view !== webviewView) continue;
-        stream.controller.abort();
-        this._sseStreams.delete(streamId);
-      }
+      abortAllSseStreams(this._sseStreams);
       if (this._view !== webviewView) return;
-      if (this._broadcastSelectionDebounce !== undefined) {
-        clearTimeout(this._broadcastSelectionDebounce);
-        this._broadcastSelectionDebounce = undefined;
-      }
-      if (this._clearActiveEditorFileTimer !== undefined) {
-        clearTimeout(this._clearActiveEditorFileTimer);
-        this._clearActiveEditorFileTimer = undefined;
-      }
-      this._lastActiveEditorFilePayload = null;
-      this._clearPendingMessages();
+      this._activeEditor.reset();
+      this._messageRetry.clear();
       this._view = undefined;
     });
 
     webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string }) => {
       if (message.type === 'bridge:ack' && typeof message._msgId === 'string') {
-        this._confirmMessage(message._msgId);
+        this._messageRetry.confirm(message._msgId);
         return;
       }
 
@@ -143,14 +116,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
 
       if (message.type === 'api:sse:start') {
-        const response = await this._startSseProxy(message);
-        void this._sendMessageWithRetry(response);
+        const response = await startWebviewSseProxy({
+          message,
+          manager: this._openCodeManager,
+          streams: this._sseStreams,
+          nextCounter: () => ++this._sseCounter,
+          postMessage: (payload) => {
+            void this._view?.webview.postMessage(payload);
+          },
+        });
+        void this._messageRetry.send(response);
         return;
       }
 
       if (message.type === 'api:sse:stop') {
-        const response = await this._stopSseProxy(message);
-        void this._sendMessageWithRetry(response);
+        const response = stopWebviewSseProxy(message, this._sseStreams);
+        void this._messageRetry.send(response);
         return;
       }
 
@@ -158,7 +139,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         manager: this._openCodeManager,
         context: this._context,
       });
-      void this._sendMessageWithRetry(response);
+      void this._messageRetry.send(response);
 
       if (message.type === 'api:config/settings:save' && response.success) {
         void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
@@ -167,163 +148,81 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   public updateTheme(kind: vscode.ColorThemeKind) {
-    if (this._view) {
-      const themeKind = getThemeKindName(kind);
-      void getWebviewShikiThemes().then((shikiThemes) => {
-        this._view?.webview.postMessage({
-          type: 'themeChange',
-          theme: { kind: themeKind, shikiThemes },
-        });
-      });
-    }
+    postThemeChange(this._targets(), kind);
   }
 
   public updateConnectionStatus(status: ConnectionStatus, error?: string) {
-    // Cache the latest state
     this._cachedStatus = status;
     this._cachedError = error;
-    
-    // Send to webview if it exists
     this._sendCachedState();
   }
 
   public addTextToInput(text: string) {
-    if (this._view) {
-      // Reveal the webview panel
-      this._view.show(true);
-      
-      this._view.webview.postMessage({
-        type: 'command',
-        command: 'addToContext',
-        payload: { text }
-      });
-    }
+    if (!this._view) return;
+    this._view.show(true);
+    postWebviewCommand(this._targets(), 'addToContext', { text });
   }
 
   public addContextSelection(selection: { filePath: string; filename: string; text: string }) {
-    if (!this._view) {
-      return;
-    }
-
+    if (!this._view) return;
     this._view.show(true);
-    this._view.webview.postMessage({
-      type: 'command',
-      command: 'addContextSelection',
-      payload: selection,
-    });
+    postWebviewCommand(this._targets(), 'addContextSelection', selection);
   }
 
   public addFileAttachments(files: Array<{ filePath: string; fileName: string; fileSize: number | null }>) {
-    if (!this._view) {
-      return;
-    }
-
+    if (!this._view) return;
     const cleanedFiles = files.filter((entry) => entry.filePath.trim().length > 0 && entry.fileName.trim().length > 0);
-    if (cleanedFiles.length === 0) {
-      return;
-    }
-
+    if (cleanedFiles.length === 0) return;
     this._view.show(true);
-    this._view.webview.postMessage({
-      type: 'command',
-      command: 'addFileAttachments',
-      payload: { files: cleanedFiles },
-    });
+    postWebviewCommand(this._targets(), 'addFileAttachments', { files: cleanedFiles });
   }
 
   public addFileMentions(paths: string[]) {
-    if (!this._view) {
-      return;
-    }
-
-    const cleanedPaths = paths
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0);
-
-    if (cleanedPaths.length === 0) {
-      return;
-    }
-
+    if (!this._view) return;
+    const cleanedPaths = paths.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+    if (cleanedPaths.length === 0) return;
     this._view.show(true);
-    this._view.webview.postMessage({
-      type: 'command',
-      command: 'addFileMentions',
-      payload: { paths: cleanedPaths },
-    });
+    postWebviewCommand(this._targets(), 'addFileMentions', { paths: cleanedPaths });
   }
 
   public createNewSessionWithPrompt(prompt: string) {
-    if (this._view) {
-      // Reveal the webview panel
-      this._view.show(true);
-      
-      this._view.webview.postMessage({
-        type: 'command',
-        command: 'createSessionWithPrompt',
-        payload: { prompt }
-      });
-    }
+    if (!this._view) return;
+    this._view.show(true);
+    postWebviewCommand(this._targets(), 'createSessionWithPrompt', { prompt });
   }
 
   public createNewSession(options?: { directory?: string; workspaceFolders?: WorkspaceFolderCandidate[] }) {
-    if (this._view) {
-      // Reveal the webview panel
-      this._view.show(true);
-
-      this._view.webview.postMessage({
-        type: 'command',
-        command: 'newSession',
-        ...((options?.directory || options?.workspaceFolders?.length) && {
-          payload: { directory: options?.directory, workspaceFolders: options?.workspaceFolders ?? [] },
-        }),
-      });
-    }
+    if (!this._view) return;
+    this._view.show(true);
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'newSession',
+      ...((options?.directory || options?.workspaceFolders?.length) && {
+        payload: { directory: options?.directory, workspaceFolders: options?.workspaceFolders ?? [] },
+      }),
+    });
   }
 
   public syncWorkspaceFolders(workspaceFolders: WorkspaceFolderCandidate[]) {
-    this._view?.webview.postMessage({
-      type: 'command',
-      command: 'workspaceFoldersChanged',
-      payload: { workspaceFolders },
-    });
+    postWebviewCommand(this._targets(), 'workspaceFoldersChanged', { workspaceFolders });
   }
 
   public showSettings() {
-    if (this._view) {
-      // Reveal the webview panel
-      this._view.show(true);
-      
-      this._view.webview.postMessage({
-        type: 'command',
-        command: 'showSettings'
-      });
-    }
+    if (!this._view) return;
+    this._view.show(true);
+    postWebviewCommand(this._targets(), 'showSettings');
   }
 
   public postMessage(message: unknown): void {
-    if (this._view) {
-      this._view.webview.postMessage(message);
-    }
+    this._view?.webview.postMessage(message);
   }
 
   public notifySettingsSynced(settings: unknown): void {
-    if (!this._view) {
-      return;
-    }
-
-    this._view.webview.postMessage({
-      type: 'command',
-      command: 'settingsSynced',
-      payload: settings,
-    });
+    postSettingsSynced(this._targets(), settings);
   }
 
   public notifyPermissionAutoAcceptSynced(snapshot: unknown): void {
-    this._view?.webview.postMessage({
-      type: 'command',
-      command: 'permissionAutoAcceptSynced',
-      payload: snapshot,
-    });
+    postPermissionAutoAcceptSynced(this._targets(), snapshot);
   }
 
   /**
@@ -332,286 +231,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
    * OpenCode update. Returns false if no webview is resolved to drive it.
    */
   public reloadOpenCode(): boolean {
-    if (!this._view) {
-      return false;
-    }
-
-    this._view.webview.postMessage({
-      type: 'command',
-      command: 'reloadOpenCode',
-    });
+    if (!this._view) return false;
+    postWebviewCommand(this._targets(), 'reloadOpenCode');
     return true;
   }
 
   public notifyWindowFocusChanged(focused: boolean): void {
-    if (!this._view) {
-      return;
-    }
-
-    this._view.webview.postMessage({
-      type: 'command',
-      command: 'windowFocusChanged',
-      payload: { focused },
-    });
+    postWindowFocusChanged(this._targets(), focused);
   }
 
-  // Message delivery confirmation
-  private _confirmMessage(messageId: string) {
-    this._pendingMessages.delete(messageId);
-
-    const timeout = this._messageTimeouts.get(messageId);
-    if (timeout) {
-      clearTimeout(timeout);
-      this._messageTimeouts.delete(messageId);
-    }
-  }
-
-  // Send message with retry mechanism
-  private async _sendMessageWithRetry(response: BridgeResponse, retryCount: number = 0, messageId?: string): Promise<boolean> {
-    if (!this._view) {
-      return false;
-    }
-
-    const pendingMessageId = messageId ?? this._createMessageId();
-    const existingTimeout = this._messageTimeouts.get(pendingMessageId);
-    if (existingTimeout) {
-      clearTimeout(existingTimeout);
-      this._messageTimeouts.delete(pendingMessageId);
-    }
-
-    try {
-      const delivered = await this._view.webview.postMessage({
-        ...response,
-        _msgId: pendingMessageId,
-      });
-      if (!delivered) {
-        throw new Error('Webview rejected message delivery');
-      }
-
-      this._pendingMessages.add(pendingMessageId);
-
-      const timeout = setTimeout(() => {
-        if (!this._pendingMessages.has(pendingMessageId)) {
-          return;
-        }
-
-        if (retryCount < this._MAX_RETRIES) {
-          console.warn(`[Message Retry] Message ${pendingMessageId} not confirmed, retrying (${retryCount + 1}/${this._MAX_RETRIES})...`);
-          void this._sendMessageWithRetry(response, retryCount + 1, pendingMessageId);
-          return;
-        }
-
-        console.error(`[Message Retry] Message ${pendingMessageId} failed after ${this._MAX_RETRIES} retries`);
-        this._pendingMessages.delete(pendingMessageId);
-        this._messageTimeouts.delete(pendingMessageId);
-      }, this._MESSAGE_TIMEOUT);
-
-      this._messageTimeouts.set(pendingMessageId, timeout);
-      return true;
-
-    } catch (error) {
-      console.error(`[Message Retry] Failed to send message:`, error);
-
-      if (retryCount < this._MAX_RETRIES) {
-        await new Promise((resolve) => setTimeout(resolve, 100 * (retryCount + 1)));
-        return this._sendMessageWithRetry(response, retryCount + 1, pendingMessageId);
-      }
-
-      this._pendingMessages.delete(pendingMessageId);
-      this._messageTimeouts.delete(pendingMessageId);
-
-      return false;
-    }
+  private _targets() {
+    return this._view ? [this._view.webview] : [];
   }
 
   private _sendCachedState() {
-    if (!this._view) {
-      return;
-    }
-
-    this._view.webview.postMessage({
-      type: 'connectionStatus',
-      status: this._cachedStatus,
-      error: this._cachedError,
-    });
-    this.notifyWindowFocusChanged(vscode.window.state.focused);
-  }
-
-  private _scheduleBroadcast(): void {
-    if (this._broadcastSelectionDebounce !== undefined) {
-      clearTimeout(this._broadcastSelectionDebounce);
-    }
-    this._broadcastSelectionDebounce = setTimeout(() => {
-      this._broadcastSelectionDebounce = undefined;
-      void this._broadcastActiveEditorFile();
-    }, 150);
-  }
-
-  private _scheduleClearActiveEditorFile(): void {
-    if (this._clearActiveEditorFileTimer !== undefined) {
-      clearTimeout(this._clearActiveEditorFileTimer);
-    }
-    this._clearActiveEditorFileTimer = setTimeout(() => {
-      this._clearActiveEditorFileTimer = undefined;
-      if (!this._view || this._lastActiveEditorFilePayload === null) {
-        return;
-      }
-      this._lastActiveEditorFilePayload = null;
-      this._view.webview.postMessage({
-        type: 'command',
-        command: 'activeEditorFile',
-        payload: null,
-      });
-    }, 200);
-  }
-
-  private async _broadcastActiveEditorFile() {
-    if (!this._view) {
-      return;
-    }
-
-    const view = this._view;
-    const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.uri.scheme !== 'file') {
-      this._scheduleClearActiveEditorFile();
-      return;
-    }
-
-    const editorUri = editor.document.uri;
-    const editorUriKey = editorUri.toString();
-
-    if (this._clearActiveEditorFileTimer !== undefined) {
-      clearTimeout(this._clearActiveEditorFileTimer);
-      this._clearActiveEditorFileTimer = undefined;
-    }
-
-    const filePath = normalizeWindowsDriveLetter(editorUri.fsPath);
-    const rawFileName = editorUri.fsPath;
-    const fileName = rawFileName.replace(/\\/g, '/').split('/').pop() || '';
-    const relativePath = vscode.workspace.asRelativePath(editorUri, false);
-
-    let fileSize: number | null = null;
-    try {
-      const stat = await vscode.workspace.fs.stat(editorUri);
-      fileSize = stat.size;
-    } catch {
-      // File may not be saved yet or inaccessible
-    }
-
-    if (this._view !== view || vscode.window.activeTextEditor?.document.uri.toString() !== editorUriKey) {
-      return;
-    }
-
-    let selection: { startLine: number; endLine: number; text: string } | null = null;
-    if (!editor.selection.isEmpty) {
-      selection = {
-        startLine: editor.selection.start.line + 1,
-        endLine: editor.selection.end.line + 1,
-        text: editor.document.getText(editor.selection),
-      };
-    }
-
-    const payload: ActiveEditorFilePayload = { filePath, fileName, relativePath, fileSize, selection };
-    if (isSameActiveEditorFilePayload(this._lastActiveEditorFilePayload, payload)) {
-      return;
-    }
-    this._lastActiveEditorFilePayload = payload;
-
-    view.webview.postMessage({
-      type: 'command',
-      command: 'activeEditorFile',
-      payload,
-    });
-  }
-
-  private _buildSseHeaders(extra?: Record<string, string>): Record<string, string> {
-    return {
-      Accept: 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      ...(extra || {}),
-    };
-  }
-
-  private async _startSseProxy(message: BridgeRequest): Promise<BridgeResponse> {
-    const { id, type, payload } = message;
-
-    const { path, headers, streamId: requestedStreamId } = (payload || {}) as { path?: string; headers?: Record<string, string>; streamId?: string };
-    const normalizedPath = typeof path === 'string' && path.trim().length > 0 ? path.trim() : '/event';
-
-    if (!this._openCodeManager) {
-      return {
-        id,
-        type,
-        success: true,
-        data: { status: 503, headers: { 'content-type': 'application/json' }, streamId: null },
-      };
-    }
-
-    const streamId = typeof requestedStreamId === 'string' && /^sse_webview_\d+_\d+$/.test(requestedStreamId)
-      ? requestedStreamId
-      : `sse_${++this._sseCounter}_${Date.now()}`;
-    const controller = new AbortController();
-    this._sseStreams.set(streamId, { controller, view: this._view });
-
-    try {
-      const start = await openSseProxy({
-        manager: this._openCodeManager,
-        path: normalizedPath,
-        headers: this._buildSseHeaders(headers),
-        signal: controller.signal,
-        onChunk: (chunk) => {
-          this._view?.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk });
-        },
-      });
-
-      start.run
-        .then(() => {
-          this._view?.webview.postMessage({ type: 'api:sse:end', streamId });
-        })
-        .catch((error) => {
-          if (!controller.signal.aborted) {
-            const messageText = error instanceof Error ? error.message : String(error);
-            this._view?.webview.postMessage({ type: 'api:sse:end', streamId, error: messageText });
-          }
-        })
-        .finally(() => {
-          this._sseStreams.delete(streamId);
-        });
-
-      return {
-        id,
-        type,
-        success: true,
-        data: {
-          status: 200,
-          headers: start.headers,
-          streamId,
-        },
-      };
-    } catch (error) {
-      this._sseStreams.delete(streamId);
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        id,
-        type,
-        success: true,
-        data: { status: 502, headers: { 'content-type': 'application/json' }, streamId: null, error: message },
-      };
-    }
-  }
-
-  private async _stopSseProxy(message: BridgeRequest): Promise<BridgeResponse> {
-    const { id, type, payload } = message;
-    const { streamId } = (payload || {}) as { streamId?: string };
-    if (typeof streamId === 'string' && streamId.length > 0) {
-      const stream = this._sseStreams.get(streamId);
-      if (stream) {
-        stream.controller.abort();
-        this._sseStreams.delete(streamId);
-      }
-    }
-    return { id, type, success: true, data: { stopped: true } };
+    syncConnectionAndFocus(this._targets(), this._cachedStatus, this._cachedError);
   }
 
   private _getHtmlForWebview(webview: vscode.Webview) {
@@ -619,17 +253,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
     );
     const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
-    // Use cached values which are updated by onStatusChange callback
-    const initialStatus = this._cachedStatus;
-    const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 
     return getWebviewHtml({
       webview,
       extensionUri: this._extensionUri,
       workspaceFolder,
       workspaceFolders,
-      initialStatus,
-      cliAvailable,
+      initialStatus: this._cachedStatus,
+      cliAvailable: this._openCodeManager?.isCliAvailable() ?? false,
       extensionVersion: String(this._context.extension?.packageJSON?.version || ''),
       devServerUrl: this._webviewDevServerUrl,
     });
