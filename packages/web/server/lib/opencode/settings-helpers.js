@@ -568,6 +568,15 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.collapsibleUserMessages === 'boolean') {
       result.collapsibleUserMessages = candidate.collapsibleUserMessages;
     }
+    if (typeof candidate.chatMessageWidthMode === 'string') {
+      const mode = candidate.chatMessageWidthMode.trim();
+      if (mode === 'narrow' || mode === 'wide' || mode === 'fluid') {
+        result.chatMessageWidthMode = mode;
+      }
+    }
+    if (!result.chatMessageWidthMode && typeof candidate.wideChatLayoutEnabled === 'boolean') {
+      result.chatMessageWidthMode = candidate.wideChatLayoutEnabled ? 'wide' : 'narrow';
+    }
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
     }
@@ -576,9 +585,6 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.expandedEditorToolbar === 'boolean') {
       result.expandedEditorToolbar = candidate.expandedEditorToolbar;
-    }
-    if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
-      result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
     }
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
@@ -885,6 +891,10 @@ export const createSettingsHelpers = (dependencies) => {
       ),
       typographySizes: nextTypographySizes
     };
+
+    if (typeof next.chatMessageWidthMode === 'string') {
+      delete next.wideChatLayoutEnabled;
+    }
 
     return next;
   };
