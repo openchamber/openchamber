@@ -294,4 +294,25 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 100);
   },
+
+  async uploadFile(path: string, data: Blob): Promise<{ success: boolean; path: string }> {
+    const target = normalizePath(path);
+    const response = await runtimeFetch('/api/fs/upload', {
+      method: 'POST',
+      query: { path: target },
+      headers: { 'Content-Type': 'application/octet-stream', ...directoryHeaders(getDirectory) },
+      body: data,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error((error as { error?: string }).error || 'Failed to upload file');
+    }
+
+    const result = await response.json().catch(() => ({}));
+    return {
+      success: Boolean((result as { success?: boolean }).success),
+      path: typeof (result as { path?: string }).path === 'string' ? normalizePath((result as { path: string }).path) : target,
+    };
+  },
 });

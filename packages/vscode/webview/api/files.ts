@@ -6,6 +6,7 @@ import type {
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
 
+import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import { sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
 
 const normalizePath = (value: string): string => value.replace(/\\/g, '/');
@@ -142,5 +143,26 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  },
+
+  async uploadFile(path: string, data: Blob): Promise<{ success: boolean; path: string }> {
+    const target = normalizePath(path);
+    const response = await runtimeFetch('/api/fs/upload', {
+      method: 'POST',
+      query: { path: target },
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: data,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error((error as { error?: string }).error || 'Failed to upload file');
+    }
+
+    const result = await response.json().catch(() => ({}));
+    return {
+      success: Boolean((result as { success?: boolean }).success),
+      path: typeof (result as { path?: string }).path === 'string' ? normalizePath((result as { path: string }).path) : target,
+    };
   },
 });

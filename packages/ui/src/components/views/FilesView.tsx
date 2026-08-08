@@ -748,6 +748,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [isSearchOpen, setIsSearchOpen] = React.useState(false);
   const [isFloatingToolbarOpen, setIsFloatingToolbarOpen] = React.useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = React.useState(false);
   const floatingToolbarRef = React.useRef<HTMLDivElement | null>(null);
   const toolbarDropdownOpenCountRef = React.useRef(0);
 
@@ -962,6 +963,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const canRename = Boolean(files.rename);
   const canDelete = Boolean(files.delete);
   const canReveal = Boolean(files.revealPath);
+  const canUpload = Boolean(files.uploadFile);
   const openInApps = useOpenInAppsStore((state) => state.availableApps);
   const openInCacheStale = useOpenInAppsStore((state) => state.isCacheStale);
   const initializeOpenInApps = useOpenInAppsStore((state) => state.initialize);
@@ -1266,6 +1268,72 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     inFlightDirsRef.current.delete(normalized);
     await loadDirectory(normalized);
   }, [loadDirectory, refreshRoot]);
+
+  const uploadInputRef = React.useRef<HTMLInputElement>(null);
+
+  /**
+   * Uploads one or more browser files into `targetDir`. Names are reduced to a
+   * safe basename (path separators stripped) so dropped directories cannot
+   * smuggle nested paths. The server re-validates containment independently.
+   */
+  const uploadFilesTo = React.useCallback(async (targetDir: string, incoming: FileList | File[]) => {
+    const fn = files.uploadFile;
+    if (!fn) return;
+    const fileList = Array.from(incoming);
+    if (fileList.length === 0) return;
+    const target = normalizePath(targetDir);
+
+    let uploadedCount = 0;
+    let lastUploadedName = '';
+    const failedNames: string[] = [];
+    for (const file of fileList) {
+      const safeName = file.name.replace(/[/\\]/g, '_').trim();
+      if (!safeName) continue;
+      try {
+        await fn(`${target}/${safeName}`, file);
+        uploadedCount += 1;
+        lastUploadedName = safeName;
+      } catch (error) {
+        console.error(`Upload failed for ${safeName}:`, error);
+        failedNames.push(safeName);
+      }
+    }
+
+    if (uploadedCount > 0) {
+      toast.success(uploadedCount === 1
+        ? t('filesView.toast.uploadSuccessSingle', { name: lastUploadedName })
+        : t('filesView.toast.uploadSuccess', { count: uploadedCount }));
+      void refreshDirectory(target);
+    }
+    if (failedNames.length > 0) {
+      toast.error(failedNames.length === 1
+        ? t('filesView.toast.uploadFailedSingle', { name: failedNames[0] })
+        : t('filesView.toast.uploadFailed', { count: failedNames.length }));
+    }
+  }, [files.uploadFile, refreshDirectory, t]);
+
+  const handleTreeDragOver = React.useCallback((event: React.DragEvent) => {
+    if (!canUpload) return;
+    if (!Array.from(event.dataTransfer.types).includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setIsDraggingFiles(true);
+  }, [canUpload]);
+
+  const handleTreeDragLeave = React.useCallback((event: React.DragEvent) => {
+    if (!canUpload) return;
+    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+    setIsDraggingFiles(false);
+  }, [canUpload]);
+
+  const handleTreeDrop = React.useCallback((event: React.DragEvent) => {
+    if (!canUpload) return;
+    setIsDraggingFiles(false);
+    const files = event.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    event.preventDefault();
+    void uploadFilesTo(currentDirectory, files);
+  }, [canUpload, currentDirectory, uploadFilesTo]);
 
   const lastFilesViewDirRef = React.useRef<string>('');
   const lastFilesViewTreeKeyRef = React.useRef<string>('');
@@ -4117,10 +4185,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const rootLoadError = root ? loadErrorsByDir[root] : null;
 
   const treePanel = (
-    <section className={cn(
-      "flex min-h-0 flex-col overflow-hidden",
-      isMobile ? "h-full w-full bg-background" : "h-full rounded-xl border border-border/60 bg-background/70"
-    )}>
+    <section
+      className={cn(
+        "relative flex min-h-0 flex-col overflow-hidden",
+        isMobile ? "h-full w-full bg-background" : "h-full rounded-xl border border-border/60 bg-background/70"
+      )}
+      onDragOver={handleTreeDragOver}
+      onDragLeave={handleTreeDragLeave}
+      onDrop={handleTreeDrop}
+    >
       <div className={cn("flex flex-col gap-2 py-2", isMobile ? "px-3" : "px-2")}>
         <div className="flex items-center gap-2">
           <div className="relative flex-1 min-w-0">
@@ -4190,6 +4263,40 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             </TooltipTrigger>
             <TooltipContent side="bottom" sideOffset={6}>{t('filesView.tree.actions.refreshTitle')}</TooltipContent>
           </Tooltip>
+          {canUpload && (
+            <>
+              <input
+                ref={uploadInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                  const fileList = event.target.files;
+                  if (fileList && fileList.length > 0) {
+                    void uploadFilesTo(currentDirectory, fileList);
+                  }
+                  event.target.value = '';
+                }}
+              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex flex-shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => uploadInputRef.current?.click()}
+                      className="size-8 p-0 flex-shrink-0"
+                      title={t('filesView.tree.actions.uploadTitle')}
+                      aria-label={t('filesView.tree.actions.uploadTitle')}
+                    >
+                      <Icon name="upload-2" className="size-4" />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>{t('filesView.tree.actions.uploadTitle')}</TooltipContent>
+              </Tooltip>
+            </>
+          )}
         </div>
       </div>
 
@@ -4240,6 +4347,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           )}
         </ul>
       </ScrollableOverlay>
+      {isDraggingFiles && canUpload && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-primary/60 bg-background/80">
+          <div className="flex items-center gap-2 typography-ui text-foreground">
+            <Icon name="upload-2" className="size-4" />
+            {t('filesView.tree.drop.uploadHint')}
+          </div>
+        </div>
+      )}
     </section>
   );
 

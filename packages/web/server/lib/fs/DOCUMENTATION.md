@@ -16,6 +16,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `GET /api/fs/raw`
     - `GET /api/fs/serve/:path(*)`
     - `POST /api/fs/write`
+    - `POST /api/fs/upload`
     - `POST /api/fs/delete`
     - `POST /api/fs/rename`
     - `POST /api/fs/reveal`
@@ -24,6 +25,12 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `GET /api/fs/list`
   - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
   - Enforces workspace boundary checks with active project + worktree fallback support.
+  - `POST /api/fs/upload` accepts a raw binary body streamed to a temp file and
+    atomically renamed over the target, with the same containment rules as
+    `write` (parent and existing target realpath checks reject symlink escapes).
+    The byte cap defaults to 100 MiB and is configurable via
+    `OPENCHAMBER_FS_UPLOAD_MAX_BYTES`; it is enforced on the declared
+    `Content-Length` and mid-stream.
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
   - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.

@@ -87,4 +87,29 @@ describe('createWebFilesAPI', () => {
       headers: { 'x-opencode-directory': '/current-workspace' },
     });
   });
+
+  it('uploads the raw blob with the workspace directory header', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/current-workspace' });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ success: true, path: '/current-workspace/notes.txt' }));
+    const blob = new Blob(['hello']);
+    const result = await api.uploadFile?.('/current-workspace/notes.txt', blob);
+
+    expect(result).toEqual({ success: true, path: '/current-workspace/notes.txt' });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/upload', {
+      method: 'POST',
+      query: { path: '/current-workspace/notes.txt' },
+      headers: { 'Content-Type': 'application/octet-stream', 'x-opencode-directory': '/current-workspace' },
+      body: blob,
+    });
+  });
+
+  it('surfaces the server error message when an upload fails', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/current-workspace' });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'Upload exceeds the maximum allowed size' }, { status: 413 }));
+    await expect(api.uploadFile?.('/current-workspace/big.bin', new Blob(['x']))).rejects.toThrow('Upload exceeds the maximum allowed size');
+  });
 });

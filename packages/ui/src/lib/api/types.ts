@@ -611,6 +611,7 @@ export interface FilesAPI {
   revealPath?(path: string): Promise<{ success: boolean }>;
   execCommands?(commands: string[], cwd: string): Promise<{ success: boolean; results: CommandExecResult[] }>;
   downloadFile?(path: string): Promise<void>;
+  uploadFile?(path: string, data: Blob): Promise<{ success: boolean; path: string }>;
 }
 
 export interface ProjectEntry {

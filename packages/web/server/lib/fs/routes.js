@@ -108,6 +108,15 @@ const createGitCheckIgnoreTimeoutMs = () => {
   return 2500;
 };
 
+// Hard cap for binary uploads (bytes). Mirrors MAX_SERVE_BYTES; the check runs
+// both on the declared Content-Length and mid-stream, so a lying header cannot
+// bypass the cap.
+const createUploadMaxBytes = () => {
+  const raw = Number(process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES);
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  return 100 * 1024 * 1024;
+};
+
 const FILE_MIME_MAP = Object.freeze({
   '.html': 'text/html',
   '.htm': 'text/html',
@@ -1066,6 +1075,145 @@ export const registerFsRoutes = (app, dependencies) => {
       }
       console.error('Failed to write file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to write file' });
+    }
+  });
+
+  app.post('/api/fs/upload', async (req, res) => {
+    const targetPath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    if (!targetPath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    const maxUploadBytes = createUploadMaxBytes();
+
+    // Reject declared oversized bodies before reading anything.
+    const declaredLength = Number(req.headers?.['content-length']);
+    if (Number.isFinite(declaredLength) && declaredLength > maxUploadBytes) {
+      const respond = () => {
+        res.status(413).json({ error: 'Upload exceeds the maximum allowed size' });
+        // Stop the client from pushing the rest of an oversized body once the
+        // response has flushed (destroying the socket first would lose it).
+        res.on?.('finish', () => req.destroy?.());
+      };
+      return respond();
+    }
+
+    try {
+      const resolved = await resolveWorkspacePathFromContext({
+        req,
+        targetPath,
+        resolveProjectDirectory,
+        path,
+        os,
+        normalizeDirectoryPath,
+        openchamberUserConfigRoot,
+      });
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      const canonicalBase = await fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base));
+
+      // The parent directory must exist and resolve inside the workspace; this
+      // rejects writing through a symlinked parent that escapes the root.
+      let canonicalParent;
+      try {
+        canonicalParent = await fsPromises.realpath(path.dirname(resolved.resolved));
+      } catch (error) {
+        if (!error || error.code === 'ENOENT') {
+          return res.status(400).json({ error: 'Target directory does not exist' });
+        }
+        throw error;
+      }
+      if (!isPathWithinRoot(canonicalParent, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      // An existing target must stay inside the workspace (rejects symlink
+      // escapes) and must not be a directory.
+      let targetIsDirectory = false;
+      try {
+        const canonicalTarget = await fsPromises.realpath(resolved.resolved);
+        if (!isPathWithinRoot(canonicalTarget, canonicalBase, path, os)) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+        const targetStats = await fsPromises.stat(canonicalTarget);
+        targetIsDirectory = targetStats.isDirectory();
+      } catch (error) {
+        if (!error || error.code !== 'ENOENT') {
+          throw error;
+        }
+      }
+      if (targetIsDirectory) {
+        return res.status(400).json({ error: 'Specified path is a directory' });
+      }
+
+      // Stream the request body into a temp file, enforcing the byte cap
+      // mid-stream so an absent or lying Content-Length cannot bypass it.
+      // Writes are serialized through a promise chain so 'end' can only settle
+      // after every chunk has been flushed to disk (closing the handle with
+      // writes still in flight would truncate the file).
+      const tmp = `${resolved.resolved}.upload-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      let received = 0;
+      try {
+        const handle = await fsPromises.open(tmp, 'w');
+        try {
+          await new Promise((resolve, reject) => {
+            let settled = false;
+            let writeChain = Promise.resolve();
+            let writeError = null;
+            const finish = (error) => {
+              if (settled) return;
+              settled = true;
+              if (error) reject(error);
+              else resolve();
+            };
+            req.on('data', (chunk) => {
+              if (settled) return;
+              received += chunk.length;
+              if (received > maxUploadBytes) {
+                finish(Object.assign(new Error('Upload exceeds the maximum allowed size'), { uploadTooLarge: true }));
+                return;
+              }
+              writeChain = writeChain
+                .then(() => handle.write(chunk))
+                .catch((error) => {
+                  writeError = writeError || error || new Error('Failed to write upload');
+                });
+            });
+            req.on('end', () => {
+              writeChain.then(() => finish(writeError));
+            });
+            req.on('error', (error) => finish(error || new Error('Upload stream failed')));
+            req.on('aborted', () => finish(new Error('Upload aborted')));
+          });
+        } finally {
+          await handle.close().catch(() => {});
+        }
+      } catch (error) {
+        await fsPromises.unlink(tmp).catch(() => {});
+        if (error && typeof error === 'object' && error.uploadTooLarge) {
+          res.status(413).json({ error: 'Upload exceeds the maximum allowed size' });
+          // Stop the client from pushing the rest of an oversized body once
+          // the response has flushed (destroying the socket first would lose it).
+          res.on?.('finish', () => req.destroy?.());
+          return;
+        }
+        throw error;
+      }
+
+      await fsPromises.rename(tmp, resolved.resolved);
+      return res.json({ success: true, path: resolved.resolved });
+    } catch (error) {
+      const err = error;
+      if (err && typeof err === 'object' && err.code === 'EACCES') {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        return res.status(404).json({ error: 'Target directory not found' });
+      }
+      console.error('Failed to upload file:', error);
+      return res.status(500).json({ error: (error && error.message) || 'Failed to upload file' });
     }
   });
 

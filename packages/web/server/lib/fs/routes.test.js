@@ -340,6 +340,222 @@ describe('fs write', () => {
   });
 });
 
+const registerUpload = (fsPromises) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      stat: async () => ({ isFile: () => true, isDirectory: () => false }),
+      open: async () => ({ write: vi.fn(async () => ({ bytesWritten: 0 })), close: vi.fn(async () => {}) }),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+      ...fsPromises,
+    },
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('POST', '/api/fs/upload');
+};
+
+const callUpload = async (handler, { query = {}, headers = {}, chunks = [] } = {}) => {
+  const res = createMockResponse();
+  const req = new EventEmitter();
+  req.query = query;
+  req.headers = headers;
+  req.destroy = () => {};
+  const promise = handler(req, res);
+  setImmediate(() => {
+    for (const chunk of chunks) {
+      req.emit('data', Buffer.from(chunk));
+    }
+    req.emit('end');
+  });
+  await promise;
+  return res;
+};
+
+describe('fs upload', () => {
+  it('requires a target path', async () => {
+    const handler = registerUpload();
+    const res = await callUpload(handler, { chunks: ['data'] });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Path is required' });
+  });
+
+  it('rejects paths outside the active workspace', async () => {
+    const handler = registerUpload();
+    const res = await callUpload(handler, { query: { path: '/etc/passwd' }, chunks: ['data'] });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Path is outside of active workspace' });
+  });
+
+  it('streams the body to a temp file and atomically renames it into place', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => {
+        if (targetPath === '/repo/uploads/a.txt') {
+          const error = new Error('ENOENT');
+          error.code = 'ENOENT';
+          throw error;
+        }
+        return targetPath;
+      }),
+      open: vi.fn(async () => ({
+        write: vi.fn(async () => ({ bytesWritten: 0 })),
+        close: vi.fn(async () => {}),
+      })),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, {
+      query: { path: '/repo/uploads/a.txt' },
+      headers: { 'content-length': '7' },
+      chunks: ['hello', ' world'],
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ success: true, path: '/repo/uploads/a.txt' });
+    const tmp = fsPromises.open.mock.calls[0][0];
+    expect(tmp).toMatch(/^\/repo\/uploads\/a\.txt\.upload-/);
+    const handle = await fsPromises.open.mock.results[0].value;
+    expect(handle.write).toHaveBeenCalledTimes(2);
+    expect(handle.write.mock.calls[0][0].toString()).toBe('hello');
+    expect(handle.write.mock.calls[1][0].toString()).toBe(' world');
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/uploads/a.txt');
+    expect(fsPromises.unlink).not.toHaveBeenCalled();
+  });
+
+  it('rejects declared oversized uploads before reading the body', async () => {
+    const fsPromises = {
+      open: vi.fn(async () => ({ write: vi.fn(async () => ({})), close: vi.fn(async () => {}) })),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, {
+      query: { path: '/repo/big.bin' },
+      headers: { 'content-length': String(101 * 1024 * 1024) },
+      chunks: ['data'],
+    });
+
+    expect(res.statusCode).toBe(413);
+    expect(fsPromises.open).not.toHaveBeenCalled();
+    expect(fsPromises.rename).not.toHaveBeenCalled();
+  });
+
+  it('enforces the byte cap mid-stream when Content-Length is absent or lies', async () => {
+    const previous = process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES;
+    process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES = '16';
+    try {
+      const fsPromises = {
+        realpath: vi.fn(async (targetPath) => {
+          if (targetPath === '/repo/big.bin') {
+            const error = new Error('ENOENT');
+            error.code = 'ENOENT';
+            throw error;
+          }
+          return targetPath;
+        }),
+        open: vi.fn(async () => ({ write: vi.fn(async () => ({})), close: vi.fn(async () => {}) })),
+        rename: vi.fn(async () => undefined),
+        unlink: vi.fn(async () => undefined),
+      };
+      const handler = registerUpload(fsPromises);
+
+      const res = await callUpload(handler, {
+        query: { path: '/repo/big.bin' },
+        chunks: [Buffer.alloc(32)],
+      });
+
+      expect(res.statusCode).toBe(413);
+      expect(fsPromises.rename).not.toHaveBeenCalled();
+      expect(fsPromises.unlink).toHaveBeenCalledTimes(1);
+      expect(fsPromises.unlink.mock.calls[0][0]).toMatch(/^\/repo\/big\.bin\.upload-/);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES;
+      } else {
+        process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES = previous;
+      }
+    }
+  });
+
+  it('rejects existing symlink targets that resolve outside the workspace', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => {
+        if (targetPath === '/repo/link.txt') return '/outside/target.txt';
+        return targetPath;
+      }),
+      open: vi.fn(async () => ({ write: vi.fn(async () => ({})), close: vi.fn(async () => {}) })),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, {
+      query: { path: '/repo/link.txt' },
+      chunks: ['data'],
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Access denied' });
+    expect(fsPromises.open).not.toHaveBeenCalled();
+    expect(fsPromises.rename).not.toHaveBeenCalled();
+  });
+
+  it('rejects symlinked parent directories that escape the workspace', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => {
+        if (targetPath === '/repo/esc') return '/outside/dir';
+        return targetPath;
+      }),
+      open: vi.fn(async () => ({ write: vi.fn(async () => ({})), close: vi.fn(async () => {}) })),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, {
+      query: { path: '/repo/esc/a.txt' },
+      chunks: ['data'],
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Access denied' });
+    expect(fsPromises.open).not.toHaveBeenCalled();
+    expect(fsPromises.rename).not.toHaveBeenCalled();
+  });
+
+  it('rejects uploads targeting an existing directory', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => false, isDirectory: () => true })),
+      open: vi.fn(async () => ({ write: vi.fn(async () => ({})), close: vi.fn(async () => {}) })),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, {
+      query: { path: '/repo/existing-dir' },
+      chunks: ['data'],
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Specified path is a directory' });
+    expect(fsPromises.open).not.toHaveBeenCalled();
+    expect(fsPromises.rename).not.toHaveBeenCalled();
+  });
+});
+
 describe('fs read', () => {
   it('rejects outside workspace reads without a grant', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
