@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import path from 'path';
+import { Readable, Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
@@ -160,7 +161,7 @@ const registerRead = (fsPromises) => {
   return getRoute('GET', '/api/fs/read');
 };
 
-const registerRaw = (fsPromises) => {
+const registerRaw = (fsPromises, fs) => {
   const { app, getRoute } = createRouteRegistry();
   registerFsRoutes(app, {
     os: { homedir: () => '/home/user' },
@@ -169,6 +170,7 @@ const registerRaw = (fsPromises) => {
       realpath: async (targetPath) => targetPath,
       ...fsPromises,
     },
+    ...(fs ? { fs } : {}),
     spawn: vi.fn(),
     crypto: { randomUUID: () => 'job-0' },
     normalizeDirectoryPath: (p) => p,
@@ -256,6 +258,187 @@ const callReveal = async (handler, body) => {
   await handler({ body }, res);
   return res;
 };
+
+describe('fs raw range', () => {
+  const FILE = Buffer.from('0123456789');
+
+  // Response mock for streaming tests: Express responses are writable
+  // streams and Readable.pipe() drives them via write(), so the range
+  // tests use a real Writable instead of the plain-object mock.
+  const createRangeResponse = () => {
+    const chunks = [];
+    let statusCode = 200;
+    let body = null;
+    const headers = new Map();
+    const res = new Writable({
+      write(chunk, _encoding, callback) {
+        chunks.push(chunk);
+        callback();
+      },
+      final(callback) {
+        if (chunks.length > 0) {
+          body = Buffer.concat(chunks);
+        }
+        callback();
+      },
+    });
+    Object.assign(res, {
+      status(code) {
+        statusCode = code;
+        return this;
+      },
+      json(payload) {
+        body = payload;
+        return this;
+      },
+      type(mimeType) {
+        headers.set('content-type', mimeType);
+        return this;
+      },
+      send(payload) {
+        if (Buffer.isBuffer(payload)) {
+          this.write(payload);
+        } else if (payload !== undefined) {
+          body = payload;
+        }
+        this.end();
+        return this;
+      },
+      setHeader(name, value) {
+        headers.set(name.toLowerCase(), value);
+        return this;
+      },
+      getHeader(name) {
+        return headers.get(name.toLowerCase());
+      },
+      destroy(error) {
+        this.destroyError = error;
+        this.end();
+        return this;
+      },
+    });
+    Object.defineProperty(res, 'statusCode', {
+      get: () => statusCode,
+      enumerable: true,
+    });
+    Object.defineProperty(res, 'body', {
+      get: () => body,
+      enumerable: true,
+    });
+    res.streamedChunks = chunks;
+    return res;
+  };
+
+  const registerSlicedRaw = () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: FILE.length })),
+      readFile: vi.fn(async () => FILE),
+    };
+    const fs = {
+      createReadStream: vi.fn((_targetPath, { start, end }) =>
+        Readable.from(FILE.subarray(start, end + 1))),
+    };
+    return { handler: registerRaw(fsPromises, fs), fs };
+  };
+
+  const callRange = async (handler, range, filePath = '/repo/clip.mp4') => {
+    const res = createRangeResponse();
+    await handler({ query: { path: filePath }, headers: { range } }, res);
+    return res;
+  };
+
+  const collectStreamedBody = async (res) => {
+    if (!res.writableEnded) {
+      await new Promise((resolve) => res.once('finish', resolve));
+    }
+    return Buffer.concat(res.streamedChunks);
+  };
+
+  it('streams the requested byte range as 206', async () => {
+    const { handler, fs } = registerSlicedRaw();
+
+    const res = await callRange(handler, 'bytes=2-5');
+
+    expect(res.statusCode).toBe(206);
+    expect(res.getHeader('content-range')).toBe(`bytes 2-5/${FILE.length}`);
+    expect(res.getHeader('content-length')).toBe('4');
+    expect(res.getHeader('content-type')).toBe('video/mp4');
+    expect(await collectStreamedBody(res)).toEqual(Buffer.from('2345'));
+    expect(fs.createReadStream).toHaveBeenCalledWith('/repo/clip.mp4', { start: 2, end: 5 });
+  });
+
+  it('serves open-ended ranges to the end of the file', async () => {
+    const { handler } = registerSlicedRaw();
+
+    const res = await callRange(handler, 'bytes=7-');
+
+    expect(res.statusCode).toBe(206);
+    expect(res.getHeader('content-range')).toBe(`bytes 7-${FILE.length - 1}/${FILE.length}`);
+    expect(await collectStreamedBody(res)).toEqual(Buffer.from('789'));
+  });
+
+  it('serves suffix ranges as the final N bytes', async () => {
+    const { handler } = registerSlicedRaw();
+
+    const res = await callRange(handler, 'bytes=-3');
+
+    expect(res.statusCode).toBe(206);
+    expect(res.getHeader('content-range')).toBe(`bytes 7-${FILE.length - 1}/${FILE.length}`);
+    expect(await collectStreamedBody(res)).toEqual(Buffer.from('789'));
+  });
+
+  it('rejects ranges past the end of the file with 416', async () => {
+    const { handler, fs } = registerSlicedRaw();
+
+    const res = await callRange(handler, 'bytes=20-25');
+
+    expect(res.statusCode).toBe(416);
+    expect(res.getHeader('content-range')).toBe(`bytes */${FILE.length}`);
+    expect(fs.createReadStream).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed range headers with 416', async () => {
+    const { handler, fs } = registerSlicedRaw();
+
+    const res = await callRange(handler, 'bytes=not-a-range');
+
+    expect(res.statusCode).toBe(416);
+    expect(fs.createReadStream).not.toHaveBeenCalled();
+  });
+
+  it('serves audio and video files with the correct MIME type on full reads', async () => {
+    for (const [filePath, expected] of [
+      ['/repo/clip.mp4', 'video/mp4'],
+      ['/repo/track.mp3', 'audio/mpeg'],
+      ['/repo/movie.webm', 'video/webm'],
+      ['/repo/voice.wav', 'audio/wav'],
+      ['/repo/unknown.bin', 'application/octet-stream'],
+    ]) {
+      const { handler } = registerSlicedRaw();
+
+      const res = await callRange(handler, undefined, filePath);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.getHeader('content-type')).toBe(expected);
+    }
+  });
+
+  it('keeps downloads as full-body responses', async () => {
+    const { handler, fs } = registerSlicedRaw();
+
+    const res = await callRange(handler, 'bytes=0-1');
+    const downloadRes = createRangeResponse();
+    await handler({
+      query: { path: '/repo/clip.mp4', download: 'true' },
+      headers: { range: 'bytes=0-1' },
+    }, downloadRes);
+
+    expect(res.statusCode).toBe(206);
+    expect(downloadRes.statusCode).toBe(200);
+    expect(downloadRes.getHeader('content-disposition')).toContain('attachment');
+    expect(fs.createReadStream).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('fs write', () => {
   it('does not rewrite a file when content is unchanged', async () => {

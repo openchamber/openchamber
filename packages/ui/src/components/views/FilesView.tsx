@@ -44,7 +44,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, getModifierLabel, getRevealLabelKey, hasModifier } from '@/lib/utils';
-import { getLanguageFromExtension, getImageMimeType, isBinaryFile, isDrawioFile, isImageFile, isPdfFile, isSvgFile, looksLikeBinaryText } from '@/lib/toolHelpers';
+import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDrawioFile, isImageFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, subscribeRuntimeUrlAuthToken } from '@/lib/runtime-auth';
@@ -788,6 +788,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const mdViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
   const htmlViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
   const drawioViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const mediaPositionRef = React.useRef<{ currentTime: number; wasPlaying: boolean }>({
+    currentTime: 0,
+    wasPlaying: false,
+  });
 
   const lightTheme = React.useMemo(
     () => availableThemes.find((theme) => theme.metadata.id === lightThemeId) ?? getDefaultTheme(false),
@@ -1815,6 +1819,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     const selectedIsImage = isImageFile(node.path);
     const isSvg = isSvgFile(node.path);
     const selectedIsPdf = isPdfFile(node.path);
+    const selectedIsAudio = isAudioFile(node.path);
+    const selectedIsVideo = isVideoFile(node.path);
     const selectedIsBinary = isBinaryFile(node.path);
 
     if (isMobile) {
@@ -1849,6 +1855,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     // Other known binaries (docx/xlsx/zip/…) must never be opened as text —
     // a later autosave would corrupt them.
     if (selectedIsBinary) {
+      setFileContent('');
+      setDraftContent('');
+      setLoadedFilePath(node.path);
+      setFileLoading(false);
+      return;
+    }
+
+    if (selectedIsAudio || selectedIsVideo) {
       setFileContent('');
       setDraftContent('');
       setLoadedFilePath(node.path);
@@ -2345,11 +2359,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const isSelectedImage = Boolean(selectedFile?.path && isImageFile(selectedFile.path));
   const isSelectedSvg = Boolean(selectedFile?.path && isSvgFile(selectedFile.path));
   const isSelectedPdf = Boolean(selectedFile?.path && isPdfFile(selectedFile.path));
+  const isSelectedAudio = Boolean(selectedFile?.path && isAudioFile(selectedFile.path));
+  const isSelectedVideo = Boolean(selectedFile?.path && isVideoFile(selectedFile.path));
+  const isSelectedMedia = isSelectedAudio || isSelectedVideo;
   const isSelectedBinary = Boolean(
     selectedFile?.path
     && (isBinaryFile(selectedFile.path) || contentDetectedBinary)
   );
-  const isUnsupportedBinary = isSelectedBinary && !isSelectedImage && !isSelectedPdf;
+  const isUnsupportedBinary = isSelectedBinary && !isSelectedImage && !isSelectedPdf && !isSelectedMedia;
   const pendingNavigationTargetPath = React.useMemo(
     () => normalizePath(pendingFileNavigation?.path ?? ''),
     [pendingFileNavigation?.path],
@@ -3002,6 +3019,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${selectedFileReadOptions.outsideFileGrant ?? ''}`
     : '';
 
+  const mediaAssetAuthKey = selectedFile?.path && isSelectedMedia
+    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${selectedFileReadOptions.outsideFileGrant ?? ''}`
+    : '';
+
   const htmlAssetAuthKey = selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode
     ? selectedFile.path
     : '';
@@ -3013,10 +3034,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     useAssetAuthRefresh(htmlAssetAuthKey, setFileError, assetAuthErrorFallback);
   const { readyKey: pdfAssetAuthReadyKey, nonce: pdfPreviewNonce } =
     useAssetAuthRefresh(pdfAssetAuthKey, setFileError, assetAuthErrorFallback);
+  const { readyKey: mediaAssetAuthReadyKey, nonce: mediaPreviewNonce } =
+    useAssetAuthRefresh(mediaAssetAuthKey, setFileError, assetAuthErrorFallback);
 
   const isImageAssetAuthLoading = Boolean(imageAssetAuthKey && imageAssetAuthReadyKey !== imageAssetAuthKey);
   const isHtmlAssetAuthLoading = Boolean(htmlAssetAuthKey && htmlAssetAuthReadyKey !== htmlAssetAuthKey);
   const isPdfAssetAuthLoading = Boolean(pdfAssetAuthKey && pdfAssetAuthReadyKey !== pdfAssetAuthKey);
+  const isMediaAssetAuthLoading = Boolean(mediaAssetAuthKey && mediaAssetAuthReadyKey !== mediaAssetAuthKey);
 
   const imageSrc = selectedFile?.path && isSelectedImage
     ? (runtime.isDesktop
@@ -3041,6 +3065,42 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       directory: root || undefined,
     })
     : '';
+
+  const mediaSrc = selectedFile?.path && isSelectedMedia && mediaAssetAuthReadyKey === mediaAssetAuthKey
+    ? getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
+      path: selectedFile.path,
+      allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
+      outsideFileGrant: selectedFileReadOptions.outsideFileGrant,
+      directory: root || undefined,
+    })
+    : '';
+
+  // Media previews remount when the short-lived URL auth token is swapped
+  // (useAssetAuthRefresh bumps the nonce), which would reset playback to 0.
+  // Carry the playback position across remounts so video/audio survive token
+  // refreshes seamlessly; reset when switching files.
+  React.useEffect(() => {
+    mediaPositionRef.current = { currentTime: 0, wasPlaying: false };
+  }, [selectedFile?.path]);
+
+  const handleMediaLoadedMetadata = (event: React.SyntheticEvent<HTMLMediaElement>) => {
+    const media = event.currentTarget;
+    const { currentTime, wasPlaying } = mediaPositionRef.current;
+    if (currentTime > 0 && Number.isFinite(media.duration) && currentTime < media.duration) {
+      media.currentTime = currentTime;
+    }
+    if (wasPlaying) {
+      void media.play().catch(() => {});
+    }
+  };
+
+  const handleMediaTimeUpdate = (event: React.SyntheticEvent<HTMLMediaElement>) => {
+    mediaPositionRef.current.currentTime = event.currentTarget.currentTime;
+  };
+
+  const handleMediaPlayStateChange = (playing: boolean) => () => {
+    mediaPositionRef.current.wasPlaying = playing;
+  };
 
   const renderPdfPreview = React.useCallback((file: FileNode) => (
     <div className="h-full overflow-hidden bg-[var(--surface-background)]">
@@ -3858,7 +3918,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
           {!selectedFile ? (
             <div className="p-3 typography-ui text-muted-foreground">{t('filesView.editor.pickFileFromTree')}</div>
-          ) : (fileLoading || isImageAssetAuthLoading || isPdfAssetAuthLoading) ? (
+          ) : (fileLoading || isImageAssetAuthLoading || isPdfAssetAuthLoading || isMediaAssetAuthLoading) ? (
             suppressFileLoadingIndicator
               ? <div className="p-3" />
               : (
@@ -3880,6 +3940,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             </div>
           ) : isSelectedPdf ? (
             renderPdfPreview(selectedFile)
+          ) : isSelectedAudio ? (
+            <div className="flex h-full items-center justify-center p-3">
+              <audio
+                key={mediaPreviewNonce}
+                src={mediaSrc}
+                controls
+                className="w-full max-w-xl"
+                onLoadedMetadata={handleMediaLoadedMetadata}
+                onTimeUpdate={handleMediaTimeUpdate}
+                onPlay={handleMediaPlayStateChange(true)}
+                onPause={handleMediaPlayStateChange(false)}
+              />
+            </div>
+          ) : isSelectedVideo ? (
+            <div className="flex h-full items-center justify-center p-3">
+              <video
+                key={mediaPreviewNonce}
+                src={mediaSrc}
+                controls
+                className="max-h-[70vh] max-w-full rounded-md border border-border/30 bg-primary/10"
+                onLoadedMetadata={handleMediaLoadedMetadata}
+                onTimeUpdate={handleMediaTimeUpdate}
+                onPlay={handleMediaPlayStateChange(true)}
+                onPause={handleMediaPlayStateChange(false)}
+              />
+            </div>
           ) : isUnsupportedBinary ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
               <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
@@ -4274,6 +4360,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             </div>
           ) : isSelectedPdf ? (
             renderPdfPreview(selectedFile)
+          ) : isSelectedAudio ? (
+            <div className="flex h-full items-center justify-center p-4">
+              <audio
+                key={mediaPreviewNonce}
+                src={mediaSrc}
+                controls
+                className="w-full max-w-2xl"
+                onLoadedMetadata={handleMediaLoadedMetadata}
+                onTimeUpdate={handleMediaTimeUpdate}
+                onPlay={handleMediaPlayStateChange(true)}
+                onPause={handleMediaPlayStateChange(false)}
+              />
+            </div>
+          ) : isSelectedVideo ? (
+            <div className="flex h-full items-center justify-center p-4">
+              <video
+                key={mediaPreviewNonce}
+                src={mediaSrc}
+                controls
+                className="max-w-full max-h-full object-contain rounded-md border border-border/30 bg-primary/10"
+                onLoadedMetadata={handleMediaLoadedMetadata}
+                onTimeUpdate={handleMediaTimeUpdate}
+                onPlay={handleMediaPlayStateChange(true)}
+                onPause={handleMediaPlayStateChange(false)}
+              />
+            </div>
           ) : isUnsupportedBinary ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
               <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
