@@ -2998,4 +2998,8 @@ export const dict: Record<I18nKey, string> = {
   'header.workStatusPanel.toggleAria': 'Alternar panel de estado',
   'header.workStatusPanel.hide': 'Ocultar estado del trabajo',
   'header.workStatusPanel.show': 'Mostrar estado del trabajo',
+  'chat.workStatus.mcp.authorizeOpenFailed': 'No se pudo abrir la página de autorización',
+  'chat.workStatus.mcp.authorizeFailed': 'Error de autorización',
+  'mcpDropdown.toast.authorizeOpenFailed': 'No se pudo abrir la página de autorización',
+  'mcpDropdown.toast.authorizeFailed': 'Error de autorización',
 };

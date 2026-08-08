@@ -2997,6 +2997,10 @@ export const dict = {
   'header.workStatusPanel.toggleAria': 'Toggle work-status panel',
   'header.workStatusPanel.hide': 'Hide work status',
   'header.workStatusPanel.show': 'Show work status',
+  'chat.workStatus.mcp.authorizeOpenFailed': 'Could not open the authorization page',
+  'chat.workStatus.mcp.authorizeFailed': 'Authorization failed',
+  'mcpDropdown.toast.authorizeOpenFailed': 'Could not open the authorization page',
+  'mcpDropdown.toast.authorizeFailed': 'Authorization failed',
 } as const;
 
 export type I18nKey = keyof typeof dict;

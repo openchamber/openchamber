@@ -2997,4 +2997,8 @@ export const dict: Record<I18nKey, string> = {
   'header.workStatusPanel.toggleAria': '작업 상태 패널 전환',
   'header.workStatusPanel.hide': '작업 상태 숨기기',
   'header.workStatusPanel.show': '작업 상태 표시',
+  'chat.workStatus.mcp.authorizeOpenFailed': '인증 페이지를 열지 못했습니다',
+  'chat.workStatus.mcp.authorizeFailed': '인증에 실패했습니다',
+  'mcpDropdown.toast.authorizeOpenFailed': '인증 페이지를 열지 못했습니다',
+  'mcpDropdown.toast.authorizeFailed': '인증에 실패했습니다',
 };

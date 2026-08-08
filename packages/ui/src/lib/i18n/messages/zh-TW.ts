@@ -2997,4 +2997,8 @@ export const dict: Record<I18nKey, string> = {
   'header.workStatusPanel.toggleAria': '切換工作狀態面板',
   'header.workStatusPanel.hide': '隱藏工作狀態',
   'header.workStatusPanel.show': '顯示工作狀態',
+  'chat.workStatus.mcp.authorizeOpenFailed': '無法開啟授權頁面',
+  'chat.workStatus.mcp.authorizeFailed': '授權失敗',
+  'mcpDropdown.toast.authorizeOpenFailed': '無法開啟授權頁面',
+  'mcpDropdown.toast.authorizeFailed': '授權失敗',
 };

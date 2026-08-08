@@ -4,6 +4,9 @@ import { Switch } from '@/components/ui/switch';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
+import { toast } from 'sonner';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { startMcpAuthorization } from '@/components/sections/mcp/startMcpAuthorization';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusRowAction } from './WorkStatusPrimitives';
 
 type Props = {
@@ -40,6 +43,27 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
     () => mcpServers.filter(([, entry]) => entry?.status === 'connected').length,
     [mcpServers],
   );
+
+  // A server waiting on authorization cannot be reconnected into working
+  // order: `connect` just repeats the attempt that produced `needs_auth`.
+  // Authorising sends the user to the provider instead.
+  const handleAuthorize = React.useCallback(async (name: string) => {
+    setBusyServer(name);
+    try {
+      const { opened } = await startMcpAuthorization({
+        name,
+        directory,
+        skipRedirectUriBootstrap: isVSCodeRuntime(),
+      });
+      if (!opened) {
+        toast.error(t('chat.workStatus.mcp.authorizeOpenFailed'));
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('chat.workStatus.mcp.authorizeFailed'));
+    } finally {
+      setBusyServer((current) => (current === name ? null : current));
+    }
+  }, [directory, t]);
 
   const handleToggle = React.useCallback(async (name: string, next: boolean) => {
     setBusyServer(name);
@@ -84,7 +108,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
               <WorkStatusRowAction
                 tone="warning"
                 disabled={busyServer === name}
-                onClick={() => { void handleToggle(name, true); }}
+                onClick={() => { void handleAuthorize(name); }}
               >
                 {t('chat.workStatus.mcp.needsAuth')}
               </WorkStatusRowAction>

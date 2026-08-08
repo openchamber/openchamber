@@ -35,6 +35,7 @@ import {
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { MCP_OAUTH_CALLBACK_PATH, parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
+import { startMcpAuthorization } from '@/components/sections/mcp/startMcpAuthorization';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Dialog,
@@ -523,27 +524,6 @@ const buildMcpOAuthRedirectUri = (name?: string | null, directory?: string | nul
   return url.toString();
 };
 
-const queuePendingMcpAuthContext = async (input: {
-  state: string;
-  name: string;
-  directory?: string | null;
-}): Promise<void> => {
-  const response = await runtimeFetch('/api/mcp/auth/pending', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      state: input.state,
-      name: input.name,
-      directory: typeof input.directory === 'string' && input.directory.trim() ? input.directory.trim() : null,
-    }),
-  });
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    throw new Error(payload?.error || 'Failed to prepare MCP authorization callback');
-  }
-};
-
 const getPendingMcpAuthContext = async (stateKey: string): Promise<{ name: string; directory: string | null } | null> => {
   const response = await runtimeFetch(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey)}`);
   if (!response.ok) {
@@ -626,7 +606,6 @@ export const McpPage: React.FC = () => {
   const refreshStatus = useMcpStore((state) => state.refresh);
   const connectMcp = useMcpStore((state) => state.connect);
   const disconnectMcp = useMcpStore((state) => state.disconnect);
-  const startAuthMcp = useMcpStore((state) => state.startAuth);
   const completeAuthMcp = useMcpStore((state) => state.completeAuth);
   const clearAuthMcp = useMcpStore((state) => state.clearAuth);
   const testConnectionMcp = useMcpStore((state) => state.testConnection);
@@ -1040,48 +1019,16 @@ export const McpPage: React.FC = () => {
       const currentStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory ?? null)[selectedMcpName]?.status;
       authPollStartsFromNeedsAuthRef.current = currentStatus === 'needs_auth' || currentStatus === 'needs_client_registration';
 
-      const redirectUri = buildMcpOAuthRedirectUri(selectedMcpName, currentDirectory);
-      if (!redirectUri) {
-        throw new Error(t('settings.mcp.page.toast.oauthRedirectUrlBuildFailed'));
-      }
-
-      if (!oauthRedirectUri.trim() && !isVSCodeAuthRuntime) {
-        const saved = await updateMcp(selectedMcpName, {
-          oauthEnabled,
-          oauthClientId,
-          oauthClientSecret,
-          oauthScope,
-          oauthRedirectUri: redirectUri,
-        });
-
-        if (!saved.ok) {
-          throw new Error(t('settings.mcp.page.toast.oauthBrowserCallbackSaveFailed'));
-        }
-
-        if (saved.reloadFailed) {
-          throw new Error(saved.warning || saved.message || t('settings.mcp.page.toast.openCodeReloadFailedAfterCallbackSave'));
-        }
-
-        if (runtimeActionKeyRef.current !== actionKey) {
-          return;
-        }
-
-        setOauthRedirectUri(redirectUri);
-        initialRef.current = initialRef.current
-          ? { ...initialRef.current, oauthRedirectUri: redirectUri }
-          : initialRef.current;
-      }
-
-      const nextAuthUrl = await startAuthMcp(selectedMcpName, currentDirectory);
+      // One implementation for every surface that can authorise; the page
+      // used to own this flow while the dropdown and the work-status panel
+      // called plain `connect`, which cannot start OAuth at all.
+      const { authorizationUrl: nextAuthUrl, opened } = await startMcpAuthorization({
+        name: selectedMcpName,
+        directory: currentDirectory,
+        skipRedirectUriBootstrap: isVSCodeAuthRuntime || Boolean(oauthRedirectUri.trim()),
+      });
       const stateKey = parseMcpOAuthCallbackStateKey(new URL(nextAuthUrl).searchParams);
-      if (stateKey) {
-        queuedStateKey = stateKey;
-        await queuePendingMcpAuthContext({
-          state: stateKey,
-          name: selectedMcpName,
-          directory: currentDirectory,
-        });
-      }
+      queuedStateKey = stateKey;
 
       if (runtimeActionKeyRef.current !== actionKey) {
         return;
@@ -1092,7 +1039,6 @@ export const McpPage: React.FC = () => {
       setIsAuthPolling(true);
       authPollAttemptsRef.current = 0;
 
-      const opened = await openExternalUrl(nextAuthUrl);
       if (runtimeActionKeyRef.current !== actionKey) {
         return;
       }
@@ -1116,7 +1062,7 @@ export const McpPage: React.FC = () => {
         setIsAuthorizing(false);
       }
     }
-  }, [currentDirectory, isVSCodeAuthRuntime, mcpType, oauthClientId, oauthClientSecret, oauthEnabled, oauthRedirectUri, oauthScope, requireSavedConfig, runtimeActionKey, selectedMcpName, startAuthMcp, t, tUnsafe, updateMcp]);
+  }, [currentDirectory, isVSCodeAuthRuntime, mcpType, oauthRedirectUri, requireSavedConfig, runtimeActionKey, selectedMcpName, t, tUnsafe]);
 
   const handleClearAuthorization = React.useCallback(async () => {
     if (!selectedMcpName || !requireSavedConfig()) return;

@@ -2995,4 +2995,8 @@ export const dict = {
   'header.workStatusPanel.toggleAria': 'Arbeitsstatus-Panel umschalten',
   'header.workStatusPanel.hide': 'Arbeitsstatus ausblenden',
   'header.workStatusPanel.show': 'Arbeitsstatus anzeigen',
+  'chat.workStatus.mcp.authorizeOpenFailed': 'Autorisierungsseite konnte nicht geöffnet werden',
+  'chat.workStatus.mcp.authorizeFailed': 'Autorisierung fehlgeschlagen',
+  'mcpDropdown.toast.authorizeOpenFailed': 'Autorisierungsseite konnte nicht geöffnet werden',
+  'mcpDropdown.toast.authorizeFailed': 'Autorisierung fehlgeschlagen',
 };

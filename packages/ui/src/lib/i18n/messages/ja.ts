@@ -2997,4 +2997,8 @@ export const dict: Record<I18nKey, string> = {
   'header.workStatusPanel.toggleAria': '作業状況パネルを切り替え',
   'header.workStatusPanel.hide': '作業状況を非表示',
   'header.workStatusPanel.show': '作業状況を表示',
+  'chat.workStatus.mcp.authorizeOpenFailed': '認証ページを開けませんでした',
+  'chat.workStatus.mcp.authorizeFailed': '認証に失敗しました',
+  'mcpDropdown.toast.authorizeOpenFailed': '認証ページを開けませんでした',
+  'mcpDropdown.toast.authorizeFailed': '認証に失敗しました',
 };

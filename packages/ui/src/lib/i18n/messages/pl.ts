@@ -3014,4 +3014,8 @@ export const dict: Record<I18nKey, string> = {
   'header.workStatusPanel.toggleAria': 'Przełącz panel stanu pracy',
   'header.workStatusPanel.hide': 'Ukryj stan pracy',
   'header.workStatusPanel.show': 'Pokaż stan pracy',
+  'chat.workStatus.mcp.authorizeOpenFailed': 'Nie udało się otworzyć strony autoryzacji',
+  'chat.workStatus.mcp.authorizeFailed': 'Autoryzacja nie powiodła się',
+  'mcpDropdown.toast.authorizeOpenFailed': 'Nie udało się otworzyć strony autoryzacji',
+  'mcpDropdown.toast.authorizeFailed': 'Autoryzacja nie powiodła się',
 } as const;

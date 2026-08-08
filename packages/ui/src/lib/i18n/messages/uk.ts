@@ -2998,4 +2998,8 @@ export const dict: Record<I18nKey, string> = {
   'header.workStatusPanel.toggleAria': 'Перемкнути панель стану роботи',
   'header.workStatusPanel.hide': 'Сховати стан роботи',
   'header.workStatusPanel.show': 'Показати стан роботи',
+  'chat.workStatus.mcp.authorizeOpenFailed': 'Не вдалося відкрити сторінку авторизації',
+  'chat.workStatus.mcp.authorizeFailed': 'Авторизація не вдалася',
+  'mcpDropdown.toast.authorizeOpenFailed': 'Не вдалося відкрити сторінку авторизації',
+  'mcpDropdown.toast.authorizeFailed': 'Авторизація не вдалася',
 };
