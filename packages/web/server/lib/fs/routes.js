@@ -946,49 +946,53 @@ export const registerFsRoutes = (app, dependencies) => {
       if (resolved.granted) {
         res.setHeader('Referrer-Policy', 'no-referrer');
       }
-      res.setHeader('Accept-Ranges', 'bytes');
+      if (!download) {
+        res.setHeader('Accept-Ranges', 'bytes');
+      }
 
       // HTTP Range support (video/audio seeking, resumable media playback).
-      // Downloads and non-range requests keep the existing full-body path.
+      // Downloads keep the full-body path; per RFC 7233 malformed and
+      // multi-range headers are ignored and served as 200.
       const range = req.headers?.range;
-      if (!download && range) {
-        const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-        if (!match) {
-          return res.status(416).json({ error: 'Invalid Range header' });
-        }
+      if (!download && typeof range === 'string') {
+        const match = /^bytes=(\d*)-(\d*)$/i.exec(range.trim());
+        if (match) {
+          const size = stats.size;
+          let start = match[1] === '' ? undefined : Number(match[1]);
+          let end = match[2] === '' ? undefined : Number(match[2]);
 
-        const size = stats.size;
-        let start = match[1] === '' ? undefined : Number(match[1]);
-        let end = match[2] === '' ? undefined : Number(match[2]);
-
-        // Suffix range: bytes=-N means the final N bytes.
-        if (start === undefined) {
-          if (end === undefined) {
-            return res.status(416).json({ error: 'Invalid Range header' });
+          // Suffix range: bytes=-N means the final N bytes.
+          if (start === undefined) {
+            if (end === undefined) {
+              return res.status(416).json({ error: 'Invalid Range header' });
+            }
+            start = Math.max(0, size - end);
+            end = size - 1;
           }
-          start = Math.max(0, size - end);
-          end = size - 1;
-        }
-        if (end === undefined || end >= size) {
-          end = size - 1;
-        }
+          if (end === undefined || end >= size) {
+            end = size - 1;
+          }
 
-        if (start > end || start >= size) {
-          res.status(416);
-          res.setHeader('Content-Range', `bytes */${size}`);
-          return res.end();
-        }
+          if (start > end || start >= size) {
+            res.status(416);
+            res.setHeader('Content-Range', `bytes */${size}`);
+            return res.end();
+          }
 
-        res.status(206);
-        res.setHeader('Content-Type', mimeType);
-        res.setHeader('Content-Length', String(end - start + 1));
-        res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
-        const stream = fs.createReadStream(canonicalPath, { start, end });
-        stream.on('error', (error) => {
-          console.error('Failed to stream raw file:', error);
-          res.destroy(error);
-        });
-        return stream.pipe(res);
+          res.status(206);
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Content-Length', String(end - start + 1));
+          res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+          const stream = fs.createReadStream(canonicalPath, { start, end });
+          stream.on('error', (error) => {
+            console.error('Failed to stream raw file:', error);
+            res.destroy(error);
+          });
+          // Release the file handle promptly when the client aborts
+          // mid-transfer (seeking, switching files, closing the tab).
+          res.on('close', () => stream.destroy());
+          return stream.pipe(res);
+        }
       }
 
       const content = await fsPromises.readFile(canonicalPath);

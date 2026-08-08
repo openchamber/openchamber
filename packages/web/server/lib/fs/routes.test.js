@@ -334,11 +334,15 @@ describe('fs raw range', () => {
       stat: vi.fn(async () => ({ isFile: () => true, size: FILE.length })),
       readFile: vi.fn(async () => FILE),
     };
+    const streams = [];
     const fs = {
-      createReadStream: vi.fn((_targetPath, { start, end }) =>
-        Readable.from(FILE.subarray(start, end + 1))),
+      createReadStream: vi.fn((_targetPath, { start, end }) => {
+        const stream = Readable.from(FILE.subarray(start, end + 1));
+        streams.push(stream);
+        return stream;
+      }),
     };
-    return { handler: registerRaw(fsPromises, fs), fs };
+    return { handler: registerRaw(fsPromises, fs), fs, streams };
   };
 
   const callRange = async (handler, range, filePath = '/repo/clip.mp4') => {
@@ -397,13 +401,33 @@ describe('fs raw range', () => {
     expect(fs.createReadStream).not.toHaveBeenCalled();
   });
 
-  it('rejects malformed range headers with 416', async () => {
+  it('ignores malformed range headers and serves the full body', async () => {
     const { handler, fs } = registerSlicedRaw();
 
     const res = await callRange(handler, 'bytes=not-a-range');
 
-    expect(res.statusCode).toBe(416);
+    expect(res.statusCode).toBe(200);
     expect(fs.createReadStream).not.toHaveBeenCalled();
+  });
+
+  it('ignores multi-range headers and serves the full body', async () => {
+    const { handler, fs } = registerSlicedRaw();
+
+    const res = await callRange(handler, 'bytes=0-1,5-6');
+
+    expect(res.statusCode).toBe(200);
+    expect(fs.createReadStream).not.toHaveBeenCalled();
+  });
+
+  it('destroys the source stream when the client aborts mid-transfer', async () => {
+    const { handler, streams } = registerSlicedRaw();
+
+    const res = await callRange(handler, 'bytes=0-3');
+
+    expect(res.statusCode).toBe(206);
+    expect(streams).toHaveLength(1);
+    res.emit('close');
+    expect(streams[0].destroyed).toBe(true);
   });
 
   it('serves audio and video files with the correct MIME type on full reads', async () => {

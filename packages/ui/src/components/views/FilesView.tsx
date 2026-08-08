@@ -784,6 +784,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [htmlViewMode, setHtmlViewMode] = React.useState<PreviewViewMode>('edit');
   const [drawioViewMode, setDrawioViewMode] = React.useState<PreviewViewMode>('preview');
   const [drawioRemountNonce, setDrawioRemountNonce] = React.useState(0);
+  const [mediaPlaybackError, setMediaPlaybackError] = React.useState(false);
   const textViewModeByPathRef = React.useRef<Record<string, TextViewMode>>({});
   const mdViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
   const htmlViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
@@ -3081,6 +3082,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   // refreshes seamlessly; reset when switching files.
   React.useEffect(() => {
     mediaPositionRef.current = { currentTime: 0, wasPlaying: false };
+    setMediaPlaybackError(false);
   }, [selectedFile?.path]);
 
   const handleMediaLoadedMetadata = (event: React.SyntheticEvent<HTMLMediaElement>) => {
@@ -3102,6 +3104,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     mediaPositionRef.current.wasPlaying = playing;
   };
 
+  const handleMediaError = () => {
+    setMediaPlaybackError(true);
+  };
+
   const renderPdfPreview = React.useCallback((file: FileNode) => (
     <div className="h-full overflow-hidden bg-[var(--surface-background)]">
       <iframe
@@ -3112,6 +3118,31 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       />
     </div>
   ), [pdfSrc, pdfPreviewNonce]);
+
+  const renderUnsupportedBinaryCard = React.useCallback(() => (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+      <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
+      <div className="max-w-md typography-ui text-muted-foreground">{t('filesView.editor.binaryFileDescription')}</div>
+      {files.downloadFile ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const fn = files.downloadFile;
+            if (!fn || !selectedFile) return;
+            void fn(selectedFile.path).catch((error) => {
+              console.error('Download failed:', error);
+              toast.error(t('sidebarFilesTree.toast.operationFailed'));
+            });
+          }}
+        >
+          <Icon name="download" className="mr-2 size-4" />
+          {t('filesView.editor.saveFile')}
+        </Button>
+      ) : null}
+    </div>
+  ), [t, files.downloadFile, selectedFile]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -3356,7 +3387,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {!isSelectedImage && !isSelectedPdf && !isUnsupportedBinary && (
+        {!isSelectedImage && !isSelectedPdf && !isSelectedMedia && !isUnsupportedBinary && (
           <>
             {withTooltip(wrapLines ? t('filesView.editor.disableLineWrap') : t('filesView.editor.enableLineWrap'),
               <Button
@@ -3942,53 +3973,38 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             renderPdfPreview(selectedFile)
           ) : isSelectedAudio ? (
             <div className="flex h-full items-center justify-center p-3">
-              <audio
-                key={mediaPreviewNonce}
-                src={mediaSrc}
-                controls
-                className="w-full max-w-xl"
-                onLoadedMetadata={handleMediaLoadedMetadata}
-                onTimeUpdate={handleMediaTimeUpdate}
-                onPlay={handleMediaPlayStateChange(true)}
-                onPause={handleMediaPlayStateChange(false)}
-              />
+              {mediaPlaybackError ? renderUnsupportedBinaryCard() : (
+                <audio
+                  key={mediaPreviewNonce}
+                  src={mediaSrc}
+                  controls
+                  className="w-full max-w-xl"
+                  onError={handleMediaError}
+                  onLoadedMetadata={handleMediaLoadedMetadata}
+                  onTimeUpdate={handleMediaTimeUpdate}
+                  onPlay={handleMediaPlayStateChange(true)}
+                  onPause={handleMediaPlayStateChange(false)}
+                />
+              )}
             </div>
           ) : isSelectedVideo ? (
             <div className="flex h-full items-center justify-center p-3">
-              <video
-                key={mediaPreviewNonce}
-                src={mediaSrc}
-                controls
-                className="max-h-[70vh] max-w-full rounded-md border border-border/30 bg-primary/10"
-                onLoadedMetadata={handleMediaLoadedMetadata}
-                onTimeUpdate={handleMediaTimeUpdate}
-                onPlay={handleMediaPlayStateChange(true)}
-                onPause={handleMediaPlayStateChange(false)}
-              />
+              {mediaPlaybackError ? renderUnsupportedBinaryCard() : (
+                <video
+                  key={mediaPreviewNonce}
+                  src={mediaSrc}
+                  controls
+                  className="max-h-[70vh] max-w-full rounded-md border border-border/30 bg-primary/10"
+                  onError={handleMediaError}
+                  onLoadedMetadata={handleMediaLoadedMetadata}
+                  onTimeUpdate={handleMediaTimeUpdate}
+                  onPlay={handleMediaPlayStateChange(true)}
+                  onPause={handleMediaPlayStateChange(false)}
+                />
+              )}
             </div>
           ) : isUnsupportedBinary ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-              <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
-              <div className="max-w-md typography-ui text-muted-foreground">{t('filesView.editor.binaryFileDescription')}</div>
-              {files.downloadFile ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const fn = files.downloadFile;
-                    if (!fn || !selectedFile) return;
-                    void fn(selectedFile.path).catch((error) => {
-                      console.error('Download failed:', error);
-                      toast.error(t('sidebarFilesTree.toast.operationFailed'));
-                    });
-                  }}
-                >
-                  <Icon name="download" className="mr-2 size-4" />
-                  {t('filesView.editor.saveFile')}
-                </Button>
-              ) : null}
-            </div>
+            renderUnsupportedBinaryCard()
           ) : selectedFile && isDrawio && drawioViewMode === 'preview' ? (
             <div className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
               <DiagramEditor
@@ -4362,53 +4378,38 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             renderPdfPreview(selectedFile)
           ) : isSelectedAudio ? (
             <div className="flex h-full items-center justify-center p-4">
-              <audio
-                key={mediaPreviewNonce}
-                src={mediaSrc}
-                controls
-                className="w-full max-w-2xl"
-                onLoadedMetadata={handleMediaLoadedMetadata}
-                onTimeUpdate={handleMediaTimeUpdate}
-                onPlay={handleMediaPlayStateChange(true)}
-                onPause={handleMediaPlayStateChange(false)}
-              />
+              {mediaPlaybackError ? renderUnsupportedBinaryCard() : (
+                <audio
+                  key={mediaPreviewNonce}
+                  src={mediaSrc}
+                  controls
+                  className="w-full max-w-2xl"
+                  onError={handleMediaError}
+                  onLoadedMetadata={handleMediaLoadedMetadata}
+                  onTimeUpdate={handleMediaTimeUpdate}
+                  onPlay={handleMediaPlayStateChange(true)}
+                  onPause={handleMediaPlayStateChange(false)}
+                />
+              )}
             </div>
           ) : isSelectedVideo ? (
             <div className="flex h-full items-center justify-center p-4">
-              <video
-                key={mediaPreviewNonce}
-                src={mediaSrc}
-                controls
-                className="max-w-full max-h-full object-contain rounded-md border border-border/30 bg-primary/10"
-                onLoadedMetadata={handleMediaLoadedMetadata}
-                onTimeUpdate={handleMediaTimeUpdate}
-                onPlay={handleMediaPlayStateChange(true)}
-                onPause={handleMediaPlayStateChange(false)}
-              />
+              {mediaPlaybackError ? renderUnsupportedBinaryCard() : (
+                <video
+                  key={mediaPreviewNonce}
+                  src={mediaSrc}
+                  controls
+                  className="max-w-full max-h-full object-contain rounded-md border border-border/30 bg-primary/10"
+                  onError={handleMediaError}
+                  onLoadedMetadata={handleMediaLoadedMetadata}
+                  onTimeUpdate={handleMediaTimeUpdate}
+                  onPlay={handleMediaPlayStateChange(true)}
+                  onPause={handleMediaPlayStateChange(false)}
+                />
+              )}
             </div>
           ) : isUnsupportedBinary ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-              <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
-              <div className="max-w-md typography-ui text-muted-foreground">{t('filesView.editor.binaryFileDescription')}</div>
-              {files.downloadFile ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const fn = files.downloadFile;
-                    if (!fn || !selectedFile) return;
-                    void fn(selectedFile.path).catch((error) => {
-                      console.error('Download failed:', error);
-                      toast.error(t('sidebarFilesTree.toast.operationFailed'));
-                    });
-                  }}
-                >
-                  <Icon name="download" className="mr-2 size-4" />
-                  {t('filesView.editor.saveFile')}
-                </Button>
-              ) : null}
-            </div>
+            renderUnsupportedBinaryCard()
           ) : isMarkdown && getMdViewMode() === 'preview' ? (
             <div className="h-full overflow-auto p-4">
               {fileContent.length > 500 * 1024 && (
