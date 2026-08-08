@@ -2997,6 +2997,7 @@ export const ContextPanel: React.FC = () => {
                 diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
                 onDiffScopeChange={handleDiffScopeChange}
                 targetFilePath={tab.targetPath}
+                isActive={isOpen && activeTab?.id === tab.id}
                 flushContent
               />
             </React.Suspense>

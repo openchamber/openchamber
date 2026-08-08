@@ -13,7 +13,7 @@ import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
-export type PendingDiffScope = 'working' | 'staged' | 'turn';
+export type PendingDiffScope = 'working' | 'staged' | 'branch' | 'turn';
 export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
@@ -188,7 +188,7 @@ const normalizeContextTabLabel = (value: string | null | undefined): string | nu
 };
 
 const normalizePendingDiffScope = (value: unknown): PendingDiffScope | null => {
-  return value === 'working' || value === 'staged' || value === 'turn' ? value : null;
+  return value === 'working' || value === 'staged' || value === 'branch' || value === 'turn' ? value : null;
 };
 
 const buildDefaultContextPanelTabDedupeKey = (mode: ContextPanelMode, targetPath: string | null): string => {
