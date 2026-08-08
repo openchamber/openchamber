@@ -52,6 +52,21 @@ The following functions are exported and used by the web server:
 - `removeWorktree(directory, input)`: Remove a worktree (optionally delete local branch).
 - `isLinkedWorktree(directory)`: Check if directory is a linked worktree (not primary).
 
+### Worktree creation from a GitHub PR head ref
+When creating a worktree from a linked GitHub PR whose head branch lives in a
+forked repository, the server first tries the fork path: it provisions a
+`pr-<owner>` remote from the PR's head-repository URL (`ensureRemoteName` /
+`ensureRemoteUrl`) and fetches the head branch into it. If the fork's head
+repository is missing (deleted fork) or unreachable (auth, network), and the
+input carries `prRef` (e.g. `refs/pull/123/head`) with `prRefRemote`
+(default `origin`), the server falls back to fetching the PR head ref from the
+base remote — GitHub serves `refs/pull/<n>/head` on the base repository even
+after a fork is deleted. The fallback creates the worktree on the requested
+local branch without upstream tracking (a PR ref has no real upstream), and
+only the base remote is queried, so no fork credentials are needed. Both
+`validateWorktreeCreate` and `createWorktree` apply the same fallback so a
+validated input cannot fail later at creation time.
+
 ### Commit and Remote Operations
 - `commit(directory, message, options)`: Create a commit from the current index. `options.stageFiles` may be provided with `options.files` by older callers to stage only selected unstaged rows before committing, but the shared Git panel now stages/unstages explicitly before commit.
 - `pull(directory, options)`: Pull changes from remote.

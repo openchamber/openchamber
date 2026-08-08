@@ -1891,6 +1891,35 @@ const fetchRemoteBranchRef = async (primaryWorktree, remoteName, branchName) => 
   );
 };
 
+const parsePrHeadRef = (value) => {
+  const match = String(value || '').trim().match(/^refs\/pull\/(\d+)\/head$/);
+  if (!match) {
+    return null;
+  }
+  return { number: Number(match[1]) };
+};
+
+// GitHub serves `refs/pull/<n>/head` on the base repository, so a forked PR's
+// head can be fetched even when the fork's own repository is missing (deleted
+// fork) or unreachable. Fetches into a remote-tracking ref under the base
+// remote, mirroring the refspec shape used by fetchRemoteBranchRef.
+const fetchPullRequestHeadRef = async (primaryWorktree, remoteName, prNumber) => {
+  const remote = String(remoteName || '').trim() || 'origin';
+  const number = Number(prNumber);
+  if (!Number.isInteger(number) || number <= 0) {
+    throw new Error(`Invalid pull request number: ${prNumber}`);
+  }
+
+  const trackingRef = `refs/remotes/${remote}/pr-${number}-head`;
+  const refspec = `+refs/pull/${number}/head:${trackingRef}`;
+  await runGitCommandOrThrow(
+    primaryWorktree,
+    ['fetch', remote, refspec],
+    `Failed to fetch pull request ${number} head ref from ${remote}`
+  );
+  return `remotes/${remote}/pr-${number}-head`;
+};
+
 const checkRemoteBranchExists = async (primaryWorktree, remoteName, branchName, remoteUrl = '') => {
   const remote = String(remoteName || '').trim();
   const branch = String(branchName || '').trim();
@@ -3761,29 +3790,68 @@ export async function validateWorktreeCreate(directory, input = {}) {
       try {
         const requestedExistingBranch = String(input?.existingBranch || '').trim();
         const parsedExistingRemote = await resolveRemoteBranchRef(context.primaryWorktree, requestedExistingBranch);
+        const prHeadRef = parsePrHeadRef(input?.prRef);
+        const prRefRemote = String(input?.prRefRemote || 'origin').trim() || 'origin';
+
+        let forkError = null;
         if (parsedExistingRemote && ensureRemoteName && ensureRemoteUrl && ensureRemoteName === parsedExistingRemote.remote) {
-          const lsRemote = await runGitCommand(
-            context.primaryWorktree,
-            ['ls-remote', '--heads', ensureRemoteUrl, `refs/heads/${parsedExistingRemote.branch}`]
-          );
-          if (!lsRemote.success) {
-            throw new Error(`Unable to query remote ${ensureRemoteName}`);
-          }
-          if (!String(lsRemote.stdout || '').trim()) {
-            throw new Error(`Remote branch not found: ${parsedExistingRemote.remoteRef}`);
-          }
-          localBranch = cleanBranchName(preferredBranchName || parsedExistingRemote.branch);
-          inferredUpstream = {
-            remote: parsedExistingRemote.remote,
-            branch: parsedExistingRemote.branch,
-          };
-        } else {
-          const resolved = await resolveBranchForExistingMode(context.primaryWorktree, requestedExistingBranch, preferredBranchName);
-          localBranch = resolved.localBranch || '';
-          if (resolved.remoteRef) {
+          try {
+            const lsRemote = await runGitCommand(
+              context.primaryWorktree,
+              ['ls-remote', '--heads', ensureRemoteUrl, `refs/heads/${parsedExistingRemote.branch}`]
+            );
+            if (!lsRemote.success) {
+              throw new Error(`Unable to query remote ${ensureRemoteName}`);
+            }
+            if (!String(lsRemote.stdout || '').trim()) {
+              throw new Error(`Remote branch not found: ${parsedExistingRemote.remoteRef}`);
+            }
+            localBranch = cleanBranchName(preferredBranchName || parsedExistingRemote.branch);
             inferredUpstream = {
-              remote: resolved.remoteRef.remote,
-              branch: resolved.remoteRef.branch,
+              remote: parsedExistingRemote.remote,
+              branch: parsedExistingRemote.branch,
+            };
+          } catch (error) {
+            if (!prHeadRef) {
+              throw error;
+            }
+            // Fork head repo missing/unreachable: remember the failure and
+            // fall back to the PR head ref below.
+            forkError = error;
+          }
+        }
+
+        if (!localBranch) {
+          try {
+            const resolved = await resolveBranchForExistingMode(context.primaryWorktree, requestedExistingBranch, preferredBranchName);
+            localBranch = resolved.localBranch || '';
+            if (resolved.remoteRef) {
+              inferredUpstream = {
+                remote: resolved.remoteRef.remote,
+                branch: resolved.remoteRef.branch,
+              };
+            }
+          } catch (error) {
+            if (!prHeadRef) {
+              throw error;
+            }
+            // GitHub serves `refs/pull/<n>/head` on the base repository, so a
+            // forked PR can be validated even when the fork's head repository
+            // is missing or unreachable. Only the base remote is queried.
+            const lsRemote = await runGitCommand(
+              context.primaryWorktree,
+              ['ls-remote', prRefRemote, `refs/pull/${prHeadRef.number}/head`]
+            );
+            if (!lsRemote.success) {
+              throw forkError ?? new Error(`Unable to query remote ${prRefRemote}`);
+            }
+            if (!String(lsRemote.stdout || '').trim()) {
+              throw forkError ?? new Error(`Pull request head ref not found: refs/pull/${prHeadRef.number}/head`);
+            }
+            localBranch = cleanBranchName(preferredBranchName || `pr-${prHeadRef.number}-head`);
+            inferredUpstream = {
+              remote: prRefRemote,
+              branch: `pr-${prHeadRef.number}-head`,
             };
           }
         }
@@ -3961,17 +4029,49 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
 
   let localBranch = '';
   let inferredUpstream = null;
+  let shouldSetUpstream = Boolean(input?.setUpstream);
+  // True when the fork head repo failed and the worktree was built from the
+  // PR head ref instead; such worktrees must not carry upstream tracking.
+  let prRefFallback = false;
   const worktreeAddArgs = ['worktree', 'add', '--no-checkout'];
 
   if (mode === 'existing') {
-    const requestedExistingBranch = String(input?.existingBranch || '').trim();
+    let requestedExistingBranch = String(input?.existingBranch || '').trim();
+    const prHeadRef = parsePrHeadRef(input?.prRef);
+    const prRefRemote = String(input?.prRefRemote || 'origin').trim() || 'origin';
     const parsedExistingRemote = await resolveRemoteBranchRef(context.primaryWorktree, requestedExistingBranch);
+
     if (parsedExistingRemote && ensureRemoteName && ensureRemoteUrl && parsedExistingRemote.remote === ensureRemoteName) {
-      await ensureRemoteWithUrl(context.primaryWorktree, ensureRemoteName, ensureRemoteUrl);
-      await fetchRemoteBranchRef(context.primaryWorktree, parsedExistingRemote.remote, parsedExistingRemote.branch);
+      try {
+        await ensureRemoteWithUrl(context.primaryWorktree, ensureRemoteName, ensureRemoteUrl);
+        await fetchRemoteBranchRef(context.primaryWorktree, parsedExistingRemote.remote, parsedExistingRemote.branch);
+      } catch (error) {
+        if (!prHeadRef) {
+          throw error;
+        }
+        // Fork head repo missing/unreachable: fall back to the PR head ref
+        // below. A PR ref has no real upstream, so the fork's upstream
+        // configuration is dropped.
+        shouldSetUpstream = false;
+        prRefFallback = true;
+      }
     }
 
-    const resolved = await resolveBranchForExistingMode(context.primaryWorktree, requestedExistingBranch, preferredBranchName);
+    let resolved;
+    try {
+      resolved = await resolveBranchForExistingMode(context.primaryWorktree, requestedExistingBranch, preferredBranchName);
+    } catch (error) {
+      if (!prHeadRef) {
+        throw error;
+      }
+      // GitHub serves `refs/pull/<n>/head` on the base repository, so a
+      // forked PR's head can be fetched even when the fork's own repository
+      // is missing (deleted fork) or unreachable.
+      requestedExistingBranch = await fetchPullRequestHeadRef(context.primaryWorktree, prRefRemote, prHeadRef.number);
+      shouldSetUpstream = false;
+      prRefFallback = true;
+      resolved = await resolveBranchForExistingMode(context.primaryWorktree, requestedExistingBranch, preferredBranchName);
+    }
     localBranch = resolved.localBranch;
 
     const inUse = await findBranchInUse(context.primaryWorktree, localBranch);
@@ -3981,10 +4081,15 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
 
     if (resolved.createLocalBranch) {
       worktreeAddArgs.push('-b', localBranch);
+      if (prRefFallback) {
+        // `git worktree add -b` would auto-configure upstream tracking to the
+        // PR ref, which is not pushable; the fallback intentionally has none.
+        worktreeAddArgs.push('--no-track');
+      }
     }
     worktreeAddArgs.push(candidate.directory, resolved.checkoutRef);
 
-    if (resolved.remoteRef) {
+    if (resolved.remoteRef && !prRefFallback) {
       inferredUpstream = {
         remote: resolved.remoteRef.remote,
         branch: resolved.remoteRef.branch,
@@ -4033,9 +4138,8 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
 
   await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
 
-  const shouldSetUpstream = Boolean(input?.setUpstream);
-  const upstreamRemote = String(input?.upstreamRemote || inferredUpstream?.remote || '').trim();
-  const upstreamBranch = String(input?.upstreamBranch || inferredUpstream?.branch || '').trim();
+  const upstreamRemote = prRefFallback ? '' : String(input?.upstreamRemote || inferredUpstream?.remote || '').trim();
+  const upstreamBranch = prRefFallback ? '' : String(input?.upstreamBranch || inferredUpstream?.branch || '').trim();
 
   const bootstrapStatus = setWorktreeBootstrapState(
     candidate.directory,

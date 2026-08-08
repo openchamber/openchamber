@@ -807,6 +807,113 @@ describe('createWorktree', () => {
 });
 
 // ---------------------------------------------------------------------------
+// createWorktree from a GitHub PR head ref (forked PRs)
+// ---------------------------------------------------------------------------
+
+describe('createWorktree from a GitHub PR head ref', () => {
+  const withDataHome = async (test) => {
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    try {
+      await test(dataHome);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  };
+
+  // Simulate GitHub serving `refs/pull/<n>/head` on the base repository,
+  // which is what makes forked-PR checkouts possible without fork access.
+  // The PR head is a distinct commit so a worktree built from it can be told
+  // apart from one built from the base branch.
+  const publishPrHeadRef = (repository, baseRemote, prNumber) => {
+    fs.writeFileSync(path.join(repository, 'PR.md'), `# PR ${prNumber}\n`);
+    runGit(repository, ['add', 'PR.md']);
+    runGit(repository, ['commit', '-m', `pr ${prNumber} head`]);
+    const sha = runGit(repository, ['rev-parse', 'HEAD']).trim();
+    // Mirrors GitHub serving refs/pull/<n>/head on the base repository.
+    runGit(repository, ['push', baseRemote, `HEAD:refs/pull/${prNumber}/head`]);
+    return sha;
+  };
+
+  // `git config --get` exits non-zero (and execFileSync throws) when the key
+  // is absent, which is exactly the state we assert on.
+  const getBranchTrackingRemote = (directory, branch) => {
+    try {
+      return runGit(directory, ['config', '--get', `branch.${branch}.remote`]).trim();
+    } catch {
+      return '';
+    }
+  };
+
+  it('creates a worktree from refs/pull/<n>/head when the fork head repo URL is missing', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { remote, repository } = createRepositoryWithRemote();
+      const sha = publishPrHeadRef(repository, remote, 42);
+
+      const created = await createWorktree(repository, {
+        mode: 'existing',
+        branchName: 'pr-42-local',
+        worktreeName: 'pr-42',
+        prRef: 'refs/pull/42/head',
+        prRefRemote: 'origin',
+      });
+
+      expect(created.branch).toBe('pr-42-local');
+      // The worktree checks out the PR head commit, not the base branch.
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(sha);
+      await expect.poll(() => fs.existsSync(path.join(created.path, 'PR.md')), { timeout: 5_000 }).toBe(true);
+      // The PR ref was fetched into a remote-tracking ref under the base remote.
+      const trackingRef = runGit(repository, ['show-ref', '--verify', 'refs/remotes/origin/pr-42-head']).trim();
+      expect(trackingRef).toContain('refs/remotes/origin/pr-42-head');
+      // A PR ref has no real upstream: no tracking configuration is written.
+      expect(getBranchTrackingRemote(created.path, 'pr-42-local')).toBe('');
+    });
+  });
+
+  it('falls back to refs/pull/<n>/head when the fork head repository cannot be fetched', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { remote, repository } = createRepositoryWithRemote();
+      const sha = publishPrHeadRef(repository, remote, 42);
+
+      // A reachable fork that does not contain the PR head branch: the fork
+      // fetch fails and the server must fall back to the PR head ref.
+      const fork = createTempDir();
+      runGit(fork, ['init', '--bare']);
+
+      const created = await createWorktree(repository, {
+        mode: 'existing',
+        branchName: 'pr-42-fallback',
+        worktreeName: 'pr-42-fallback',
+        existingBranch: 'remotes/pr-fork/some-head',
+        ensureRemoteName: 'pr-fork',
+        ensureRemoteUrl: fork,
+        setUpstream: true,
+        upstreamRemote: 'pr-fork',
+        upstreamBranch: 'some-head',
+        prRef: 'refs/pull/42/head',
+        prRefRemote: 'origin',
+      });
+
+      expect(created.branch).toBe('pr-42-fallback');
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(sha);
+      await expect.poll(() => fs.existsSync(path.join(created.path, 'PR.md')), { timeout: 5_000 }).toBe(true);
+      // The fallback must not leave upstream tracking pointing at the fork
+      // branch that was never fetched.
+      expect(getBranchTrackingRemote(created.path, 'pr-42-fallback')).toBe('');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // removeWorktree
 // ---------------------------------------------------------------------------
 

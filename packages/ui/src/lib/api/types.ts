@@ -395,6 +395,15 @@ export interface CreateGitWorktreePayload {
   /** Optional remote provisioning (used for fork PR workflows). */
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  /**
+   * GitHub PR head ref fallback (e.g. `refs/pull/123/head`): when the fork's
+   * head repository is missing or unreachable, the server fetches this ref
+   * from `prRefRemote` (the base repository, which GitHub serves PR refs on)
+   * and creates the worktree from it.
+   */
+  prRef?: string;
+  /** Remote to fetch `prRef` from; defaults to `origin`. */
+  prRefRemote?: string;
   /** Return once the target directory exists and finish Git worktree setup in the background. */
   returnAfterDirectoryCreated?: boolean;
 }

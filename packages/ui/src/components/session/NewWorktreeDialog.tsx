@@ -121,7 +121,38 @@ const sanitizeRemoteName = (value: string): string => {
   return normalized || 'pr-head';
 };
 
-const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: string[], remoteBranches: string[]) => {
+// Resolved server inputs for a linked-PR worktree. `prRef`/`prRefRemote`
+// carry a GitHub PR head ref (`refs/pull/<n>/head`) that the server fetches
+// from the base remote when the fork's head repository is missing or
+// unreachable — GitHub serves PR refs on the base repository even after a
+// fork is deleted.
+type PrWorktreeConfig = {
+  existingBranch?: string;
+  setUpstream?: boolean;
+  upstreamRemote?: string;
+  upstreamBranch?: string;
+  ensureRemoteName?: string;
+  ensureRemoteUrl?: string;
+  prRef?: string;
+  prRefRemote?: string;
+  sourceLabel: string;
+};
+
+const resolvePrHeadRefConfig = (pr: GitHubPullRequestSummary): PrWorktreeConfig => {
+  return {
+    existingBranch: undefined,
+    setUpstream: false,
+    upstreamRemote: undefined,
+    upstreamBranch: undefined,
+    ensureRemoteName: undefined,
+    ensureRemoteUrl: undefined,
+    prRef: `refs/pull/${pr.number}/head`,
+    prRefRemote: 'origin',
+    sourceLabel: `#${pr.number} head`,
+  };
+};
+
+const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: string[], remoteBranches: string[]): PrWorktreeConfig => {
   const headBranch = normalizeBranchName(pr.head || '');
   if (!headBranch) {
     throw new Error('PR head branch is missing');
@@ -135,6 +166,8 @@ const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: st
       upstreamBranch: undefined,
       ensureRemoteName: undefined,
       ensureRemoteUrl: undefined,
+      prRef: undefined,
+      prRefRemote: undefined,
       sourceLabel: headBranch,
     };
   }
@@ -157,6 +190,8 @@ const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: st
       upstreamBranch: headBranch,
       ensureRemoteName: undefined,
       ensureRemoteUrl: undefined,
+      prRef: undefined,
+      prRefRemote: undefined,
       sourceLabel: `${remoteName}/${headBranch}`,
     };
   }
@@ -167,7 +202,10 @@ const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: st
   const remoteUrl = pr.headRepo?.sshUrl || pr.headRepo?.cloneUrl || '';
 
   if (!remoteUrl) {
-    throw new Error('PR head repository URL is unavailable');
+    // The fork's head repository is gone (e.g. the fork was deleted) and the
+    // GitHub API returns no URL for it. Fall back to the PR head ref, which
+    // GitHub still serves on the base repository, instead of failing.
+    return resolvePrHeadRefConfig(pr);
   }
 
   return {
@@ -177,6 +215,10 @@ const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: st
     upstreamBranch: headBranch,
     ensureRemoteName: remoteName,
     ensureRemoteUrl: remoteUrl,
+    // Fallback when the fork URL is present but cannot be fetched (auth,
+    // network, deleted fork race): the server falls back to the PR head ref.
+    prRef: `refs/pull/${pr.number}/head`,
+    prRefRemote: 'origin',
     sourceLabel: `${remoteName}/${headBranch}`,
   };
 };
@@ -722,6 +764,7 @@ export function NewWorktreeDialog({
           existingBranch: prConfig?.existingBranch ?? (mode === 'existing-branch' ? normalizedBranch : undefined),
           ...(prConfig?.ensureRemoteName ? { ensureRemoteName: prConfig.ensureRemoteName } : {}),
           ...(prConfig?.ensureRemoteUrl ? { ensureRemoteUrl: prConfig.ensureRemoteUrl } : {}),
+          ...(prConfig?.prRef ? { prRef: prConfig.prRef, prRefRemote: prConfig.prRefRemote } : {}),
         });
         
         if (abortController.signal.aborted) return;
@@ -852,6 +895,7 @@ export function NewWorktreeDialog({
             returnAfterDirectoryCreated: true,
             ...(prConfig.ensureRemoteName ? { ensureRemoteName: prConfig.ensureRemoteName } : {}),
             ...(prConfig.ensureRemoteUrl ? { ensureRemoteUrl: prConfig.ensureRemoteUrl } : {}),
+            ...(prConfig.prRef ? { prRef: prConfig.prRef, prRefRemote: prConfig.prRefRemote } : {}),
           };
         }
 
