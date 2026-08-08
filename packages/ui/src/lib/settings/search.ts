@@ -720,6 +720,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['oauth', 'headers', 'timeout'],
   },
   {
+    id: 'mcp.tools',
+    page: 'mcp',
+    titleKey: 'settings.mcp.page.actions.showTools',
+    descriptionKey: 'settings.mcp.page.toolsDialog.description',
+    keywords: ['tools', 'list', 'schema', 'mcp tools', 'discover'],
+  },
+  {
     id: 'plugins.create',
     page: 'plugins',
     titleKey: 'settings.plugins.sidebar.actions.addTitle',
