@@ -155,6 +155,8 @@ export const ContextPanelRail: React.FC = () => {
   const contextRailOrder = useUIStore((state) => state.contextRailOrder);
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const activeMainTab = useUIStore((state) => state.activeMainTab);
+  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const { screenWidth } = useDeviceInfo();
@@ -321,6 +323,27 @@ export const ContextPanelRail: React.FC = () => {
           })}
         </SortableContext>
       </DndContext>
+      <Tooltip delayDuration={RAIL_TOOLTIP_DELAY_MS}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => setActiveMainTab(activeMainTab === 'workspaces' ? 'chat' : 'workspaces')}
+            aria-label={t('settings.workspaces.title')}
+            aria-pressed={activeMainTab === 'workspaces'}
+            className={cn(
+              'flex h-9 w-9 touch-none select-none items-center justify-center rounded-md transition-colors',
+              activeMainTab === 'workspaces'
+                ? 'text-primary'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <Icon name="shield-check" className="h-[18px] w-[18px]" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="left" sideOffset={8}>
+          <span>{t('settings.workspaces.title')}</span>
+        </TooltipContent>
+      </Tooltip>
     </nav>
   );
 };

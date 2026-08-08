@@ -12,6 +12,11 @@ post-compaction continuation. Missing individual messages are skipped without
 discarding the remaining context. Ordinary idle events perform no work and
 make no requests.
 
+The runtime retains both directory and workspace routing from the compaction
+event for every session/message read, prompt, and metadata patch. Directory
+alone is insufficient because a workspace session can have a stale host
+projection with the same ID.
+
 After a successful send, the runtime merge-writes
 `context_obligatory_last_compaction_message_id`. This cursor prevents a
 replayed compaction event from reinjecting the same summary. The runtime is

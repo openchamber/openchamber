@@ -110,7 +110,7 @@ export function createCloudflareTunnelProvider() {
       };
     },
     diagnose: async (request = {}) => {
-      const dependency = await checkCloudflaredAvailable();
+      const dependency = await checkCloudflaredAvailable({ force: true });
       const network = await checkCloudflareApiReachability();
       const installInfo = getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_CLOUDFLARE);
 

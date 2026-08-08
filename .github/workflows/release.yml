@@ -115,12 +115,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish to npm
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        working-directory: packages/web
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # npm publication is intentionally not part of the release contract.
 
   build-desktop-electron-macos:
     needs: create-release
@@ -198,6 +193,7 @@ jobs:
           # cross-building (runner is arm64; x64 matrix needs the hint).
           ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
         run: |
+          bun run stage:workspace-plugin
           bun run build:web-assets
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
@@ -207,8 +203,14 @@ jobs:
           # target Electron ABI before packaging, otherwise node-pty/bun-pty
           # crash on require inside the packaged app.
           bun run rebuild:native
-          bunx electron-builder --mac --${{ matrix.arch }} --publish=never
+          node ./scripts/package.mjs --mac --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
+
+      - name: Run packaged launch smoke
+        working-directory: packages/electron
+        env:
+          OPENCHAMBER_PACKAGED_SMOKE_TIMEOUT_MS: 120000
+        run: bun run smoke:packaged
 
       - name: Verify signature + entitlements + notarization
         run: |
@@ -316,6 +318,10 @@ jobs:
           restore-keys: |
             opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
 
+      - name: Stage workspace plugin
+        working-directory: packages/electron
+        run: bun run stage:workspace-plugin
+
       - name: Build web assets
         working-directory: packages/electron
         run: bun run build:web-assets
@@ -345,9 +351,29 @@ jobs:
       - name: Build Windows app
         working-directory: packages/electron
         shell: bash
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+          OPENCHAMBER_REQUIRE_WINDOWS_SIGNING: '1'
         run: |
           node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
+
+      - name: Verify Authenticode signature and timestamp
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem packages/electron/dist/*.exe | Where-Object { $_.Name -notmatch 'uninstaller' } | Select-Object -First 1
+          if (-not $installer) { throw 'Windows installer not found' }
+          $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
+          if ($signature.Status -ne 'Valid') { throw "Authenticode signature is not valid: $($signature.Status)" }
+          if (-not $signature.SignerCertificate) { throw 'Authenticode signer certificate is missing' }
+          if (-not $signature.TimeStamperCertificate) { throw 'Authenticode timestamp certificate is missing' }
+
+      - name: Run packaged launch smoke
+        working-directory: packages/electron
+        env:
+          OPENCHAMBER_PACKAGED_SMOKE_TIMEOUT_MS: 120000
+        run: bun run smoke:packaged
 
       - name: Upload installer to release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
@@ -433,6 +459,7 @@ jobs:
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          bun run stage:workspace-plugin
           bun run build:web-assets
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
@@ -441,6 +468,12 @@ jobs:
           node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
           bun run verify:linux-appimage
+
+      - name: Run packaged launch smoke under Xvfb
+        working-directory: packages/electron
+        env:
+          OPENCHAMBER_PACKAGED_SMOKE_TIMEOUT_MS: 120000
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' bun run smoke:packaged
 
       - name: Validate Linux update manifest
         working-directory: packages/electron
@@ -554,8 +587,14 @@ jobs:
       upload_github_release: true
     secrets: inherit
 
+  certification:
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, build-desktop-electron-linux, publish-electron-linux, combine-electron-manifests, mobile-release]
+    uses: ./.github/workflows/release-certification.yml
+    with:
+      release_mode: true
+
   finalize-release:
-    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, build-desktop-electron-linux, publish-electron-linux, publish-npm, combine-electron-manifests, mobile-release]
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, build-desktop-electron-linux, publish-electron-linux, publish-npm, combine-electron-manifests, mobile-release, certification]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

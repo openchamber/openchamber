@@ -21,7 +21,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `MESSAGE_STREAM_GLOBAL_WS_PATH`: `/api/global/event/ws`
 - `MESSAGE_STREAM_DIRECTORY_WS_PATH`: `/api/event/ws`
 - `MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS`: heartbeat interval for browser-facing WS connections.
-- `parseSseEventEnvelope(block)`: parses an SSE block into `{ eventId, directory, payload }`.
+- `parseSseEventEnvelope(block)`: parses an SSE block into `{ eventId, directory, workspace?, payload }`, preserving authoritative workspace routing from wrapped OpenCode events.
 - `sendMessageStreamWsFrame(socket, payload)`: serializes and sends a JSON WS frame.
 - `sendMessageStreamWsEvent(socket, payload, options)`: sends an event frame with optional `eventId` and `directory`.
 
@@ -41,6 +41,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - The web server creates one shared global message-stream hub. OpenCode watcher side effects and global WS clients subscribe to that hub, so there is one upstream `/global/event` SSE reader for both server-side processing and browser fan-out.
 - The global hub keeps a bounded replay buffer keyed by SSE `eventId` so reconnecting browser clients can receive buffered events after their requested `Last-Event-ID`.
 - Directory WS clients still attach one upstream `/event?directory=...` SSE reader per connection because directory streams are scoped.
+- The global hub preserves the wrapped event's workspace ID for server-side consumers. Any consumer that follows a session event with OpenCode reads or mutations must carry both directory and workspace routing; directory alone can address a stale host projection of a remote session.
 - If an upstream SSE stream stalls after the browser WS is already ready, the reader aborts that upstream fetch and reconnects upstream with `Last-Event-ID`, keeping the browser WS alive when recovery is fast.
 - When the shared global upstream reconnects after it was previously ready, the global WS bridge sends a fresh `ready` frame to already-ready browser clients. The browser treats this as a reconnect edge and can run scoped state repair without requiring the browser WS to close.
 - Health checks are reserved for initial upstream connect failures and explicit upstream-unavailable responses, not for ordinary stall recovery on an already-established stream.

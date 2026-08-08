@@ -16,6 +16,7 @@ import { createWebToolsAPI } from './tools';
 import { createWebPushAPI } from './push';
 import { createWebGitHubAPI } from './github';
 import { createWebClientAuthAPI } from './clientAuth';
+import { createWebWorkspaceSecurityAPI } from './workspaces';
 
 export interface WebAPIsOptions {
   urls?: RuntimeUrlResolver;
@@ -48,5 +49,6 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
   push: createWebPushAPI(),
   clientAuth: createWebClientAuthAPI(),
   tools: createWebToolsAPI(),
+  workspaces: createWebWorkspaceSecurityAPI(),
   };
 };

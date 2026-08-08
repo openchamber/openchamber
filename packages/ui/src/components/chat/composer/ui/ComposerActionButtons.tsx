@@ -47,6 +47,7 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
 
     const sendButton = (
         <button
+            data-testid="chat-submit"
             type={isMobile ? 'button' : 'submit'}
             disabled={!canSend || (!currentSessionId && !newSessionDraftOpen)}
             onClick={(event) => {

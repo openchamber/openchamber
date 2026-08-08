@@ -14,6 +14,7 @@ The mobile package reuses the web build, then rewrites `mobile.html` to `index.h
 - The tablet layout is a live size class (`useTabletLayout`), not a device check: any surface whose short side is at least 600px gets it, and the workspace only becomes a side panel where the width can host the sidebar, the panel and a readable chat at once. Book foldables therefore pick it up when unfolded, keep the portrait layout in both orientations (their long side is barely wider than a tablet's short one), and drop back to the phone layout when folded shut. The Android activity declares the matching `configChanges`, so folding resizes the WebView instead of recreating it.
 - Password-protected OpenChamber servers can be unlocked from the mobile app. The app stores the issued client token with the saved connection.
 - The Terminal workspace surface runs its PTY on the active OpenChamber server over the shared authenticated runtime transport; it never opens a local shell on the phone or tablet. Closing the surface detaches the renderer while the server session remains available for reattachment. On touch devices, dragging scrolls the buffer while long-pressing and dragging selects terminal text.
+- Secure Workspaces is a first-class workspace-tools surface for hosted and Capacitor mobile clients. It uses the active server and current project context for lifecycle, source-preserving reviewed context handoff into a new workspace/host session, and export review; provider and policy configuration remains in Settings.
 
 ## Commands
 
@@ -33,6 +34,11 @@ Run these from `packages/mobile`, or use the root `mobile:*` aliases.
 - `bun run sim:kill`: stops running `serve-sim` streams.
 - `bun run open:ios`: opens the iOS project.
 - `bun run open:android`: opens the Android project.
+- `bun run smoke:fixture`: runs the authenticated Secure Workspace client contract fixture, including retry, stable operation ID, and routed-session assertions.
+- `bun run smoke:ios`: installs and launches the built app on a booted iOS Simulator.
+- `bun run smoke:android`: installs and launches the debug APK on an Android Emulator or authorized device. CI uses an emulator; physical-device evidence is not implied.
+- `bun run smoke:physical:ios`: verifies the exact installed TestFlight version/build on the only connected physical iPhone or iPad, opens a fresh pairing link, and launches it for the Maestro flow.
+- `bun run smoke:physical:android`: verifies the release APK signature and exact version/build, installs it on the only connected physical Android device, opens a fresh pairing link, and launches it for the Maestro flow.
 
 ## Headless Quickstart
 
@@ -44,6 +50,14 @@ bun run build:android:debug
 ```
 
 These commands build and sync the native projects without launching Xcode, Android Studio, Simulator, or an emulator.
+
+## Physical Device Validation
+
+Release CI keeps simulator/emulator smoke separate from physical-device testing and does not wait for local devices. `.github/workflows/mobile-release.yml` builds iOS on GitHub-hosted macOS and uploads it to App Store Connect; it also produces the signed Android artifacts. Physical validation then runs locally in a guided OpenChamber session and requires no self-hosted runner.
+
+App Store Connect uses a dedicated Secure Workspace test group containing only the designated operator, with automatic distribution to other tester groups disabled. The operator installs the exact processed TestFlight version/build. Android uses the exact signed APK after signature, certificate digest, version, and build verification. Each device uses a separate fresh pairing URL for a disposable Windows/Linux OpenChamber backend; pairing credentials, serials, and UDIDs are not logged.
+
+The local helpers verify installed candidate identity and open the pairing link before `.maestro/secure-workspace-physical.yaml`; `.maestro/secure-workspace-cleanup.yaml` runs cleanup. Physical flows use English accessibility text exposed by the WebView; Android additionally uses Maestro's documented DevTools WebView hierarchy. DOM `data-testid` values are component-test hooks, not native accessibility identifiers. The Maestro flow proves routed session/change/export dry-run behavior, not interactive apply back to the host project. Follow `docs/SECURE_WORKSPACES_PHYSICAL_TEST_SETUP.md` for the full guided procedure.
 
 ## Local Tooling
 

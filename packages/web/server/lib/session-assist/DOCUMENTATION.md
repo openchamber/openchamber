@@ -9,8 +9,10 @@ and one suggested user follow-up with the small model
 
 1. `createSessionAssistRuntime` is a consumer of the server's global SSE
    fan-out (`index.js` → `onPayload`), riding the same upstream connection as
-   notifications. Purely event-driven — dormant sessions never generate
-   anything, there is no backfill and no session scanning.
+   notifications. It retains both directory and workspace routing from the
+   event envelope for every subsequent session read and metadata patch. Purely
+   event-driven — dormant sessions never generate anything, there is no
+   backfill and no session scanning.
 2. `session.status: idle` arms a 60-second per-session timer; any `busy`/
    `retry` status or a user `message.updated` clears it (the "1 minute of
    quiet" rule).

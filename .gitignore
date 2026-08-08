@@ -46,6 +46,7 @@ build/
 
 # Built webview assets (generated during build)
 src/main/resources/webview/
+packages/electron/resources/opencode-container-workspace/
 
 # IDE
 *.iml
@@ -65,6 +66,10 @@ Thumbs.db
 # Local runtime state (docker/dev)
 data/
 workspaces/
+!packages/web/server/lib/workspaces/
+!packages/web/server/lib/workspaces/**
+!packages/ui/src/components/workspaces/
+!packages/ui/src/components/workspaces/**
 *.pid
 .worktrees/
 test-results/

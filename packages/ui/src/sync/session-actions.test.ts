@@ -13,6 +13,7 @@ let permissionReplyError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionUpdateResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
+let workspaceCreatedResult: Session | null = null
 let sessionDeleteError: unknown | null = null
 let beforeSessionUpdateResolve: ((sessionId: string) => void) | null = null
 let beforeSessionDeleteResolve: ((sessionId: string) => void) | null = null
@@ -20,6 +21,8 @@ const globalUpsertedSessions: unknown[] = []
 const globalRemovedSessionIds: string[] = []
 const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
+const selectedSessions: Array<{ sessionID: string | null; directory?: string | null }> = []
+const confirmedWorkspaceRoutes = new Map<string, string>()
 
 const mockScopedClient = {
   permission: {
@@ -126,6 +129,14 @@ mock.module("@/lib/opencode/client", () => ({
     },
     getDirectory: () => "/test/project",
     getSdkClient: () => mockSdk,
+    createSession: mock((params: Record<string, unknown>, directory?: string | null) => {
+      replyCalls.push({ method: "session.create", params: { ...params, directory } })
+      return Promise.resolve(workspaceCreatedResult)
+    }),
+    getSession: mock((sessionId: string, directory?: string | null, workspace?: string | null) => {
+      replyCalls.push({ method: "session.get", params: { sessionID: sessionId, directory, workspace } })
+      return Promise.resolve(null)
+    }),
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
       return Promise.resolve(true)
@@ -134,10 +145,10 @@ mock.module("@/lib/opencode/client", () => ({
       replyCalls.push({ method: "question.reply", params: { requestID: requestId, answers, directory } })
       return Promise.resolve(true)
     }),
-    revertSession: mock((sessionId: string, messageId: string, partId?: string, directory?: string | null) => {
+    revertSession: mock((sessionId: string, messageId: string, partId?: string, directory?: string | null, workspace?: string | null) => {
       replyCalls.push({
         method: "session.revert",
-        params: { sessionID: sessionId, messageID: messageId, partID: partId, directory },
+        params: { sessionID: sessionId, messageID: messageId, partID: partId, directory, workspace },
       })
       if (sessionRevertResult.error) {
         const status = sessionRevertResult.response?.status
@@ -145,15 +156,15 @@ mock.module("@/lib/opencode/client", () => ({
       }
       return Promise.resolve(sessionRevertResult.data)
     }),
-    updateSession: mock((sessionId: string, changes: Record<string, unknown>, directory?: string | null) => {
-      replyCalls.push({ method: "session.update", params: { sessionID: sessionId, ...changes, directory } })
+    updateSession: mock((sessionId: string, changes: Record<string, unknown>, directory?: string | null, workspace?: string | null) => {
+      replyCalls.push({ method: "session.update", params: { sessionID: sessionId, ...changes, directory, workspace } })
       // Lets a test mutate global runtime state while the SDK call is in flight,
       // so the action observes the switch only after awaiting the response.
       beforeSessionUpdateResolve?.(sessionId)
       return Promise.resolve(sessionUpdateResult.data)
     }),
-    deleteSession: mock((sessionId: string, directory?: string | null) => {
-      replyCalls.push({ method: "session.delete", params: { sessionID: sessionId, directory } })
+    deleteSession: mock((sessionId: string, directory?: string | null, workspace?: string | null) => {
+      replyCalls.push({ method: "session.delete", params: { sessionID: sessionId, directory, workspace } })
       // Lets a test switch runtime while the delete is in flight, so the action
       // observes the change only after awaiting (or catching) the response.
       beforeSessionDeleteResolve?.(sessionId)
@@ -183,11 +194,14 @@ mock.module("./session-ui-store", () => ({
         return null
       },
       currentSessionId: null,
-      setCurrentSession: () => {},
       setWorktreeMetadata: () => {},
       setSessionDirectory: (sessionID: string, directory: string) => {
         movedSessionDirectories.push({ sessionID, directory })
       },
+      setCurrentSession: (sessionID: string | null, directory?: string | null) => {
+        selectedSessions.push({ sessionID, directory })
+      },
+      markSessionAsOpenChamberCreated: () => {},
     }),
   },
 }))
@@ -213,6 +227,10 @@ mock.module("./input-store", () => ({
 }))
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
+  rememberConfirmedSessionWorkspaceRoute: (sessionID: string, workspaceID: string) => {
+    confirmedWorkspaceRoutes.set(sessionID, workspaceID)
+  },
+  resolveConfirmedSessionWorkspaceRoute: (sessionID: string) => confirmedWorkspaceRoutes.get(sessionID),
   resolveGlobalSessionDirectory: (session: SessionWithDirectory) => session.directory ?? session.project?.worktree ?? null,
   mergeSessionDirectoryMetadata: (incoming: Session, existing?: SessionWithDirectory | null): SessionWithDirectory => {
     if (!existing) return incoming as SessionWithDirectory
@@ -244,7 +262,16 @@ mock.module("./session-deletion-cleanup", () => ({
   },
 }))
 
+// `mock.module` replaces the module for the whole process and is never restored, so a
+// replacement listing only the functions this file cares about becomes the module every
+// later test file sees too. Those files then fail to import what the real module exports
+// — which is why the suite passed one file at a time and failed run together, and why the
+// reported error named an export nobody had touched. The real module is kept and only the
+// two entry points under test are overridden.
+const actualSyncRefs = await import("./sync-refs")
+
 mock.module("./sync-refs", () => ({
+  ...actualSyncRefs,
   getSyncSessionDirectory: () => null,
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registeredSessionDirectories.push({ sessionID, directory })
@@ -366,6 +393,103 @@ describe("moveSessionToDirectory", () => {
     expect(destination.getState().session).toHaveLength(0)
     expect(destination.getState().message["session-a"]).toBe(undefined)
     expect(destination.getState().part["message-a"]).toBe(undefined)
+  })
+})
+
+describe("secure workspace session routing", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    globalUpsertedSessions.length = 0
+    registeredSessionDirectories.length = 0
+    selectedSessions.length = 0
+    workspaceCreatedResult = null
+    confirmedWorkspaceRoutes.clear()
+  })
+
+  test("creates through the workspace query and confirms authoritative ownership", async () => {
+    workspaceCreatedResult = {
+      id: "session-workspace",
+      directory: "/workspace",
+      time: { created: 1 },
+    } as Session
+    const { createSessionInWorkspace } = await import("./session-actions")
+
+    const result = await createSessionInWorkspace("workspace-a", undefined, "/test/project")
+
+    expect(result.workspaceID).toBe("workspace-a")
+    expect(replyCalls.find((call) => call.method === "session.create")?.params).toEqual({
+      workspace: "workspace-a",
+      directory: "/test/project",
+      title: undefined,
+    })
+    expect(replyCalls.some((call) => call.method === "session.get")).toBe(false)
+    expect(result.id).toBe("session-workspace")
+    expect(result.workspaceID).toBe("workspace-a")
+    expect(globalUpsertedSessions).toEqual([result])
+
+    // The session reports where it works, and that is inside the container. The record
+    // keeps it, because that is true of the session; host-side state must not, because
+    // `/workspace` names nothing on this computer. Taking it left the file tree empty and
+    // the terminal with nowhere to start, and it persisted as `lastDirectory` afterwards.
+    expect(result.directory).toBe("/workspace")
+    expect(selectedSessions).toEqual([{ sessionID: "session-workspace", directory: "/test/project" }])
+    expect(registeredSessionDirectories).toEqual([{ sessionID: "session-workspace", directory: "/test/project" }])
+  })
+
+  test("keeps host state on the project even when the workspace reports no directory", async () => {
+    workspaceCreatedResult = { id: "session-workspace", time: { created: 1 } } as Session
+    const { createSessionInWorkspace } = await import("./session-actions")
+
+    await createSessionInWorkspace("workspace-a", undefined, "/test/project")
+
+    expect(selectedSessions).toEqual([{ sessionID: "session-workspace", directory: "/test/project" }])
+  })
+})
+
+describe("secure workspace session mutations", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    sessionUpdateResult = {}
+    confirmedWorkspaceRoutes.clear()
+  })
+
+  test("routes title updates through the confirmed workspace", async () => {
+    const oldSession = { id: "session-workspace", directory: "/workspace", workspaceID: "wrk_1", title: "Old", time: { created: 1 } } as Session
+    const updatedSession = { ...oldSession, title: "New", time: { created: 1, updated: 2 } } as Session
+    sessionUpdateResult = { data: updatedSession }
+    const sessionStore = createStore({}, { session: [oldSession] })
+    const { setActionRefs, updateSessionTitle } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/workspace", sessionStore]]), () => "/host")
+
+    await updateSessionTitle("session-workspace", "New")
+
+    expect(replyCalls.find((call) => call.method === "session.update")?.params).toEqual({
+      sessionID: "session-workspace",
+      title: "New",
+      directory: "/workspace",
+      workspace: "wrk_1",
+    })
+  })
+
+  test("routes permission and question replies through the confirmed nested child workspace", async () => {
+    confirmedWorkspaceRoutes.set("parent-workspace", "wrk_1")
+    const sessionStore = createStore({
+      "grandchild-workspace": [{ id: "perm_1" }] as PermissionRequest[],
+    }, {
+      session: [
+        { id: "child-workspace", parentID: "parent-workspace", directory: "/workspace", time: { created: 1 } } as Session,
+        { id: "grandchild-workspace", parentID: "child-workspace", directory: "/workspace", time: { created: 1 } } as Session,
+      ],
+      question: { "grandchild-workspace": [{ id: "question_1" }] as never },
+    })
+    const { respondToPermission, respondToQuestion, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/workspace", sessionStore]]), () => "/host")
+
+    await respondToPermission("grandchild-workspace", "perm_1", "once")
+    await respondToQuestion("grandchild-workspace", "question_1", ["yes"])
+
+    expect(replyCalls.find((call) => call.method === "permission.reply")?.params.workspace).toBe("wrk_1")
+    expect(replyCalls.find((call) => call.method === "question.reply")?.params.workspace).toBe("wrk_1")
   })
 })
 

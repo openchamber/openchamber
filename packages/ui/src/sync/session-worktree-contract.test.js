@@ -23,6 +23,12 @@ describe('isWithinWorktreeRoot', () => {
     expect(isWithinWorktreeRoot('/tmp/outside', '/repo/worktrees/feat-a')).toBe(false);
   });
 
+  test('does not count a sibling that merely starts with the same characters', () => {
+    // A plain prefix check passes this and attaches the session to the wrong worktree.
+    expect(isWithinWorktreeRoot('/repo/worktrees/feat-abc', '/repo/worktrees/feat-a')).toBe(false);
+    expect(isWithinWorktreeRoot('/repo/worktrees/feat-a-old/src', '/repo/worktrees/feat-a')).toBe(false);
+  });
+
   test('returns false when either is null/empty', () => {
     expect(isWithinWorktreeRoot(null, '/repo')).toBe(false);
     expect(isWithinWorktreeRoot('/repo', null)).toBe(false);

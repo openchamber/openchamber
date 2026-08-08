@@ -40,6 +40,7 @@ const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView')
 const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then(m => ({ default: m.DiffView })));
 const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then(m => ({ default: m.FilesView })));
 const DiagramView = lazyWithChunkRecovery(() => import('@/components/views/DiagramView').then(m => ({ default: m.DiagramView })));
+const WorkspaceLifecycleView = lazyWithChunkRecovery(() => import('@/components/workspaces/WorkspaceLifecycleView').then(m => ({ default: m.WorkspaceLifecycleView })));
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
 
@@ -260,10 +261,10 @@ export const MainLayout: React.FC = () => {
     }, [mobileLeftDrawerOpen, mobileRightSidebarOpen, setMobileSessionPanelOpen]);
 
     const secondaryView = React.useMemo(() => {
-        // Desktop surfaces live in the context panel; the only full-view
-        // overlays left there are the terminal (promoted by project actions)
-        // and the diagram viewer. Mobile keeps the full tab set.
-        if (!isMobile && activeMainTab !== 'terminal' && activeMainTab !== 'diagram') {
+        // Desktop surfaces live in the context panel; the full-view overlays
+        // are the terminal (promoted by project actions), diagram viewer, and
+        // Workspace lifecycle surface. Mobile keeps the full tab set.
+        if (!isMobile && activeMainTab !== 'terminal' && activeMainTab !== 'diagram' && activeMainTab !== 'workspaces') {
             return null;
         }
         switch (activeMainTab) {
@@ -281,6 +282,8 @@ export const MainLayout: React.FC = () => {
                 return <React.Suspense fallback={null}><ProjectContextPanel /></React.Suspense>;
             case 'diagram':
                 return <React.Suspense fallback={null}><DiagramView /></React.Suspense>;
+            case 'workspaces':
+                return <React.Suspense fallback={null}><WorkspaceLifecycleView onClose={() => useUIStore.getState().setActiveMainTab('chat')} /></React.Suspense>;
             default:
                 return null;
         }

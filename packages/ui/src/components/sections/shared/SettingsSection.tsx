@@ -432,6 +432,8 @@ interface SettingsRadioOptionProps {
   onSelect: () => void;
   label: React.ReactNode;
   description?: React.ReactNode;
+  /** Explanation of what choosing this option means, kept behind the info affordance. */
+  info?: React.ReactNode;
   ariaLabel?: string;
   disabled?: boolean;
   className?: string;
@@ -443,6 +445,7 @@ export const SettingsRadioOption: React.FC<SettingsRadioOptionProps> = ({
   onSelect,
   label,
   description,
+  info,
   ariaLabel,
   disabled = false,
   className,
@@ -477,13 +480,16 @@ export const SettingsRadioOption: React.FC<SettingsRadioOptionProps> = ({
         className={description != null ? 'mt-0.5' : undefined}
       />
       <div className="flex min-w-0 flex-col">
-        <span
-          className={cn(
-            'typography-settings-field-label font-normal',
-            selected ? 'text-foreground' : 'text-foreground/50',
-          )}
-        >
-          {label}
+        <span className="flex items-center gap-1.5">
+          <span
+            className={cn(
+              'typography-settings-field-label font-normal',
+              selected ? 'text-foreground' : 'text-foreground/50',
+            )}
+          >
+            {label}
+          </span>
+          {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </span>
         {description != null ? (
           <span className={SETTINGS_HELPER_CLASS}>{description}</span>

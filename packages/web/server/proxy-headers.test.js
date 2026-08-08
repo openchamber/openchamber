@@ -49,6 +49,11 @@ describe('OpenCode proxy header handling', () => {
     expect(shouldForwardProxyResponseHeader('Transfer-Encoding')).toBe(false);
   });
 
+  it('drops upstream CORS headers so OpenChamber remains the response CORS authority', () => {
+    expect(shouldForwardProxyResponseHeader('access-control-allow-origin')).toBe(false);
+    expect(shouldForwardProxyResponseHeader('Access-Control-Allow-Headers')).toBe(false);
+  });
+
   it('still keeps ordinary response headers', () => {
     expect(shouldForwardProxyResponseHeader('content-type')).toBe(true);
     expect(shouldForwardProxyResponseHeader('etag')).toBe(true);
@@ -67,6 +72,7 @@ describe('OpenCode proxy header handling', () => {
         'content-type': 'application/json',
         etag: 'W/"abc"',
         'content-encoding': 'gzip',
+        'access-control-allow-origin': 'http://workspace-target.invalid',
       }),
       response,
     );

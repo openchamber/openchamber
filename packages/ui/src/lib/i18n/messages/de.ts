@@ -461,6 +461,7 @@ export const dict = {
   'sessions.sidebar.session.menu.betaBadge': 'Beta',
   'sessions.sidebar.session.menu.label': 'Sitzungsmenü',
   'sessions.sidebar.session.untitled': 'Unbenannte Sitzung',
+  'sessions.sidebar.session.workspaceRemoved': 'Workspace existiert nicht mehr',
   'sessions.sidebar.session.export.nothingToExport': 'Nichts zum Exportieren',
   'sessions.sidebar.session.export.success': 'Sitzung exportiert',
   'sessions.sidebar.session.export.failedRevealPath': 'Pfad konnte nicht angezeigt werden',

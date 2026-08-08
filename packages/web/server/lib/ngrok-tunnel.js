@@ -1,4 +1,5 @@
-import { spawn, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
+import { cachedDependencyProbe, probeExecutable } from './tunnels/probe-executable.js';
 import {
   createExecutableSearchEnv,
   resolveExecutableLaunchTarget,
@@ -12,16 +13,15 @@ const NGROK_PUBLIC_URL_REGEX = /https:\/\/[^\s"']+/i;
 const NGROK_AUTHTOKEN_HELP = 'Run: ngrok config add-authtoken <your-ngrok-token>';
 const getNgrokInstallInfo = () => getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_NGROK);
 
-export async function checkNgrokAvailable() {
+export async function checkNgrokAvailable({ force = false } = {}) {
+  return cachedDependencyProbe('ngrok', () => probecheckNgrokAvailable(), { force });
+}
+
+async function probecheckNgrokAvailable() {
   const target = resolveExecutableLaunchTarget('ngrok');
   if (target) {
     try {
-      const result = spawnSync(target.command, ['version'], {
-        encoding: 'utf8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-        env: target.env,
-      });
+      const result = await probeExecutable(target.command, ['version'], { env: target.env });
       if (result.status === 0) {
         return { available: true, path: target.command, version: result.stdout.trim() || result.stderr.trim() };
       }
@@ -45,12 +45,7 @@ export async function checkNgrokAuthtokenConfigured(ngrokPath = null) {
   }
 
   try {
-    const result = spawnSync(target.command, ['config', 'check'], {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      env: target.env,
-    });
+    const result = await probeExecutable(target.command, ['config', 'check'], { env: target.env });
     const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
     if (result.status === 0) {
       return { configured: true, detail: output || 'ngrok config is valid.' };

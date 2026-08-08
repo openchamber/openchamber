@@ -23,7 +23,7 @@
         "@codemirror/language": "6.12.2",
         "@codemirror/lint": "^6.9.2",
         "@codemirror/search": "^6.6.0",
-        "@codemirror/state": "^6.5.4",
+        "@codemirror/state": "6.7.1",
         "@codemirror/view": "6.39.13",
         "@heroui/scroll-shadow": "^2.3.18",
         "@heroui/system": "^2.4.23",
@@ -95,7 +95,7 @@
     },
     "packages/electron": {
       "name": "@openchamber/electron",
-      "version": "1.18.0",
+      "version": "1.18.1",
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
@@ -104,6 +104,7 @@
       },
       "devDependencies": {
         "@electron/rebuild": "^3.7.0",
+        "@openchamber/opencode-container-workspace": "github:openchamber/opencode-container-workspace#5dc9ef84de826e4404cfe610aa8460834dcfb8d3",
         "electron": "^41.2.1",
         "electron-builder": "^26.0.0",
       },
@@ -131,7 +132,7 @@
     },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "1.18.0",
+      "version": "1.18.1",
       "dependencies": {
         "@aparajita/capacitor-secure-storage": "^8.0.0",
         "@base-ui/react": "^1.4.0",
@@ -159,7 +160,7 @@
         "@codemirror/legacy-modes": "^6.5.2",
         "@codemirror/lint": "^6.9.2",
         "@codemirror/search": "^6.6.0",
-        "@codemirror/state": "^6.5.4",
+        "@codemirror/state": "6.7.1",
         "@codemirror/view": "6.39.13",
         "@dnd-kit/core": "^6.3.1",
         "@dnd-kit/sortable": "^10.0.0",
@@ -236,7 +237,7 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "1.18.0",
+      "version": "1.18.1",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
         "@opencode-ai/sdk": "1.18.12",
@@ -259,13 +260,14 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "1.18.0",
+      "version": "1.18.1",
       "bin": {
         "openchamber": "./bin/cli.js",
       },
       "dependencies": {
         "@clack/prompts": "^1.1.0",
         "@octokit/rest": "^22.0.1",
+        "@openchamber/opencode-container-workspace": "github:openchamber/opencode-container-workspace#5dc9ef84de826e4404cfe610aa8460834dcfb8d3",
         "@opencode-ai/sdk": "1.18.12",
         "@simplewebauthn/server": "13.3.1",
         "adm-zip": "^0.6.0",
@@ -354,6 +356,7 @@
   },
   "overrides": {
     "@codemirror/language": "6.12.2",
+    "@codemirror/state": "6.7.1",
     "@codemirror/view": "6.39.13",
   },
   "packages": {
@@ -657,7 +660,7 @@
 
     "@codemirror/search": ["@codemirror/search@6.6.0", "", { "dependencies": { "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.37.0", "crelt": "^1.0.5" } }, "sha512-koFuNXcDvyyotWcgOnZGmY7LZqEOXZaaxD/j6n18TCLx2/9HieZJ5H6hs1g8FiRxBD0DNfs0nXn17g872RmYdw=="],
 
-    "@codemirror/state": ["@codemirror/state@6.5.4", "", { "dependencies": { "@marijn/find-cluster-break": "^1.0.0" } }, "sha512-8y7xqG/hpB53l25CIoit9/ngxdfoG+fx+V3SHBrinnhOtLvKHRyAJJuHzkWrR4YXXLX8eXBsejgAAxHUOdW1yw=="],
+    "@codemirror/state": ["@codemirror/state@6.7.1", "", { "dependencies": { "@marijn/find-cluster-break": "^1.0.0" } }, "sha512-9QzNDgE4EYDnAHfrTlR2lwiPciiOymLtwKK+8yHQzCc7GXhAP9xdEbEJFy2IWB1j9UGUl9BsgMmTo/ImA02T7A=="],
 
     "@codemirror/view": ["@codemirror/view@6.39.13", "", { "dependencies": { "@codemirror/state": "^6.5.0", "crelt": "^1.0.6", "style-mod": "^4.1.0", "w3c-keyname": "^2.2.4" } }, "sha512-QBO8ZsgJLCbI28KdY0/oDy5NQLqOQVZCozBknxc2/7L98V+TVYFHnfaCsnGh1U+alpd2LOkStVwYY7nW2R1xbw=="],
 
@@ -992,6 +995,8 @@
     "@openchamber/electron": ["@openchamber/electron@workspace:packages/electron"],
 
     "@openchamber/mobile": ["@openchamber/mobile@workspace:packages/mobile"],
+
+    "@openchamber/opencode-container-workspace": ["@openchamber/opencode-container-workspace@github:openchamber/opencode-container-workspace#5dc9ef8", {}, "openchamber-opencode-container-workspace-5dc9ef8", "sha512-SdWuIwbiM3aqu6qi6LuinOi2xCui4RmJJ0utKVJo0O7aazxL9FnA+Cq+3pSut14gjd1m5Kt8S7NmSt8oEr5ISw=="],
 
     "@openchamber/ui": ["@openchamber/ui@workspace:packages/ui"],
 
@@ -3478,6 +3483,8 @@
     "@npmcli/move-file/rimraf": ["rimraf@3.0.2", "", { "dependencies": { "glob": "^7.1.3" }, "bin": { "rimraf": "bin.js" } }, "sha512-JZkJMZkAGFFPP2YqXZXPbMlMBgsxzE8ILs4lMIX/2o0L9UBw9O/Y3o6wFw/i9YLapcUJWwqbi3kdxIPdC62TIA=="],
 
     "@openchamber/web/cron-parser": ["cron-parser@4.9.0", "", { "dependencies": { "luxon": "^3.2.1" } }, "sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q=="],
+
+    "@openchamber/web/yaml": ["yaml@2.9.0", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA=="],
 
     "@radix-ui/react-collection/@radix-ui/react-slot": ["@radix-ui/react-slot@1.2.3", "", { "dependencies": { "@radix-ui/react-compose-refs": "1.1.2" }, "peerDependencies": { "@types/react": "*", "react": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc" }, "optionalPeers": ["@types/react"] }, "sha512-aeNmHnBxbi2St0au6VBVC7JXFlhLlOnvIIlePNniyUNAClzmtAUEY8/pBiK3iHjufOlwA+c20/8jngo7xcrg8A=="],
 

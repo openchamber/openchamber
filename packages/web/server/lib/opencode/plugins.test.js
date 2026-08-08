@@ -74,6 +74,7 @@ describe('opencode plugins data layer', () => {
     plugins.createPluginEntry({ spec: 'tuple-plugin', options: { apiKey: 'x' }, scope: 'user' }, projectDir);
 
     expect(readJson(userConfigPath).plugin).toEqual(['plain-plugin', ['tuple-plugin', { apiKey: 'x' }]]);
+    expect(fs.readdirSync(path.dirname(userConfigPath)).some((entry) => entry.includes('.tmp-'))).toBe(false);
     expect(() => plugins.createPluginEntry({ spec: 'plain-plugin', scope: 'user' }, projectDir)).toThrow('already exists');
     expect(thrownBy(() => plugins.createPluginEntry({ spec: 'plain-plugin', scope: 'user' }, projectDir))).toHaveProperty('code', 'ENTRY_EXISTS');
   });

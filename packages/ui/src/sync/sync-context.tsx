@@ -10,6 +10,7 @@ import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent, type SessionMaterializationReason } from "./event-reducer"
 import { useGlobalSyncStore } from "./global-sync-store"
+import { getSessionHostDirectoriesVersion, getSessionHostDirectory, resolveSessionHostDirectory, subscribeSessionHostDirectories } from "./session-host-directory"
 import {
   ChildStoreManager,
   markDirectorySessionPartChanged,
@@ -38,6 +39,7 @@ import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { applySessionEventToGlobalSessions } from "./session-event-router"
+import { sessionEvents } from "@/lib/sessionEvents"
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
@@ -1407,6 +1409,16 @@ export function handleEvent(
   streamingDirectory?: string,
   batch?: DirectoryEventBatch,
 ) {
+  if (payload.type === "workspace.status") {
+    sessionEvents.publishWorkspaceEvent({
+      type: "status",
+      workspaceID: payload.properties.workspaceID,
+      status: payload.properties.status,
+    })
+  } else if (payload.type === "workspace.ready" || payload.type === "workspace.failed") {
+    sessionEvents.publishWorkspaceEvent({ type: "refresh" })
+  }
+
   if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
     const properties = (payload as unknown as { properties?: unknown }).properties
     if (properties && typeof properties === "object") {
@@ -2717,10 +2729,30 @@ export function useSession(sessionID?: string | null, directory?: string) {
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-/** Get one session directory by id for a directory */
+/**
+ * Get one session directory by id for a directory, as a directory on this computer.
+ *
+ * A session routed into a secure workspace reports the directory it works in —
+ * `/workspace`, a container path that names nothing here. This hook's one consumer is
+ * `useEffectiveDirectory`, which scopes the Files, Terminal, Git, and Diff tabs, so it
+ * converts at the boundary: the resolver maps a workspace runtime path to the owning
+ * host project, or to nothing at all — never to the container path. Handing the raw
+ * record value through sent the file tree asking this machine for `/workspace`, which
+ * answered "Directory not found" the moment the authoritative record synced back.
+ */
 export function useSessionDirectory(sessionID?: string | null, directory?: string): string | undefined {
   const session = useSession(sessionID, directory)
-  return (session as (typeof session & { directory?: string | null }) | undefined)?.directory ?? undefined
+  // Recorded routes can arrive after this hook first answered — a restored session
+  // resolves before the sidebar has fetched them — so subscribe to their version and
+  // re-answer when they land.
+  React.useSyncExternalStore(subscribeSessionHostDirectories, getSessionHostDirectoriesVersion, getSessionHostDirectoriesVersion)
+  if (session) return resolveSessionHostDirectory(session) ?? undefined
+  // A workspace-routed session is held by no directory child store — OpenCode's
+  // scoped lists exclude routed sessions — so there is no record here to resolve.
+  // The recorded route still knows the owning project; without it, the Files and
+  // Terminal tabs of a session opened from the sidebar scope to nothing.
+  if (sessionID) return getSessionHostDirectory(sessionID) ?? undefined
+  return undefined
 }
 
 /** Get the SDK client */

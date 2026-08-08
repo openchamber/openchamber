@@ -1,0 +1,55 @@
+name: Release Certification Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_mode:
+        description: Require complete evidence and signing/device/provider certification
+        required: false
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      release_mode:
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  certification:
+    name: Unified certification gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Fetch certification evidence
+        if: ${{ vars.SECURE_WORKSPACE_CERTIFICATION_EVIDENCE_URL != '' }}
+        env:
+          EVIDENCE_URL: ${{ vars.SECURE_WORKSPACE_CERTIFICATION_EVIDENCE_URL }}
+        run: |
+          set -euo pipefail
+          mkdir -p .release-certification
+          curl --fail-with-body --location --silent --show-error --max-time 30 \
+            --output .release-certification/evidence.json "$EVIDENCE_URL"
+
+      - name: Verify exact release identities and certification evidence
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          OPENCODE_VERSION: ${{ vars.OPENCODE_VERSION }}
+          RUNTIME_IMAGE: ${{ vars.SECURE_WORKSPACE_RUNTIME_IMAGE }}
+          GATEWAY_IMAGE: ${{ vars.SECURE_WORKSPACE_GATEWAY_IMAGE }}
+          CERTIFICATION_EVIDENCE: ${{ vars.SECURE_WORKSPACE_CERTIFICATION_EVIDENCE || '.release-certification/evidence.json' }}
+          CERTIFICATION_EVIDENCE_SHA256: ${{ vars.SECURE_WORKSPACE_CERTIFICATION_EVIDENCE_SHA256 }}
+        run: |
+          set -euo pipefail
+          mode='--allow-incomplete'
+          if [[ '${{ inputs.release_mode || false }}' == 'true' || '${{ github.ref }}' == refs/tags/* ]]; then
+            mode='--release'
+          fi
+          # Release evidence is immutable, commit-bound, and digest-pinned.
+          node scripts/release-certification.mjs "$mode"
+
+      - name: Run certification script tests
+        run: node --test scripts/release-certification.test.mjs

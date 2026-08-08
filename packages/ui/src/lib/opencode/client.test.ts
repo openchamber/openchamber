@@ -9,6 +9,7 @@ let configCalls = 0;
 let runtimeKey = 'test-runtime';
 const promptAsyncCalls: unknown[][] = [];
 const promptAsyncResults: Array<unknown> = [];
+const syncStartCalls: unknown[][] = [];
 
 const promptAsyncMock = mock(async (...args: unknown[]) => {
   promptAsyncCalls.push(args);
@@ -29,6 +30,12 @@ mock.module('@opencode-ai/sdk/v2', () => ({
     },
     session: {
       promptAsync: promptAsyncMock,
+    },
+    sync: {
+      start: mock(async (...args: unknown[]) => {
+        syncStartCalls.push(args);
+        return { data: true };
+      }),
     },
   })),
 }));
@@ -64,6 +71,12 @@ beforeEach(() => {
   runtimeKey = 'test-runtime';
   promptAsyncCalls.length = 0;
   promptAsyncResults.length = 0;
+  syncStartCalls.length = 0;
+});
+
+test('starts workspace sync through the generated SDK with exact directory routing', async () => {
+  expect(await opencodeClient.experimentalWorkspaces.startSync('/workspace/project')).toBe(true);
+  expect(syncStartCalls).toEqual([[{ directory: '/workspace/project' }]]);
 });
 
 describe('opencodeClient getConfig cache', () => {
@@ -112,6 +125,23 @@ describe('opencodeClient prompt retry behavior', () => {
 
     expect(promptAsyncCalls.length).toBe(1);
     expect(error instanceof Error ? error.message : String(error)).toContain('Failed to send message (504)');
+  });
+
+  test('preserves explicit workspace routing for a newly created remote session', async () => {
+    await opencodeClient.sendMessage({
+      id: 'ses_workspace',
+      providerID: 'anthropic-workspace',
+      modelID: 'claude-sonnet',
+      text: 'hello',
+      directory: '/workspace',
+      workspace: 'wrk_workspace',
+    });
+
+    expect(promptAsyncCalls).toHaveLength(1);
+    const request = promptAsyncCalls[0][0] as Record<string, unknown>;
+    expect(request.sessionID).toBe('ses_workspace');
+    expect(request.directory).toBe('/workspace');
+    expect(request.workspace).toBe('wrk_workspace');
   });
 
   test('does not retry transport failures because the tunnel may have lost only the response', async () => {

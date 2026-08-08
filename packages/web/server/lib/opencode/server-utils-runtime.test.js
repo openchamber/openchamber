@@ -112,11 +112,12 @@ describe('server utils runtime', () => {
 
     const npmBin = path.join(appData, 'npm');
     const nodeBin = path.join(programFiles, 'nodejs');
+    const dockerBin = path.join(programFiles, 'Docker', 'Docker', 'resources', 'bin');
     const pnpmHome = path.join(localAppData, 'pnpm');
     const yarnBin = path.join(localAppData, 'Yarn', 'bin');
     const chocoBin = path.join(programData, 'chocolatey', 'bin');
 
-    for (const dir of [systemDir, npmBin, nodeBin, pnpmHome, yarnBin, chocoBin]) {
+    for (const dir of [systemDir, npmBin, nodeBin, dockerBin, pnpmHome, yarnBin, chocoBin]) {
       fs.mkdirSync(dir, { recursive: true });
     }
 
@@ -136,6 +137,7 @@ describe('server utils runtime', () => {
       systemDir,
       npmBin,
       nodeBin,
+      dockerBin,
       pnpmHome,
       yarnBin,
       chocoBin,

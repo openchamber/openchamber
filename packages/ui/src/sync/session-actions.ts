@@ -10,9 +10,10 @@ import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { opencodeClient } from "@/lib/opencode/client"
-import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { mergeSessionDirectoryMetadata, rememberConfirmedSessionWorkspaceRoute, resolveConfirmedSessionWorkspaceRoute, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
+import { rememberSessionHostDirectory } from "./session-host-directory"
 import { recordSendFailure } from "./send-failure-log"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { materializeSessionSnapshots } from "./materialization"
@@ -446,6 +447,31 @@ function getSessionDirectory(sessionId: string): string | undefined {
     || dir()
 }
 
+function getSessionWorkspaceID(sessionId: string): string | undefined {
+  let candidateID: string | null | undefined = sessionId
+  const visited = new Set<string>()
+
+  while (candidateID && !visited.has(candidateID)) {
+    visited.add(candidateID)
+    const confirmed = resolveConfirmedSessionWorkspaceRoute(candidateID)
+    if (confirmed) return confirmed
+
+    const globalSession = getGlobalSessionSnapshot(candidateID)
+    if (globalSession?.workspaceID) return globalSession.workspaceID
+    let parentID = globalSession?.parentID
+    for (const [, store] of _childStores?.children ?? []) {
+      const session = store.getState().session.find((item) => item.id === candidateID)
+      if (!session) continue
+      if (session.workspaceID) return session.workspaceID
+      parentID = session.parentID
+      break
+    }
+    candidateID = parentID
+  }
+
+  return undefined
+}
+
 function findSessionDirectoryInChildStores(sessionId: string): string | null {
   const stores = _childStores
   if (!stores || !sessionId) return null
@@ -753,6 +779,37 @@ export async function createSession(
   }
 }
 
+export async function createSessionInWorkspace(
+  workspaceID: string,
+  title?: string,
+  directoryOverride?: string | null,
+): Promise<Session> {
+  const effectiveDirectory = directoryOverride ?? dir()
+  const created = await opencodeClient.createSession({ title, workspace: workspaceID }, effectiveDirectory)
+  // A successful workspace-routed create response came from that workspace,
+  // while remote OpenCode does not stamp the control-plane ID in its payload.
+  const session = created.workspaceID === workspaceID ? created : { ...created, workspaceID }
+  rememberConfirmedSessionWorkspaceRoute(session.id, workspaceID)
+
+  // `session.directory` is where the session works, and for a workspace-routed session
+  // that is inside the container — `/workspace`, which names nothing on this computer.
+  // Host-side state takes the project the workspace was created from, which is the
+  // directory this create was addressed to. Preferring the reported one put a container
+  // path into the file tree, the terminal, and `lastDirectory`, so the tree came up empty
+  // and the terminal had nowhere to start.
+  const sessionDirectory = effectiveDirectory ?? null
+  if (sessionDirectory) {
+    registerSessionDirectory(session.id, sessionDirectory)
+    // Sidebar ownership groups by this map: the session's own record will only ever
+    // say `/workspace`, so what the creating client knows is written down here.
+    rememberSessionHostDirectory(session.id, sessionDirectory)
+  }
+  useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
+  useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
+  useGlobalSessionsStore.getState().upsertSession(session)
+  return session
+}
+
 /**
  * True when a caller captured a runtime key before an asynchronous mutation and
  * that runtime is no longer the active one. Callers pass `undefined` when they
@@ -781,10 +838,11 @@ export async function patchSessionMetadata(
 ): Promise<Session> {
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   const targetDirectory = directory ?? getSessionDirectory(sessionId)
-  const current = await opencodeClient.getSession(sessionId, targetDirectory)
+  const workspaceID = getSessionWorkspaceID(sessionId)
+  const current = await opencodeClient.getSession(sessionId, targetDirectory, workspaceID)
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   const nextMetadata = updater(getSessionMetadata(current))
-  const updated = await opencodeClient.updateSession(sessionId, { metadata: nextMetadata }, targetDirectory)
+  const updated = await opencodeClient.updateSession(sessionId, { metadata: nextMetadata }, targetDirectory, workspaceID)
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   useGlobalSessionsStore.getState().upsertSession(updated)
   const sessionDirectory = (updated as { directory?: string | null }).directory ?? targetDirectory
@@ -813,7 +871,7 @@ async function cleanupReviewMetadataBeforeDelete(
   if (isStaleRuntime(expectedRuntimeKey)) return
   let session: Session
   try {
-    session = await opencodeClient.getSession(sessionId, directory ?? getSessionDirectory(sessionId))
+    session = await opencodeClient.getSession(sessionId, directory ?? getSessionDirectory(sessionId), getSessionWorkspaceID(sessionId))
   } catch {
     return
   }
@@ -934,7 +992,7 @@ export async function deleteSession(sessionId: string, options?: DeleteSessionOp
   try {
     await cleanupReviewMetadataBeforeDelete(sessionId, sessionDirectory, expectedRuntimeKey)
     if (isStaleRuntime(expectedRuntimeKey)) return false
-    const deleted = await opencodeClient.deleteSession(sessionId, sessionDirectory)
+    const deleted = await opencodeClient.deleteSession(sessionId, sessionDirectory, getSessionWorkspaceID(sessionId))
     if (isStaleRuntime(expectedRuntimeKey)) return false
     if (deleted !== true) {
       throw new Error("session.delete failed: server did not confirm deletion")
@@ -965,7 +1023,7 @@ export async function deleteSessionInDirectory(
   try {
     await cleanupReviewMetadataBeforeDelete(sessionId, directory, expectedRuntimeKey)
     if (isStaleRuntime(expectedRuntimeKey)) return false
-    const deleted = await opencodeClient.deleteSession(sessionId, directory)
+    const deleted = await opencodeClient.deleteSession(sessionId, directory, getSessionWorkspaceID(sessionId))
     if (isStaleRuntime(expectedRuntimeKey)) return false
     if (deleted !== true) {
       throw new Error("session.delete failed: server did not confirm deletion")
@@ -1039,7 +1097,7 @@ export async function archiveSession(sessionId: string, expectedRuntimeKey = get
   try {
     await cleanupReviewMetadataBeforeDelete(sessionId, sessionDirectory, expectedRuntimeKey)
     if (isStaleRuntime(expectedRuntimeKey)) return false
-    const archived = await opencodeClient.updateSession(sessionId, { time: { archived: archivedAt } }, sessionDirectory)
+    const archived = await opencodeClient.updateSession(sessionId, { time: { archived: archivedAt } }, sessionDirectory, getSessionWorkspaceID(sessionId))
     if (isStaleRuntime(expectedRuntimeKey)) return false
     if (!archived) {
       throw new Error("session.update failed: server did not return the archived session")
@@ -1183,14 +1241,15 @@ export async function unarchiveSessions(
 
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const session = await opencodeClient.updateSession(sessionId, { title }, sessionDirectory)
+  const session = await opencodeClient.updateSession(sessionId, { title }, sessionDirectory, getSessionWorkspaceID(sessionId))
   useGlobalSessionsStore.getState().upsertSession(session)
   mirrorSessionIntoLiveStores(session, sessionDirectory)
 }
 
 export async function shareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const result = await sdk().session.share({ sessionID: sessionId, directory: sessionDirectory })
+  const workspaceID = getSessionWorkspaceID(sessionId)
+  const result = await sdk().session.share({ sessionID: sessionId, directory: sessionDirectory, ...(workspaceID ? { workspace: workspaceID } : {}) })
   const session = stripSessionDiffSnapshots(assertSdkData(result, "session.share"))
   useGlobalSessionsStore.getState().upsertSession(session)
   updateLiveSession(session, sessionDirectory)
@@ -1199,7 +1258,8 @@ export async function shareSession(sessionId: string): Promise<Session | null> {
 
 export async function unshareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const result = await sdk().session.unshare({ sessionID: sessionId, directory: sessionDirectory })
+  const workspaceID = getSessionWorkspaceID(sessionId)
+  const result = await sdk().session.unshare({ sessionID: sessionId, directory: sessionDirectory, ...(workspaceID ? { workspace: workspaceID } : {}) })
   // A successful unshare is authoritative even when the upstream response
   // echoes the pre-mutation session with its old share URL. Normalize that
   // stale field at the action boundary before publishing to either store.
@@ -1465,6 +1525,7 @@ async function fetchRecentSendConfirmationRecords(
       const result = await sdk().session.messages({
         sessionID: sessionId,
         directory: directory ?? undefined,
+        ...(getSessionWorkspaceID(sessionId) ? { workspace: getSessionWorkspaceID(sessionId) } : {}),
         limit: SEND_CONFIRMATION_REFETCH_LIMIT,
       })
       const records = (assertSdkSuccess(result, "session.messages") ?? [])
@@ -1519,8 +1580,9 @@ export async function abortCurrentOperation(sessionId: string): Promise<void> {
   // (the "stop button does nothing" report — sessions in another project/
   // worktree than the UI's current directory could never be aborted).
   const { directory } = dirStoreForSession(sessionId)
+  const workspaceID = getSessionWorkspaceID(sessionId)
   try {
-    await sdk().session.abort({ sessionID: sessionId, directory })
+    await sdk().session.abort({ sessionID: sessionId, directory, ...(workspaceID ? { workspace: workspaceID } : {}) })
   } catch (error) {
     console.error("[session-actions] abort failed", error)
   }
@@ -1541,6 +1603,7 @@ export async function respondToPermission(
     || resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
+  const workspaceID = getSessionWorkspaceID(sessionId)
   const client = directoryOverride
     ? opencodeClient.getScopedSdkClient(directoryOverride)
     : getRequestReplyClient("permission", sessionId, requestId)
@@ -1548,6 +1611,7 @@ export async function respondToPermission(
     requestID: requestId,
     reply: response,
     ...(directory ? { directory } : {}),
+    ...(workspaceID ? { workspace: workspaceID } : {}),
   })
   if (assertSdkData(result, "permission.reply") !== true) {
     throw new Error("Permission reply failed")
@@ -1562,11 +1626,13 @@ export async function dismissPermission(
   const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
+  const workspaceID = getSessionWorkspaceID(sessionId)
   try {
     const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
       requestID: requestId,
       reply: "reject",
       ...(directory ? { directory } : {}),
+      ...(workspaceID ? { workspace: workspaceID } : {}),
     })
     if (assertSdkData(result, "permission.reply") !== true) {
       throw new Error("Permission dismissal failed")
@@ -1664,10 +1730,12 @@ export async function respondToQuestion(
       : Array.isArray(answers[0])
         ? answers as string[][]
         : [answers as string[]]
+    const workspaceID = getSessionWorkspaceID(sessionId)
     const result = await getRequestReplyClient("question", sessionId, requestId).question.reply({
       requestID: requestId,
       answers: normalizedAnswers,
       ...(directory ? { directory } : {}),
+      ...(workspaceID ? { workspace: workspaceID } : {}),
     })
     if (assertSdkData(result, "question.reply") !== true) {
       throw new Error("Question reply failed")
@@ -1690,9 +1758,11 @@ export async function rejectQuestion(
     || getSessionDirectory(sessionId)
     || dir()
   try {
+    const workspaceID = getSessionWorkspaceID(sessionId)
     const result = await getRequestReplyClient("question", sessionId, requestId).question.reject({
       requestID: requestId,
       ...(directory ? { directory } : {}),
+      ...(workspaceID ? { workspace: workspaceID } : {}),
     })
     if (assertSdkData(result, "question.reject") !== true) {
       throw new Error("Question rejection failed")
@@ -1793,7 +1863,8 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdk().session.abort({ sessionID: sessionId, directory })
+      const workspaceID = getSessionWorkspaceID(sessionId)
+      await sdk().session.abort({ sessionID: sessionId, directory, ...(workspaceID ? { workspace: workspaceID } : {}) })
     } catch {
       // ignore abort errors
     }
@@ -1859,7 +1930,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   // Call SDK and merge authoritative result into store
   try {
-    const revertedSession = await opencodeClient.revertSession(sessionId, messageId, undefined, directory)
+    const revertedSession = await opencodeClient.revertSession(sessionId, messageId, undefined, directory, getSessionWorkspaceID(sessionId))
     const current = store.getState()
     const updated = [...current.session]
     const idx = updated.findIndex((s) => s.id === sessionId)
@@ -1903,7 +1974,8 @@ export async function refetchSessionMessages(sessionId: string): Promise<void> {
 
   // Actions can run in isolated tests before SyncProvider binds the shared
   // loader. The application runtime always takes the shared path above.
-  const result = await sdk().session.messages({ sessionID: sessionId, directory, limit: MESSAGE_REFETCH_LIMIT })
+  const workspaceID = getSessionWorkspaceID(sessionId)
+  const result = await sdk().session.messages({ sessionID: sessionId, directory, ...(workspaceID ? { workspace: workspaceID } : {}), limit: MESSAGE_REFETCH_LIMIT })
   const records = (assertSdkSuccess(result, "session.messages") ?? [])
     .filter((record: { info?: { id?: string } }) => !!record?.info?.id)
   if (records.length === 0) return
@@ -1935,13 +2007,15 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdk().session.abort({ sessionID: sessionId, directory })
+      const workspaceID = getSessionWorkspaceID(sessionId)
+      await sdk().session.abort({ sessionID: sessionId, directory, ...(workspaceID ? { workspace: workspaceID } : {}) })
     } catch {
       // ignore
     }
   }
 
-  const result = await sdk().session.unrevert({ sessionID: sessionId, directory })
+  const workspaceID = getSessionWorkspaceID(sessionId)
+  const result = await sdk().session.unrevert({ sessionID: sessionId, directory, ...(workspaceID ? { workspace: workspaceID } : {}) })
   const unrevertedSession = assertSdkData(result, "session.unrevert")
   const current = store.getState()
   const sessions = [...current.session]

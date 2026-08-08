@@ -34,6 +34,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
+import { isPhantomWorkspaceSession } from '@/sync/session-host-directory';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -393,6 +394,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     }
   }, [prSummary, t]);
   const isActive = useSessionUIStore((state) => state.currentSessionId === session.id);
+  const isPhantomWorkspace = React.useMemo(() => isPhantomWorkspaceSession(session), [session]);
 
   const sessionDirectory =
     normalizePath((session as Session & { directory?: string | null }).directory ?? null)
@@ -1293,6 +1295,14 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                             )}
                           </span>
                         </div>
+                      ) : null}
+                      {isPhantomWorkspace ? (
+                        // A transcript whose workspace no longer exists (or predates the
+                        // route record): readable, but nothing on this computer to scope
+                        // Files/Terminal to. Marked rather than hidden or pretended at.
+                        <span className="inline-flex items-center rounded bg-muted/60 px-1 py-0.5 text-muted-foreground/70 flex-shrink-0" title={t('sessions.sidebar.session.workspaceRemoved')} aria-label={t('sessions.sidebar.session.workspaceRemoved')}>
+                          <Icon name="cloud-off" className="h-3 w-3" />
+                        </span>
                       ) : null}
                       {pendingPermissionCount > 0 ? (
                         <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>

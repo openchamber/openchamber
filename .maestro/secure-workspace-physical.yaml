@@ -1,0 +1,47 @@
+appId: com.openchamber.app
+androidWebViewHierarchy: devtools
+---
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: "Secure Workspace"
+    timeout: 60000
+- tapOn: "Secure Workspace"
+- tapOn: ".*helpers"
+- inputText: "Create a file named openchamber-physical-e2e.txt containing only the text physical-device-evidence. Do not modify any other files."
+- tapOn: "Send message"
+- extendedWaitUntil:
+    notVisible:
+      text: "Send message"
+    timeout: 30000
+- extendedWaitUntil:
+    notVisible:
+      text: "Secure Workspace"
+    timeout: 120000
+- extendedWaitUntil:
+    visible: "Send message"
+    timeout: 300000
+- tapOn: "Open menu"
+- tapOn: "Workspaces"
+- extendedWaitUntil:
+    visible: "Review changes"
+    timeout: 60000
+- tapOn: "Review changes"
+- extendedWaitUntil:
+    visible: "Check changes"
+    timeout: 120000
+- tapOn: "Check changes"
+- extendedWaitUntil:
+    visible: "Selected changes apply without conflicts."
+    timeout: 120000
+- tapOn: "Discard artifact"
+- tapOn: "OK"
+- extendedWaitUntil:
+    notVisible: "Discard artifact"
+    timeout: 120000
+- tapOn: "Delete workspace"
+- assertVisible: "Remove secure workspace?"
+- tapOn: "Delete workspace"
+- extendedWaitUntil:
+    visible: "No workspaces found for this project."
+    timeout: 120000

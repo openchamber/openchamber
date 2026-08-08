@@ -8,7 +8,34 @@ export interface WebUiServerController {
   getOpenCodePort: () => number | null;
   isReady: () => boolean;
   restartOpenCode: () => Promise<void>;
+  createDesktopLocalClient?: (metadata?: DesktopLocalClientMetadata) => Promise<DesktopLocalClientResult>;
   stop: (options?: { exitProcess?: boolean }) => Promise<void>;
+}
+
+export interface DesktopLocalClientMetadata {
+  deviceName?: string;
+  devicePlatform?: string;
+  deviceModel?: string;
+  appVersion?: string;
+}
+
+export interface DesktopLocalClientResult {
+  token: string;
+  client: {
+    id: string;
+    label: string;
+    clientKind: "desktop-local";
+    capabilities: string[];
+    createdAt: string;
+    lastUsedAt: string | null;
+    revokedAt: string | null;
+    expiresAt: string | null;
+    authMethod: string | null;
+    deviceName: string | null;
+    devicePlatform: string | null;
+    deviceModel: string | null;
+    appVersion: string | null;
+  };
 }
 
 export interface StartWebUiServerOptions {

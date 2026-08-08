@@ -6,6 +6,11 @@ import {
   buildDeferredRestartResponse,
 } from './config-mutation-response.js';
 
+export const hasSecureWorkspaceSettingsMutation = (changes) => Boolean(
+  changes && typeof changes === 'object' && !Array.isArray(changes)
+  && Object.keys(changes).some((key) => key.startsWith('secureWorkspaces'))
+);
+
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
     crypto,
@@ -24,6 +29,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     refreshOpenCodeAfterConfigChange,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    uiAuthController,
+    tunnelAuthController,
   } = dependencies;
 
   let authLibrary = null;
@@ -331,12 +338,17 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.put('/api/config/settings', async (req, res) => {
     try {
-      const updated = await persistSettings(req.body ?? {});
+      const changes = req.body ?? {};
+      const updatesWorkspacePolicy = hasSecureWorkspaceSettingsMutation(changes);
+      if (updatesWorkspacePolicy) {
+        return res.status(403).json({ error: 'Secure Workspace settings must use the proof-bound workspace security API' });
+      }
+      const updated = await persistSettings(changes);
       res.json(updated);
     } catch (error) {
       console.error('[API:PUT /api/config/settings] Failed to save settings:', error);
       console.error('[API:PUT /api/config/settings] Error stack:', error.stack);
-      res.status(500).json({ error: 'Failed to save settings' });
+      res.status(error?.statusCode || 500).json({ error: error?.statusCode === 400 ? error.message : 'Failed to save settings' });
     }
   });
 

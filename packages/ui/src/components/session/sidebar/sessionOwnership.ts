@@ -1,5 +1,6 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 import { normalizePath } from '@/lib/pathNormalization';
+import { resolveSessionDirectoryKey } from '@/sync/session-directory';
 
 type Project = {
   id: string;
@@ -42,12 +43,23 @@ const setOwner = (owners: Map<string, DirectoryOwner>, directory: string, candid
   }
 };
 
-const resolveSessionDirectory = (session: Session): string | null => {
-  const record = session as Session & {
-    directory?: string | null;
-    project?: { worktree?: string | null } | null;
-  };
-  return normalizePath(record.directory) ?? normalizePath(record.project?.worktree);
+/**
+ * The directory a session belongs to on this computer, for sidebar ownership.
+ *
+ * The canonical resolver converts a workspace-routed session's container path —
+ * `/workspace` — to the owning host project, or to nothing when the record carries no
+ * project. Reading the raw record value here bucketed such sessions under a directory
+ * that owns nothing, so they silently vanished from every project in the sidebar. When
+ * the resolver has no answer, ownership falls back to store membership: the project
+ * list the record arrived in still knows which directory it was addressed to.
+ */
+const resolveSessionDirectory = (
+  session: Session,
+  fallbackDirectory?: (sessionId: string) => string | null,
+): string | null => {
+  const resolved = resolveSessionDirectoryKey(session);
+  if (resolved) return resolved;
+  return fallbackDirectory ? normalizePath(fallbackDirectory(session.id)) : null;
 };
 
 const getParentDirectory = (directory: string): string | null => {
@@ -67,6 +79,7 @@ export const createSessionOwnershipIndex = (
   availableWorktreesByProject: Map<string, Worktree[]>,
   isVSCode: boolean,
   archivedSessions: Session[] = [],
+  fallbackDirectory?: (sessionId: string) => string | null,
 ): SessionOwnershipIndex => {
   const ownerByDirectory = new Map<string, DirectoryOwner>();
   const projectByRoot = new Map<string, Project>();
@@ -147,7 +160,7 @@ export const createSessionOwnershipIndex = (
     scopeTarget?: Map<string, Set<string>>,
   ): void => {
     for (const session of input) {
-      const owner = resolveOwner(resolveSessionDirectory(session));
+      const owner = resolveOwner(resolveSessionDirectory(session, fallbackDirectory));
       if (!owner) continue;
       bySessionId.set(session.id, owner);
       const projectSessions = target.get(owner.projectId);

@@ -22,6 +22,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
   SettingsSection,
+  SettingsCheckboxRow,
   SettingsGroupTitle,
   SETTINGS_PAGE_TITLE_CLASS,
   SETTINGS_FIELD_LABEL_CLASS,
@@ -40,7 +41,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { PendingPairingRecord, RemoteClientRecord } from '@/lib/api/types';
+import type { PendingPairingRecord, RemoteClientCapability, RemoteClientRecord } from '@/lib/api/types';
 import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
 import {
   desktopSshLogsClear,
@@ -68,10 +69,13 @@ import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { buildRemoteClientCapabilityMutation, canManageRemoteClientCapabilities } from './remoteClientCapabilities';
 
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
 };
+
+const REMOTE_CLIENT_CAPABILITIES: RemoteClientCapability[] = ['workspace.read', 'workspace.use', 'workspace.admin', 'host.apply'];
 
 const isPortInUseError = (error: unknown): boolean => {
   const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
@@ -446,6 +450,8 @@ export const RemoteInstancesPage: React.FC = () => {
   const [remoteClientsLoading, setRemoteClientsLoading] = React.useState(false);
   const [remoteClientLabel, setRemoteClientLabel] = React.useState('');
   const [remoteClientError, setRemoteClientError] = React.useState<string | null>(null);
+  const [hostSessionAuthorized, setHostSessionAuthorized] = React.useState(false);
+  const [capabilityBusyClientId, setCapabilityBusyClientId] = React.useState<string | null>(null);
   const [pairingUrl, setPairingUrl] = React.useState<string | null>(null);
   // The pairing session shown in the QR dialog; used to auto-close the dialog
   // once the device redeems it (the pairing leaves the pending list).
@@ -839,12 +845,55 @@ export const RemoteInstancesPage: React.FC = () => {
   React.useEffect(() => {
     if (!clientAuth) return;
     void loadRemoteClients();
+    void clientAuth.canManageCapabilities().then(setHostSessionAuthorized).catch(() => setHostSessionAuthorized(false));
     const interval = window.setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       void loadRemoteClients({ silent: true });
     }, 5_000);
     return () => window.clearInterval(interval);
   }, [clientAuth, loadRemoteClients]);
+
+  const updateRemoteClientCapability = React.useCallback(async (
+    client: RemoteClientRecord,
+    capability: RemoteClientCapability,
+    grant: boolean,
+  ) => {
+    if (!clientAuth || !canManageRemoteClientCapabilities(client, hostSessionAuthorized)) return;
+    const capabilityLabel = t(`settings.remoteInstances.clientAuth.capabilities.${capability}` as I18nKey);
+    if (!window.confirm(t('settings.remoteInstances.clientAuth.capabilities.confirm', {
+      action: grant
+        ? t('settings.remoteInstances.clientAuth.capabilities.grant')
+        : t('settings.remoteInstances.clientAuth.capabilities.revoke'),
+      capability: capabilityLabel,
+      client: client.label,
+    }))) return;
+    const mutation = buildRemoteClientCapabilityMutation(client.id, capability, grant);
+    setCapabilityBusyClientId(client.id);
+    setRemoteClientError(null);
+    try {
+      let proof;
+      try {
+        proof = await clientAuth.reauthenticate({ operation: 'host.capabilities', project: 'host', payload: mutation });
+      } catch {
+        const password = window.prompt(t('settings.remoteInstances.clientAuth.capabilities.passwordPrompt'));
+        if (password === null) return;
+        proof = await clientAuth.reauthenticate({ operation: 'host.capabilities', project: 'host', payload: mutation, password });
+      }
+      const result = await clientAuth.updateClientCapabilities(client.id, {
+        grant: mutation.grant,
+        revoke: mutation.revoke,
+        reauthProof: proof.proof,
+        reauthNonce: proof.nonce,
+      });
+      if (result.client) {
+        setRemoteClients((current) => current.map((entry) => entry.id === result.client?.id ? result.client : entry));
+      }
+    } catch (error) {
+      setRemoteClientError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCapabilityBusyClientId(null);
+    }
+  }, [clientAuth, hostSessionAuthorized, t]);
 
   // Available direct transports for the create dialog. The server is authoritative
   // for LAN reachability (derived from its bind, not the UI origin), so "Local
@@ -1458,7 +1507,8 @@ export const RemoteInstancesPage: React.FC = () => {
                               })
                             : t('settings.remoteInstances.clientAuth.neverUsed');
                       return (
-                        <div key={client.id} className="flex items-center justify-between gap-3 py-1.5">
+                        <div key={client.id} className="py-1.5">
+                          <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
                             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
                               <span className={cn(
@@ -1482,6 +1532,21 @@ export const RemoteInstancesPage: React.FC = () => {
                           <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void revokeRemoteClient(client)} disabled={Boolean(client.revokedAt)}>
                             {t('settings.remoteInstances.clientAuth.actions.revoke')}
                           </Button>
+                          </div>
+                          {canManageRemoteClientCapabilities(client, hostSessionAuthorized) ? (
+                            <div className="mt-2 space-y-1" aria-label={t('settings.remoteInstances.clientAuth.capabilities.title')}>
+                              {REMOTE_CLIENT_CAPABILITIES.map((capability) => (
+                                <SettingsCheckboxRow
+                                  key={capability}
+                                  checked={client.capabilities.includes(capability)}
+                                  onChange={(checked) => void updateRemoteClientCapability(client, capability, checked)}
+                                  disabled={capabilityBusyClientId === client.id}
+                                  label={t(`settings.remoteInstances.clientAuth.capabilities.${capability}` as I18nKey)}
+                                  ariaLabel={t(`settings.remoteInstances.clientAuth.capabilities.${capability}` as I18nKey)}
+                                />
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })}
