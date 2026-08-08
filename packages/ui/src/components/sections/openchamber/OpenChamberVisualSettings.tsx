@@ -1280,7 +1280,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         controlClassName="w-full"
                                     >
                                         <Select value={uiFont} onValueChange={(value) => setUiFont(value as UiFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_TRIGGER_CLASS, 'max-w-full')}>
                                                 <SelectValue>{UI_FONT_OPTIONS.find((option) => option.id === uiFont)?.label}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1310,7 +1310,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         controlClassName="w-full"
                                     >
                                         <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_TRIGGER_CLASS, 'max-w-full')}>
                                                 <SelectValue>{CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1351,6 +1351,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 min={50}
                                                 max={200}
                                                 step={5}
+                                                className="w-20"
                                                 aria-label={t('settings.openchamber.visual.field.fontSizePercentageAria')}
                                             />
                                             <span className={SETTINGS_NUMBER_UNIT_CLASS}>%</span>
@@ -1381,6 +1382,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 min={9}
                                                 max={52}
                                                 step={1}
+                                                className="w-20"
                                             />
                                             <span className={SETTINGS_NUMBER_UNIT_CLASS}>px</span>
                                             <Button size="sm"
@@ -1410,6 +1412,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 min={9}
                                                 max={32}
                                                 step={1}
+                                                className="w-20"
                                             />
                                             <span className={SETTINGS_NUMBER_UNIT_CLASS}>px</span>
                                             <Button size="sm"
@@ -1444,6 +1447,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 min={50}
                                                 max={200}
                                                 step={5}
+                                                className="w-20"
                                             />
                                             <span className={SETTINGS_NUMBER_UNIT_CLASS}>%</span>
                                             <Button size="sm"
@@ -1474,6 +1478,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 min={0}
                                                 max={100}
                                                 step={5}
+                                                className="w-20"
                                             />
                                             <span className={SETTINGS_NUMBER_UNIT_CLASS}>px</span>
                                             <Button size="sm"

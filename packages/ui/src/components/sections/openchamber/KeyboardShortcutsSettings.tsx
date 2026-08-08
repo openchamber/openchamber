@@ -260,6 +260,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
               <SettingsFieldRow
                 label={actionLabel(action.id, action.label)}
                 alignEnd={false}
+                controlClassName="@xl:w-auto @xl:flex-1"
               >
                 <Input
                   readOnly
@@ -295,7 +296,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                     setPendingOverwrite(null);
                     setErrorText('');
                   }}
-                  className="h-7 w-40 min-w-0 typography-ui-label text-center"
+                  className="h-7 min-w-40 max-w-full field-sizing-content typography-ui-label text-center"
                 />
                 <Button
                   type="button"

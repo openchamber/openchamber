@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import {
@@ -375,7 +376,7 @@ export const BehaviorPage: React.FC = () => {
             onValueChange={(value) => setResponseStylePreset(value)}
             disabled={isLoading || !responseStyleEnabled}
           >
-            <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+            <SelectTrigger size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'max-w-72')}>
               <SelectValue>
                 {(value) => {
                   if (value === 'custom') return t('settings.behavior.page.responseStyle.option.custom');

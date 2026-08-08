@@ -1051,13 +1051,13 @@ export const VoiceSettings: React.FC = () => {
                             {/* Speech Rate */}
                             <SettingsFieldRow label={t('settings.voice.page.field.speechRate')}>
                                     {!isMobile && <input type="range" min={0.5} max={2} step={0.1} value={speechRate} onChange={(e) => setSpeechRate(Number(e.target.value))} className={sliderClass} />}
-                                    <NumberInput value={speechRate} onValueChange={setSpeechRate} min={0.5} max={2} step={0.1} className="w-16 tabular-nums" />
+                                    <NumberInput value={speechRate} onValueChange={setSpeechRate} min={0.5} max={2} step={0.1} className="w-20 tabular-nums" />
                             </SettingsFieldRow>
 
                             {/* Speech Pitch */}
                             <SettingsFieldRow label={t('settings.voice.page.field.speechPitch')}>
                                     {!isMobile && <input type="range" min={0.5} max={2} step={0.1} value={speechPitch} onChange={(e) => setSpeechPitch(Number(e.target.value))} className={sliderClass} />}
-                                    <NumberInput value={speechPitch} onValueChange={setSpeechPitch} min={0.5} max={2} step={0.1} className="w-16 tabular-nums" />
+                                    <NumberInput value={speechPitch} onValueChange={setSpeechPitch} min={0.5} max={2} step={0.1} className="w-20 tabular-nums" />
                             </SettingsFieldRow>
 
                             {/* Speech Volume */}
