@@ -373,6 +373,96 @@ describe('preview body URL rewriting', () => {
     expect(jsOutput).toContain('import("/api/preview/proxy/abc123/entry.js?oc_preview_token=preview-secret&oc_url_token=url-secret")');
     expect(jsOutput).toContain('from "/api/preview/proxy/abc123/module.js?oc_preview_token=preview-secret&oc_url_token=url-secret"');
   });
+
+  it('rewrites relative module import paths in JavaScript responses (issue #2338)', () => {
+    const jsOutput = rewritePreviewBody({
+      bodyText: 'import { defineComponent } from "./DlAUqK2U.js";\nconst mod = await import("./chunk-abc123.js");\nimport("../parent.js").then(m => m.default);',
+      kind: 'javascript',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+      previewToken: 'preview-secret',
+      modulePath: '/_nuxt/entry.js',
+    });
+
+    expect(jsOutput).toContain('from "/api/preview/proxy/abc123/_nuxt/DlAUqK2U.js?oc_preview_token=preview-secret"');
+    expect(jsOutput).toContain('import("/api/preview/proxy/abc123/_nuxt/chunk-abc123.js?oc_preview_token=preview-secret")');
+    expect(jsOutput).toContain('import("/api/preview/proxy/abc123/parent.js?oc_preview_token=preview-secret")');
+  });
+
+  it('leaves relative imports unchanged when modulePath is not provided', () => {
+    const jsOutput = rewritePreviewBody({
+      bodyText: 'import { defineComponent } from "./DlAUqK2U.js";',
+      kind: 'javascript',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+    });
+
+    expect(jsOutput).toContain('from "./DlAUqK2U.js"');
+  });
+
+  it('strips crossorigin="" from modulepreload <link> tags (issue #2338)', () => {
+    const output = rewritePreviewBody({
+      bodyText: '<link rel="modulepreload" crossorigin="" href="/_nuxt/C2VRKy4g.js">',
+      kind: 'html',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+      previewToken: 'preview-secret',
+    });
+
+    expect(output).not.toMatch(/crossorigin/i);
+    expect(output).toContain('href="/api/preview/proxy/abc123/_nuxt/C2VRKy4g.js?oc_preview_token=preview-secret"');
+  });
+
+  it('strips crossorigin="" from module <script> tags (issue #2338)', () => {
+    const output = rewritePreviewBody({
+      bodyText: '<script crossorigin="" src="/_nuxt/entry.js" type="module"></script>',
+      kind: 'html',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+      previewToken: 'preview-secret',
+    });
+
+    expect(output).not.toMatch(/crossorigin/i);
+    expect(output).toContain('src="/api/preview/proxy/abc123/_nuxt/entry.js?oc_preview_token=preview-secret"');
+  });
+
+  it('strips crossorigin="anonymous" from tags (issue #2338)', () => {
+    const output = rewritePreviewBody({
+      bodyText: '<link rel="modulepreload" crossorigin="anonymous" href="/_nuxt/C2VRKy4g.js"><script crossorigin=\'anonymous\' src="/_nuxt/app.js" type="module"></script>',
+      kind: 'html',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+      previewToken: 'preview-secret',
+    });
+
+    expect(output).not.toMatch(/crossorigin/i);
+  });
+
+  it('does not strip crossorigin from inline script JavaScript identifiers (issue #2338)', () => {
+    const output = rewritePreviewBody({
+      bodyText: '<script type="module">if (window.crossoriginEnabled) { console.log("test"); }</script><link rel="modulepreload" crossorigin="" href="/_nuxt/C2VRKy4g.js">',
+      kind: 'html',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+      previewToken: 'preview-secret',
+    });
+
+    expect(output).toContain('crossoriginEnabled');
+    expect(output).not.toMatch(/<link[^>]*crossorigin/i);
+  });
+  it('preserves relative imports unchanged when modulePath is empty string (issue #2338)', () => {
+    const jsOutput = rewritePreviewBody({
+      bodyText: 'import { defineComponent } from "./chunk.js";',
+      kind: 'javascript',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+      previewToken: 'preview-secret',
+      modulePath: '',
+    });
+
+    // Empty modulePath means relative imports cannot be resolved; preserve original
+    expect(jsOutput).toContain('from "./chunk.js"');
+  });
 });
 
 describe('preview redirect URL rewriting', () => {
