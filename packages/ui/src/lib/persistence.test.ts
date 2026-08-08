@@ -568,3 +568,87 @@ describe('updateDesktopSettings', () => {
     expect(saveCalls.some((changes) => changes.autoSaveEnabled === true)).toBe(true);
   });
 });
+
+describe('unload lifecycle flush (#2197)', () => {
+  beforeEach(() => {
+    getWindow();
+    registerRuntimeAPIs(null);
+    invalidateSettingsCache();
+  });
+
+  test('flushes a pending debounced settings save on pagehide without a double write', async () => {
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return {};
+    });
+
+    const update = updateDesktopSettings({ showDeletionDialog: false });
+    expect(saveCalls).toEqual([]);
+
+    getWindow().dispatchEvent(new Event('pagehide'));
+
+    // The flush must hand the pending changes to the settings backend
+    // synchronously inside the lifecycle listener — an unloading window has
+    // no later turn for the debounce timer.
+    expect(saveCalls).toEqual([{ showDeletionDialog: false }]);
+
+    await update;
+    await delay(300);
+    // The canceled debounce timer must not replay the same write.
+    expect(saveCalls).toHaveLength(1);
+  });
+
+  test('flushes a pending debounced settings save on beforeunload without a double write', async () => {
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return {};
+    });
+
+    const update = updateDesktopSettings({ gitChangesViewMode: 'tree' });
+    expect(saveCalls).toEqual([]);
+
+    getWindow().dispatchEvent(new Event('beforeunload'));
+
+    expect(saveCalls).toEqual([{ gitChangesViewMode: 'tree' }]);
+
+    await update;
+    await delay(300);
+    expect(saveCalls).toHaveLength(1);
+  });
+
+  test('persists a showDeletionDialog toggle followed by an immediate unload', async () => {
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return {};
+    });
+    startAppearanceAutoSave();
+
+    try {
+      useUIStore.getState().setShowDeletionDialog(false);
+      getWindow().dispatchEvent(new Event('pagehide'));
+
+      expect(saveCalls.some((changes) => changes.showDeletionDialog === false)).toBe(true);
+    } finally {
+      useUIStore.getState().setShowDeletionDialog(true);
+      // Let the restore write drain so it cannot leak into other tests.
+      await delay(300);
+    }
+  });
+
+  test('ignores lifecycle events when no settings write is pending', async () => {
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return {};
+    });
+
+    getWindow().dispatchEvent(new Event('pagehide'));
+    getWindow().dispatchEvent(new Event('beforeunload'));
+    await delay(50);
+
+    expect(saveCalls).toEqual([]);
+  });
+});

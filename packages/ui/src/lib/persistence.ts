@@ -1625,6 +1625,21 @@ const isSettingsRuntimeContextCurrent = (context: SettingsRuntimeContext): boole
   context.generation === _settingsRuntimeGeneration && context.runtimeKey === getRuntimeKey()
 );
 
+// Best-effort flush of the pending debounced settings write at a lifecycle
+// boundary. Clearing the timer before flushing means the write happens exactly
+// once — the flush consumes the pending changes, so a timer that already fired
+// cannot double-write. A hard process kill (crash, task-manager kill) can
+// still lose the in-flight request; this narrows the loss window to the
+// request itself instead of the whole debounce interval (#2197).
+const flushPendingSettingsBeforeSuspend = (): void => {
+  if (!_pendingSettingsChanges) return;
+  if (_settingsFlushTimer) {
+    clearTimeout(_settingsFlushTimer);
+    _settingsFlushTimer = null;
+  }
+  void _flushSettingsUpdate();
+};
+
 const ensureSettingsRuntimeLifecycle = (): void => {
   if (_settingsLifecycleInitialized || typeof window === 'undefined') return;
   _settingsLifecycleInitialized = true;
@@ -1640,6 +1655,22 @@ const ensureSettingsRuntimeLifecycle = (): void => {
     _settingsCache = null;
     _settingsInflight = null;
   });
+
+  // Mirror the deferred safe-storage lifecycle: without these listeners, a
+  // settings change made within SETTINGS_DEBOUNCE_MS of closing the window is
+  // silently dropped, and the stale server snapshot wins on next startup.
+  try {
+    window.addEventListener('pagehide', flushPendingSettingsBeforeSuspend, { capture: true });
+    window.addEventListener('beforeunload', flushPendingSettingsBeforeSuspend, { capture: true });
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushPendingSettingsBeforeSuspend();
+      });
+      document.addEventListener('freeze', flushPendingSettingsBeforeSuspend);
+    }
+  } catch {
+    // Restricted environments can reject listeners; the debounce timer still flushes.
+  }
 };
 
 const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Promise<DesktopSettings | null> => {
