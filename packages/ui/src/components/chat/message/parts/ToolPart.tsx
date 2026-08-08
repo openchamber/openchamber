@@ -4,6 +4,7 @@ import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
+import { QuestionMarkdown } from '../../QuestionMarkdown';
 import { MessageFilesDisplay } from '../../FileAttachment';
 import { getToolMetadata } from '@/lib/toolHelpers';
 import type { ToolPart as ToolPartType, ToolState as ToolStateUnion, FilePart } from '@opencode-ai/sdk/v2';
@@ -1407,7 +1408,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         <div className="space-y-2">
                             {parsedQA.map((qa, index) => (
                                 <div key={index} className="space-y-0.5">
-                                    <div className="typography-micro text-muted-foreground">{qa.question}</div>
+                                    <QuestionMarkdown content={qa.question} size="micro" className="text-muted-foreground" />
                                     <div className="typography-meta text-foreground whitespace-pre-wrap">{qa.answer}</div>
                                 </div>
                             ))}
@@ -1444,7 +1445,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                 {q.header ? (
                                     <div className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
                                 ) : null}
-                                <div className="typography-meta text-foreground">{coerceToText(q.question)}</div>
+                                <QuestionMarkdown content={coerceToText(q.question)} size="meta" className="text-foreground" />
                                 {Array.isArray(q.options) && q.options.length > 0 ? (
                                     <div className="flex flex-wrap gap-1 mt-0.5">
                                         {q.options.map((opt) => (
