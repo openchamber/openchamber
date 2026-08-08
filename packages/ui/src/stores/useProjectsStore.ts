@@ -55,7 +55,7 @@ interface ProjectsStore {
   setActiveProjectIdOnly: (id: string) => void;
   renameProject: (id: string, label: string) => void;
   updateProjectMeta: (id: string, meta: {
-    label?: string;
+    label?: string | null;
     icon?: string | null;
     color?: string | null;
     iconBackground?: string | null;
@@ -169,11 +169,16 @@ const normalizeProjectPath = (value: string): string => {
 const deriveProjectLabel = (path: string): string => {
   const normalized = normalizeProjectPath(path);
   if (!normalized || normalized === '/') {
-    return 'Root';
+    return normalized || '/';
   }
   const segments = normalized.split('/').filter(Boolean);
-  const raw = segments[segments.length - 1] || normalized;
-  return raw.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return segments[segments.length - 1] || normalized;
+};
+
+const deriveLegacyProjectLabel = (path: string): string => {
+  const label = deriveProjectLabel(path);
+  if (label === '/') return 'Root';
+  return label.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
 const sanitizeProjectIconImage = (value: unknown): ProjectEntry['iconImage'] | undefined => {
@@ -261,7 +266,10 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     };
 
     if (typeof candidate.label === 'string' && candidate.label.trim().length > 0) {
-      project.label = candidate.label.trim();
+      const label = candidate.label.trim();
+      if (label !== deriveLegacyProjectLabel(normalizedPath)) {
+        project.label = label;
+      }
     }
     if (typeof candidate.icon === 'string' && candidate.icon.trim().length > 0) {
       project.icon = candidate.icon.trim();
@@ -582,12 +590,12 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const now = Date.now();
-      const label = options?.label?.trim() || deriveProjectLabel(normalizedPath);
+      const label = options?.label?.trim();
       const id = createProjectIdFromPath(normalizedPath);
       const entry: ProjectEntry = {
         id,
         path: normalizedPath,
-        label,
+        ...(label ? { label } : {}),
         color: pickAutoColor(get().projects),
         addedAt: now,
         lastOpenedAt: now,
@@ -708,7 +716,7 @@ export const useProjectsStore = create<ProjectsStore>()(
     },
 
     updateProjectMeta: (id: string, meta: {
-      label?: string;
+      label?: string | null;
       icon?: string | null;
       color?: string | null;
       iconBackground?: string | null;
@@ -722,8 +730,9 @@ export const useProjectsStore = create<ProjectsStore>()(
         if (project.id !== id) return project;
         const updated = { ...project };
         if (meta.label !== undefined) {
-          const trimmed = meta.label.trim();
+          const trimmed = meta.label?.trim() ?? '';
           if (trimmed) updated.label = trimmed;
+          else delete updated.label;
         }
         if (meta.icon !== undefined) updated.icon = meta.icon;
         if (meta.color !== undefined) updated.color = meta.color;
