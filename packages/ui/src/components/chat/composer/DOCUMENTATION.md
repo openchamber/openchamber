@@ -81,6 +81,19 @@ composer holds a prompt, not a source file: it is short enough that a full pass
 is cheaper and far simpler than incremental mapping, and it keeps the editor
 and the send path reading the same grammar.
 
+The content element's `autocorrect` keyword is a policy decided by the caller
+through `editor/autocorrect.ts`. The HTML `autocorrect` attribute matches its
+keywords ASCII case-insensitively, so the composer keeps desktop word
+correction off everywhere — but @codemirror/view reads the attribute with an
+exact `== "off"` and rewrites macOS and Android's insert-period-on-double-space
+into a plain double space when it sees exactly `off`. `editor/autocorrect.ts`
+therefore emits the case-insensitively-equivalent `Off` on exactly the
+platforms CodeMirror reverts (`browser.mac || browser.android`, mirrored
+deliberately), and the literal `off` everywhere else. Do not "normalize" the
+`Off` spelling back to `off`, and if a @codemirror/view upgrade changes the
+guard, the pinned-guard test in `editor/__tests__/autocorrect.test.ts` fails
+first.
+
 ## Ordering rules worth knowing
 
 - `editor/ComposerEditor.tsx` forwards a click on the composer's padding by
