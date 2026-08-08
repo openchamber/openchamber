@@ -9,6 +9,7 @@ import {
   checkoutCommit,
   cherryPick,
   createWorktree,
+  findNestedGitRepositories,
   getWorktreeBootstrapStatus,
   getBranches,
   getRangeDiff,
@@ -423,6 +424,92 @@ describe('getStatus', () => {
     } finally {
       process.chdir(previousCwd);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findNestedGitRepositories
+// ---------------------------------------------------------------------------
+
+describe('findNestedGitRepositories', () => {
+  it('returns an empty list for a missing directory', async () => {
+    expect(await findNestedGitRepositories(path.join(os.tmpdir(), 'does-not-exist-ope-222'))).toEqual([]);
+  });
+
+  it('returns an empty list when the root itself is a repository', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+
+    // A nested repo inside a repo is still hidden by the single-repo contract:
+    // callers only use this endpoint when the root is not a repository.
+    const nested = path.join(repo, 'nested');
+    fs.mkdirSync(nested);
+    runGit(nested, ['init', '-b', 'main']);
+    expect(await findNestedGitRepositories(repo)).toEqual([]);
+  });
+
+  it('finds direct child repositories and skips node_modules', async () => {
+    if (!canRunGit()) return;
+
+    const parent = createTempDir();
+    for (const name of ['Backend', 'Frontend']) {
+      const repo = path.join(parent, name);
+      fs.mkdirSync(repo, { recursive: true });
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+    }
+    fs.mkdirSync(path.join(parent, 'node_modules', 'pkg'), { recursive: true });
+    runGit(path.join(parent, 'node_modules', 'pkg'), ['init', '-b', 'main']);
+
+    const results = await findNestedGitRepositories(parent);
+    expect(results.map((entry) => entry.relativePath)).toEqual(['Backend', 'Frontend']);
+    expect(results[0]).toMatchObject({
+      path: path.join(parent, 'Backend'),
+      name: 'Backend',
+    });
+  });
+
+  it('finds repositories up to the bounded depth, sorted by relative path', async () => {
+    if (!canRunGit()) return;
+
+    const parent = createTempDir();
+    const tooling = path.join(parent, 'Tooling');
+    const docs = path.join(tooling, 'docs');
+    fs.mkdirSync(docs, { recursive: true });
+    // `Tooling` is a plain folder; `Tooling/docs` is a repository two levels deep.
+    fs.writeFileSync(path.join(tooling, 'README.md'), '# Tooling\n');
+    runGit(docs, ['init', '-b', 'main']);
+
+    const results = await findNestedGitRepositories(parent);
+    expect(results.map((entry) => entry.relativePath)).toEqual(['Tooling/docs']);
+  });
+
+  it('honors a custom bounded depth', async () => {
+    if (!canRunGit()) return;
+
+    const parent = createTempDir();
+    const docs = path.join(parent, 'Tooling', 'docs');
+    fs.mkdirSync(docs, { recursive: true });
+    runGit(docs, ['init', '-b', 'main']);
+
+    expect(await findNestedGitRepositories(parent, { depth: 1 })).toEqual([]);
+    expect(await findNestedGitRepositories(parent, { depth: 2 })).toHaveLength(1);
+  });
+
+  it('returns an empty list for a plain folder with no nested repositories', async () => {
+    const parent = createTempDir();
+    fs.mkdirSync(path.join(parent, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(parent, 'src', 'index.ts'), '// nothing\n');
+
+    expect(await findNestedGitRepositories(parent)).toEqual([]);
   });
 });
 

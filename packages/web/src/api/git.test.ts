@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@openchamber/ui/lib/gitApiHttp', () => ({
   checkIsGitRepository: vi.fn(),
+  findNestedGitRepositories: vi.fn(),
   getGitStatus: vi.fn(),
   getGitDiff: vi.fn(),
+  getGitRangeDiff: vi.fn(),
   getGitFileDiff: vi.fn(),
   revertGitFile: vi.fn(),
   stageGitFile: vi.fn(),
@@ -41,6 +43,7 @@ vi.mock('@openchamber/ui/lib/gitApiHttp', () => ({
   renameBranch: vi.fn(),
   getGitLog: vi.fn(),
   getCommitFiles: vi.fn(),
+  getCommitFileDiff: vi.fn(),
   getCurrentGitIdentity: vi.fn(),
   hasLocalIdentity: vi.fn(),
   setGitIdentity: vi.fn(),
@@ -62,7 +65,6 @@ vi.mock('@openchamber/ui/lib/gitApiHttp', () => ({
   cherryPick: vi.fn(),
   revertCommit: vi.fn(),
   resetToCommit: vi.fn(),
-  getCommitFileDiff: vi.fn(),
   previewGitWorktree: vi.fn(),
   getGitWorktreeBootstrapStatus: vi.fn(),
   discoverGitCredentials: vi.fn(),
@@ -80,5 +82,6 @@ describe('createWebGitAPI', () => {
     expect(typeof api.stageGitHunk).toBe('function');
     expect(typeof api.unstageGitHunk).toBe('function');
     expect(typeof api.revertGitHunk).toBe('function');
+    expect(typeof api.findNestedGitRepositories).toBe('function');
   });
 });

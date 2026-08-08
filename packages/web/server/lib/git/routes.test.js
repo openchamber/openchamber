@@ -5,6 +5,7 @@ const gitLibraries = {
   unstageFiles: vi.fn(),
   isGitRepository: vi.fn(),
   getStatus: vi.fn(),
+  findNestedGitRepositories: vi.fn(),
 };
 
 vi.mock('./index.js', () => ({
@@ -12,6 +13,7 @@ vi.mock('./index.js', () => ({
   unstageFiles: gitLibraries.unstageFiles,
   isGitRepository: gitLibraries.isGitRepository,
   getStatus: gitLibraries.getStatus,
+  findNestedGitRepositories: gitLibraries.findNestedGitRepositories,
 }));
 
 const { registerGitRoutes } = await import('./routes.js');
@@ -206,5 +208,65 @@ describe('git routes status discovery', () => {
     expect(gitLibraries.isGitRepository).toHaveBeenCalledWith('/opened/git-project');
     expect(gitLibraries.getStatus).toHaveBeenCalledWith('/opened/git-project', { mode: undefined });
     expect(response.body).toMatchObject({ current: 'main' });
+  });
+});
+
+describe('git routes nested repositories', () => {
+  beforeEach(() => {
+    gitLibraries.findNestedGitRepositories.mockReset();
+  });
+
+  it('returns nested repositories for a directory', async () => {
+    gitLibraries.findNestedGitRepositories.mockResolvedValue([
+      { path: '/workspace/Backend', relativePath: 'Backend', name: 'Backend' },
+      { path: '/workspace/Frontend', relativePath: 'Frontend', name: 'Frontend' },
+    ]);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/nested-repositories')(
+      { query: { directory: '/workspace' } },
+      response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      repositories: [
+        { path: '/workspace/Backend', relativePath: 'Backend', name: 'Backend' },
+        { path: '/workspace/Frontend', relativePath: 'Frontend', name: 'Frontend' },
+      ],
+    });
+    expect(gitLibraries.findNestedGitRepositories).toHaveBeenCalledWith('/workspace');
+  });
+
+  it('returns an empty repository list for a folder without nested repos', async () => {
+    gitLibraries.findNestedGitRepositories.mockResolvedValue([]);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/nested-repositories')(
+      { query: { directory: '/workspace' } },
+      response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ repositories: [] });
+  });
+
+  it('rejects requests without a directory', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/nested-repositories')(
+      { query: {} },
+      response,
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toEqual({ error: 'directory parameter is required' });
+    expect(gitLibraries.findNestedGitRepositories).not.toHaveBeenCalled();
   });
 });

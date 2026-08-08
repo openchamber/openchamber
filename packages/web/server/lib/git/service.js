@@ -1981,6 +1981,73 @@ export async function isGitRepository(directory) {
   return result.success;
 }
 
+// Directories never worth descending into when hunting for nested repositories.
+const NESTED_REPO_SKIP_DIRECTORIES = new Set(['node_modules', '.git']);
+
+const hasGitMarker = async (directory) => {
+  try {
+    await fsp.access(path.join(directory, '.git'));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Find Git repositories nested inside a directory that is itself not a
+ * repository. Bounded, cheap heuristic: walk subdirectories up to `depth`
+ * levels (default 2) and collect directories that contain a `.git` entry
+ * (a directory for regular repositories, a file for linked worktrees and
+ * submodules). `node_modules` and hidden directories are never descended
+ * into. Returns [] when the root itself is a repository, the path is
+ * missing, or no nested repository is found.
+ */
+export async function findNestedGitRepositories(directory, options = {}) {
+  const { depth = 2, maxRepositories = 50 } = options;
+  const root = normalizeDirectoryPath(directory);
+  if (typeof root !== 'string' || !root || !fs.existsSync(root) || (await hasGitMarker(root))) {
+    return [];
+  }
+
+  const results = [];
+
+  const walk = async (current, level) => {
+    if (level > depth || results.length >= maxRepositories) {
+      return;
+    }
+    let entries;
+    try {
+      entries = await fsp.readdir(current, { withFileTypes: true });
+    } catch {
+      // Unreadable directory — skip it rather than failing the whole search.
+      return;
+    }
+    for (const entry of entries) {
+      if (results.length >= maxRepositories) {
+        return;
+      }
+      if (!entry.isDirectory() || NESTED_REPO_SKIP_DIRECTORIES.has(entry.name) || entry.name.startsWith('.')) {
+        continue;
+      }
+      const candidate = path.join(current, entry.name);
+      if (await hasGitMarker(candidate)) {
+        results.push({
+          path: candidate,
+          relativePath: path.relative(root, candidate).replace(/\\/g, '/'),
+          name: entry.name,
+        });
+      } else if (level < depth) {
+        await walk(candidate, level + 1);
+      }
+    }
+  };
+
+  await walk(root, 1);
+
+  results.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+  return results;
+}
+
 export async function getGlobalIdentity() {
   const git = await createGitForGlobalConfig();
 

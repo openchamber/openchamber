@@ -126,6 +126,22 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.get('/api/git/nested-repositories', async (req, res) => {
+    const { findNestedGitRepositories } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const repositories = await findNestedGitRepositories(directory);
+      res.json({ repositories });
+    } catch (error) {
+      console.error('Failed to find nested git repositories:', error);
+      res.status(500).json({ error: 'Failed to find nested git repositories' });
+    }
+  });
+
   app.get('/api/git/remote-url', async (req, res) => {
     const { getRemoteUrl } = await getGitLibraries();
     try {
