@@ -69,10 +69,17 @@ other runtime API.
 - `timeoutMs` overrides the 60s default per call; `signal` lets a caller abort
   a request that is no longer wanted. Both apply to every wire format.
 - `describeSmallModel()` additionally reports `inputCharBudget`,
-  `contextTokens`, `contextKnown`, and `structuredOutput`. The last is
-  tri-state: `true`/`false` from the catalog, `null` when the catalog omits the
-  field — which it does for roughly half of all models, aggregators and proxies
-  especially. Callers must treat `null` as "try it", not "unsupported".
+  `contextTokens`, `contextKnown`, `structuredOutput`, and `hasLogin`. The last
+  is whether the resolved provider has a usable credential (`auth.json` or
+  config `provider.<id>.options.apiKey`) — settings/config overrides can name a
+  provider with none, and callers such as the walkthrough refuse before the
+  request. `structuredOutput` is tri-state: `true`/`false` from the catalog,
+  `null` when the catalog omits the field — which it does for roughly half of
+  all models, aggregators and proxies especially. Callers must treat `null` as
+  "try it", not "unsupported".
+- Missing credentials throw with `statusCode: 401` and
+  `code: 'no-provider-login'` rather than a bare `Error`, so UI callers can show
+  a blocker instead of a raw 500 message.
 - `call.js` — wire formats and per-provider auth, replicating OpenCode's
   plugin auth loaders:
   - **GitHub Copilot**: fetches the requested model's authenticated `/models`

@@ -10,14 +10,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n, type Locale } from '@/lib/i18n';
+import { openExternalUrl } from '@/lib/url';
 import { buildWalkthroughView } from '@/lib/walkthrough/model';
 import type { WalkthroughSource, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { deriveBaseBranch } from '@/components/views/git/baseBranch';
+import { deriveBaseBranch, hasResolvableBaseBranch } from '@/components/views/git/baseBranch';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useGitBranches, useGitStatus } from '@/stores/useGitStore';
+import { useGitBranches, useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import {
   getFreshestPrStatusForBranch,
@@ -40,6 +42,12 @@ interface WalkthroughViewProps {
 }
 
 const SCOPES: WalkthroughWorkingTreeScope[] = ['all', 'staged', 'working'];
+
+// What a walkthrough is — and what it deliberately is not — cannot be read off
+// the panel: the first question users asked about it was whether its marks were
+// review findings. The guide answers that, so it is reachable from the surface
+// itself rather than only from the release announcement.
+const WALKTHROUGH_GUIDE_URL = 'https://docs.openchamber.dev/walkthrough/';
 
 // DropdownMenuLabel defaults to the same size and weight as its items, which
 // makes a heading read as another choice. This matches SelectLabel, the
@@ -152,6 +160,12 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
 
   const status = useGitStatus(directory || null);
   const branches = useGitBranches(directory || null);
+  const ensureAll = useGitStore((state) => state.ensureAll);
+  const { github, git } = useRuntimeAPIs();
+
+  useEffect(() => {
+    if (directory) void ensureAll(directory, git);
+  }, [directory, ensureAll, git]);
 
   // The branch source reviews everything on this branch that is not on its
   // base. Three-dot semantics server-side mean merges from the base are
@@ -162,22 +176,33 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
     if (!headRef) return null;
     const all = branches?.all ?? [];
     const localBranches = all.filter((name) => !name.startsWith('remotes/'));
+    const remoteBranches = all
+      .filter((name) => name.startsWith('remotes/'))
+      .map((name) => name.slice('remotes/'.length));
     const remoteNames = new Set(
-      all
-        .filter((name) => name.startsWith('remotes/'))
-        .map((name) => name.slice('remotes/'.length).split('/')[0])
+      remoteBranches
+        .map((name) => name.split('/')[0])
         .filter(Boolean)
     );
-    const baseRef = deriveBaseBranch({ remoteNames, localBranches });
-    if (!baseRef || baseRef === headRef) return null;
+    const trackingRemote = status?.tracking?.split('/')[0];
+    const defaultBranch = (trackingRemote && branches?.defaultBranches?.[trackingRemote])
+      ?? branches?.defaultBranches?.origin;
+    const baseRef = deriveBaseBranch({
+      remoteNames,
+      localBranches,
+      defaultBranch,
+      headBranch: headRef,
+    });
+    if (!baseRef || baseRef === headRef || !hasResolvableBaseBranch({ baseBranch: baseRef, localBranches, remoteBranches })) {
+      return null;
+    }
     return { kind: 'branch', baseRef, headRef };
-  }, [branches, currentBranch]);
+  }, [branches, currentBranch, status?.tracking]);
 
   // The pull request for this branch used to appear only after visiting the PR
   // panel, because nothing else asked GitHub about it. Ask here too: the status
   // store already dedupes by signature and throttles by TTL, so several panels
   // wanting the same answer produce one request.
-  const { github } = useRuntimeAPIs();
   const githubConnected = useGitHubAuthStore((state) => state.status?.connected ?? false);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const ensurePrStatusEntry = useGitHubPrStatusStore((state) => state.ensureEntry);
@@ -323,14 +348,35 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
   // Explicit pick first, then the model that actually produced what is on
   // screen, then whatever settings resolve to. The middle step is what makes
   // reopening a review show the model behind it rather than the default.
-  const activeModel = selectedModel
-    ?? (entry.result?.model ? `${entry.result.model.providerID}/${entry.result.model.modelID}` : undefined)
-    ?? (entry.readiness?.model ? `${entry.readiness.model.providerID}/${entry.readiness.model.modelID}` : undefined);
-  const [activeProviderId, ...activeModelParts] = (activeModel ?? '').split('/');
-  const activeModelId = activeModelParts.join('/');
-
+  // Never present a provider without a usable login as the current selection —
+  // the picker already hides them from the menu; showing one as selected was
+  // the whole "why say so?" failure mode.
   const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
   const [modelProviders, setModelProviders] = useState<string[] | undefined>(undefined);
+
+  const providerIsAuthenticated = (providerId: string | undefined) => {
+    if (!providerId) return false;
+    // Until the auth list loads, do not present a candidate as selected —
+    // otherwise an unauthenticated config model flashes in the picker.
+    if (modelProviders === undefined) return false;
+    return modelProviders.includes(providerId);
+  };
+  const readinessModelRef = entry.readiness?.model
+    && entry.readiness.model.hasLogin !== false
+    && providerIsAuthenticated(entry.readiness.model.providerID)
+    ? `${entry.readiness.model.providerID}/${entry.readiness.model.modelID}`
+    : undefined;
+  const resultModelRef = entry.result?.model
+    && providerIsAuthenticated(entry.result.model.providerID)
+    ? `${entry.result.model.providerID}/${entry.result.model.modelID}`
+    : undefined;
+  const selectedModelUsable = selectedModel
+    && providerIsAuthenticated(selectedModel.split('/')[0])
+    ? selectedModel
+    : undefined;
+  const activeModel = selectedModelUsable ?? resultModelRef ?? readinessModelRef;
+  const [activeProviderId, ...activeModelParts] = (activeModel ?? '').split('/');
+  const activeModelId = activeModelParts.join('/');
 
   useEffect(() => {
     if (modelProviders !== undefined) return;
@@ -403,14 +449,20 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
 
   const showStages = startedFromEmptyRef.current
     && (entry.status === 'generating' || stageProgress.holding);
+  // Auth/login gaps are not a full-panel blocker: hide the unusable model and
+  // disable Generate instead of explaining a raw provider error.
   const blockedReason = entry.error?.code === 'context-too-small'
     || entry.error?.code === 'structured-output-unsupported'
     || entry.error?.code === 'no-model'
     || entry.error?.code === 'empty-diff'
     || entry.error?.code === 'only-generated'
     || entry.error?.code === 'output-exhausted'
+    // Client-detected rather than reported: the server answered something that
+    // was not JSON, so it has no walkthrough routes at all.
+    || entry.error?.code === 'server-unsupported'
     ? entry.error.code
     : entry.readiness && !entry.readiness.ready && !view
+      && entry.readiness.reason !== 'no-provider-login'
       ? entry.readiness.reason
       : undefined;
 
@@ -420,11 +472,16 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
   const blockedRequiredChars = entry.error?.requiredChars ?? entry.readiness?.requiredChars;
   const blockedAvailableChars = entry.error?.availableChars ?? entry.readiness?.availableChars;
 
+  // Not ready, or no usable selected model, means Generate must not look
+  // actionable — including when the resolved model has no login.
+  const generateDisabled = !activeModel || Boolean(entry.readiness && !entry.readiness.ready);
+
   const handleGenerate = useCallback(
     (force: boolean) => {
+      if (generateDisabled) return;
       void generate(directory, source, { force, language: activeLanguage });
     },
-    [activeLanguage, directory, generate, source]
+    [activeLanguage, directory, generate, generateDisabled, source]
   );
 
   return (
@@ -495,6 +552,25 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
         </DropdownMenu>
 
         <div className="ml-auto flex min-w-0 items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label={t('walkthrough.help.guide')}
+                onClick={() => {
+                  void openExternalUrl(WALKTHROUGH_GUIDE_URL);
+                }}
+              >
+                <Icon name="question" className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="typography-micro leading-tight">{t('walkthrough.help.guide')}</p>
+            </TooltipContent>
+          </Tooltip>
+
           {/* A walkthrough nobody can read is worth nothing, so the prose
               language is a per-review choice like the model — defaulting to the
               interface language, which is the best evidence of what the reader
@@ -544,7 +620,8 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
             onChange={(providerId, modelId) => {
               selectModel(directory, source, providerId && modelId ? `${providerId}/${modelId}` : null);
             }}
-            allowedProviderIds={modelProviders}
+            // While the auth list is loading, allow none — not every provider.
+            allowedProviderIds={modelProviders ?? []}
             isModelAllowed={isStructuredOutputCapable}
             tooltipsEnabled={false}
             dropdownPortalToBody
@@ -592,7 +669,10 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
               type="button"
               variant="outline"
               size="sm"
-              className={WALKTHROUGH_ACTION_CLASS}
+              className={generateDisabled
+                ? 'border-border text-muted-foreground'
+                : WALKTHROUGH_ACTION_CLASS}
+              disabled={generateDisabled}
               aria-label={compactHeader
                 ? (view ? t('walkthrough.action.regenerate') : t('walkthrough.action.generate'))
                 : undefined}
@@ -646,6 +726,7 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
             variant="ghost"
             size="xs"
             className="ml-auto"
+            disabled={generateDisabled}
             // Not forced: if an entry for this exact request existed the banner
             // would not be here, and a forced run would refuse the cache it may
             // find on the way.
@@ -677,7 +758,7 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
         </div>
       )}
 
-      {entry.error && !blockedReason && (
+      {entry.error && !blockedReason && entry.error.code !== 'no-provider-login' && (
         <div className="flex shrink-0 items-start gap-2 border-b border-border/60 bg-status-error/10 px-3 py-2">
           <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-status-error" />
           {/* Provider errors arrive as raw JSON bodies. Show a readable amount

@@ -83,6 +83,42 @@ describe('scanConnectionQr on Android', () => {
     expect(removeCalls).toBe(2);
   });
 
+  test('falls back to string parsing when the WebView URL parser rejects the link (old Android WebView)', async () => {
+    // Old Android WebViews resolve openchamber://connect?... with hostname "" and
+    // pathname "//connect", so the URL-based parse fails on an intact string. The test
+    // runtime's URL parser handles the canonical form fine, so simulate the rejection
+    // with a case variant the URL parser refuses while the string parser accepts.
+    const url = encodePairingConnectionPayload(buildPairingConnectionPayload({
+      pairingId: 'pair_abc',
+      secret: 'one-time',
+      candidates: [{ type: 'lan', url: 'http://192.168.1.20:4096', priority: 10 }],
+    }));
+    const mixedCase = url.replace('openchamber://connect', 'OpenChamber://CONNECT');
+    const listeners = new Map<string, (event: { barcodes?: Array<{ rawValue?: string }> }) => void>();
+    const plugin = {
+      requestPermissions: mock(async () => ({ camera: 'granted' })),
+      startScan: mock(async () => {
+        listeners.get('barcodesScanned')?.({ barcodes: [{ rawValue: mixedCase }] });
+      }),
+      stopScan: mock(async () => undefined),
+      addListener: mock((event: string, callback: (info: { barcodes?: Array<{ rawValue?: string }> }) => void) => {
+        listeners.set(event, callback);
+        return { remove: () => undefined };
+      }),
+    };
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { Capacitor: { getPlatform: () => 'android', Plugins: { BarcodeScanner: plugin } } },
+    });
+
+    const result = await scanConnectionQr();
+    expect(result.status).toBe('pairing');
+    if (result.status === 'pairing') {
+      expect(result.pairing.pairingId).toBe('pair_abc');
+      expect(result.pairing.candidates).toEqual([{ type: 'lan', url: 'http://192.168.1.20:4096', priority: 10 }]);
+    }
+  });
+
   test('stops scanning when the caller aborts', async () => {
     let stopCalls = 0;
     const stopScan = async () => { stopCalls += 1; };

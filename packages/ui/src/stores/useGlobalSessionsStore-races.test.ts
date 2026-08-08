@@ -20,14 +20,17 @@ const deferred = <T>(): Deferred<T> => {
   return { promise, resolve, reject }
 }
 
-let activeRequest: Deferred<Session[]>
-let archivedRequest: Deferred<Session[]>
+let listRequest: Deferred<Session[]>
 
+// The store issues one inclusive (`archived: true`) paginated request per
+// load/refresh scope and splits active/archived client-side, so restored
+// sessions (`time.archived` falsy-but-present) stay visible in the active
+// list. The mock serves that single request.
 const sdk = {
   experimental: {
     session: {
-      list: async (options: { archived?: boolean }) => ({
-        data: await (options.archived ? archivedRequest.promise : activeRequest.promise),
+      list: async () => ({
+        data: await listRequest.promise,
         response: { headers: new Headers() },
       }),
     },
@@ -38,13 +41,12 @@ const originalGetSdkClient = opencodeClient.getSdkClient
 const session = (id: string, title = id, archived?: number): Session => ({
   id,
   title,
-  time: { created: 1, updated: 1, ...(archived ? { archived } : {}) },
+  time: { created: 1, updated: 1, ...(archived !== undefined ? { archived } : {}) },
 } as Session)
 
 describe("global session mutation reconciliation", () => {
   beforeEach(() => {
-    activeRequest = deferred<Session[]>()
-    archivedRequest = deferred<Session[]>()
+    listRequest = deferred<Session[]>()
     opencodeClient.getSdkClient = () => sdk
     useGlobalSessionsStore.getState().resetForRuntimeSwitch()
   })
@@ -57,8 +59,7 @@ describe("global session mutation reconciliation", () => {
     const loading = useGlobalSessionsStore.getState().loadSessions()
     useGlobalSessionsStore.getState().upsertSession(session("created"))
 
-    activeRequest.resolve([])
-    archivedRequest.resolve([])
+    listRequest.resolve([])
     await loading
 
     expect(useGlobalSessionsStore.getState().activeSessions.map((item) => item.id)).toEqual(["created"])
@@ -70,8 +71,7 @@ describe("global session mutation reconciliation", () => {
     const loading = useGlobalSessionsStore.getState().loadSessions()
     useGlobalSessionsStore.getState().removeSessions([stale.id])
 
-    activeRequest.resolve([stale])
-    archivedRequest.resolve([])
+    listRequest.resolve([stale])
     await loading
 
     expect(useGlobalSessionsStore.getState().activeSessions).toEqual([])
@@ -84,8 +84,7 @@ describe("global session mutation reconciliation", () => {
     const loading = useGlobalSessionsStore.getState().loadSessions()
     useGlobalSessionsStore.getState().archiveSessions([stale.id], 10)
 
-    activeRequest.resolve([stale])
-    archivedRequest.resolve([])
+    listRequest.resolve([stale])
     await loading
 
     expect(useGlobalSessionsStore.getState().activeSessions).toEqual([])
@@ -98,24 +97,33 @@ describe("global session mutation reconciliation", () => {
     const loading = useGlobalSessionsStore.getState().loadSessions()
     useGlobalSessionsStore.getState().upsertSession(session("updated", "New"))
 
-    activeRequest.resolve([stale])
-    archivedRequest.resolve([])
+    listRequest.resolve([stale])
     await loading
 
     expect(useGlobalSessionsStore.getState().activeSessions[0]?.title).toBe("New")
   })
 
-  test("uses commit-time state when one side of the load fails", async () => {
+  test("uses commit-time state when the load fails", async () => {
     const created = session("created")
     const loading = useGlobalSessionsStore.getState().loadSessions()
     useGlobalSessionsStore.getState().upsertSession(created)
 
-    activeRequest.reject(new Error("unavailable"))
-    archivedRequest.resolve([])
+    listRequest.reject(new Error("unavailable"))
     await loading
 
     expect(useGlobalSessionsStore.getState().activeSessions).toEqual([created])
     expect(useGlobalSessionsStore.getState().status).toBe("error")
+  })
+
+  test("splits a restored session into the active list", async () => {
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+
+    listRequest.resolve([session("active"), session("archived", "archived", 5), session("restored", "restored", 0)])
+    await loading
+
+    expect(useGlobalSessionsStore.getState().activeSessions.map((item) => item.id)).toEqual(["active", "restored"])
+    expect(useGlobalSessionsStore.getState().archivedSessions.map((item) => item.id)).toEqual(["archived"])
+    expect(useGlobalSessionsStore.getState().status).toBe("ready")
   })
 
   test("does not undo a move while refreshing the source directory", async () => {
@@ -125,11 +133,24 @@ describe("global session mutation reconciliation", () => {
     const refreshing = useGlobalSessionsStore.getState().refreshSessionsForDirectories(["/source"])
     useGlobalSessionsStore.getState().upsertSession(destination)
 
-    activeRequest.resolve([source])
-    archivedRequest.resolve([])
+    listRequest.resolve([source])
     await refreshing
 
     expect(useGlobalSessionsStore.getState().sessionsByDirectory.get("/source")).toBe(undefined)
     expect(useGlobalSessionsStore.getState().sessionsByDirectory.get("/destination")?.[0]?.id).toBe("moved")
+  })
+
+  test("keeps a restore mutation newer than the directory refresh", async () => {
+    const archived = { ...session("restored", "restored", 5), directory: "/source" } as Session
+    useGlobalSessionsStore.getState().applySnapshot([], [archived])
+    const refreshing = useGlobalSessionsStore.getState().refreshSessionsForDirectories(["/source"])
+    useGlobalSessionsStore.getState().upsertSession({ ...archived, time: { ...archived.time, archived: 0 } })
+
+    // The server still reports the pre-restore row for this directory.
+    listRequest.resolve([archived])
+    await refreshing
+
+    expect(useGlobalSessionsStore.getState().activeSessions.map((item) => item.id)).toEqual(["restored"])
+    expect(useGlobalSessionsStore.getState().archivedSessions).toEqual([])
   })
 })

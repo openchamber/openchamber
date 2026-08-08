@@ -15,12 +15,55 @@ A scheduled task runs a prompt for you on a schedule — for example, a daily "s
    - **daily** — at one or more times each day
    - **weekly** — on chosen weekdays and times
    - **once** — a single date and time
+   - **cron** — an arbitrary cron expression
 4. Set what it does: the prompt to send, and the provider, model, and agent to use. The prompt can be a slash command, like `/review`.
 5. Save, and make sure the task is enabled.
 
 You can run any task immediately with **run now** to check it does what you expect.
 
 Check **Run as goal** to make the run pursue its prompt to completion instead of stopping after one reply — see [Session Goals](/session-goals/).
+
+## Loops: scheduled tasks as markdown files
+
+A **loop** is a scheduled task defined as a portable markdown file you can commit to your repo. Drop a file into `.agents/loops/` and the task appears on the next sync — no dialog needed:
+
+```markdown
+---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: anthropic/claude-sonnet-4-5
+agent: plan
+timezone: Europe/Kyiv
+---
+Summarize repository changes since yesterday and post the digest.
+```
+
+### Where files live
+
+- **Project scope** — `.agents/loops/*.md` in the project directory or any ancestor directory up to the git worktree root.
+- **User scope** — `~/.agents/loops/*.md` applies to every project you open.
+
+If a project loop and a user loop share a name, the project loop wins.
+
+### Fields
+
+| Field | Meaning |
+|---|---|
+| `name` | Task name (required, max 80 characters). |
+| `schedule` | Cron expression (required) — loop files are cron-only. |
+| `enabled` | Set `true` to run. Loops are **off by default**, so committing a file never starts running a task on its own. |
+| `model` | `provider/model` (required), e.g. `anthropic/claude-sonnet-4-5`. |
+| `agent` | Agent to use (optional). |
+| `timezone` | IANA timezone (optional, defaults to the server zone). |
+| body | The execution prompt (required). Can be a slash command, like `/review src/`. |
+
+### How loops behave
+
+- The **file is authoritative** while it exists: edits made in the UI are reverted on the next sync. The scheduled-tasks dialog marks loop tasks and disables their edit/enable/delete actions — **run now** still works. To stop a loop, delete the file (or set `enabled: false`).
+- Runtime state (last run, next run, status) lives in the project config and is never written back into the markdown file.
+- Renaming the `name` field renames the task in place. If a loop file temporarily fails to parse (mid-edit, merge conflict), its task is kept with the last good definition until the file is fixed.
+- `daily`/`weekly`/`once` schedules and goal settings remain UI-only; loop files are always cron.
 
 ## What success looks like
 

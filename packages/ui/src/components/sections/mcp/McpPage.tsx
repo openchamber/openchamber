@@ -930,6 +930,8 @@ export const McpPage: React.FC = () => {
             : t('settings.mcp.page.toast.savedReloadFailed')), {
             description: result.warning || t('settings.mcp.page.toast.retryRefreshHint'),
           });
+        } else if (result.restartDeferred) {
+          toast.success(t('settings.view.pendingRestart.saved'));
         } else {
           toast.success(result.message || (isNewServer
             ? t('settings.mcp.page.toast.serverCreatedReloading')

@@ -566,15 +566,31 @@ const readProviderConfig = (workingDirectory, providerID) => {
 // Dispatch
 // ---------------------------------------------------------------------------
 
+/**
+ * Same credential resolution the request path uses: config
+ * `provider.<id>.options.apiKey` wins, then the auth.json entry.
+ * Callers that need to refuse before spending a request (walkthrough readiness)
+ * must use this rather than inventing a second rule.
+ */
+export function resolveProviderLogin({ auth, workingDirectory, providerID }) {
+  const providerConfig = readProviderConfig(workingDirectory, providerID);
+  return providerConfig?.auth || getAuthEntryForProvider(auth, providerID) || null;
+}
+
 export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) {
   const tokens = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : DEFAULT_MAX_OUTPUT_TOKENS;
   const providerConfig = readProviderConfig(workingDirectory, providerID);
   // Match OpenCode's resolveSDK precedence:
-  // config provider.<id>.options.apiKey (providerConfig.auth) wins; the
-  // auth.json entry is only a fallback.
+  // config provider.<id>.options.apiKey wins; the auth.json entry is only a fallback.
   const entry = providerConfig?.auth || getAuthEntryForProvider(auth, providerID);
   if (!entry) {
-    throw new Error(`No OpenCode login found for provider "${providerID}"`);
+    // Structured so the walkthrough (and any other caller) can show a blocker
+    // instead of a raw 500 banner with this developer-oriented sentence.
+    throw Object.assign(new Error(`No OpenCode login found for provider "${providerID}"`), {
+      statusCode: 401,
+      code: 'no-provider-login',
+      providerID,
+    });
   }
 
   if (providerID === 'github-copilot') {

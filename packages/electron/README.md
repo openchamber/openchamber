@@ -143,6 +143,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 - Floating Mini Chat windows.
 - Multiple native windows.
 - Native notifications.
+- User-confirmed local folder selection. The shared UI supplies the requested directory as the picker `defaultPath`; confirmation is required before filesystem access is retried.
 - One-click open/reveal/open-in-app actions.
 - Desktop host switcher and deep-link imports.
 - Local and remote instance handling.

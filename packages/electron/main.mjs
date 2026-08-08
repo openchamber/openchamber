@@ -2463,12 +2463,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.on('move', () => {
     debounceWindowStatePersist(browserWindow, false);
   });
-  browserWindow.on('minimize', (event) => {
-    if (!shouldHideMainWindowToTray(browserWindow)) return;
-    debounceWindowStatePersist(browserWindow, true);
-    event.preventDefault();
-    browserWindow.hide();
-  });
   browserWindow.on('close', (event) => {
     if (!state.quitRequested && shouldHideMainWindowToTray(browserWindow)) {
       debounceWindowStatePersist(browserWindow, true);
@@ -4448,7 +4442,12 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_minimize_current_window':
       if (browserWindow && !browserWindow.isDestroyed()) {
-        browserWindow.minimize();
+        if (shouldHideMainWindowToTray(browserWindow)) {
+          debounceWindowStatePersist(browserWindow, true);
+          browserWindow.hide();
+        } else {
+          browserWindow.minimize();
+        }
       }
       return null;
 

@@ -25,6 +25,12 @@ const isSameThumbMetrics = (a: ThumbMetrics, b: ThumbMetrics): boolean => {
   return Math.abs(a.length - b.length) < METRIC_EPSILON && Math.abs(a.offset - b.offset) < METRIC_EPSILON;
 };
 
+// Desktop shells (Electron, VS Code webview) use persistent, not
+// auto-hiding, scrollbars. Reads the same `desktop-runtime` root class that
+// index.css keys off, so JS and CSS never disagree on what counts as desktop.
+const isDesktopScrollbarRuntime = (): boolean =>
+  typeof document !== "undefined" && document.documentElement.classList.contains("desktop-runtime");
+
 const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   containerRef,
   minThumbSize = 32,
@@ -128,8 +134,15 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     if (isHoveringRef.current) {
       return;
     }
+    // Desktop shells keep the thumb visible once shown instead of
+    // auto-hiding it after a delay. userIntentOnly callers (e.g. chat
+    // auto-follow scroll) opt out of persistence on purpose, so they keep
+    // the existing auto-hide behavior even on desktop.
+    if (isDesktopScrollbarRuntime() && !userIntentOnly) {
+      return;
+    }
     hideTimeoutRef.current = setTimeout(() => setVisible(false), hideDelayMs);
-  }, [hideDelayMs]);
+  }, [hideDelayMs, userIntentOnly]);
 
   const markUserIntent = React.useCallback(() => {
     lastUserIntentAtRef.current = Date.now();
@@ -162,7 +175,10 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     if (!container) return;
 
     updateMetrics();
-    setVisible(false);
+    // On desktop shells, show the thumb immediately if content overflows
+    // instead of waiting for the first scroll event (persistent affordance,
+    // matching native desktop scrollbar conventions).
+    setVisible(isDesktopScrollbarRuntime() && !userIntentOnly);
 
     const onScroll = () => handleScroll();
     const onKeyDown = (event: KeyboardEvent) => {

@@ -463,6 +463,14 @@ export function ScheduledTasksDialog() {
                   <div className="typography-micro truncate text-muted-foreground">
                     {formatSchedule(task, t)}
                   </div>
+                  {task.loopFile ? (
+                    <div
+                      className="typography-micro truncate text-muted-foreground/70"
+                      title={task.loopFile}
+                    >
+                      {t('sessions.scheduledTasks.dialog.loopFile.note', { file: task.loopFile })}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground">
@@ -525,8 +533,11 @@ export function ScheduledTasksDialog() {
                     className={cn(
                       'inline-flex cursor-pointer items-center gap-2 typography-micro font-medium',
                       task.enabled ? 'text-foreground' : 'text-muted-foreground',
-                      isBusy && 'cursor-not-allowed opacity-50',
+                      (isBusy || task.loopFile) && 'cursor-not-allowed opacity-50',
                     )}
+                    title={task.loopFile
+                      ? t('sessions.scheduledTasks.dialog.loopFile.toggleDisabled')
+                      : undefined}
                   >
                     <Checkbox
                       checked={task.enabled}
@@ -534,7 +545,7 @@ export function ScheduledTasksDialog() {
                       ariaLabel={task.enabled
                         ? t('sessions.scheduledTasks.dialog.taskToggle.pauseAria', { taskName: task.name })
                         : t('sessions.scheduledTasks.dialog.taskToggle.enableAria', { taskName: task.name })}
-                      disabled={isBusy}
+                      disabled={isBusy || Boolean(task.loopFile)}
                     />
                     {task.enabled ? t('sessions.scheduledTasks.dialog.taskToggle.enabled') : t('sessions.scheduledTasks.dialog.taskToggle.paused')}
                   </label>
@@ -555,7 +566,10 @@ export function ScheduledTasksDialog() {
                         setEditorTask(task);
                         setEditorOpen(true);
                       }}
-                      disabled={isBusy}
+                      disabled={isBusy || Boolean(task.loopFile)}
+                      title={task.loopFile
+                        ? t('sessions.scheduledTasks.dialog.loopFile.actionsDisabled')
+                        : undefined}
                       aria-label={t('sessions.scheduledTasks.dialog.actions.editAria', { taskName: task.name })}
                     >
                       <Icon name="edit-2" className="h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.edit')}
@@ -564,7 +578,10 @@ export function ScheduledTasksDialog() {
                       variant="destructive"
                       size="sm"
                       onClick={() => void handleDeleteTask(task)}
-                      disabled={isBusy}
+                      disabled={isBusy || Boolean(task.loopFile)}
+                      title={task.loopFile
+                        ? t('sessions.scheduledTasks.dialog.loopFile.actionsDisabled')
+                        : undefined}
                       aria-label={t('sessions.scheduledTasks.dialog.actions.deleteAria', { taskName: task.name })}
                     >
                       <Icon name="delete-bin" className="h-4 w-4" />

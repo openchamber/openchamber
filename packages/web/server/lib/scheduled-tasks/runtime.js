@@ -3,6 +3,7 @@ import { DateTime } from 'luxon';
 import parser from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
+import { discoverLoops } from './loops.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -382,8 +383,19 @@ export const createScheduledTasksRuntime = (deps) => {
 
   const syncProject = async (projectID) => {
     await ensureProjectPath(projectID);
+    const projectPath = projectPathByID.get(projectID) || null;
 
-    const tasks = await projectConfigRuntime.listScheduledTasks(projectID);
+    let tasks;
+    if (projectPath) {
+      // Reconcile `.agents/loops` definitions with the persisted task list:
+      // loop files are authoritative while present, removed files unschedule
+      // their task, and runtime state is preserved (see loops.js).
+      const loops = await discoverLoops(projectPath);
+      tasks = await projectConfigRuntime.reconcileLoopTasks(projectID, loops);
+    } else {
+      tasks = await projectConfigRuntime.listScheduledTasks(projectID);
+    }
+
     setProjectTasks(projectID, tasks);
 
     for (const task of tasks) {

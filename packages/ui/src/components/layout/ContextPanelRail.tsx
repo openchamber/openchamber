@@ -24,18 +24,23 @@ import { useDeviceInfo } from '@/lib/device';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import {
+  getVisibleContextRailSurfaces,
   sortContextSurfaces,
   type ContextSurfaceDescriptor,
 } from '@/lib/surfaces/registry';
+import {
+  getEffectiveShortcutPrefix,
+  isShortcutPrefixHeld,
+} from '@/lib/shortcuts';
 import { cn } from '@/lib/utils';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitStatus } from '@/stores/useGitStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 
 const RAIL_TOOLTIP_DELAY_MS = 150;
-// Tablet width and up: below this the walkthrough cannot show a stop and its
-// code side by side, which is the whole point of the surface.
-const WALKTHROUGH_MIN_WIDTH = 768;
+// Hold the surface-switch modifier for this long before revealing the order
+// number badges on the rail icons.
+const RAIL_NUMBER_HOLD_DELAY_MS = 500;
 const EMPTY_TABS: never[] = [];
 
 type RailItemProps = {
@@ -44,8 +49,20 @@ type RailItemProps = {
   showActivityDot: boolean;
   label: string;
   description: string;
+  /** Numeric badge (e.g. the Git changed-files count); takes precedence over the activity dot. */
+  badgeCount?: number | null;
+  /** Accessible label that includes the badge count; falls back to `label`. */
+  badgeAriaLabel?: string | null;
+  /** Extra tooltip line describing the badge; rendered under the description. */
+  badgeDescription?: string | null;
+  orderNumber?: number | null;
+  showOrderNumber?: boolean;
   onSelect: (surface: ContextSurfaceDescriptor) => void;
 };
+
+// The badge corner is 16px tall; cap large counts so the pill stays compact
+// on the 36px rail button (matching the order-number badge's footprint).
+const formatRailBadgeCount = (count: number): string => (count > 99 ? '99+' : String(count));
 
 const ContextPanelRailItem: React.FC<RailItemProps> = ({
   surface,
@@ -53,11 +70,18 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
   showActivityDot,
   label,
   description,
+  badgeCount,
+  badgeAriaLabel,
+  badgeDescription,
+  orderNumber,
+  showOrderNumber,
   onSelect,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: surface.id,
   });
+
+  const displayBadgeCount = badgeCount != null && badgeCount > 0 ? formatRailBadgeCount(badgeCount) : null;
 
   return (
     <div
@@ -72,7 +96,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             {...attributes}
             {...listeners}
             onClick={() => onSelect(surface)}
-            aria-label={label}
+            aria-label={badgeAriaLabel ?? label}
             aria-pressed={isActive}
             className={cn(
               'flex h-9 w-9 touch-none select-none items-center justify-center rounded-md transition-colors',
@@ -86,7 +110,21 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             ) : (
               <Icon name={surface.icon} className="h-[18px] w-[18px]" />
             )}
-            {showActivityDot ? (
+            {showOrderNumber && orderNumber != null ? (
+              <span
+                aria-hidden="true"
+                className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-muted px-1 text-[0.625rem] font-medium leading-none text-muted-foreground"
+              >
+                {orderNumber === 10 ? '0' : orderNumber}
+              </span>
+            ) : displayBadgeCount ? (
+              <span
+                aria-hidden="true"
+                className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-muted px-1 text-[0.625rem] font-medium leading-none text-muted-foreground"
+              >
+                {displayBadgeCount}
+              </span>
+            ) : showActivityDot ? (
               <span
                 aria-hidden="true"
                 className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
@@ -98,6 +136,9 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
           <div className="flex flex-col gap-0.5">
             <span>{label}</span>
             <span className="typography-micro text-muted-foreground">{description}</span>
+            {badgeDescription ? (
+              <span className="typography-micro text-muted-foreground">{badgeDescription}</span>
+            ) : null}
           </div>
         </TooltipContent>
       </Tooltip>
@@ -114,9 +155,85 @@ export const ContextPanelRail: React.FC = () => {
   const contextRailOrder = useUIStore((state) => state.contextRailOrder);
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const { screenWidth } = useDeviceInfo();
   const gitStatus = useGitStatus(directoryKey || null);
+
+  const surfaceSwitchPrefix = React.useMemo(
+    () => getEffectiveShortcutPrefix('switch_context_surface', shortcutOverrides),
+    [shortcutOverrides],
+  );
+  const [revealNumbers, setRevealNumbers] = React.useState(false);
+
+  // While the surface-switch modifier is held for RAIL_NUMBER_HOLD_DELAY_MS,
+  // reveal the order number badges so users can see which digit maps to which
+  // rail icon. Releasing (or losing focus) dismisses them, and pressing a
+  // number key while the chord is armed consumes them for this hold — they
+  // only come back on the next press-and-hold.
+  React.useEffect(() => {
+    const held = new Set<string>();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let consumedWhileHeld = false;
+
+    const isDigitKey = (key: string) => key.length === 1 && key >= '0' && key <= '9';
+
+    const update = () => {
+      const armed = isShortcutPrefixHeld(surfaceSwitchPrefix, held);
+      if (armed) {
+        if (!consumedWhileHeld && timer === null) {
+          timer = setTimeout(() => setRevealNumbers(true), RAIL_NUMBER_HOLD_DELAY_MS);
+        }
+      } else {
+        consumedWhileHeld = false;
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        setRevealNumbers(false);
+      }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      held.add(e.key.toLowerCase());
+      if (isDigitKey(e.key) && isShortcutPrefixHeld(surfaceSwitchPrefix, held)) {
+        consumedWhileHeld = true;
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        setRevealNumbers(false);
+        return;
+      }
+      update();
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      held.delete(e.key.toLowerCase());
+      update();
+    };
+    const onWindowBlur = () => {
+      held.clear();
+      consumedWhileHeld = false;
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      setRevealNumbers(false);
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('blur', onWindowBlur);
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('blur', onWindowBlur);
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+    };
+  }, [surfaceSwitchPrefix]);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
@@ -128,22 +245,13 @@ export const ContextPanelRail: React.FC = () => {
   const activeMode = panelState?.isOpen ? activeTab?.mode ?? null : null;
   const changedFilesCount = gitStatus?.files.length ?? 0;
 
-  // Content-driven surfaces are hidden (not disabled) until content exists;
-  // an existing tab keeps them visible even if the content source went away.
   const surfaces = React.useMemo(() => {
-    return sortContextSurfaces(contextRailOrder).filter((surface) => {
-      if (surface.id === 'plan' && !planModeEnabled) {
-        return false;
-      }
-      // The walkthrough needs room for a stop list beside real code, and its
-      // diffs come from OpenChamber's Git routes, which VS Code does not serve.
-      if (surface.id === 'walkthrough' && (isVSCodeRuntime() || screenWidth < WALKTHROUGH_MIN_WIDTH)) {
-        return false;
-      }
-      if (surface.availability === 'has-content') {
-        return tabs.some((tab) => tab.mode === surface.mode);
-      }
-      return true;
+    return getVisibleContextRailSurfaces({
+      railOrder: contextRailOrder,
+      planModeEnabled,
+      isVSCode: isVSCodeRuntime(),
+      screenWidth,
+      tabs,
     });
   }, [contextRailOrder, planModeEnabled, screenWidth, tabs]);
 
@@ -174,17 +282,43 @@ export const ContextPanelRail: React.FC = () => {
     >
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={surfaces.map((surface) => surface.id)} strategy={verticalListSortingStrategy}>
-          {surfaces.map((surface) => (
-            <ContextPanelRailItem
-              key={surface.id}
-              surface={surface}
-              isActive={activeMode === surface.mode}
-              showActivityDot={surface.id === 'git' && changedFilesCount > 0}
-              label={t(surface.labelKey)}
-              description={t(surface.descriptionKey)}
-              onSelect={(selected) => openContextSurface(directoryKey, selected.mode)}
-            />
-          ))}
+          {surfaces.map((surface, index) => {
+            const label = t(surface.labelKey);
+            // Git shows a numeric badge instead of the old activity dot.
+            // Other surfaces never inherit git's changed-files signal.
+            const gitChangedCount = surface.id === 'git' ? changedFilesCount : 0;
+            const badgeCount = gitChangedCount > 0 ? gitChangedCount : null;
+            return (
+              <ContextPanelRailItem
+                key={surface.id}
+                surface={surface}
+                isActive={activeMode === surface.mode}
+                showActivityDot={false}
+                label={label}
+                description={t(surface.descriptionKey)}
+                badgeCount={badgeCount}
+                badgeAriaLabel={badgeCount !== null
+                  ? t(
+                      badgeCount === 1
+                        ? 'contextRail.surface.git.changesCountAriaSingle'
+                        : 'contextRail.surface.git.changesCountAriaPlural',
+                      { label, count: badgeCount },
+                    )
+                  : null}
+                badgeDescription={badgeCount !== null
+                  ? t(
+                      badgeCount === 1
+                        ? 'contextRail.surface.git.changesCountTooltipSingle'
+                        : 'contextRail.surface.git.changesCountTooltipPlural',
+                      { count: badgeCount },
+                    )
+                  : null}
+                orderNumber={index + 1}
+                showOrderNumber={revealNumbers}
+                onSelect={(selected) => openContextSurface(directoryKey, selected.mode)}
+              />
+            );
+          })}
         </SortableContext>
       </DndContext>
     </nav>

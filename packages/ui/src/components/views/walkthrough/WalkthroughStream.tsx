@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { groupHunksByFile } from '@/lib/walkthrough/model';
 import type { WalkthroughStopView, WalkthroughView } from '@/lib/walkthrough/model';
@@ -20,8 +21,13 @@ interface WalkthroughStreamProps {
   wrapLines: boolean;
 }
 
+// Importance says where to spend attention, not what is wrong: a stop is marked
+// because it drives the rest of the change, never because something was found in
+// it. A red pill said the opposite — status colours are read as findings, and a
+// walkthrough deliberately hands out no verdicts — so the emphasis is carried by
+// weight and an outline instead, and the tooltip states the axis outright.
 const IMPORTANCE_CLASS: Record<WalkthroughStopImportance, string> = {
-  critical: 'bg-status-error/10 text-status-error',
+  critical: 'border border-[var(--interactive-border)] font-medium text-foreground',
   normal: 'bg-surface-muted text-muted-foreground',
   context: 'bg-surface-muted text-muted-foreground',
 };
@@ -41,11 +47,22 @@ const StopHeader = ({ stopView }: { stopView: WalkthroughStopView }) => {
             exactly as tall as one without: vertical padding on a smaller type
             size was pushing past the tallest element in the row. */}
         {stop.importance !== 'normal' && (
-          <span className={cn('typography-micro flex h-5 items-center rounded px-1.5 leading-none', IMPORTANCE_CLASS[stop.importance])}>
-            {stop.importance === 'critical'
-              ? t('walkthrough.importance.critical')
-              : t('walkthrough.importance.context')}
-          </span>
+          <Tooltip>
+            <TooltipTrigger
+              className={cn('typography-micro flex h-5 items-center rounded px-1.5 leading-none', IMPORTANCE_CLASS[stop.importance])}
+            >
+              {stop.importance === 'critical'
+                ? t('walkthrough.importance.critical')
+                : t('walkthrough.importance.context')}
+            </TooltipTrigger>
+            <TooltipContent className="max-w-64">
+              <p className="typography-micro leading-tight">
+                {stop.importance === 'critical'
+                  ? t('walkthrough.importance.criticalHint')
+                  : t('walkthrough.importance.contextHint')}
+              </p>
+            </TooltipContent>
+          </Tooltip>
         )}
       </div>
       <p className="typography-body text-muted-foreground">{stop.prose}</p>

@@ -11,6 +11,20 @@ Es erklärt und ordnet. Es bewertet Ihren Code nicht und fällt kein Urteil — 
 
 Öffnen Sie es über das **Walkthrough**-Symbol in der rechten Leiste oder über die Schaltfläche **AI walkthrough** in den Bereichen Changes und Pull Request. Beides öffnet nur das Panel; generiert wird erst, wenn Sie **Generate walkthrough** drücken.
 
+## Wie ein Stop markiert ist
+
+Jeder Stop benennt sein Thema, erklärt es in ein bis zwei Sätzen und zeigt danach genau den Code, den er beschreibt. Manche Stops tragen eine kleine Markierung neben dem Titel:
+
+| Markierung | Bedeutung |
+| --- | --- |
+| **Kernänderung** | Dieser Stop trägt die eigentliche Änderung oder den größten Teil ihres Risikos. Lesen Sie ihn genau und zuerst. |
+| **Kontext** | Eine unterstützende Änderung, damit der Rest verständlich bleibt. Kann überflogen werden. |
+| *(ohne Markierung)* | Ein gewöhnlicher Schritt in der Lesereihenfolge. |
+
+Die Markierung sagt, **wo Sie Ihre Aufmerksamkeit investieren sollten**, und nichts über die Qualität des Codes. Ein Stop wird nie markiert, weil darin etwas Falsches gefunden wurde — das Walkthrough meldet keine Funde, keine Schweregrade und keine Urteile. Wenn Code bewertet werden soll, ist das die Aktion **Review** in [Git & GitHub](/git/).
+
+Die einzigen Markierungen, die tatsächlich auf ein Problem hinweisen, sind **Veraltet** und **Nicht abgedeckt** — und beide betreffen das Veralten des Walkthroughs selbst, nicht Ihren Code. Siehe unten.
+
 ## Was es prüfen kann
 
 | Bereich | Was enthalten ist |

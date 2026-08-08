@@ -29,6 +29,20 @@ describe('useFilesViewTabsStore', () => {
     expect(useFilesViewTabsStore.getState().byRoot[root]?.expandedPaths).toEqual(['/repo/src']);
   });
 
+  test('rejects realpath children of workspace symlinks (issue 2627)', () => {
+    const root = '/workspace';
+    const store = useFilesViewTabsStore.getState();
+
+    store.toggleExpandedPath(root, '/workspace/pkg');
+    store.toggleExpandedPath(root, '/real/pkg/src');
+    store.toggleExpandedPath(root, '/workspace/pkg/src');
+
+    expect(useFilesViewTabsStore.getState().byRoot[root]?.expandedPaths).toEqual([
+      '/workspace/pkg',
+      '/workspace/pkg/src',
+    ]);
+  });
+
   test('removes stale expanded paths by prefix without closing files', () => {
     const root = '/repo';
     const store = useFilesViewTabsStore.getState();

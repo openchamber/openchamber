@@ -4,6 +4,10 @@ import type {
   FileSearchResult,
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
+import {
+  FilesystemError,
+  parseFilesystemErrorReason,
+} from '@openchamber/ui/lib/api/files-errors';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
@@ -28,12 +32,16 @@ type WebDirectoryListResponse = {
 };
 
 const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryListResponse): DirectoryListResult => {
+  if (!payload || !Array.isArray(payload.entries)) {
+    throw new FilesystemError('Directory listing returned an invalid response', {
+      reason: 'invalid-response',
+    });
+  }
   const directory = normalizePath(payload?.directory || payload?.path || fallbackDirectory);
-  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
 
   return {
     directory,
-    entries: entries
+    entries: payload.entries
       .filter((entry): entry is Required<Pick<WebDirectoryEntry, 'name' | 'path'>> & { isDirectory?: boolean } =>
         Boolean(entry && typeof entry.name === 'string' && typeof entry.path === 'string')
       )
@@ -67,8 +75,17 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error((error as { error?: string }).error || 'Failed to list directory');
+      const error = await response.json().catch(() => ({ error: response.statusText })) as {
+        error?: string;
+        reason?: unknown;
+      };
+      throw new FilesystemError(
+        error.error || 'Failed to list directory',
+        {
+          reason: parseFilesystemErrorReason(error.reason),
+          status: response.status,
+        },
+      );
     }
 
     const result = (await response.json()) as WebDirectoryListResponse;

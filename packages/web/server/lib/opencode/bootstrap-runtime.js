@@ -19,6 +19,8 @@ export const createBootstrapRuntime = (dependencies) => {
       serverStartedAt,
       gracefulShutdown,
       getHealthSnapshot,
+      getServerPort,
+      getTunnelUrl,
       verboseRequestLogs,
       uiPassword,
       tunnelAuthController,
@@ -81,6 +83,8 @@ export const createBootstrapRuntime = (dependencies) => {
       gracefulShutdown,
       getHealthSnapshot,
       getServerId,
+      getServerPort,
+      getTunnelUrl,
       tunnelAuthController,
       uiAuthController,
     });

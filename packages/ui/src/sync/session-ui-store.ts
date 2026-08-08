@@ -30,6 +30,7 @@ import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { normalizePath } from "@/lib/pathNormalization"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
+import { findLatestUserModelChoice } from "@/lib/messages/userModelChoice"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
@@ -55,6 +56,8 @@ import {
   deleteSessions as deleteSessionsAction,
   archiveSession as archiveSessionAction,
   archiveSessions as archiveSessionsAction,
+  unarchiveSession as unarchiveSessionAction,
+  unarchiveSessions as unarchiveSessionsAction,
   updateSessionTitle as updateSessionTitleAction,
   shareSession as shareSessionAction,
   unshareSession as unshareSessionAction,
@@ -67,6 +70,7 @@ import {
   type ArchiveSessionsOptions,
   type DeleteSessionOptions,
   type DeleteSessionsOptions,
+  type UnarchiveSessionsOptions,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
@@ -118,6 +122,7 @@ export function expandSlashCommandGoalObjective(content: string, commands: GoalC
 // ---------------------------------------------------------------------------
 
 export function routeMessage(params: {
+  runtimeKey?: string
   sessionId: string
   directory?: string | null
   content: string
@@ -134,6 +139,7 @@ export function routeMessage(params: {
   const requestDirectory = params.directory ?? undefined
   if (params.inputMode === "shell") {
     return opencodeClient.shellSession({
+      runtimeKey: params.runtimeKey,
       sessionId: params.sessionId,
       directory: requestDirectory,
       agent: params.agent ?? "",
@@ -162,6 +168,7 @@ export function routeMessage(params: {
 
     if (isCommand) {
       return optimisticSend({
+        runtimeKey: params.runtimeKey,
         sessionId: params.sessionId,
         content: params.content,
         providerID: params.providerID,
@@ -170,6 +177,7 @@ export function routeMessage(params: {
         directory: requestDirectory,
         files: params.files,
         send: (messageID) => opencodeClient.sendCommand({
+          runtimeKey: params.runtimeKey,
           id: params.sessionId,
           providerID: params.providerID,
           modelID: params.modelID,
@@ -187,6 +195,7 @@ export function routeMessage(params: {
 
   // Normal prompt — optimistic insert so message appears instantly
   return optimisticSend({
+    runtimeKey: params.runtimeKey,
     sessionId: params.sessionId,
     content: params.content,
     providerID: params.providerID,
@@ -195,6 +204,7 @@ export function routeMessage(params: {
     directory: requestDirectory,
     files: params.files,
     send: (messageID) => opencodeClient.sendMessage({
+      runtimeKey: params.runtimeKey,
       id: params.sessionId,
       providerID: params.providerID,
       modelID: params.modelID,
@@ -211,7 +221,14 @@ export function routeMessage(params: {
   })
 }
 
+type CapturedSendTarget = {
+  runtimeKey: string
+  sessionId: string
+  directory: string
+}
+
 type SendMessageOptions = {
+  target?: CapturedSendTarget
   sessionId?: string
   directory?: string
   delivery?: 'steer'
@@ -335,6 +352,8 @@ export type SessionUIState = {
   deleteSessions: (ids: string[], options?: DeleteSessionsOptions) => Promise<{ deletedIds: string[]; failedIds: string[] }>
   archiveSession: (id: string) => Promise<boolean>
   archiveSessions: (ids: string[], options?: ArchiveSessionsOptions) => Promise<{ archivedIds: string[]; failedIds: string[] }>
+  unarchiveSession: (id: string) => Promise<boolean>
+  unarchiveSessions: (ids: string[], options?: UnarchiveSessionsOptions) => Promise<{ restoredIds: string[]; failedIds: string[] }>
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>
   shareSession: (sessionId: string) => Promise<Session | null>
   unshareSession: (sessionId: string) => Promise<Session | null>
@@ -1192,8 +1211,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     inputMode?: "normal" | "shell",
     options?: SendMessageOptions,
   ) => {
+    const capturedTarget = options?.target
+    if (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey()) {
+      throw new Error("Message was not sent because the runtime changed.")
+    }
+
     // Clear non-Git changed-files bar on new user message for current session
-    const sid = options?.sessionId ?? get().currentSessionId;
+    const sid = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId;
     if (sid) {
       const map = new Map(get().pendingChangesBarDismissed);
       map.delete(sid);
@@ -1252,7 +1276,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     // ---- New session from draft ----
-    if (!options?.sessionId && draft?.open) {
+    if (!capturedTarget && !options?.sessionId && draft?.open) {
       const createdDraftSession = await materializeOpenDraftSession({
         providerID,
         modelID,
@@ -1304,7 +1328,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     // ---- Existing session ----
-    const targetSessionId = options?.sessionId ?? get().currentSessionId
+    const targetSessionId = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
     const sessionAgentSelection = targetSessionId
       ? useSelectionStore.getState().getSessionAgentSelection(targetSessionId)
       : null
@@ -1339,7 +1363,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     const currentSessionDirectory = targetSessionId
-      ? normalizePath(options?.directory ?? get().getDirectoryForSession(targetSessionId))
+      ? normalizePath(capturedTarget?.directory ?? options?.directory ?? get().getDirectoryForSession(targetSessionId))
       : null
     if (targetSessionId) {
       notifyMessageSent(targetSessionId)
@@ -1360,6 +1384,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       await applyArmedGoal(targetSessionId, currentSessionDirectory)
     }
     await routeMessage({
+      runtimeKey: capturedTarget?.runtimeKey,
       sessionId: targetSessionId || "",
       directory: currentSessionDirectory,
       content,
@@ -1422,6 +1447,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   archiveSession: (id) => archiveSessionAction(id),
 
   archiveSessions: (ids, options) => archiveSessionsAction(ids, options),
+
+  unarchiveSession: (id) => unarchiveSessionAction(id),
+
+  unarchiveSessions: (ids, options) => unarchiveSessionsAction(ids, options),
 
   // ---------------------------------------------------------------------------
   // updateSessionTitle — calls SDK, SSE event updates child store
@@ -1704,33 +1733,19 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   getLastUserChoice: (sessionId) => {
     const directory = get().getDirectoryForSession(sessionId) ?? undefined
     const messages = getSyncMessages(sessionId, directory)
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const message = messages[i] as Message & {
-        model?: { providerID?: string; modelID?: string; variant?: string }
-        variant?: string
-        mode?: string
-      }
-      if (message.role !== "user") {
-        continue
-      }
-
-      const providerID = typeof message.model?.providerID === "string" && message.model.providerID.trim().length > 0
-        ? message.model.providerID
-        : undefined
-      const modelID = typeof message.model?.modelID === "string" && message.model.modelID.trim().length > 0
-        ? message.model.modelID
-        : undefined
-      const agent = typeof message.agent === "string" && message.agent.trim().length > 0
-        ? message.agent
-        : (typeof message.mode === "string" && message.mode.trim().length > 0 ? message.mode : undefined)
-      const variantCandidate = message.model?.variant ?? message.variant
-      const variant = typeof variantCandidate === "string" && variantCandidate.trim().length > 0
-        ? variantCandidate
-        : undefined
-
-      return { agent, providerID, modelID, variant }
+    const choice = findLatestUserModelChoice(
+      messages,
+      (messageId) => getSyncParts(messageId, directory),
+    )
+    if (!choice) {
+      return null
     }
-    return null
+    return {
+      agent: choice.agent,
+      providerID: choice.providerID,
+      modelID: choice.modelID,
+      variant: choice.variant,
+    }
   },
 
   getCurrentAgent: (sessionId) => {

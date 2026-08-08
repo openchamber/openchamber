@@ -70,6 +70,12 @@ export function createMessageStreamWsRuntime({
     noServer: true,
   });
 
+  // Directory-scoped streams create one upstream reader per client
+  // connection. Track those sockets so a managed OpenCode restart can close
+  // them: each reader is pinned to the port it connected at and would
+  // otherwise keep streaming from an orphaned process on the old port (#2638).
+  const directorySockets = new Set();
+
   const ownsGlobalHub = !globalEventHub;
   const globalHub = globalEventHub ?? createGlobalMessageStreamHub({
     buildOpenCodeUrl,
@@ -102,6 +108,11 @@ export function createMessageStreamWsRuntime({
       });
       return;
     }
+
+    directorySockets.add(socket);
+    socket.on('close', () => {
+      directorySockets.delete(socket);
+    });
 
     acceptDirectoryMessageStreamWsConnection({
       socket,
@@ -156,6 +167,27 @@ export function createMessageStreamWsRuntime({
 
   return {
     wsServer,
+    /**
+     * Rebind all upstream readers to the current OpenCode port. Called after
+     * a managed process restart: the restart can land on a NEW port while
+     * the old process (or an orphaned survivor of it) still holds the
+     * previous one, and a healthy-but-pinned SSE connection never notices —
+     * so the UI would stop receiving events until the app restarts (#2638).
+     * Restarting the shared hub re-dials `buildOpenCodeUrl` (which reads the
+     * current port) on its next attempt; directory-scoped readers are
+     * rebuilt by closing their client sockets, which reconnect with
+     * `Last-Event-ID` and re-establish the stream against the new port.
+     */
+    rebindUpstream() {
+      globalHub.stop();
+      globalHub.start();
+      for (const socket of Array.from(directorySockets)) {
+        try {
+          socket.close(1012, 'OpenCode upstream restarted');
+        } catch {
+        }
+      }
+    },
     async close() {
       server.off('upgrade', upgradeHandler);
       globalBridge.close();
