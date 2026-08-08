@@ -97,7 +97,12 @@ type Args = { directory: string | null; isMobile: boolean; isVSCode: boolean };
 const renderVisibility = (args: Args, rowWidth: number) => {
   const dom = installMinimalDom();
   const root: Root = createRoot(dom.container);
-  const rowNode = { getBoundingClientRect: () => ({ width: rowWidth }) } as unknown as HTMLDivElement;
+  // `closest` returns null here, so the hook falls back to the row itself —
+  // the fallback path is what these cases exercise.
+  const rowNode = {
+    getBoundingClientRect: () => ({ width: rowWidth }),
+    closest: () => null,
+  } as unknown as HTMLDivElement;
   const result = { visible: false };
 
   const Probe: React.FC = () => {
@@ -152,10 +157,46 @@ describe('useWorkStatusVisibility', () => {
     teardown();
   });
 
-  test('measures the row element itself, never the chat column', () => {
-    // The row holds both columns, so its width does not depend on whether the
-    // panel is showing. Measuring anything narrower would let hiding the panel
-    // widen the measured element and re-show it, oscillating forever.
+  test('prefers the marked chat area over the row it was handed', () => {
+    // The row is what the context panel squeezes, over an animation. Measuring
+    // it made the panel reappear only once that number caught up, so the chat
+    // widened first and narrowed again afterwards.
+    const dom = installMinimalDom();
+    const root: Root = createRoot(dom.container);
+    const chatArea = { getBoundingClientRect: () => ({ width: REQUIRED }) };
+    const rowNode = {
+      getBoundingClientRect: () => ({ width: 0 }),
+      closest: () => chatArea,
+    } as unknown as HTMLDivElement;
+    const result = { visible: false };
+
+    const Probe: React.FC = () => {
+      const { rowRef, visible } = useWorkStatusVisibility({
+        directory: '/repo',
+        isMobile: false,
+        isVSCode: false,
+      });
+      result.visible = visible;
+      React.useLayoutEffect(() => {
+        rowRef(rowNode);
+        return () => rowRef(null);
+      }, [rowRef]);
+      return null;
+    };
+
+    act(() => { root.render(React.createElement(Probe)); });
+    expect(observed).toEqual([chatArea]);
+    expect(result.visible).toBe(true);
+
+    act(() => { root.unmount(); });
+    dom.restore();
+  });
+
+  test('measures a container the panel cannot resize, never the chat column', () => {
+    // The measured element must not depend on whether the panel is showing:
+    // otherwise hiding the panel widens it and re-shows the panel, forever.
+    // In the app this is the chat area (chat + context panel); here `closest`
+    // finds nothing, so the hook falls back to the row it was given.
     const { rowNode, teardown } = renderVisibility(
       { directory: '/repo', isMobile: false, isVSCode: false },
       REQUIRED,
@@ -178,16 +219,19 @@ describe('useWorkStatusVisibility', () => {
     teardown();
   });
 
-  test('yields to an open context panel and stops measuring', () => {
+  test('yields to an open context panel while still measuring the row', () => {
+    // Measurement continues so the panel can come back in the same commit that
+    // reveals it. Stopping cost a frame: closing the context panel widened the
+    // chat, and only then did the panel reappear and narrow it again.
     panelByDirectory = {
       '/repo': { isOpen: true, tabs: [{ id: 'tab-1', mode: 'git' }], activeTabId: 'tab-1' },
     };
-    const { result, teardown } = renderVisibility(
+    const { result, rowNode, teardown } = renderVisibility(
       { directory: '/repo', isMobile: false, isVSCode: false },
       REQUIRED,
     );
     expect(result.visible).toBe(false);
-    expect(observed).toHaveLength(0);
+    expect(observed).toEqual([rowNode]);
     teardown();
   });
 
@@ -209,7 +253,10 @@ describe('useWorkStatusVisibility', () => {
     // context panel. The panel must appear as soon as the row exists.
     const dom = installMinimalDom();
     const root: Root = createRoot(dom.container);
-    const rowNode = { getBoundingClientRect: () => ({ width: REQUIRED }) } as unknown as HTMLDivElement;
+    const rowNode = {
+      getBoundingClientRect: () => ({ width: REQUIRED }),
+      closest: () => null,
+    } as unknown as HTMLDivElement;
     const result = { visible: false };
     let attach: (value: boolean) => void = () => undefined;
 
@@ -238,14 +285,13 @@ describe('useWorkStatusVisibility', () => {
     dom.restore();
   });
 
-  test('stays hidden and stops measuring when the user switched the panel off', () => {
+  test('stays hidden when the user switched the panel off', () => {
     panelEnabled = false;
     const { result, teardown } = renderVisibility(
       { directory: '/repo', isMobile: false, isVSCode: false },
       REQUIRED * 2,
     );
     expect(result.visible).toBe(false);
-    expect(observed).toHaveLength(0);
     teardown();
   });
 

@@ -708,9 +708,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     // Shown on a new-session draft too: the repository readouts apply before
     // the session exists, and that is exactly when branch and working-tree
     // state inform what to ask for.
-    const showWorkStatusPanel = workStatusFits
+    // Surfaces that never host the panel skip it entirely; the rest keep it
+    // mounted so its visibility can animate rather than snap.
+    const workStatusPanelMountable = !isMobile
+        && !isVSCode
         && chatSurfaceMode !== 'mini-chat'
         && !isDesktopExpandedInput;
+    const showWorkStatusPanel = workStatusPanelMountable && workStatusFits;
 
     // Published so the header can drop the readouts the panel already carries.
     // Cleared on unmount: a chat that goes away is not showing anything.
@@ -1242,8 +1246,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
                 onLoadEarlier={handleLoadOlderClick}
             />
         </div>
-        {showWorkStatusPanel ? (
+        {/* Kept mounted while it could ever show, so it can animate its own
+            collapse; `visible` drives that. Unmounting on the spot is what made
+            the chat jump wide before easing narrow again. */}
+        {workStatusPanelMountable ? (
             <WorkStatusPanel
+                visible={showWorkStatusPanel}
                 sessionId={currentSessionId ?? null}
                 directory={effectiveSessionDirectory ?? null}
             />

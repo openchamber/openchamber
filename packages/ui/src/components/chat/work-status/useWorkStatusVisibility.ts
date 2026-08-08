@@ -79,24 +79,31 @@ export const useWorkStatusVisibility = ({ directory, isMobile, isVSCode }: Optio
 
   const measurementEnabled = panelEnabled && !isMobile && !isVSCode && !contextPanelOpen;
 
+  // Measures the chat AREA — the container holding the chat and the context
+  // panel together — not the chat row inside it.
+  //
+  // The row is what the context panel squeezes, and it squeezes it over a
+  // 200ms animation. Measuring the row therefore reported a width that was
+  // still catching up while the context panel collapsed, so this panel only
+  // reappeared once that number crossed the threshold: the chat widened first
+  // and narrowed again afterwards. The chat area's width does not move when
+  // the context panel opens, so the reading is correct the instant it closes.
+  //
+  // It is also the stable input the oscillation argument needs: this panel's
+  // own visibility cannot change the width being measured.
   React.useEffect(() => {
-    if (!measurementEnabled || !rowNode) {
-      // Drop the stale measurement so a re-enabled panel waits for a fresh one
-      // instead of flashing at the previous layout's width.
-      setRowWidth(null);
-      return undefined;
-    }
-    if (typeof ResizeObserver === 'undefined') return undefined;
+    if (!rowNode || typeof ResizeObserver === 'undefined') return undefined;
 
-    setRowWidth(rowNode.getBoundingClientRect().width);
+    const measured = rowNode.closest<HTMLElement>('[data-chat-area]') ?? rowNode;
+    setRowWidth(measured.getBoundingClientRect().width);
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
       setRowWidth(entry.contentRect.width);
     });
-    observer.observe(rowNode);
+    observer.observe(measured);
     return () => observer.disconnect();
-  }, [measurementEnabled, rowNode]);
+  }, [rowNode]);
 
   const visible = measurementEnabled && rowWidth !== null && rowWidth >= WORK_STATUS_REQUIRED_ROW_WIDTH;
 

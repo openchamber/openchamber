@@ -20,7 +20,21 @@ type Props = {
   /** Null on a new-session draft: repository readouts still apply. */
   sessionId: string | null;
   directory: string | null;
+  /** Whether the panel should currently occupy space. */
+  visible: boolean;
 };
+
+/**
+ * Matches the context panel's own width animation exactly.
+ *
+ * The two are siblings of the transcript, and opening the context panel hides
+ * this one. With an instant unmount the chat first jumped wider (this panel
+ * gone) and then eased narrower (the context panel expanding) — two opposite
+ * width changes in a row, which reads as a flutter. Collapsing on the same
+ * curve and duration makes the chat's width move once, in one direction.
+ */
+const PANEL_TRANSITION_MS = 200;
+const PANEL_TRANSITION_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 /**
  * Work-status panel: a card inside the chat column reporting the state of the
@@ -38,12 +52,12 @@ type Props = {
  * eat a visible slice of every row's trailing value, and the shadows already
  * say there is more to see.
  */
-export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory }) => {
+export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible }) => {
   const { t } = useI18n();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
   const hiddenSections = useUIStore((state) => state.workStatusHiddenSections);
   const [sectionsDialogOpen, setSectionsDialogOpen] = React.useState(false);
-  const visible = React.useCallback(
+  const sectionVisible = React.useCallback(
     (sectionId: Parameters<typeof isWorkStatusSectionVisible>[1]) =>
       isWorkStatusSectionVisible(hiddenSections, sectionId),
     [hiddenSections],
@@ -54,6 +68,19 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory }) => {
   // the panel unmounts whenever the context panel opens. Reading the stored
   // value through a ref keeps this a mount-time restore rather than a
   // subscription that would fight the user mid-scroll.
+  // Content is dropped only after the collapse finishes, so the card animates
+  // out with something in it rather than emptying first, and its subscriptions
+  // stop once it is truly gone.
+  const [contentMounted, setContentMounted] = React.useState(visible);
+  React.useEffect(() => {
+    if (visible) {
+      setContentMounted(true);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setContentMounted(false), PANEL_TRANSITION_MS);
+    return () => window.clearTimeout(timer);
+  }, [visible]);
+
   const restore = React.useCallback((node: HTMLElement | null) => {
     if (!node) return;
     const stored = useUIStore.getState().workStatusScrollTop;
@@ -78,20 +105,33 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory }) => {
   return (
     <aside
       aria-label={t('chat.workStatus.ariaLabel')}
+      aria-hidden={!visible}
       className={cn(
         // `self-start` keeps the card at content height instead of stretching
         // to the row; `max-h` then caps it so a long panel scrolls rather than
         // overflowing the chat.
         // A left margin as well as a right one: flush against the transcript
         // the card's own shadow had no room and was clipped down that edge.
-        'relative my-4 ml-2 mr-4 flex shrink-0 flex-col self-start overflow-hidden',
+        'relative my-4 flex shrink-0 flex-col self-start overflow-hidden',
         'max-h-[calc(100%-2rem)]',
+        visible ? 'ml-2 mr-4' : 'ml-0 mr-0',
+        'motion-reduce:transition-none',
         'rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-muted)]/40',
         // A lighter version of the composer's lift: the same shape, but this
         // card is taller, so the composer's spread reads as heavy here.
         'shadow-[0_2px_8px_-3px_rgb(0_0_0_/_0.08)]',
       )}
-      style={{ width: WORK_STATUS_PANEL_WIDTH }}
+      style={{
+        width: visible ? WORK_STATUS_PANEL_WIDTH : 0,
+        opacity: visible ? 1 : 0,
+        // Leaves to the right and arrives from it, so the card reads as sliding
+        // out past the window edge rather than dissolving in place.
+        transform: visible ? 'translateX(0)' : `translateX(${WORK_STATUS_PANEL_WIDTH / 4}px)`,
+        transitionProperty: 'width, opacity, transform, margin',
+        transitionDuration: `${PANEL_TRANSITION_MS}ms`,
+        transitionTimingFunction: PANEL_TRANSITION_EASING,
+        pointerEvents: visible ? undefined : 'none',
+      }}
     >
       {/* Overlaid rather than placed in flow: the panel has no header of its
           own, and giving it one would cost a row of height on every session. */}
@@ -104,6 +144,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory }) => {
         <Icon name="equalizer-2" className="size-4" />
       </button>
 
+      {contentMounted ? (
       <ScrollShadow
         ref={restore}
         onScroll={handleScroll}
@@ -113,17 +154,18 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory }) => {
         <WorkStatusPrimaryGroup
           sessionId={sessionId}
           directory={directory}
-          showSession={visible('session')}
-          showRepository={visible('repository')}
+          showSession={sectionVisible('session')}
+          showRepository={sectionVisible('repository')}
           goalRow={<WorkStatusGoalRow sessionId={sessionId} directory={directory} />}
         />
-        {visible('usage') ? <WorkStatusUsageSection /> : null}
-        {visible('subagents') ? <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} /> : null}
-        {visible('tasks') ? <WorkStatusTasksSection sessionId={sessionId} directory={directory} /> : null}
-        {visible('mcp') ? <WorkStatusMcpSection directory={directory} /> : null}
-        {visible('pinned') ? <WorkStatusPinnedSection sessionId={sessionId} directory={directory} /> : null}
-        {visible('contextSources') ? <WorkStatusContextSection sessionId={sessionId} directory={directory} /> : null}
+        {sectionVisible('usage') ? <WorkStatusUsageSection /> : null}
+        {sectionVisible('subagents') ? <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} /> : null}
+        {sectionVisible('tasks') ? <WorkStatusTasksSection sessionId={sessionId} directory={directory} /> : null}
+        {sectionVisible('mcp') ? <WorkStatusMcpSection directory={directory} /> : null}
+        {sectionVisible('pinned') ? <WorkStatusPinnedSection sessionId={sessionId} directory={directory} /> : null}
+        {sectionVisible('contextSources') ? <WorkStatusContextSection sessionId={sessionId} directory={directory} /> : null}
       </ScrollShadow>
+      ) : null}
 
       <WorkStatusSectionsDialog open={sectionsDialogOpen} onOpenChange={setSectionsDialogOpen} />
     </aside>
