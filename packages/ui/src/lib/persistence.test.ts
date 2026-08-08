@@ -367,7 +367,7 @@ describe('updateDesktopSettings', () => {
     }));
     await syncDesktopSettings();
 
-    expect(useUIStore.getState().showReasoningTraces).toBe(false);
+    expect(useUIStore.getState().reasoningMode).toBe('off');
     expect(useUIStore.getState().terminalShell).toBe('fish');
     expect(useUIStore.getState().favoriteModels).toHaveLength(1);
     expect(useUIStore.getState().globalDraftStarters).toEqual([{ type: 'command', name: 'runtime-a' }]);
@@ -381,7 +381,7 @@ describe('updateDesktopSettings', () => {
     }));
     await syncDesktopSettings();
 
-    expect(useUIStore.getState().showReasoningTraces).toBe(true);
+    expect(useUIStore.getState().reasoningMode).toBe('collapsible-dynamic');
     expect(useUIStore.getState().terminalShell).toBe('auto');
     expect(useUIStore.getState().favoriteModels).toEqual([]);
     expect(useUIStore.getState().globalDraftStarters).toBeNull();
@@ -397,7 +397,7 @@ describe('updateDesktopSettings', () => {
 
     await updateDesktopSettings({ showReasoningTraces: false });
 
-    expect(useUIStore.getState().showReasoningTraces).toBe(false);
+    expect(useUIStore.getState().reasoningMode).toBe('off');
     expect(useUIStore.getState().terminalShell).toBe('fish');
     expect(localStorage.getItem('selectedThemeId')).toBe('existing-theme');
   });
