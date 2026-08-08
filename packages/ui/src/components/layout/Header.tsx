@@ -67,6 +67,7 @@ import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitc
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
+import { ConnectionStatusIndicator } from '@/components/layout/ConnectionStatusIndicator';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
@@ -2414,6 +2415,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex-1" />
 
         <div className="flex shrink-0 items-center gap-1">
+          <ConnectionStatusIndicator />
           {showDesktopHeaderContextUsage && stableDesktopContextUsage ? (
             <ContextUsageDisplay
               totalTokens={stableDesktopContextUsage.totalTokens}
@@ -2552,6 +2554,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            <ConnectionStatusIndicator className="h-9 w-9" />
             {projectActionsContext && (
               <ProjectActionsButton
                 projectRef={projectActionsContext.projectRef}
