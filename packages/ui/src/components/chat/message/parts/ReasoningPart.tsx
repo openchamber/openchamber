@@ -452,8 +452,12 @@ const ReasoningPart = React.memo(({
     const rawText = partWithText.text || partWithText.content || '';
     const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
     const time = partWithText.time;
-    const canBeStreaming = streamPhase === undefined || streamPhase !== 'completed';
-    const isStreaming = chatRenderMode === 'live' && canBeStreaming && typeof time?.end !== 'number';
+    // Live activity derives from the live stream phase, never from the absence
+    // of persisted timing data: cached parts may lack `time.end` even though
+    // the message finished long ago (issue #2020). A part that has ended is
+    // never streaming, even while the rest of the message still streams.
+    const isLiveStreamPhase = streamPhase === 'streaming' || streamPhase === 'cooldown';
+    const isStreaming = chatRenderMode === 'live' && isLiveStreamPhase && typeof time?.end !== 'number';
     const throttledText = useStreamingTextThrottle({
         text: textContent,
         isStreaming,
