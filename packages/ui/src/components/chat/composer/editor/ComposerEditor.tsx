@@ -342,6 +342,14 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
         React.useEffect(() => {
             const view = viewRef.current;
             if (!view) return;
+            // IME composition guard: while the browser is composing, the
+            // uncommitted text lives in the DOM, not in the document. A
+            // wholesale writeback dispatch mid-composition would replace the
+            // document out from under the IME session and jump the caret.
+            // The composition commits through CodeMirror's own pipeline and
+            // reports via onChange, so the guard only defers the rewrite —
+            // no manual sync is needed after the composition ends.
+            if (view.compositionStarted) return;
             const current = view.state.doc.toString();
             if (current === value) return;
             view.dispatch({
