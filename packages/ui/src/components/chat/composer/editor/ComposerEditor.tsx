@@ -287,6 +287,18 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                             paste: (event) => { handlersRef.current.onPaste?.(event); return false; },
                         }),
                         EditorView.contentAttributes.of({
+                            // Without an explicit hint the action key is the
+                            // IME's own guess at what a contenteditable wants,
+                            // and Android IMEs (like iOS WKWebView) tend to
+                            // answer "Send" for a chat-shaped box — while a
+                            // bare Enter here inserts a newline on mobile
+                            // (ChatInput's keydown policy leaves it to the
+                            // browser; sending is the send button's job). The
+                            // "enter" hint keeps the keycap honest: it reads
+                            // as a newline/return key, which is what the press
+                            // actually does. Virtual keyboards only, so
+                            // desktop behavior is untouched.
+                            enterkeyhint: 'enter',
                             spellcheck: String(handlersRef.current.spellCheck ?? false),
                             autocorrect: handlersRef.current.autoCorrect ? 'on' : 'off',
                             autocapitalize: handlersRef.current.autoCapitalize ?? 'none',
