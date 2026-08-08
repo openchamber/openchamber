@@ -86,6 +86,7 @@ import { createNotificationEmitterRuntime } from './lib/notifications/emitter-ru
 import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js';
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
+import { createMessengersRuntime } from './lib/notifications/messengers-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
@@ -424,6 +425,16 @@ const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...ar
 const removeApnsToken = (...args) => apnsRuntime.removeApnsToken(...args);
 const sendApnsToAllUiSessions = (...args) => apnsRuntime.sendApnsToAllUiSessions(...args);
 
+const messengersRuntime = createMessengersRuntime({
+  readSettingsFromDiskMigrated,
+  writeSettingsToDisk,
+});
+
+const getMessengerSettingsPublic = (...args) => messengersRuntime.getMessengerSettingsPublic(...args);
+const updateMessengerSettings = (...args) => messengersRuntime.updateMessengerSettings(...args);
+const sendMessengerNotification = (...args) => messengersRuntime.sendMessengerNotification(...args);
+const sendMessengerTest = (...args) => messengersRuntime.sendMessengerTest(...args);
+
 const TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW = 128;
 const TERMINAL_INPUT_WS_REBIND_WINDOW_MS = 60 * 1000;
 const TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
@@ -718,6 +729,7 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   broadcastUiNotification,
   sendPushToAllUiSessions,
   sendApnsToAllUiSessions,
+  sendMessengerNotification,
   isAnyInteractiveClientVisible,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -1598,6 +1610,9 @@ async function main(options = {}) {
     fetchFreeZenModels,
     getCachedZenModels,
     setAutoAcceptSession,
+    getMessengerSettingsPublic,
+    updateMessengerSettings,
+    sendMessengerTest,
     agentToolRuntime,
   });
   uiAuthController = bootstrapResult.uiAuthController;

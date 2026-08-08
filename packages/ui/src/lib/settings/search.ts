@@ -927,6 +927,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['completion', 'subtasks', 'errors', 'questions'],
   },
   {
+    id: 'notifications.messengers',
+    page: 'notifications',
+    titleKey: 'settings.notifications.page.messengers.title',
+    keywords: ['slack', 'discord', 'webhook', 'messenger', 'channel', 'chat'],
+  },
+  {
     id: 'notifications.push',
     page: 'notifications',
     titleKey: 'settings.notifications.page.push.title',

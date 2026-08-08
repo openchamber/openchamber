@@ -52,6 +52,9 @@ export const registerNotificationRoutes = (app, dependencies) => {
     markUserMessageSent,
     setPushInitialized,
     setAutoAcceptSession,
+    getMessengerSettingsPublic,
+    updateMessengerSettings,
+    sendMessengerTest,
   } = dependencies;
 
   const ensureSessionWatcher = async () => {
@@ -392,6 +395,47 @@ export const registerNotificationRoutes = (app, dependencies) => {
       sessionId,
       messageSent: true,
     });
+  });
+
+  // Messenger (Slack/Discord) webhook notification settings. Webhook URLs are
+  // write-only: responses expose only enabled + webhookConfigured flags.
+  app.get('/api/notifications/messengers', async (_req, res) => {
+    try {
+      res.json(await getMessengerSettingsPublic());
+    } catch (error) {
+      console.warn('[Messengers] settings read failed:', error?.message ?? error);
+      res.status(500).json({ error: 'Failed to load messenger settings' });
+    }
+  });
+
+  app.put('/api/notifications/messengers', async (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    try {
+      res.json(await updateMessengerSettings(body));
+    } catch (error) {
+      if (error?.code === 'invalid-webhook-url') {
+        return res.status(400).json({ error: error.message, code: error.code });
+      }
+      console.warn('[Messengers] settings update failed:', error?.message ?? error);
+      return res.status(500).json({ error: 'Failed to update messenger settings' });
+    }
+  });
+
+  app.post('/api/notifications/messengers/test', async (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const provider = typeof body.provider === 'string' ? body.provider : '';
+    const webhookUrl = typeof body.webhookUrl === 'string' ? body.webhookUrl : undefined;
+    try {
+      const result = await sendMessengerTest({ provider, webhookUrl });
+      if (result.ok) {
+        return res.json({ ok: true });
+      }
+      const status = result.error === 'delivery-failed' ? 502 : 400;
+      return res.status(status).json({ ok: false, error: result.error });
+    } catch (error) {
+      console.warn('[Messengers] test send failed:', error?.message ?? error);
+      return res.status(500).json({ ok: false, error: 'test-failed' });
+    }
   });
 
   // Mirror client-side Permission Auto-Accept state to the server so it can

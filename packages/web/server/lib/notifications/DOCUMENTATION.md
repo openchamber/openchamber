@@ -8,6 +8,8 @@ This module provides notification message preparation utilities for the web serv
 - `packages/web/server/lib/notifications/routes.js`: route registration for push, visibility, and session status/attention endpoints.
 - `packages/web/server/lib/notifications/push-runtime.js`: push subscription persistence, VAPID initialization, and UI visibility runtime.
 - `packages/web/server/lib/notifications/apns-runtime.js`: native iOS APNs device-token persistence + delivery. Two modes: **relay** (default — sign + POST tokens + generic text to the central Cloudflare relay `https://api.openchamber.dev/v1/push/send`, which holds the single project APNs key) and **direct** (fallback — sign ES256 JWT with Node crypto + HTTP/2, when `OPENCHAMBER_PUSH_RELAY_DISABLED=true`). Each server has an auto-generated ECDSA P-256 keypair (`getOrCreateRelayKeypair`, persisted in settings); it binds tokens on the relay (`/v1/push/register-token`) and signs every relay request, so the relay only delivers to tokens bound to that server. APNs is the native app's sole notification channel (no local notifications) and is NOT gated on UI visibility — iOS suppresses the foreground banner instead. Mobile push carries only generic text (scenario title + session name) — see `APNS.md`.
+- `packages/web/server/lib/notifications/messengers-runtime.js`: Slack/Discord messenger webhook channel — settings persistence (write-only webhook URLs under `settings.messengerNotifications`), strict webhook-URL host validation, provider payload building, fanout delivery, and test sends.
+- `packages/web/server/lib/notifications/messengers-runtime.test.js`: unit tests for the messenger channel.
 - `packages/web/server/lib/notifications/emitter-runtime.js`: desktop/stdout + UI SSE notification emission runtime.
 - `packages/web/server/lib/notifications/runtime.js`: trigger runtime for OpenCode event-driven notification fanout.
 - `packages/web/server/lib/notifications/template-runtime.js`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
@@ -30,6 +32,9 @@ This module provides notification message preparation utilities for the web serv
   - `POST /api/push/visibility`
   - `GET /api/push/visibility`
   - `GET /api/notifications/stream`
+  - `GET /api/notifications/messengers` (messenger settings; webhook URLs are write-only — responses carry only `enabled` + `webhookConfigured` per provider)
+  - `PUT /api/notifications/messengers` (partial per-provider update `{ slack?: { enabled?, webhookUrl? }, discord?: {...} }`; `webhookUrl: null`/`''` clears; invalid URLs → `400` with `code: 'invalid-webhook-url'`)
+  - `POST /api/notifications/messengers/test` (`{ provider, webhookUrl? }` — sends a test message to the override or stored webhook; validation failures → `400`, delivery failures → `502`)
   - `GET /api/session-activity`
   - `GET /api/sessions/snapshot`
   - `GET /api/sessions/status`
@@ -73,6 +78,16 @@ This module provides notification message preparation utilities for the web serv
   - `sendApnsToAllUiSessions(payload)` — signs + sends to all registered tokens (no UI-visibility gate; iOS suppresses the foreground banner). No-ops with a single warning when APNs is unconfigured. Drops tokens on `410` / `BadDeviceToken` / `Unregistered`.
   - `resolveApnsConfig()`
 - Configuration (env first, then `settings.apnsConfig`): `OPENCHAMBER_APNS_KEY_ID`, `OPENCHAMBER_APNS_TEAM_ID`, `OPENCHAMBER_APNS_P8` (PEM contents; literal `\n` accepted) or `OPENCHAMBER_APNS_P8_PATH`, `OPENCHAMBER_APNS_BUNDLE_ID` (default `com.openchamber.app`), `OPENCHAMBER_APNS_ENVIRONMENT` (optional override forcing every send to `sandbox` or `production`; when unset, each token is delivered to the environment it registered with, defaulting to `production` for tokens without one).
+
+### Messengers runtime API (messengers-runtime.js)
+- `createMessengersRuntime(dependencies)`: creates the Slack/Discord webhook delivery runtime. Dependencies: `readSettingsFromDiskMigrated`, `writeSettingsToDisk`, optional `fetchImpl` (defaults to global `fetch`).
+- Returned API:
+  - `getMessengerSettingsPublic()` — client-facing shape per provider: `{ enabled, webhookConfigured }`; the stored webhook URL is never returned.
+  - `updateMessengerSettings(update)` — deep-merges a partial per-provider update into `settings.messengerNotifications` (an update omitting `webhookUrl` preserves the stored URL; `null`/`''` clears it), validates URLs, persists, and returns the public shape. Throws `MessengerValidationError` (`code: 'invalid-webhook-url'`) without persisting on invalid input.
+  - `sendMessengerNotification(payload)` — fanout channel invoked by the trigger runtime's `fanoutPush` (NOT presence-gated: messengers post to a channel, not a device). Posts the `{ title, body }` to every enabled provider with a valid stored URL; appends an "Open session" link only when `settings.publicOrigin` is set. Per-provider failures are logged (never the URL) and never propagate.
+  - `sendMessengerTest({ provider, webhookUrl? })` — settings-page test send; returns `{ ok }` or `{ ok: false, error: 'invalid-provider' | 'not-configured' | 'invalid-webhook-url' | 'delivery-failed' }`.
+- Message formats: Slack `{ text }` (mrkdwn, `&`/`<`/`>` escaped, ≤3000 chars); Discord `{ content, allowed_mentions: { parse: [] } }` (≤2000 chars; mention pings disabled because text derives from session content).
+- Security invariants: webhook URLs are validated against strict host allowlists (`hooks.slack.com/services/*`; `discord.com|discordapp.com|ptb.discord.com|canary.discord.com` `/api/webhooks/*`, https only, no embedded credentials) both on write and again at send time — the server itself POSTs to these URLs, so arbitrary origins would be an SSRF primitive. `settings.messengerNotifications` is intentionally absent from `sanitizeSettingsUpdate`, so the generic `GET/PUT /api/config/settings` pipeline can neither read nor overwrite it; only the dedicated messenger routes touch it.
 
 ### Emitter runtime API (emitter-runtime.js)
 - `createNotificationEmitterRuntime(dependencies)`: creates runtime for unified notification emission channels.
