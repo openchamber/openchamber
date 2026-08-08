@@ -26,7 +26,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { addSelectionToChat } from '@/lib/addSelectionToChat';
-import { hasOpenDropdown } from './keyboard-shortcut-dom';
+import { hasOpenDropdown, isTypingInEditableTarget } from './keyboard-shortcut-dom';
 
 export const useKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
@@ -493,6 +493,13 @@ export const useKeyboardShortcuts = () => {
       if (switchSurfaceDigit !== null
         && !e.repeat
         && eventMatchesShortcutPrefix(e, switchSurfacePrefix, heldKeysRef.current)) {
+        // mod+digit is the browser's own tab-switching chord and a common
+        // in-input chord; never hijack it while the user is typing (the chat
+        // composer, CommitInput, searches, dialogs). Surface switching still
+        // works from anywhere that is not an editable target.
+        if (isTypingInEditableTarget(e.target)) {
+          return;
+        }
         const state = useUIStore.getState();
         if (state.isMobile || !effectiveDirectory) {
           return;
