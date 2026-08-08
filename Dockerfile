@@ -2,6 +2,15 @@
 FROM oven/bun:1.3.14 AS base
 WORKDIR /app
 
+# OCI metadata for GHCR; VERSION is injected by the docker-publish workflow
+# (docker/metadata-action --build-arg) and defaults to 'dev' for local builds.
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="OpenChamber" \
+      org.opencontainers.image.description="Run OpenCode agents from your browser - shared web, desktop, and mobile UI" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.source="https://github.com/openchamber/openchamber" \
+      org.opencontainers.image.licenses="MIT"
+
 FROM base AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
@@ -65,5 +74,10 @@ COPY --from=builder /app/packages/web/server ./packages/web/server
 COPY --from=builder /app/packages/web/dist ./packages/web/dist
 
 EXPOSE 3000
+
+# Liveness check against the web server's /health endpoint (bun is present in
+# the runtime image; no curl needed).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD bun -e "fetch('http://127.0.0.1:3000/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
 ENTRYPOINT ["sh", "/home/openchamber/openchamber-entrypoint.sh"]
