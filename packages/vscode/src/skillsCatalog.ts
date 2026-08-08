@@ -84,6 +84,13 @@ const CURATED_SOURCES: CuratedSource[] = [
     defaultSubpath: 'skills',
   },
   {
+    id: 'minimax',
+    label: 'MiniMax',
+    description: 'MiniMax AI tools for text, image, video, speech, and music generation',
+    source: 'MiniMax-AI/cli',
+    defaultSubpath: 'skill',
+  },
+  {
     id: 'clawdhub',
     label: 'ClawdHub',
     description: 'Community skill registry with vector search',
