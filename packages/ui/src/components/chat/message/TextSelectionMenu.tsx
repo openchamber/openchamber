@@ -16,6 +16,12 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
+import {
+  DESKTOP_MENU_FALLBACK_HEIGHT_PX,
+  DESKTOP_MENU_FALLBACK_WIDTH_PX,
+  getDesktopClampedX,
+  getDesktopClampedY,
+} from './selectionMenuPosition';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 
 interface TextSelectionMenuProps {
@@ -44,8 +50,6 @@ const appendDistilledInsightToNotes = (existingNotes: string, insight: string): 
   return trimmedNotes ? `${trimmedNotes}\n${trimmedInsight}` : trimmedInsight;
 };
 
-const DESKTOP_MENU_SIDE_MARGIN_PX = 8;
-const DESKTOP_MENU_FALLBACK_WIDTH_PX = 280;
 export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerRef }) => {
   const { t } = useI18n();
   const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, show: false });
@@ -56,6 +60,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const [isAddingToNotes, setIsAddingToNotes] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
   const menuWidthRef = React.useRef(DESKTOP_MENU_FALLBACK_WIDTH_PX);
+  const menuHeightRef = React.useRef(DESKTOP_MENU_FALLBACK_HEIGHT_PX);
   const pendingSelectionRef = React.useRef<SelectionPayload | null>(null);
   const openRafRef = React.useRef<number | null>(null);
   const mouseUpTimeoutRef = React.useRef<number | null>(null);
@@ -105,22 +110,20 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     isMenuVisibleRef.current = false;
   }, []);
 
-  const getDesktopClampedX = React.useCallback((anchorX: number) => {
+  const clampDesktopX = React.useCallback((anchorX: number) => {
     if (typeof window === 'undefined') {
       return anchorX;
     }
 
-    const viewportWidth = window.innerWidth;
-    const menuWidth = menuWidthRef.current;
-    const halfWidth = menuWidth / 2;
-    const minX = DESKTOP_MENU_SIDE_MARGIN_PX + halfWidth;
-    const maxX = viewportWidth - DESKTOP_MENU_SIDE_MARGIN_PX - halfWidth;
+    return getDesktopClampedX(anchorX, window.innerWidth, menuWidthRef.current);
+  }, []);
 
-    if (minX > maxX) {
-      return viewportWidth / 2;
+  const clampDesktopY = React.useCallback((anchorY: number) => {
+    if (typeof window === 'undefined') {
+      return anchorY;
     }
 
-    return Math.min(Math.max(anchorX, minX), maxX);
+    return getDesktopClampedY(anchorY, window.innerHeight, menuHeightRef.current);
   }, []);
 
   const showMenu = React.useCallback(() => {
@@ -132,8 +135,10 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     // Position menu above the selection
     const menuX = isMobile
       ? rect.left + rect.width / 2
-      : getDesktopClampedX(rect.left + rect.width / 2);
-    const menuY = rect.top - 10;
+      : clampDesktopX(rect.left + rect.width / 2);
+    const menuY = isMobile
+      ? rect.top - 10
+      : clampDesktopY(rect.top - 10);
 
     setSelectedText(plainText);
     setSelectedTextMarkdown(markdownText);
@@ -154,7 +159,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         openRafRef.current = null;
       });
     }
-  }, [getDesktopClampedX, isMobile, position.show]);
+  }, [clampDesktopX, clampDesktopY, isMobile, position.show]);
 
   React.useLayoutEffect(() => {
     if (!position.show || isMobile || !menuRef.current) {
@@ -162,16 +167,25 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     }
 
     const measuredWidth = menuRef.current.offsetWidth;
-    if (!Number.isFinite(measuredWidth) || measuredWidth <= 0 || measuredWidth === menuWidthRef.current) {
+    const measuredHeight = menuRef.current.offsetHeight;
+    const widthChanged = Number.isFinite(measuredWidth) && measuredWidth > 0 && measuredWidth !== menuWidthRef.current;
+    const heightChanged = Number.isFinite(measuredHeight) && measuredHeight > 0 && measuredHeight !== menuHeightRef.current;
+    if (!widthChanged && !heightChanged) {
       return;
     }
 
-    menuWidthRef.current = measuredWidth;
+    if (widthChanged) {
+      menuWidthRef.current = measuredWidth;
+    }
+    if (heightChanged) {
+      menuHeightRef.current = measuredHeight;
+    }
     setPosition((prev) => ({
       ...prev,
-      x: getDesktopClampedX(prev.x),
+      x: clampDesktopX(prev.x),
+      y: clampDesktopY(prev.y),
     }));
-  }, [getDesktopClampedX, isMobile, position.show]);
+  }, [clampDesktopX, clampDesktopY, isMobile, position.show]);
 
   React.useEffect(() => {
     if (!position.show || isMobile) {
@@ -181,7 +195,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     const handleViewportResize = () => {
       setPosition((prev) => ({
         ...prev,
-        x: getDesktopClampedX(prev.x),
+        x: clampDesktopX(prev.x),
+        y: clampDesktopY(prev.y),
       }));
     };
 
@@ -189,7 +204,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     return () => {
       window.removeEventListener('resize', handleViewportResize);
     };
-  }, [getDesktopClampedX, isMobile, position.show]);
+  }, [clampDesktopX, clampDesktopY, isMobile, position.show]);
 
   const handleSelectionChange = React.useCallback(() => {
     const selection = window.getSelection();
