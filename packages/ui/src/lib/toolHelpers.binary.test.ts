@@ -2,10 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   getFileExtension,
+  isAudioFile,
   isBinaryFile,
   isImageFile,
   isPdfFile,
   isSvgFile,
+  isVideoFile,
   looksLikeBinaryText,
 } from './toolHelpers';
 
@@ -18,6 +20,24 @@ describe('binary file helpers', () => {
     expect(isBinaryFile('notes.docx')).toBe(true);
     expect(isPdfFile('report.pdf')).toBe(true);
     expect(isImageFile('photo.png')).toBe(true);
+  });
+
+  test('classifies audio extensions', () => {
+    expect(isAudioFile('/repo/music.mp3')).toBe(true);
+    expect(isAudioFile('podcast.M4A')).toBe(true);
+    expect(isAudioFile('clip.wav')).toBe(true);
+    expect(isBinaryFile('track.flac')).toBe(true);
+    expect(isAudioFile('video.mp4')).toBe(false);
+    expect(isAudioFile('notes.txt')).toBe(false);
+  });
+
+  test('classifies video extensions', () => {
+    expect(isVideoFile('/repo/output.mp4')).toBe(true);
+    expect(isVideoFile('movie.MOV')).toBe(true);
+    expect(isVideoFile('clip.webm')).toBe(true);
+    expect(isBinaryFile('capture.mkv')).toBe(true);
+    expect(isVideoFile('song.mp3')).toBe(false);
+    expect(isVideoFile('notes.txt')).toBe(false);
   });
 
   test('keeps text and SVG editable', () => {
