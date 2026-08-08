@@ -1,22 +1,82 @@
 name: Feature request
-description: Suggest an improvement
-title: "[Feature Request] "
-labels: [enhancement]
+description: Suggest a focused improvement or missing expected behavior.
+title: "feat: "
+labels: ["enhancement", "needs-triage"]
 body:
-  - type: textarea
-    id: request
+  - type: markdown
     attributes:
-      label: What should we add/change?
-      description: What you're trying to do + what you'd like to happen.
-      placeholder: |
-        I'm trying to …
+      value: |
+        Thanks for suggesting an improvement.
 
-        It would be great if OpenChamber …
+        Keep this short and focused. Do not paste long AI-generated proposals.
+        Large UI or core product changes should be discussed before implementation.
+
+  - type: input
+    id: summary
+    attributes:
+      label: Short summary
+      description: One sentence describing the requested behavior.
+      placeholder: "Show a selectable file tree before creating a commit"
     validations:
       required: true
 
   - type: textarea
-    id: context
+    id: problem
     attributes:
-      label: Extra context (optional)
-      description: Links, screenshots, mockups, constraints, etc.
+      label: Problem
+      description: What workflow is blocked or painful today?
+      placeholder: "When I want to commit only part of a change..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should OpenChamber do?
+      placeholder: "Add a file tree with checkboxes..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime
+      description: Where should this work?
+      multiple: true
+      options:
+        - Web
+        - Desktop
+        - Mobile Web / PWA
+        - VS Code extension
+        - All runtimes
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples or references
+      description: Screenshots, mockups, links, or comparable behavior in other tools.
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope notes
+      description: Mention what should not be included if the feature could grow too large.
+      placeholder: "This request does not include..."
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I kept this request short and focused.
+          required: true
+        - label: I am not submitting a broad multi-feature wishlist.
+          required: true
+        - label: I wrote this issue in English.
+          required: true
