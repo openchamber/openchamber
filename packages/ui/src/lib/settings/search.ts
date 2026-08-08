@@ -338,7 +338,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'chat.composer',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.section.composer',
-    keywords: ['input', 'draft', 'spellcheck'],
+    keywords: ['input', 'draft', 'spellcheck', 'paste'],
   },
   {
     id: 'chat.spellcheck',
@@ -346,6 +346,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.enableSpellcheckInTextInputs',
     keywords: ['spelling', 'input'],
     isAvailable: (ctx) => !ctx.isMobile,
+  },
+  {
+    id: 'chat.large-text-paste',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.largeTextPaste',
+    descriptionKey: 'settings.openchamber.visual.field.largeTextPasteHint',
+    keywords: ['paste', 'clipboard', 'attachment', 'large', 'text', 'file'],
   },
   {
     id: 'sessions.default-model',
