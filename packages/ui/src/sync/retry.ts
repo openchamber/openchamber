@@ -15,6 +15,13 @@ const TRANSIENT_MESSAGES = [
   "econnrefused",
   "etimedout",
   "socket hang up",
+  // undici tears down a half-open upstream connection with `TypeError:
+  // terminated` (the exact failure from the #2470 logs); the SDK client now
+  // also rejects reads with a normalized "request timed out" error after
+  // OPENCODE_REQUEST_TIMEOUT_MS. Both are transient — the managed process may
+  // simply be restarting.
+  "terminated",
+  "request timed out",
   "opencode api unavailable",
   "503",
   "502",
