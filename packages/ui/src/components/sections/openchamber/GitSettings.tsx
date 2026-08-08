@@ -1,4 +1,5 @@
 import React from 'react';
+import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -19,6 +20,9 @@ export const GitSettings: React.FC = () => {
   const { t } = useI18n();
   const settingsGitmojiEnabled = useConfigStore((state) => state.settingsGitmojiEnabled);
   const setSettingsGitmojiEnabled = useConfigStore((state) => state.setSettingsGitmojiEnabled);
+  const settingsGitProviderId = useConfigStore((state) => state.settingsGitProviderId);
+  const settingsGitModelId = useConfigStore((state) => state.settingsGitModelId);
+  const setSettingsGitModel = useConfigStore((state) => state.setSettingsGitModel);
   const showGitignored = useFilesViewShowGitignored();
   const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
   const setGitChangesViewMode = useUIStore((state) => state.setGitChangesViewMode);
@@ -117,6 +121,16 @@ export const GitSettings: React.FC = () => {
     void updateDesktopSettings({ gitChangesViewMode: mode });
   }, [gitChangesViewMode, setGitChangesViewMode]);
 
+  const handleGitModelChange = React.useCallback((providerId: string, modelId: string) => {
+    if (providerId && modelId) {
+      setSettingsGitModel(providerId, modelId);
+      void updateDesktopSettings({ gitProviderId: providerId, gitModelId: modelId });
+    } else {
+      setSettingsGitModel(undefined, undefined);
+      void updateDesktopSettings({ gitProviderId: '', gitModelId: '' });
+    }
+  }, [setSettingsGitModel]);
+
   if (isLoading) {
     return null;
   }
@@ -124,6 +138,18 @@ export const GitSettings: React.FC = () => {
   return (
     <SettingsSection title={t('settings.openchamber.git.title')}>
       <div className={SETTINGS_OPTION_STACK_CLASS}>
+        <SettingsControlGroup
+          settingsItem="git.generation-model"
+          title={t('settings.openchamber.git.generationModelTitle')}
+        >
+          <ModelSelector
+            providerId={settingsGitProviderId ?? ''}
+            modelId={settingsGitModelId ?? ''}
+            onChange={handleGitModelChange}
+            placeholder={t('settings.openchamber.git.generationModelPlaceholder')}
+          />
+        </SettingsControlGroup>
+
         <SettingsControlGroup
           settingsItem="git.changes-view"
           title={t('settings.openchamber.git.changesViewTitle')}
