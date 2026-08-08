@@ -2992,4 +2992,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} 个技能',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} 个 MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} 个 MCP',
+  'chat.workStatus.sections.open': '选择板块',
+  'chat.workStatus.sections.dialogTitle': '面板板块',
+  'chat.workStatus.sections.dialogDescription': '选择工作状态面板显示的内容。隐藏的板块仍保留数据，只是不再显示。',
+  'header.workStatusPanel.toggleAria': '切换工作状态面板',
+  'header.workStatusPanel.hide': '隐藏工作状态',
+  'header.workStatusPanel.show': '显示工作状态',
 };

@@ -20,7 +20,7 @@
  *   `.claude/skills` entries are commonly symlinks back into `.agents/skills`.
  */
 
-export type ExternalSkillFlags = {
+type ExternalSkillFlags = {
   /** `.claude` roots are not loaded. */
   claudeDisabled: boolean;
   /** Neither `.claude` nor `.agents` roots are loaded. */

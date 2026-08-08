@@ -12,6 +12,9 @@ import { WorkStatusTasksSection } from './WorkStatusTasksSection';
 import { WorkStatusMcpSection } from './WorkStatusMcpSection';
 import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
 import { WorkStatusContextSection } from './WorkStatusContextSection';
+import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog';
+import { isWorkStatusSectionVisible } from './sections';
+import { Icon } from '@/components/icon/Icon';
 
 type Props = {
   /** Null on a new-session draft: repository readouts still apply. */
@@ -38,6 +41,13 @@ type Props = {
 export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
+  const hiddenSections = useUIStore((state) => state.workStatusHiddenSections);
+  const [sectionsDialogOpen, setSectionsDialogOpen] = React.useState(false);
+  const visible = React.useCallback(
+    (sectionId: Parameters<typeof isWorkStatusSectionVisible>[1]) =>
+      isWorkStatusSectionVisible(hiddenSections, sectionId),
+    [hiddenSections],
+  );
   const frameRef = React.useRef<number | null>(null);
 
   // Restoring the offset has to happen the moment the scroller attaches, and
@@ -72,15 +82,28 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory }) => {
         // `self-start` keeps the card at content height instead of stretching
         // to the row; `max-h` then caps it so a long panel scrolls rather than
         // overflowing the chat.
-        'my-4 mr-4 flex shrink-0 flex-col self-start overflow-hidden',
+        // A left margin as well as a right one: flush against the transcript
+        // the card's own shadow had no room and was clipped down that edge.
+        'relative my-4 ml-2 mr-4 flex shrink-0 flex-col self-start overflow-hidden',
         'max-h-[calc(100%-2rem)]',
         'rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-muted)]/40',
-        // Same lift as the composer, so the two floating surfaces in the chat
-        // sit at one elevation.
-        'shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
+        // A lighter version of the composer's lift: the same shape, but this
+        // card is taller, so the composer's spread reads as heavy here.
+        'shadow-[0_2px_8px_-3px_rgb(0_0_0_/_0.08)]',
       )}
       style={{ width: WORK_STATUS_PANEL_WIDTH }}
     >
+      {/* Overlaid rather than placed in flow: the panel has no header of its
+          own, and giving it one would cost a row of height on every session. */}
+      <button
+        type="button"
+        aria-label={t('chat.workStatus.sections.open')}
+        onClick={() => setSectionsDialogOpen(true)}
+        className="absolute right-2 top-1.5 z-10 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <Icon name="equalizer-2" className="size-4" />
+      </button>
+
       <ScrollShadow
         ref={restore}
         onScroll={handleScroll}
@@ -90,15 +113,19 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory }) => {
         <WorkStatusPrimaryGroup
           sessionId={sessionId}
           directory={directory}
+          showSession={visible('session')}
+          showRepository={visible('repository')}
           goalRow={<WorkStatusGoalRow sessionId={sessionId} directory={directory} />}
         />
-        <WorkStatusUsageSection />
-        <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} />
-        <WorkStatusTasksSection sessionId={sessionId} directory={directory} />
-        <WorkStatusMcpSection directory={directory} />
-        <WorkStatusPinnedSection sessionId={sessionId} directory={directory} />
-        <WorkStatusContextSection sessionId={sessionId} directory={directory} />
+        {visible('usage') ? <WorkStatusUsageSection /> : null}
+        {visible('subagents') ? <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} /> : null}
+        {visible('tasks') ? <WorkStatusTasksSection sessionId={sessionId} directory={directory} /> : null}
+        {visible('mcp') ? <WorkStatusMcpSection directory={directory} /> : null}
+        {visible('pinned') ? <WorkStatusPinnedSection sessionId={sessionId} directory={directory} /> : null}
+        {visible('contextSources') ? <WorkStatusContextSection sessionId={sessionId} directory={directory} /> : null}
       </ScrollShadow>
+
+      <WorkStatusSectionsDialog open={sectionsDialogOpen} onOpenChange={setSectionsDialogOpen} />
     </aside>
   );
 };

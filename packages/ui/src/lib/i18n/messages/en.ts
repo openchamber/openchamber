@@ -2991,6 +2991,12 @@ export const dict = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} skills',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.sections.open': 'Choose sections',
+  'chat.workStatus.sections.dialogTitle': 'Panel sections',
+  'chat.workStatus.sections.dialogDescription': 'Choose what the work-status panel shows. Hidden sections keep their data — they are only left out of the panel.',
+  'header.workStatusPanel.toggleAria': 'Toggle work-status panel',
+  'header.workStatusPanel.hide': 'Hide work status',
+  'header.workStatusPanel.show': 'Show work status',
 } as const;
 
 export type I18nKey = keyof typeof dict;

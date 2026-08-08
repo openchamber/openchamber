@@ -15,8 +15,8 @@ export const WORK_STATUS_PANEL_WIDTH = 300;
  */
 const WORK_STATUS_MIN_CHAT_WIDTH = 560;
 
-/** Outer margin between the panel card and the window edge. */
-const WORK_STATUS_PANEL_GUTTER = 16;
+/** The card's own horizontal margins (`ml-2` + `mr-4`). */
+const WORK_STATUS_PANEL_GUTTER = 8 + 16;
 
 /** Row width below which the panel gives its space back to the transcript. */
 export const WORK_STATUS_REQUIRED_ROW_WIDTH =
@@ -73,7 +73,11 @@ export const useWorkStatusVisibility = ({ directory, isMobile, isVSCode }: Optio
     ),
   );
 
-  const measurementEnabled = !isMobile && !isVSCode && !contextPanelOpen;
+  // The user's own switch, persisted to server settings, gates everything
+  // before layout is even measured.
+  const panelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
+
+  const measurementEnabled = panelEnabled && !isMobile && !isVSCode && !contextPanelOpen;
 
   React.useEffect(() => {
     if (!measurementEnabled || !rowNode) {

@@ -2989,4 +2989,10 @@ export const dict = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} Skills',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.sections.open': 'Abschnitte wählen',
+  'chat.workStatus.sections.dialogTitle': 'Panel-Abschnitte',
+  'chat.workStatus.sections.dialogDescription': 'Wähle, was das Arbeitsstatus-Panel zeigt. Ausgeblendete Abschnitte behalten ihre Daten und werden nur nicht angezeigt.',
+  'header.workStatusPanel.toggleAria': 'Arbeitsstatus-Panel umschalten',
+  'header.workStatusPanel.hide': 'Arbeitsstatus ausblenden',
+  'header.workStatusPanel.show': 'Arbeitsstatus anzeigen',
 };

@@ -711,6 +711,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     const showWorkStatusPanel = workStatusFits
         && chatSurfaceMode !== 'mini-chat'
         && !isDesktopExpandedInput;
+
+    // Published so the header can drop the readouts the panel already carries.
+    // Cleared on unmount: a chat that goes away is not showing anything.
+    const setWorkStatusPanelVisible = useUIStore((state) => state.setWorkStatusPanelVisible);
+    React.useEffect(() => {
+        setWorkStatusPanelVisible(showWorkStatusPanel);
+        return () => setWorkStatusPanelVisible(false);
+    }, [setWorkStatusPanelVisible, showWorkStatusPanel]);
     const messageListRef = React.useRef<MessageListHandle | null>(null);
     const currentSession = useSession(currentSessionId, effectiveSessionDirectory);
     const parentSession = useParentSession(currentSessionId, effectiveSessionDirectory);

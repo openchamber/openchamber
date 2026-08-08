@@ -2992,4 +2992,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} habilidades',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.sections.open': 'Escolher seções',
+  'chat.workStatus.sections.dialogTitle': 'Seções do painel',
+  'chat.workStatus.sections.dialogDescription': 'Escolha o que o painel de status mostra. Seções ocultas mantêm seus dados — apenas não aparecem no painel.',
+  'header.workStatusPanel.toggleAria': 'Alternar painel de status',
+  'header.workStatusPanel.hide': 'Ocultar status do trabalho',
+  'header.workStatusPanel.show': 'Mostrar status do trabalho',
 };

@@ -3008,4 +3008,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} umiejętności',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.sections.open': 'Wybierz sekcje',
+  'chat.workStatus.sections.dialogTitle': 'Sekcje panelu',
+  'chat.workStatus.sections.dialogDescription': 'Wybierz, co pokazuje panel stanu pracy. Ukryte sekcje zachowują swoje dane — po prostu nie są wyświetlane.',
+  'header.workStatusPanel.toggleAria': 'Przełącz panel stanu pracy',
+  'header.workStatusPanel.hide': 'Ukryj stan pracy',
+  'header.workStatusPanel.show': 'Pokaż stan pracy',
 } as const;

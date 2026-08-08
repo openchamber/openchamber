@@ -9,10 +9,11 @@ type PanelState = {
 };
 
 let panelByDirectory: Record<string, PanelState> = {};
+let panelEnabled = true;
 
 mock.module('@/stores/useUIStore', () => ({
   useUIStore: (selector: (state: unknown) => unknown) =>
-    selector({ contextPanelByDirectory: panelByDirectory }),
+    selector({ contextPanelByDirectory: panelByDirectory, workStatusPanelEnabled: panelEnabled }),
 }));
 
 mock.module('@/lib/pathNormalization', () => ({
@@ -122,6 +123,7 @@ const renderVisibility = (args: Args, rowWidth: number) => {
 
 beforeEach(() => {
   panelByDirectory = {};
+  panelEnabled = true;
   observed = [];
   notify = null;
 });
@@ -234,6 +236,17 @@ describe('useWorkStatusVisibility', () => {
 
     act(() => { root.unmount(); });
     dom.restore();
+  });
+
+  test('stays hidden and stops measuring when the user switched the panel off', () => {
+    panelEnabled = false;
+    const { result, teardown } = renderVisibility(
+      { directory: '/repo', isMobile: false, isVSCode: false },
+      REQUIRED * 2,
+    );
+    expect(result.visible).toBe(false);
+    expect(observed).toHaveLength(0);
+    teardown();
   });
 
   test('stays hidden on mobile and in VS Code regardless of width', () => {

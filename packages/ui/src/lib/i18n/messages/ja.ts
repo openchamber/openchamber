@@ -2991,4 +2991,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': 'スキル {count} 個',
   'chat.workStatus.breakdown.mcpCountSingle': 'MCP {count} 個',
   'chat.workStatus.breakdown.mcpCountPlural': 'MCP {count} 個',
+  'chat.workStatus.sections.open': 'セクションを選択',
+  'chat.workStatus.sections.dialogTitle': 'パネルのセクション',
+  'chat.workStatus.sections.dialogDescription': '作業状況パネルに表示する内容を選びます。非表示のセクションもデータは保持され、表示されないだけです。',
+  'header.workStatusPanel.toggleAria': '作業状況パネルを切り替え',
+  'header.workStatusPanel.hide': '作業状況を非表示',
+  'header.workStatusPanel.show': '作業状況を表示',
 };

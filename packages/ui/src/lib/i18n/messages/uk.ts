@@ -2992,4 +2992,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} скілів',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.sections.open': 'Обрати секції',
+  'chat.workStatus.sections.dialogTitle': 'Секції панелі',
+  'chat.workStatus.sections.dialogDescription': 'Обери, що показує панель стану роботи. Приховані секції зберігають свої дані — вони просто не відображаються.',
+  'header.workStatusPanel.toggleAria': 'Перемкнути панель стану роботи',
+  'header.workStatusPanel.hide': 'Сховати стан роботи',
+  'header.workStatusPanel.show': 'Показати стан роботи',
 };

@@ -2232,6 +2232,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const footerGapClass = 'gap-x-1.5 gap-y-0';
     const isVSCode = isVSCodeRuntime();
+    // The work-status panel carries the agent's todos and the changed-file
+    // count, but only on the desktop/web layout — VS Code and mobile have no
+    // panel, so these keep their place above the composer there.
+    const composerStatusExtrasEnabled = isVSCode || isMobile;
     const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
 
     // Which project and directory a new session will target.
@@ -2496,8 +2500,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 <MemoStatusRow
                     showAbortStatus={showAbortStatus}
                     showAssistantStatus={false}
-                    showTodos
-                    leftAccessory={newSessionDraftOpen || !hasPendingChanges ? null : <PendingChangesBar />}
+                    showTodos={composerStatusExtrasEnabled}
+                    leftAccessory={!composerStatusExtrasEnabled || newSessionDraftOpen || !hasPendingChanges
+                        ? null
+                        : <PendingChangesBar />}
                 />
                 {!isMobile && showDraftTargetSelectors && selectedDraftProject ? (
                     <DraftTargetSelectors

@@ -25,6 +25,8 @@ type Props = {
   directory: string | null;
   /** Rendered first inside the Session section; owns its own dialog. */
   goalRow: React.ReactNode;
+  showSession: boolean;
+  showRepository: boolean;
 };
 
 // Spend is read against a budget, so it keeps its real precision instead of
@@ -41,7 +43,7 @@ const formatPercent = (percent: number): string => `${Math.min(percent, 999).toF
  * the pull request look like. All of it stays true for as long as the session
  * is open, so it sits above anything episodic.
  */
-export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, goalRow }) => {
+export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, goalRow, showSession, showRepository }) => {
   const { t } = useI18n();
   const session = useSession(sessionId ?? '', directory ?? undefined);
   const { git } = useRuntimeAPIs();
@@ -182,8 +184,8 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
       : 'var(--status-success)';
 
   const cost = typeof session?.cost === 'number' && session.cost > 0 ? session.cost : null;
-  const hasSession = usagePercent !== null || cost !== null || Boolean(goalRow);
-  const hasRepository = Boolean(branch || changed || prSummary || attentionLabel);
+  const hasSession = showSession && (usagePercent !== null || cost !== null || Boolean(goalRow));
+  const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel);
 
   if (!hasSession && !hasRepository) return null;
 
