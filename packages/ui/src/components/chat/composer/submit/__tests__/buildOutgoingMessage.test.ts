@@ -36,6 +36,7 @@ const input = (overrides: Partial<OutgoingMessageInput> = {}): OutgoingMessageIn
     composerText: null,
     composerAttachments: [],
     inlineComments: [],
+    commentCards: [],
     syntheticTexts: [],
     linkedIssueContext: null,
     linkedPr: null,
@@ -160,6 +161,74 @@ describe('inline comments', () => {
     test('no comments changes nothing', () => {
         expect(buildOutgoingMessage(input({ composerText: 'body' }), deps()).primaryText)
             .toBe('body');
+    });
+});
+
+describe('comment cards', () => {
+    const card = (text: string) => ({ text, metadata: { opencodeComment: { path: text } } });
+
+    test('become their own synthetic parts, carrying their metadata', () => {
+        const result = buildOutgoingMessage(input({
+            composerText: 'body',
+            commentCards: [card('a'), card('b')],
+        }), deps());
+        expect(result.primaryText).toBe('body');
+        expect(result.additionalParts).toEqual([
+            { text: 'a', synthetic: true, metadata: { opencodeComment: { path: 'a' } } },
+            { text: 'b', synthetic: true, metadata: { opencodeComment: { path: 'b' } } },
+        ]);
+    });
+
+    test("a queued message's cards follow that message, not the whole turn", () => {
+        const result = buildOutgoingMessage(input({
+            queued: [
+                { content: 'q1', commentCards: [card('c1')] },
+                { content: 'q2', commentCards: [card('c2')] },
+            ],
+        }), deps());
+        expect(result.primaryText).toBe('q1');
+        expect(result.additionalParts.map((p) => p.text)).toEqual(['c1', 'q2', 'c2']);
+    });
+
+    test('appended comments still reach the last authored part, past any cards', () => {
+        const result = buildOutgoingMessage(input({
+            queued: [{ content: 'queued', commentCards: [card('queued-card')] }],
+            composerText: 'typed',
+            inlineComments: [{}],
+            commentCards: [card('typed-card')],
+        }), deps());
+        // Without tracking the authored part, the appended text would land on
+        // `queued-card` — the trailing part at the time comments are attached.
+        expect(result.additionalParts.map((p) => p.text)).toEqual([
+            'queued-card',
+            'typed\n[1 comments]',
+            'typed-card',
+        ]);
+    });
+
+    test('fall back to primary when only the primary was authored', () => {
+        const result = buildOutgoingMessage(input({
+            queued: [{ content: 'only queued', commentCards: [card('card')] }],
+            inlineComments: [{}],
+        }), deps());
+        expect(result.primaryText).toBe('only queued\n[1 comments]');
+        expect(result.additionalParts.map((p) => p.text)).toEqual(['card']);
+    });
+
+    test('cards alone are worth sending', () => {
+        expect(buildOutgoingMessage(input({ commentCards: [card('a')] }), deps()).isEmpty)
+            .toBe(false);
+    });
+
+    test('cards precede synthetic context and the skill instruction', () => {
+        const result = buildOutgoingMessage(input({
+            composerText: 'typed /deploy',
+            commentCards: [card('card')],
+            syntheticTexts: ['synthetic'],
+            linkedIssueContext: 'issue',
+        }), deps());
+        expect(result.additionalParts.map((p) => p.text))
+            .toEqual(['card', 'synthetic', 'issue', 'use: deploy']);
     });
 });
 
