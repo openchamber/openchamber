@@ -1265,7 +1265,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                             </>
                           )}
                         </span>
-                      ) : (showActivityDuration || sessionGoalGlyph || showInlineBranchMarker) ? (
+                      ) : (showActivityDuration || sessionGoalGlyph || showInlineBranchMarker || renderContext === 'recent') ? (
                         <div className="relative ml-1 flex h-4 flex-shrink-0 items-center justify-end">
                           <span className={cn(
                             'inline-flex items-center gap-1 whitespace-nowrap text-right transition-opacity duration-150',
@@ -1288,6 +1288,18 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                                     className={cn('h-3 w-3', !prIconColor && 'text-muted-foreground/60')}
                                     style={prIconColor ? { color: prIconColor } : undefined}
                                   />
+                                ) : null}
+                                {/* The recent activity list shows its compact
+                                    timestamp inline (touch runtimes already get
+                                    it through the alwaysShowActions branch);
+                                    it shares the slot with the goal/branch
+                                    metadata and hides on hover exactly like
+                                    them, so the revealed row actions never
+                                    overlap it. */}
+                                {renderContext === 'recent' ? (
+                                  <span className="flex-shrink-0 text-[0.72rem] leading-none text-muted-foreground/75 tabular-nums">
+                                    {sessionCompactUpdatedLabel}
+                                  </span>
                                 ) : null}
                               </>
                             )}
