@@ -44,6 +44,17 @@ export interface SessionContextUsage {
     normalizedOutput?: number;
     thresholdLimit: number;
     lastMessageId?: string;
+    /** Total cost: current session + all descendant sessions (recursive). */
+    cost?: number;
+    /** Cost of the current session only (before subtree aggregation). */
+    sessionCost?: number;
+    /** True while descendant coverage is incomplete or still accumulating. */
+    costPending?: boolean;
+    totalMessages?: number;
+    userMessages?: number;
+    assistantMessages?: number;
+    tokensPerSecond?: number;
+    lastTokensPerSecond?: number;
 }
 
 // Default message limit (can be overridden via settings).

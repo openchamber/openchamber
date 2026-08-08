@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { computeCacheHitRate, sumTokenBreakdown } from "./tokenUtils"
+import {
+  computeCacheHitRate,
+  computeSessionCostAndCounts,
+  computeSessionTokenRate,
+  extractTokensFromMessage,
+  sumTokenBreakdown,
+} from "./tokenUtils"
+import type { Message, Part } from "@opencode-ai/sdk/v2"
 
 describe("computeCacheHitRate", () => {
   test("returns zero and hasInput=false for null input", () => {
@@ -93,5 +100,215 @@ describe("sumTokenBreakdown (regression)", () => {
   test("handles null safely", () => {
     expect(sumTokenBreakdown(null)).toBe(0)
     expect(sumTokenBreakdown(undefined)).toBe(0)
+  })
+})
+
+describe("extractTokensFromMessage", () => {
+  test("returns numeric tokens from info.tokens", () => {
+    const msg = { info: { tokens: 500 } as unknown as Message, parts: [] as Part[] }
+    expect(extractTokensFromMessage(msg)).toBe(500)
+  })
+
+  test("sums breakdown tokens from info.tokens", () => {
+    const msg = {
+      info: { tokens: { input: 100, output: 50, reasoning: 20, cache: { read: 80, write: 20 } } } as unknown as Message,
+      parts: [] as Part[],
+    }
+    expect(extractTokensFromMessage(msg)).toBe(270)
+  })
+
+  test("returns numeric tokens from a part when info.tokens is absent", () => {
+    const msg = {
+      info: {} as unknown as Message,
+      parts: [{ type: "text", text: "hi" } as unknown as Part, { type: "token", tokens: 42 } as unknown as Part],
+    }
+    expect(extractTokensFromMessage(msg)).toBe(42)
+  })
+
+  test("sums breakdown tokens from a part when info.tokens is absent", () => {
+    const msg = {
+      info: {} as unknown as Message,
+      parts: [{ type: "token", tokens: { input: 10, output: 5 } } as unknown as Part],
+    }
+    expect(extractTokensFromMessage(msg)).toBe(15)
+  })
+
+  test("returns 0 when no tokens are present anywhere", () => {
+    const msg = { info: {} as unknown as Message, parts: [] as Part[] }
+    expect(extractTokensFromMessage(msg)).toBe(0)
+  })
+})
+
+describe("computeSessionCostAndCounts", () => {
+  test("counts user and assistant messages and sums cost", () => {
+    const messages = [
+      { role: "user" },
+      { role: "assistant", cost: 0.5 },
+      { role: "user" },
+      { role: "assistant", cost: 0.3 },
+    ] as unknown as Message[]
+    const result = computeSessionCostAndCounts(messages)
+    expect(result).toEqual({ totalCost: 0.8, userCount: 2, assistantCount: 2 })
+  })
+
+  test("ignores cost from non-assistant roles", () => {
+    const messages = [{ role: "user", cost: 1.0 }] as unknown as Message[]
+    expect(computeSessionCostAndCounts(messages).totalCost).toBe(0)
+  })
+
+  test("skips invalid cost values", () => {
+    const messages = [
+      { role: "assistant", cost: NaN },
+      { role: "assistant", cost: -1 },
+      { role: "assistant", cost: Infinity },
+      { role: "assistant", cost: 0.2 },
+    ] as unknown as Message[]
+    expect(computeSessionCostAndCounts(messages).totalCost).toBe(0.2)
+  })
+
+  test("handles empty array", () => {
+    expect(computeSessionCostAndCounts([])).toEqual({ totalCost: 0, userCount: 0, assistantCount: 0 })
+  })
+
+  test("matches deriveMessageRole: clientRole='user' counts as user even when role='assistant'", () => {
+    const messages = [{ role: "assistant", clientRole: "user" }] as unknown as Message[]
+    const result = computeSessionCostAndCounts(messages)
+    expect(result.userCount).toBe(1)
+    expect(result.assistantCount).toBe(0)
+  })
+
+  test("matches deriveMessageRole: userMessageMarker=true counts as user", () => {
+    const messages = [{ role: "assistant", userMessageMarker: true, cost: 0.5 }] as unknown as Message[]
+    const result = computeSessionCostAndCounts(messages)
+    expect(result.userCount).toBe(1)
+    expect(result.assistantCount).toBe(0)
+    expect(result.totalCost).toBe(0)
+  })
+
+  test("matches deriveMessageRole: clientRole='assistant' counts as assistant even when role='system'", () => {
+    const messages = [{ role: "system", clientRole: "assistant", cost: 0.1 }] as unknown as Message[]
+    const result = computeSessionCostAndCounts(messages)
+    expect(result.assistantCount).toBe(1)
+    expect(result.userCount).toBe(0)
+    expect(result.totalCost).toBe(0.1)
+  })
+
+  test("defaults to assistant when no role fields are present", () => {
+    const messages = [{}] as unknown as Message[]
+    const result = computeSessionCostAndCounts(messages)
+    expect(result.assistantCount).toBe(1)
+    expect(result.userCount).toBe(0)
+  })
+})
+
+describe("computeSessionTokenRate", () => {
+  test("returns zeros for empty array", () => {
+    expect(computeSessionTokenRate([])).toEqual({ avgTokensPerSecond: 0, lastTokensPerSecond: 0 })
+  })
+
+  test("returns zeros when no assistant messages have valid time/tokens", () => {
+    const messages = [
+      { role: "user" },
+      { role: "assistant", time: { created: 1000, completed: 2000 } },
+      { role: "assistant", tokens: { output: 100 } },
+    ] as unknown as Message[]
+    expect(computeSessionTokenRate(messages)).toEqual({ avgTokensPerSecond: 0, lastTokensPerSecond: 0 })
+  })
+
+  test("computes rate for a single assistant message", () => {
+    const messages = [
+      { role: "assistant", time: { created: 0, completed: 1000 }, tokens: { output: 100, reasoning: 50 } },
+    ] as unknown as Message[]
+    const result = computeSessionTokenRate(messages)
+    expect(result.avgTokensPerSecond).toBe(150)
+    expect(result.lastTokensPerSecond).toBe(150)
+  })
+
+  test("computes weighted average across multiple assistant messages", () => {
+    const messages = [
+      { role: "assistant", time: { created: 0, completed: 1000 }, tokens: { output: 100 } },
+      { role: "assistant", time: { created: 0, completed: 2000 }, tokens: { output: 200 } },
+    ] as unknown as Message[]
+    const result = computeSessionTokenRate(messages)
+    expect(result.avgTokensPerSecond).toBe(100)
+    expect(result.lastTokensPerSecond).toBe(100)
+  })
+
+  test("subtracts non-overlapping tool durations from message duration", () => {
+    const messages = [
+      { role: "assistant", id: "m1", time: { created: 0, completed: 10000 }, tokens: { output: 1200 } },
+    ] as unknown as Message[]
+    const getParts = () => [
+      { type: "tool", state: { time: { start: 1000, end: 4000 } } },
+      { type: "tool", state: { time: { start: 5000, end: 8000 } } },
+    ]
+    const result = computeSessionTokenRate(messages, getParts)
+    expect(result.avgTokensPerSecond).toBe(300)
+    expect(result.lastTokensPerSecond).toBe(300)
+  })
+
+  test("does not double-subtract overlapping tool durations", () => {
+    const messages = [
+      { role: "assistant", id: "m1", time: { created: 0, completed: 10000 }, tokens: { output: 500 } },
+    ] as unknown as Message[]
+    const getParts = () => [
+      { type: "tool", state: { time: { start: 1000, end: 5000 } } },
+      { type: "tool", state: { time: { start: 2000, end: 6000 } } },
+    ]
+    const result = computeSessionTokenRate(messages, getParts)
+    expect(result.avgTokensPerSecond).toBe(100)
+    expect(result.lastTokensPerSecond).toBe(100)
+  })
+
+  test("handles nested tool intervals (inner fully within outer)", () => {
+    const messages = [
+      { role: "assistant", id: "m1", time: { created: 0, completed: 10000 }, tokens: { output: 500 } },
+    ] as unknown as Message[]
+    const getParts = () => [
+      { type: "tool", state: { time: { start: 1000, end: 6000 } } },
+      { type: "tool", state: { time: { start: 2000, end: 5000 } } },
+    ]
+    const result = computeSessionTokenRate(messages, getParts)
+    expect(result.avgTokensPerSecond).toBe(100)
+    expect(result.lastTokensPerSecond).toBe(100)
+  })
+
+  test("skips tool parts with invalid time (end <= start)", () => {
+    const messages = [
+      { role: "assistant", id: "m1", time: { created: 0, completed: 5000 }, tokens: { output: 400 } },
+    ] as unknown as Message[]
+    const getParts = () => [
+      { type: "tool", state: { time: { start: 1000, end: 1000 } } },
+      { type: "tool", state: { time: { start: 3000, end: 2000 } } },
+    ]
+    const result = computeSessionTokenRate(messages, getParts)
+    expect(result.avgTokensPerSecond).toBe(80)
+    expect(result.lastTokensPerSecond).toBe(80)
+  })
+
+  test("skips message when duration after tool subtraction is <= 0", () => {
+    const messages = [
+      { role: "assistant", id: "m1", time: { created: 0, completed: 5000 }, tokens: { output: 100 } },
+    ] as unknown as Message[]
+    const getParts = () => [
+      { type: "tool", state: { time: { start: 0, end: 5000 } } },
+    ]
+    expect(computeSessionTokenRate(messages, getParts)).toEqual({
+      avgTokensPerSecond: 0,
+      lastTokensPerSecond: 0,
+    })
+  })
+
+  test("ignores non-tool parts when subtracting tool time", () => {
+    const messages = [
+      { role: "assistant", id: "m1", time: { created: 0, completed: 10000 }, tokens: { output: 800 } },
+    ] as unknown as Message[]
+    const getParts = () => [
+      { type: "text", state: { time: { start: 1000, end: 5000 } } },
+      { type: "tool", state: { time: { start: 1000, end: 3000 } } },
+    ]
+    const result = computeSessionTokenRate(messages, getParts)
+    expect(result.avgTokensPerSecond).toBe(100)
+    expect(result.lastTokensPerSecond).toBe(100)
   })
 })

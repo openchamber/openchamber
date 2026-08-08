@@ -63,6 +63,7 @@ import {
 import type { UsageWindow } from '@/types';
 import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
+import { useSessionSubtreeCost, withSubtreeCost } from '@/sync/session-cost';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { useTerminalStore } from '@/stores/useTerminalStore';
@@ -632,7 +633,15 @@ const isSameContextUsage = (
     && (a.outputLimit ?? 0) === (b.outputLimit ?? 0)
     && (a.normalizedOutput ?? 0) === (b.normalizedOutput ?? 0)
     && a.thresholdLimit === b.thresholdLimit
-    && (a.lastMessageId ?? '') === (b.lastMessageId ?? '');
+    && (a.lastMessageId ?? '') === (b.lastMessageId ?? '')
+    && (a.cost ?? 0) === (b.cost ?? 0)
+    && (a.sessionCost ?? 0) === (b.sessionCost ?? 0)
+    && (a.costPending ?? false) === (b.costPending ?? false)
+    && (a.totalMessages ?? 0) === (b.totalMessages ?? 0)
+    && (a.userMessages ?? 0) === (b.userMessages ?? 0)
+    && (a.assistantMessages ?? 0) === (b.assistantMessages ?? 0)
+    && (a.tokensPerSecond ?? 0) === (b.tokensPerSecond ?? 0)
+    && (a.lastTokensPerSecond ?? 0) === (b.lastTokensPerSecond ?? 0);
 };
 
 const formatCompactHeaderLabel = (value: string): string => {
@@ -746,6 +755,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
+  const subtreeCost = useSessionSubtreeCost(currentSessionId ?? null);
   const currentSessionStatus = useGlobalSessionStatus(currentSessionId ?? '');
   const isCurrentSessionMovingToWorktree = useIsSessionWorktreeMovePending(currentSessionId ?? '');
   const currentGlobalSession = useGlobalSessionsStore(useShallow(React.useCallback(
@@ -859,7 +869,7 @@ export const Header: React.FC<HeaderProps> = ({
     : null;
   const contextLimit = (limit && typeof limit.context === 'number' ? limit.context : 0);
   const outputLimit = (limit && typeof limit.output === 'number' ? limit.output : 0);
-  const contextUsage = getContextUsage(contextLimit, outputLimit);
+  const contextUsage = withSubtreeCost(getContextUsage(contextLimit, outputLimit), subtreeCost);
   const [stableDesktopContextUsage, setStableDesktopContextUsage] = React.useState<SessionContextUsage | null>(null);
   const isContextUsageResolvedForSession = !currentSessionId || currentSessionMessagesResolved;
 
@@ -2421,6 +2431,14 @@ export const Header: React.FC<HeaderProps> = ({
               colorPercentage={stableDesktopContextUsage.percentage}
               contextLimit={stableDesktopContextUsage.contextLimit}
               outputLimit={stableDesktopContextUsage.outputLimit ?? 0}
+              cost={stableDesktopContextUsage.cost}
+              sessionCost={stableDesktopContextUsage.sessionCost}
+              costPending={stableDesktopContextUsage.costPending}
+              totalMessages={stableDesktopContextUsage.totalMessages}
+              userMessages={stableDesktopContextUsage.userMessages}
+              assistantMessages={stableDesktopContextUsage.assistantMessages}
+              tokensPerSecond={stableDesktopContextUsage.tokensPerSecond}
+              lastTokensPerSecond={stableDesktopContextUsage.lastTokensPerSecond}
               size="compact"
               hideIcon
               showPercentIcon
