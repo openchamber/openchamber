@@ -147,6 +147,9 @@ describe('terminal runtime', () => {
 
   it('creates client-identified sessions and forwards bounded resize operations', async () => {
     const harness = createHarness();
+    const ipcEnv = Object.fromEntries(['NODE_CHANNEL_FD', 'BUN_WATCH_PID'].map((key) => [key, process.env[key]]));
+    process.env.NODE_CHANNEL_FD = '3';
+    process.env.BUN_WATCH_PID = '123';
     try {
       const response = createResponse();
       await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-1', cwd: '/repo', cols: 120, rows: 40, themeMode: 'light', terminalBackground: '#faf8f0', terminalForeground: '#1b1b1b' } }, response);
@@ -176,7 +179,13 @@ describe('terminal runtime', () => {
       const invalid = createResponse();
       harness.routes.post.get('/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 1001, rows: 60 } }, invalid);
       expect(invalid.statusCode).toBe(400);
-    } finally { await harness.runtime.shutdown(); }
+    } finally {
+      for (const [key, value] of Object.entries(ipcEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await harness.runtime.shutdown();
+    }
   });
 
   it('strips AppImage ARGV0 from PTY child environments', async () => {
