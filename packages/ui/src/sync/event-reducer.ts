@@ -582,16 +582,21 @@ export function applyDirectoryEvent(
 
 function trimSessions(draft: State) {
   if (draft.session.length <= draft.limit) return
-  // Keep sessions that have pending permissions (they need to stay visible)
-  const hasPermission = new Set(
+  // Keep sessions that have pending blocking requests (they need to stay
+  // visible and answerable). A pending question would otherwise be orphaned:
+  // evicting the session breaks subtree scoping and resync recovery coverage.
+  const hasBlockingRequest = new Set(
     Object.entries(draft.permission ?? {})
-      .filter(([, perms]) => perms && perms.length > 0)
+      .filter(([, requests]) => requests && requests.length > 0)
       .map(([sessionID]) => sessionID),
   )
+  for (const [sessionID, requests] of Object.entries(draft.question ?? {})) {
+    if (requests && requests.length > 0) hasBlockingRequest.add(sessionID)
+  }
   while (draft.session.length > draft.limit) {
     // Remove from the beginning (oldest by sorted ID)
     const candidate = draft.session[0]
-    if (hasPermission.has(candidate.id)) break
+    if (hasBlockingRequest.has(candidate.id)) break
     draft.session.shift()
   }
 }

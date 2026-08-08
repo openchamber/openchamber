@@ -4,11 +4,14 @@ import type { Event, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk
 
 const listPendingQuestionsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
 const listPendingPermissionsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
+const sessionGetCalls: Array<{ sessionID: string; directory?: string | null }> = []
 const todoPersistWrites: Array<{ directory: string; sessionID: string; todos: unknown }> = []
 let pendingQuestionsResponse: QuestionRequest[] = []
 let pendingPermissionsResponse: PermissionRequest[] = []
 let pendingQuestionsShouldThrow = false
 let pendingPermissionsShouldThrow = false
+let sessionGetResult: Record<string, unknown> | null = null
+let sessionGetShouldThrow = false
 
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
@@ -23,7 +26,16 @@ mock.module("@/lib/opencode/client", () => ({
       return pendingPermissionsResponse
     }),
     getDirectory: () => "/repo",
-    getScopedSdkClient: () => ({}),
+    getScopedSdkClient: () => ({
+      session: {
+        get: mock(async (params: { sessionID: string; directory?: string | null }) => {
+          sessionGetCalls.push({ sessionID: params.sessionID, directory: params.directory })
+          if (sessionGetShouldThrow) throw new Error("session.get failed: simulated")
+          if (!sessionGetResult) throw new Error("session.get failed: no result")
+          return { data: sessionGetResult }
+        }),
+      },
+    }),
     setDirectory: () => undefined,
   },
 }))
@@ -109,10 +121,13 @@ describe("resyncBlockingRequestsForDirectory", () => {
   beforeEach(() => {
     listPendingQuestionsCalls.length = 0
     listPendingPermissionsCalls.length = 0
+    sessionGetCalls.length = 0
     pendingQuestionsResponse = []
     pendingPermissionsResponse = []
     pendingQuestionsShouldThrow = false
     pendingPermissionsShouldThrow = false
+    sessionGetResult = null
+    sessionGetShouldThrow = false
     todoPersistWrites.length = 0
     setActiveSession("", "")
   })
@@ -171,13 +186,61 @@ describe("resyncBlockingRequestsForDirectory", () => {
     expect(store.getState().question["ses_a"]).toEqual(undefined)
   })
 
-  test("ignores questions for sessions the directory does not know about", async () => {
+  test("keeps a question for an unknown session materialized in this directory", async () => {
+    // Issue #2448: a question asked during an SSE gap by a session the store
+    // does not know yet (e.g. a new subagent) is merged once the session is
+    // materialized in this directory, so it can surface as an answerable form.
     const store = createDirectoryStore({})
     pendingQuestionsResponse = [{ ...buildQuestion(), sessionID: "ses_unknown" }]
+    sessionGetResult = {
+      id: "ses_unknown",
+      parentID: null,
+      directory: "/repo",
+      time: { created: 1, updated: 1 },
+      version: "1",
+      title: "subagent",
+    }
 
     await resyncBlockingRequestsForDirectory("/repo", store)
 
-    expect(store.getState().question["ses_unknown"]).toEqual(undefined)
+    expect(sessionGetCalls).toHaveLength(1)
+    expect(sessionGetCalls[0].sessionID).toBe("ses_unknown")
+    expect(store.getState().session.some((session) => session.id === "ses_unknown")).toBe(true)
+    expect(store.getState().question["ses_unknown"]).toHaveLength(1)
+  })
+
+  test("drops a question for an unknown session that cannot be materialized", async () => {
+    // listPendingQuestions merges an unscoped global fetch, but a session that
+    // does not resolve in this directory must not leak its question in.
+    const store = createDirectoryStore({})
+    pendingQuestionsResponse = [{ ...buildQuestion(), sessionID: "ses_foreign" }]
+    sessionGetShouldThrow = true
+
+    await resyncBlockingRequestsForDirectory("/repo", store)
+
+    expect(store.getState().question["ses_foreign"]).toEqual(undefined)
+    expect(store.getState().session.some((session) => session.id === "ses_foreign")).toBe(false)
+  })
+
+  test("drops a question whose session belongs to another directory", async () => {
+    // Even when session.get resolves the unknown session, a session owned by a
+    // different directory must not be materialized into (or merged under) this
+    // per-directory store.
+    const store = createDirectoryStore({})
+    pendingQuestionsResponse = [{ ...buildQuestion(), sessionID: "ses_foreign" }]
+    sessionGetResult = {
+      id: "ses_foreign",
+      parentID: null,
+      directory: "/other-repo",
+      time: { created: 1, updated: 1 },
+      version: "1",
+      title: "foreign",
+    }
+
+    await resyncBlockingRequestsForDirectory("/repo", store)
+
+    expect(store.getState().question["ses_foreign"]).toEqual(undefined)
+    expect(store.getState().session.some((session) => session.id === "ses_foreign")).toBe(false)
   })
 
   test("returns early without fetching when no candidate sessions are known", async () => {

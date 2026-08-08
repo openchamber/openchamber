@@ -3,11 +3,12 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { OpencodeClient, Session, Message, Part, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type { StoreApi } from "zustand"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
-import type { ChildStoreManager } from "./child-store"
+import type { ChildStoreManager, DirectoryStore } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { opencodeClient } from "@/lib/opencode/client"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
@@ -650,6 +651,30 @@ function removeQuestionRequestFromChildStores(sessionId: string, requestId: stri
   }
 
   return removed
+}
+
+/**
+ * Re-insert a question into a single child store, preserving id-sorted order.
+ * Idempotent: if a question with the same id is already present the store is
+ * left untouched. Used to roll back an optimistic `dismissOpenQuestionsForSession`
+ * clear when the backend reject fails with a non-404 error, so a question that
+ * is still pending on the backend stays answerable (issue #2448).
+ */
+function restoreQuestionRequestInChildStore(
+  store: StoreApi<DirectoryStore>,
+  sessionId: string,
+  request: QuestionRequest,
+): void {
+  if (!store || !sessionId || !request?.id) return
+  store.setState((state: DirectoryStore) => {
+    const current = state.question ?? {}
+    const existing = current[sessionId] ?? []
+    if (existing.some((item) => item.id === request.id)) return state
+    const next = [...existing]
+    const result = Binary.search(next, request.id, (q) => q.id)
+    next.splice(result.index, 0, request)
+    return { question: { ...current, [sessionId]: next } }
+  })
 }
 
 function isPermissionRequestNotFoundError(error: unknown): boolean {
@@ -1672,6 +1697,12 @@ export async function respondToQuestion(
     if (assertSdkData(result, "question.reply") !== true) {
       throw new Error("Question reply failed")
     }
+    // A successful reply is authoritative: the backend applied the answer, so
+    // remove the question from the store deterministically instead of waiting
+    // on the SSE `question.replied` event. The event may be lost during an SSE
+    // gap, which previously left a pending-but-hidden question (issue #2448).
+    // The later SSE event is a no-op (the reducer only removes if present).
+    removeQuestionRequestFromChildStores(sessionId, requestId)
   } catch (error) {
     if (isQuestionRequestNotFoundError(error)) {
       removeQuestionRequestFromChildStores(sessionId, requestId)
@@ -1697,6 +1728,9 @@ export async function rejectQuestion(
     if (assertSdkData(result, "question.reject") !== true) {
       throw new Error("Question rejection failed")
     }
+    // Successful rejection is authoritative: remove from the store
+    // deterministically (see respondToQuestion for rationale).
+    removeQuestionRequestFromChildStores(sessionId, requestId)
   } catch (error) {
     if (isQuestionRequestNotFoundError(error)) {
       removeQuestionRequestFromChildStores(sessionId, requestId)
@@ -1734,8 +1768,8 @@ export async function dismissOpenQuestionsForSession(sessionId: string): Promise
   const stores = _childStores
   if (!stores) return false
 
-  const toDismiss: Array<{ sessionId: string; requestId: string }> = []
-  for (const [, store] of stores.children) {
+  const toDismiss: Array<{ directory: string; store: StoreApi<DirectoryStore>; sessionId: string; request: QuestionRequest }> = []
+  for (const [directory, store] of stores.children) {
     const state = store.getState()
     const scopedIds = computeSubtreeIds(state.session, sessionId)
     if (scopedIds.size === 0) continue
@@ -1744,7 +1778,7 @@ export async function dismissOpenQuestionsForSession(sessionId: string): Promise
       const requests = questionsBySession[scopedId]
       if (!requests) continue
       for (const request of requests) {
-        toDismiss.push({ sessionId: scopedId, requestId: request.id })
+        toDismiss.push({ directory, store, sessionId: scopedId, request })
       }
     }
   }
@@ -1753,23 +1787,56 @@ export async function dismissOpenQuestionsForSession(sessionId: string): Promise
 
   // Optimistically clear the questions from the local store so the prompt
   // disappears immediately, before the reject round-trip.
-  for (const { sessionId: scopedSessionId, requestId } of toDismiss) {
-    removeQuestionRequestFromChildStores(scopedSessionId, requestId)
+  for (const { sessionId: scopedSessionId, request } of toDismiss) {
+    removeQuestionRequestFromChildStores(scopedSessionId, request.id)
   }
 
   await Promise.all(
-    toDismiss.map(async ({ sessionId: scopedSessionId, requestId }) => {
+    toDismiss.map(async ({ directory, store, sessionId: scopedSessionId, request }) => {
       try {
-        await rejectQuestion(scopedSessionId, requestId)
+        await rejectQuestion(scopedSessionId, request.id)
       } catch (error) {
         if (isQuestionRequestNotFoundError(error)) return
-        // Swallow: a failed dismissal must not block the send. The next
-        // question.asked / question.rejected event reconciles the store.
+        // The reject failed with a non-404 error: the backend still considers
+        // the question pending. Roll the optimistic clear back so the question
+        // stays answerable instead of being orphaned (gone from the store,
+        // still pending on the backend, agent blocked with no form — #2448).
+        // NOTE: the caller (chat send path) queues the message when this
+        // returns true; the queued send only delivers once the session reaches
+        // idle, which now requires the user to resolve the recovered question.
+        await rollbackDismissedQuestion(directory, store, scopedSessionId, request)
+        // Swallow: a failed dismissal must not block the send. The rolled-back
+        // form reappears; once the user answers it, the queued send delivers.
         console.error("[session-actions] Failed to dismiss open question on send:", error)
       }
     }),
   )
   return true
+}
+
+/**
+ * Restore an optimistically-cleared question after a failed dismiss, but only
+ * when the backend still reports it pending. The authoritative re-check guards
+ * against resurrecting a question another client already answered/rejected
+ * while the reject round-trip was in flight. If the re-check itself fails, the
+ * question is restored conservatively (the reply/reject path reconciles a stale
+ * 404 back out), rather than hidden while the agent is blocked.
+ */
+async function rollbackDismissedQuestion(
+  directory: string,
+  store: StoreApi<DirectoryStore>,
+  sessionId: string,
+  request: QuestionRequest,
+): Promise<void> {
+  if (!directory || !store || !sessionId || !request?.id) return
+  try {
+    const pending = await opencodeClient.listPendingQuestions({ directories: [directory] })
+    const stillPending = pending.some((q) => q?.sessionID === sessionId && q.id === request.id)
+    if (!stillPending) return
+    restoreQuestionRequestInChildStore(store, sessionId, request)
+  } catch {
+    restoreQuestionRequestInChildStore(store, sessionId, request)
+  }
 }
 
 // ---------------------------------------------------------------------------
