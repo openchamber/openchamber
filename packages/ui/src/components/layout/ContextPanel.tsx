@@ -170,7 +170,7 @@ const getModeLabel = (
   if (mode === 'plan') return t('contextPanel.mode.plan');
   if (mode === 'preview') return t('contextPanel.mode.preview');
   if (mode === 'browser') return t('contextPanel.mode.browser');
-  if (mode === 'git') return t('layout.rightSidebar.git');
+  if (mode === 'git') return t('contextPanel.mode.diff');
   if (mode === 'pr') return t('contextPanel.mode.pr');
   if (mode === 'notes') return t('contextRail.surface.notes');
   if (mode === 'terminal') return t('layout.mainTab.terminal');
@@ -2246,6 +2246,7 @@ export const ContextPanel: React.FC = () => {
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
+  const openContextSurface = useUIStore((state) => state.openContextSurface);
   const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
   const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
@@ -2447,6 +2448,15 @@ export const ContextPanel: React.FC = () => {
     closeContextPanel(directoryKey);
   }, [closeContextPanel, directoryKey]);
 
+  const handleBackToChangesList = React.useCallback(() => {
+    if (!directoryKey) {
+      return;
+    }
+    // Prefer the shared Changes rail action so expanded review collapses and
+    // the SCM list becomes active again.
+    openContextSurface(directoryKey, 'git');
+  }, [directoryKey, openContextSurface]);
+
   const handleToggleExpanded = React.useCallback(() => {
     if (!directoryKey) {
       return;
@@ -2468,8 +2478,45 @@ export const ContextPanel: React.FC = () => {
 
     event.preventDefault();
     event.stopPropagation();
+    if (activeTab?.mode === 'diff') {
+      handleBackToChangesList();
+      return;
+    }
     handleClose();
-  }, [handleClose]);
+  }, [activeTab?.mode, handleBackToChangesList, handleClose]);
+
+  // Window-level Escape so expanded file review still returns to the Changes
+  // list when focus is outside the panel (chat, rail, etc.). Terminal remains
+  // excluded via the same target check as the in-panel capture handler.
+  React.useEffect(() => {
+    if (!isOpen || typeof window === 'undefined') {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) {
+        return;
+      }
+      if (isTerminalEventTarget(event.target)) {
+        return;
+      }
+      // Leave modal/dialog Escape to the dialog layer.
+      if (event.target instanceof Element && event.target.closest('[role="dialog"], [data-radix-dialog-content]')) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (activeTab?.mode === 'diff') {
+        handleBackToChangesList();
+        return;
+      }
+      handleClose();
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [activeTab?.mode, handleBackToChangesList, handleClose, isOpen]);
 
   React.useEffect(() => {
     if (!directoryKey || !activeTab) {
@@ -2754,6 +2801,8 @@ export const ContextPanel: React.FC = () => {
   );
 
   const isFileTabActive = activeTab?.mode === 'file';
+  const isDiffTabActive = activeTab?.mode === 'diff';
+  const diffHeaderFileName = isDiffTabActive ? getFileNameFromPath(activeTab?.targetPath ?? null) : null;
 
   const header = (
     <header className="flex h-10 items-stretch border-b border-border">
@@ -2784,9 +2833,24 @@ export const ContextPanel: React.FC = () => {
         />
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">
-          {activeTab ? getTabIcon(activeTab) : null}
+          {isDiffTabActive ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleBackToChangesList}
+              className="h-7 w-7 shrink-0 p-0"
+              title={t('contextPanel.actions.backToChanges')}
+              aria-label={t('contextPanel.actions.backToChanges')}
+            >
+              <Icon name="arrow-left" className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
+          {activeTab && !isDiffTabActive ? getTabIcon(activeTab) : null}
           <span className="truncate typography-ui-label text-foreground">
-            {activeTab ? getModeLabel(activeTab.mode, t) : null}
+            {isDiffTabActive
+              ? (diffHeaderFileName ?? t('contextPanel.mode.diff'))
+              : (activeTab ? getModeLabel(activeTab.mode, t) : null)}
           </span>
         </div>
       )}
@@ -2990,7 +3054,9 @@ export const ContextPanel: React.FC = () => {
           >
             <React.Suspense fallback={null}>
               <DiffView
-                hideStackedFileSidebar
+                // Expanded review shows the file list beside the diff (VS Code-style).
+                // Collapsed / narrow keeps a single focused diff pane.
+                hideStackedFileSidebar={!isExpanded}
                 stackedDefaultCollapsedAll
                 pinSelectedFileHeaderToTopOnNavigate
                 showOpenInEditorAction

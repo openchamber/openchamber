@@ -17,7 +17,6 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 
 import { Icon } from '@/components/icon/Icon';
-import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDeviceInfo } from '@/lib/device';
@@ -25,6 +24,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import {
   getVisibleContextRailSurfaces,
+  isChangesContextMode,
   sortContextSurfaces,
   type ContextSurfaceDescriptor,
 } from '@/lib/surfaces/registry';
@@ -105,11 +105,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            {surface.id === 'diff' ? (
-              <DiffViewIcon />
-            ) : (
-              <Icon name={surface.icon} className="h-[18px] w-[18px]" />
-            )}
+            <Icon name={surface.icon} className="h-[18px] w-[18px]" />
             {showOrderNumber && orderNumber != null ? (
               <span
                 aria-hidden="true"
@@ -292,7 +288,11 @@ export const ContextPanelRail: React.FC = () => {
               <ContextPanelRailItem
                 key={surface.id}
                 surface={surface}
-                isActive={activeMode === surface.mode}
+                isActive={
+                  surface.id === 'git'
+                    ? isChangesContextMode(activeMode)
+                    : activeMode === surface.mode
+                }
                 showActivityDot={false}
                 label={label}
                 description={t(surface.descriptionKey)}

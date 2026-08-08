@@ -1089,7 +1089,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label": "Agregar selección al chat",
   "settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label": "Mostrar u ocultar barra lateral",
   "settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label": 'Alternar panel de contexto',
-  "settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label": 'Abrir superficie de Git',
+  "settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label": 'Abrir superficie de Cambios',
   "settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label": 'Abrir superficie de archivos',
   "settings.openchamber.keyboardShortcuts.action.switch_context_surface.label": "Cambiar superficie del panel de contexto",
   "settings.openchamber.keyboardShortcuts.action.switch_context_surface.suffix": " + 1…0",

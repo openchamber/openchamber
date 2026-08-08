@@ -737,6 +737,7 @@ interface UIStore {
   closeContextPanelTab: (directory: string, tabID: string) => void;
   closeContextPanel: (directory: string) => void;
   toggleContextPanelExpanded: (directory: string) => void;
+  setContextPanelExpanded: (directory: string, expanded: boolean) => void;
   setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number) => void;
   setNotesPanelHeight: (height: number) => void;
   setTodoPanelHeight: (height: number) => void;
@@ -1110,6 +1111,21 @@ export const useUIStore = create<UIStore>()(
           const tabs = panelState?.tabs ?? [];
           const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
 
+          // Git + Diff share one Changes rail entry. Opening Git while a file
+          // diff is active returns to the SCM list and collapses the expanded
+          // review pane instead of closing the panel.
+          if (mode === 'git' && panelState?.isOpen && activeTab?.mode === 'diff') {
+            state.setContextPanelExpanded(normalizedDirectory, false);
+            const gitTabs = tabs.filter((tab) => tab.mode === 'git');
+            if (gitTabs.length > 0) {
+              const mostRecent = gitTabs.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best));
+              state.setActiveContextPanelTab(normalizedDirectory, mostRecent.id);
+              return;
+            }
+            state.openContextPanelTab(normalizedDirectory, { mode: 'git' });
+            return;
+          }
+
           if (panelState?.isOpen && activeTab?.mode === mode) {
             state.closeContextPanel(normalizedDirectory);
             return;
@@ -1167,6 +1183,9 @@ export const useUIStore = create<UIStore>()(
             stagedDiff: diffScope === 'staged',
             diffScope,
           });
+          // File review expands over chat so projects/sessions stay visible
+          // while the change list's selected file opens full-bleed.
+          get().setContextPanelExpanded(normalizedDirectory, true);
         },
 
         openContextFile: (directory, filePath) => {
@@ -1403,6 +1422,31 @@ export const useUIStore = create<UIStore>()(
               [normalizedDirectory]: {
                 ...current,
                 expanded: !current.expanded,
+              },
+            };
+
+            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
+        setContextPanelExpanded: (directory, expanded) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) {
+            return;
+          }
+
+          const nextExpanded = expanded === true;
+          set((state) => {
+            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const current = touchContextPanelState(prev);
+            if (current.expanded === nextExpanded) {
+              return state;
+            }
+            const byDirectory = {
+              ...state.contextPanelByDirectory,
+              [normalizedDirectory]: {
+                ...current,
+                expanded: nextExpanded,
               },
             };
 

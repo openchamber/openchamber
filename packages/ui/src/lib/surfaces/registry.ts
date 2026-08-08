@@ -6,7 +6,6 @@ export type ContextSurfaceId =
   | 'editor'
   | 'git'
   | 'pr'
-  | 'diff'
   | 'walkthrough'
   | 'terminal'
   | 'plan'
@@ -15,6 +14,11 @@ export type ContextSurfaceId =
   | 'browser'
   | 'preview'
   | 'chat';
+
+/** Modes that belong to the combined Changes / Source Control surface. */
+export const isChangesContextMode = (mode: ContextPanelMode | null | undefined): boolean => {
+  return mode === 'git' || mode === 'diff';
+};
 
 export type ContextSurfaceDescriptor = {
   id: ContextSurfaceId;
@@ -51,10 +55,13 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'git',
     descriptionKey: 'contextRail.surface.git.description',
+    // Combined Source Control + change review surface (VS Code-style). Diff
+    // viewing is opened from this surface (and chat deep links) as an expanded
+    // `mode: 'diff'` tab — not as a separate rail entry.
     defaultWidthFraction: 2 / 5,
     mode: 'git',
     icon: 'git-branch',
-    labelKey: 'layout.rightSidebar.git',
+    labelKey: 'contextPanel.mode.diff',
     availability: 'always',
   },
   {
@@ -64,15 +71,6 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     mode: 'pr',
     icon: 'github',
     labelKey: 'contextPanel.mode.pr',
-    availability: 'always',
-  },
-  {
-    id: 'diff',
-    descriptionKey: 'contextRail.surface.diff.description',
-    defaultWidthFraction: 3 / 5,
-    mode: 'diff',
-    icon: 'arrow-left-right',
-    labelKey: 'contextPanel.mode.diff',
     availability: 'always',
   },
   {
@@ -157,6 +155,11 @@ const FRACTION_BY_MODE = new Map(CONTEXT_SURFACES.map((surface) => [surface.mode
 export const WALKTHROUGH_MIN_WIDTH = 768;
 
 export const getContextSurfaceWidthFraction = (mode: ContextPanelMode): number => {
+  // Diff review is opened from Changes and usually expands; keep the former
+  // wider default for the rare collapsed case.
+  if (mode === 'diff') {
+    return 3 / 5;
+  }
   return FRACTION_BY_MODE.get(mode) ?? 1 / 2;
 };
 

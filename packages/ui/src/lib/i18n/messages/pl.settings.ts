@@ -825,7 +825,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label': 'Otwórz powierzchnię plików',
   'settings.openchamber.keyboardShortcuts.action.switch_context_surface.label': 'Przełącz powierzchnię panelu kontekstu',
   'settings.openchamber.keyboardShortcuts.action.switch_context_surface.suffix': ' + 1…0',
-  'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': 'Otwórz powierzchnię Git',
+  'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': 'Otwórz powierzchnię Zmiany',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Otwórz ustawienia',
   'settings.openchamber.keyboardShortcuts.action.toggle_context_plan.label': 'Przełącz panel kontekstu planu',
   'settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label': 'Przełącz panel kontekstu',
