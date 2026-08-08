@@ -778,7 +778,11 @@ export const restartToApplyUpdate = async (): Promise<boolean> => {
     return false;
   }
 
-  return restartDesktopApp();
+  // Update installation failures must reach the update store so it can show the real
+  // native error. The generic restart helper intentionally converts IPC failures to false,
+  // which would incorrectly present every installer failure as a non-local runtime.
+  await invokeDesktop('desktop_restart');
+  return true;
 };
 
 export const restartDesktopApp = async (): Promise<boolean> => {

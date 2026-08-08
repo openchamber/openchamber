@@ -6,7 +6,22 @@ export const isMissingUpdateFeedError = (error) => {
   return MISSING_UPDATE_FEED_RE.test(message);
 };
 
-export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendingUpdate, compareVersions }) => {
+export const hasUpdateArtifact = (updateInfo, artifactExtension) => {
+  if (!artifactExtension) return true;
+  const extension = `.${artifactExtension.toLowerCase()}`;
+  return Array.isArray(updateInfo?.files) && updateInfo.files.some((file) => {
+    const url = typeof file?.url === 'string' ? file.url : '';
+    return url.split(/[?#]/, 1)[0].toLowerCase().endsWith(extension);
+  });
+};
+
+export const checkForDesktopUpdate = async ({
+  autoUpdater,
+  currentVersion,
+  pendingUpdate,
+  compareVersions,
+  artifactExtension = null,
+}) => {
   let updateResult;
   try {
     updateResult = await autoUpdater.checkForUpdates();
@@ -32,6 +47,15 @@ export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendi
     (typeof updateInfo?.version === 'string' && updateInfo.version) ||
     currentVersion;
   const available = compareVersions(nextVersion, currentVersion) > 0;
+  if (available && !hasUpdateArtifact(updateInfo, artifactExtension)) {
+    return {
+      available: false,
+      updateInfo: null,
+      updateResult: null,
+      nextVersion: currentVersion,
+      pendingUpdate: null,
+    };
+  }
   return {
     available,
     updateInfo,

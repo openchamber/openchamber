@@ -15,10 +15,11 @@ import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
-import { assertUpdaterCapability } from './updater-capability.mjs';
+import { assertUpdaterCapability, resolveLinuxUpdatePackageType } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
+import { installDebUpdate } from './deb-installer.mjs';
 import {
   buildLinuxInstalledApps,
   buildLinuxOpenSpecs,
@@ -4193,13 +4194,17 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_check_for_updates': {
-      assertUpdaterCapability({ packaged: app.isPackaged });
+      // Linux release manifests can contain both AppImage and deb artifacts. Resolve the
+      // installed package type first so an update is offered only when it can be applied.
+      const linuxPackageType = resolveLinuxUpdatePackageType({ packaged: app.isPackaged });
+      assertUpdaterCapability({ packaged: app.isPackaged, packageType: linuxPackageType });
       const currentVersion = APP_VERSION;
       const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
         autoUpdater,
         currentVersion,
         pendingUpdate: state.pendingUpdate,
         compareVersions: compareSemver,
+        artifactExtension: linuxPackageType,
       });
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
@@ -4217,7 +4222,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_download_and_install_update':
-      assertUpdaterCapability({ packaged: app.isPackaged });
+      assertUpdaterCapability({
+        packaged: app.isPackaged,
+        packageType: resolveLinuxUpdatePackageType({ packaged: app.isPackaged }),
+      });
       if (!state.pendingUpdate) {
         throw new Error('No pending update');
       }
@@ -4232,25 +4240,22 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         if (!state.pendingUpdate.electronUpdate) {
           throw new Error('Electron updater metadata is not available for this build');
         }
-        if (!state.pendingUpdate.downloaded) {
-          await new Promise((resolve, reject) => {
-            let settled = false;
-            const cleanup = () => {
-              autoUpdater.off('update-downloaded', onDownloaded);
-              autoUpdater.off('error', onError);
-            };
-            const finish = (callback, value) => {
-              if (settled) return;
-              settled = true;
-              cleanup();
-              callback(value);
-            };
-            const onDownloaded = () => finish(resolve, null);
-            const onError = (error) => finish(reject, error);
-            autoUpdater.on('update-downloaded', onDownloaded);
-            autoUpdater.on('error', onError);
-            Promise.resolve(autoUpdater.downloadUpdate()).catch((error) => finish(reject, error));
-          });
+        const linuxPackageType = resolveLinuxUpdatePackageType({ packaged: app.isPackaged });
+        const needsDebArtifactPath = linuxPackageType === 'deb' && !state.pendingUpdate.downloadedArtifactPath;
+        if (!state.pendingUpdate.downloaded || needsDebArtifactPath) {
+          const downloadedFiles = await autoUpdater.downloadUpdate();
+          state.pendingUpdate.downloaded = true;
+          if (linuxPackageType === 'deb') {
+            const downloadedDeb = downloadedFiles.find((filePath) => (
+              typeof filePath === 'string' && filePath.toLowerCase().endsWith('.deb')
+            ));
+            if (!downloadedDeb) {
+              throw new Error('The downloaded update did not include a deb installer');
+            }
+            // Keep the verified path returned by electron-updater. The restart step uses
+            // it directly instead of reaching into electron-updater's protected internals.
+            state.pendingUpdate.downloadedArtifactPath = downloadedDeb;
+          }
         }
         emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
           event: 'Finished',
@@ -4263,8 +4268,18 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_restart': {
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
-      if (applyUpdate) assertUpdaterCapability({ packaged: app.isPackaged });
-      log.info(`[electron] desktop_restart applyUpdate=${applyUpdate} packaged=${app.isPackaged}`);
+      const linuxPackageType = applyUpdate
+        ? resolveLinuxUpdatePackageType({ packaged: app.isPackaged })
+        : null;
+      if (applyUpdate) {
+        assertUpdaterCapability({
+          packaged: app.isPackaged,
+          packageType: linuxPackageType,
+        });
+      }
+      log.info(
+        `[electron] desktop_restart applyUpdate=${applyUpdate} packaged=${app.isPackaged} packageType=${linuxPackageType || 'none'}`,
+      );
       if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
         try {
           if (!app.isInApplicationsFolder()) {
@@ -4275,10 +4290,23 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           throw error;
         }
       }
+      if (applyUpdate && linuxPackageType === 'deb') {
+        const downloadedArtifactPath = state.pendingUpdate?.downloadedArtifactPath;
+        if (!downloadedArtifactPath) {
+          throw new Error('Downloaded deb installer path is not available; download the update again');
+        }
+        // electron-updater's DebUpdater can mistake a signal-terminated dpkg process for
+        // success. Install and verify the package before changing quit state, so failure is
+        // returned to the renderer and an unpacked package never triggers a false restart.
+        const installed = installDebUpdate({
+          artifactPath: downloadedArtifactPath,
+          expectedVersion: state.pendingUpdate.version,
+        });
+        log.info(`[electron] verified deb update installation version=${installed.version} status=${installed.status}`);
+      }
       if (applyUpdate) {
-        // Match the working updater pattern closely: only bypass the macOS
-        // hide-on-close / quit-confirmation guards, leave the rest of the
-        // updater-driven quit/install sequence alone.
+        // Installation has either completed (deb) or will be delegated to the native
+        // updater after the IPC response. Bypass quit guards only for this committed flow.
         state.quitRequested = true;
         state.installingUpdate = true;
         state.quitConfirmationPending = false;
@@ -4294,7 +4322,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // invoke and the restart appears to do nothing from the UI side.
       setImmediate(() => {
         try {
-          if (applyUpdate) {
+          if (applyUpdate && linuxPackageType !== 'deb') {
             killSidecar();
             autoUpdater.quitAndInstall();
           } else {
