@@ -75,6 +75,7 @@ import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
+import { applySmallModelOverrideToOpenCodeConfig } from './lib/small-model/config-injection.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
@@ -1097,11 +1098,19 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     const managedEnv = settings?.agentControlToolEnabled === false
       ? {}
       : await (agentToolRuntime?.prepareManagedOpenCodeEnv() || {});
-    if (settings?.optimizeSystemPrompt !== true) return managedEnv;
-
-    const configContent = managedEnv.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT;
-    const systemPromptEnv = await systemPromptRuntime.prepareManagedOpenCodeEnv(configContent);
-    return { ...managedEnv, ...systemPromptEnv };
+    const env = settings?.optimizeSystemPrompt === true
+      ? { ...managedEnv, ...(await systemPromptRuntime.prepareManagedOpenCodeEnv(managedEnv.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT)) }
+      : managedEnv;
+    // Apply the explicit Small Model override to the managed OpenCode config
+    // so OpenCode's own title/summary generation uses the user's chosen model.
+    const configContent = env.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT;
+    const withSmallModel = applySmallModelOverrideToOpenCodeConfig({
+      configContent,
+      smallModelUseDefault: settings?.smallModelUseDefault,
+      smallModelOverride: settings?.smallModelOverride,
+    });
+    if (withSmallModel === configContent) return env;
+    return { ...env, OPENCODE_CONFIG_CONTENT: withSmallModel };
   },
 });
 

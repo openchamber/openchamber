@@ -114,6 +114,17 @@ other runtime API.
 - `routes.js` — `GET /api/small-model` (resolution preview) and
   `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
   model?, directory? }` → `{ text, providerID, modelID, source }`).
+- `config-injection.js` — applies the Settings → Chat → Small Model override
+  to the config injected into the **managed OpenCode process**
+  (`OPENCODE_CONFIG_CONTENT`), so OpenCode's own internal `small_model`
+  consumers — session title and summary generation — use the user's explicit
+  choice instead of OpenCode's fallback chain. Only an explicit override
+  (`smallModelUseDefault === false` with a non-empty `smallModelOverride`) is
+  injected; "use default" leaves the config untouched so OpenCode's own
+  resolution stays authoritative. Wired into `getManagedOpenCodeEnv` in
+  `server/index.js`; the pure helper is unit-tested in
+  `config-injection.test.js`. External OpenCode servers are unaffected (they
+  are not launched with this env).
 
 ## Registration
 
