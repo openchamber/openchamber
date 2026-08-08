@@ -19,6 +19,8 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     '&.cm-focused': { outline: 'none' },
     '.cm-content': {
         padding: '0',
+        // Keep the drawn empty-document cursor inside the scroller's horizontal clip.
+        paddingInlineStart: '1px',
         fontFamily: 'inherit',
         fontSize: 'inherit',
         lineHeight: 'inherit',
