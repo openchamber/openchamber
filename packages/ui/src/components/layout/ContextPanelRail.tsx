@@ -60,9 +60,11 @@ type RailItemProps = {
   onSelect: (surface: ContextSurfaceDescriptor) => void;
 };
 
-// The badge corner is 16px tall; cap large counts so the pill stays compact
-// on the 36px rail button (matching the order-number badge's footprint).
-const formatRailBadgeCount = (count: number): string => (count > 99 ? '99+' : String(count));
+// The badge corner is a 14px circle; line-height matches the badge height so
+// digits stay optically centered regardless of font metrics. Allow up to three
+// digits (999+) so real counts stay readable while the pill still fits on the
+// 36px rail button.
+const formatRailBadgeCount = (count: number): string => (count > 999 ? '999+' : String(count));
 
 const ContextPanelRailItem: React.FC<RailItemProps> = ({
   surface,
@@ -120,7 +122,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             ) : displayBadgeCount ? (
               <span
                 aria-hidden="true"
-                className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-muted px-1 text-[0.625rem] font-medium leading-none text-muted-foreground"
+                className="absolute right-0 top-0 flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-[var(--status-info)] px-1 text-[0.625rem] font-semibold leading-[14px] tabular-nums text-[var(--status-info-foreground)] ring-1 ring-[var(--surface-background)]"
               >
                 {displayBadgeCount}
               </span>
