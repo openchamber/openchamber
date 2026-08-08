@@ -164,6 +164,10 @@ Important properties:
 - runtime reset disposes timers, watchers, API references, and request ownership while inert namespaced snapshots remain isolated
 - persisted cache is versioned, TTL-filtered, and bounded for page refresh continuity, not broad background syncing
 
+### `useQuotaStore.ts`
+
+Quota results are an active-runtime stale-while-revalidate cache. Full refreshes share one request per runtime generation, retain existing results while loading, and reject provider, settings, error, and freshness commits from an older runtime. A runtime switch clears quota data and runtime-scoped settings to neutral defaults before asynchronously loading the new runtime's settings.
+
 ## Ownership Rules
 
 These rules are important. Breaking them tends to reintroduce idle CPU churn, stale UI, or rerender fanout.

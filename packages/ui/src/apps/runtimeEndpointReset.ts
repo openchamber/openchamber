@@ -13,6 +13,7 @@ import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
+import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resetStreamingState } from '@/sync/streaming';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
@@ -64,6 +65,8 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useFileSearchStore.getState().resetForRuntimeSwitch();
   useGitStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   useGitHubPrStatusStore.getState().resetForRuntimeSwitch();
+  useQuotaStore.getState().resetForRuntimeSwitch();
+  void useQuotaStore.getState().loadSettings();
   useSessionFoldersStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   useFilesViewTabsStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);

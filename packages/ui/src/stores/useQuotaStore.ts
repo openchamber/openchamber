@@ -8,8 +8,15 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getDefaultModels } from '@/lib/quota/model-families';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 const DEFAULT_REFRESH_INTERVAL_MS = 60000;
+const fetchAllQuotasInFlight = new Map<string, { request: Promise<void>; token: symbol; generation: number }>();
+let quotaRuntimeGeneration = 0;
+
+const isQuotaRequestCurrent = (runtimeKey: string, generation: number): boolean => (
+  runtimeKey === getRuntimeKey() && generation === quotaRuntimeGeneration
+);
 
 interface QuotaSettingsState {
   autoRefresh: boolean;
@@ -32,6 +39,7 @@ interface QuotaStore extends QuotaSettingsState {
   loadSettings: () => Promise<void>;
   fetchAllQuotas: () => Promise<void>;
   fetchProviderQuota: (providerId: QuotaProviderId) => Promise<void>;
+  resetForRuntimeSwitch: () => void;
   setSelectedProvider: (providerId: QuotaProviderId | null) => void;
   setAutoRefresh: (enabled: boolean) => void;
   setRefreshInterval: (intervalMs: number) => void;
@@ -153,32 +161,53 @@ export const useQuotaStore = create<QuotaStore>()(
       expandedFamilies: {},
 
       loadSettings: async () => {
+        const runtimeKey = getRuntimeKey();
+        const generation = quotaRuntimeGeneration;
         try {
           const settings = await loadSettingsFromRuntime();
+          if (!isQuotaRequestCurrent(runtimeKey, generation)) return;
           set(settings);
         } catch (error) {
+          if (!isQuotaRequestCurrent(runtimeKey, generation)) return;
           console.warn('Failed to load usage settings:', error);
         }
       },
 
-      fetchAllQuotas: async () => {
-        set({ isLoading: true, error: null });
-        const providerIds = QUOTA_PROVIDERS.map((provider) => provider.id);
-        try {
-          await Promise.all(
-            providerIds.map((providerId) => get().fetchProviderQuota(providerId))
-          );
-          set({
-            isLoading: false,
-            lastUpdated: Date.now()
-          });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Failed to fetch quotas';
-          set({ isLoading: false, error: message });
-        }
+      fetchAllQuotas: () => {
+        const runtimeKey = getRuntimeKey();
+        const generation = quotaRuntimeGeneration;
+        const inFlight = fetchAllQuotasInFlight.get(runtimeKey);
+        if (inFlight?.generation === generation) return inFlight.request;
+
+        const token = Symbol();
+        const request = (async () => {
+          set({ isLoading: true, error: null });
+          const providerIds = QUOTA_PROVIDERS.map((provider) => provider.id);
+          try {
+            await Promise.all(
+              providerIds.map((providerId) => get().fetchProviderQuota(providerId))
+            );
+            if (!isQuotaRequestCurrent(runtimeKey, generation)) return;
+            set({ lastUpdated: Date.now() });
+          } catch (error) {
+            if (!isQuotaRequestCurrent(runtimeKey, generation)) return;
+            const message = error instanceof Error ? error.message : 'Failed to fetch quotas';
+            set({ error: message });
+          } finally {
+            if (fetchAllQuotasInFlight.get(runtimeKey)?.token === token) {
+              fetchAllQuotasInFlight.delete(runtimeKey);
+            }
+            const currentRequest = fetchAllQuotasInFlight.get(getRuntimeKey());
+            set({ isLoading: currentRequest?.generation === quotaRuntimeGeneration });
+          }
+        })();
+        fetchAllQuotasInFlight.set(runtimeKey, { request, token, generation });
+        return request;
       },
 
       fetchProviderQuota: async (providerId) => {
+        const runtimeKey = getRuntimeKey();
+        const generation = quotaRuntimeGeneration;
         set((state) => ({
           isFetchingProvider: { ...state.isFetchingProvider, [providerId]: true }
         }));
@@ -190,12 +219,14 @@ export const useQuotaStore = create<QuotaStore>()(
           }
 
           const result = payload as ProviderResult;
+          if (!isQuotaRequestCurrent(runtimeKey, generation)) return;
           set((state) => {
             const next = state.results.filter((entry) => entry.providerId !== providerId);
             next.push(result);
             return { results: next, error: null };
           });
         } catch (error) {
+          if (!isQuotaRequestCurrent(runtimeKey, generation)) return;
           const message = error instanceof Error ? error.message : 'Failed to fetch quota';
           const fallback: ProviderResult = {
             providerId,
@@ -212,10 +243,31 @@ export const useQuotaStore = create<QuotaStore>()(
             return { results: next, error: message };
           });
         } finally {
-          set((state) => ({
-            isFetchingProvider: { ...state.isFetchingProvider, [providerId]: false }
-          }));
+          if (isQuotaRequestCurrent(runtimeKey, generation)) {
+            set((state) => ({
+              isFetchingProvider: { ...state.isFetchingProvider, [providerId]: false }
+            }));
+          }
         }
+      },
+
+      resetForRuntimeSwitch: () => {
+        quotaRuntimeGeneration += 1;
+        set({
+          results: [],
+          selectedProviderId: null,
+          isLoading: false,
+          isFetchingProvider: {},
+          lastUpdated: null,
+          error: null,
+          autoRefresh: false,
+          refreshIntervalMs: DEFAULT_REFRESH_INTERVAL_MS,
+          displayMode: 'usage',
+          showPredValues: false,
+          dropdownProviderIds: QUOTA_PROVIDERS.map((provider) => provider.id),
+          selectedModels: {},
+          expandedFamilies: {},
+        });
       },
 
       setSelectedProvider: (providerId) => set({ selectedProviderId: providerId }),
