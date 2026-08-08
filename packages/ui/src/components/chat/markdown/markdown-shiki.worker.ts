@@ -1,6 +1,10 @@
 /// <reference lib="webworker" />
 
-import { bundledLanguages, createHighlighter, type BundledLanguage, type ThemedToken } from 'shiki';
+import { bundledLanguages, createHighlighter, type BundledLanguage, type LanguageRegistration, type ThemedToken } from 'shiki';
+import {
+  isTemplateCallLanguageId,
+  sanitizeTemplateCallGrammar,
+} from '../../../lib/shiki/sanitizeTemplateCallGrammar';
 import { MARKDOWN_SHIKI_THEME, MARKDOWN_SHIKI_THEME_DEFINITION } from './markdownShikiThemeDefinition';
 import type { MarkdownWorkerRequest, MarkdownWorkerResponse } from './markdown-worker-protocol';
 
@@ -60,11 +64,28 @@ self.onmessage = (event: MessageEvent<MarkdownWorkerRequest>) => {
 
 type Instance = Awaited<ReturnType<typeof createHighlighter>>;
 
+type BundledLanguageModule = { default: LanguageRegistration[] };
+
+/**
+ * Load a language, neutralizing the catastrophic JS/TS `template-call` rule
+ * before it reaches the Oniguruma scanner (see sanitizeTemplateCallGrammar).
+ */
+const loadLanguageSafe = async (instance: Instance, lang: BundledLanguage): Promise<void> => {
+  if (!isTemplateCallLanguageId(lang)) {
+    await instance.loadLanguage(bundledLanguages[lang]);
+    return;
+  }
+
+  const mod = (await bundledLanguages[lang]()) as BundledLanguageModule;
+  const grammars = mod.default.map((grammar) => sanitizeTemplateCallGrammar(grammar));
+  await instance.loadLanguage(...grammars);
+};
+
 const resolveLanguage = async (instance: Instance, requested: string): Promise<string> => {
   let lang = requested in bundledLanguages ? requested : 'text';
   if (lang !== 'text' && !instance.getLoadedLanguages().includes(lang)) {
     try {
-      await instance.loadLanguage(bundledLanguages[lang as BundledLanguage]);
+      await loadLanguageSafe(instance, lang as BundledLanguage);
     } catch {
       lang = 'text';
     }
