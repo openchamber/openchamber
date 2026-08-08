@@ -52,6 +52,8 @@ Select code in the editor, right-click, and find the **OpenChamber** submenu:
 | `openchamber.apiUrl` | _(empty)_ | URL of an external OpenCode API server. Leave empty to auto-start a local instance. |
 | `openchamber.opencodeBinary` | _(empty)_ | Absolute path to the `opencode` CLI binary. Useful when PATH lookup fails. Requires window reload to apply. |
 
+npm metadata checks honor `npm_config_registry`, then `NPM_CONFIG_REGISTRY`, from the extension host environment.
+
 ## Requirements
 
 - [OpenCode CLI](https://opencode.ai) installed and available in PATH (or set `OPENCODE_BINARY` env var)
