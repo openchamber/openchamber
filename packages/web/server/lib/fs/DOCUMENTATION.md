@@ -22,6 +22,10 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `POST /api/fs/exec`
     - `GET /api/fs/exec/:jobId`
     - `GET /api/fs/list`
+    - `GET /api/fs/git-dirs` — shallow nested git repository discovery for the
+      Git tab (depth- and visit-capped readdir walk; `.git` directory, file, or
+      symlink marks a repository boundary; junk directories and symlinks are
+      never descended into)
   - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
   - Enforces workspace boundary checks with active project + worktree fallback support.
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`

@@ -249,6 +249,79 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
   });
 };
 
+// Nested repository discovery bounds: only shallow walks are useful for the
+// Git tab's "pick a repository" picker, and deep/monorepo trees can explode
+// otherwise. Directories deeper than maxDepth or beyond the visit cap are
+// silently not searched.
+const GIT_DIRS_MAX_DEPTH = 3;
+const GIT_DIRS_MAX_DIRS = 100;
+const GIT_DIRS_SKIP_LIST = new Set(['node_modules', 'dist', 'build', '.venv', 'target', '.next']);
+
+// Walks rootPath and returns every nested git repository path (a directory
+// containing a `.git` entry — a directory, a worktree pointer file, or a
+// symlink). A repository boundary stops descent: nested repos inside repos
+// are not reported. The root itself, when it is a repo, yields no results.
+const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxDepth, maxDirs }) => {
+  const results = [];
+  let visited = 0;
+
+  const walk = async (dir, depth) => {
+    if (visited >= maxDirs) {
+      return;
+    }
+
+    let dirents;
+    try {
+      dirents = await fsPromises.readdir(dir, { withFileTypes: true });
+    } catch (error) {
+      // Unreadable subtree — skip it unless it is the root itself, which the
+      // route maps to 403/404/500 through the shared error handling.
+      if (dir === rootPath) {
+        throw error;
+      }
+      return;
+    }
+    visited += 1;
+
+    let isRepoBoundary = false;
+    const subdirectories = [];
+    for (const dirent of dirents) {
+      if (dirent.name === '.git') {
+        isRepoBoundary = true;
+        continue;
+      }
+      if (!dirent.isDirectory() || dirent.isSymbolicLink()) {
+        continue;
+      }
+      if (GIT_DIRS_SKIP_LIST.has(dirent.name)) {
+        continue;
+      }
+      if (depth >= maxDepth) {
+        continue;
+      }
+      subdirectories.push(dirent.name);
+    }
+
+    if (isRepoBoundary) {
+      if (dir !== rootPath) {
+        results.push(dir);
+      }
+      return;
+    }
+
+    subdirectories.sort();
+    for (const name of subdirectories) {
+      if (visited >= maxDirs) {
+        break;
+      }
+      await walk(pathModule.join(dir, name), depth + 1);
+    }
+  };
+
+  await walk(rootPath, 0);
+  return results;
+};
+
 const deriveCloneDirectoryName = (remoteUrl) => {
   const remote = typeof remoteUrl === 'string' ? remoteUrl.trim() : '';
   if (!remote) return '';
@@ -1459,6 +1532,62 @@ export const registerFsRoutes = (app, dependencies) => {
         return sendOsPermissionDenied(res, 'Access to directory denied');
       }
       return res.status(500).json({ error: (error && error.message) || 'Failed to list directory' });
+    }
+  });
+
+  app.get('/api/fs/git-dirs', async (req, res) => {
+    const rawPath = typeof req.query.path === 'string' && req.query.path.trim().length > 0
+      ? req.query.path.trim()
+      : '';
+    if (!rawPath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    try {
+      const resolved = await resolveWorkspacePathFromContext({
+        req,
+        targetPath: rawPath,
+        resolveProjectDirectory,
+        path,
+        os,
+        normalizeDirectoryPath,
+        openchamberUserConfigRoot,
+      });
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      const stats = await fsPromises.stat(resolved.resolved);
+      if (!stats.isDirectory()) {
+        return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
+      }
+
+      const repositories = await findGitDirectories({
+        rootPath: resolved.resolved,
+        fsPromises,
+        path,
+        maxDepth: GIT_DIRS_MAX_DEPTH,
+        maxDirs: GIT_DIRS_MAX_DIRS,
+      });
+
+      return res.json({
+        path: resolved.resolved,
+        repositories: repositories.map((repoPath) => ({
+          path: repoPath,
+          name: path.basename(repoPath),
+        })),
+      });
+    } catch (error) {
+      const err = error;
+      const code = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
+      if (code === 'ENOENT') {
+        return res.status(404).json({ error: 'Directory not found', reason: 'not-found' });
+      }
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to directory denied');
+      }
+      console.error('Failed to find git directories:', error);
+      return res.status(500).json({ error: (error && error.message) || 'Failed to find git directories' });
     }
   });
 };

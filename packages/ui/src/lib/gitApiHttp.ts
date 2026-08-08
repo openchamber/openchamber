@@ -115,6 +115,23 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
   }
 }
 
+export async function listGitDirectories(root: string): Promise<string[]> {
+  const response = await runtimeFetch('/api/fs/git-dirs', { query: { path: root } });
+  if (!response.ok) {
+    throw new Error(`Failed to list git directories: ${response.statusText}`);
+  }
+  const data = await response.json();
+  if (!data || !Array.isArray(data.repositories)) {
+    throw new Error('Unexpected git directories response');
+  }
+  return data.repositories
+    .map((entry: unknown) => {
+      const path = entry && typeof entry === 'object' && 'path' in entry ? (entry as { path?: unknown }).path : undefined;
+      return typeof path === 'string' && path.trim() ? path.trim() : null;
+    })
+    .filter((path: string | null): path is string => path !== null);
+}
+
 export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus> {
   const mode = options?.mode;
   const runtimeKey = getRuntimeKey();

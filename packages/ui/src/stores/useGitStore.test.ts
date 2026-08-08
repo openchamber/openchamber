@@ -335,3 +335,61 @@ describe('useGitStore', () => {
     expect(useGitStore.getState().getDirectoryState('/repo')?.status).toBe(initialStatus);
   });
 });
+
+describe('useGitStore nested repository discovery', () => {
+  beforeEach(() => {
+    useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+  });
+
+  test('selects a nested repo per root and persists the selection', () => {
+    useGitStore.getState().selectNestedRepo('/root-a', '/root-a/repo-one');
+
+    expect(useGitStore.getState().nestedRepoSelection.get('/root-a')).toBe('/root-a/repo-one');
+
+    // Re-seeding from storage (as a page refresh would) restores the pick.
+    useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+    expect(useGitStore.getState().nestedRepoSelection.get('/root-a')).toBe('/root-a/repo-one');
+  });
+
+  test('keeps selections isolated per root', () => {
+    useGitStore.getState().selectNestedRepo('/root-a', '/root-a/one');
+    useGitStore.getState().selectNestedRepo('/root-b', '/root-b/two');
+
+    expect(useGitStore.getState().nestedRepoSelection.get('/root-a')).toBe('/root-a/one');
+    expect(useGitStore.getState().nestedRepoSelection.get('/root-b')).toBe('/root-b/two');
+  });
+
+  test('clears only the given root selection', () => {
+    useGitStore.getState().selectNestedRepo('/root-a', '/root-a/one');
+    useGitStore.getState().selectNestedRepo('/root-b', '/root-b/two');
+
+    useGitStore.getState().clearNestedRepoSelection('/root-a');
+
+    expect(useGitStore.getState().nestedRepoSelection.has('/root-a')).toBe(false);
+    expect(useGitStore.getState().nestedRepoSelection.get('/root-b')).toBe('/root-b/two');
+  });
+
+  test('runtime switch does not leak selections or discovery across runtimes', () => {
+    useGitStore.getState().selectNestedRepo('/root-a', '/root-a/one');
+    useGitStore.setState({ nestedReposByRoot: new Map([['/root-a', ['/root-a/one']]]) });
+
+    useGitStore.getState().resetForRuntimeSwitch('runtime-b');
+
+    expect(useGitStore.getState().nestedRepoSelection.size).toBe(0);
+    expect(useGitStore.getState().nestedReposByRoot.size).toBe(0);
+  });
+
+  test('marks discovery failure as a failed marker, not an empty success', async () => {
+    await useGitStore.getState().ensureNestedRepos('/root-a');
+
+    expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toBeNull();
+  });
+
+  test('dedupes concurrent discovery runs for the same root', async () => {
+    const first = useGitStore.getState().ensureNestedRepos('/root-a');
+    const second = useGitStore.getState().ensureNestedRepos('/root-a');
+    await Promise.all([first, second]);
+
+    expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toBeNull();
+  });
+});

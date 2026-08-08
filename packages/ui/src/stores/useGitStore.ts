@@ -9,6 +9,7 @@ import type {
 } from '@/lib/api/types';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { listGitDirectories } from '@/lib/gitApiHttp';
 
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
@@ -77,6 +78,16 @@ interface GitStore {
 
   setLogMaxCount: (directory: string, maxCount: number) => void;
 
+  // Nested repository discovery: when the root directory is not itself a git
+  // repository, these hold the discovered repositories and the user's pick.
+  // `nestedReposByRoot` values are `null` when discovery failed — never a
+  // valid empty result — and absent when discovery has not run yet.
+  nestedReposByRoot: Map<string, string[] | null>;
+  nestedRepoSelection: Map<string, string>;
+  ensureNestedRepos: (root: string, options?: { force?: boolean }) => Promise<void>;
+  selectNestedRepo: (root: string, repository: string) => void;
+  clearNestedRepoSelection: (root: string) => void;
+
   refresh: (git: GitAPI, options?: { force?: boolean }) => Promise<void>;
   resetForRuntimeSwitch: (runtimeKey: string) => void;
 }
@@ -101,6 +112,7 @@ const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
 const diffFetchGenerationByDirectory = new Map<string, number>();
 const inFlightStatusFetches = new Map<string, Promise<boolean>>();
 const inFlightEnsureAllByDirectory = new Map<string, Promise<void>>();
+const inFlightNestedRepoDiscovery = new Map<string, Promise<void>>();
 const requestGenerationByChannel = new Map<string, number>();
 const statusMutationRevisionByDirectory = new Map<string, number>();
 let gitRuntimeGeneration = 0;
@@ -274,6 +286,59 @@ const seedDirectoriesFromBranchCache = (runtimeKey: string): Map<string, Directo
     directories.set(directory, { ...createEmptyDirectoryState(), isGitRepo: true, branches });
   }
   return directories;
+};
+
+// ---------------------------------------------------------------------------
+// Persisted nested-repo selection (per runtime, per root)
+//
+// Only the user's pick is cached — never the discovery result, which is cheap
+// to re-scan and must not go stale. Seeding the selection lets the Git tab
+// target the right repository on cold start before discovery completes; a
+// selection whose repository vanished falls back to discovery in GitView.
+// ---------------------------------------------------------------------------
+const GIT_NESTED_REPO_SELECTION_KEY = 'oc.gitNestedRepoSelection.v1';
+const MAX_NESTED_REPO_RUNTIMES = 8;
+const MAX_NESTED_REPO_ROOTS = 50;
+type NestedRepoSelectionEnvelope = {
+  version: 1;
+  runtimes: Record<string, { updatedAt: number; roots: Record<string, string> }>;
+};
+
+const emptyNestedRepoSelection = (): NestedRepoSelectionEnvelope => ({ version: 1, runtimes: {} });
+
+const readNestedRepoSelectionEnvelope = (): NestedRepoSelectionEnvelope => {
+  try {
+    const storage = getDeferredSafeStorage();
+    const raw = storage.getItem(GIT_NESTED_REPO_SELECTION_KEY);
+    const parsed = raw ? JSON.parse(raw) as Partial<NestedRepoSelectionEnvelope> : emptyNestedRepoSelection();
+    return parsed?.version === 1 && parsed.runtimes && typeof parsed.runtimes === 'object'
+      ? { version: 1, runtimes: parsed.runtimes }
+      : emptyNestedRepoSelection();
+  } catch {
+    return emptyNestedRepoSelection();
+  }
+};
+
+const writeCachedNestedRepoSelection = (runtimeKey: string, roots: Record<string, string>): void => {
+  try {
+    const envelope = readNestedRepoSelectionEnvelope();
+    const now = Date.now();
+    const boundedRoots = Object.fromEntries(
+      Object.entries(roots).slice(0, MAX_NESTED_REPO_ROOTS)
+    );
+    envelope.runtimes[runtimeKey] = { updatedAt: now, roots: boundedRoots };
+    envelope.runtimes = Object.fromEntries(
+      Object.entries(envelope.runtimes).sort(([, left], [, right]) => right.updatedAt - left.updatedAt).slice(0, MAX_NESTED_REPO_RUNTIMES),
+    );
+    getDeferredSafeStorage().setItem(GIT_NESTED_REPO_SELECTION_KEY, JSON.stringify(envelope));
+  } catch {
+    // quota / serialization — ignore; the selection still lives in memory
+  }
+};
+
+const seedNestedRepoSelection = (runtimeKey: string): Map<string, string> => {
+  const roots = readNestedRepoSelectionEnvelope().runtimes[runtimeKey]?.roots ?? {};
+  return new Map(Object.entries(roots).filter(([root, repository]) => root && repository));
 };
 
 // LRU eviction helper for diff cache
@@ -549,6 +614,8 @@ export const useGitStore = create<GitStore>()(
       runtimeKey: initialGitRuntimeKey,
       directories: seedDirectoriesFromBranchCache(initialGitRuntimeKey),
       activeDirectory: null,
+      nestedReposByRoot: new Map(),
+      nestedRepoSelection: seedNestedRepoSelection(initialGitRuntimeKey),
 
       resetForRuntimeSwitch: (runtimeKey) => {
         gitRuntimeGeneration += 1;
@@ -557,9 +624,16 @@ export const useGitStore = create<GitStore>()(
         statusMutationRevisionByDirectory.clear();
         inFlightStatusFetches.clear();
         inFlightEnsureAllByDirectory.clear();
+        inFlightNestedRepoDiscovery.clear();
         inFlightDiffFetchesByDirectory.clear();
         diffFetchGenerationByDirectory.clear();
-        set({ runtimeKey, directories: seedDirectoriesFromBranchCache(runtimeKey), activeDirectory: null });
+        set({
+          runtimeKey,
+          directories: seedDirectoriesFromBranchCache(runtimeKey),
+          activeDirectory: null,
+          nestedReposByRoot: new Map(),
+          nestedRepoSelection: seedNestedRepoSelection(runtimeKey),
+        });
       },
 
       setActiveDirectory: (directory) => {
@@ -1125,6 +1199,66 @@ export const useGitStore = create<GitStore>()(
         set({ directories: newDirectories });
       },
 
+      ensureNestedRepos: async (root, options = {}) => {
+        if (!root) return;
+        const { force = false } = options;
+        const runtimeKey = getRuntimeKey();
+        const key = runtimeDirectoryKey(runtimeKey, root);
+        const current = get().nestedReposByRoot.get(root);
+        if (!force && (current !== undefined || inFlightNestedRepoDiscovery.has(key))) {
+          return;
+        }
+
+        const existing = inFlightNestedRepoDiscovery.get(key);
+        if (existing) {
+          await existing;
+          return;
+        }
+
+        const discovery = (async () => {
+          let repositories: string[] | null = null;
+          try {
+            repositories = await listGitDirectories(root);
+          } catch (error) {
+            console.error('Failed to discover nested git repositories:', error);
+            repositories = null;
+          }
+
+          // A failed retry must not clobber an earlier successful discovery.
+          const previous = get().nestedReposByRoot.get(root);
+          const nextValue = repositories ?? previous ?? null;
+          const next = new Map(get().nestedReposByRoot);
+          next.set(root, nextValue);
+          set({ nestedReposByRoot: next });
+        })();
+
+        inFlightNestedRepoDiscovery.set(key, discovery);
+        try {
+          await discovery;
+        } finally {
+          if (inFlightNestedRepoDiscovery.get(key) === discovery) {
+            inFlightNestedRepoDiscovery.delete(key);
+          }
+        }
+      },
+
+      selectNestedRepo: (root, repository) => {
+        if (!root || !repository) return;
+        const next = new Map(get().nestedRepoSelection);
+        next.set(root, repository);
+        set({ nestedRepoSelection: next });
+        writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries(next));
+      },
+
+      clearNestedRepoSelection: (root) => {
+        if (!root) return;
+        if (!get().nestedRepoSelection.has(root)) return;
+        const next = new Map(get().nestedRepoSelection);
+        next.delete(root);
+        set({ nestedRepoSelection: next });
+        writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries(next));
+      },
+
       ensureStatus: async (directory, git) => {
         const dirState = get().directories.get(directory);
         const now = Date.now();
@@ -1218,6 +1352,35 @@ export const useIsGitRepo = (directory: string | null) => {
   return useGitStore((state) => {
     if (!directory) return null;
     return state.directories.get(directory)?.isGitRepo ?? null;
+  });
+};
+
+// Resolves the directory the Git tab operates on. A root that is itself a git
+// repository is always used directly; otherwise a per-root nested-repo
+// selection (when present) becomes the effective directory.
+export const useEffectiveGitDirectory = (root: string | null) => {
+  return useGitStore((state) => {
+    if (!root) return null;
+    if (state.directories.get(root)?.isGitRepo === true) {
+      return root;
+    }
+    return state.nestedRepoSelection.get(root) ?? root;
+  });
+};
+
+// `undefined` = discovery not run yet, `null` = discovery failed, otherwise
+// the discovered nested repository paths (possibly empty).
+export const useNestedRepos = (root: string | null) => {
+  return useGitStore((state) => {
+    if (!root) return undefined;
+    return state.nestedReposByRoot.get(root);
+  });
+};
+
+export const useNestedRepoSelection = (root: string | null) => {
+  return useGitStore((state) => {
+    if (!root) return null;
+    return state.nestedRepoSelection.get(root) ?? null;
   });
 };
 

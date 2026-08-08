@@ -133,6 +133,7 @@ Important properties:
 - loading state is per-directory, not global
 - `ensureStatus()` and `ensureAll()` are the preferred entry points for consumers
 - in-flight dedupe exists for status and `ensureAll()`
+- nested repository discovery (`nestedReposByRoot`, `nestedRepoSelection`, `ensureNestedRepos`) is per-root state for roots that are not themselves git repositories; discovery failure is a `null` marker (never a valid empty result), selections are persisted per runtime + root, and `useEffectiveGitDirectory(root)` resolves the directory the Git tab operates on (`root` when the root is a repository, the selected nested repository otherwise)
 - runtime reset replaces all live entries with that runtime's persisted branch seeds and invalidates old completions
 - status, branches, log, identity, repository probes, and prefetch diffs commit through runtime and per-channel generations
 - status mutations advance a revision so older refreshes cannot undo optimistic or confirmed index changes
