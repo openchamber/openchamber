@@ -49,7 +49,7 @@ import {
   type EmbeddedSessionChatURLCacheEntry,
   type EmbeddedSessionRuntimeBootstrap,
 } from './contextPanelEmbeddedChat';
-import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
+import { getContextSurfaceHeightFraction, getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import {
   type PreviewElementMetadata,
@@ -65,6 +65,12 @@ import {
 const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
+// Bottom-dock clamps are their own numbers; the 380px width minimum would
+// forbid the short terminal strip the bottom dock exists for. Keep these in
+// sync with clampContextPanelHeight in useUIStore.
+const CONTEXT_PANEL_MIN_HEIGHT = 120;
+const CONTEXT_PANEL_MAX_HEIGHT = 1200;
+const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
 const RESIZE_FOLLOW_INTERVAL_MS = 100;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
@@ -138,13 +144,24 @@ const clampWidth = (width: number): number => {
   return Math.min(CONTEXT_PANEL_MAX_WIDTH, Math.max(CONTEXT_PANEL_MIN_WIDTH, Math.round(width)));
 };
 
-const getAvailablePanelWidth = (panel: HTMLElement | null): number | null => {
-  const parentWidth = panel?.parentElement?.clientWidth;
-  if (!parentWidth || parentWidth <= 0) {
+const clampHeight = (height: number): number => {
+  if (!Number.isFinite(height)) {
+    return CONTEXT_PANEL_DEFAULT_HEIGHT;
+  }
+
+  return Math.min(CONTEXT_PANEL_MAX_HEIGHT, Math.max(CONTEXT_PANEL_MIN_HEIGHT, Math.round(height)));
+};
+
+// The resizable axis depends on the dock: width when docked right, height when
+// docked bottom.
+const getAvailablePanelSize = (panel: HTMLElement | null, bottomDock: boolean): number | null => {
+  const parent = panel?.parentElement;
+  const parentSize = bottomDock ? parent?.clientHeight : parent?.clientWidth;
+  if (!parentSize || parentSize <= 0) {
     return null;
   }
 
-  return parentWidth;
+  return parentSize;
 };
 
 const getRelativePathLabel = (filePath: string | null, directory: string): string => {
@@ -2248,6 +2265,8 @@ export const ContextPanel: React.FC = () => {
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
   const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
+  const setContextPanelHeight = useUIStore((state) => state.setContextPanelHeight);
+  const contextPanelDock = useUIStore((state) => state.contextPanelDock);
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
@@ -2261,13 +2280,31 @@ export const ContextPanel: React.FC = () => {
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
-  const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
-  const activeModeForWidth = activeTab?.mode ?? null;
-  const manualWidth = activeModeForWidth ? panelState?.widthByMode?.[activeModeForWidth] : undefined;
-  const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
-  const widthFallbackBase = availablePanelAreaWidth
-    ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
-  const width = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
+  const isBottomDock = contextPanelDock === 'bottom';
+  // Both parent dimensions are tracked from one observer: the resizable axis
+  // depends on the dock, but --oc-context-panel-width must stay a real width in
+  // either dock (see the panelStyle comment).
+  const [availablePanelArea, setAvailablePanelArea] = React.useState<{ width: number | null; height: number | null }>({
+    width: null,
+    height: null,
+  });
+  const availablePanelAreaWidth = availablePanelArea.width;
+  const availablePanelAreaSize = isBottomDock ? availablePanelArea.height : availablePanelArea.width;
+  const activeModeForSize = activeTab?.mode ?? null;
+  const manualSize = activeModeForSize
+    ? (isBottomDock ? panelState?.heightByMode?.[activeModeForSize] : panelState?.widthByMode?.[activeModeForSize])
+    : undefined;
+  const sizeFraction = activeModeForSize
+    ? (isBottomDock
+      ? getContextSurfaceHeightFraction(activeModeForSize)
+      : getContextSurfaceWidthFraction(activeModeForSize))
+    : 0.5;
+  const viewportFallback = typeof window !== 'undefined'
+    ? (isBottomDock ? window.innerHeight : window.innerWidth)
+    : (isBottomDock ? CONTEXT_PANEL_DEFAULT_HEIGHT * 2 : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
+  const sizeFallbackBase = availablePanelAreaSize ?? viewportFallback;
+  const clampSize = isBottomDock ? clampHeight : clampWidth;
+  const panelSize = clampSize(manualSize ?? Math.round(sizeFraction * sizeFallbackBase));
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
     for (const tab of tabs) {
@@ -2280,28 +2317,41 @@ export const ContextPanel: React.FC = () => {
   const sessionTitleById = useSessionTitleMap(directoryKey || undefined, chatSessionIDs);
 
   const [isResizing, setIsResizing] = React.useState(false);
-  const startXRef = React.useRef(0);
-  const startWidthRef = React.useRef(width);
-  const resizingWidthRef = React.useRef<number | null>(null);
+  // Pointer coordinate on the dragged axis: clientX when docked right, clientY
+  // when docked bottom.
+  const startPointerRef = React.useRef(0);
+  const startSizeRef = React.useRef(panelSize);
+  const resizingSizeRef = React.useRef<number | null>(null);
   const activeResizePointerIDRef = React.useRef<number | null>(null);
   const panelRef = React.useRef<HTMLElement | null>(null);
   const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
   const chatFrameSrcByTabIDRef = React.useRef<Map<string, EmbeddedSessionChatURLCacheEntry>>(new Map());
   const wasOpenRef = React.useRef(false);
 
-  // Tracks the panel area width so fraction-based surface defaults stay
-  // proportional as the window resizes; manual widths remain fixed px.
+  // Tracks the panel area size so fraction-based surface defaults stay
+  // proportional as the window resizes; manual sizes remain fixed px. Both
+  // dimensions are read from the same observer: the dock decides which one is
+  // the resizable axis, while the width is always needed for
+  // --oc-context-panel-width.
   React.useLayoutEffect(() => {
     const parent = panelRef.current?.parentElement;
     if (!parent || typeof ResizeObserver === 'undefined') {
       return;
     }
 
-    const observer = new ResizeObserver(() => {
-      setAvailablePanelAreaWidth(parent.clientWidth || null);
-    });
+    const readArea = () => {
+      const nextWidth = parent.clientWidth || null;
+      const nextHeight = parent.clientHeight || null;
+      setAvailablePanelArea((prev) => (
+        prev.width === nextWidth && prev.height === nextHeight
+          ? prev
+          : { width: nextWidth, height: nextHeight }
+      ));
+    };
+
+    const observer = new ResizeObserver(readArea);
     observer.observe(parent);
-    setAvailablePanelAreaWidth(parent.clientWidth || null);
+    readArea();
 
     return () => observer.disconnect();
   }, []);
@@ -2323,21 +2373,28 @@ export const ContextPanel: React.FC = () => {
   // Deferred resize: reflowing the chat column and the active surface (xterm,
   // editor, embedded chat iframes) on every drag frame is unavoidably janky,
   // so during the drag only a ghost guide line follows the pointer and the
-  // real width is applied once on release (riding the width transition).
-  const resizeAvailableWidthRef = React.useRef<number | null>(null);
-  // The panel content follows the guide line lazily: the real width is
+  // real size is applied once on release (riding the size transition).
+  const resizeAvailableSizeRef = React.useRef<number | null>(null);
+  // The panel content follows the guide line lazily: the real size is
   // re-applied at most every RESIZE_FOLLOW_INTERVAL_MS and the standing
-  // 200ms width transition smooths each step, VS Code-style.
+  // 200ms size transition smooths each step, VS Code-style.
   const resizeFollowTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Read inside pointer handlers, which are created once per drag; a ref keeps
+  // the dock from being captured stale if the preference changes mid-drag.
+  const isBottomDockRef = React.useRef(isBottomDock);
+  isBottomDockRef.current = isBottomDock;
 
-  const applyFollowWidth = React.useCallback(() => {
+  const applyFollowSize = React.useCallback(() => {
     resizeFollowTimerRef.current = null;
     const panel = panelRef.current;
-    const next = resizingWidthRef.current;
+    const next = resizingSizeRef.current;
     if (!panel || next === null) {
       return;
     }
-    panel.style.setProperty('--oc-context-panel-width', `${next}px`);
+    panel.style.setProperty(
+      isBottomDockRef.current ? '--oc-context-panel-height' : '--oc-context-panel-width',
+      `${next}px`,
+    );
   }, []);
 
   React.useEffect(() => () => {
@@ -2346,9 +2403,9 @@ export const ContextPanel: React.FC = () => {
     }
   }, []);
 
-  const clampWidthForDrag = React.useCallback((nextWidth: number) => {
-    const clamped = clampWidth(nextWidth);
-    const available = resizeAvailableWidthRef.current;
+  const clampSizeForDrag = React.useCallback((nextSize: number) => {
+    const clamped = isBottomDockRef.current ? clampHeight(nextSize) : clampWidth(nextSize);
+    const available = resizeAvailableSizeRef.current;
     return available === null ? clamped : Math.min(clamped, Math.max(1, available));
   }, []);
 
@@ -2359,32 +2416,36 @@ export const ContextPanel: React.FC = () => {
 
     activeResizePointerIDRef.current = event.pointerId;
     setIsResizing(true);
-    startXRef.current = event.clientX;
-    startWidthRef.current = width;
-    resizingWidthRef.current = width;
+    startPointerRef.current = isBottomDock ? event.clientY : event.clientX;
+    startSizeRef.current = panelSize;
+    resizingSizeRef.current = panelSize;
     // Measure once per drag; no layout reads happen during pointermove.
-    resizeAvailableWidthRef.current = getAvailablePanelWidth(panelRef.current);
-    document.documentElement.style.cursor = 'col-resize';
+    resizeAvailableSizeRef.current = getAvailablePanelSize(panelRef.current, isBottomDock);
+    document.documentElement.style.cursor = isBottomDock ? 'row-resize' : 'col-resize';
     event.preventDefault();
-  }, [directoryKey, isExpanded, isOpen, width]);
+  }, [directoryKey, isBottomDock, isExpanded, isOpen, panelSize]);
 
   const finishResize = React.useCallback(() => {
-    // Apply the final width once, letting the regular 200ms width transition
+    // Apply the final size once, letting the regular 200ms size transition
     // carry the panel to the release position.
-    const finalWidth = clampWidthForDrag(resizingWidthRef.current ?? width);
-    resizingWidthRef.current = null;
-    resizeAvailableWidthRef.current = null;
+    const finalSize = clampSizeForDrag(resizingSizeRef.current ?? panelSize);
+    resizingSizeRef.current = null;
+    resizeAvailableSizeRef.current = null;
     if (resizeFollowTimerRef.current !== null) {
       clearTimeout(resizeFollowTimerRef.current);
       resizeFollowTimerRef.current = null;
     }
     document.documentElement.style.cursor = '';
-    if (directoryKey && activeModeForWidth) {
-      setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
+    if (directoryKey && activeModeForSize) {
+      if (isBottomDock) {
+        setContextPanelHeight(directoryKey, activeModeForSize, finalSize);
+      } else {
+        setContextPanelWidth(directoryKey, activeModeForSize, finalSize);
+      }
     }
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
-  }, [activeModeForWidth, clampWidthForDrag, directoryKey, setContextPanelWidth, width]);
+  }, [activeModeForSize, clampSizeForDrag, directoryKey, isBottomDock, panelSize, setContextPanelHeight, setContextPanelWidth]);
 
   // Window-level drag listeners: tracking the pointer via the 3px handle and
   // pointer capture is unreliable (capture can fail over iframes and a missed
@@ -2399,14 +2460,17 @@ export const ContextPanel: React.FC = () => {
       if (activeResizePointerIDRef.current !== event.pointerId) {
         return;
       }
-      const delta = startXRef.current - event.clientX;
-      const nextWidth = clampWidthForDrag(startWidthRef.current + delta);
-      if (resizingWidthRef.current === nextWidth) {
+      // start - current on the dragged axis: dragging left grows a right-docked
+      // panel, dragging up grows a bottom-docked one.
+      const current = isBottomDockRef.current ? event.clientY : event.clientX;
+      const delta = startPointerRef.current - current;
+      const nextSize = clampSizeForDrag(startSizeRef.current + delta);
+      if (resizingSizeRef.current === nextSize) {
         return;
       }
-      resizingWidthRef.current = nextWidth;
+      resizingSizeRef.current = nextSize;
       if (resizeFollowTimerRef.current === null) {
-        resizeFollowTimerRef.current = setTimeout(applyFollowWidth, RESIZE_FOLLOW_INTERVAL_MS);
+        resizeFollowTimerRef.current = setTimeout(applyFollowSize, RESIZE_FOLLOW_INTERVAL_MS);
       }
     };
 
@@ -2431,11 +2495,11 @@ export const ContextPanel: React.FC = () => {
       window.removeEventListener('pointercancel', handleUp);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [applyFollowWidth, clampWidthForDrag, finishResize, isResizing]);
+  }, [applyFollowSize, clampSizeForDrag, finishResize, isResizing]);
 
   React.useEffect(() => {
     if (!isResizing) {
-      resizingWidthRef.current = null;
+      resizingSizeRef.current = null;
       document.documentElement.style.cursor = '';
     }
   }, [isResizing]);
@@ -2831,29 +2895,68 @@ export const ContextPanel: React.FC = () => {
     </header>
   );
 
-  // width/min/max stay interpolable across open/close (no instant min/max
-  // jumps) so the 200ms width transition matches the sidebars.
-  const panelStyle: React.CSSProperties = !isOpen
-    ? {
-        ['--oc-context-panel-width' as string]: `${width}px`,
-        width: 0,
-        maxWidth: '100%',
-        overflowX: 'clip',
-      }
-    : isExpanded
+  // size/min/max stay interpolable across open/close (no instant min/max
+  // jumps) so the 200ms transition matches the sidebars.
+  //
+  // --oc-context-panel-width is NOT panel-local: the inline-comment components
+  // (InlineCommentCard, InlineCommentInput, PierreDiffCommentOverlays) render
+  // inside the diff/editor surfaces and inherit it to cap their own width. It
+  // must therefore stay a real width in both docks — never the height — or
+  // comment cards get capped at the panel's height with no error. The
+  // bottom-dock axis uses its own --oc-context-panel-height variable.
+  const bottomDockWidthVar = availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%';
+  const expandedSize = availablePanelAreaSize !== null ? `${availablePanelAreaSize}px` : '100%';
+
+  let panelStyle: React.CSSProperties;
+  if (isBottomDock) {
+    const heightVar = { ['--oc-context-panel-width' as string]: bottomDockWidthVar };
+    panelStyle = !isOpen
       ? {
-          // px, not '100%': px↔% width changes do not interpolate, which
-          // would make the expand/collapse width snap instead of animating.
-          ['--oc-context-panel-width' as string]: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
-          width: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
-          maxWidth: '100%',
+          ...heightVar,
+          ['--oc-context-panel-height' as string]: `${panelSize}px`,
+          height: 0,
+          maxHeight: '100%',
+          overflowY: 'clip',
         }
-      : {
-          width: 'min(var(--oc-context-panel-width), 100%)',
+      : isExpanded
+        ? {
+            ...heightVar,
+            // px, not '100%': px↔% changes do not interpolate, which would make
+            // the expand/collapse snap instead of animating.
+            ['--oc-context-panel-height' as string]: expandedSize,
+            height: expandedSize,
+            maxHeight: '100%',
+          }
+        : {
+            ...heightVar,
+            height: 'min(var(--oc-context-panel-height), 100%)',
+            maxHeight: '100%',
+            overflowY: 'clip',
+            ['--oc-context-panel-height' as string]: `${panelSize}px`,
+          };
+  } else {
+    panelStyle = !isOpen
+      ? {
+          ['--oc-context-panel-width' as string]: `${panelSize}px`,
+          width: 0,
           maxWidth: '100%',
           overflowX: 'clip',
-          ['--oc-context-panel-width' as string]: `${width}px`,
-        };
+        }
+      : isExpanded
+        ? {
+            // px, not '100%': px↔% width changes do not interpolate, which
+            // would make the expand/collapse width snap instead of animating.
+            ['--oc-context-panel-width' as string]: expandedSize,
+            width: expandedSize,
+            maxWidth: '100%',
+          }
+        : {
+            width: 'min(var(--oc-context-panel-width), 100%)',
+            maxWidth: '100%',
+            overflowX: 'clip',
+            ['--oc-context-panel-width' as string]: `${panelSize}px`,
+          };
+  }
 
   return (
     <aside
@@ -2863,57 +2966,72 @@ export const ContextPanel: React.FC = () => {
       inert={!isOpen || undefined}
       className={cn(
         'flex min-h-0 flex-col overflow-hidden bg-background',
-        // Right-anchored while expanded: `inset-0` would teleport the left
-        // edge instantly (position does not transition), so only the width
-        // animates and the panel grows leftwards from its docked position.
+        // Edge-anchored while expanded: `inset-0` would teleport the opposite
+        // edge instantly (position does not transition), so only the size
+        // animates and the panel grows away from its docked edge — leftwards
+        // when docked right, upwards when docked bottom.
         isExpanded
-          ? 'absolute inset-y-0 right-0 z-20 min-w-0'
-          : 'relative h-full flex-shrink-0',
+          ? (isBottomDock ? 'absolute inset-x-0 bottom-0 z-20 min-h-0' : 'absolute inset-y-0 right-0 z-20 min-w-0')
+          : (isBottomDock ? 'relative w-full flex-shrink-0' : 'relative h-full flex-shrink-0'),
         !isOpen && 'pointer-events-none',
-        'will-change-[width] motion-reduce:transition-none',
-        'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]'
+        isBottomDock ? 'will-change-[height]' : 'will-change-[width]',
+        'motion-reduce:transition-none',
+        isBottomDock
+          ? 'transition-[height] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]'
+          : 'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]'
       )}
       onKeyDownCapture={handlePanelKeyDownCapture}
       style={panelStyle}
     >
-      {/* Painted divider instead of border-l: a real border eats 1px of the
+      {/* Painted divider instead of a real border: a border eats 1px of the
           content box only while collapsed, shifting the header controls by
-          1px between the collapsed and expanded states. */}
+          1px between the collapsed and expanded states. Sits on the docked
+          edge — left when docked right, top when docked bottom. */}
       {isOpen && !isExpanded && (
-        <div aria-hidden="true" className="absolute left-0 top-0 z-40 h-full w-px bg-border" />
+        <div
+          aria-hidden="true"
+          className={cn(
+            'absolute left-0 top-0 z-40 bg-border',
+            isBottomDock ? 'h-px w-full' : 'h-full w-px'
+          )}
+        />
       )}
-      {/* Divider between the panel and the icon rail on its right. */}
+      {/* Divider between the panel and the icon rail on its right. The rail
+          paints no border of its own, and it sits beside the whole content
+          column, so the panel's right edge is adjacent to it in both docks. */}
       {isOpen && (
         <div aria-hidden="true" className="absolute right-0 top-0 z-40 h-full w-px bg-border" />
       )}
       {!isExpanded && (
         <div
           className={cn(
-            'absolute left-0 top-0 z-50 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+            'absolute left-0 top-0 z-50 transition-colors hover:bg-[var(--interactive-border)]/80',
+            isBottomDock ? 'h-[3px] w-full cursor-row-resize' : 'h-full w-[3px] cursor-col-resize',
             isResizing && 'bg-[var(--interactive-border)]'
           )}
           onPointerDown={handleResizeStart}
           role="separator"
-          aria-orientation="vertical"
+          aria-orientation={isBottomDock ? 'horizontal' : 'vertical'}
           aria-label={t('contextPanel.actions.resizePanelAria')}
         />
       )}
       <div
         className={cn(
-          'relative z-10 flex h-full min-h-0 shrink-0 flex-col duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
-          // Width animates in sync with the panel (surface switches, resize
+          'relative z-10 flex min-h-0 shrink-0 flex-col duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+          // shrink-0 means the wrapper needs an explicit size on the docked
+          // axis and a full measure on the cross axis.
+          isBottomDock ? 'w-full' : 'h-full',
+          // Size animates in sync with the panel (surface switches, resize
           // release); during the drag itself nothing resizes — only the ghost
           // guide line moves.
-          'transition-[width,opacity]',
+          isBottomDock ? 'transition-[height,opacity]' : 'transition-[width,opacity]',
           !isOpen && 'pointer-events-none select-none opacity-0'
         )}
-        // px in the expanded state too: px↔% width changes cannot interpolate,
-        // so the header controls would snap instead of riding the animation.
-        style={{
-          width: isExpanded
-            ? (availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%')
-            : 'var(--oc-context-panel-width)',
-        }}
+        // px in the expanded state too: px↔% changes cannot interpolate, so the
+        // header controls would snap instead of riding the animation.
+        style={isBottomDock
+          ? { height: isExpanded ? expandedSize : 'var(--oc-context-panel-height)' }
+          : { width: isExpanded ? expandedSize : 'var(--oc-context-panel-width)' }}
         aria-hidden={!isOpen}
       >
       {header}

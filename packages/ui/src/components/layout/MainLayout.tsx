@@ -67,6 +67,7 @@ export const MainLayout: React.FC = () => {
     const isScheduledTasksPageOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
     const isArchivePageOpen = useUIStore((state) => state.isArchivePageOpen);
     const worktreesPageProjectId = useUIStore((state) => state.worktreesPageProjectId);
+    const contextPanelDock = useUIStore((state) => state.contextPanelDock);
     // Any full-page surface replacing the chat area. While open, the chat and
     // secondary views are fully hidden (not just covered) so none of their
     // floating chrome bleeds through, and selecting a session / draft / main
@@ -437,8 +438,8 @@ export const MainLayout: React.FC = () => {
                             <div className="relative flex flex-1 min-h-0 overflow-hidden bg-background" data-page-scroll-lock="true">
                                 <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden border-t border-border bg-background" data-page-scroll-lock="true">
                                     <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
-                                        <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
-                                            <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
+                                        <div className={cn('relative flex flex-1 min-h-0 min-w-0 overflow-hidden', contextPanelDock === 'bottom' && 'flex-col')} data-page-scroll-lock="true">
+                                            <main className="flex-1 min-h-0 overflow-hidden bg-background relative" data-page-scroll-lock="true">
                                                 <div className={cn('absolute inset-0', (!isChatActive || isSurfacePageOpen) && 'invisible')}>
                                                     <ErrorBoundary><ChatView active={isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
                                                 </div>
