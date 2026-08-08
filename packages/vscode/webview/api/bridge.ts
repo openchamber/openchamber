@@ -80,6 +80,10 @@ window.addEventListener('message', (event: MessageEvent<BridgeResponse>) => {
   }
 });
 
+export function postVSCodeMessage(message: unknown): void {
+  getVSCodeAPI().postMessage(message);
+}
+
 export function sendBridgeMessage<T = unknown>(type: string, payload?: unknown): Promise<T> {
   return sendBridgeMessageWithOptions<T>(type, payload);
 }

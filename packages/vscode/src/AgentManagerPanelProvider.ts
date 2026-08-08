@@ -78,6 +78,13 @@ export class AgentManagerPanelProvider {
 
     // Handle messages
     this._panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+      if (message.type === 'webviewReady') {
+        // Re-send cached state once the webview can receive messages; an early
+        // push is dropped while the bundle is still loading.
+        this._sendCachedState();
+        return;
+      }
+
       if (message.type === 'restartApi') {
         await this._openCodeManager?.restart();
         return;

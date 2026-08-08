@@ -1,5 +1,5 @@
 import { createVSCodeAPIs } from './api';
-import { onCommand, onThemeChange, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, startSseProxy, stopSseProxy } from './api/bridge';
+import { onCommand, onThemeChange, postVSCodeMessage, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
@@ -87,6 +87,10 @@ const handleConnectionMessage = (event: MessageEvent) => {
 };
 
 window.addEventListener('message', handleConnectionMessage);
+// The extension's connectionStatus pushes race with webview loading and can be
+// lost before the bundle executes; announce readiness so providers re-send
+// their cached state once we can actually receive messages.
+postVSCodeMessage({ type: 'webviewReady' });
 window.addEventListener('openchamber:connection-status', () => {
   maybeHideLoadingOverlay();
 });
