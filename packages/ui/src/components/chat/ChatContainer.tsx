@@ -705,9 +705,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
         isMobile,
         isVSCode,
     });
-    // Shown on a new-session draft too: the repository readouts apply before
-    // the session exists, and that is exactly when branch and working-tree
-    // state inform what to ask for.
+    // Session view only. The draft branch returns its own layout before this
+    // one, so the panel has no place there yet.
     // Surfaces that never host the panel skip it entirely; the rest keep it
     // mounted so its visibility can animate rather than snap.
     const workStatusPanelMountable = !isMobile

@@ -1454,6 +1454,7 @@ export const McpPage: React.FC = () => {
                       </SettingsStackedField>
                       <SettingsStackedField label={t('settings.mcp.page.registration.clientSecret')}>
                         <Input
+                          type="password"
                           value={oauthClientSecret}
                           onChange={(e) => { setOauthClientSecret(e.target.value); setOauthEnabled(true); }}
                           className="font-mono typography-meta"

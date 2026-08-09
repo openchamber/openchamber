@@ -82,6 +82,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   // out with something in it rather than emptying first, and its subscriptions
   // stop once it is truly gone.
   const [contentMounted, setContentMounted] = React.useState(visible);
+  // Hidden, mid-collapse, or reporting nothing: in each case the card is not
+  // something the user can act on, so it should not be reachable.
+  const interactive = visible && renderedSections > 0;
   React.useEffect(() => {
     if (visible) {
       setContentMounted(true);
@@ -149,7 +152,12 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
     <aside
       ref={overlayRef}
       aria-label={t('chat.workStatus.ariaLabel')}
-      aria-hidden={!visible}
+      aria-hidden={!interactive}
+      // The card stays mounted while hidden so it can animate its own collapse,
+      // and the sections button sits outside the content gate. Without `inert`
+      // Tab could land on an invisible control — and `aria-hidden` around a
+      // focusable descendant is an accessibility fault in its own right.
+      inert={!interactive}
       className={cn(
         // `self-start` keeps the card at content height instead of stretching
         // to the row; `max-h` then caps it so a long panel scrolls rather than
@@ -158,7 +166,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // the card's own shadow had no room and was clipped down that edge.
         'relative my-4 flex shrink-0 flex-col self-start overflow-hidden',
         'max-h-[calc(100%-2rem)]',
-        visible && renderedSections > 0 ? 'ml-2 mr-4' : 'ml-0 mr-0',
+        interactive ? 'ml-2 mr-4' : 'ml-0 mr-0',
         // Out of the flow entirely, anchored to the chat column's top-right so
         // it reads as a dropdown from the header button. As a flex child it
         // took part in the layout and pushed the transcript, which is the one
@@ -185,8 +193,8 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // The overlay keeps its width: it takes no space from the chat, so
         // collapsing it would animate a dimension nothing depends on. It fades
         // and lifts instead, like the dropdown it reads as.
-        width: overlay || (visible && renderedSections > 0) ? WORK_STATUS_PANEL_WIDTH : 0,
-        opacity: visible && renderedSections > 0 ? 1 : 0,
+        width: overlay || interactive ? WORK_STATUS_PANEL_WIDTH : 0,
+        opacity: interactive ? 1 : 0,
         transform: visible
           ? 'translateY(0) scale(1)'
           : overlay
@@ -198,7 +206,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         transitionProperty: 'width, opacity, transform, margin',
         transitionDuration: `${PANEL_TRANSITION_MS}ms`,
         transitionTimingFunction: PANEL_TRANSITION_EASING,
-        pointerEvents: visible ? undefined : 'none',
+        pointerEvents: interactive ? undefined : 'none',
       }}
     >
       {/* Overlaid rather than placed in flow: the panel has no header of its
