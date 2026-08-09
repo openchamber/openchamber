@@ -27,9 +27,8 @@ import {
   SettingsSection,
   SettingsFieldRow,
   SettingsCheckboxRow,
-  SettingsStackedField,
-  SettingsChipGroup,
   SettingsGroupTitle,
+  SettingsStackedField,
   SETTINGS_SELECT_SIZE,
   SETTINGS_FIELD_LABEL_CLASS,
 } from '@/components/sections/shared/SettingsSection';
@@ -52,6 +51,7 @@ import {
   SelectTrigger,
 } from '@/components/ui/select';
 import { Icon } from "@/components/icon/Icon";
+import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { useI18n } from '@/lib/i18n';
 
 // ─────────────────────────────────────────────────────────────
@@ -60,11 +60,9 @@ import { useI18n } from '@/lib/i18n';
 interface CommandTextareaProps {
   value: string[];
   onChange: (v: string[]) => void;
-  pasteCommandTitle: string;
-  pasteCommandLabel: string;
-  pasteSuccess: (count: number) => string;
-  clipboardReadFailed: string;
   preview: (count: number) => string;
+  /** Called when the text is plainly a link rather than a command. */
+  onDetectUrl?: (url: string) => void;
 }
 
 /**
@@ -125,11 +123,8 @@ function extractAuthorizationResponse(raw: string): {
 const CommandTextarea: React.FC<CommandTextareaProps> = ({
   value,
   onChange,
-  pasteCommandTitle,
-  pasteCommandLabel,
-  pasteSuccess,
-  clipboardReadFailed,
   preview,
+  onDetectUrl,
 }) => {
   // Internal: one arg per line
   const [text, setText] = React.useState(() => value.join('\n'));
@@ -145,42 +140,38 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
 
   const commit = (raw: string) => {
     const lines = raw.split('\n').filter((l) => l.trim().length > 0);
+    // A single line that is nothing but a URL is a hosted server, not a
+    // command to run — the page switches kind rather than making the user say.
+    if (onDetectUrl && lines.length === 1 && /^https?:\/\/\S+$/i.test(lines[0].trim())) {
+      onDetectUrl(lines[0].trim());
+      return;
+    }
     onChange(lines);
   };
 
-  const handlePasteFromClipboard = async () => {
-    try {
-      const raw = await navigator.clipboard.readText();
-      const trimmed = raw.trim();
-      // If it looks like a multi-line list, keep as-is; otherwise parse as shell command
-      const lines = trimmed.includes('\n')
-        ? trimmed.split('\n').filter((l) => l.trim())
-        : parseShellCommand(trimmed);
-      setText(lines.join('\n'));
-      onChange(lines);
-      toast.success(pasteSuccess(lines.length));
-    } catch {
-      toast.error(clipboardReadFailed);
-    }
+  /**
+   * Pasting a whole command line splits it into arguments here, in the field
+   * the user pasted into. The old approach — a button that read the clipboard
+   * itself — fails outright wherever the runtime denies clipboard reads.
+   */
+  const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const raw = event.clipboardData.getData('text');
+    const trimmed = raw.trim();
+    // Only take over a paste that replaces the whole field with one command
+    // line; anything else is ordinary editing and belongs to the browser.
+    if (!trimmed || trimmed.includes('\n') || !/\s/.test(trimmed)) return;
+    const target = event.currentTarget;
+    if (target.selectionStart !== 0 || target.selectionEnd !== target.value.length) return;
+    event.preventDefault();
+    const lines = parseShellCommand(trimmed);
+    setText(lines.join('\n'));
+    onChange(lines);
   };
 
   return (
     <div className="space-y-2" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
-      <div className="flex items-center justify-end gap-2">
-        <Button
-          variant="ghost"
-          size="xs"
-          className="!font-normal gap-1 text-muted-foreground"
-          onClick={handlePasteFromClipboard}
-          type="button"
-          title={pasteCommandTitle}
-        >
-          <Icon name="clipboard" className="h-3 w-3" />
-          {pasteCommandLabel}
-        </Button>
-      </div>
-
       <Textarea
+        onPaste={handlePaste}
         value={text}
         onChange={(e) => {
           setText(e.target.value);
@@ -199,7 +190,7 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
           'npx\n-y\n@modelcontextprotocol/server-postgres\npostgresql://user:pass@host/db'
         }
         rows={Math.max(4, value.length + 1)}
-        className="font-mono typography-meta resize-y min-h-[80px]"
+        className="font-mono typography-meta min-h-[80px]"
         spellCheck={false}
       />
 
@@ -866,6 +857,39 @@ export const McpPage: React.FC = () => {
     );
   }, [mcpType, command, url, envEntries, headerEntries, oauthEnabled, oauthClientId, oauthClientSecret, oauthScope, oauthRedirectUri, timeout, enabled]);
 
+  // What the user has is either a command they were given or a link. Which of
+  // the two decides the transport, so the page reads it off the text instead of
+  // asking — and lets them correct it when the text alone cannot say.
+  const connectionKindTabs = React.useMemo<SortableTabsStripItem[]>(() => [
+    {
+      id: 'local',
+      label: t('settings.mcp.page.connection.kindCommand'),
+      icon: <Icon name="terminal" className="h-3.5 w-3.5" />,
+    },
+    {
+      id: 'remote',
+      label: t('settings.mcp.page.connection.kindLink'),
+      icon: <Icon name="global" className="h-3.5 w-3.5" />,
+    },
+  ], [t]);
+
+  const handleDetectedUrl = React.useCallback((candidate: string) => {
+    setMcpType('remote');
+    setUrl(candidate);
+    setCommand([]);
+  }, []);
+
+  const handleUrlChange = React.useCallback((next: string) => {
+    setUrl(next);
+    // A command pasted into the link field is still a command.
+    const trimmed = next.trim();
+    if (trimmed && !/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) && /\s/.test(trimmed)) {
+      setMcpType('local');
+      setCommand(parseShellCommand(trimmed));
+      setUrl('');
+    }
+  }, []);
+
   const handleSave = async () => {
     const name = isNewServer ? draftName.trim() : selectedMcpName ?? '';
     if (!name) { toast.error(t('settings.mcp.page.toast.nameRequired')); return; }
@@ -1258,6 +1282,18 @@ export const McpPage: React.FC = () => {
   const isConnected = runtimeStatus?.status === 'connected';
   const needsAuthorization = runtimeStatus?.status === 'needs_auth' || runtimeStatus?.status === 'needs_client_registration';
   const suggestedRedirectUri = isVSCodeAuthRuntime ? null : buildMcpOAuthRedirectUri(selectedMcpName, currentDirectory);
+
+  const handleCopyRedirectUri = async () => {
+    if (!suggestedRedirectUri) return;
+    try {
+      await navigator.clipboard.writeText(suggestedRedirectUri);
+      toast.success(t('settings.mcp.page.toast.copiedCallbackUrl'));
+    } catch {
+      toast.error(t('settings.mcp.page.toast.clipboardWriteFailed'));
+    }
+  };
+
+
   const runtimeDescription = getStatusDescription(
     effectiveRuntimeStatus?.status,
     tUnsafe,
@@ -1375,6 +1411,68 @@ export const McpPage: React.FC = () => {
                   )}
                 </div>
 
+                {/* Client credentials appear only when the server has said it
+                    needs them. Kept as a permanent four-field form, they made
+                    the rarest case the most prominent thing on the page and
+                    told nobody what to put there. */}
+                {effectiveRuntimeStatus?.status === 'needs_client_registration' && (
+                  <div className="space-y-3 rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-3 py-3">
+                    <div>
+                      <SettingsGroupTitle as="div">{t('settings.mcp.page.registration.title')}</SettingsGroupTitle>
+                      <p className="mt-1 typography-micro text-muted-foreground">
+                        {t('settings.mcp.page.registration.description')}
+                      </p>
+                    </div>
+
+                    {suggestedRedirectUri && (
+                      <div>
+                        <div className="typography-micro text-muted-foreground">
+                          {t('settings.mcp.page.registration.callbackLabel')}
+                        </div>
+                        <div className="mt-1 flex items-start gap-2">
+                          <span className="min-w-0 flex-1 break-all font-mono typography-micro text-foreground/80">
+                            {suggestedRedirectUri}
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            className="!font-normal"
+                            onClick={() => void handleCopyRedirectUri()}
+                          >
+                            <Icon name="clipboard" className="h-3.5 w-3.5" />
+                            {t('settings.mcp.page.actions.copyLink')}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid gap-3 @xl:grid-cols-2">
+                      <SettingsStackedField label={t('settings.mcp.page.registration.clientId')}>
+                        <Input
+                          value={oauthClientId}
+                          onChange={(e) => { setOauthClientId(e.target.value); setOauthEnabled(true); }}
+                          className="font-mono typography-meta"
+                          data-bwignore="true"
+                          data-1p-ignore="true"
+                        />
+                      </SettingsStackedField>
+                      <SettingsStackedField label={t('settings.mcp.page.registration.clientSecret')}>
+                        <Input
+                          value={oauthClientSecret}
+                          onChange={(e) => { setOauthClientSecret(e.target.value); setOauthEnabled(true); }}
+                          className="font-mono typography-meta"
+                          data-bwignore="true"
+                          data-1p-ignore="true"
+                        />
+                      </SettingsStackedField>
+                    </div>
+
+                    <p className="typography-micro text-muted-foreground">
+                      {t('settings.mcp.page.registration.afterSaving')}
+                    </p>
+                  </div>
+                )}
+
                 {authUrl && (
                   <div className="rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-3 py-2">
                     <div className="space-y-2">
@@ -1412,7 +1510,7 @@ export const McpPage: React.FC = () => {
                         onChange={(event) => setAuthCallbackInput(event.target.value)}
                         placeholder={t('settings.mcp.page.auth.callbackInputPlaceholder')}
                         rows={3}
-                        className="font-mono typography-meta resize-y"
+                        className="font-mono typography-meta"
                         data-bwignore="true"
                         data-1p-ignore="true"
                         spellCheck={false}
@@ -1447,6 +1545,19 @@ export const McpPage: React.FC = () => {
           divider={false}
           settingsItem="mcp.server"
           contentClassName="space-y-0"
+          titleAccessory={isNewServer ? (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="!font-normal gap-1.5 text-muted-foreground"
+              onClick={handleOpenImportDialog}
+              type="button"
+              title={t('settings.mcp.page.server.importJsonTitle')}
+            >
+              <Icon name="file-code" className="h-3.5 w-3.5" />
+              {t('settings.mcp.page.server.importJson')}
+            </Button>
+          ) : null}
         >
 
             {isNewServer && (
@@ -1459,42 +1570,33 @@ export const McpPage: React.FC = () => {
                     autoFocus
                   />
                   <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
-                    <SelectTrigger size={SETTINGS_SELECT_SIZE} className="!h-7 !w-7 !min-w-0 !px-0 !py-0 justify-center [&>svg:last-child]:hidden" title={draftScope === 'user' ? t('settings.common.scope.global') : t('settings.common.scope.project')}>
-                      {draftScope === 'user' ? <Icon name="user-3" className="h-3.5 w-3.5" /> : <Icon name="folder" className="h-3.5 w-3.5" />}
+                    <SelectTrigger size={SETTINGS_SELECT_SIZE} className="!h-7 gap-1.5 px-2">
+                      <Icon
+                        name={draftScope === 'user' ? 'user-3' : 'folder'}
+                        className="h-3.5 w-3.5 shrink-0"
+                      />
+                      <span className="truncate">
+                        {draftScope === 'user'
+                          ? t('settings.mcp.page.scope.everywhere')
+                          : t('settings.mcp.page.scope.thisProject')}
+                      </span>
                     </SelectTrigger>
                     <SelectContent align="end">
                       <SelectItem value="user">
                         <div className="flex items-center gap-2">
                           <Icon name="user-3" className="h-3.5 w-3.5" />
-                          <span>{t('settings.common.scope.global')}</span>
+                          <span>{t('settings.mcp.page.scope.everywhere')}</span>
                         </div>
                       </SelectItem>
                       <SelectItem value="project">
                         <div className="flex items-center gap-2">
                           <Icon name="folder" className="h-3.5 w-3.5" />
-                          <span>{t('settings.common.scope.project')}</span>
+                          <span>{t('settings.mcp.page.scope.thisProject')}</span>
                         </div>
                       </SelectItem>
                     </SelectContent>
                   </Select>
               </SettingsFieldRow>
-            )}
-
-            {/* Import JSON - prominent placement for new servers */}
-            {isNewServer && (
-              <div className="py-1.5">
-                <Button
-                  variant="outline"
-                  size="xs"
-                  className="!font-normal gap-1.5"
-                  onClick={handleOpenImportDialog}
-                  type="button"
-                  title={t('settings.mcp.page.server.importJsonTitle')}
-                >
-                  <Icon name="file-code" className="h-3.5 w-3.5" />
-                  {t('settings.mcp.page.server.importJson')}
-                </Button>
-              </div>
             )}
 
             <SettingsCheckboxRow
@@ -1504,42 +1606,50 @@ export const McpPage: React.FC = () => {
               ariaLabel={t('settings.mcp.page.server.enableAria')}
             />
 
-            <SettingsStackedField label={t('settings.mcp.page.server.transportMode')}>
-              <SettingsChipGroup
-                aria-label={t('settings.mcp.page.server.transportMode')}
-                value={mcpType}
-                onChange={setMcpType}
-                options={[
-                  { value: 'local', label: t('settings.mcp.page.transport.local') },
-                  { value: 'remote', label: t('settings.mcp.page.transport.remote') },
-                ]}
-              />
-            </SettingsStackedField>
-
         </SettingsSection>
 
         <SettingsSection
-          title={mcpType === 'local' ? t('settings.mcp.page.connection.command') : t('settings.mcp.page.connection.serverUrl')}
+          title={t('settings.mcp.page.connection.title')}
+          description={t('settings.mcp.page.connection.description')}
           settingsItem="mcp.command"
+          // The section's content wrapper carries no spacing of its own, so the
+          // kind tabs, the field and its hint would otherwise sit flush.
+          contentClassName="space-y-2"
         >
+            {/* Pasting a link or a command still flips this for you, but the
+                choice is a control you can see and press. As one sentence with
+                an inline link it was, in practice, undiscoverable. */}
+            <SortableTabsStrip
+              items={connectionKindTabs}
+              activeId={mcpType}
+              onSelect={(id) => setMcpType(id as 'local' | 'remote')}
+              layoutMode="fit"
+              variant="active-pill"
+              activePillLowercase={false}
+              className="h-10"
+            />
+
             {mcpType === 'local' ? (
               <CommandTextarea
                 value={command}
                 onChange={setCommand}
-                pasteCommandTitle={t('settings.mcp.page.connection.pasteCommandTitle')}
-                pasteCommandLabel={t('settings.mcp.page.connection.pasteCommand')}
-                pasteSuccess={(count) => t('settings.mcp.page.toast.pastedArgumentsCount', { count })}
-                clipboardReadFailed={t('settings.mcp.page.toast.clipboardReadFailed')}
                 preview={(count) => t('settings.mcp.page.connection.previewArgs', { count })}
+                onDetectUrl={handleDetectedUrl}
               />
             ) : (
               <Input
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={(e) => handleUrlChange(e.target.value)}
                 placeholder={t('settings.mcp.page.connection.serverUrlPlaceholder')}
                 className="font-mono typography-meta"
               />
             )}
+
+            <p className="typography-micro text-muted-foreground">
+              {mcpType === 'local'
+                ? t('settings.mcp.page.connection.hintCommand')
+                : t('settings.mcp.page.connection.hintLink')}
+            </p>
         </SettingsSection>
 
         {mcpType === 'remote' && (
@@ -1555,7 +1665,9 @@ export const McpPage: React.FC = () => {
                   <div className="flex items-center gap-1.5 text-left">
                     <span className="typography-ui-label font-normal text-foreground">{t('settings.mcp.page.advanced.configure')}</span>
                     <span className="typography-micro text-muted-foreground">
-                      ({oauthEnabled ? t('settings.mcp.page.advanced.autoDetect') : t('settings.mcp.page.advanced.custom')} · {headerEntries.length} {t('settings.mcp.page.advanced.headers')}{timeout ? ` · ${timeout}ms` : ''})
+                      {/* OAuth left the form, so the summary stops reporting a
+                          setting the user can no longer see. */}
+                      ({headerEntries.length} {t('settings.mcp.page.advanced.headers')}{timeout ? ` · ${timeout}ms` : ''})
                     </span>
                   </div>
                   {isAdvancedRemoteOptionsOpen ? (
@@ -1617,61 +1729,6 @@ export const McpPage: React.FC = () => {
                       />
                     </div>
 
-                    <div className="space-y-3">
-                      <SettingsCheckboxRow
-                        checked={oauthEnabled}
-                        onChange={setOauthEnabled}
-                        label={t('settings.mcp.page.advanced.oauthAutoDetection')}
-                        ariaLabel={t('settings.mcp.page.advanced.oauthAutoDetectionAria')}
-                        info={t('settings.mcp.page.advanced.oauthHint')}
-                      />
-
-                      <div className="grid gap-3 @xl:grid-cols-2">
-                        <Input
-                          value={oauthClientId}
-                          onChange={(e) => setOauthClientId(e.target.value)}
-                          placeholder={t('settings.mcp.page.advanced.oauthClientIdPlaceholder')}
-                          className="font-mono typography-meta"
-                          disabled={!oauthEnabled}
-                          data-bwignore="true"
-                          data-1p-ignore="true"
-                        />
-                        <Input
-                          value={oauthClientSecret}
-                          onChange={(e) => setOauthClientSecret(e.target.value)}
-                          placeholder={t('settings.mcp.page.advanced.oauthClientSecretPlaceholder')}
-                          className="font-mono typography-meta"
-                          disabled={!oauthEnabled}
-                          data-bwignore="true"
-                          data-1p-ignore="true"
-                        />
-                        <Input
-                          value={oauthScope}
-                          onChange={(e) => setOauthScope(e.target.value)}
-                          placeholder={t('settings.mcp.page.advanced.oauthScopesPlaceholder')}
-                          className="font-mono typography-meta"
-                          disabled={!oauthEnabled}
-                          data-bwignore="true"
-                          data-1p-ignore="true"
-                        />
-                        <Input
-                          value={oauthRedirectUri}
-                          onChange={(e) => setOauthRedirectUri(e.target.value)}
-                          placeholder={t('settings.mcp.page.advanced.oauthRedirectUriPlaceholder')}
-                          className="font-mono typography-meta"
-                          disabled={!oauthEnabled}
-                          data-bwignore="true"
-                          data-1p-ignore="true"
-                        />
-                      </div>
-
-                      {suggestedRedirectUri && (
-                        <p className="typography-micro text-muted-foreground">
-                          {t('settings.mcp.page.advanced.oauthCallbackHint')}
-                          <span className="mt-1 block break-all font-mono text-foreground/80">{suggestedRedirectUri}</span>
-                        </p>
-                      )}
-                    </div>
                   </div>
                 </CollapsibleContent>
               </Collapsible>
@@ -1680,6 +1737,7 @@ export const McpPage: React.FC = () => {
 
         <SettingsSection
           title={t('settings.mcp.page.env.title')}
+          description={t('settings.mcp.page.env.description')}
           titleAccessory={
             envEntries.length > 0 ? (
               <span className="typography-micro text-muted-foreground font-normal">
@@ -1771,7 +1829,7 @@ export const McpPage: React.FC = () => {
               }}
               placeholder={'{\n  "mcpServers": {\n    "postgres": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-postgres"]\n    }\n  }\n}'}
               rows={8}
-              className="font-mono typography-meta resize-y"
+              className="font-mono typography-meta"
               spellCheck={false}
               data-bwignore="true"
               data-1p-ignore="true"
