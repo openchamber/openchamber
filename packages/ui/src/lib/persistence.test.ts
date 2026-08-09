@@ -398,7 +398,7 @@ describe('updateDesktopSettings', () => {
     };
     window.addEventListener('openchamber:settings-synced', handleSettingsSynced);
     registerSettingsApi(async () => ({}), async () => ({
-      settings: { tunnelProvider: 'tailscale', tunnelMode: 'private-network', tailscaleHttpsPort: 8443 },
+      settings: { tunnelProvider: 'tailscale', tunnelMode: 'private-network', tailscaleHttpsPort: 9443 },
       source: 'web',
     }));
 
@@ -415,7 +415,7 @@ describe('updateDesktopSettings', () => {
     }).toEqual({
       tunnelProvider: 'tailscale',
       tunnelMode: 'private-network',
-      tailscaleHttpsPort: 8443,
+      tailscaleHttpsPort: 9443,
     });
   });
 

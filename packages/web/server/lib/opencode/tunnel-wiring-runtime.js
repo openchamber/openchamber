@@ -8,6 +8,9 @@ const printQuickTunnelWarning = () => {
    • Provider limits may apply
    • URLs are temporary and will expire when the tunnel stops
    • Quick tunnels are intended for ephemeral access, not persistent hosting
+   • Password protection is required for tunnel access
+
+   For production use, set up a persistent provider tunnel or static domain.
 `);
 };
 

@@ -884,14 +884,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    id: 'tunnel.https-port',
-    page: 'tunnel',
-    titleKey: 'settings.openchamber.tunnel.field.tailscaleHttpsPort',
-    descriptionKey: 'settings.openchamber.tunnel.field.tailscaleHttpsPortDescription',
-    keywords: ['tailscale', 'https', 'frontend port', 'custom port', '443', '8443', '10000', '65535'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
     id: 'tunnel.ttl',
     page: 'tunnel',
     titleKey: 'settings.openchamber.tunnel.field.connectLinkTtl',

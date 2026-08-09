@@ -1120,7 +1120,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
       result.tunnelMode = mode;
     }
   }
-  if (candidate.tailscaleHttpsPort === 443 || candidate.tailscaleHttpsPort === 8443 || candidate.tailscaleHttpsPort === 10000) {
+  if (
+    typeof candidate.tailscaleHttpsPort === 'number'
+    && Number.isInteger(candidate.tailscaleHttpsPort)
+    && candidate.tailscaleHttpsPort >= 1
+    && candidate.tailscaleHttpsPort <= 65535
+  ) {
     result.tailscaleHttpsPort = candidate.tailscaleHttpsPort;
   }
   if (candidate.tunnelBootstrapTtlMs === null) {
