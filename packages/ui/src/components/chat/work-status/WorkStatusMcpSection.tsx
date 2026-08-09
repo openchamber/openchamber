@@ -67,6 +67,16 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
   }, [directory, t]);
 
   const handleToggle = React.useCallback(async (name: string, next: boolean) => {
+    // Switching on a server that is waiting for sign-in cannot connect: it only
+    // repeats the attempt that produced `needs_auth`. Authorization is the real
+    // action, and the dropdown already routes the same switch that way — the
+    // two surfaces must not disagree about what this control does.
+    const status = (mcpStatus ?? {})[name]?.status;
+    if (next && (status === 'needs_auth' || status === 'needs_client_registration')) {
+      await handleAuthorize(name);
+      return;
+    }
+
     setBusyServer(name);
     try {
       if (next) await connect(name, directory);
@@ -74,7 +84,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
     } finally {
       setBusyServer((current) => (current === name ? null : current));
     }
-  }, [connect, disconnect, directory]);
+  }, [connect, disconnect, directory, handleAuthorize, mcpStatus]);
 
   useReportWorkStatusPresence('mcp', mcpServers.length > 0);
 

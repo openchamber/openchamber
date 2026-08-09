@@ -2115,6 +2115,14 @@ export const Header: React.FC<HeaderProps> = ({
             />
           ) : null}
 
+          <HeaderIconActionButton
+            visible={showMiniChatHeaderAction}
+            title={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}
+            ariaLabel={isNewSessionDraftOpen ? t('header.actions.newMiniChatAria') : t('header.actions.openSessionMiniChatAria')}
+            onClick={handleOpenCurrentMiniChat}
+            className={cn(desktopHeaderIconButtonClass, 'mr-1')}
+            Icon={'picture-in-picture-2'}
+          />
           {activeMainTab === 'chat' && !isVSCode ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2126,6 +2134,9 @@ export const Header: React.FC<HeaderProps> = ({
                   onClick={handleWorkStatusToggle}
                   className={cn(
                     DESKTOP_HEADER_ICON_BUTTON_CLASS,
+                    // Trailing gap before the sidebar actions; it moved here
+                    // with the button when this took the last position.
+                    'mr-1',
                     // On is the resting state and carries no chrome; off is the
                     // one worth signalling, so it dims instead of filling.
                     workStatusToggleActive ? 'text-foreground' : 'text-muted-foreground/50',
@@ -2146,14 +2157,6 @@ export const Header: React.FC<HeaderProps> = ({
             </Tooltip>
           ) : null}
 
-          <HeaderIconActionButton
-            visible={showMiniChatHeaderAction}
-            title={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}
-            ariaLabel={isNewSessionDraftOpen ? t('header.actions.newMiniChatAria') : t('header.actions.openSessionMiniChatAria')}
-            onClick={handleOpenCurrentMiniChat}
-            className={cn(desktopHeaderIconButtonClass, 'mr-1')}
-            Icon={'picture-in-picture-2'}
-          />
           {desktopSidebarActions}
           <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>

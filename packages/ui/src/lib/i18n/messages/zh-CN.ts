@@ -3025,7 +3025,6 @@ export const dict: Record<I18nKey, string> = {
   'settings.mcp.page.scope.everywhere': '在所有项目中可用',
   'settings.mcp.page.scope.thisProject': '仅在此项目中',
   'settings.mcp.page.env.description': '服务器需要的值，例如 API 密钥。',
-  'settings.mcp.page.connection.kindAria': '如何连接服务器',
   'settings.mcp.page.connection.kindCommand': '命令',
   'settings.mcp.page.connection.kindLink': '链接',
   'settings.mcp.page.connection.hintCommand': '在本机运行。粘贴完整命令后会按每行一个参数拆分。',

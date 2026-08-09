@@ -3025,7 +3025,6 @@ export const dict: Record<I18nKey, string> = {
   'settings.mcp.page.scope.everywhere': 'Доступний у всіх проєктах',
   'settings.mcp.page.scope.thisProject': 'Тільки в цьому проєкті',
   'settings.mcp.page.env.description': 'Значення, потрібні серверу — наприклад, ключ API.',
-  'settings.mcp.page.connection.kindAria': 'Як дістатися до сервера',
   'settings.mcp.page.connection.kindCommand': 'Команда',
   'settings.mcp.page.connection.kindLink': 'Посилання',
   'settings.mcp.page.connection.hintCommand': 'Запускається на цьому комп’ютері. Вставте цілу команду — вона розділиться на один аргумент у рядку.',

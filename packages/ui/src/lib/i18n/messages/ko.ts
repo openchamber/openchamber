@@ -3024,7 +3024,6 @@ export const dict: Record<I18nKey, string> = {
   'settings.mcp.page.scope.everywhere': '모든 프로젝트에서 사용',
   'settings.mcp.page.scope.thisProject': '이 프로젝트에서만',
   'settings.mcp.page.env.description': 'API 키처럼 서버가 필요로 하는 값.',
-  'settings.mcp.page.connection.kindAria': '서버에 연결하는 방법',
   'settings.mcp.page.connection.kindCommand': '명령',
   'settings.mcp.page.connection.kindLink': '링크',
   'settings.mcp.page.connection.hintCommand': '이 컴퓨터에서 실행됩니다. 명령 전체를 붙여넣으면 한 줄에 인수 하나씩 나뉩니다.',

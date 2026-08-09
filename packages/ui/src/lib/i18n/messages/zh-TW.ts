@@ -3024,7 +3024,6 @@ export const dict: Record<I18nKey, string> = {
   'settings.mcp.page.scope.everywhere': '在所有專案中可用',
   'settings.mcp.page.scope.thisProject': '僅在此專案中',
   'settings.mcp.page.env.description': '伺服器需要的值，例如 API 金鑰。',
-  'settings.mcp.page.connection.kindAria': '如何連線到伺服器',
   'settings.mcp.page.connection.kindCommand': '指令',
   'settings.mcp.page.connection.kindLink': '連結',
   'settings.mcp.page.connection.hintCommand': '在本機執行。貼上完整指令後會依每行一個參數拆分。',

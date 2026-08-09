@@ -20,7 +20,6 @@ import {
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
@@ -33,8 +32,8 @@ import {
   SETTINGS_FIELD_LABEL_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
-import { MCP_OAUTH_CALLBACK_PATH, parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
-import { startMcpAuthorization } from '@/components/sections/mcp/startMcpAuthorization';
+import { parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
+import { buildMcpAuthorizationRedirectUri, startMcpAuthorization } from '@/components/sections/mcp/startMcpAuthorization';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Dialog,
@@ -498,21 +497,6 @@ const shouldShowFullStatusCard = (status: string | undefined, authUrl: string | 
   if (authUrl) return true;
   if (needsAuthorization || isAuthPolling) return true;
   return false;
-};
-
-const buildMcpOAuthRedirectUri = (name?: string | null, directory?: string | null): string | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const url = new URL(MCP_OAUTH_CALLBACK_PATH, getRuntimeApiBaseUrl() || window.location.origin);
-  if (typeof name === 'string' && name.trim()) {
-    url.searchParams.set('server', name.trim());
-  }
-  if (typeof directory === 'string' && directory.trim()) {
-    url.searchParams.set('directory', directory.trim());
-  }
-  return url.toString();
 };
 
 const getPendingMcpAuthContext = async (stateKey: string): Promise<{ name: string; directory: string | null } | null> => {
@@ -1051,7 +1035,11 @@ export const McpPage: React.FC = () => {
       const { authorizationUrl: nextAuthUrl, opened } = await startMcpAuthorization({
         name: selectedMcpName,
         directory: currentDirectory,
-        skipRedirectUriBootstrap: isVSCodeAuthRuntime || Boolean(oauthRedirectUri.trim()),
+        // Only VS Code keeps OpenCode's own redirect. Skipping whenever some
+        // value was stored left a stale one — a dead loopback port from an
+        // earlier launch — unrepairable from this page; the bootstrap already
+        // rewrites nothing when the stored value is right.
+        skipRedirectUriBootstrap: isVSCodeAuthRuntime,
       });
       const stateKey = parseMcpOAuthCallbackStateKey(new URL(nextAuthUrl).searchParams);
       queuedStateKey = stateKey;
@@ -1088,7 +1076,7 @@ export const McpPage: React.FC = () => {
         setIsAuthorizing(false);
       }
     }
-  }, [currentDirectory, isVSCodeAuthRuntime, mcpType, oauthRedirectUri, requireSavedConfig, runtimeActionKey, selectedMcpName, t, tUnsafe]);
+  }, [currentDirectory, isVSCodeAuthRuntime, mcpType, requireSavedConfig, runtimeActionKey, selectedMcpName, t, tUnsafe]);
 
   const handleClearAuthorization = React.useCallback(async () => {
     if (!selectedMcpName || !requireSavedConfig()) return;
@@ -1283,7 +1271,13 @@ export const McpPage: React.FC = () => {
   const effectiveRuntimeStatus = runtimeStatus ?? runtimeDiagnostic;
   const isConnected = runtimeStatus?.status === 'connected';
   const needsAuthorization = runtimeStatus?.status === 'needs_auth' || runtimeStatus?.status === 'needs_client_registration';
-  const suggestedRedirectUri = isVSCodeAuthRuntime ? null : buildMcpOAuthRedirectUri(selectedMcpName, currentDirectory);
+  // Must be the very URI `startMcpAuthorization` writes into the config, not a
+  // second construction of it. The page used to suggest a directory-bearing
+  // address while the flow sent a directory-less one, so a provider enforcing
+  // exact redirect matching rejected a registration copied from right here.
+  const suggestedRedirectUri = isVSCodeAuthRuntime || !selectedMcpName
+    ? null
+    : buildMcpAuthorizationRedirectUri(selectedMcpName);
 
   const handleCopyRedirectUri = async () => {
     if (!suggestedRedirectUri) return;

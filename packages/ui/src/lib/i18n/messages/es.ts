@@ -3025,7 +3025,6 @@ export const dict: Record<I18nKey, string> = {
   'settings.mcp.page.scope.everywhere': 'Disponible en todos los proyectos',
   'settings.mcp.page.scope.thisProject': 'Solo en este proyecto',
   'settings.mcp.page.env.description': 'Valores que el servidor necesita, como una clave de API.',
-  'settings.mcp.page.connection.kindAria': 'Cómo se llega al servidor',
   'settings.mcp.page.connection.kindCommand': 'Comando',
   'settings.mcp.page.connection.kindLink': 'Enlace',
   'settings.mcp.page.connection.hintCommand': 'Se ejecuta en este equipo. Pega un comando completo y se dividirá en un argumento por línea.',

@@ -3024,7 +3024,6 @@ export const dict: Record<I18nKey, string> = {
   'settings.mcp.page.scope.everywhere': 'すべてのプロジェクトで利用可能',
   'settings.mcp.page.scope.thisProject': 'このプロジェクトのみ',
   'settings.mcp.page.env.description': 'API キーなど、サーバーが必要とする値。',
-  'settings.mcp.page.connection.kindAria': 'サーバーへの接続方法',
   'settings.mcp.page.connection.kindCommand': 'コマンド',
   'settings.mcp.page.connection.kindLink': 'リンク',
   'settings.mcp.page.connection.hintCommand': 'このマシンで実行します。コマンド全体を貼り付けると、1 行に 1 引数へ分割されます。',

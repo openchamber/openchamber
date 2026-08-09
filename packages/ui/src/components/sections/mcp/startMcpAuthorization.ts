@@ -63,7 +63,7 @@ export const MCP_OAUTH_ORIGIN_DESKTOP = 'desktop';
  * server straight from the URL rather than depending solely on server-side
  * memory surviving the reload this very write triggers.
  */
-const buildRedirectUri = (name: string): string => {
+export const buildMcpAuthorizationRedirectUri = (name: string): string => {
   if (typeof window === 'undefined') {
     throw new McpAuthorizationError('No browser context to build a callback URL from');
   }
@@ -162,7 +162,7 @@ export const startMcpAuthorization = async (input: {
       // completes. Comparing instead of checking for absence also means the
       // config is left alone — and OpenCode is not reloaded — whenever the
       // stored value is already right, which is every run after the first.
-      const desiredRedirectUri = buildRedirectUri(name);
+      const desiredRedirectUri = buildMcpAuthorizationRedirectUri(name);
       if (existing && currentOAuth?.redirectUri !== desiredRedirectUri) {
         const saved = await configStore.updateMcp(name, {
           oauthEnabled: true,

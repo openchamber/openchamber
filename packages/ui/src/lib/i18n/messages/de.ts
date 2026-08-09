@@ -3022,7 +3022,6 @@ export const dict = {
   'settings.mcp.page.scope.everywhere': 'In allen Projekten verfügbar',
   'settings.mcp.page.scope.thisProject': 'Nur in diesem Projekt',
   'settings.mcp.page.env.description': 'Werte, die der Server braucht, etwa einen API-Schlüssel.',
-  'settings.mcp.page.connection.kindAria': 'Wie der Server erreicht wird',
   'settings.mcp.page.connection.kindCommand': 'Befehl',
   'settings.mcp.page.connection.kindLink': 'Link',
   'settings.mcp.page.connection.hintCommand': 'Läuft auf diesem Rechner. Fügen Sie einen ganzen Befehl ein — er wird in ein Argument pro Zeile zerlegt.',
