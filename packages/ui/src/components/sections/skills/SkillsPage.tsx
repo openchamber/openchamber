@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { toast } from '@/components/ui';
 import { useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
+import { usePendingOpenCodeRestartStore } from '@/stores/usePendingOpenCodeRestartStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -352,7 +353,16 @@ const SkillsInstalledPage: React.FC = () => {
       }
 
       if (success) {
-        toast.success(isNewSkill ? t('settings.skills.page.toast.skillCreated') : t('settings.skills.page.toast.skillUpdated'));
+        const deferred = usePendingOpenCodeRestartStore.getState().changes.some(
+          (change) => change.scope === 'skills' && change.id.startsWith(`skills:${skillName}:`),
+        );
+        toast.success(
+          deferred
+            ? t('settings.view.pendingRestart.saved')
+            : isNewSkill
+              ? t('settings.skills.page.toast.skillCreated')
+              : t('settings.skills.page.toast.skillUpdated'),
+        );
       } else {
         toast.error(isNewSkill ? t('settings.skills.page.toast.createSkillFailed') : t('settings.skills.page.toast.updateSkillFailed'));
       }

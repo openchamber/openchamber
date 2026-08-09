@@ -132,6 +132,43 @@ describe('OpenChamber control service', () => {
     expect(sessionService[method]).toHaveBeenCalledWith('ses_1', { directory: '/repo', prompt: 'Continue' });
   });
 
+  it('resolves the target session directory from the global session list when send omits it', async () => {
+    const { service, sessionService, client } = createService({
+      createClient: () => ({
+        ...client,
+        experimental: {
+          session: {
+            list: vi.fn(async () => ({
+              data: [
+                { id: 'ses_other', directory: '/repo/worktrees/other' },
+                { id: 'ses_target', directory: '/repo/worktrees/target' },
+              ],
+            })),
+          },
+        },
+      }),
+    });
+    sessionService.send.mockResolvedValue({ sessionId: 'ses_target', directory: '/repo/worktrees/target', promptDispatched: true });
+
+    await service.execute('session.send', { sessionId: 'ses_target', prompt: 'Continue' }, '/repo');
+
+    expect(sessionService.send).toHaveBeenCalledWith('ses_target', { directory: '/repo/worktrees/target', prompt: 'Continue' });
+  });
+
+  it('falls back to the context directory when the session is not in the global list', async () => {
+    const { service, sessionService, client } = createService({
+      createClient: () => ({
+        ...client,
+        experimental: { session: { list: vi.fn(async () => ({ data: [] })) } },
+      }),
+    });
+    sessionService.send.mockResolvedValue({ sessionId: 'ses_unknown', directory: '/repo', promptDispatched: true });
+
+    await service.execute('session.send', { sessionId: 'ses_unknown', prompt: 'Continue' }, '/repo');
+
+    expect(sessionService.send).toHaveBeenCalledWith('ses_unknown', { directory: '/repo', prompt: 'Continue' });
+  });
+
   it('waits past initial idle until a completed assistant result appears', async () => {
     let timestamp = 1000;
     const { service, client, sessionService } = createService({

@@ -1804,8 +1804,10 @@ input[aria-label="Terminal input"] {
 
 }
 
-/* Settings dialog: hide the overlay scrollbar; wheel/keyboard scroll still works. */
-[data-settings-view="true"] .overlay-scrollbar {
+/* Settings dialog: hide the overlay scrollbar on mobile/web; wheel/keyboard
+   scroll still works. Desktop shells keep the persistent scrollbar so the
+   Settings sub-panels aren't left with no scroll affordance at all. */
+html:not(.desktop-runtime) [data-settings-view="true"] .overlay-scrollbar {
   display: none;
 }
 

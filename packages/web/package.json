@@ -27,7 +27,7 @@
     "@octokit/rest": "^22.0.1",
     "@opencode-ai/sdk": "1.18.12",
     "@simplewebauthn/server": "13.3.1",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.0",
     "bun-pty": "^0.4.5",
     "compression": "^1.8.1",
     "cron-parser": "^4.9.0",

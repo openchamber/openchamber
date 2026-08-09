@@ -58,6 +58,7 @@ import {
   installSkillsFromRepository as installSkillsFromGit,
   type SkillsCatalogSourceConfig,
 } from './skillsCatalog';
+import { buildDeferredRestartResponse } from './config-mutation-response';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -86,31 +87,9 @@ const resolveWorkingDirectory = (ctx: BridgeContext | undefined, directory?: str
     : (ctx?.manager?.getWorkingDirectory() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath)
 );
 
-const pluginMutationPayload = async (
-  ctx: BridgeContext | undefined,
-  deps: ConfigRuntimeDeps,
-  label: string,
-) => {
-  try {
-    await ctx?.manager?.restart();
-    return {
-      success: true,
-      requiresReload: true,
-      message: `${label}. Reloading interface…`,
-      reloadDelayMs: deps.clientReloadDelayMs,
-      reloadFailed: false,
-    };
-  } catch (error) {
-    return {
-      success: true,
-      requiresReload: false,
-      message: `${label}, but OpenCode reload failed.`,
-      reloadDelayMs: deps.clientReloadDelayMs,
-      reloadFailed: true,
-      warning: error instanceof Error ? error.message : String(error),
-    };
-  }
-};
+const pluginMutationPayload = (label: string) => buildDeferredRestartResponse(
+  `${label}. Restart OpenCode to apply.`,
+);
 
 const parseSkillsCatalogSources = (settings: Record<string, unknown>): SkillsCatalogSourceConfig[] => {
   const rawCatalogs = (settings as { skillCatalogs?: unknown }).skillCatalogs;
@@ -224,8 +203,12 @@ export async function handleConfigBridgeMessage(
       }
       await fs.promises.mkdir(path.dirname(AGENTS_MD_PATH), { recursive: true });
       await fs.promises.writeFile(AGENTS_MD_PATH, content, 'utf8');
-      await ctx?.manager?.restart();
-      return { id, type, success: true, data: { success: true } };
+      return {
+        id,
+        type,
+        success: true,
+        data: buildDeferredRestartResponse('AGENTS.md saved. Restart OpenCode to apply.'),
+      };
     }
 
     case 'api:magic-prompts:get': {
@@ -297,33 +280,21 @@ export async function handleConfigBridgeMessage(
         const scopeValue = body?.scope as string | undefined;
         const scope: AgentScope | undefined = scopeValue === 'project' ? AGENT_SCOPE.PROJECT : scopeValue === 'user' ? AGENT_SCOPE.USER : undefined;
         createAgent(agentName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Agent ${agentName} created successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildDeferredRestartResponse(`Agent ${agentName} created successfully. Restart OpenCode to apply.`),
         };
       }
 
       if (normalizedMethod === 'PATCH') {
         updateAgent(agentName, (body || {}) as Record<string, unknown>, workingDirectory);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Agent ${agentName} updated successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildDeferredRestartResponse(`Agent ${agentName} updated successfully. Restart OpenCode to apply.`),
         };
       }
 
@@ -331,17 +302,11 @@ export async function handleConfigBridgeMessage(
         const scopeValue = body?.scope as string | undefined;
         const scope: AgentScope | undefined = scopeValue === 'project' ? AGENT_SCOPE.PROJECT : scopeValue === 'user' ? AGENT_SCOPE.USER : undefined;
         deleteAgent(agentName, workingDirectory, scope);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Agent ${agentName} deleted successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildDeferredRestartResponse(`Agent ${agentName} deleted successfully. Restart OpenCode to apply.`),
         };
       }
 
@@ -380,49 +345,31 @@ export async function handleConfigBridgeMessage(
         const scopeValue = body?.scope as string | undefined;
         const scope: CommandScope | undefined = scopeValue === 'project' ? COMMAND_SCOPE.PROJECT : scopeValue === 'user' ? COMMAND_SCOPE.USER : undefined;
         createCommand(commandName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Command ${commandName} created successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildDeferredRestartResponse(`Command ${commandName} created successfully. Restart OpenCode to apply.`),
         };
       }
 
       if (normalizedMethod === 'PATCH') {
         updateCommand(commandName, (body || {}) as Record<string, unknown>, workingDirectory);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Command ${commandName} updated successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildDeferredRestartResponse(`Command ${commandName} updated successfully. Restart OpenCode to apply.`),
         };
       }
 
       if (normalizedMethod === 'DELETE') {
         deleteCommand(commandName, workingDirectory);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Command ${commandName} deleted successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildDeferredRestartResponse(`Command ${commandName} deleted successfully. Restart OpenCode to apply.`),
         };
       }
 
@@ -460,49 +407,31 @@ export async function handleConfigBridgeMessage(
       if (normalizedMethod === 'POST') {
         const scope = body?.scope as 'user' | 'project' | undefined;
         createMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `MCP server "${mcpName}" created. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildDeferredRestartResponse(`MCP server "${mcpName}" created. Restart OpenCode to apply.`),
         };
       }
 
       if (normalizedMethod === 'PATCH') {
         updateMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `MCP server "${mcpName}" updated. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildDeferredRestartResponse(`MCP server "${mcpName}" updated. Restart OpenCode to apply.`),
         };
       }
 
       if (normalizedMethod === 'DELETE') {
         deleteMcpConfig(mcpName, workingDirectory);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `MCP server "${mcpName}" deleted. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildDeferredRestartResponse(`MCP server "${mcpName}" deleted. Restart OpenCode to apply.`),
         };
       }
 
@@ -564,7 +493,7 @@ export async function handleConfigBridgeMessage(
           id,
           type,
           success: true,
-          data: await pluginMutationPayload(ctx, deps, 'Plugin entry changed'),
+          data: pluginMutationPayload('Plugin entry changed'),
         };
       }
 
@@ -592,7 +521,7 @@ export async function handleConfigBridgeMessage(
           id,
           type,
           success: true,
-          data: await pluginMutationPayload(ctx, deps, 'Plugin file changed'),
+          data: pluginMutationPayload('Plugin file changed'),
         };
       }
 
@@ -694,17 +623,11 @@ export async function handleConfigBridgeMessage(
         const scope: SkillScope | undefined = scopeValue === 'project' ? SKILL_SCOPE.PROJECT : scopeValue === 'user' ? SKILL_SCOPE.USER : undefined;
         const normalizedSource = sourceValue === 'agents' ? 'agents' : 'opencode';
         createSkill(skillName, { ...(body || {}), source: normalizedSource } as Record<string, unknown>, workingDirectory, scope);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Skill ${skillName} created successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildDeferredRestartResponse(`Skill ${skillName} created successfully. Restart OpenCode to apply.`),
         };
       }
 
@@ -728,33 +651,21 @@ export async function handleConfigBridgeMessage(
         }
 
         updateSkill(skillName, (body || {}) as Record<string, unknown>, workingDirectory);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Skill ${skillName} updated successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildDeferredRestartResponse(`Skill ${skillName} updated successfully. Restart OpenCode to apply.`),
         };
       }
 
       if (normalizedMethod === 'DELETE') {
         deleteSkill(skillName, workingDirectory);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Skill ${skillName} deleted successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildDeferredRestartResponse(`Skill ${skillName} deleted successfully. Restart OpenCode to apply.`),
         };
       }
 
@@ -807,11 +718,7 @@ export async function handleConfigBridgeMessage(
       if (data.ok) {
         const installed = data.installed || [];
         const skipped = data.skipped || [];
-        const requiresReload = installed.length > 0;
-
-        if (requiresReload) {
-          await ctx?.manager?.restart();
-        }
+        const requiresRestart = installed.length > 0;
 
         return {
           id,
@@ -821,9 +728,12 @@ export async function handleConfigBridgeMessage(
             ok: true,
             installed,
             skipped,
-            requiresReload,
-            message: requiresReload ? 'Skills installed successfully. Reloading interface…' : 'No skills were installed',
-            reloadDelayMs: requiresReload ? deps.clientReloadDelayMs : undefined,
+            ...(requiresRestart
+              ? buildDeferredRestartResponse('Skills installed successfully. Restart OpenCode to apply.')
+              : {
+                requiresReload: false,
+                message: 'No skills were installed',
+              }),
           },
         };
       }

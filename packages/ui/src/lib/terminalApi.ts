@@ -343,7 +343,7 @@ export class TerminalTransport {
     this.idleCloseTimer = null;
   }
 
-  private startKeepalive(): void { this.stopKeepalive(); this.keepaliveTimer = setInterval(() => this.send({ t: 'ping', v: 3 }), 20_000); }
+  private startKeepalive(): void { this.stopKeepalive(); this.keepaliveTimer = setInterval(() => this.send({ t: 'ping', v: 3 }), 45_000); }
   private stopKeepalive(): void { if (this.keepaliveTimer) clearInterval(this.keepaliveTimer); this.keepaliveTimer = null; }
   private cancelReconnect(): void { if (this.reconnectTimer) clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.wakeCleanup?.(); this.wakeCleanup = null; }
   private closeSocket(): void { this.stopKeepalive(); const socket = this.socket; this.socket = null; if (socket && (socket.readyState === SOCKET_CONNECTING || socket.readyState === SOCKET_OPEN)) socket.close(); }
