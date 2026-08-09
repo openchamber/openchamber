@@ -5,7 +5,6 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSession } from '@/sync/sync-context';
 import { getLinkedIssues } from '@/lib/linkedIssues';
-import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 
@@ -35,12 +34,13 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   // Skills were previously fetched only when the composer's slash autocomplete
   // opened, so this row reported whatever count happened to be cached — often
   // none — until the user typed "/". The panel states a count, so it is the
-  // panel's business to have one. Background-gated so it cannot compete with
-  // chat bootstrap for sockets, and re-run per directory because skills are
-  // discovered relative to the active project.
+  // panel's business to have one. Re-run per directory because skills are
+  // discovered relative to the active project. No background-network wrap
+  // here: `loadSkills` already gates its own fetch, and wrapping it again
+  // would hold a second slot idle for the length of the first.
   const loadSkills = useSkillsStore((state) => state.loadSkills);
   React.useEffect(() => {
-    void runBackgroundNetworkTask(() => loadSkills());
+    void loadSkills();
   }, [directory, loadSkills]);
 
   const linked = React.useMemo(() => getLinkedIssues(session), [session]);

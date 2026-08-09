@@ -313,8 +313,13 @@ the matching header dropdown:
 - **MCP** — `McpDropdown` was the only mount-time caller of `refresh()`.
 - **Usage** — `useQuotaAutoRefresh` merely schedules an interval; the *first*
   fetch was performed by the dropdown's open handler.
+- **Skills** — `loadSkills()` ran only when the composer's slash autocomplete
+  opened, so the context-sources count was whatever happened to be cached. The
+  section loads them itself, keyed on the directory, since skills are
+  discovered relative to the active project. It does not wrap the call in
+  `runBackgroundNetworkTask`: the store already gates its own fetch.
 
-The panel now performs both itself, silently and through the
+The panel now performs these itself, silently and through the
 background-network gate, so it cannot compete with chat bootstrap traffic for
 sockets. A panel that reports a subsystem's state cannot depend on an unrelated
 component having been mounted or opened.
@@ -333,7 +338,5 @@ animation frame.
 
 ## Not implemented yet
 
-- Linked GitHub issues (needs session-metadata storage alongside
-  `context_obligatory_messages`).
 - Test/build/dev-server status and LSP diagnostics — a separate track. Note
   that `state.lsp` already exists in the sync state.
