@@ -2,11 +2,13 @@ import { createProjectIdFromPath } from '../projects/project-id.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import {
+  buildDeferredRestartResponse,
+} from './config-mutation-response.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
     crypto,
-    clientReloadDelayMs,
     getOpenCodeResolutionSnapshot,
     getOpenCodeUpgradeCapability,
     formatSettingsResponse,
@@ -355,6 +357,11 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const entry = {
         name,
         directory: normalizePendingString(req.body?.directory),
+        // Which surface started the flow. It belongs here rather than in the
+        // redirect URI: that URI is written into the server's config once and
+        // deliberately never rewritten, so anything encoded in it would be
+        // frozen at whatever runtime authorised first.
+        origin: normalizePendingString(req.body?.origin),
         expiresAt: Date.now() + PENDING_MCP_AUTH_TTL_MS,
       };
       pendingMcpAuthContextByState.set(state, entry);
@@ -364,6 +371,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         context: {
           name: entry.name,
           directory: entry.directory,
+          origin: entry.origin,
         },
       });
     } catch (error) {
@@ -485,15 +493,14 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const { getProviderAuth } = await getAuthLibrary();
       const hasStoredAuth = Boolean(getProviderAuth(providerID));
       const upsertResult = upsertProviderConfig(providerID, config, directory, scope, { hasStoredAuth });
-      await refreshOpenCodeAfterConfigChange(`provider ${providerID} upserted (${scope})`);
 
       return res.json({
-        success: true,
+        ...buildDeferredRestartResponse(
+          `Provider ${providerID} saved. Restart OpenCode to apply.`,
+        ),
         providerId: upsertResult.providerId,
         path: upsertResult.path,
         config: upsertResult.config,
-        requiresReload: true,
-        reloadDelayMs: clientReloadDelayMs,
       });
     } catch (error) {
       const status = typeof error?.statusCode === 'number' ? error.statusCode : 500;
@@ -548,15 +555,18 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       }
 
       if (removed) {
-        await refreshOpenCodeAfterConfigChange(`provider ${providerId} disconnected (${scope})`);
+        return res.json({
+          success: true,
+          removed,
+          ...buildDeferredRestartResponse('Provider disconnected successfully. Restart OpenCode to apply.'),
+        });
       }
 
       return res.json({
         success: true,
         removed,
-        requiresReload: removed,
-        message: removed ? 'Provider disconnected successfully' : 'Provider was not connected',
-        reloadDelayMs: removed ? clientReloadDelayMs : undefined,
+        requiresReload: false,
+        message: 'Provider was not connected',
       });
     } catch (error) {
       console.error('Failed to disconnect provider:', error);
@@ -650,14 +660,9 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
       await fs.promises.writeFile(AGENTS_MD_PATH, content, 'utf8');
 
-      // Refresh OpenCode so it picks up the new AGENTS.md without a full restart
-      try {
-        await refreshOpenCodeAfterConfigChange('global behavior (AGENTS.md) updated');
-      } catch {
-        // Non-fatal: file was written successfully
-      }
-
-      return res.json({ success: true });
+      return res.json(buildDeferredRestartResponse(
+        'AGENTS.md saved. Restart OpenCode to apply.',
+      ));
     } catch (error) {
       console.error('Failed to write AGENTS.md:', error);
       return res.status(500).json({ error: error.message || 'Failed to write AGENTS.md' });

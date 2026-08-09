@@ -1,4 +1,15 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+import { buildDeferredRestartResponse } from './config-mutation-response.js';
+
+/**
+ * Matches how OpenCode reads its own boolean env flags: any value other than
+ * unset, empty, "0" or "false" enables the flag.
+ */
+const isEnvFlagEnabled = (value) => {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 && normalized !== '0' && normalized !== 'false';
+};
 
 export const registerSkillRoutes = (app, dependencies) => {
   const {
@@ -10,9 +21,8 @@ export const registerSkillRoutes = (app, dependencies) => {
     readSettingsFromDisk,
     sanitizeSkillCatalogs,
     isUnsafeSkillRelativePath,
-    refreshOpenCodeAfterConfigChange,
-    clientReloadDelayMs,
     buildOpenCodeUrl,
+
     getOpenCodeAuthHeaders,
     getOpenCodePort,
     getSkillSources,
@@ -250,7 +260,24 @@ export const registerSkillRoutes = (app, dependencies) => {
         };
       });
 
-      res.json({ skills: enrichedSkills });
+      // OpenCode decides which external skill roots it loads from process
+      // env, and the browser cannot read that. Report the flags alongside the
+      // scan so the client can narrow its list to what the agent can actually
+      // invoke.
+      //
+      // OpenCode's own skill-list endpoint is not usable for this: on 1.18.14
+      // it returns only global and builtin skills, omitting the project
+      // `.agents`/`.claude` skills the agent demonstrably has.
+      res.json({
+        skills: enrichedSkills,
+        externalSkills: {
+          // `OPENCODE_DISABLE_CLAUDE_CODE` is the broad switch; the specific
+          // one wins independently — OpenCode ORs them.
+          claudeDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_CLAUDE_CODE)
+            || isEnvFlagEnabled(process.env.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS),
+          allDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_EXTERNAL_SKILLS),
+        },
+      });
     } catch (error) {
       console.error('Failed to list skills:', error);
       res.status(500).json({ error: 'Failed to list skills' });
@@ -476,19 +503,18 @@ export const registerSkillRoutes = (app, dependencies) => {
 
         const installed = result.installed || [];
         const skipped = result.skipped || [];
-        const requiresReload = installed.length > 0;
-
-        if (requiresReload) {
-          await refreshOpenCodeAfterConfigChange('skills install');
-        }
+        const requiresRestart = installed.length > 0;
 
         return res.json({
           ok: true,
           installed,
           skipped,
-          requiresReload,
-          message: requiresReload ? 'Skills installed successfully. Reloading interface…' : 'No skills were installed',
-          reloadDelayMs: requiresReload ? clientReloadDelayMs : undefined,
+          ...(requiresRestart
+            ? buildDeferredRestartResponse('Skills installed successfully. Restart OpenCode to apply.')
+            : {
+              requiresReload: false,
+              message: 'No skills were installed',
+            }),
         });
       }
 
@@ -527,19 +553,18 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       const installed = result.installed || [];
       const skipped = result.skipped || [];
-      const requiresReload = installed.length > 0;
-
-      if (requiresReload) {
-        await refreshOpenCodeAfterConfigChange('skills install');
-      }
+      const requiresRestart = installed.length > 0;
 
       res.json({
         ok: true,
         installed,
         skipped,
-        requiresReload,
-        message: requiresReload ? 'Skills installed successfully. Reloading interface…' : 'No skills were installed',
-        reloadDelayMs: requiresReload ? clientReloadDelayMs : undefined,
+        ...(requiresRestart
+          ? buildDeferredRestartResponse('Skills installed successfully. Restart OpenCode to apply.')
+          : {
+            requiresReload: false,
+            message: 'No skills were installed',
+          }),
       });
     } catch (error) {
       console.error('Failed to install skills:', error);
@@ -620,14 +645,9 @@ export const registerSkillRoutes = (app, dependencies) => {
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
       createSkill(skillName, { ...config, source: skillSource }, directory, scope);
-      await refreshOpenCodeAfterConfigChange('skill creation');
-
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Skill ${skillName} created successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildDeferredRestartResponse(
+        `Skill ${skillName} created successfully. Restart OpenCode to apply.`,
+      ));
     } catch (error) {
       console.error('Failed to create skill:', error);
       res.status(500).json({ error: error.message || 'Failed to create skill' });
@@ -663,14 +683,9 @@ export const registerSkillRoutes = (app, dependencies) => {
       console.log('[Server] Working directory:', directory);
 
       updateSkill(skillName, updates, directory, updates?.targetPath);
-      await refreshOpenCodeAfterConfigChange('skill update');
-
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Skill ${skillName} updated successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildDeferredRestartResponse(
+        `Skill ${skillName} updated successfully. Restart OpenCode to apply.`,
+      ));
     } catch (error) {
       console.error('[Server] Failed to update skill:', error);
       res.status(500).json({ error: error.message || 'Failed to update skill' });
@@ -755,14 +770,9 @@ export const registerSkillRoutes = (app, dependencies) => {
       }
 
       deleteSkill(skillName, directory);
-      await refreshOpenCodeAfterConfigChange('skill deletion');
-
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Skill ${skillName} deleted successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildDeferredRestartResponse(
+        `Skill ${skillName} deleted successfully. Restart OpenCode to apply.`,
+      ));
     } catch (error) {
       console.error('Failed to delete skill:', error);
       res.status(500).json({ error: error.message || 'Failed to delete skill' });

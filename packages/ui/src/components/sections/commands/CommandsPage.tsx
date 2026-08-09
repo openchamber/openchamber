@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useCommandsStore, type CommandConfig, type CommandScope } from '@/stores/useCommandsStore';
+import { usePendingOpenCodeRestartStore } from '@/stores/usePendingOpenCodeRestartStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ModelSelector } from '../agents/ModelSelector';
 import { AgentSelector } from './AgentSelector';
@@ -170,7 +171,16 @@ export const CommandsPage: React.FC = () => {
       }
 
       if (success) {
-        toast.success(isNewCommand ? t('settings.commands.page.toast.created') : t('settings.commands.page.toast.updated'));
+        const deferred = usePendingOpenCodeRestartStore.getState().changes.some(
+          (change) => change.scope === 'commands' && change.id.startsWith(`commands:${commandName}:`),
+        );
+        toast.success(
+          deferred
+            ? t('settings.view.pendingRestart.saved')
+            : isNewCommand
+              ? t('settings.commands.page.toast.created')
+              : t('settings.commands.page.toast.updated'),
+        );
       } else {
         toast.error(isNewCommand ? t('settings.commands.page.toast.createFailed') : t('settings.commands.page.toast.updateFailed'));
       }

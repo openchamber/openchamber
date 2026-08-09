@@ -284,16 +284,15 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
 const SHELL_CODE_TAG_STYLE: React.CSSProperties = { background: 'transparent', backgroundColor: 'transparent' };
 
 const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) => {
-    const [expanded, setExpanded] = React.useState(false);
+    const output = typeof part.shellAction?.output === 'string' ? part.shellAction.output : '';
+    const [expanded, setExpanded] = React.useState(true);
     const [copiedOutput, setCopiedOutput] = React.useState(false);
     const copiedResetTimeoutRef = React.useRef<number | null>(null);
     const { t } = useI18n();
 
     const command = typeof part.shellAction?.command === 'string' ? part.shellAction.command.trim() : '';
-    const output = typeof part.shellAction?.output === 'string' ? part.shellAction.output : '';
     const status = typeof part.shellAction?.status === 'string' ? part.shellAction.status.trim().toLowerCase() : '';
     const hasOutput = output.trim().length > 0;
-
     const clearCopiedResetTimeout = React.useCallback(() => {
         if (copiedResetTimeoutRef.current !== null && typeof window !== 'undefined') {
             window.clearTimeout(copiedResetTimeoutRef.current);

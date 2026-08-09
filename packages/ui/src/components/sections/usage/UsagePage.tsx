@@ -76,6 +76,9 @@ export const UsagePage: React.FC = () => {
   const providerMeta = QUOTA_PROVIDERS.find((provider) => provider.id === selectedProviderId);
   const providerName = providerMeta?.name ?? selectedProviderId ?? t('settings.usage.sidebar.title');
   const usage = selectedResult?.usage;
+  const selectedProviderError = selectedResult?.configured && !selectedResult.ok
+    ? selectedResult.error
+    : null;
   const showInDropdown = selectedProviderId ? dropdownProviderIds.includes(selectedProviderId) : false;
   const hasCredentialsForm = selectedProviderId === 'opencode-go' || selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor';
   const handleDropdownToggle = React.useCallback((enabled: boolean) => {
@@ -179,10 +182,10 @@ export const UsagePage: React.FC = () => {
         <p className="typography-ui-label text-foreground pb-8">{t('settings.usage.page.state.noData')}</p>
       )}
 
-      {error && (
+      {(error || selectedProviderError) && (
         <div className="mb-8 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-4 py-3">
           <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('settings.usage.page.state.refreshFailedTitle')}</p>
-          <p className="typography-meta text-[var(--status-error)]/80 mt-1">{error}</p>
+          <p className="typography-meta text-[var(--status-error)]/80 mt-1">{error ?? selectedProviderError}</p>
         </div>
       )}
 

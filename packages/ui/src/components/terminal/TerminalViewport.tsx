@@ -1,5 +1,5 @@
 import React from 'react';
-import { FitAddon, Ghostty, Terminal as GhosttyTerminal } from 'ghostty-web';
+import type { FitAddon, Ghostty, Terminal as GhosttyTerminal } from 'ghostty-web';
 
 import { cn } from '@/lib/utils';
 import type { TerminalTheme } from '@/lib/terminalTheme';
@@ -15,8 +15,33 @@ import {
 } from '@/lib/terminalTouchSelection';
 import type { TerminalChunk } from '@/stores/useTerminalStore';
 
-let ghosttyPromise: Promise<Ghostty> | null = null;
-const loadGhostty = (): Promise<Ghostty> => ghosttyPromise ??= Ghostty.load();
+// ghostty-web (638 KB raw of JS + the WASM VT) loads on demand: TerminalView
+// stays eagerly importable for the bottom dock without pulling the emulator
+// into the startup graph before a terminal is actually mounted.
+type GhosttyModule = typeof import('ghostty-web');
+type GhosttyRuntime = { module: GhosttyModule; ghostty: Ghostty };
+let ghosttyRuntimePromise: Promise<GhosttyRuntime> | null = null;
+const loadGhostty = (): Promise<GhosttyRuntime> =>
+  ghosttyRuntimePromise ??= import('ghostty-web').then(async (module) => ({
+    module,
+    ghostty: await module.Ghostty.load(),
+  }));
+
+// The web entry defers its ~2 MB Nerd Font download until a terminal actually
+// mounts (see the `__openchamberEnsureNerdFonts` hook in index.html). Wait for
+// it with a short bound so a cached font is in place before the glyph atlas is
+// built, while a cold CDN fetch never blocks the terminal from opening; the
+// runtimes without the hook (VS Code, mobile) resolve immediately.
+const NERD_FONT_WAIT_MS = 2000;
+const ensureNerdFonts = (): Promise<void> => {
+  if (typeof window === 'undefined') return Promise.resolve();
+  const loader = (window as typeof window & { __openchamberEnsureNerdFonts?: () => Promise<void> }).__openchamberEnsureNerdFonts;
+  if (typeof loader !== 'function') return Promise.resolve();
+  return Promise.race([
+    Promise.resolve(loader()).catch(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, NERD_FONT_WAIT_MS)),
+  ]).then(() => undefined);
+};
 
 type TerminalSize = { cols: number; rows: number };
 
@@ -211,13 +236,13 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     window.addEventListener('focus', handleWindowFocus);
     window.addEventListener('blur', handleWindowBlur);
 
-    loadGhostty().then((ghostty) => {
+    Promise.all([loadGhostty(), ensureNerdFonts()]).then(([{ module, ghostty }]) => {
       if (disposed) return;
-      terminal = new GhosttyTerminal({
+      terminal = new module.Terminal({
         ...getGhosttyTerminalOptions(fontFamily, fontSize, theme, ghostty, false),
         ...(provisionalSizeRef.current ?? {}),
       });
-      const fitAddon = new FitAddon();
+      const fitAddon = new module.FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
       terminalRef.current = terminal;

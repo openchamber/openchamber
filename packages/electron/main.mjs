@@ -2193,6 +2193,23 @@ const dispatchDeepLink = (link) => {
     log.warn('[electron] invalid connect deep-link payload');
     return;
   }
+  // Sent by the MCP OAuth callback page after it completes authorization in
+  // the system browser. The work is already done server-side; all this has to
+  // do is bring the app back to the front, since the user's attention is in a
+  // browser tab at that moment.
+  if (link.type === 'focus') {
+    const target = state.mainWindow && !state.mainWindow.isDestroyed()
+      ? state.mainWindow
+      : BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
+    if (target) {
+      if (target.isMinimized()) target.restore();
+      target.show();
+      target.focus();
+    }
+    emitToAllWindows('openchamber:deep-link-focus', { reason: link.value || null });
+    return;
+  }
+
   if (link.type === 'session' && link.value) {
     emitToAllWindows('openchamber:open-session', { sessionId: link.value });
     return;
@@ -2462,12 +2479,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   });
   browserWindow.on('move', () => {
     debounceWindowStatePersist(browserWindow, false);
-  });
-  browserWindow.on('minimize', (event) => {
-    if (!shouldHideMainWindowToTray(browserWindow)) return;
-    debounceWindowStatePersist(browserWindow, true);
-    event.preventDefault();
-    browserWindow.hide();
   });
   browserWindow.on('close', (event) => {
     if (!state.quitRequested && shouldHideMainWindowToTray(browserWindow)) {
@@ -3695,6 +3706,22 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_start_window_drag':
       return null;
 
+    // Used after an MCP authorization finishes in the system browser: the app
+    // raises itself rather than relying on the browser to hand control back.
+    // A browser will not follow a custom-protocol link without a user gesture,
+    // and the completion page has none.
+    case 'desktop_focus_window': {
+      const target = browserWindow && !browserWindow.isDestroyed()
+        ? browserWindow
+        : (state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null);
+      if (!target) return false;
+      if (target.isMinimized()) target.restore();
+      target.show();
+      target.focus();
+      app.focus?.({ steal: true });
+      return true;
+    }
+
     case 'desktop_is_window_fullscreen':
       return Boolean(browserWindow?.isFullScreen());
 
@@ -4448,7 +4475,12 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_minimize_current_window':
       if (browserWindow && !browserWindow.isDestroyed()) {
-        browserWindow.minimize();
+        if (shouldHideMainWindowToTray(browserWindow)) {
+          debounceWindowStatePersist(browserWindow, true);
+          browserWindow.hide();
+        } else {
+          browserWindow.minimize();
+        }
       }
       return null;
 

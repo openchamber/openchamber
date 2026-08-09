@@ -18,7 +18,8 @@ export type QuotaProviderId =
   | 'opencode-go'
   | 'crof'
   | 'deepseek'
-  | 'neuralwatt';
+  | 'neuralwatt'
+  | 'xai';
 
 export interface UsageWindow {
   usedPercent: number | null;

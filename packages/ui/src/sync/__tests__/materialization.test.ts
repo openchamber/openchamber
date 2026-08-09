@@ -167,6 +167,39 @@ describe("materializeSessionSnapshots", () => {
     expect(mergedPart.state?.time?.end).toBe(2000)
   })
 
+  test("does not regress a locally interrupted tool (error + end) when a stale running snapshot arrives", () => {
+    // The #2577 mark writes status "error" + end time; a later stale refresh
+    // that still reports the part as running must not undo it.
+    const interruptedTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: { status: "error", error: "Interrupted", time: { start: 1000, end: 5000 } },
+    } as unknown as Part
+    const staleRunningTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: { status: "running", time: { start: 1000 } },
+    } as unknown as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [interruptedTool] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [staleRunningTool] }],
+    )
+
+    expect(result.part.msg_1[0]).toBe(interruptedTool)
+    expect(result.part.msg_1[0]).not.toBe(staleRunningTool)
+    expect((result.part.msg_1[0] as { state: { status: string } }).state.status).toBe("error")
+  })
+
   test("does not regress a completed tool when a stale running snapshot arrives", () => {
     const completedTool = {
       id: "prt_1",

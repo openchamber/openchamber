@@ -8,6 +8,7 @@ import { setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -228,6 +229,85 @@ describe('routeMessage directory scoping', () => {
   });
 });
 
+describe('sendMessage captured target', () => {
+  let originalSendMessage;
+  const calls = [];
+
+  beforeEach(() => {
+    calls.length = 0;
+    const childStore = {
+      getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
+      setState: () => {},
+    };
+    const childStores = {
+      children: new Map(),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    setActionRefs(opencodeClient, childStores, () => '/current/project');
+    setOptimisticRefs(() => {}, () => {});
+    useConfigStore.setState({ isConnected: true });
+    useSessionUIStore.setState({
+      currentSessionId: 'session-current',
+      currentSessionDirectory: '/current/project',
+      newSessionDraft: { open: false, directoryOverride: null, parentID: null },
+    });
+
+    originalSendMessage = opencodeClient.sendMessage;
+    opencodeClient.sendMessage = async (params) => {
+      calls.push(params);
+      return 'msg';
+    };
+  });
+
+  afterEach(() => {
+    opencodeClient.sendMessage = originalSendMessage;
+  });
+
+  const sendToTarget = (target) => useSessionUIStore.getState().sendMessage(
+    'queued message',
+    'provider-a',
+    'model-a',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    'normal',
+    { target },
+  );
+
+  test('uses the target captured before the active session changes', async () => {
+    await sendToTarget({
+      runtimeKey: getRuntimeKey(),
+      sessionId: 'session-captured',
+      directory: '/captured/project',
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].runtimeKey).toBe(getRuntimeKey());
+    expect(calls[0].id).toBe('session-captured');
+    expect(calls[0].directory).toBe('/captured/project');
+  });
+
+  test('does not send a captured target through a different runtime', async () => {
+    let error = null;
+    try {
+      await sendToTarget({
+        runtimeKey: `${getRuntimeKey()}-stale`,
+        sessionId: 'session-captured',
+        directory: '/captured/project',
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain('runtime changed');
+    expect(calls).toHaveLength(0);
+  });
+});
+
 describe('slash-command goal objectives', () => {
   test('expands every $ARGUMENTS reference from the authoritative command template', () => {
     expect(expandSlashCommandGoalObjective('/issue--to-pr LIN-123 --draft', [{
@@ -370,7 +450,12 @@ describe('routeMessage skill invocation', () => {
 
     // Minimal optimistic + connection machinery so routeMessage can dispatch.
     const childStore = {
-      getState: () => ({ session_status: {} }),
+      getState: () => ({
+        session: [],
+        message: {},
+        part: {},
+        session_status: {},
+      }),
       setState: () => {},
     };
     const childStores = {

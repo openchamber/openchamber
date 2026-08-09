@@ -791,4 +791,46 @@ describe('client auth routes', () => {
       socket: { remoteAddress: '203.0.113.10' },
     })).toBe('unknown-public');
   });
+
+  it('reports null port and tunnel URL on /api/system/info when no getters are wired', async () => {
+    const app = express();
+    registerServerStatusRoutes(app, {
+      process,
+      serverStartedAt: '2026-01-01T00:00:00.000Z',
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      express,
+    });
+
+    const response = await request(app).get('/api/system/info');
+    expect(response.status).toBe(200);
+    expect(response.body.openchamberVersion).toBe('1.0.0');
+    expect(response.body.runtime).toBe('test');
+    expect(response.body.pid).toBeTypeOf('number');
+    expect(response.body.startedAt).toBeTypeOf('string');
+    expect(response.body.port).toBeNull();
+    expect(response.body.tunnelUrl).toBeNull();
+  });
+
+  it('reports the instance port and tunnel URL on /api/system/info from the wired getters', async () => {
+    const app = express();
+    registerServerStatusRoutes(app, {
+      process,
+      serverStartedAt: '2026-01-01T00:00:00.000Z',
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      express,
+      getServerPort: () => 9988,
+      getTunnelUrl: () => 'https://worktree-a.example.trycloudflare.com',
+    });
+
+    const response = await request(app).get('/api/system/info');
+    expect(response.status).toBe(200);
+    expect(response.body.port).toBe(9988);
+    expect(response.body.tunnelUrl).toBe('https://worktree-a.example.trycloudflare.com');
+  });
 });
