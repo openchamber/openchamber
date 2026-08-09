@@ -1116,9 +1116,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.tunnelMode === 'string') {
     const mode = candidate.tunnelMode.trim().toLowerCase();
-    if (mode === 'quick' || mode === 'managed-remote' || mode === 'managed-local') {
+    if (mode === 'quick' || mode === 'private-network' || mode === 'managed-remote' || mode === 'managed-local') {
       result.tunnelMode = mode;
     }
+  }
+  if (candidate.tailscaleHttpsPort === 443 || candidate.tailscaleHttpsPort === 8443 || candidate.tailscaleHttpsPort === 10000) {
+    result.tailscaleHttpsPort = candidate.tailscaleHttpsPort;
   }
   if (candidate.tunnelBootstrapTtlMs === null) {
     result.tunnelBootstrapTtlMs = null;
