@@ -67,12 +67,18 @@ import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
-import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
+import { desktopHostsGet, redactSensitiveUrl } from '@/lib/desktopHosts';
+import {
+  LOCAL_HOST_ID,
+  buildLocalDesktopHost,
+  getLocalDesktopOrigin,
+  resolveCurrentDesktopHost,
+} from '@/lib/desktopCurrentHost';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useShallow } from 'zustand/react/shallow';
 import type { IconName } from "@/components/icon/icons";
 import { toast } from '@/components/ui';
@@ -696,26 +702,19 @@ export const Header: React.FC<HeaderProps> = ({
       }
       setCurrentInstanceIsLocal(false);
 
+      // Same resolution the host switcher's own header uses, so the button and
+      // the panel it opens can never disagree about which instance this is.
       const cfg = await desktopHostsGet();
-      const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
-      const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+      const localOrigin = getLocalDesktopOrigin();
+      const resolved = resolveCurrentDesktopHost([buildLocalDesktopHost(localOrigin), ...cfg.hosts]);
 
-      if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
+      if (resolved.id === LOCAL_HOST_ID) {
         setCurrentInstanceLabel('Local');
         setCurrentInstanceIsLocal(true);
         return;
       }
 
-      const match = cfg.hosts.find((host) => {
-        return runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false;
-      });
-
-      if (match?.label?.trim()) {
-        setCurrentInstanceLabel(redactSensitiveUrl(match.label.trim()));
-        return;
-      }
-
-      setCurrentInstanceLabel('Instance');
+      setCurrentInstanceLabel(redactSensitiveUrl(resolved.label.trim() || 'Instance'));
     } catch {
       setCurrentInstanceLabel('Local');
       setCurrentInstanceIsLocal(true);
@@ -724,6 +723,11 @@ export const Header: React.FC<HeaderProps> = ({
 
   useEffect(() => {
     void refreshCurrentInstanceLabel();
+    // Switching instances does not remount the header, so without this the
+    // button would keep naming the instance the window left behind.
+    return subscribeRuntimeEndpointChanged(() => {
+      void refreshCurrentInstanceLabel();
+    });
   }, [refreshCurrentInstanceLabel]);
 
   const checkRemoteInstanceUpdate = React.useCallback(async () => {
