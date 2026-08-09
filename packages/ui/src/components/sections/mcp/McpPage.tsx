@@ -1563,16 +1563,23 @@ export const McpPage: React.FC = () => {
         >
 
             {isNewServer && (
-              <SettingsFieldRow label={t('settings.mcp.page.server.name')}>
+              <SettingsFieldRow
+                label={t('settings.mcp.page.server.name')}
+                // The scope select carries words now, not a lone icon, so the
+                // control cluster has to be allowed to bound itself and wrap.
+                // Left at its default (fit-width, no shrink) the pair ran past
+                // the edge of the settings pane in a narrow dialog.
+                controlClassName="flex-wrap @xl:w-auto @xl:flex-1"
+              >
                   <Input
                     value={draftName}
                     onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '-'))}
                     placeholder={t('settings.mcp.page.server.namePlaceholder')}
-                    className="h-7 w-48 font-mono px-2"
+                    className="h-7 w-48 min-w-0 max-w-full shrink font-mono px-2"
                     autoFocus
                   />
                   <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
-                    <SelectTrigger size={SETTINGS_SELECT_SIZE} className="!h-7 gap-1.5 px-2">
+                    <SelectTrigger size={SETTINGS_SELECT_SIZE} className="!h-7 min-w-0 max-w-full gap-1.5 px-2">
                       <Icon
                         name={draftScope === 'user' ? 'user-3' : 'folder'}
                         className="h-3.5 w-3.5 shrink-0"
