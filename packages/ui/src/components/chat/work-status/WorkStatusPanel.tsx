@@ -123,9 +123,16 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   // covers the transcript, so leaving it up would block the thing it reports on.
   const overlayRef = React.useRef<HTMLElement | null>(null);
   React.useEffect(() => {
-    if (!overlay) return undefined;
+    // Only while it is actually up: a hidden overlay listening for clicks would
+    // swallow the very press that opens it.
+    if (!overlay || !visible) return undefined;
     const onPointerDown = (event: PointerEvent) => {
-      if (!overlayRef.current?.contains(event.target as Node)) setOverlayOpen(false);
+      const target = event.target as HTMLElement | null;
+      if (overlayRef.current?.contains(target)) return;
+      // The header toggle closes it on its own; letting this fire too would
+      // close and immediately reopen.
+      if (target?.closest('[data-work-status-toggle]')) return;
+      setOverlayOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOverlayOpen(false);
@@ -136,7 +143,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [overlay, setOverlayOpen]);
+  }, [overlay, setOverlayOpen, visible]);
 
   return (
     <aside
@@ -175,11 +182,19 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         'shadow-[0_2px_8px_-3px_rgb(0_0_0_/_0.08)]',
       )}
       style={{
-        width: visible && renderedSections > 0 ? WORK_STATUS_PANEL_WIDTH : 0,
+        // The overlay keeps its width: it takes no space from the chat, so
+        // collapsing it would animate a dimension nothing depends on. It fades
+        // and lifts instead, like the dropdown it reads as.
+        width: overlay || (visible && renderedSections > 0) ? WORK_STATUS_PANEL_WIDTH : 0,
         opacity: visible && renderedSections > 0 ? 1 : 0,
-        // Leaves to the right and arrives from it, so the card reads as sliding
-        // out past the window edge rather than dissolving in place.
-        transform: visible ? 'translateX(0)' : `translateX(${WORK_STATUS_PANEL_WIDTH / 4}px)`,
+        transform: visible
+          ? 'translateY(0) scale(1)'
+          : overlay
+            ? 'translateY(-6px) scale(0.98)'
+            // Inline: leaves to the right and arrives from it, so the card
+            // reads as sliding out past the window edge.
+            : `translateX(${WORK_STATUS_PANEL_WIDTH / 4}px)`,
+        transformOrigin: 'top right',
         transitionProperty: 'width, opacity, transform, margin',
         transitionDuration: `${PANEL_TRANSITION_MS}ms`,
         transitionTimingFunction: PANEL_TRANSITION_EASING,

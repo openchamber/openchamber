@@ -721,10 +721,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
     const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
     const setWorkStatusPanelFits = useUIStore((state) => state.setWorkStatusPanelFits);
-    const showWorkStatusOverlay = workStatusPanelMountable
+    // Mounted whenever it could be shown, not only while it is: an element
+    // that appears and disappears with the condition has nothing to animate.
+    const workStatusOverlayMountable = workStatusPanelMountable
         && workStatusPanelEnabled
-        && !workStatusFits
-        && workStatusOverlayOpen;
+        && !workStatusFits;
+    const showWorkStatusOverlay = workStatusOverlayMountable && workStatusOverlayOpen;
 
     React.useEffect(() => {
         setWorkStatusPanelFits(workStatusPanelMountable && workStatusFits);
@@ -1253,10 +1255,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
             {/* Inside the chat column, not beside it: as a row sibling it took
                 part in the flex layout and pushed the transcript, which is the
                 one thing an overlay must not do. */}
-            {showWorkStatusOverlay ? (
+            {workStatusOverlayMountable ? (
                 <WorkStatusPanel
                     overlay
-                    visible
+                    visible={showWorkStatusOverlay}
                     sessionId={currentSessionId ?? null}
                     directory={effectiveSessionDirectory ?? null}
                 />

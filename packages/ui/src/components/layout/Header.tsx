@@ -2116,6 +2116,7 @@ export const Header: React.FC<HeaderProps> = ({
               <TooltipTrigger asChild>
                 <button
                   type="button"
+                  data-work-status-toggle="true"
                   aria-pressed={workStatusToggleActive}
                   aria-label={t('header.workStatusPanel.toggleAria')}
                   onClick={handleWorkStatusToggle}
