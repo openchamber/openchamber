@@ -103,11 +103,12 @@ const renderVisibility = (args: Args, rowWidth: number) => {
     getBoundingClientRect: () => ({ width: rowWidth }),
     closest: () => null,
   } as unknown as HTMLDivElement;
-  const result = { visible: false };
+  const result = { visible: false, fits: false };
 
   const Probe: React.FC = () => {
-    const { rowRef, visible } = useWorkStatusVisibility(args);
+    const { rowRef, visible, fits } = useWorkStatusVisibility(args);
     result.visible = visible;
+    result.fits = fits;
     React.useLayoutEffect(() => {
       rowRef(rowNode);
       return () => rowRef(null);
@@ -285,12 +286,26 @@ describe('useWorkStatusVisibility', () => {
     dom.restore();
   });
 
-  test('stays hidden when the user switched the panel off', () => {
+  test('stays hidden when the user switched the panel off, but still reports the fit', () => {
+    // The header offers the panel as an overlay when layout refuses it, so it
+    // needs the two answers apart: whether the user wants it, and whether
+    // there is room for it.
     panelEnabled = false;
     const { result, teardown } = renderVisibility(
       { directory: '/repo', isMobile: false, isVSCode: false },
       REQUIRED * 2,
     );
+    expect(result.visible).toBe(false);
+    expect(result.fits).toBe(true);
+    teardown();
+  });
+
+  test('reports no fit when the row is too narrow, whatever the switch says', () => {
+    const { result, teardown } = renderVisibility(
+      { directory: '/repo', isMobile: false, isVSCode: false },
+      REQUIRED - 1,
+    );
+    expect(result.fits).toBe(false);
     expect(result.visible).toBe(false);
     teardown();
   });

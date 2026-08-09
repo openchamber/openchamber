@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useDirectorySync } from '@/sync/sync-context';
 import { useTodosPersistStore } from '@/stores/useTodosPersistStore';
 import { WorkStatusRow, WorkStatusSection } from './WorkStatusPrimitives';
+import { useReportWorkStatusPresence } from './presenceContext';
 import type { State } from '@/sync/types';
 import type { Todo } from '@opencode-ai/sdk/v2';
 
@@ -66,6 +67,8 @@ export const WorkStatusTasksSection: React.FC<Props> = ({ sessionId, directory }
       })
       .map(({ todo }) => todo);
   }, [todos]);
+
+  useReportWorkStatusPresence('tasks', visibleTodos.length > 0);
 
   if (visibleTodos.length === 0) return null;
 

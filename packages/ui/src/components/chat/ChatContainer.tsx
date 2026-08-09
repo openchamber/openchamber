@@ -700,7 +700,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     // It yields to the context panel and to a narrow chat; `rowRef` goes on the
     // row that holds both columns, so its width never depends on the panel's
     // own visibility.
-    const { rowRef: workStatusRowRef, visible: workStatusFits } = useWorkStatusVisibility({
+    const { rowRef: workStatusRowRef, visible: workStatusVisible, fits: workStatusFits } = useWorkStatusVisibility({
         directory: effectiveSessionDirectory,
         isMobile,
         isVSCode,
@@ -714,7 +714,22 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
         && !isVSCode
         && chatSurfaceMode !== 'mini-chat'
         && !isDesktopExpandedInput;
-    const showWorkStatusPanel = workStatusPanelMountable && workStatusFits;
+    const showWorkStatusPanel = workStatusPanelMountable && workStatusVisible;
+
+    // Offered over the chat when there is no room beside it. The panel is still
+    // switched on; only the layout refuses it.
+    const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
+    const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
+    const setWorkStatusPanelFits = useUIStore((state) => state.setWorkStatusPanelFits);
+    const showWorkStatusOverlay = workStatusPanelMountable
+        && workStatusPanelEnabled
+        && !workStatusFits
+        && workStatusOverlayOpen;
+
+    React.useEffect(() => {
+        setWorkStatusPanelFits(workStatusPanelMountable && workStatusFits);
+        return () => setWorkStatusPanelFits(false);
+    }, [setWorkStatusPanelFits, workStatusFits, workStatusPanelMountable]);
 
     // Published so the header can drop the readouts the panel already carries.
     // Cleared on unmount: a chat that goes away is not showing anything.
@@ -1234,6 +1249,18 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
                 )}
                 {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
             </div>
+
+            {/* Inside the chat column, not beside it: as a row sibling it took
+                part in the flex layout and pushed the transcript, which is the
+                one thing an overlay must not do. */}
+            {showWorkStatusOverlay ? (
+                <WorkStatusPanel
+                    overlay
+                    visible
+                    sessionId={currentSessionId ?? null}
+                    directory={effectiveSessionDirectory ?? null}
+                />
+            ) : null}
 
             <TimelineDialog
                 open={isTimelineDialogOpen}

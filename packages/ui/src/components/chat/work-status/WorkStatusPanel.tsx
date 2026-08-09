@@ -14,6 +14,7 @@ import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
 import { WorkStatusContextSection } from './WorkStatusContextSection';
 import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog';
 import { isWorkStatusSectionVisible } from './sections';
+import { WorkStatusPresenceProvider } from './presence';
 import { Icon } from '@/components/icon/Icon';
 
 type Props = {
@@ -22,6 +23,11 @@ type Props = {
   directory: string | null;
   /** Whether the panel should currently occupy space. */
   visible: boolean;
+  /**
+   * Floats over the transcript instead of sitting beside it, for when the chat
+   * is too narrow to give it a column of its own.
+   */
+  overlay?: boolean;
 };
 
 /**
@@ -52,11 +58,15 @@ const PANEL_TRANSITION_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
  * eat a visible slice of every row's trailing value, and the shadows already
  * say there is more to see.
  */
-export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible }) => {
+export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, overlay = false }) => {
   const { t } = useI18n();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
+  const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
   const hiddenSections = useUIStore((state) => state.workStatusHiddenSections);
   const [sectionsDialogOpen, setSectionsDialogOpen] = React.useState(false);
+  // Starts optimistic: sections report after their first commit, and rendering
+  // nothing on the way in would make the card flash out and back on arrival.
+  const [renderedSections, setRenderedSections] = React.useState(1);
   const sectionVisible = React.useCallback(
     (sectionId: Parameters<typeof isWorkStatusSectionVisible>[1]) =>
       isWorkStatusSectionVisible(hiddenSections, sectionId),
@@ -102,8 +112,35 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
   }, []);
 
+  // The offset belongs to the panel a session produced, not to the panel in
+  // general: restoring one session's scroll into another's shorter panel lands
+  // somewhere arbitrary.
+  React.useEffect(() => {
+    setScrollTop(0);
+  }, [sessionId, setScrollTop]);
+
+  // Dismissed like any transient surface: a click elsewhere or Escape. It
+  // covers the transcript, so leaving it up would block the thing it reports on.
+  const overlayRef = React.useRef<HTMLElement | null>(null);
+  React.useEffect(() => {
+    if (!overlay) return undefined;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!overlayRef.current?.contains(event.target as Node)) setOverlayOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOverlayOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [overlay, setOverlayOpen]);
+
   return (
     <aside
+      ref={overlayRef}
       aria-label={t('chat.workStatus.ariaLabel')}
       aria-hidden={!visible}
       className={cn(
@@ -114,7 +151,23 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // the card's own shadow had no room and was clipped down that edge.
         'relative my-4 flex shrink-0 flex-col self-start overflow-hidden',
         'max-h-[calc(100%-2rem)]',
-        visible ? 'ml-2 mr-4' : 'ml-0 mr-0',
+        visible && renderedSections > 0 ? 'ml-2 mr-4' : 'ml-0 mr-0',
+        // Out of the flow entirely, anchored to the chat column's top-right so
+        // it reads as a dropdown from the header button. As a flex child it
+        // took part in the layout and pushed the transcript, which is the one
+        // thing an overlay must not do. Stronger shadow: it sits on content now.
+        overlay && [
+          'absolute right-3 top-3 z-30 mx-0 my-0',
+          'max-h-[calc(100%-1.5rem)]',
+          'shadow-[0_8px_28px_-8px_rgb(0_0_0_/_0.28)]',
+          // Beside the transcript the translucent fill reads as depth; on top
+          // of it, message bubbles showed straight through the rows. Frosting
+          // separates the two without going fully opaque.
+          'bg-[var(--surface-muted)]/80 backdrop-blur-md',
+        ],
+        // An empty card is a border around a settings icon, which reads as a
+        // fault rather than as "nothing to report".
+        renderedSections === 0 && 'border-transparent bg-transparent shadow-none',
         'motion-reduce:transition-none',
         'rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-muted)]/40',
         // A lighter version of the composer's lift: the same shape, but this
@@ -122,8 +175,8 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         'shadow-[0_2px_8px_-3px_rgb(0_0_0_/_0.08)]',
       )}
       style={{
-        width: visible ? WORK_STATUS_PANEL_WIDTH : 0,
-        opacity: visible ? 1 : 0,
+        width: visible && renderedSections > 0 ? WORK_STATUS_PANEL_WIDTH : 0,
+        opacity: visible && renderedSections > 0 ? 1 : 0,
         // Leaves to the right and arrives from it, so the card reads as sliding
         // out past the window edge rather than dissolving in place.
         transform: visible ? 'translateX(0)' : `translateX(${WORK_STATUS_PANEL_WIDTH / 4}px)`,
@@ -145,6 +198,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       </button>
 
       {contentMounted ? (
+      <WorkStatusPresenceProvider onChange={setRenderedSections}>
       <ScrollShadow
         ref={restore}
         onScroll={handleScroll}
@@ -165,6 +219,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         {sectionVisible('pinned') ? <WorkStatusPinnedSection sessionId={sessionId} directory={directory} /> : null}
         {sectionVisible('contextSources') ? <WorkStatusContextSection sessionId={sessionId} directory={directory} /> : null}
       </ScrollShadow>
+      </WorkStatusPresenceProvider>
       ) : null}
 
       <WorkStatusSectionsDialog open={sectionsDialogOpen} onOpenChange={setSectionsDialogOpen} />

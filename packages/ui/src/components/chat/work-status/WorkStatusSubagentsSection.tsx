@@ -6,6 +6,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
+import { useReportWorkStatusPresence } from './presenceContext';
 import type { State } from '@/sync/types';
 
 type Props = {
@@ -66,6 +67,8 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
       readOnly: true,
     });
   }, [directory, isMobile, openContextPanelTab, setCurrentSession]);
+
+  useReportWorkStatusPresence('subagents', children.length > 0);
 
   if (children.length === 0) return null;
 

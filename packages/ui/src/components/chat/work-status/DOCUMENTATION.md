@@ -41,6 +41,7 @@ exactly as it already does when the context panel opens.
 
 `useWorkStatusVisibility` hides the panel when any of these hold:
 
+- the user switched it off;
 - the runtime is mobile or VS Code;
 - the context panel is open for the active directory;
 - the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` of transcript alongside
@@ -56,15 +57,19 @@ whenever the row mounted after the effect first ran, and only recovered on the
 next unrelated dependency change — in practice, opening and closing the context
 panel. `useWorkStatusVisibility.test.ts` covers a row that attaches late.
 
-### Why the row is measured, not the chat column
+### Why the chat area is measured, not the chat column
 
-**The width test must observe the row that contains both columns.** The chat
+**The width test must observe something the panel cannot resize.** The chat
 column's width is an *output* of the visibility decision: hiding the panel
 widens the chat, which would re-satisfy a chat-width test and re-show the
-panel, which narrows the chat again — an infinite oscillation. The row's width
-does not depend on the panel, so it is the only stable input.
-`useWorkStatusVisibility.test.ts` pins this with an explicit assertion on which
-element the `ResizeObserver` was given.
+panel, which narrows the chat again — an infinite oscillation.
+
+It measures the **chat area** — the container holding the chat and the context
+panel together, marked `data-chat-area` in `MainLayout`. Measuring the chat row
+instead reported a width still catching up while the context panel animated
+closed, so the panel reappeared only once that number crossed the threshold:
+the chat widened and then narrowed again. The chat area does not move when the
+context panel opens. `useWorkStatusVisibility.test.ts` pins both properties.
 
 The context-panel check mirrors `ContextPanel`'s own derivation: `isOpen` alone
 is not enough, because a panel with no resolvable active tab renders nothing
@@ -83,11 +88,11 @@ endpoint and no polling of its own.
 | PR + checks | `usePrVisualSummary` | **read-only** |
 | Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses` | |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
-| Queue | `useMessageQueueStore` | |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
+| Linked threads | `lib/linkedIssues.ts` over session metadata | written by the flows that attach an issue or PR |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
-| Pinned messages | `getContextObligatoryMessages` + `state.part` | text resolved from the loaded part records |
+| Pinned messages | `getContextObligatoryMessages` + `state.part` | see below |
 | Todos | live `state.todo[sessionId]`, persisted fallback | live channel wins |
 
 ### Context usage has its own computation, on purpose
@@ -121,6 +126,14 @@ Two further rules on this readout:
 There is no cost-only fallback row. A row labelled "Context" showing nothing but
 a price is not a context reading; cost rides along with the percentage or waits
 for it.
+
+### Pinned messages load only what they need
+
+Pins are most useful on a long session — which is exactly when the pinned
+message has scrolled far enough back not to be loaded, leaving the row with a
+placeholder. The section materialises the session, but only when a pin actually
+resolves to nothing: having pins is not a reason to fetch a session, and
+neither is something being unloaded in general.
 
 ### PR status is deliberately read-only
 
@@ -158,7 +171,36 @@ Ordering is by durability, not category:
    open. Usage sits here rather than lower down because a spent quota stops the
    work outright;
 2. **Subagents**, **Tasks** — what is happening right now;
-3. **MCP**, **Pinned**, **Context sources** — supporting material.
+3. **MCP**, **Pinned messages**, **Context sources** — supporting material.
+
+## Switching it off
+
+A persisted preference (`workStatusPanelEnabled`) drives a header toggle, and a
+dialog behind the equalizer icon switches individual sections off. Hidden
+sections are stored rather than visible ones, so a section added later appears
+for everyone instead of staying invisible to whoever had saved settings before
+it existed. Both travel the full settings pipeline, including the server
+whitelist without which the keys never reach `settings.json`.
+
+`workStatusPanelVisible` is separate and transient: the switch can be on while
+layout still refuses the panel. The header and the git rail read it to drop the
+readouts the panel already carries, and it is deliberately not persisted — it
+describes the current frame, not a preference.
+
+## Appearing and disappearing
+
+The panel collapses on the context panel's own curve and duration rather than
+unmounting, and slides out to the right with a fade when switched off. It stays
+mounted wherever it could ever show, so the collapse has something to animate;
+its content is dropped once the collapse finishes.
+
+An empty card is a border around a settings icon, which reads as a fault. Each
+section decides for itself that it has nothing to say, so they report through
+`presenceContext.ts` and the panel collapses when none rendered. Deriving that
+at the panel level would mean duplicating every data source the sections read.
+
+The scroll offset resets on session change: restoring one session's offset into
+another's shorter panel lands somewhere arbitrary.
 
 The Subagents section opens itself when subagents appear where there were none,
 on that edge only: re-expanding on every count change would fight a user who

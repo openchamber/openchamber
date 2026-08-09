@@ -11,6 +11,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { pickUsageHeadline } from './usageHeadline';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { WorkStatusRow, WorkStatusCollapsibleSection, WorkStatusValue } from './WorkStatusPrimitives';
+import { useReportWorkStatusPresence } from './presenceContext';
 import type { UsageWindow } from '@/types';
 
 /**
@@ -67,6 +68,8 @@ export const WorkStatusUsageSection: React.FC = () => {
     if (groups.length === 0) return;
     preloadProviderLogos(groups.map((group) => group.providerId));
   }, [groups]);
+
+  useReportWorkStatusPresence('usage', groups.length > 0);
 
   if (groups.length === 0) return null;
 

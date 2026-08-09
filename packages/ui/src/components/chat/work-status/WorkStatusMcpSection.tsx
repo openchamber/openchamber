@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { startMcpAuthorization } from '@/components/sections/mcp/startMcpAuthorization';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusRowAction } from './WorkStatusPrimitives';
+import { useReportWorkStatusPresence } from './presenceContext';
 
 type Props = {
   directory: string | null;
@@ -74,6 +75,8 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
       setBusyServer((current) => (current === name ? null : current));
     }
   }, [connect, disconnect, directory]);
+
+  useReportWorkStatusPresence('mcp', mcpServers.length > 0);
 
   if (mcpServers.length === 0) return null;
 

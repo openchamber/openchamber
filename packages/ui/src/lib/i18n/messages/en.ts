@@ -1540,8 +1540,6 @@ export const dict = {
   'header.github.accountSource.cli': 'CLI',
   'header.services.openWithCurrent': 'Open instance, usage and MCP (current: {current})',
   'header.services.open': 'Open services, usage and MCP',
-  'header.services.tooltip.currentInstanceWithShortcuts': 'Current instance: {current} ({toggle}; next tab {nextTab})',
-  'header.services.tooltip.servicesWithShortcuts': 'Services ({toggle}; next tab {nextTab})',
   'header.services.title': 'Services',
   'header.services.viewAria': 'View services',
   'header.services.closeAria': 'Close services',
@@ -1558,7 +1556,6 @@ export const dict = {
   'header.services.used': 'Used',
   'header.services.remaining': 'Remaining',
   'header.services.modelFamily.other': 'Other',
-  'header.services.shutdownDev': 'Stop OpenChamber',
   'header.actions.openPlanAria': 'Open plan',
   'header.actions.toggleChangesPanel': 'Changes panel',
   'header.actions.toggleChangesPanelAria': 'Toggle changes panel',
@@ -2956,7 +2953,7 @@ export const dict = {
   'chat.workStatus.section.repository': 'Repository',
   'chat.workStatus.section.subagents': 'Subagents',
   'chat.workStatus.section.mcp': 'MCP',
-  'chat.workStatus.section.pinned': 'Pinned',
+  'chat.workStatus.section.pinned': 'Pinned messages',
   'chat.workStatus.section.tasks': 'Tasks',
   'chat.workStatus.subagent.working': 'is working',
   'chat.workStatus.subagent.needsPermission': 'needs permission',
@@ -3001,6 +2998,8 @@ export const dict = {
   'chat.workStatus.mcp.authorizeFailed': 'Authorization failed',
   'mcpDropdown.toast.authorizeOpenFailed': 'Could not open the authorization page',
   'mcpDropdown.toast.authorizeFailed': 'Authorization failed',
+  'header.services.tooltip.currentInstance': 'Current instance: {current} ({toggle})',
+  'header.workStatusPanel.showOverlay': 'Show work status over the chat',
 } as const;
 
 export type I18nKey = keyof typeof dict;

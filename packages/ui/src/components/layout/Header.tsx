@@ -64,7 +64,6 @@ import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
-import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
@@ -269,9 +268,6 @@ type DesktopServicesMenuProps = {
   setIsDesktopServicesOpen: React.Dispatch<React.SetStateAction<boolean>>;
   refreshCurrentInstanceLabel: () => Promise<void>;
   shortcutLabel: (actionId: string) => string;
-  showDevShutdown: boolean;
-  isDevShutdownInFlight: boolean;
-  onDevShutdown: () => Promise<void>;
   remoteUpdateInfo: UpdateInfo | null;
   remoteUpdateChecking: boolean;
   remoteUpdateError: string | null;
@@ -287,9 +283,6 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   setIsDesktopServicesOpen,
   refreshCurrentInstanceLabel,
   shortcutLabel,
-  showDevShutdown,
-  isDevShutdownInFlight,
-  onDevShutdown,
   remoteUpdateInfo,
   remoteUpdateChecking,
   remoteUpdateError,
@@ -328,16 +321,10 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         </TooltipTrigger>
         <TooltipContent>
           <p>
-            {isDesktopApp
-              ? t('header.services.tooltip.currentInstanceWithShortcuts', {
-                  current: currentInstanceLabel,
-                  toggle: shortcutLabel('toggle_services_menu'),
-                  nextTab: shortcutLabel('cycle_services_tab'),
-                })
-              : t('header.services.tooltip.servicesWithShortcuts', {
-                  toggle: shortcutLabel('toggle_services_menu'),
-                  nextTab: shortcutLabel('cycle_services_tab'),
-                })}
+            {t('header.services.tooltip.currentInstance', {
+              current: currentInstanceLabel,
+              toggle: shortcutLabel('toggle_services_menu'),
+            })}
           </p>
         </TooltipContent>
       </Tooltip>
@@ -381,22 +368,6 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
           </div>
         ) : null}
 
-
-        {showDevShutdown ? (
-          <>
-            <div className="mx-4 my-2 border-t border-[var(--interactive-border)]" />
-            <div className="px-2 pb-2">
-              <DropdownMenuItem
-                disabled={isDevShutdownInFlight}
-                onSelect={() => {
-                  void onDevShutdown();
-                }}
-              >
-                {t('header.services.shutdownDev')}
-              </DropdownMenuItem>
-            </div>
-          </>
-        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -523,7 +494,6 @@ export const Header: React.FC<HeaderProps> = ({
 
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const runtimeApis = useRuntimeAPIs();
-  const [isDevShutdownInFlight, setIsDevShutdownInFlight] = React.useState(false);
 
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
@@ -686,6 +656,24 @@ export const Header: React.FC<HeaderProps> = ({
   const workStatusPanelVisible = useUIStore((state) => state.workStatusPanelVisible);
   const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
   const setWorkStatusPanelEnabled = useUIStore((state) => state.setWorkStatusPanelEnabled);
+  const workStatusPanelFits = useUIStore((state) => state.workStatusPanelFits);
+  const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
+  const setWorkStatusOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
+
+  // Two meanings for one button. With room beside the chat it switches the
+  // panel on and off. Without room it cannot be shown inline at all, so it
+  // reads as off and opens the panel over the chat instead — the stored
+  // preference is left alone, so the panel comes back on its own once the
+  // window is wide enough again.
+  const workStatusPanelShownInline = workStatusPanelEnabled && workStatusPanelFits;
+  const workStatusToggleActive = workStatusPanelShownInline || workStatusOverlayOpen;
+  const handleWorkStatusToggle = React.useCallback(() => {
+    if (workStatusPanelEnabled && !workStatusPanelFits) {
+      setWorkStatusOverlayOpen(!workStatusOverlayOpen);
+      return;
+    }
+    setWorkStatusPanelEnabled(!workStatusPanelEnabled);
+  }, [setWorkStatusOverlayOpen, setWorkStatusPanelEnabled, workStatusOverlayOpen, workStatusPanelEnabled, workStatusPanelFits]);
   const showDesktopHeaderContextUsage = !isVSCode
     && !workStatusPanelVisible
     && activeMainTab === 'chat'
@@ -1751,63 +1739,6 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isDesktopApp, t]);
 
 
-  const showDevShutdown = React.useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    if (isDesktopApp) return false;
-    if (isVSCode) return false;
-    const host = window.location.hostname;
-    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
-  }, [isDesktopApp, isVSCode]);
-
-  const handleDevShutdown = React.useCallback(async () => {
-    if (isDevShutdownInFlight) return;
-    setIsDevShutdownInFlight(true);
-    setIsDesktopServicesOpen(false);
-
-    const previewUrls: string[] = [];
-    let shutdownRequested = false;
-    try {
-      try {
-        for (const [, dirState] of useTerminalStore.getState().sessions.entries()) {
-          for (const tab of dirState.tabs) {
-            if (tab.previewUrl) {
-              previewUrls.push(tab.previewUrl);
-            }
-          }
-        }
-      } catch {
-        // ignore
-      }
-
-      try {
-        // Ensure preview/dev terminals don't linger.
-        await runtimeApis.terminal.forceKill?.({});
-      } catch {
-        // ignore
-      }
-
-      try {
-        const devRes = await runtimeFetch('/api/system/dev-shutdown', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ previewUrls }),
-        });
-        if (devRes.ok) {
-          shutdownRequested = true;
-        } else {
-          const shutdownRes = await runtimeFetch('/api/system/shutdown', { method: 'POST' });
-          shutdownRequested = shutdownRes.ok;
-        }
-      } catch {
-        // ignore
-      }
-    } finally {
-      if (!shutdownRequested) {
-        setIsDevShutdownInFlight(false);
-      }
-    }
-  }, [isDevShutdownInFlight, runtimeApis.terminal, setIsDesktopServicesOpen]);
-
   const mobileServicesTabItems = React.useMemo<SortableTabsStripItem[]>(() => {
     return [
       { id: 'usage', label: t('layout.services.usage'), icon: <Icon name="timer" className="h-3.5 w-3.5" /> },
@@ -1931,6 +1862,10 @@ export const Header: React.FC<HeaderProps> = ({
   const desktopSidebarActions = (
     <>
       <OpenInAppButton directory={actionDirectory} className="mr-1" />
+      {/* Instances only exist in the desktop app. On web the menu was left
+          holding a single dev-only shutdown action, which is not a reason to
+          keep a dropdown in the header. */}
+      {isDesktopApp ? (
       <DesktopServicesMenu
         isDesktopApp={isDesktopApp}
         currentInstanceLabel={currentInstanceLabel}
@@ -1940,14 +1875,12 @@ export const Header: React.FC<HeaderProps> = ({
         setIsDesktopServicesOpen={setIsDesktopServicesOpen}
         refreshCurrentInstanceLabel={refreshCurrentInstanceLabel}
         shortcutLabel={shortcutLabel}
-        showDevShutdown={showDevShutdown}
-        isDevShutdownInFlight={isDevShutdownInFlight}
-        onDevShutdown={handleDevShutdown}
         remoteUpdateInfo={remoteUpdateInfo}
         remoteUpdateChecking={remoteUpdateChecking}
         remoteUpdateError={remoteUpdateError}
         onOpenRemoteUpdate={openRemoteInstanceUpdate}
       />
+      ) : null}
       <DesktopGitHubControl
         isMobile={isMobile}
         githubAuthStatus={githubAuthStatus}
@@ -2183,23 +2116,27 @@ export const Header: React.FC<HeaderProps> = ({
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  aria-pressed={workStatusPanelEnabled}
+                  aria-pressed={workStatusToggleActive}
                   aria-label={t('header.workStatusPanel.toggleAria')}
-                  onClick={() => setWorkStatusPanelEnabled(!workStatusPanelEnabled)}
+                  onClick={handleWorkStatusToggle}
                   className={cn(
                     DESKTOP_HEADER_ICON_BUTTON_CLASS,
                     // On is the resting state and carries no chrome; off is the
                     // one worth signalling, so it dims instead of filling.
-                    workStatusPanelEnabled ? 'text-foreground' : 'text-muted-foreground/50',
+                    workStatusToggleActive ? 'text-foreground' : 'text-muted-foreground/50',
                   )}
                 >
                   <Icon name="list-indefinite" className="h-[18px] w-[18px]" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                {workStatusPanelEnabled
-                  ? t('header.workStatusPanel.hide')
-                  : t('header.workStatusPanel.show')}
+                {workStatusPanelEnabled && !workStatusPanelFits
+                  ? (workStatusOverlayOpen
+                    ? t('header.workStatusPanel.hide')
+                    : t('header.workStatusPanel.showOverlay'))
+                  : workStatusPanelEnabled
+                    ? t('header.workStatusPanel.hide')
+                    : t('header.workStatusPanel.show')}
               </TooltipContent>
             </Tooltip>
           ) : null}

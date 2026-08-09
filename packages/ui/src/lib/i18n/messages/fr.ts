@@ -1359,8 +1359,6 @@ export const dict = {
   'header.github.accountSource.cli': 'CLI',
   'header.services.openWithCurrent': 'Instance ouverte, utilisation et MCP (actuel : {current})',
   'header.services.open': 'Services ouverts, utilisation et MCP',
-  'header.services.tooltip.currentInstanceWithShortcuts': 'Instance actuelle : {current} ({toggle} ; onglet suivant {nextTab})',
-  'header.services.tooltip.servicesWithShortcuts': 'Services ({toggle} ; onglet suivant {nextTab})',
   'header.services.title': 'Services',
   'header.services.viewAria': 'Voir les prestations',
   'header.services.closeAria': 'Fermer les prestations',
@@ -1371,7 +1369,6 @@ export const dict = {
   'header.services.used': 'Utilisé',
   'header.services.remaining': 'Restant',
   'header.services.modelFamily.other': 'Autre',
-  'header.services.shutdownDev': 'Arrêter OpenChamber',
   'header.actions.openPlanAria': 'Plan ouvert',
   "header.actions.toggleChangesPanel": "Panneau des changements",
   "header.actions.toggleChangesPanelAria": "Basculer le panneau des changements",
@@ -2954,7 +2951,7 @@ export const dict = {
   'chat.workStatus.section.repository': 'Dépôt',
   'chat.workStatus.section.subagents': 'Sous-agents',
   'chat.workStatus.section.mcp': 'MCP',
-  'chat.workStatus.section.pinned': 'Épinglés',
+  'chat.workStatus.section.pinned': 'Messages épinglés',
   'chat.workStatus.section.tasks': 'Tâches',
   'chat.workStatus.subagent.working': 'travaille',
   'chat.workStatus.subagent.needsPermission': 'demande une autorisation',
@@ -2999,6 +2996,8 @@ export const dict = {
   'chat.workStatus.mcp.authorizeFailed': 'Échec de l\'autorisation',
   'mcpDropdown.toast.authorizeOpenFailed': 'Impossible d\'ouvrir la page d\'autorisation',
   'mcpDropdown.toast.authorizeFailed': 'Échec de l\'autorisation',
+  'header.services.tooltip.currentInstance': 'Instance actuelle : {current} ({toggle})',
+  'header.workStatusPanel.showOverlay': 'Afficher l\'état par-dessus le chat',
 } as const;
 
 export type I18nKey = keyof typeof dict;

@@ -2,10 +2,11 @@ import React from 'react';
 import { toast } from 'sonner';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { useDirectorySync, useSession } from '@/sync/sync-context';
+import { useDirectorySync, useEnsureSessionMessages, useSession } from '@/sync/sync-context';
 import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
 import { setContextObligatoryMessage } from '@/sync/session-actions';
 import { WorkStatusRow, WorkStatusSection } from './WorkStatusPrimitives';
+import { useReportWorkStatusPresence } from './presenceContext';
 import type { State } from '@/sync/types';
 
 type Props = {
@@ -37,6 +38,14 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
     });
   }, [session, parts]);
 
+  // Pinned messages are most useful on a long session — which is exactly when
+  // the pinned message has scrolled far enough back not to be loaded, leaving
+  // the row with a placeholder instead of its text. Materialise the session,
+  // but only when a pin actually resolves to nothing: having pins is not a
+  // reason to fetch, and neither is something being unloaded in general.
+  const hasUnresolvedPin = pinned.length > 0 && pinned.some((entry) => entry.text === null);
+  useEnsureSessionMessages(sessionId ?? '', directory ?? undefined, hasUnresolvedPin);
+
   const handleUnpin = React.useCallback(async (messageId: string) => {
     if (!sessionId || busyId) return;
     setBusyId(messageId);
@@ -67,6 +76,8 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
     }
     window.location.hash = target;
   }, []);
+
+  useReportWorkStatusPresence('pinned', pinned.length > 0);
 
   if (pinned.length === 0) return null;
 

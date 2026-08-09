@@ -29,6 +29,8 @@ type Options = {
 };
 
 type Result = {
+  /** Layout can host the panel inline, regardless of the user's switch. */
+  fits: boolean;
   /**
    * Attach to the flex row that contains the chat column and the panel.
    *
@@ -77,7 +79,9 @@ export const useWorkStatusVisibility = ({ directory, isMobile, isVSCode }: Optio
   // before layout is even measured.
   const panelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
 
-  const measurementEnabled = panelEnabled && !isMobile && !isVSCode && !contextPanelOpen;
+  // Split from the switch: a narrow chat is a layout fact, and the header needs
+  // it to offer the panel as an overlay instead of pretending it is off.
+  const layoutAllows = !isMobile && !isVSCode && !contextPanelOpen;
 
   // Measures the chat AREA — the container holding the chat and the context
   // panel together — not the chat row inside it.
@@ -105,7 +109,8 @@ export const useWorkStatusVisibility = ({ directory, isMobile, isVSCode }: Optio
     return () => observer.disconnect();
   }, [rowNode]);
 
-  const visible = measurementEnabled && rowWidth !== null && rowWidth >= WORK_STATUS_REQUIRED_ROW_WIDTH;
+  const fits = layoutAllows && rowWidth !== null && rowWidth >= WORK_STATUS_REQUIRED_ROW_WIDTH;
+  const visible = panelEnabled && fits;
 
-  return { rowRef, visible };
+  return { rowRef, visible, fits };
 };

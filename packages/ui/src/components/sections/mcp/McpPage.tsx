@@ -1394,7 +1394,11 @@ export const McpPage: React.FC = () => {
                   </div>
                 )}
 
-                {mcpType === 'remote' && (needsAuthorization || isAuthPolling || authUrl) && (
+                {/* VS Code only. Everywhere else the callback returns into the
+                    app on its own, so the paste box was a second, confusing way
+                    to do what already happened. VS Code cannot receive that
+                    redirect, so there it remains the only way to finish. */}
+                {isVSCodeAuthRuntime && mcpType === 'remote' && (needsAuthorization || isAuthPolling || authUrl) && (
                   <div className="rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-3 py-3">
                     <div className="space-y-2">
                       <div>

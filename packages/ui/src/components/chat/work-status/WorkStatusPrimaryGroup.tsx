@@ -19,6 +19,7 @@ import {
   WorkStatusSection,
   WorkStatusValue,
 } from './WorkStatusPrimitives';
+import { useReportWorkStatusPresence } from './presenceContext';
 
 type Props = {
   sessionId: string | null;
@@ -186,6 +187,8 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   const cost = typeof session?.cost === 'number' && session.cost > 0 ? session.cost : null;
   const hasSession = showSession && (usagePercent !== null || cost !== null || Boolean(goalRow));
   const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel);
+
+  useReportWorkStatusPresence('session-repository', hasSession || hasRepository);
 
   if (!hasSession && !hasRepository) return null;
 

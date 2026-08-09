@@ -6,6 +6,7 @@ import { useMcpStore } from '@/stores/useMcpStore';
 import { useSession } from '@/sync/sync-context';
 import { getLinkedIssues } from '@/lib/linkedIssues';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
+import { useReportWorkStatusPresence } from './presenceContext';
 
 type Props = {
   sessionId: string | null;
@@ -38,6 +39,8 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     () => Object.values(mcpStatus ?? {}).filter((entry) => entry?.status === 'connected').length,
     [mcpStatus],
   );
+
+  useReportWorkStatusPresence('context-sources', linked.length > 0 || skills.length > 0 || mcpCount > 0);
 
   if (linked.length === 0 && skills.length === 0 && mcpCount === 0) return null;
 
