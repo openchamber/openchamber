@@ -35,6 +35,8 @@ openchamber tunnel profile add --provider cloudflare --mode managed-remote --nam
 openchamber tunnel start --profile prod-main
 openchamber tunnel start --provider cloudflare --mode quick --qr
 openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+openchamber tunnel start --provider tailscale --mode private-network --tailscale-https-port 8443
+openchamber tunnel start --provider tailscale --mode quick --tailscale-https-port 8443
 openchamber tunnel status --all      # Show tunnel state across instances
 openchamber tunnel stop --port 3000  # Stop tunnel only (server stays running)
 openchamber connect-url --port 3000  # Add this server to OpenChamber Desktop
@@ -62,6 +64,18 @@ external OpenCode servers.
 - Starting a different tunnel mode/provider on the same instance replaces the active tunnel.
 - Replacing or stopping a tunnel revokes existing connect links and invalidates remote tunnel sessions.
 - Connect links are one-time tokens; generating a new link revokes the previous unused link.
+
+### Tailscale MVP
+
+Tailscale requires its `tailscale` CLI and `tailscaled` daemon to be installed, running, and logged in. OpenChamber does not install or manage `tailscaled`.
+
+- `openchamber tunnel start --provider tailscale --mode private-network --tailscale-https-port 8443` runs Tailscale Serve in the foreground and is tailnet-only.
+- `openchamber tunnel start --provider tailscale --mode quick --tailscale-https-port 8443` runs Tailscale Funnel in the foreground and exposes OpenChamber to the public internet.
+- Both modes default to frontend HTTPS port `443`. Serve (`private-network`) accepts any integer frontend port from `1` through `65535`; Funnel (`quick`) accepts only `443`, `8443`, or `10000`. In the desktop UI, Serve uses a custom numeric input and Funnel uses a fixed selector.
+- The frontend port is separate from backend `--port`, which remains the local OpenChamber port; `--tailscale-https-port` changes only the Tailscale frontend listener. The listener is node-global, so an existing Tailscale listener can conflict with the selected port; choose another allowed port or stop/reconfigure the existing listener.
+- Funnel requires MagicDNS and HTTPS to be enabled for the tailnet, plus permission in the tailnet policy. OpenChamber authentication still applies. Tailscale `ts.net` certificate names can appear in Certificate Transparency logs.
+- Tailscale supports multiple paths, but OpenChamber intentionally does not expose path multiplexing yet because OpenChamber subpath compatibility is not established.
+- OpenChamber still uses a foreground lifecycle. It does not support `--bg`, persistence, Tailscale reset support, Docker bundling, `sudo`, or daemon management.
 
 ### Connect other OpenChamber apps
 

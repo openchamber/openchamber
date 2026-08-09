@@ -5,7 +5,7 @@ description: Expose OpenChamber safely for remote and mobile access.
 
 # Tunnels
 
-A tunnel is a public link to your OpenChamber, so you can reach it from an ordinary browser on another network. Use `openchamber tunnel` to create one for a running instance.
+A tunnel lets you reach a running OpenChamber instance from another network. Depending on the provider and mode, it can be a public URL or a tailnet-only address. Use `openchamber tunnel` to create one for a running instance.
 
 > Connecting your **own devices** (the mobile app, another desktop) usually doesn't need a tunnel — [pair them](/connect-devices/) instead and let the end-to-end encrypted [Private Relay](/private-relay/) handle away-from-home access with zero setup.
 
@@ -23,6 +23,8 @@ Cloudflare quick tunnels can run with `cloudflared`. Ngrok requires an ngrok acc
 ```bash
 ngrok config add-authtoken <your-ngrok-token>
 ```
+
+Tailscale requires its `tailscale` CLI and `tailscaled` daemon to be installed, running, and logged in. OpenChamber does not install or manage `tailscaled`.
 
 ## Quick start
 
@@ -52,14 +54,39 @@ openchamber tunnel start --provider ngrok --mode quick
 openchamber tunnel status
 ```
 
-When the tunnel is up, `status` shows a public URL. Open it, or scan the QR code, to reach OpenChamber from anywhere.
+When the tunnel is up, `status` shows its URL. Open it from a device that can reach the tunnel. Public modes are reachable from the internet; tailnet-only modes are not.
 
 By default, OpenChamber prints a QR code in interactive TTY sessions. Use `--qr` to force QR output, or `--no-qr` to disable it.
+
+## Tailscale
+
+For tailnet-only access, use Tailscale Serve in the foreground:
+
+```bash
+openchamber tunnel start --provider tailscale --mode private-network --tailscale-https-port 8443
+```
+
+For public internet exposure, use Tailscale Funnel in the foreground:
+
+```bash
+openchamber tunnel start --provider tailscale --mode quick --tailscale-https-port 8443
+```
+
+Tailscale's frontend HTTPS listener defaults to port `443` in both modes. Private `private-network` (Serve) accepts any integer frontend port from `1` through `65535`; public `quick` (Funnel) accepts only `443`, `8443`, or `10000`. The backend `--port` remains the local OpenChamber port; `--tailscale-https-port` changes only the Tailscale frontend listener. The desktop UI uses a custom numeric input for Serve and a fixed selector for Funnel.
+
+The Tailscale listener is node-global, so an existing Tailscale listener can conflict with the selected frontend port; stop or reconfigure it, or choose another port allowed by the mode.
+
+`private-network` is available only to devices on your tailnet. `quick` uses Tailscale Funnel and is public internet exposure. Funnel requires MagicDNS and HTTPS to be enabled for your tailnet, plus permission in your tailnet policy. OpenChamber authentication still applies. Tailscale `ts.net` certificate names can appear in Certificate Transparency logs.
+
+Tailscale supports multiple paths, but OpenChamber intentionally does not expose path multiplexing yet because OpenChamber subpath compatibility is not established.
+
+OpenChamber still uses a foreground lifecycle. It does not support `--bg`, persistence, Tailscale reset support, Docker bundling, `sudo`, or daemon management.
 
 ## Providers
 
 - `cloudflare`: quick, managed remote, and managed local modes
 - `ngrok`: quick mode
+- `tailscale`: `private-network` (Serve) and `quick` (Funnel)
 
 ## Managed modes
 
