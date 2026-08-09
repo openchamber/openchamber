@@ -64,8 +64,8 @@ export function createTerminalRuntime({
       try {
         const env = { ...process.env, PATH: buildAugmentedPath(), TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
         // IPC targets belong to the host process and must be disabled for PTYs.
-        env.NODE_CHANNEL_FD = '';
-        env.BUN_WATCH_PID = '';
+        delete NODE_CHANNEL_FD;
+        delete BUN_WATCH_PID;
         delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
         // AppImage exports ARGV0; zsh would otherwise rewrite argv[0] for every command (#2588).
         // bun-pty also merges the native OS environ, so wrap with `env -u ARGV0` on Linux.
