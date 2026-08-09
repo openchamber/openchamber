@@ -15,6 +15,7 @@ export const dict: Record<I18nKey, string> = {
   'common.loading': '加载中...',
   'common.unavailable': '不可用',
   'common.language.english': 'English',
+  'common.language.arabic': '阿拉伯语',
   'common.language.german': '德语',
   'common.language.french': '法语',
   'common.language.simplifiedChinese': '简体中文',

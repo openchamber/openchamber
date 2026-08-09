@@ -26,8 +26,10 @@ async function loadDictionary(locale: Locale): Promise<I18nDictionary> {
     return cached;
   }
 
-  const mod = locale === 'zh-CN'
-    ? await import('./messages/zh-CN') as { dict: I18nDictionary }
+  const mod = locale === 'ar'
+    ? await import('./messages/ar') as { dict: I18nDictionary }
+    : locale === 'zh-CN'
+      ? await import('./messages/zh-CN') as { dict: I18nDictionary }
     : locale === 'fr'
       ? await import('./messages/fr') as { dict: I18nDictionary }
     : locale === 'zh-TW'

@@ -14,6 +14,7 @@ export const dict = {
   'common.loading': 'Chargement...',
   'common.unavailable': 'Indisponible',
   'common.language.english': 'Anglais',
+  'common.language.arabic': 'Arabe',
   'common.language.german': 'Allemand',
   'common.language.french': 'Français',
   'common.language.simplifiedChinese': 'Chinois (simplifié)',
