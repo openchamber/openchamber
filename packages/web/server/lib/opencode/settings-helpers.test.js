@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createSettingsHelpers } from './settings-helpers.js';
 import { createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
+import { normalizeTailscaleHttpsPort } from '../tunnels/types.js';
 
 const createTestHelpers = () => createSettingsHelpers({
   normalizePathForPersistence: (value) => value,
@@ -10,6 +11,7 @@ const createTestHelpers = () => createSettingsHelpers({
   normalizeTunnelSessionTtlMs: (value) => value,
   normalizeTunnelProvider: (value) => value,
   normalizeTunnelMode: (value) => value,
+  normalizeTailscaleHttpsPort,
   normalizeOptionalPath: (value) => value,
   normalizeManagedRemoteTunnelHostname: (value) => value,
   normalizeManagedRemoteTunnelPresets: () => undefined,
@@ -45,6 +47,7 @@ const createTestHelpersWithRealSanitizers = () => {
     normalizeTunnelSessionTtlMs: (value) => value,
     normalizeTunnelProvider: (value) => value,
     normalizeTunnelMode: (value) => value,
+    normalizeTailscaleHttpsPort,
     normalizeOptionalPath: (value) => value,
     normalizeManagedRemoteTunnelHostname: (value) => value,
     normalizeManagedRemoteTunnelPresets: () => undefined,
@@ -58,6 +61,17 @@ const createTestHelpersWithRealSanitizers = () => {
 };
 
 describe('settings helpers', () => {
+  it('persists valid Tailscale HTTPS frontend ports', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ tailscaleHttpsPort: '9443' })).toEqual({ tailscaleHttpsPort: 9443 });
+    expect(helpers.sanitizeSettingsUpdate({ tunnelMode: 'private-network', tailscaleHttpsPort: '9443' })).toEqual({
+      tunnelMode: 'private-network',
+      tailscaleHttpsPort: 9443,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ tailscaleHttpsPort: '0' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ tailscaleHttpsPort: 'not-a-port' })).toEqual({});
+  });
   it('accepts only booleans for draft starter visibility', () => {
     const helpers = createTestHelpers();
 

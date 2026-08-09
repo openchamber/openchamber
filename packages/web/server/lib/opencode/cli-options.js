@@ -19,6 +19,7 @@ export const parseServeCliOptions = ({
     : undefined;
   const envTunnelToken = env.OPENCHAMBER_TUNNEL_TOKEN || undefined;
   const envTunnelHostname = env.OPENCHAMBER_TUNNEL_HOSTNAME || undefined;
+  const envTailscaleHttpsPort = env.OPENCHAMBER_TAILSCALE_HTTPS_PORT || undefined;
   const envApiOnly = env.OPENCHAMBER_API_ONLY === '1' || env.OPENCHAMBER_API_ONLY === 'true';
 
   const options = {
@@ -31,6 +32,7 @@ export const parseServeCliOptions = ({
     tunnelConfigPath: envTunnelConfig,
     tunnelToken: envTunnelToken,
     tunnelHostname: envTunnelHostname,
+    tailscaleHttpsPort: envTailscaleHttpsPort,
     apiOnly: envApiOnly,
   };
 
@@ -119,6 +121,13 @@ export const parseServeCliOptions = ({
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
       options.tunnelHostname = typeof value === 'string' ? value : options.tunnelHostname;
+      continue;
+    }
+
+    if (optionName === 'tailscale-https-port') {
+      const { value, nextIndex } = consumeValue(i, inlineValue);
+      i = nextIndex;
+      options.tailscaleHttpsPort = typeof value === 'string' ? value : options.tailscaleHttpsPort;
       continue;
     }
 

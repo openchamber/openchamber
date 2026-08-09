@@ -77,6 +77,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     server: undefined,
     connectTtl: undefined,
     sessionTtl: undefined,
+    tailscaleHttpsPort: undefined,
     qr: false,
     explicitQr: false,
     force: false,
@@ -401,6 +402,36 @@ function parseArgs(argv = process.argv.slice(2)) {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
         options.sessionTtl = typeof value === 'string' ? value : options.sessionTtl;
+        break;
+      }
+      case 'tailscale-https-port': {
+        let { value, nextIndex } = consumeValue(i, inlineValue);
+        if (value === undefined && typeof inlineValue !== 'string') {
+          const candidate = args[i + 1];
+          if (typeof candidate === 'string' && /^-\d+$/.test(candidate)) {
+            value = candidate;
+            nextIndex = i + 1;
+          }
+        }
+        i = nextIndex;
+        if (typeof value !== 'string' || value.trim().length === 0) {
+          throw new TunnelCliError('Missing value for --tailscale-https-port.', EXIT_CODE.USAGE_ERROR);
+        }
+        const normalizedValue = value.trim();
+        if (!/^\d+$/.test(normalizedValue)) {
+          throw new TunnelCliError(
+            `Invalid value for --tailscale-https-port: ${value}. Expected an integer from 1 to 65535.`,
+            EXIT_CODE.USAGE_ERROR,
+          );
+        }
+        const parsed = Number(normalizedValue);
+        if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 65535) {
+          throw new TunnelCliError(
+            `Invalid value for --tailscale-https-port: ${value}. Expected an integer from 1 to 65535.`,
+            EXIT_CODE.USAGE_ERROR,
+          );
+        }
+        options.tailscaleHttpsPort = parsed;
         break;
       }
       case 'json':
@@ -758,8 +789,8 @@ COMMON OPTIONS:
   --all                   Apply to all running instances (doctor default, stop)
 
 START OPTIONS:
-  --provider <id>         Tunnel provider id (default: cloudflare)
-  --mode <id>             Tunnel mode (default: quick)
+  --provider <id>         Tunnel provider id (default: cloudflare; tailscale supported)
+  --mode <id>             Tunnel mode (default: provider-specific; tailscale: private-network or quick)
   --profile <name>        Start tunnel from saved profile name
   --config [path]         Managed-local config path (optional)
   --token <token>         Managed-remote token (visible in process list)
@@ -768,6 +799,9 @@ START OPTIONS:
   --hostname <hostname>   Managed-remote hostname
   --connect-ttl <value>   Connect-link TTL (e.g. 30m, 24h, 1d)
   --session-ttl <value>   Session TTL (e.g. 8h, 24h, 1d)
+  --tailscale-https-port <port>  Tailscale frontend HTTPS port (default: 443; --port is the backend)
+                                Serve/private-network: any integer 1-65535
+                                Funnel/quick: only 443, 8443, or 10000
   --qr                    Print QR code for resulting tunnel URL
   --no-qr                 Disable QR output
   --dry-run               Validate inputs without applying changes
@@ -781,6 +815,7 @@ OUTPUT OPTIONS:
 BEHAVIOR NOTES:
   - One active tunnel per OpenChamber instance.
   - Starting a different mode/provider replaces the current tunnel and revokes old connect links/sessions.
+  - Tailscale private-network is tailnet-only; Tailscale quick uses the public Funnel.
   - Connect links are one-time; generating a new link revokes the previous unused link.
 
 PROFILE USAGE:
@@ -804,6 +839,9 @@ EXAMPLES:
   openchamber tunnel start --profile prod-main
   openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
   openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+  openchamber tunnel start --provider tailscale --mode private-network
+  openchamber tunnel start --provider tailscale --mode quick
+  openchamber tunnel start --provider tailscale --mode quick --tailscale-https-port 8443
   openchamber tunnel start --dry-run --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
   echo "$TOKEN" | openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-stdin
   openchamber tunnel profile list --provider cloudflare
@@ -828,7 +866,7 @@ _openchamber_tunnel() {
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
-  start_flags="--provider --mode --profile --config --token --token-file --token-stdin --hostname --connect-ttl --session-ttl --qr --no-qr --dry-run --show-secrets"
+  start_flags="--provider --mode --profile --config --token --token-file --token-stdin --hostname --connect-ttl --session-ttl --tailscale-https-port --qr --no-qr --dry-run --show-secrets"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "\${commands}" -- "\${cur}") )
@@ -922,6 +960,10 @@ _openchamber() {
           elif [[ \$words[2] == "completion" ]] && (( CURRENT == 3 )); then
             _values 'shell' bash zsh fish
           fi
+          if [[ \$words[2] == "start" ]]; then
+            _arguments \
+              '--tailscale-https-port[Tailscale frontend HTTPS port]:port:(443 8443 10000)'
+          fi
           ;;
       esac
       ;;
@@ -964,6 +1006,7 @@ complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l token-file -d 'Token file path'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l token-stdin -d 'Read token from stdin'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l hostname -d 'Hostname'
+complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l tailscale-https-port -a '443 8443 10000' -d 'Tailscale frontend HTTPS port (default 443)'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l dry-run -d 'Validate without applying'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l qr -d 'Show QR code'
 `;

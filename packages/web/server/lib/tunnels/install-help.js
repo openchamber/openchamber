@@ -1,6 +1,7 @@
 import {
   TUNNEL_PROVIDER_CLOUDFLARE,
   TUNNEL_PROVIDER_NGROK,
+  TUNNEL_PROVIDER_TAILSCALE,
 } from './types.js';
 
 const PROVIDER_INSTALL_INFO = {
@@ -20,6 +21,15 @@ const PROVIDER_INSTALL_INFO = {
       darwin: 'brew install ngrok',
       win32: 'winget install ngrok -s msstore',
       linux: 'Download ngrok from https://ngrok.com/download',
+    },
+  },
+  [TUNNEL_PROVIDER_TAILSCALE]: {
+    dependency: 'tailscale',
+    installUrl: 'https://tailscale.com/download',
+    commands: {
+      darwin: 'brew install --cask tailscale',
+      win32: 'winget install --id Tailscale.Tailscale',
+      linux: 'Download Tailscale from https://tailscale.com/download',
     },
   },
 };

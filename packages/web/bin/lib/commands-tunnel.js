@@ -107,6 +107,19 @@ function shouldDisplayTunnelQr(options) {
   return !isTruthyEnv(process.env.CI);
 }
 
+function getTunnelAccessDescription(provider, mode) {
+  if (provider !== 'tailscale') return null;
+  if (mode === 'private-network') return 'Tailscale private-network is tailnet-only; it is not public.';
+  if (mode === 'quick') return 'Tailscale quick uses the public Funnel.';
+  return null;
+}
+
+function getTunnelDependencyLabel(provider, mode) {
+  if (provider === 'cloudflare') return 'cloudflared';
+  if (provider === 'tailscale') return mode === 'quick' ? 'Tailscale Funnel' : 'Tailscale Serve';
+  return `${provider} tunnel`;
+}
+
 
 function isValidTunnelDoctorResponse(body) {
   if (!body || typeof body !== 'object') {
@@ -1077,14 +1090,22 @@ async function tunnelCommand(options, subcommand, action, deps) {
               || line.includes('dial tcp'));
 
             if (isManagedRemote && (hasPortOrOriginIssue || hasTokenIssue)) {
+              const doctorProvider = String(providerOption || doctorResult?.provider || 'cloudflare').toLowerCase();
               troubleshootingHints.push({
                 key: 'managed-remote-port',
                 code: '[PORT_MISMATCH]',
-                lines: [
-                  'Cloudflare target must match the active OpenChamber CLI port.',
-                  'Example: `http://127.0.0.1:<port>`',
-                  'If CLI picked a different port, update Cloudflare or run `openchamber serve --port <port>`.',
-                ],
+                lines: doctorProvider === 'tailscale'
+                  ? [
+                    'Tailscale origin must match the active OpenChamber CLI port.',
+                    'Example: `http://127.0.0.1:<port>`',
+                    'Tailscale private-network is tailnet-only; quick uses the public Funnel.',
+                    'If CLI picked a different port, update Tailscale Serve/Funnel or run `openchamber serve --port <port>`.',
+                  ]
+                  : [
+                    'Cloudflare target must match the active OpenChamber CLI port.',
+                    'Example: `http://127.0.0.1:<port>`',
+                    'If CLI picked a different port, update Cloudflare or run `openchamber serve --port <port>`.',
+                  ],
               });
             }
 
@@ -1185,13 +1206,13 @@ async function tunnelCommand(options, subcommand, action, deps) {
         }
 
         provider = provider || 'cloudflare';
+        const providerCapabilities = DEFAULT_TUNNEL_PROVIDER_CAPABILITIES.find(
+          (cap) => cap.provider === provider
+        );
 
         // Interactive mode selection when mode not yet resolved in TTY
         if (!mode && canPrompt(options)) {
-          const providerCaps = DEFAULT_TUNNEL_PROVIDER_CAPABILITIES.find(
-            (cap) => cap.provider === provider
-          );
-          const modes = providerCaps?.modes || [];
+          const modes = providerCapabilities?.modes || [];
           if (modes.length > 1) {
             const modeChoice = await clackSelect({
               message: `Select tunnel mode for ${clackFormatProviderWithIcon(provider)}`,
@@ -1209,7 +1230,22 @@ async function tunnelCommand(options, subcommand, action, deps) {
           }
         }
 
-        mode = mode || 'quick';
+        mode = mode || providerCapabilities?.defaults?.mode || 'quick';
+        const tailscaleHttpsPort = provider === 'tailscale'
+          ? (options.tailscaleHttpsPort
+            ?? providerCapabilities?.defaults?.optionDefaults?.tailscaleHttpsPort
+            ?? 443)
+          : undefined;
+        if (
+          provider === 'tailscale'
+          && mode === 'quick'
+          && ![443, 8443, 10000].includes(tailscaleHttpsPort)
+        ) {
+          throw new TunnelCliError(
+            `Invalid value for --tailscale-https-port: ${tailscaleHttpsPort}. Tailscale Funnel (quick) supports only 443, 8443, or 10000.`,
+            EXIT_CODE.USAGE_ERROR,
+          );
+        }
         if (mode === 'managed-remote') {
           if (!(typeof hostname === 'string' && hostname.trim().length > 0)) {
             if (canPrompt(options)) {
@@ -1419,12 +1455,23 @@ async function tunnelCommand(options, subcommand, action, deps) {
             configPath: options.configPath || null,
             connectTtlMs: connectTtlMs ?? null,
             sessionTtlMs: sessionTtlMs ?? null,
+            ...(provider === 'tailscale' ? { tailscaleHttpsPort } : {}),
           };
           if (isJsonMode(options)) {
             printJson(dryRunResult);
           } else if (!isQuietMode(options)) {
             clackIntro('Tunnel Start (dry-run)');
-            logStatus('info', `Would start ${clackFormatProviderWithIcon(provider)}/${mode}`, hostname || '(ephemeral URL)');
+            logStatus(
+              'info',
+              `Would start ${clackFormatProviderWithIcon(provider)}/${mode}`,
+              [
+                getTunnelAccessDescription(provider, mode),
+                provider === 'tailscale'
+                  ? `Tailscale frontend HTTPS port: ${tailscaleHttpsPort}; OpenChamber backend --port: ${options.port}.`
+                  : null,
+                hostname || '(ephemeral URL)',
+              ].filter(Boolean).join(' '),
+            );
             clackOutro('dry-run complete (no changes applied)');
           }
           return;
@@ -1548,6 +1595,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
         const payload = {
           provider,
           mode,
+          ...(provider === 'tailscale' ? { tailscaleHttpsPort } : {}),
           ...(typeof connectTtlMs === 'number' ? { connectTtlMs } : {}),
           ...(typeof sessionTtlMs === 'number' ? { sessionTtlMs } : {}),
           ...(options.configPath === null ? { configPath: null } : {}),
@@ -1575,7 +1623,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
           if (error instanceof Error && /\/api\/openchamber\/tunnel\/start/.test(error.message) && /timed out/.test(error.message)) {
             spin?.error('Tunnel start timed out');
             throw new Error(
-              `Tunnel start timed out after 60s. cloudflared may still be starting; check with \`openchamber tunnel status --port ${instance.port}\`. Run \`openchamber logs -p ${instance.port}\` for details.`
+              `Tunnel start timed out after 60s. ${getTunnelDependencyLabel(provider, mode)} may still be starting; check with \`openchamber tunnel status --port ${instance.port}\`. Run \`openchamber logs -p ${instance.port}\` for details.`
             );
           }
           spin?.error('Tunnel start failed');
@@ -1586,10 +1634,15 @@ async function tunnelCommand(options, subcommand, action, deps) {
         if (!response.ok || !body?.ok) {
           spin?.error('Tunnel start failed');
           const baseError = body?.error || `Tunnel start failed (${response.status})`;
-          const isCloudflareTimeout = /context deadline exceeded|Client\.Timeout exceeded while awaiting headers|failed to request quick Tunnel/i.test(baseError);
+          const isCloudflareTimeout = provider === 'cloudflare'
+            && /context deadline exceeded|Client\.Timeout exceeded while awaiting headers|failed to request quick Tunnel/i.test(baseError);
+          const isTailscaleTimeout = provider === 'tailscale'
+            && /context deadline exceeded|timed out|timeout|failed to start.*(?:funnel|serve)/i.test(baseError);
           const userError = isCloudflareTimeout
             ? `Cloudflare quick tunnel request timed out. ${baseError}`
-            : baseError;
+            : isTailscaleTimeout
+              ? `${getTunnelDependencyLabel(provider, mode)} request timed out. ${baseError}`
+              : baseError;
           throw new Error(`${userError} Run \`openchamber logs -p ${instance.port}\` for details.`);
         }
 
@@ -1601,6 +1654,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
           port: instance.port,
           provider,
           mode,
+          tailscaleHttpsPort,
           profileName: selectedProfile?.name,
           configPath: options.configPath,
           hostname,
@@ -1623,6 +1677,14 @@ async function tunnelCommand(options, subcommand, action, deps) {
           clackIntro(boldText('Tunnel Started'));
           logStatus('success', `port ${instance.port} ${clackFormatProviderWithIcon(body.provider)}/${body.mode}`);
           logStatus('success', body.connectUrl || body.url || 'n/a');
+          const accessDescription = getTunnelAccessDescription(body.provider || provider, body.mode || mode);
+          if (accessDescription) logStatus('info', accessDescription);
+          if ((body.provider || provider) === 'tailscale') {
+            logStatus(
+              'info',
+              `Tailscale frontend HTTPS port: ${tailscaleHttpsPort}; OpenChamber backend --port: ${instance.port}.`,
+            );
+          }
           if (body.replacedTunnel) {
             const revokedBootstrapCount = Number.isFinite(body.revokedBootstrapCount) ? body.revokedBootstrapCount : 0;
             const invalidatedSessionCount = Number.isFinite(body.invalidatedSessionCount) ? body.invalidatedSessionCount : 0;

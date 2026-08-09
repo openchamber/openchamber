@@ -31,6 +31,7 @@ export const runCliEntryIfMain = (dependencies) => {
     tunnelProvider: cliOptions.tunnelProvider,
     tunnelMode: cliOptions.tunnelMode,
     tunnelConfigPath: cliOptions.tunnelConfigPath,
+    tailscaleHttpsPort: cliOptions.tailscaleHttpsPort,
     tunnelToken: cliOptions.tunnelToken,
     tunnelHostname: cliOptions.tunnelHostname,
     attachSignals: true,
