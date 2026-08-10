@@ -67,6 +67,21 @@ carrying it is out, image models work with any agent and this section is history
 rather than an active constraint; until then the only user-side workaround is the
 wildcard-deny agent above.
 
+A second, independent OpenCode bug sits behind this one: `SessionProcessor` has no
+`case "file"`, so an image returned as Gemini `inlineData` is discarded and never
+becomes a message part. The two are sequential — the fix above lets the request
+through, and that one makes the result visible. Fixing only the first yields a
+billed request whose image is silently dropped. anomalyco/opencode#40126 addresses
+it on the `v2` branch; `dev` is unfixed.
+
+OpenChamber needs no change for either. The receive path is already type-agnostic:
+`file` is absent from `SKIP_PARTS` in `packages/ui/src/sync/event-reducer.ts`, the
+`message.part.updated` reducer upserts any part type, `filterVisibleParts` never
+drops `file`, and `AssistantMessageBody` already renders `MessageFilesDisplay`,
+which filters on `type === "file"` without checking the message role. That leg is
+a code read rather than an executed test — there is no component-render harness
+for `MessageBody` — so a live generation is the first real check.
+
 ## Agent context budget
 
 - The tool exposes one shared parameter object rather than repeating parameters
