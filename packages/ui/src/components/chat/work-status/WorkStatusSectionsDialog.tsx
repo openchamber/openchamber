@@ -29,6 +29,12 @@ export const WorkStatusSectionsDialog: React.FC<{
   const { t } = useI18n();
   const hidden = useUIStore((state) => state.workStatusHiddenSections);
   const setSectionVisible = useUIStore((state) => state.setWorkStatusSectionVisible);
+  const setHiddenSections = useUIStore((state) => state.setWorkStatusHiddenSections);
+
+  const allVisible = hidden.length === 0;
+  const noneVisible = hidden.length >= WORK_STATUS_SECTION_IDS.length;
+
+  const handleShowAll = () => setHiddenSections([]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -50,6 +56,21 @@ export const WorkStatusSectionsDialog: React.FC<{
             />
           ))}
         </div>
+
+        {!allVisible ? (
+          <div className="flex items-center justify-between border-t pt-3">
+            {noneVisible ? (
+              <span className="text-xs text-destructive">{t('chat.workStatus.sections.noneWarning')}</span>
+            ) : <span />}
+            <button
+              type="button"
+              onClick={handleShowAll}
+              className="text-xs text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
+            >
+              {t('chat.workStatus.sections.showAll')}
+            </button>
+          </div>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

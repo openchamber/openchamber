@@ -13,7 +13,7 @@ import { WorkStatusMcpSection } from './WorkStatusMcpSection';
 import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
 import { WorkStatusContextSection } from './WorkStatusContextSection';
 import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog';
-import { isWorkStatusSectionVisible } from './sections';
+import { WORK_STATUS_SECTION_IDS, isWorkStatusSectionVisible } from './sections';
 import { WorkStatusPresenceProvider } from './presence';
 import { Icon } from '@/components/icon/Icon';
 
@@ -82,9 +82,12 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   // out with something in it rather than emptying first, and its subscriptions
   // stop once it is truly gone.
   const [contentMounted, setContentMounted] = React.useState(visible);
-  // Hidden, mid-collapse, or reporting nothing: in each case the card is not
-  // something the user can act on, so it should not be reachable.
-  const interactive = visible && renderedSections > 0;
+  // Hidden or mid-collapse: the card is not something the user can act on.
+  // When `visible` but all sections are hidden, the panel stays interactive so
+  // the settings button remains reachable — otherwise there is no way to
+  // re-enable sections.
+  const allSectionsHidden = hiddenSections.length >= WORK_STATUS_SECTION_IDS.length;
+  const interactive = visible;
   React.useEffect(() => {
     if (visible) {
       setContentMounted(true);
@@ -180,9 +183,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           // separates the two without going fully opaque.
           'oc-glass-panel',
         ],
-        // An empty card is a border around a settings icon, which reads as a
-        // fault rather than as "nothing to report".
-        renderedSections === 0 && 'border-transparent bg-transparent shadow-none',
+        // When every section is hidden the card keeps its border and background
+        // so the settings button stays discoverable — going transparent made the
+        // only recovery path unreachable.
         'motion-reduce:transition-none',
         'rounded-xl border border-[var(--interactive-border)]',
         !overlay && 'bg-[var(--surface-muted)]/40',
@@ -244,6 +247,19 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         {sectionVisible('contextSources') ? <WorkStatusContextSection sessionId={sessionId} directory={directory} /> : null}
       </ScrollShadow>
       </WorkStatusPresenceProvider>
+      ) : null}
+
+      {contentMounted && allSectionsHidden && renderedSections === 0 ? (
+        <div className="flex flex-col items-center justify-center px-4 py-8 text-center">
+          <span className="text-sm text-muted-foreground">{t('chat.workStatus.sections.allHidden')}</span>
+          <button
+            type="button"
+            onClick={() => setSectionsDialogOpen(true)}
+            className="mt-2 text-xs text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
+          >
+            {t('chat.workStatus.sections.chooseLabel')}
+          </button>
+        </div>
       ) : null}
 
       <WorkStatusSectionsDialog open={sectionsDialogOpen} onOpenChange={setSectionsDialogOpen} />
