@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { readCredential } from './quotaCredentials';
+import { getProviderAuth, updateProviderAuth } from './opencodeAuth';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -173,6 +174,21 @@ export type ProviderResult = {
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 const AUTH_FILE = path.join(OPENCODE_DATA_DIR, 'auth.json');
+
+const XAI_USAGE_ENDPOINT = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
+const XAI_TOKEN_ENDPOINT = 'https://auth.x.ai/oauth2/token';
+const XAI_CLIENT_ID = 'b1a00492-073a-47ea-816f-4c329264a828';
+const XAI_REFRESH_SKEW_MS = 120_000;
+const XAI_DEFAULT_EXPIRES_IN_SECONDS = 3600;
+
+type XaiAuthEntry = Record<string, unknown> & {
+  type: 'oauth';
+  access?: string;
+  refresh?: string;
+  expires?: unknown;
+};
+
+let xaiRefreshPromise: Promise<XaiAuthEntry> | null = null;
 
 
 const ANTIGRAVITY_ACCOUNTS_PATHS = [
@@ -403,6 +419,304 @@ const buildResult = (data: {
   fetchedAt: Date.now(),
 });
 
+const resolveXaiAuth = (): XaiAuthEntry | null => {
+  const entry = getProviderAuth('xai');
+  if (!entry || typeof entry !== 'object' || entry.type !== 'oauth') return null;
+
+  const access = asNonEmptyString(entry.access);
+  const refresh = asNonEmptyString(entry.refresh);
+  if (!access && !refresh) return null;
+
+  return {
+    ...entry,
+    type: 'oauth',
+    ...(access ? { access } : {}),
+    ...(refresh ? { refresh } : {}),
+    ...(entry.expires !== undefined ? { expires: entry.expires } : {}),
+  };
+};
+
+const jwtExpiryMilliseconds = (accessToken: string): number | null => {
+  const payload = accessToken.split('.')[1];
+  if (!payload) return null;
+
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>;
+    return typeof decoded.exp === 'number' && Number.isFinite(decoded.exp)
+      ? decoded.exp * 1000
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const xaiAccessNeedsRefresh = (entry: XaiAuthEntry, now = Date.now()): boolean => {
+  const access = asNonEmptyString(entry.access);
+  if (!access) return true;
+
+  const refreshDeadline = now + XAI_REFRESH_SKEW_MS;
+  const storedExpiry = Number(entry.expires);
+  if (Number.isFinite(storedExpiry) && storedExpiry <= refreshDeadline) {
+    return true;
+  }
+
+  const jwtExpiry = jwtExpiryMilliseconds(access);
+  return jwtExpiry !== null && jwtExpiry <= refreshDeadline;
+};
+
+const refreshXaiAuth = (entry: XaiAuthEntry): Promise<XaiAuthEntry> => {
+  if (xaiRefreshPromise) return xaiRefreshPromise;
+
+  const refreshToken = asNonEmptyString(entry.refresh);
+  if (!refreshToken) {
+    return Promise.reject(new Error('xAI OAuth refresh token is unavailable'));
+  }
+
+  const pending = (async () => {
+    const response = await fetch(XAI_TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: XAI_CLIENT_ID,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    if (!response.ok) {
+      throw new Error(`xAI OAuth refresh failed: ${response.status}`);
+    }
+
+    const responsePayload = payload ?? {};
+    const access = asNonEmptyString(responsePayload.access_token);
+    if (!access) {
+      throw new Error('xAI OAuth refresh returned no access token');
+    }
+
+    const expiresIn = responsePayload.expires_in ?? XAI_DEFAULT_EXPIRES_IN_SECONDS;
+    if (typeof expiresIn !== 'number' || !Number.isFinite(expiresIn)) {
+      throw new Error('xAI OAuth refresh returned an invalid expiry');
+    }
+
+    const refreshed: XaiAuthEntry = {
+      ...entry,
+      type: 'oauth',
+      access,
+      refresh: asNonEmptyString(responsePayload.refresh_token) ?? refreshToken,
+      expires: Date.now() + expiresIn * 1000,
+    };
+
+    // Validate the new access token before updating the existing secure auth file.
+    updateProviderAuth('xai', refreshed);
+    return refreshed;
+  })();
+
+  const settled = pending.finally(() => {
+    if (xaiRefreshPromise === settled) {
+      xaiRefreshPromise = null;
+    }
+  });
+  xaiRefreshPromise = settled;
+  return settled;
+};
+
+const getXaiAccessToken = async (entry: XaiAuthEntry): Promise<string> => {
+  if (!xaiAccessNeedsRefresh(entry)) return entry.access!;
+  return (await refreshXaiAuth(entry)).access!;
+};
+
+type XaiFixed32Field = { path: number[]; value: number; order: number };
+type XaiVarintField = { path: number[]; value: bigint };
+type XaiProtobufScan = {
+  fixed32Fields: XaiFixed32Field[];
+  varintFields: XaiVarintField[];
+  nextOrder: number;
+};
+
+const readXaiVarint = (bytes: Uint8Array, index: { value: number }): bigint | null => {
+  let result = 0n;
+  for (let shift = 0n; index.value < bytes.length && shift < 64n; shift += 7n) {
+    const byte = bytes[index.value++];
+    if (shift === 63n && (byte & 0x7e) !== 0) return null;
+    result |= BigInt(byte & 0x7f) << shift;
+    if ((byte & 0x80) === 0) return result;
+  }
+  return null;
+};
+
+const scanXaiProtobuf = (
+  bytes: Uint8Array,
+  depth: number,
+  pathPrefix: number[],
+  scan: XaiProtobufScan,
+): boolean => {
+  const index = { value: 0 };
+  while (index.value < bytes.length) {
+    const fieldKey = readXaiVarint(bytes, index);
+    if (fieldKey === null || fieldKey === 0n) return false;
+
+    const fieldNumber = Number(fieldKey >> 3n);
+    const wireType = Number(fieldKey & 0x07n);
+    if (fieldNumber < 1 || fieldNumber > 0x1fffffff) return false;
+    const fieldPath = [...pathPrefix, fieldNumber];
+
+    if (wireType === 0) {
+      const value = readXaiVarint(bytes, index);
+      if (value === null) return false;
+      scan.varintFields.push({ path: fieldPath, value });
+      continue;
+    }
+
+    if (wireType === 1) {
+      if (index.value + 8 > bytes.length) return false;
+      index.value += 8;
+      continue;
+    }
+
+    if (wireType === 2) {
+      const length = readXaiVarint(bytes, index);
+      if (length === null || length > BigInt(bytes.length - index.value)) return false;
+      const start = index.value;
+      index.value += Number(length);
+      if (depth >= 4 && length !== 0n) return false;
+      if (depth < 4) {
+        const nestedScan: XaiProtobufScan = {
+          fixed32Fields: [],
+          varintFields: [],
+          nextOrder: scan.nextOrder,
+        };
+        if (!scanXaiProtobuf(bytes.subarray(start, index.value), depth + 1, fieldPath, nestedScan)) return false;
+        scan.fixed32Fields.push(...nestedScan.fixed32Fields);
+        scan.varintFields.push(...nestedScan.varintFields);
+        scan.nextOrder = nestedScan.nextOrder;
+      }
+      continue;
+    }
+
+    if (wireType === 5) {
+      if (index.value + 4 > bytes.length) return false;
+      const value = new DataView(bytes.buffer, bytes.byteOffset + index.value, 4).getFloat32(0, true);
+      scan.fixed32Fields.push({ path: fieldPath, value, order: scan.nextOrder++ });
+      index.value += 4;
+      continue;
+    }
+
+    return false;
+  }
+
+  return true;
+};
+
+const looksLikeXaiProtobuf = (bytes: Uint8Array): boolean => {
+  if (!bytes.length) return false;
+  const fieldNumber = Math.floor(bytes[0] / 8);
+  const wireType = bytes[0] % 8;
+  return fieldNumber > 0 && [0, 1, 2, 5].includes(wireType);
+};
+
+const parseXaiGrpcTrailerStatus = (bytes: Uint8Array): number | null => {
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+
+  let status: number | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line) continue;
+    const separator = line.indexOf(':');
+    if (separator <= 0) return null;
+    const key = line.slice(0, separator).trim().toLowerCase();
+    if (!key) return null;
+    if (key !== 'grpc-status') continue;
+    if (status !== null) return null;
+    const rawStatus = line.slice(separator + 1).trim();
+    if (!/^\d+$/.test(rawStatus)) return null;
+    status = Number(rawStatus);
+    if (!Number.isSafeInteger(status)) return null;
+  }
+  return status;
+};
+
+const parseXaiGrpcFrames = (bytes: Uint8Array): { payloads: Uint8Array[]; trailerStatuses: number[] } | null | false => {
+  if (bytes.length < 5 || (bytes[0] & 0x7f) !== 0) return null;
+  const payloads: Uint8Array[] = [];
+  const trailerStatuses: number[] = [];
+  let index = 0;
+  let sawTrailer = false;
+  while (index < bytes.length) {
+    if (index + 5 > bytes.length) return false;
+    const flags = bytes[index++];
+    if ((flags & 0x7f) !== 0) return false;
+    const length = (bytes[index++] * 0x1000000) + (bytes[index++] << 16) + (bytes[index++] << 8) + bytes[index++];
+    if (length > bytes.length - index) return false;
+    const frame = bytes.subarray(index, index + length);
+    index += length;
+    if (flags & 0x80) {
+      sawTrailer = true;
+      const status = parseXaiGrpcTrailerStatus(frame);
+      if (status === null) return false;
+      trailerStatuses.push(status);
+    } else {
+      if (sawTrailer) return false;
+      payloads.push(frame);
+    }
+  }
+  return { payloads, trailerStatuses };
+};
+
+const sameXaiPath = (left: number[], right: number[]) => (
+  left.length === right.length && left.every((value, index) => value === right[index])
+);
+
+const XAI_USAGE_PERCENT_PATHS = [[1], [1, 1]];
+const isXaiUsagePercentPath = (path: number[]) => (
+  XAI_USAGE_PERCENT_PATHS.some((candidate) => sameXaiPath(candidate, path))
+);
+
+const parseXaiUsage = (bytes: Uint8Array): { usedPercent: number; resetAt: number | null } => {
+  const frames = parseXaiGrpcFrames(bytes);
+  if (frames === false) throw new Error('xAI returned malformed gRPC-web framing');
+  const payloads = frames === null
+    ? (looksLikeXaiProtobuf(bytes) ? [bytes] : [])
+    : frames.payloads;
+  if (frames) {
+    for (const status of frames.trailerStatuses) {
+      if (status !== 0) throw new Error(`xAI billing RPC failed with status ${status}`);
+    }
+  }
+  if (!payloads.length) throw new Error('xAI returned an empty protobuf response');
+
+  const scan: XaiProtobufScan = { fixed32Fields: [], varintFields: [], nextOrder: 0 };
+  for (const payload of payloads) {
+    if (!scanXaiProtobuf(payload, 0, [], scan)) throw new Error('xAI returned malformed protobuf data');
+  }
+
+  const percentField = scan.fixed32Fields
+    .filter((field) => isXaiUsagePercentPath(field.path) && Number.isFinite(field.value) && field.value >= 0 && field.value <= 100)
+    .sort((left, right) => left.path.length - right.path.length || left.order - right.order)[0];
+  const resetCandidates = scan.varintFields
+    .filter((field) => field.value >= 1_700_000_000n && field.value <= 2_100_000_000n)
+    .map((field) => ({ path: field.path, seconds: Number(field.value) }))
+    .map((field) => ({ path: field.path, timestamp: field.seconds * 1000 }))
+    .filter((field) => field.timestamp > Date.now());
+  const preferredReset = resetCandidates
+    .filter((field) => sameXaiPath(field.path, [1, 5, 1]))
+    .sort((a, b) => a.timestamp - b.timestamp)[0];
+  const resetAt = (preferredReset ?? resetCandidates.sort((a, b) => a.timestamp - b.timestamp)[0])?.timestamp ?? null;
+  const hasUsagePeriod = scan.varintFields.some((field) => (
+    (field.path.length >= 2 && field.path[0] === 1 && field.path[1] === 6)
+    || (sameXaiPath(field.path, [1, 8, 1]) && (field.value === 1n || field.value === 2n))
+  ));
+  const noUsageYet = !percentField && scan.fixed32Fields.length === 0 && resetAt !== null && hasUsagePeriod;
+  const usedPercent = percentField?.value ?? (noUsageYet ? 0 : null);
+  if (usedPercent === null) throw new Error('xAI billing response did not contain usable current-period data');
+  return { usedPercent, resetAt };
+};
+
 const formatMoney = (value: number | null) => {
   if (value === null || !Number.isFinite(value)) return null;
   return value.toFixed(2);
@@ -425,7 +739,12 @@ const durationToSeconds = (duration?: number, unit?: string) => {
 };
 
 export const listConfiguredQuotaProviders = () => {
-  const auth = readAuthFile();
+  let auth: AuthFile = {};
+  try {
+    auth = readAuthFile();
+  } catch {
+    // Managed credentials remain enumerable; unreadable auth cannot establish xAI configuration.
+  }
   const configured = new Set<string>();
   if (readCredential('opencode-go')) configured.add('opencode-go');
   if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
@@ -505,6 +824,16 @@ export const listConfiguredQuotaProviders = () => {
   const deepseekAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
   if (deepseekAuth && ((deepseekAuth as Record<string, unknown>).key || (deepseekAuth as Record<string, unknown>).token)) {
     configured.add('deepseek');
+  }
+
+  let xaiAuth: XaiAuthEntry | null = null;
+  try {
+    xaiAuth = resolveXaiAuth();
+  } catch {
+    xaiAuth = null;
+  }
+  if (xaiAuth) {
+    configured.add('xai');
   }
 
   return Array.from(configured);
@@ -2303,6 +2632,78 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const fetchXaiQuota = async (): Promise<ProviderResult> => {
+  try {
+    const entry = resolveXaiAuth();
+    if (!entry) {
+      return buildResult({
+        providerId: 'xai',
+        providerName: 'xAI',
+        ok: false,
+        configured: false,
+        error: 'Not configured',
+      });
+    }
+
+    const accessToken = await getXaiAccessToken(entry);
+    const response = await fetch(XAI_USAGE_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Origin: 'https://grok.com',
+        Referer: 'https://grok.com/?_s=usage',
+        Accept: '*/*',
+        'Content-Type': 'application/grpc-web+proto',
+        'x-grpc-web': '1',
+        'x-user-agent': 'connect-es/2.1.1',
+        'User-Agent': 'OpenChamber',
+      },
+      body: new Uint8Array([0, 0, 0, 0, 0]),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    const grpcStatus = response.headers.get('grpc-status');
+    if (grpcStatus !== null) {
+      const rawStatus = grpcStatus.trim();
+      if (!/^\d+$/.test(rawStatus)) throw new Error('xAI billing returned malformed gRPC status');
+      const status = Number(rawStatus);
+      if (!Number.isSafeInteger(status)) throw new Error('xAI billing returned malformed gRPC status');
+      if (status !== 0) {
+        throw new Error(`xAI billing RPC failed with status ${status}`);
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(`xAI billing API error: ${response.status}`);
+    }
+
+    const parsed = parseXaiUsage(new Uint8Array(await response.arrayBuffer()));
+    return buildResult({
+      providerId: 'xai',
+      providerName: 'xAI',
+      ok: true,
+      configured: true,
+      usage: {
+        windows: {
+          billing_cycle: toUsageWindow({
+            usedPercent: parsed.usedPercent,
+            windowSeconds: null,
+            resetAt: parsed.resetAt,
+          }),
+        },
+      },
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'xai',
+      providerName: 'xAI',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+    });
+  }
+};
+
 export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
@@ -2350,6 +2751,8 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
       return fetchDeepseekQuota();
     case 'neuralwatt':
       return fetchNeuralwattQuota();
+    case 'xai':
+      return fetchXaiQuota();
     default:
       return buildResult({
         providerId,

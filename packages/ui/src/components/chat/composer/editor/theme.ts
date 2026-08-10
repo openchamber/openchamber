@@ -30,7 +30,10 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     // `caret-color: transparent !important` at the highest precedence and
     // draws its own `.cm-cursor` element, whose base style is a hard-coded
     // `border-left: 1.2px solid black`. Styling `caret-color` here therefore
-    // does nothing at all — the border is what has to be coloured.
+    // does nothing at all — the border is what has to be coloured. A 2px
+    // stroke makes the insertion point remain visible against every composer
+    // surface without relying on a fixed colour. A slight vertical scale makes
+    // it extend beyond the glyphs without changing CodeMirror's line geometry.
     //
     // CodeMirror recolours it for dark editors through `&dark .cm-cursor`,
     // which needs the theme to declare itself dark. OpenChamber themes are not
@@ -43,6 +46,9 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     // moment this module is imported.
     '&.cm-editor .cm-cursor, &.cm-editor .cm-dropCursor': {
         borderLeftColor: 'var(--surface-foreground)',
+        borderLeftWidth: '2px',
+        transform: 'scaleY(1.15)',
+        transformOrigin: 'center',
     },
     '.cm-line': { padding: '0' },
     '.cm-scroller': {

@@ -152,13 +152,13 @@ export const NotificationSettings: React.FC = () => {
     field: 'title' | 'message',
     value: string,
   ) => {
-    setNotificationTemplates({
-      ...notificationTemplates,
+    setNotificationTemplates((current) => ({
+      ...current,
       [event]: {
-        ...notificationTemplates[event],
+        ...current[event],
         [field]: value,
       },
-    });
+    }));
   };
 
   const base64UrlToUint8Array = (base64Url: string): Uint8Array<ArrayBuffer> => {

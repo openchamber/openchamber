@@ -1,4 +1,6 @@
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { normalizePath } from '@/lib/pathNormalization';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
 import type { SessionNode } from './types';
 
@@ -68,6 +70,41 @@ export const nodeContainsSessionId = (node: SessionNode, sessionId: string | nul
   }
 
   return false;
+};
+
+export type QuestionBadgeSessionScope = {
+  directory: string;
+  sessionIDs: string[];
+};
+
+/**
+ * Choose which (directory, sessionIDs) scopes a sidebar row's pending-question
+ * badge should count. An expanded row counts only its own session; a collapsed
+ * parent row additionally rolls up the hidden descendants of its subtree,
+ * grouped by the directory store each descendant actually lives in, so badges
+ * stay correct for worktree/subtask sessions without bootstrapping their
+ * directory stores.
+ */
+export const selectQuestionBadgeSessionScopes = (
+  node: SessionNode,
+  isExpanded: boolean,
+  fallbackDirectory: string | null,
+): QuestionBadgeSessionScope[] => {
+  const sessionIDsByDirectory = new Map<string, string[]>();
+  const visit = (current: SessionNode): void => {
+    const directory = resolveGlobalSessionDirectory(current.session)
+      ?? normalizePath(current.worktree?.path)
+      ?? fallbackDirectory;
+    if (directory) {
+      const sessionIDs = sessionIDsByDirectory.get(directory) ?? [];
+      sessionIDs.push(current.session.id);
+      sessionIDsByDirectory.set(directory, sessionIDs);
+    }
+    if (current === node && isExpanded) return;
+    for (const child of current.children) visit(child);
+  };
+  visit(node);
+  return [...sessionIDsByDirectory].map(([directory, sessionIDs]) => ({ directory, sessionIDs }));
 };
 
 export const selectFolderRootNodes = (

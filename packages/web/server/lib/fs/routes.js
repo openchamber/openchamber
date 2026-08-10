@@ -16,6 +16,16 @@ const pruneOutsideFileGrants = () => {
   }
 };
 
+const isOsPermissionError = (error) => (
+  error
+  && typeof error === 'object'
+  && (error.code === 'EACCES' || error.code === 'EPERM')
+);
+
+const sendOsPermissionDenied = (res, message) => (
+  res.status(403).json({ error: message, reason: 'os-permission' })
+);
+
 export const mintOutsideFileGrant = async (targetPath, {
   scopes = ['stat', 'read', 'raw'],
   fsPromises = nodeFsPromises,
@@ -382,6 +392,7 @@ export const registerFsRoutes = (app, dependencies) => {
     path,
     fsPromises,
     spawn,
+    platform = process.platform,
     crypto,
     normalizeDirectoryPath,
     resolveProjectDirectory,
@@ -391,6 +402,27 @@ export const registerFsRoutes = (app, dependencies) => {
   } = dependencies;
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
+  });
+
+  const spawnDetached = (command, args) => new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(command, args, { windowsHide: true, stdio: 'ignore', detached: true });
+    } catch (error) {
+      reject(new Error('Failed to launch file browser', { cause: error }));
+      return;
+    }
+    const onError = (error) => {
+      child.removeListener('spawn', onSpawn);
+      reject(new Error('Failed to launch file browser', { cause: error }));
+    };
+    const onSpawn = () => {
+      child.removeListener('error', onError);
+      child.unref();
+      resolve();
+    };
+    child.once('error', onError);
+    child.once('spawn', onSpawn);
   });
 
   const execJobs = new Map();
@@ -454,7 +486,7 @@ export const registerFsRoutes = (app, dependencies) => {
   // Non-cacheable commands always execute and are never stored.
   const runCommandWithGitReadCache = async ({ shell, shellFlag, command, resolvedCwd }) => {
     const cacheable = gitReadCacheTtlMs > 0 && isCacheableGitReadCommand(command);
-    const cacheKey = cacheable ? `${resolvedCwd} ${normalizeCommand(command)}` : null;
+    const cacheKey = cacheable ? `${resolvedCwd}${normalizeCommand(command)}` : null;
 
     if (cacheKey) {
       const cached = gitReadCache.get(cacheKey);
@@ -583,6 +615,9 @@ export const registerFsRoutes = (app, dependencies) => {
       await fsPromises.mkdir(resolvedPath, { recursive: true });
       return res.json({ success: true, path: resolvedPath });
     } catch (error) {
+      if (isOsPermissionError(error)) {
+        return sendOsPermissionDenied(res, 'Access denied');
+      }
       console.error('Failed to create directory:', error);
       return res.status(500).json({ error: error.message || 'Failed to create directory' });
     }
@@ -746,8 +781,8 @@ export const registerFsRoutes = (app, dependencies) => {
         }
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access to file denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to file denied');
       }
       console.error('Failed to stat file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to stat file' });
@@ -818,8 +853,8 @@ export const registerFsRoutes = (app, dependencies) => {
         }
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access to file denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to file denied');
       }
       console.error('Failed to read file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to read file' });
@@ -903,8 +938,8 @@ export const registerFsRoutes = (app, dependencies) => {
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access to file denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to file denied');
       }
       console.error('Failed to read raw file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to read file' });
@@ -964,8 +999,8 @@ export const registerFsRoutes = (app, dependencies) => {
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access to file denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to file denied');
       }
       console.error('Failed to serve file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to serve file' });
@@ -1026,8 +1061,8 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access denied');
       }
       console.error('Failed to write file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to write file' });
@@ -1061,8 +1096,8 @@ export const registerFsRoutes = (app, dependencies) => {
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'File or directory not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access denied');
       }
       console.error('Failed to delete path:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to delete path' });
@@ -1116,8 +1151,8 @@ export const registerFsRoutes = (app, dependencies) => {
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'Source path not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
-        return res.status(403).json({ error: 'Access denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access denied');
       }
       console.error('Failed to rename path:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to rename path' });
@@ -1134,13 +1169,12 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = path.resolve(targetPath.trim());
       await fsPromises.access(resolved);
 
-      const platform = process.platform;
       if (platform === 'darwin') {
         const stat = await fsPromises.stat(resolved);
         if (stat.isDirectory()) {
-          spawn('open', [resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
+          await spawnDetached('open', [resolved]);
         } else {
-          spawn('open', ['-R', resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
+          await spawnDetached('open', ['-R', resolved]);
         }
       } else if (platform === 'win32') {
         const stat = await fsPromises.stat(resolved);
@@ -1164,7 +1198,7 @@ export const registerFsRoutes = (app, dependencies) => {
       } else {
         const stat = await fsPromises.stat(resolved);
         const dir = stat.isDirectory() ? resolved : path.dirname(resolved);
-        spawn('xdg-open', [dir], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
+        await spawnDetached('xdg-open', [dir]);
       }
 
       return res.json({ success: true, path: resolved });
@@ -1172,6 +1206,9 @@ export const registerFsRoutes = (app, dependencies) => {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'Path not found' });
+      }
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to path denied');
       }
       console.error('Failed to reveal path:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to reveal path' });
@@ -1296,6 +1333,11 @@ export const registerFsRoutes = (app, dependencies) => {
       ? req.query.path.trim()
       : os.homedir();
     const respectGitignore = req.query.respectGitignore === 'true';
+    // Logical (requested) path stays in the caller's path space. Realpath is
+    // only used to read directory contents — returning real paths for entries
+    // breaks file-tree expansion when listing through a symlink, because the
+    // UI rejects expanded paths that fall outside the workspace root.
+    let requestedPath = '';
     let resolvedPath = '';
 
     const isPlansDirectory = (value) => {
@@ -1305,11 +1347,12 @@ export const registerFsRoutes = (app, dependencies) => {
     };
 
     try {
-      resolvedPath = await realpathCache.resolve(path.resolve(normalizeDirectoryPath(rawPath)));
+      requestedPath = path.resolve(normalizeDirectoryPath(rawPath));
+      resolvedPath = await realpathCache.resolve(requestedPath);
 
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {
-        return res.status(400).json({ error: 'Specified path is not a directory' });
+        return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
       }
 
       const dirents = await fsPromises.readdir(resolvedPath, { withFileTypes: true });
@@ -1364,8 +1407,8 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const entries = await Promise.all(
         dirents.map(async (dirent) => {
-          const entryPath = path.join(resolvedPath, dirent.name);
-          if (respectGitignore && ignoredPaths.has(entryPath)) {
+          const physicalEntryPath = path.join(resolvedPath, dirent.name);
+          if (respectGitignore && ignoredPaths.has(physicalEntryPath)) {
             return null;
           }
 
@@ -1374,7 +1417,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
           if (!isDirectory && isSymbolicLink) {
             try {
-              const linkStats = await fsPromises.stat(entryPath);
+              const linkStats = await fsPromises.stat(physicalEntryPath);
               isDirectory = linkStats.isDirectory();
             } catch {
               isDirectory = false;
@@ -1383,7 +1426,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
           return {
             name: dirent.name,
-            path: entryPath,
+            path: path.join(requestedPath, dirent.name),
             isDirectory,
             isFile: dirent.isFile(),
             isSymbolicLink,
@@ -1392,24 +1435,28 @@ export const registerFsRoutes = (app, dependencies) => {
       );
 
       return res.json({
-        path: resolvedPath,
+        path: requestedPath,
         entries: entries.filter(Boolean),
       });
     } catch (error) {
       const err = error;
       const code = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
-      const isPlansPath = code === 'ENOENT' && (isPlansDirectory(resolvedPath) || isPlansDirectory(rawPath));
+      const isPlansPath = code === 'ENOENT' && (
+        isPlansDirectory(resolvedPath)
+        || isPlansDirectory(requestedPath)
+        || isPlansDirectory(rawPath)
+      );
       if (code !== 'ENOENT') {
         console.error('Failed to list directory:', error);
       }
       if (code === 'ENOENT') {
         if (isPlansPath) {
-          return res.json({ path: resolvedPath || rawPath, entries: [] });
+          return res.json({ path: requestedPath || resolvedPath || rawPath, entries: [] });
         }
-        return res.status(404).json({ error: 'Directory not found' });
+        return res.status(404).json({ error: 'Directory not found', reason: 'not-found' });
       }
-      if (code === 'EACCES') {
-        return res.status(403).json({ error: 'Access to directory denied' });
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to directory denied');
       }
       return res.status(500).json({ error: (error && error.message) || 'Failed to list directory' });
     }

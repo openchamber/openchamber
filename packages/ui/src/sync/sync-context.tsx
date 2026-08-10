@@ -14,6 +14,7 @@ import {
   ChildStoreManager,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
+  subscribeDirectoryQuestions,
   subscribeDirectorySessionMessages,
   type DirectoryBootstrapContext,
   type DirectoryBootstrapReason,
@@ -67,6 +68,7 @@ import { getPermissionToastKey, showPermissionNeededToast } from "./permission-t
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
+import { isFilesystemError } from "@/lib/api/files-errors"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
@@ -628,6 +630,19 @@ async function resyncDirectorySessionStatuses(
   applySessionStatusSnapshot(store, nextStatuses, candidateSessionIds, mode)
   if (mode === "authoritative") {
     applyGlobalSessionStatusSnapshot(directory, nextStatuses, candidateSessionIds)
+    // An authoritative snapshot that settles sessions previously observed
+    // busy/retry can orphan running tool parts (managed process died
+    // mid-turn, #2577): finalize them now. The snapshot write above already
+    // lowered their status to explicit idle, which is the gate the helper
+    // requires — a session the snapshot reports busy stays untouched.
+    for (const sessionId of candidateSessionIds) {
+      const interrupted = interruptedTurnToolParts(store.getState(), sessionId)
+      if (interrupted) {
+        store.setState((state) => ({
+          part: { ...state.part, [interrupted.messageID]: interrupted.parts },
+        }))
+      }
+    }
   }
   return nextStatuses
 }
@@ -683,7 +698,7 @@ const dispatchVSCodeRuntimeNotificationEvent = (directory: string, payload: Even
   }))
 }
 
-const createEventRoutingIndex = (): EventRoutingIndex => ({
+export const createEventRoutingIndex = (): EventRoutingIndex => ({
   sessionDirectoryById: new Map(),
   messageSessionById: new Map(),
   sessionMessageIdsById: new Map(),
@@ -983,8 +998,12 @@ const childStoreHasMessagePartState = (
   return Object.prototype.hasOwnProperty.call(getDirectoryEventState(store, batch).part, messageID)
 }
 
-const getActiveDirectoryFallback = (childStores: ChildStoreManager): string | null => {
+const getActiveDirectoryFallback = (
+  childStores: ChildStoreManager,
+  sessionID?: string | null,
+): string | null => {
   if (!_activeDirectory || !_activeSession) return null
+  if (sessionID && sessionID !== _activeSession) return null
   return childStores.getChild(_activeDirectory) ? _activeDirectory : null
 }
 
@@ -1014,6 +1033,14 @@ const resolveDirectoryFromRoutingIndex = (
     const found = findSessionInChildStores(sessionID, childStores, routingIndex, batch)
     if (found) {
       return found
+    }
+
+    // The global stream does not always include a directory. During a session
+    // transition, its routing index can lag the active session briefly; route
+    // a session-addressed event only when that session is the one being viewed.
+    const activeDirectory = getActiveDirectoryFallback(childStores, sessionID)
+    if (activeDirectory) {
+      return activeDirectory
     }
   }
 
@@ -1151,23 +1178,24 @@ const updateRoutingIndexFromEvent = (
  * recovery paths only; normal session switches rely on primary SSE reducer
  * state for `question.asked` / `permission.asked` events. When
  * `candidateSessionIds` is omitted, every session known to the directory store
- * is treated as a candidate.
+ * is treated as a candidate; when provided, recovery is limited to those IDs.
  */
 export async function resyncBlockingRequestsForDirectory(
   directory: string,
   store: StoreApi<DirectoryStore>,
   candidateSessionIds?: string[],
+  options?: { includePermissions?: boolean },
 ) {
   const before = store.getState()
-  const knownSessionIds = new Set<string>([
+  const candidateIds = new Set<string>(candidateSessionIds ?? [
     ...before.session.map((session) => session.id),
     ...Object.keys(before.message ?? {}),
     ...Object.keys(before.session_status ?? {}),
     ...Object.keys(before.question ?? {}),
     ...Object.keys(before.permission ?? {}),
   ])
-  const candidates = candidateSessionIds ?? Array.from(knownSessionIds)
-  if (candidates.length === 0) return
+  if (candidateIds.size === 0) return
+  const candidates = Array.from(candidateIds)
 
   // Re-fetch pending questions that may have been asked during an SSE gap,
   // reconnect window, or directory materialization gap.
@@ -1177,12 +1205,12 @@ export async function resyncBlockingRequestsForDirectory(
     )
     const pendingQuestions = await opencodeClient.listPendingQuestions({ directories: [directory] })
     const grouped: Record<string, QuestionRequest[]> = {}
-    for (const q of pendingQuestions) {
-      if (!q?.id || !q.sessionID) continue
-      if (!knownSessionIds.has(q.sessionID)) continue
-      const list = grouped[q.sessionID]
-      if (list) list.push(q)
-      else grouped[q.sessionID] = [q]
+    for (const question of pendingQuestions) {
+      if (!question?.id || !question.sessionID) continue
+      if (!candidateIds.has(question.sessionID)) continue
+      const list = grouped[question.sessionID]
+      if (list) list.push(question)
+      else grouped[question.sessionID] = [question]
     }
     for (const sessionId of Object.keys(grouped)) {
       grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -1229,6 +1257,8 @@ export async function resyncBlockingRequestsForDirectory(
     // Non-fatal: question resync best-effort
   }
 
+  if (options?.includePermissions === false) return
+
   // Re-fetch pending permissions — same rationale as questions.
   try {
     const beforeSignatures = new Map(
@@ -1238,7 +1268,7 @@ export async function resyncBlockingRequestsForDirectory(
     const grouped: Record<string, PermissionRequest[]> = {}
     for (const permission of pendingPermissions) {
       if (!permission?.id || !permission.sessionID) continue
-      if (!knownSessionIds.has(permission.sessionID)) continue
+      if (!candidateIds.has(permission.sessionID)) continue
       const list = grouped[permission.sessionID]
       if (list) list.push(permission)
       else grouped[permission.sessionID] = [permission]
@@ -1301,6 +1331,15 @@ export async function resyncBlockingRequestsForDirectory(
   } catch {
     // Non-fatal: permission resync best-effort
   }
+}
+
+export async function resyncBlockingRequestsForActiveDirectory(
+  directory: string,
+  childStores: ChildStoreManager,
+) {
+  const store = childStores.getChild(directory)
+  if (!store) return
+  await resyncBlockingRequestsForDirectory(directory, store)
 }
 
 async function resyncDirectoryAfterReconnect(
@@ -1370,7 +1409,7 @@ async function resyncDirectoryAfterReconnect(
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 }
 
-function handleEvent(
+export function handleEvent(
   rawDirectory: string,
   payload: Event,
   childStores: ChildStoreManager,
@@ -1620,6 +1659,12 @@ function handleEvent(
     case "session.deleted":
       cloneField("session", (value) => [...value])
       cloneField("permission", (value) => ({ ...value }))
+      if (
+        payload.type === "session.deleted"
+        || (payload.type === "session.updated" && Boolean((payload.properties as { info?: Session }).info?.time.archived))
+      ) {
+        cloneField("question", (value) => ({ ...value }))
+      }
       cloneField("todo", (value) => ({ ...value }))
       cloneField("part", (value) => ({ ...value }))
       cloneField("sessionEventRevision", (value) => ({ ...(value ?? {}) }))
@@ -1758,9 +1803,96 @@ function handleEvent(
         messageID,
       })
     }
+    // The reducer already wrote the idle/error status into `draft`; mark the
+    // orphaned tools using the batched state and publish through the batch.
+    if (sessionID) {
+      const interrupted = interruptedTurnToolParts(state, sessionID)
+      if (interrupted) {
+        cloneField("part", (value) => ({ ...(value ?? {}) }))
+        ;(draft as DirectoryStore).part[interrupted.messageID] = interrupted.parts
+        if (batch) {
+          batch.states.set(store, draft as DirectoryStore)
+          batch.changedStores.add(store)
+        } else {
+          store.setState({ part: { ...(store.getState().part), [interrupted.messageID]: interrupted.parts } })
+        }
+      }
+    }
   }
 
   updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
+}
+
+// ---------------------------------------------------------------------------
+// Interrupted-turn reconciliation
+//
+// A managed OpenCode process can die mid-turn (crash, health-check restart).
+// The persisted turn then never settles: the trailing assistant message has
+// no `time.completed` and its tool parts stay `pending`/`running` forever —
+// the server never finalizes them (anomalyco/opencode#19023). The
+// settle-triggered tail refresh above refetches the same stale records, so
+// the UI would keep running tool timers and "working" styling indefinitely
+// (#2577).
+//
+// OpenCode keeps a turn's session busy while it is genuinely alive —
+// including while waiting for a question/permission reply — so once a
+// session is AUTHORITATIVELY settled (a `session.idle`/`session.error`
+// event, or an authoritative status snapshot that lowers a previously busy
+// session) and the trailing assistant message is still unfinished with
+// active tool parts and no pending question/permission, the turn is
+// definitively interrupted. Finalize the orphaned parts locally as
+// `error`/`Interrupted` with an end time — the same shape OpenCode itself
+// writes for cancelled tools. A later terminal part event or a refresh that
+// carries the true terminal state supersedes the mark; a stale refresh that
+// still reports `running` is rejected by the reducer's and the materializer's
+// final-status preservation.
+export function interruptedTurnToolParts(
+  state: DirectoryStore,
+  sessionID: string,
+  now = Date.now(),
+): { messageID: string; parts: Part[] } | null {
+  if ((state.question?.[sessionID] ?? []).length > 0) return null
+  if ((state.permission?.[sessionID] ?? []).length > 0) return null
+
+  const status = state.session_status?.[sessionID]
+  if (!status || status.type !== "idle") {
+    // Absent status is "unknown", not settled (the reducer maps both
+    // session.idle and session.error to {type:"idle"}): never judge an
+    // interrupted turn without an authoritative settle signal.
+    return null
+  }
+
+  const messageID = getStaleRunningToolMessageID(state, sessionID)
+  if (!messageID) return null
+  const message = (state.message[sessionID] ?? []).find((candidate) => candidate.id === messageID)
+  if (!message) return null
+  if (typeof (message as { time?: { completed?: unknown } }).time?.completed === "number") {
+    // The turn finished; a missed terminal tool event is the tail refresh's
+    // job, not an interruption.
+    return null
+  }
+
+  const current = state.part[messageID]
+  if (!current) return null
+
+  let changed = false
+  const nextParts = current.map((part) => {
+    if (part.type !== "tool") return part
+    const partState = (part as { state?: { status?: unknown; time?: { start?: number } } }).state
+    if (!partState) return part
+    if (partState.status !== "pending" && partState.status !== "running") return part
+    changed = true
+    return {
+      ...part,
+      state: {
+        ...partState,
+        status: "error",
+        error: "Interrupted",
+        time: { ...(partState.time ?? {}), end: now },
+      },
+    } as Part
+  })
+  return changed ? { messageID, parts: nextParts } : null
 }
 
 // ---------------------------------------------------------------------------
@@ -1808,6 +1940,7 @@ export function SyncProvider(props: {
   const lastFullResyncAtByDirectoryRef = useRef(new Map<string, number>())
   const lastChildDiscoveryAtByDirectoryRef = useRef(new Map<string, number>())
   const resyncingDirectoriesRef = useRef(new Set<string>())
+  const blockingRequestResyncingDirectoriesRef = useRef(new Set<string>())
   const statusPollingDirectoriesRef = useRef(new Set<string>())
   const pipelineReconnectRef = useRef<((reason?: string) => void) | null>(null)
   const pipelineHasConnectedRef = useRef(false)
@@ -1840,6 +1973,24 @@ export function SyncProvider(props: {
         resyncing.delete(directory)
       })
   }, [childStores, routingIndex])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const onSystemResume = () => {
+      const directory = currentDirectoryRef.current
+      if (!directory || !childStores.getChild(directory)) return
+
+      const resyncing = blockingRequestResyncingDirectoriesRef.current
+      if (resyncing.has(directory)) return
+      resyncing.add(directory)
+      void resyncBlockingRequestsForActiveDirectory(directory, childStores)
+        .finally(() => resyncing.delete(directory))
+    }
+
+    window.addEventListener("openchamber:system-resume", onSystemResume)
+    return () => window.removeEventListener("openchamber:system-resume", onSystemResume)
+  }, [childStores])
 
   // Configure child store manager
   useEffect(() => {
@@ -1949,7 +2100,21 @@ export function SyncProvider(props: {
         }
 
         const result = await runBootstrap(0)
-        if (result === "failed") throw new Error(`Directory bootstrap failed for ${directory}`)
+        if (result === "failed") {
+          // OpenCode can mask the underlying errno while initializing an
+          // inaccessible workspace. Probe the exact directory through the
+          // owning runtime filesystem API so only an authoritative local
+          // EPERM/EACCES becomes an actionable grant-access failure.
+          const files = getRegisteredRuntimeAPIs()?.files
+          if (files) {
+            try {
+              await files.listDirectory(directory)
+            } catch (error) {
+              if (isFilesystemError(error) && error.reason === "os-permission") throw error
+            }
+          }
+          throw new Error(`Directory bootstrap failed for ${directory}`)
+        }
 
         // Selecting a session whose directory this client had not indexed yet
         // routes it through the active directory as a documented guess. This is
@@ -2260,6 +2425,12 @@ export function SyncProvider(props: {
       props.sdk,
       childStores,
       () => opencodeClient.getDirectory() || props.directory,
+      (directory, sessionID, messageID) => {
+        enqueueSessionMaterialization(directory, sessionID, childStores, {
+          reason: "settled-running-tool",
+          messageID,
+        })
+      },
     )
     return () => {
       if (getImperativeSessionMessageLoader() === messageLoader) {
@@ -2434,6 +2605,46 @@ export function useSessionQuestions(sessionID: string, directory?: string) {
     useCallback((state: State) => state.question[sessionID] ?? EMPTY_QUESTION_REQUESTS, [sessionID]),
     directory,
   )
+}
+
+/**
+ * Total number of pending questions across the given session scopes. Each
+ * scope names a directory store plus the session IDs to count inside it, so
+ * collapsed subtree rows can roll up pending questions of hidden descendants
+ * from their owning directory stores without bootstrapping them.
+ *
+ * Subscribes through the per-session question sidecar channel, so unrelated
+ * streaming or session activity does not re-render rows.
+ */
+export function useSessionQuestionCount(scopes: readonly { directory: string; sessionIDs: readonly string[] }[]) {
+  const { childStores } = useSyncSystem()
+  const scopedStores = React.useMemo(() => scopes.map((scope) => ({
+    sessionIDs: scope.sessionIDs,
+    store: childStores.ensureChild(scope.directory, { bootstrap: false }),
+  })), [childStores, scopes])
+  React.useEffect(() => {
+    for (const scope of scopes) childStores.pin(scope.directory)
+    return () => {
+      for (const scope of scopes) childStores.unpin(scope.directory)
+    }
+  }, [childStores, scopes])
+  const getSnapshot = React.useCallback(() => {
+    let count = 0
+    for (const { sessionIDs, store } of scopedStores) {
+      const questions = store.getState().question
+      for (const sessionID of sessionIDs) count += questions[sessionID]?.length ?? 0
+    }
+    return count
+  }, [scopedStores])
+  const subscribe = React.useCallback((notify: () => void) => {
+    const unsubscribers = scopedStores.map(({ sessionIDs, store }) => (
+      subscribeDirectoryQuestions(store, sessionIDs, notify)
+    ))
+    return () => {
+      for (const unsubscribe of unsubscribers) unsubscribe()
+    }
+  }, [scopedStores])
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /** Get sessions list for a directory */
@@ -3075,14 +3286,20 @@ export function useSessionMessageRecords(
 // (e.g. multiple ToolParts) request the same session's messages.
 const _ensureMessagesLoading = new Set<string>()
 
-export function useEnsureSessionMessages(sessionID: string, directory?: string) {
+/**
+ * @param enabled Gate for callers that only need a session materialised under
+ * a specific condition — a panel resolving pinned message text, say. Loading a
+ * whole session is not free, so "something is missing" is not on its own a
+ * reason to fetch it.
+ */
+export function useEnsureSessionMessages(sessionID: string, directory?: string, enabled = true) {
   const syncDirectory = useSyncDirectory()
   const resolvedDirectory = directory ?? syncDirectory
   const store = useDirectoryStore(resolvedDirectory)
   const requestGenerationRef = React.useRef(0)
 
   React.useEffect(() => {
-    if (!sessionID) return
+    if (!sessionID || !enabled) return
 
     const state = store.getState()
     // Already loaded into a renderable message/part snapshot — nothing to do.
@@ -3108,7 +3325,7 @@ export function useEnsureSessionMessages(sessionID: string, directory?: string) 
         _ensureMessagesLoading.delete(loadingKey)
       }
     })()
-  }, [sessionID, store, resolvedDirectory])
+  }, [enabled, sessionID, store, resolvedDirectory])
 }
 const EMPTY_MESSAGES: Message[] = []
 const EMPTY_PARTS: Part[] = []

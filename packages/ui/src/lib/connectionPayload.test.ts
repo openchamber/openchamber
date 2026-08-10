@@ -4,6 +4,7 @@ import {
   buildPairingConnectionPayload,
   encodePairingConnectionPayload,
   parsePairingConnectionPayload,
+  parsePairingConnectionPayloadString,
 } from './connectionPayload';
 
 const hostEncPubJwk = { kty: 'EC', crv: 'P-256', x: 'eHhY', y: 'eVlZ' } as const;
@@ -101,5 +102,47 @@ describe('connection payload helpers', () => {
       candidates: [{ type: 'lan', url: 'http://runtime.example' }],
     })).toString('base64url');
     expect(parsePairingConnectionPayload(`openchamber://connect?v=2&p=${expired}`)).toBeNull();
+  });
+});
+
+describe('parsePairingConnectionPayloadString (Android WebView fallback)', () => {
+  const payload = buildPairingConnectionPayload({
+    pairingId: 'pair_123',
+    secret: 'one-time-secret',
+    label: 'Desktop',
+    candidates: [
+      { type: 'lan', url: 'http://192.168.1.20:4096', priority: 20 },
+      { type: 'relay', relayUrl: 'wss://relay.example/ws', serverId: 'srv_abc', hostEncPubJwk, priority: 30 },
+    ],
+  });
+  const encoded = encodePairingConnectionPayload(payload);
+
+  test('parses the canonical link identically to the URL-based parser', () => {
+    // Old Android WebViews resolve the same string with hostname "" / pathname "//connect";
+    // the string parser must not depend on the URL API to succeed.
+    expect(parsePairingConnectionPayloadString(encoded)).toEqual(parsePairingConnectionPayload(encoded));
+  });
+
+  test('recovers a link whose scheme/host case the URL parser would reject', () => {
+    const mixedCase = encoded.replace('openchamber://connect', 'OpenChamber://CONNECT');
+    expect(parsePairingConnectionPayload(mixedCase)).toBeNull();
+    expect(parsePairingConnectionPayloadString(mixedCase)).toEqual(parsePairingConnectionPayload(encoded));
+  });
+
+  test('tolerates a trailing slash and reordered query params', () => {
+    const trailingSlash = encoded.replace('openchamber://connect?', 'openchamber://connect/?');
+    expect(parsePairingConnectionPayloadString(trailingSlash)).toEqual(parsePairingConnectionPayload(encoded));
+
+    const p = encoded.slice(encoded.indexOf('p=') + 2);
+    expect(parsePairingConnectionPayloadString(`openchamber://connect?p=${p}&v=2`)).toEqual(parsePairingConnectionPayload(encoded));
+  });
+
+  test('still rejects non-pairing and malformed payloads', () => {
+    expect(parsePairingConnectionPayloadString('')).toBeNull();
+    expect(parsePairingConnectionPayloadString('hello world')).toBeNull();
+    expect(parsePairingConnectionPayloadString('openchamber://connect')).toBeNull();
+    expect(parsePairingConnectionPayloadString('openchamber:///connect?v=2&p=x')).toBeNull();
+    expect(parsePairingConnectionPayloadString('openchamber://connect?v=1&server=http%3A%2F%2F192.168.1.10%3A2606&token=t')).toBeNull();
+    expect(parsePairingConnectionPayloadString('openchamber://connect?v=2&p=not-json')).toBeNull();
   });
 });

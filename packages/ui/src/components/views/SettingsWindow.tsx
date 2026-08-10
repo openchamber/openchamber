@@ -38,7 +38,7 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
       <Dialog.Portal>
         <Dialog.Backdrop
           className={cn(
-            'fixed inset-0 z-50 bg-black/50 dark:bg-black/75',
+            'oc-glass-backdrop fixed inset-0 z-50 bg-black/25 dark:bg-black/40',
             'transition-opacity duration-150 ease-out',
             'data-[starting-style]:opacity-0 data-[ending-style]:opacity-0',
           )}
@@ -50,7 +50,7 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
               'relative pointer-events-auto',
               'w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px]',
               'rounded-xl border shadow-none overflow-hidden origin-center',
-              'bg-background',
+              'oc-glass-dialog',
               'transition-all duration-150 ease-out',
               'data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]',
               'data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]',

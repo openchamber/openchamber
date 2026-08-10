@@ -21,14 +21,17 @@ import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@/lib/api/types';
 import {
   deleteScheduledTask,
+  deleteScheduledTaskLoopFile,
   fetchScheduledTasks,
   runScheduledTaskNow,
+  setLoopScheduledTaskEnabled,
   upsertScheduledTask,
   type ScheduledTask,
   type ScheduledTaskStatus,
 } from '@/lib/scheduledTasksApi';
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
 import { canonicalizeTimezone } from '@/lib/timezones';
+import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 
 const scheduleTimes = (task: ScheduledTask): string[] => {
   const raw = Array.isArray(task.schedule.times)
@@ -314,10 +317,11 @@ export function ScheduledTasksDialog() {
     setMutatingTaskID(task.id);
     setTasks((prev) => prev.map((item) => (item.id === task.id ? { ...item, enabled } : item)));
     try {
-      await upsertScheduledTask(selectedProjectID, {
-        ...task,
-        enabled,
-      });
+      if (task.loopFile) {
+        await setLoopScheduledTaskEnabled(selectedProjectID, task.id, enabled);
+      } else {
+        await upsertScheduledTask(selectedProjectID, { ...task, enabled });
+      }
       await reloadTasks(selectedProjectID, { silent: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.updateFailed'));
@@ -331,14 +335,20 @@ export function ScheduledTasksDialog() {
     if (!selectedProjectID) {
       return;
     }
-    const confirmed = window.confirm(t('sessions.scheduledTasks.dialog.confirm.deleteTask', { taskName: task.name }));
+    const confirmed = window.confirm(task.loopFile
+      ? t('sessions.scheduledTasks.dialog.confirm.deleteLoopFile', { taskName: task.name })
+      : t('sessions.scheduledTasks.dialog.confirm.deleteTask', { taskName: task.name }));
     if (!confirmed) {
       return;
     }
 
     setMutatingTaskID(task.id);
     try {
-      await deleteScheduledTask(selectedProjectID, task.id);
+      if (task.loopFile) {
+        await deleteScheduledTaskLoopFile(selectedProjectID, task.id);
+      } else {
+        await deleteScheduledTask(selectedProjectID, task.id);
+      }
       await reloadTasks(selectedProjectID, { silent: true });
       toast.success(t('sessions.scheduledTasks.dialog.toast.deleted'));
     } catch (error) {
@@ -347,6 +357,24 @@ export function ScheduledTasksDialog() {
       setMutatingTaskID(null);
     }
   }, [selectedProjectID, reloadTasks, t]);
+
+  const handleEditTask = React.useCallback((task: ScheduledTask) => {
+    if (!task.loopFile) {
+      setEditorTask(task);
+      setEditorOpen(true);
+      return;
+    }
+    if (!selectedProject?.path) {
+      return;
+    }
+    setOpen(false);
+    if (isMobile) {
+      useFilesViewTabsStore.getState().setSelectedPath(selectedProject.path, task.loopFile, { allowOutsideRoot: true });
+      useUIStore.getState().setActiveMainTab('files');
+      return;
+    }
+    useUIStore.getState().openContextFile(selectedProject.path, task.loopFile);
+  }, [isMobile, selectedProject?.path, setOpen]);
 
   const handleRunNow = React.useCallback(async (task: ScheduledTask) => {
     if (!selectedProjectID) {
@@ -463,6 +491,14 @@ export function ScheduledTasksDialog() {
                   <div className="typography-micro truncate text-muted-foreground">
                     {formatSchedule(task, t)}
                   </div>
+                  {task.loopFile ? (
+                    <div
+                      className="typography-micro truncate text-muted-foreground/70"
+                      title={task.loopFile}
+                    >
+                      {t('sessions.scheduledTasks.dialog.loopFile.note', { file: task.loopFile })}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground">
@@ -551,10 +587,7 @@ export function ScheduledTasksDialog() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => {
-                        setEditorTask(task);
-                        setEditorOpen(true);
-                      }}
+                      onClick={() => handleEditTask(task)}
                       disabled={isBusy}
                       aria-label={t('sessions.scheduledTasks.dialog.actions.editAria', { taskName: task.name })}
                     >

@@ -9,6 +9,8 @@ import { EXIT_CODE, TunnelCliError } from './lib/cli-errors.js';
 import {
   resolveServeHost,
   hasUiPasswordConfigured,
+  generateUiPassword,
+  resolveServeUiPassword,
   assertAuthenticatedNetworkExposure,
 } from './lib/cli-network.js';
 import {
@@ -428,6 +430,8 @@ export {
   assertAuthenticatedNetworkExposure,
   resolveServeHost,
   hasUiPasswordConfigured,
+  generateUiPassword,
+  resolveServeUiPassword,
   shouldDisplayTunnelQr,
   isValidTunnelDoctorResponse,
   readDesktopLocalPortFromSettings,

@@ -6,6 +6,7 @@ type ConfigResponse = { data: Record<string, unknown> };
 
 const configResolvers: Array<(response: ConfigResponse) => void> = [];
 let configCalls = 0;
+let runtimeKey = 'test-runtime';
 const promptAsyncCalls: unknown[][] = [];
 const promptAsyncResults: Array<unknown> = [];
 
@@ -44,7 +45,7 @@ mock.module('@/lib/runtime-url', () => ({
 
 mock.module('@/lib/runtime-switch', () => ({
   getRuntimeApiBaseUrl: mock(() => ''),
-  getRuntimeKey: mock(() => 'test-runtime'),
+  getRuntimeKey: mock(() => runtimeKey),
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
@@ -60,6 +61,7 @@ mock.module('@/lib/startupTrace', () => ({
 const { opencodeClient } = await import(`./client?cache-test=${Date.now()}`);
 
 beforeEach(() => {
+  runtimeKey = 'test-runtime';
   promptAsyncCalls.length = 0;
   promptAsyncResults.length = 0;
 });
@@ -159,5 +161,35 @@ describe('opencodeClient prompt retry behavior', () => {
 
     expect(promptAsyncCalls.length).toBe(1);
     expect(error instanceof Error ? error.message : String(error)).toContain('Failed to send message (503)');
+  });
+
+  test('does not dispatch after the runtime changes while preparing attachments', async () => {
+    runtimeKey = 'runtime-a';
+    const pending = opencodeClient.sendMessage({
+      id: 'ses_runtime_race',
+      providerID: 'runtime-race-provider',
+      modelID: 'model-a',
+      text: 'hello',
+      runtimeKey: 'runtime-a',
+      files: [{
+        type: 'file',
+        mime: 'text/markdown',
+        filename: 'notes.md',
+        url: 'data:text/markdown,hello',
+      }],
+    });
+
+    runtimeKey = 'runtime-b';
+
+    let error: unknown = null;
+    try {
+      await pending;
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error instanceof Error ? error.message : String(error)).toContain('runtime changed');
+    expect(promptAsyncCalls).toHaveLength(0);
   });
 });
