@@ -71,8 +71,9 @@ A second, independent OpenCode bug sits behind this one: `SessionProcessor` has 
 `case "file"`, so an image returned as Gemini `inlineData` is discarded and never
 becomes a message part. The two are sequential — the fix above lets the request
 through, and that one makes the result visible. Fixing only the first yields a
-billed request whose image is silently dropped. anomalyco/opencode#40126 addresses
-it on the `v2` branch; `dev` is unfixed.
+billed request whose image is silently dropped. Submitted for `dev` as
+anomalyco/opencode#41468 (issue #41467); anomalyco/opencode#40126 covers the same
+gap on the `v2` branch, which does not reach `dev` releases.
 
 OpenChamber needs no change for either. The receive path is already type-agnostic:
 `file` is absent from `SKIP_PARTS` in `packages/ui/src/sync/event-reducer.ts`, the
