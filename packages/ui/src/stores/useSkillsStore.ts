@@ -14,6 +14,7 @@ import { noteDeferredRestartFromPayload } from "@/lib/opencode/deferredRestart";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 
 import { opencodeClient } from '@/lib/opencode/client';
+import { filterSkillsByRuntimeFlags } from './skillVisibility';
 
 // Prefer the active project path so Settings/Skills discovery matches the
 // project selector (and Commands/Agents). Falling back only to the session
@@ -291,7 +292,21 @@ export const useSkillsStore = create<SkillsStore>()(
                   renamable: s.renamable === true,
                 }));
 
-                set({ skills: configSkills, isLoading: false });
+                // OpenCode loads a narrower set than this scan finds, and the
+                // rules live in server-side env flags the browser cannot read.
+                // The route reports them; `filterSkillsByRuntimeFlags` mirrors
+                // OpenCode's discovery, including the `.agents`-wins dedup that
+                // matters when `.claude/skills` are symlinks back into it.
+                //
+                // Deliberately not OpenCode's own skill endpoint: measured
+                // against 1.18.14 it lists only global and builtin skills and
+                // omits the project skills the agent actually has.
+                const visibleSkills = filterSkillsByRuntimeFlags(
+                  configSkills,
+                  data.externalSkills ?? null,
+                );
+
+                set({ skills: visibleSkills, isLoading: false });
                 skillsLastLoadedAt.set(cacheKey, Date.now());
                 return true;
               } catch (error) {

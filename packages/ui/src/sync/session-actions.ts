@@ -26,6 +26,7 @@ import {
   type SessionMetadataRecord,
 } from "@/lib/sessionReviewMetadata"
 import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
+import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { getRuntimeKey } from "@/lib/runtime-switch"
@@ -789,6 +790,19 @@ export async function patchSessionMetadata(
   useGlobalSessionsStore.getState().upsertSession(updated)
   const sessionDirectory = (updated as { directory?: string | null }).directory ?? targetDirectory
   if (sessionDirectory) registerSessionDirectory(updated.id, sessionDirectory)
+  return updated
+}
+
+export async function setLinkedIssue(
+  sessionId: string,
+  directory: string | null | undefined,
+  issue: LinkedIssue,
+  linked: boolean,
+): Promise<Session> {
+  const updated = await patchSessionMetadata(sessionId, directory, (metadata) =>
+    withLinkedIssue(metadata, issue, linked))
+  const sessionDirectory = (updated as Session & { directory?: string | null }).directory ?? directory ?? undefined
+  mirrorSessionIntoLiveStores(updated, sessionDirectory ?? undefined)
   return updated
 }
 

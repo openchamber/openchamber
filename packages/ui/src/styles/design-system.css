@@ -16,6 +16,12 @@
     --oc-scrollbar-thumb: oklch(0.32 0.03 50 / 0.4);
     --oc-scrollbar-thumb-hover: oklch(0.32 0.03 50 / 0.6);
     --padding-scale: 1;
+    /* Shared glass surfaces. Semantic surface tokens provide each tint. */
+    --oc-glass-blur: 22px;
+    --oc-glass-opacity: 52%;
+    --oc-glass-popover-opacity: 50%;
+    --oc-glass-tooltip-opacity: 62%;
+    --oc-glass-saturation: 1.24;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */
     --text-markdown: 0.9375rem;
@@ -63,6 +69,11 @@
   }
 
   .dark {
+    --oc-glass-blur: 26px;
+    --oc-glass-opacity: 50%;
+    --oc-glass-popover-opacity: 52%;
+    --oc-glass-tooltip-opacity: 64%;
+    --oc-glass-saturation: 1.16;
     /* Default Dark Theme - using OKLCH color space */
     --background: oklch(0.16 0.01 30); /* #151313 */
     --foreground: oklch(0.85 0.02 90); /* #cdccc3 */
@@ -133,13 +144,6 @@
     background-color: var(--background) !important;
   }
 
-  :root.desktop-runtime[data-oc-vibrancy],
-  :root.desktop-runtime[data-oc-vibrancy] body,
-  :root.desktop-runtime[data-oc-vibrancy] #root {
-    background: transparent !important;
-    background-color: transparent !important;
-  }
-
   .font-sans {
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif) !important;
   }
@@ -197,6 +201,82 @@
     outline-offset: 2px !important;
     box-shadow: none !important;
   }
+}
+
+@layer components {
+  /* Shared translucent surfaces. Each variant only chooses its semantic tint;
+     blur, accessibility fallbacks, and floating-surface elevation stay common.
+     Utilities remain able to opt an individual consumer out. */
+  .oc-glass-popover,
+.oc-glass-tooltip,
+.oc-glass-panel {
+  background-color: color-mix(in srgb, var(--oc-glass-color) var(--oc-glass-opacity), transparent);
+  -webkit-backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
+  backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
+}
+
+.oc-glass-popover {
+  --oc-glass-color: var(--surface-elevated);
+  --oc-glass-opacity: var(--oc-glass-popover-opacity);
+}
+
+.oc-glass-tooltip {
+  --oc-glass-color: var(--surface-elevated);
+  --oc-glass-opacity: var(--oc-glass-tooltip-opacity);
+}
+
+.oc-glass-panel {
+  --oc-glass-color: var(--surface-muted);
+}
+
+.oc-glass-floating {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.8),
+    inset 0 0 0 1px rgb(0 0 0 / 0.04),
+    0 0 0 1px rgb(0 0 0 / 0.1),
+    0 1px 2px -0.5px rgb(0 0 0 / 0.08),
+    0 4px 8px -2px rgb(0 0 0 / 0.08),
+    0 12px 20px -4px rgb(0 0 0 / 0.08);
+}
+
+.dark .oc-glass-floating {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.12),
+    inset 0 0 0 1px rgb(255 255 255 / 0.08),
+    0 0 0 1px rgb(0 0 0 / 0.36),
+    0 1px 1px -0.5px rgb(0 0 0 / 0.22),
+    0 3px 3px -1.5px rgb(0 0 0 / 0.2),
+    0 6px 6px -3px rgb(0 0 0 / 0.16);
+}
+
+.oc-glass-backdrop {
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .oc-glass-popover,
+  .oc-glass-tooltip,
+  .oc-glass-panel {
+    background-color: var(--oc-glass-color);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .oc-glass-popover,
+  .oc-glass-tooltip,
+  .oc-glass-panel,
+  .oc-glass-backdrop {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .oc-glass-popover,
+  .oc-glass-tooltip,
+  .oc-glass-panel {
+    background-color: var(--oc-glass-color);
+  }
+}
 }
 
 @theme inline {
@@ -293,6 +373,16 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Surface layer tokens (Theme.colors.surface.*) */
+  --color-surface-background: var(--surface-background);
+  --color-surface-foreground: var(--surface-foreground);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-muted-foreground: var(--surface-muted-foreground);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-elevated-foreground: var(--surface-elevated-foreground);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-surface-subtle: var(--surface-subtle);
 
   /* Interactive state tokens (Theme.colors.interactive.*) */
   --color-interactive-hover: var(--interactive-hover);

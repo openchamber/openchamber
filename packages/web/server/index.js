@@ -1635,11 +1635,19 @@ async function main(options = {}) {
     // Relay demand = any paired device or pending pairing session that uses the
     // relay transport. Drives the auto on/off lifecycle.
     hasRelayDemand: async () => {
-      const [pendingRelay, deviceRelay] = await Promise.all([
-        clientPairingRuntime.hasActiveRelaySession().catch(() => false),
-        remoteClientAuthRuntime.hasActiveRelayClients().catch(() => false),
+      // A store read failure must NOT masquerade as "no demand": reconcile
+      // persists enabled=false and severs paired devices. Any affirmative
+      // answer wins; otherwise a failed check aborts reconcile (throw) so the
+      // relay keeps its current state until a trustworthy read succeeds.
+      const [pendingRelay, deviceRelay] = await Promise.allSettled([
+        clientPairingRuntime.hasActiveRelaySession(),
+        remoteClientAuthRuntime.hasActiveRelayClients(),
       ]);
-      return pendingRelay || deviceRelay;
+      if (pendingRelay.status === 'fulfilled' && pendingRelay.value) return true;
+      if (deviceRelay.status === 'fulfilled' && deviceRelay.value) return true;
+      if (pendingRelay.status === 'rejected') throw pendingRelay.reason;
+      if (deviceRelay.status === 'rejected') throw deviceRelay.reason;
+      return false;
     },
   });
   relayServiceInstance = relayService;

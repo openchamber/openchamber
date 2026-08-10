@@ -483,7 +483,7 @@ const FileDiffActions = React.memo<FileDiffActionsProps>(({
 }) => {
     const { t } = useI18n();
     return (
-        <div className="flex items-center gap-0.5 rounded-full border border-[var(--interactive-border)]/45 bg-[var(--surface-background)]/95 px-1 py-0.5 shadow-lg backdrop-blur-md">
+        <div className="flex items-center gap-0.5 rounded-full border border-[var(--interactive-border)]/45 bg-[var(--surface-background)]/95 px-1 py-0.5 shadow-sm backdrop-blur-md">
             {staged ? (
                 <FileDiffActionButton
                     label={t('gitView.changes.unstageFileAria', { path: filePath })}

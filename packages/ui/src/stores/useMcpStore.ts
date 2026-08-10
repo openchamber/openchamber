@@ -177,6 +177,7 @@ export const useMcpStore = create<McpStore>()(
       return authorizationUrl;
     },
 
+
     completeAuth: async (name, code, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const api = getMcpApiClient(normalized);
@@ -188,6 +189,14 @@ export const useMcpStore = create<McpStore>()(
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const api = getMcpApiClient(normalized);
       await api.mcp.auth.remove({ name }, { throwOnError: true });
+
+      // Removing the stored tokens does not touch the live session, so the
+      // server kept reporting `connected` until something forced a reconnect —
+      // the user had to run a connection test to see that authorization was
+      // gone. Dropping the connection makes the reported state match the
+      // credentials that remain.
+      await api.mcp.disconnect({ name }).catch(() => undefined);
+
       await get().refresh({ directory: normalized, silent: true });
     },
 

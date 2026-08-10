@@ -27,6 +27,7 @@
 ### Components
 
 - `SidebarHeader.tsx`: Top header UI for add-project, session search, selection mode, project sort, and the display menu (recent toggle, collapse/expand all).
+- A successful add/create/clone from the project-directory dialog transitions to a new-session draft targeted at that project, matching the project's `+` action; changing project metadata alone must not leave the visible session or draft on a different directory.
 - `SidebarNav.tsx`: Text navigation rows above the tree (New session, Scheduled, Multi-run, Archive); hidden in VS Code.
 - `SidebarActivitySections.tsx`: Global top section renderer; currently used for the `recent` section only, styled as a zone header.
 - `SidebarFooter.tsx`: Static footer with icon-only settings, shortcuts, and about actions.

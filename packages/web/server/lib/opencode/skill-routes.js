@@ -1,6 +1,16 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { buildDeferredRestartResponse } from './config-mutation-response.js';
 
+/**
+ * Matches how OpenCode reads its own boolean env flags: any value other than
+ * unset, empty, "0" or "false" enables the flag.
+ */
+const isEnvFlagEnabled = (value) => {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 && normalized !== '0' && normalized !== 'false';
+};
+
 export const registerSkillRoutes = (app, dependencies) => {
   const {
     fs,
@@ -250,7 +260,24 @@ export const registerSkillRoutes = (app, dependencies) => {
         };
       });
 
-      res.json({ skills: enrichedSkills });
+      // OpenCode decides which external skill roots it loads from process
+      // env, and the browser cannot read that. Report the flags alongside the
+      // scan so the client can narrow its list to what the agent can actually
+      // invoke.
+      //
+      // OpenCode's own skill-list endpoint is not usable for this: on 1.18.14
+      // it returns only global and builtin skills, omitting the project
+      // `.agents`/`.claude` skills the agent demonstrably has.
+      res.json({
+        skills: enrichedSkills,
+        externalSkills: {
+          // `OPENCODE_DISABLE_CLAUDE_CODE` is the broad switch; the specific
+          // one wins independently — OpenCode ORs them.
+          claudeDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_CLAUDE_CODE)
+            || isEnvFlagEnabled(process.env.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS),
+          allDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_EXTERNAL_SKILLS),
+        },
+      });
     } catch (error) {
       console.error('Failed to list skills:', error);
       res.status(500).json({ error: 'Failed to list skills' });

@@ -11,7 +11,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
@@ -146,6 +148,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const homeDirectory = useDirectoryStore((s) => s.homeDirectory);
   const projects = useProjectsStore((s) => s.projects);
   const addProject = useProjectsStore((s) => s.addProject);
+  const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
+  const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
+  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const gitIdentityProfiles = useGitIdentitiesStore((s) => s.profiles);
   const globalGitIdentity = useGitIdentitiesStore((s) => s.globalIdentity);
   const defaultGitIdentityId = useGitIdentitiesStore((s) => s.defaultGitIdentityId);
@@ -405,17 +410,26 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     onOpenChange(false);
   }, [onOpenChange]);
 
+  const openProjectDraft = React.useCallback((projectId: string, projectPath: string) => {
+    setActiveMainTab('chat');
+    if (isMobile) setSessionSwitcherOpen(false);
+    openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: projectPath });
+    handleClose();
+  }, [handleClose, isMobile, openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
+
   const handleQuickAdd = React.useCallback((event: React.MouseEvent, path: string) => {
     event.stopPropagation();
     const normalized = normalizeDirectoryPath(path);
     if (normalized && addedProjectPaths.has(normalized)) return;
-    const added = addProject(path);
-    if (!added) {
+    const project = addProject(path);
+    if (!project) {
       toast.error(t('directoryExplorerDialog.toast.failedToAddProject'), {
         description: t('directoryExplorerDialog.toast.selectValidDirectoryPath'),
       });
+      return;
     }
-  }, [addProject, addedProjectPaths, t]);
+    openProjectDraft(project.id, project.path);
+  }, [addProject, addedProjectPaths, openProjectDraft, t]);
 
   const finalizeSelection = React.useCallback(async (target: string) => {
     if (!target || isConfirming) return;
@@ -439,16 +453,16 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         });
         selectedTarget = result.path;
       } else if (shouldCreateSelection) {
-        await opencodeClient.createDirectory(target);
+        await opencodeClient.createDirectory(target, { asProject: true });
       }
-      const added = addProject(selectedTarget);
-      if (!added) {
+      const project = addProject(selectedTarget);
+      if (!project) {
         toast.error(t('directoryExplorerDialog.toast.failedToAddProject'), {
           description: t('directoryExplorerDialog.toast.selectValidDirectoryPath'),
         });
         return;
       }
-      handleClose();
+      openProjectDraft(project.id, project.path);
     } catch (error) {
       toast.error(t('directoryExplorerDialog.toast.failedToSelectDirectory'), {
         description: error instanceof Error ? error.message : t('directoryExplorerDialog.toast.unknownError'),
@@ -456,7 +470,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     } finally {
       setIsConfirming(false);
     }
-  }, [addProject, addedProjectPaths, cloneRemoteUrl, handleClose, isCloneMode, isConfirming, selectedGitIdentity?.id, shouldCreateTarget, targetPath, t]);
+  }, [addProject, addedProjectPaths, cloneRemoteUrl, isCloneMode, isConfirming, openProjectDraft, selectedGitIdentity?.id, shouldCreateTarget, targetPath, t]);
 
   const browseToDisplayPath = React.useCallback((displayPath: string) => {
     setQuery(ensureBrowseDirectoryPath(displayPath));

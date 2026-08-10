@@ -46,6 +46,14 @@ describe('composerEditorTheme', () => {
         expect(rule.borderLeftColor.startsWith('var(--')).toBe(true);
     });
 
+    test('the drawn caret is wide enough to remain prominent', () => {
+        const cursorRule = selectors.find((selector) => selector.includes('.cm-cursor'));
+        const rule = (COMPOSER_EDITOR_THEME_SPEC as Record<string, Record<string, string>>)[cursorRule!];
+        expect(rule.borderLeftWidth).toBe('2px');
+        expect(rule.transform).toBe('scaleY(1.15)');
+        expect(rule.transformOrigin).toBe('center');
+    });
+
     /**
      * CodeMirror's own `.cm-cursor` rule and its `&dark` override are one and
      * two classes deep respectively; a bare `.cm-cursor` selector loses to the
