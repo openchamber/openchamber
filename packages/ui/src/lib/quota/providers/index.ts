@@ -24,4 +24,5 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'crof', name: 'CrofAI' },
   { id: 'deepseek', name: 'DeepSeek' },
   { id: 'neuralwatt', name: 'NeuralWatt' },
+  { id: 'xai', name: 'xAI' },
 ];

@@ -16,6 +16,7 @@ import {
 } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
+import { buildLinkedIssue } from '@/lib/linkedIssues';
 import { useUserMessageHistory } from "@/sync/sync-context";
 import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
@@ -1227,6 +1228,45 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         void sendPromise.then(() => {
+            // Record what this session was pointed at, so the work-status panel
+            // can show it as a context source long after the message scrolled
+            // away. A snapshot only — never re-fetched, never authoritative.
+            // Failures are swallowed: the message went out, and a missing
+            // bookkeeping entry must not surface as a send error.
+            const attachedThread = linkedIssue
+                ? { attachment: linkedIssue, kind: 'issue' as const }
+                : linkedPr
+                    ? { attachment: linkedPr, kind: 'pull' as const }
+                    : null;
+            // On a draft there is no session yet in this closure: the send path
+            // creates one and makes it current before resolving, so the id is
+            // read from the store. The fallback is used only when the closure
+            // had no session at all, so a mid-send session switch cannot
+            // redirect the write to an unrelated session.
+            const sessionState = useSessionUIStore.getState();
+            const linkTargetSessionId = currentSessionId ?? sessionState.currentSessionId;
+            const linkTargetDirectory = currentSessionId
+                ? currentSessionDirectoryForSync ?? currentDirectory
+                : sessionState.currentSessionDirectory
+                    ?? (linkTargetSessionId ? sessionState.getDirectoryForSession(linkTargetSessionId) : null)
+                    ?? currentDirectory;
+
+            if (attachedThread && linkTargetSessionId) {
+                void sessionActions.setLinkedIssue(
+                    linkTargetSessionId,
+                    linkTargetDirectory,
+                    buildLinkedIssue({
+                        url: attachedThread.attachment.url,
+                        number: attachedThread.attachment.number,
+                        title: attachedThread.attachment.title,
+                        kind: attachedThread.kind,
+                        author: attachedThread.attachment.author,
+                        linkedAt: Date.now(),
+                    }),
+                    true,
+                ).catch(() => undefined);
+            }
+
             // Clear linked issue after successful message send
             if (linkedIssue) {
                 setLinkedIssue(null);
@@ -2221,6 +2261,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const footerGapClass = 'gap-x-1.5 gap-y-0';
     const isVSCode = isVSCodeRuntime();
+    // The work-status panel carries the agent's todos and the changed-file
+    // count, but only on the desktop/web layout — VS Code and mobile have no
+    // panel, so these keep their place above the composer there.
+    const composerStatusExtrasEnabled = isVSCode || isMobile;
     const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
 
     // Which project and directory a new session will target.
@@ -2485,8 +2529,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 <MemoStatusRow
                     showAbortStatus={showAbortStatus}
                     showAssistantStatus={false}
-                    showTodos
-                    leftAccessory={newSessionDraftOpen || !hasPendingChanges ? null : <PendingChangesBar />}
+                    showTodos={composerStatusExtrasEnabled}
+                    leftAccessory={!composerStatusExtrasEnabled || newSessionDraftOpen || !hasPendingChanges
+                        ? null
+                        : <PendingChangesBar />}
                 />
                 {!isMobile && showDraftTargetSelectors && selectedDraftProject ? (
                     <DraftTargetSelectors

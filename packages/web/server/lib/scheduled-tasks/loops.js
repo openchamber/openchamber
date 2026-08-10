@@ -40,7 +40,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { parseMdFile, getAncestors, findWorktreeRoot } from '../opencode/shared.js';
+import { parseMdFile, writeMdFile, getAncestors, findWorktreeRoot } from '../opencode/shared.js';
 import { MAX_TASK_NAME_LENGTH } from '../projects/project-config.js';
 
 const LOOP_DIR_NAME = 'loops';
@@ -138,6 +138,15 @@ export const parseLoopDefinition = (filePath) => {
       ...(agent ? { agent } : {}),
     },
   };
+};
+
+export const setLoopFileEnabled = (filePath, enabled) => {
+  if (!parseLoopDefinition(filePath)) {
+    return false;
+  }
+  const { frontmatter, body } = parseMdFile(filePath);
+  writeMdFile(filePath, { ...frontmatter, enabled: Boolean(enabled) }, body);
+  return true;
 };
 
 const walkLoopMdFiles = (rootDir) => {

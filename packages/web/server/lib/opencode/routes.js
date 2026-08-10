@@ -357,6 +357,11 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const entry = {
         name,
         directory: normalizePendingString(req.body?.directory),
+        // Which surface started the flow. It belongs here rather than in the
+        // redirect URI: that URI is written into the server's config once and
+        // deliberately never rewritten, so anything encoded in it would be
+        // frozen at whatever runtime authorised first.
+        origin: normalizePendingString(req.body?.origin),
         expiresAt: Date.now() + PENDING_MCP_AUTH_TTL_MS,
       };
       pendingMcpAuthContextByState.set(state, entry);
@@ -366,6 +371,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         context: {
           name: entry.name,
           directory: entry.directory,
+          origin: entry.origin,
         },
       });
     } catch (error) {

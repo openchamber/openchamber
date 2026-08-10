@@ -2193,6 +2193,23 @@ const dispatchDeepLink = (link) => {
     log.warn('[electron] invalid connect deep-link payload');
     return;
   }
+  // Sent by the MCP OAuth callback page after it completes authorization in
+  // the system browser. The work is already done server-side; all this has to
+  // do is bring the app back to the front, since the user's attention is in a
+  // browser tab at that moment.
+  if (link.type === 'focus') {
+    const target = state.mainWindow && !state.mainWindow.isDestroyed()
+      ? state.mainWindow
+      : BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
+    if (target) {
+      if (target.isMinimized()) target.restore();
+      target.show();
+      target.focus();
+    }
+    emitToAllWindows('openchamber:deep-link-focus', { reason: link.value || null });
+    return;
+  }
+
   if (link.type === 'session' && link.value) {
     emitToAllWindows('openchamber:open-session', { sessionId: link.value });
     return;
@@ -3688,6 +3705,22 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
   switch (command) {
     case 'desktop_start_window_drag':
       return null;
+
+    // Used after an MCP authorization finishes in the system browser: the app
+    // raises itself rather than relying on the browser to hand control back.
+    // A browser will not follow a custom-protocol link without a user gesture,
+    // and the completion page has none.
+    case 'desktop_focus_window': {
+      const target = browserWindow && !browserWindow.isDestroyed()
+        ? browserWindow
+        : (state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null);
+      if (!target) return false;
+      if (target.isMinimized()) target.restore();
+      target.show();
+      target.focus();
+      app.focus?.({ steal: true });
+      return true;
+    }
 
     case 'desktop_is_window_fullscreen':
       return Boolean(browserWindow?.isFullScreen());

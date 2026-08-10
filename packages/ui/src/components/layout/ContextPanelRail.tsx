@@ -120,7 +120,14 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             ) : displayBadgeCount ? (
               <span
                 aria-hidden="true"
-                className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-muted px-1 text-[0.625rem] font-medium leading-none text-muted-foreground"
+                // Muted digits on the muted surface sat at almost the same
+                // luminance as the glyph they overlap. The count is a live
+                // signal, so it takes the info tone on its own opaque chip.
+                className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-semibold leading-none"
+                style={{
+                  backgroundColor: 'var(--status-info-background)',
+                  color: 'var(--status-info)',
+                }}
               >
                 {displayBadgeCount}
               </span>
@@ -152,6 +159,7 @@ export const ContextPanelRail: React.FC = () => {
   const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
 
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
+  const workStatusPanelVisible = useUIStore((state) => state.workStatusPanelVisible);
   const contextRailOrder = useUIStore((state) => state.contextRailOrder);
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
@@ -286,7 +294,9 @@ export const ContextPanelRail: React.FC = () => {
             const label = t(surface.labelKey);
             // Git shows a numeric badge instead of the old activity dot.
             // Other surfaces never inherit git's changed-files signal.
-            const gitChangedCount = surface.id === 'git' ? changedFilesCount : 0;
+            // The work-status panel reports the same count in words a few
+            // pixels away; two live counts for one fact is one too many.
+            const gitChangedCount = surface.id === 'git' && !workStatusPanelVisible ? changedFilesCount : 0;
             const badgeCount = gitChangedCount > 0 ? gitChangedCount : null;
             return (
               <ContextPanelRailItem
