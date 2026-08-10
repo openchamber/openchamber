@@ -13,7 +13,7 @@ import { WorkStatusMcpSection } from './WorkStatusMcpSection';
 import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
 import { WorkStatusContextSection } from './WorkStatusContextSection';
 import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog';
-import { WORK_STATUS_SECTION_IDS, isWorkStatusSectionVisible } from './sections';
+import { areAllWorkStatusSectionsHidden, isWorkStatusSectionVisible } from './sections';
 import { WorkStatusPresenceProvider } from './presence';
 import { Icon } from '@/components/icon/Icon';
 
@@ -88,7 +88,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   // re-enable sections. The previous `renderedSections > 0` guard is preserved
   // for the transient "no data yet" state so the panel doesn't flash a bare
   // bordered card on first mount.
-  const allSectionsHidden = hiddenSections.length >= WORK_STATUS_SECTION_IDS.length;
+  const allSectionsHidden = areAllWorkStatusSectionsHidden(hiddenSections);
   const interactive = visible && (renderedSections > 0 || allSectionsHidden);
   React.useEffect(() => {
     if (visible) {
@@ -259,7 +259,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
             onClick={() => setSectionsDialogOpen(true)}
             className="mt-2 text-xs text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
           >
-            {t('chat.workStatus.sections.chooseLabel')}
+            {t('chat.workStatus.sections.open')}
           </button>
         </div>
       ) : null}

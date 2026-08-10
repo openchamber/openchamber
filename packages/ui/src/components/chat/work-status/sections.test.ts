@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   WORK_STATUS_SECTION_IDS,
   WORK_STATUS_SECTION_LABEL_KEYS,
+  areAllWorkStatusSectionsHidden,
   isWorkStatusSectionVisible,
   sanitizeWorkStatusHiddenSections,
 } from './sections';
@@ -27,6 +28,37 @@ describe('isWorkStatusSectionVisible', () => {
   test('hides exactly the listed section', () => {
     expect(isWorkStatusSectionVisible(['usage'], 'usage')).toBe(false);
     expect(isWorkStatusSectionVisible(['usage'], 'tasks')).toBe(true);
+  });
+});
+
+describe('areAllWorkStatusSectionsHidden', () => {
+  test('returns false when no sections are hidden', () => {
+    expect(areAllWorkStatusSectionsHidden([])).toBe(false);
+  });
+
+  test('returns false for null and undefined', () => {
+    expect(areAllWorkStatusSectionsHidden(null)).toBe(false);
+    expect(areAllWorkStatusSectionsHidden(undefined)).toBe(false);
+  });
+
+  test('returns false when only some sections are hidden', () => {
+    expect(areAllWorkStatusSectionsHidden(['usage', 'tasks'])).toBe(false);
+  });
+
+  test('returns true when every known section is hidden', () => {
+    expect(areAllWorkStatusSectionsHidden([...WORK_STATUS_SECTION_IDS])).toBe(true);
+  });
+
+  test('ignores stale ids that are no longer in the section list', () => {
+    // A future section-ID removal should not trick the length check into
+    // reporting all-hidden when real sections are still visible.
+    const withStale = [...WORK_STATUS_SECTION_IDS.slice(0, -1), 'removed_section'];
+    expect(areAllWorkStatusSectionsHidden(withStale)).toBe(false);
+  });
+
+  test('returns true even with extra stale ids alongside all real ones', () => {
+    const withExtra = [...WORK_STATUS_SECTION_IDS, 'removed_section'];
+    expect(areAllWorkStatusSectionsHidden(withExtra)).toBe(true);
   });
 });
 

@@ -12,6 +12,7 @@ import {
 import {
   WORK_STATUS_SECTION_IDS,
   WORK_STATUS_SECTION_LABEL_KEYS,
+  areAllWorkStatusSectionsHidden,
   isWorkStatusSectionVisible,
 } from './sections';
 
@@ -32,7 +33,7 @@ export const WorkStatusSectionsDialog: React.FC<{
   const setHiddenSections = useUIStore((state) => state.setWorkStatusHiddenSections);
 
   const allVisible = hidden.length === 0;
-  const noneVisible = hidden.length >= WORK_STATUS_SECTION_IDS.length;
+  const noneVisible = areAllWorkStatusSectionsHidden(hidden);
 
   const handleShowAll = () => setHiddenSections([]);
 

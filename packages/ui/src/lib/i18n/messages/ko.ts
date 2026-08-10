@@ -3004,7 +3004,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.sections.dialogTitle': '패널 섹션',
   'chat.workStatus.sections.dialogDescription': '작업 상태 패널에 표시할 항목을 선택하세요. 숨긴 섹션도 데이터는 유지되며 패널에만 나타나지 않습니다.',
   'chat.workStatus.sections.allHidden': '선택된 섹션 없음',
-  'chat.workStatus.sections.chooseLabel': '섹션 선택',
   'chat.workStatus.sections.showAll': '모두 표시',
   'chat.workStatus.sections.noneWarning': '패널이 비어 보입니다.',
   'header.workStatusPanel.toggleAria': '작업 상태 패널 전환',

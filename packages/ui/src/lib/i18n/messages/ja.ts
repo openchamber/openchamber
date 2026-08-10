@@ -3004,7 +3004,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.sections.dialogTitle': 'パネルのセクション',
   'chat.workStatus.sections.dialogDescription': '作業状況パネルに表示する内容を選びます。非表示のセクションもデータは保持され、表示されないだけです。',
   'chat.workStatus.sections.allHidden': 'セクションが選択されていません',
-  'chat.workStatus.sections.chooseLabel': 'セクションを選択',
   'chat.workStatus.sections.showAll': 'すべて表示',
   'chat.workStatus.sections.noneWarning': 'パネルが空で表示されます。',
   'header.workStatusPanel.toggleAria': '作業状況パネルを切り替え',

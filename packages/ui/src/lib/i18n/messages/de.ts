@@ -3002,7 +3002,6 @@ export const dict = {
   'chat.workStatus.sections.dialogTitle': 'Panel-Abschnitte',
   'chat.workStatus.sections.dialogDescription': 'Wähle, was das Arbeitsstatus-Panel zeigt. Ausgeblendete Abschnitte behalten ihre Daten und werden nur nicht angezeigt.',
   'chat.workStatus.sections.allHidden': 'Keine Abschnitte ausgewählt',
-  'chat.workStatus.sections.chooseLabel': 'Abschnitte auswählen',
   'chat.workStatus.sections.showAll': 'Alle anzeigen',
   'chat.workStatus.sections.noneWarning': 'Das Panel wird leer angezeigt.',
   'header.workStatusPanel.toggleAria': 'Arbeitsstatus-Panel umschalten',

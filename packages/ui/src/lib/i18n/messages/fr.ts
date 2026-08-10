@@ -3002,7 +3002,6 @@ export const dict = {
   'chat.workStatus.sections.dialogTitle': 'Sections du panneau',
   'chat.workStatus.sections.dialogDescription': 'Choisis ce qu\'affiche le panneau d\'état. Les sections masquées conservent leurs données, elles sont seulement absentes du panneau.',
   'chat.workStatus.sections.allHidden': 'Aucune section sélectionnée',
-  'chat.workStatus.sections.chooseLabel': 'Choisir les sections',
   'chat.workStatus.sections.showAll': 'Tout afficher',
   'chat.workStatus.sections.noneWarning': 'Le panneau apparaîtra vide.',
   'header.workStatusPanel.toggleAria': 'Basculer le panneau d\'état',

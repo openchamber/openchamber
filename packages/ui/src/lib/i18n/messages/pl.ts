@@ -3021,7 +3021,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.sections.dialogTitle': 'Sekcje panelu',
   'chat.workStatus.sections.dialogDescription': 'Wybierz, co pokazuje panel stanu pracy. Ukryte sekcje zachowują swoje dane — po prostu nie są wyświetlane.',
   'chat.workStatus.sections.allHidden': 'Nie wybrano żadnych sekcji',
-  'chat.workStatus.sections.chooseLabel': 'Wybierz sekcje',
   'chat.workStatus.sections.showAll': 'Pokaż wszystkie',
   'chat.workStatus.sections.noneWarning': 'Panel będzie wyświetlany jako pusty.',
   'header.workStatusPanel.toggleAria': 'Przełącz panel stanu pracy',

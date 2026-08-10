@@ -3005,7 +3005,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.sections.dialogTitle': 'Секції панелі',
   'chat.workStatus.sections.dialogDescription': 'Обери, що показує панель стану роботи. Приховані секції зберігають свої дані — вони просто не відображаються.',
   'chat.workStatus.sections.allHidden': 'Жодної секції не вибрано',
-  'chat.workStatus.sections.chooseLabel': 'Обрати секції',
   'chat.workStatus.sections.showAll': 'Показати всі',
   'chat.workStatus.sections.noneWarning': 'Панель відображатиметься порожньою.',
   'header.workStatusPanel.toggleAria': 'Перемкнути панель стану роботи',

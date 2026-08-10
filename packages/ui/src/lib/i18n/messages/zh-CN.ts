@@ -3005,7 +3005,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.sections.dialogTitle': '面板板块',
   'chat.workStatus.sections.dialogDescription': '选择工作状态面板显示的内容。隐藏的板块仍保留数据，只是不再显示。',
   'chat.workStatus.sections.allHidden': '未选择任何部分',
-  'chat.workStatus.sections.chooseLabel': '选择部分',
   'chat.workStatus.sections.showAll': '全部显示',
   'chat.workStatus.sections.noneWarning': '面板将显示为空。',
   'header.workStatusPanel.toggleAria': '切换工作状态面板',
