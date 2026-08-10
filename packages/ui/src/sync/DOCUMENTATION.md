@@ -249,8 +249,6 @@ Rules:
 6. After session creation, the directory returned by the server is authoritative over the requested draft directory. The server may canonicalize a worktree path, and the first prompt must use the same directory identity as the created session.
 7. A prompt send that fails **after** the request left the client is ambiguous, never a definite failure: the server may already be answering it. Transports tag those errors (`markAmbiguousTransportFailure` in `@/lib/relay/transport-error`; the relay tunnel tags every stream that dies with a request in flight), and `isAmbiguousSendFailure` reads the tag before falling back to status/text heuristics. An ambiguous failure waits for the connection to return, refetches recent messages, and confirms the optimistic message in place instead of rolling it back — rolling it back lets the message queue re-send a prompt the engine is already running, producing two independent AI responses for one user message.
 
-8. Every normal prompt send carries a `tools` map from `agent-tool-gate.ts` — `{"*": false}` when the selected model cannot call tools, `{"*": true}` otherwise. OpenCode declares tools regardless of model capability, and providers such as Vertex reject a request carrying any function declaration, so the whole set is gated rather than individual tools. The map is always complete: OpenCode stores it on the user message *and* replaces the session's permission ruleset with it, so a partial map would strand tools disabled for the rest of the session. Slash-command and shell sends cannot carry the field — the OpenCode API has no `tools` on those routes.
-
 Examples of global-store updates performed in `session-actions.ts`:
 
 - `createSession()` -> `upsertSession(session)`

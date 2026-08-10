@@ -28,77 +28,38 @@ restart).
    required inputs or one non-obvious behavior, while completed calls use the
    short title in native tool metadata.
 
-## Per-send model gating
+## Models that cannot call tools
 
-Injection happens once per managed OpenCode process, before any model is known,
-so this tool — like every OpenCode built-in — is declared to models that cannot
-call tools. `capabilities.toolcall` is populated from config but never read in
-OpenCode's request path. Providers that reject function calling outright then
-fail every send: Vertex Gemini image models return `Unable to submit request
-because the model does not support function calling`.
+OpenCode declares every registered tool to the provider regardless of the
+selected model: `capabilities.toolcall` is populated from config but never read in
+the request path. Providers that reject function calling outright therefore fail
+every send. Vertex Gemini image models ("Nano Banana") return
+`Unable to submit request because the model does not support function calling`.
 
-That rejection is triggered by the presence of *any* `functionDeclarations`, so
-suppressing only `openchamber` does not fix it — the stock agents begin with
-`"*": "allow"`, so a dozen built-ins still reach the provider. Shared UI
-therefore gates the whole set per send: `resolveAgentToolGate`
-(`packages/ui/src/sync/agent-tool-gate.ts`) maps the selected model's
-`capabilities.toolcall` to `{"*": false}` or `{"*": true}`. The deny drops the
-`tools` field from the provider request entirely; the allow restores every tool,
-including this module's injected one.
+This tool makes the problem unavoidable through configuration alone. Stock agents
+begin with `"*": "allow"`, and a user who denies every tool by name still cannot
+name `openchamber`, because nothing in the UI reveals that it exists. The only
+working user-side workaround is a hand-written agent with `permission: {"*": deny}`.
 
-`tools` does two things in OpenCode, and both matter here. It is stored on the
-user message and filters that request, and it also **replaces** the session's
-permission ruleset and persists it. Because of the second effect, clients send
-the complete desired map on every send, never a partial patch, so switching
-models self-corrects.
+**There is no safe client-side fix.** The lever OpenCode exposes is the per-send
+`tools` map, which it converts into the session permission ruleset and persists,
+replacing prior contents. Every variant fails:
 
-Constraints and consequences:
+- `{"openchamber": false}` removes one declaration; the ~11 stock built-ins still
+  reach the provider, so the rejection stands.
+- `{"*": false}` does suppress the whole set, but the deny persists: later sends
+  on a tool-calling model in that session also get no tools.
+- `{"*": true}` to recover is a privilege escalation. A rule is evaluated for
+  approval as well as for filtering, so a wildcard allow turns an agent's
+  `edit: deny` into `allow` and `bash: ask` into `allow`, suppressing the
+  approval prompt. Suppressing tools must never widen permissions.
+- `session.update` accepts `permission` but merges rather than replaces, so it
+  cannot clear a deny either.
 
-- Replacement is wholesale rather than a merge, so OpenChamber assumes sole
-  ownership of the session permission ruleset on this path. OpenChamber writes
-  session permissions nowhere else (`opencodeClient.updateSession` whitelists
-  `title`, `metadata`, and `time.archived`), and its own auto-accept and
-  scheduled-task policies are OpenChamber-side settings rather than session
-  rules — but a rule set on the same session by another OpenCode client is
-  discarded by the next send from OpenChamber.
-- The gate is independent of `agentControlToolEnabled` and of whether this module
-  injected anything, because it governs every tool rather than only this one. It
-  is therefore correct in runtimes where the control tool is never injected
-  (VS Code, external OpenCode) — see Runtime parity below.
-- Unknown capability is treated as tool-capable: metadata may not have loaded
-  yet, and defaulting to disabled would strip tools from models that support
-  them. The cost is that the rejection can still occur on a send that races
-  metadata loading.
-- Subagent sessions inherit `deny` rules from their parent, so a subagent spawned
-  while an image model was selected starts with tools denied even if its own
-  model could use them. The child ruleset is derived once at spawn.
-- Because the ruleset persists, a session left denied by an image-model send
-  stays denied for later server-side dispatches into that session (scheduled
-  tasks, goal continuations) until the next gated send restores it.
-- Upstream marks `tools` `@deprecated` in favour of setting permissions on the
-  session. The non-deprecated `session.update` path merges instead of replacing,
-  so it could never flip a deny back to allow; this field is the only lever that
-  self-corrects.
-
-Only the normal prompt path is gated. `session.command` (slash commands) and
-`session.shell` accept no `tools` field in the OpenCode API at all, and a
-command's own pinned model outranks the model the client sends, so a command
-bound to a non-tool-calling model still reaches the provider ungated. Server-side
-dispatchers that post `prompt_async` directly (scheduled tasks, goal
-continuations, obligatory context) are also ungated, though they inherit whatever
-ruleset the last gated send persisted.
-
-This is a client-side mitigation for the paths OpenChamber controls, not a
-complete fix. The complete fix belongs upstream: OpenCode already knows
-`capabilities.toolcall` and could return no tools when the selected model cannot
-call them, which would cover every send path for every client.
-
-## Runtime parity for the gate
-
-The gate runs wherever the shared send path runs, including runtimes where this
-module injects nothing. That is intentional: it governs all tools, so it is
-meaningful even without the control tool present, and the client cannot know
-whether the running OpenCode process loaded the plugin.
+The fix belongs upstream, where the capability is already known: return no tools
+when `!model.capabilities.toolcall`. That covers every send path for every client
+with no permission side effects. Until then, `session.command` and `session.shell`
+could not be covered anyway — the OpenCode API has no `tools` field on either.
 
 ## Agent context budget
 
@@ -160,6 +121,3 @@ error state.
 - VS Code: not injected; the extension owns a separate OpenCode lifecycle.
 - Hosted and Capacitor mobile clients use the server's managed OpenCode tool
   when connected to such a server; no tool runs in the client runtime.
-
-The per-send tool gate is deliberately *not* conditioned on any of the above —
-see "Runtime parity for the gate" under Per-send model gating.

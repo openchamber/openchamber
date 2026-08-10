@@ -25,7 +25,6 @@ import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { useCommandsStore } from "@/stores/useCommandsStore"
 import { useSkillsStore } from "@/stores/useSkillsStore"
-import { resolveAgentToolGate } from "./agent-tool-gate"
 import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { normalizePath } from "@/lib/pathNormalization"
@@ -217,12 +216,6 @@ export function routeMessage(params: {
       additionalParts: params.additionalParts,
       delivery: params.delivery,
       messageId: messageID,
-      // Resolved at send time, not captured: the user can switch models between
-      // composing and sending, and the map must describe the model that will
-      // actually run.
-      tools: resolveAgentToolGate({
-        modelSupportsToolCalls: useConfigStore.getState().getModelMetadata(params.providerID, params.modelID)?.tool_call,
-      }),
       directory: requestDirectory,
     }).then(() => {}),
   })
