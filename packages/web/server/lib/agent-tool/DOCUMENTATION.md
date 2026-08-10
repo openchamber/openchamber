@@ -58,8 +58,14 @@ replacing prior contents. Every variant fails:
 
 The fix belongs upstream, where the capability is already known: return no tools
 when `!model.capabilities.toolcall`. That covers every send path for every client
-with no permission side effects. Until then, `session.command` and `session.shell`
-could not be covered anyway — the OpenCode API has no `tools` field on either.
+with no permission side effects. A client-side fix could not have covered
+`session.command` or `session.shell` regardless — the OpenCode API has no `tools`
+field on either route.
+
+Submitted upstream as anomalyco/opencode#41463 (issue #41464). Once a release
+carrying it is out, image models work with any agent and this section is history
+rather than an active constraint; until then the only user-side workaround is the
+wildcard-deny agent above.
 
 ## Agent context budget
 
