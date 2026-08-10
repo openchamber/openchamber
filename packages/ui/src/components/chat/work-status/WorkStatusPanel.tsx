@@ -85,9 +85,11 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   // Hidden or mid-collapse: the card is not something the user can act on.
   // When `visible` but all sections are hidden, the panel stays interactive so
   // the settings button remains reachable — otherwise there is no way to
-  // re-enable sections.
+  // re-enable sections. The previous `renderedSections > 0` guard is preserved
+  // for the transient "no data yet" state so the panel doesn't flash a bare
+  // bordered card on first mount.
   const allSectionsHidden = hiddenSections.length >= WORK_STATUS_SECTION_IDS.length;
-  const interactive = visible;
+  const interactive = visible && (renderedSections > 0 || allSectionsHidden);
   React.useEffect(() => {
     if (visible) {
       setContentMounted(true);
@@ -249,7 +251,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       </WorkStatusPresenceProvider>
       ) : null}
 
-      {contentMounted && allSectionsHidden && renderedSections === 0 ? (
+      {contentMounted && allSectionsHidden ? (
         <div className="flex flex-col items-center justify-center px-4 py-8 text-center">
           <span className="text-sm text-muted-foreground">{t('chat.workStatus.sections.allHidden')}</span>
           <button
