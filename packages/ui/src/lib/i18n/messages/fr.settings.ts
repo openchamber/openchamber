@@ -1377,6 +1377,8 @@ export const settingsDict = {
   'settings.mcp.page.status.label.failed': 'Échoué',
   'settings.mcp.page.status.label.needsAuth': 'Nécessite une authentification',
   'settings.mcp.page.status.label.needsRegistration': 'Nécessite une inscription',
+  'settings.mcp.page.status.label.awaitingRestart': 'En attente de redémarrage',
+  'settings.mcp.page.status.description.awaitingRestart': 'Ce serveur est enregistré mais pas encore appliqué. Utilisez « Apply & Restart » pour le charger dans OpenCode — la connexion et l\'autorisation seront ensuite disponibles.',
   'settings.mcp.page.status.description.connected': 'Connecté et prêt pour OpenCode pour découvrir des outils et des ressources.',
   'settings.mcp.page.status.description.failedDefault': 'OpenCode n\'a pas pu atteindre ce serveur MCP.',
   'settings.mcp.page.status.description.needsAuth': 'Ce serveur MCP distant nécessite une autorisation avant de pouvoir se connecter.',

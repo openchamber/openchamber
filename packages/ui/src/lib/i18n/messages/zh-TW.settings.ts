@@ -1365,6 +1365,8 @@
   'settings.mcp.page.status.label.failed': '失敗',
   'settings.mcp.page.status.label.needsAuth': '需要授權',
   'settings.mcp.page.status.label.needsRegistration': '需要註冊',
+  'settings.mcp.page.status.label.awaitingRestart': '等待重新啟動',
+  'settings.mcp.page.status.description.awaitingRestart': '該伺服器已儲存但尚未生效。使用 Apply & Restart 讓 OpenCode 載入它——之後即可進行連線與授權。',
   'settings.mcp.page.status.description.connected': '已連線，OpenCode 可發現工具和資源。',
   'settings.mcp.page.status.description.failedDefault': 'OpenCode 無法連線到此 MCP 伺服器。',
   'settings.mcp.page.status.description.needsAuth': '此遠端 MCP 伺服器在連線前需要授權。',

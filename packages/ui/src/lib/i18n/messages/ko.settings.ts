@@ -1459,6 +1459,8 @@ export const settingsDict = {
   'settings.mcp.page.status.label.failed': '실패',
   'settings.mcp.page.status.label.needsAuth': '인증 필요',
   'settings.mcp.page.status.label.needsRegistration': '등록 필요',
+  'settings.mcp.page.status.label.awaitingRestart': '재시작 대기 중',
+  'settings.mcp.page.status.description.awaitingRestart': '이 서버는 저장되었지만 아직 적용되지 않았습니다. Apply & Restart를 사용해 OpenCode에 불러오면 연결과 인증을 사용할 수 있습니다.',
   'settings.mcp.page.status.description.connected': '연결되었습니다. OpenCode가 도구와 리소스를 찾을 준비가 됐습니다.',
   'settings.mcp.page.status.description.failedDefault': 'OpenCode가 이 MCP 서버에 연결할 수 없습니다.',
   'settings.mcp.page.status.description.needsAuth': '이 원격 MCP 서버는 연결 전에 권한 부여가 필요합니다.',

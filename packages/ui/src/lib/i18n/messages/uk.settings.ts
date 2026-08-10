@@ -1459,6 +1459,8 @@ export const settingsDict = {
   "settings.mcp.page.status.label.failed": "Не вдалося",
   "settings.mcp.page.status.label.needsAuth": "Потрібна авторизація",
   "settings.mcp.page.status.label.needsRegistration": "Потрібна реєстрація",
+  "settings.mcp.page.status.label.awaitingRestart": "Очікує перезапуску",
+  "settings.mcp.page.status.description.awaitingRestart": "Сервер збережено, але ще не застосовано. Натисніть Apply & Restart, щоб OpenCode його завантажив — після цього стануть доступні підключення та авторизація.",
   "settings.mcp.page.status.description.connected": "Підключено, OpenCode може відкривати інструменти й ресурси.",
   "settings.mcp.page.status.description.failedDefault": "OpenCode не вдалося отримати доступ до цього сервера MCP.",
   "settings.mcp.page.status.description.needsAuth": "Цей віддалений сервер MCP потребує авторизації, перш ніж він зможе підключитися.",

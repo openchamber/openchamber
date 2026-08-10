@@ -503,6 +503,8 @@ export const settingsDict = {
   'settings.mcp.page.status.label.failed': 'Błąd',
   'settings.mcp.page.status.label.needsAuth': 'Wymaga autoryzacji',
   'settings.mcp.page.status.label.needsRegistration': 'Wymaga rejestracji',
+  'settings.mcp.page.status.label.awaitingRestart': 'Oczekuje na restart',
+  'settings.mcp.page.status.description.awaitingRestart': 'Ten serwer został zapisany, ale nie został jeszcze zastosowany. Użyj Apply & Restart, aby OpenCode go wczytał — potem będą dostępne połączenie i autoryzacja.',
   'settings.mcp.page.status.projectScopedTo': 'Ograniczony do projektu w {directory}',
   'settings.mcp.page.status.runtimeStatus': 'Status uruchomieniowy',
   'settings.mcp.page.status.userScoped': 'Konfiguracja użytkownika',

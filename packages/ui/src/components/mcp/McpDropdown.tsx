@@ -22,7 +22,6 @@ import { McpIcon } from '@/components/icons/McpIcon';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { toast } from 'sonner';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { startMcpAuthorization } from '@/components/sections/mcp/startMcpAuthorization';
 
 const statusTooltip = (
@@ -211,7 +210,6 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
                       const { opened } = await startMcpAuthorization({
                         name: serverName,
                         directory,
-                        skipRedirectUriBootstrap: isVSCodeRuntime(),
                       });
                       if (!opened) {
                         toast.error(t('mcpDropdown.toast.authorizeOpenFailed'));

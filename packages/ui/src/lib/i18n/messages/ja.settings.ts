@@ -1492,6 +1492,8 @@ export const settingsDict = {
   'settings.mcp.page.status.label.failed': '失敗',
   'settings.mcp.page.status.label.needsAuth': '認証が必要',
   'settings.mcp.page.status.label.needsRegistration': '登録が必要',
+  'settings.mcp.page.status.label.awaitingRestart': '再起動待ち',
+  'settings.mcp.page.status.description.awaitingRestart': 'このサーバーは保存されていますが、まだ適用されていません。「Apply & Restart」で OpenCode に読み込むと、接続と認可が利用できるようになります。',
   'settings.mcp.page.status.description.connected': '接続済み。OpenCode がツールとリソースを検出できます。',
   'settings.mcp.page.status.description.failedDefault': 'OpenCode がこの MCP サーバーに到達できませんでした。',
   'settings.mcp.page.status.description.needsAuth': 'このリモート MCP サーバーは接続する前に認証が必要です。',

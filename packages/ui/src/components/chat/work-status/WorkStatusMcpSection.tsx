@@ -5,7 +5,6 @@ import { useMcpStore } from '@/stores/useMcpStore';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { toast } from 'sonner';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { startMcpAuthorization } from '@/components/sections/mcp/startMcpAuthorization';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusRowAction } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
@@ -54,7 +53,6 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
       const { opened } = await startMcpAuthorization({
         name,
         directory,
-        skipRedirectUriBootstrap: isVSCodeRuntime(),
       });
       if (!opened) {
         toast.error(t('chat.workStatus.mcp.authorizeOpenFailed'));

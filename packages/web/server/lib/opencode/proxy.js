@@ -839,5 +839,9 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   app.use('/api', applyProxyResponseDeadline);
   app.post('/api/provider/:providerID/oauth/callback', interactiveOAuthProxy);
+  // OpenCode's native MCP OAuth flow: the request blocks until the user
+  // finishes authorization in the browser (up to OpenCode's 5-minute callback
+  // timeout), so it needs the interactive-OAuth deadline, not the default one.
+  app.post('/api/mcp/:name/auth/authenticate', interactiveOAuthProxy);
   app.use('/api', apiProxy);
 };

@@ -1482,6 +1482,8 @@ export const settingsDict = {
   'settings.mcp.page.status.label.failed': 'Failed',
   'settings.mcp.page.status.label.needsAuth': 'Needs auth',
   'settings.mcp.page.status.label.needsRegistration': 'Needs registration',
+  'settings.mcp.page.status.label.awaitingRestart': 'Awaiting restart',
+  'settings.mcp.page.status.description.awaitingRestart': 'This server is saved but not applied yet. Use Apply & Restart to load it into OpenCode — connect and authorization become available after that.',
   'settings.mcp.page.status.description.connected': 'Connected and ready for OpenCode to discover tools and resources.',
   'settings.mcp.page.status.description.failedDefault': 'OpenCode could not reach this MCP server.',
   'settings.mcp.page.status.description.needsAuth': 'This remote MCP server requires authorization before it can connect.',

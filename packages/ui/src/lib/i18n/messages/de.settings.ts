@@ -1417,6 +1417,8 @@ export const settingsDict = {
   'settings.mcp.page.status.label.failed': 'Fehlgeschlagen',
   'settings.mcp.page.status.label.needsAuth': 'Autorisierung erforderlich',
   'settings.mcp.page.status.label.needsRegistration': 'Registrierung erforderlich',
+  'settings.mcp.page.status.label.awaitingRestart': 'Wartet auf Neustart',
+  'settings.mcp.page.status.description.awaitingRestart': 'Dieser Server ist gespeichert, aber noch nicht übernommen. Verwenden Sie „Apply & Restart“, damit OpenCode ihn lädt — danach sind Verbindung und Autorisierung verfügbar.',
   'settings.mcp.page.status.description.connected': 'Verbunden und bereit, Tools und Ressourcen zu entdecken.',
   'settings.mcp.page.status.description.failedDefault': 'OpenCode konnte diesen MCP-Server nicht erreichen.',
   'settings.mcp.page.status.description.needsAuth': 'Dieser entfernte MCP-Server erfordert Autorisierung, bevor eine Verbindung hergestellt werden kann.',
