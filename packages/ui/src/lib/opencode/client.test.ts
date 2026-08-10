@@ -209,11 +209,11 @@ describe('opencodeClient prompt tool gating', () => {
       providerID: 'google-vertex',
       modelID: 'gemini-2.5-flash-image',
       text: 'draw a cow',
-      tools: { openchamber: false },
+      tools: { "*": false },
     });
 
     const body = promptAsyncCalls[0]?.[0] as { tools?: Record<string, boolean> };
-    expect(body.tools).toEqual({ openchamber: false });
+    expect(body.tools).toEqual({ "*": false });
   });
 
   test('omits the tools field entirely when no gate is supplied', async () => {

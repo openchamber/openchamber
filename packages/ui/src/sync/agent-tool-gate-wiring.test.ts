@@ -56,28 +56,28 @@ describe("routeMessage agent-tool gating", () => {
     sendMessageCalls.length = 0
   })
 
-  test("denies the control tool when the selected model cannot tool-call", async () => {
+  test("denies every tool when the selected model cannot tool-call", async () => {
     toolCallCapability = false
 
     await send("gemini-2.5-flash-image")
 
     expect(sendMessageCalls).toHaveLength(1)
-    expect(sendMessageCalls[0]?.tools).toEqual({ openchamber: false })
+    expect(sendMessageCalls[0]?.tools).toEqual({ "*": false })
   })
 
-  test("allows the control tool when the selected model can tool-call", async () => {
+  test("allows every tool when the selected model can tool-call", async () => {
     toolCallCapability = true
 
     await send("gemini-3.6-flash")
 
     expect(sendMessageCalls).toHaveLength(1)
-    expect(sendMessageCalls[0]?.tools).toEqual({ openchamber: true })
+    expect(sendMessageCalls[0]?.tools).toEqual({ "*": true })
   })
 
-  test("re-enables the tool after a deny when the user switches models mid-session", async () => {
+  test("re-enables tools after a deny when the user switches models mid-session", async () => {
     // The reason every send carries the complete map: OpenCode persists it as
     // the session ruleset, so without the second send's explicit `true` the
-    // tool would stay denied for the rest of the session.
+    // tools would stay denied for the rest of the session.
     toolCallCapability = false
     await send("gemini-2.5-flash-image")
 
@@ -85,8 +85,8 @@ describe("routeMessage agent-tool gating", () => {
     await send("gemini-3.6-flash")
 
     expect(sendMessageCalls.map((call) => call.tools)).toEqual([
-      { openchamber: false },
-      { openchamber: true },
+      { "*": false },
+      { "*": true },
     ])
   })
 })

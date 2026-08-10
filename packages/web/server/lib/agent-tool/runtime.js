@@ -6,11 +6,7 @@ import {
 } from '../openchamber-control/actions.js';
 
 const TOOL_SCHEMA_VERSION = 1;
-/**
- * OpenCode tool ID for the injected OpenChamber control tool. Clients must gate
- * this tool per send for models that cannot tool-call, so the name is a shared
- * contract rather than a local literal.
- */
+/** OpenCode tool ID for the injected OpenChamber control tool. */
 export const OPENCHAMBER_AGENT_TOOL_NAME = 'openchamber';
 const ACTIONS = new Set(OPENCHAMBER_AGENT_TOOL_ACTIONS);
 const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
