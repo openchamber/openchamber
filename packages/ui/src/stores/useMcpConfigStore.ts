@@ -1,14 +1,12 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
-import {
-  startConfigUpdate,
-  finishConfigUpdate,
-} from '@/lib/configUpdate';
+import { startConfigUpdate } from '@/lib/configUpdate';
 import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { noteDeferredRestartFromPayload } from '@/lib/opencode/deferredRestart';
 
 export type McpScope = 'user' | 'project';
 
@@ -17,6 +15,8 @@ type McpMutationResult = {
   reloadFailed?: boolean;
   message?: string;
   warning?: string;
+  requiresManualRestart?: boolean;
+  restartDeferred?: boolean;
 };
 
 const getConfigDirectory = (): string | null => {
@@ -192,8 +192,6 @@ export const useMcpConfigStore = create<McpConfigStore>()(
         },
 
         createMcp: async (config: McpDraft) => {
-          startConfigUpdate('Creating MCP server configuration…');
-          let requiresReload = false;
           try {
             const body = buildMcpBody(config);
             const configDirectory = getConfigDirectory();
@@ -214,8 +212,30 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
             invalidateMcpCache(configDirectory);
 
+            if (payload?.requiresManualRestart) {
+              await get().loadMcpConfigs({ force: true });
+              return {
+                ok: true,
+                requiresManualRestart: true,
+                reloadFailed: payload?.reloadFailed === true,
+                message: payload?.message,
+                warning: payload?.warning,
+              };
+            }
+
+            if (noteDeferredRestartFromPayload(payload, 'mcp', { id: config.name })) {
+              await get().loadMcpConfigs({ force: true });
+              return {
+                ok: true,
+                restartDeferred: true,
+                reloadFailed: payload?.reloadFailed === true,
+                message: payload?.message,
+                warning: payload?.warning,
+              };
+            }
+
             if (payload?.requiresReload) {
-              requiresReload = true;
+              startConfigUpdate('Creating MCP server configuration…');
               await refreshAfterOpenCodeRestart({
                 message: payload.message,
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
@@ -240,14 +260,10 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           } catch (error) {
             console.error('[McpConfigStore] Failed to create MCP:', error);
             return { ok: false };
-          } finally {
-            if (!requiresReload) finishConfigUpdate();
           }
         },
 
         updateMcp: async (name: string, config: Partial<McpDraft>) => {
-          startConfigUpdate('Updating MCP server configuration…');
-          let requiresReload = false;
           try {
             const body = buildMcpBody(config);
             const configDirectory = getConfigDirectory();
@@ -268,8 +284,30 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
             invalidateMcpCache(configDirectory);
 
+            if (payload?.requiresManualRestart) {
+              await get().loadMcpConfigs({ force: true });
+              return {
+                ok: true,
+                requiresManualRestart: true,
+                reloadFailed: payload?.reloadFailed === true,
+                message: payload?.message,
+                warning: payload?.warning,
+              };
+            }
+
+            if (noteDeferredRestartFromPayload(payload, 'mcp', { id: name })) {
+              await get().loadMcpConfigs({ force: true });
+              return {
+                ok: true,
+                restartDeferred: true,
+                reloadFailed: payload?.reloadFailed === true,
+                message: payload?.message,
+                warning: payload?.warning,
+              };
+            }
+
             if (payload?.requiresReload) {
-              requiresReload = true;
+              startConfigUpdate('Updating MCP server configuration…');
               await refreshAfterOpenCodeRestart({
                 message: payload.message,
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
@@ -294,14 +332,10 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           } catch (error) {
             console.error('[McpConfigStore] Failed to update MCP:', error);
             throw error;
-          } finally {
-            if (!requiresReload) finishConfigUpdate();
           }
         },
 
         deleteMcp: async (name: string) => {
-          startConfigUpdate('Deleting MCP server configuration…');
-          let requiresReload = false;
           try {
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
@@ -317,8 +351,34 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
             invalidateMcpCache(configDirectory);
 
+            if (get().selectedMcpName === name) {
+              set({ selectedMcpName: null });
+            }
+
+            if (payload?.requiresManualRestart) {
+              await get().loadMcpConfigs({ force: true });
+              return {
+                ok: true,
+                requiresManualRestart: true,
+                reloadFailed: payload?.reloadFailed === true,
+                message: payload?.message,
+                warning: payload?.warning,
+              };
+            }
+
+            if (noteDeferredRestartFromPayload(payload, 'mcp', { id: name })) {
+              await get().loadMcpConfigs({ force: true });
+              return {
+                ok: true,
+                restartDeferred: true,
+                reloadFailed: payload?.reloadFailed === true,
+                message: payload?.message,
+                warning: payload?.warning,
+              };
+            }
+
             if (payload?.requiresReload) {
-              requiresReload = true;
+              startConfigUpdate('Deleting MCP server configuration…');
               await refreshAfterOpenCodeRestart({
                 message: payload.message,
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
@@ -326,9 +386,6 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               });
             }
 
-            if (get().selectedMcpName === name) {
-              set({ selectedMcpName: null });
-            }
             await get().loadMcpConfigs({ force: true });
             return {
               ok: true,
@@ -339,8 +396,6 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           } catch (error) {
             console.error('[McpConfigStore] Failed to delete MCP:', error);
             return { ok: false };
-          } finally {
-            if (!requiresReload) finishConfigUpdate();
           }
         },
 

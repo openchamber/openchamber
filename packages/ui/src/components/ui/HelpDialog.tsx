@@ -175,6 +175,11 @@ export const HelpDialog: React.FC = () => {
           icon: "time",
           keys: '',
         },
+        {
+          keys: [`${mod} + 1...0`],
+          descriptionKey: "helpDialog.item.switchContextSurface",
+          icon: "layout-right",
+        },
       ],
     },
     {
@@ -185,11 +190,6 @@ export const HelpDialog: React.FC = () => {
           descriptionKey: "helpDialog.item.cycleTheme",
           icon: "palette",
           keys: '',
-        },
-        {
-          keys: [`${mod} + 1...9`],
-          descriptionKey: "helpDialog.item.switchProject",
-          icon: "layout-left",
         },
         {
           id: 'toggle_services_menu',
@@ -218,7 +218,7 @@ export const HelpDialog: React.FC = () => {
       <DialogContent className="max-w-2xl w-[min(42rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Icon name="settings-3" className="h-5 w-5" />
+            <Icon name="command" className="h-5 w-5" />
             {t('helpDialog.title')}
           </DialogTitle>
           <DialogDescription>

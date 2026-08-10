@@ -39,6 +39,17 @@ const DISPLAY_LABEL_MAP: Record<ShortcutModifier, string> = {
   'ctrl': '⌃',
 };
 
+// Physical `event.key` values (lowercased) that satisfy each modifier while a
+// chord is being held. `mod` maps to the platform primary key; on web macOS it
+// accepts either Meta or Ctrl, matching eventMatchesShortcut.
+const MODIFIER_KEY_ALIASES: Record<ShortcutModifier, readonly string[]> = {
+  'mod': isMacOS() && isDesktopShell() ? ['meta'] : isMacOS() ? ['meta', 'control'] : ['control'],
+  'shift': ['shift'],
+  'alt': ['alt'],
+  'option': ['alt'],
+  'ctrl': ['control'],
+};
+
 const KEY_LABEL_MAP: Record<string, string> = {
   'comma': ',',
   'period': '.',
@@ -208,6 +219,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'switch_context_surface',
+    defaultCombo: 'mod',
+    label: 'Switch context panel surface',
+    description: 'Hold the modifier and press a number to open or close the matching rail icon',
+    customizable: true,
+  },
+  {
     id: 'new_chat',
     defaultCombo: 'mod+n',
     label: 'New session',
@@ -239,24 +257,6 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     defaultCombo: 'escape',
     label: 'Clear input',
     description: 'Clear the input field',
-  },
-  {
-    id: 'open_diff_panel',
-    defaultCombo: 'mod+2',
-    label: 'Open diff panel',
-    description: 'Switch to the diff panel',
-  },
-  {
-    id: 'open_terminal_panel',
-    defaultCombo: 'mod+3',
-    label: 'Open terminal panel',
-    description: 'Switch to the terminal panel',
-  },
-  {
-    id: 'open_git_panel',
-    defaultCombo: 'mod+4',
-    label: 'Open git panel',
-    description: 'Switch to the git panel',
   },
   {
     id: 'open_help',
@@ -346,60 +346,6 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     defaultCombo: 'escape',
     label: 'Abort active run',
     description: 'Abort the currently running task (double press)',
-  },
-  {
-    id: 'switch_tab_1',
-    defaultCombo: 'mod+1',
-    label: 'Switch to tab 1',
-    description: 'Switch to the first tab or project',
-  },
-  {
-    id: 'switch_tab_2',
-    defaultCombo: 'mod+2',
-    label: 'Switch to tab 2',
-    description: 'Switch to the second tab or project',
-  },
-  {
-    id: 'switch_tab_3',
-    defaultCombo: 'mod+3',
-    label: 'Switch to tab 3',
-    description: 'Switch to the third tab or project',
-  },
-  {
-    id: 'switch_tab_4',
-    defaultCombo: 'mod+4',
-    label: 'Switch to tab 4',
-    description: 'Switch to the fourth tab or project',
-  },
-  {
-    id: 'switch_tab_5',
-    defaultCombo: 'mod+5',
-    label: 'Switch to tab 5',
-    description: 'Switch to the fifth tab or project',
-  },
-  {
-    id: 'switch_tab_6',
-    defaultCombo: 'mod+6',
-    label: 'Switch to tab 6',
-    description: 'Switch to the sixth tab or project',
-  },
-  {
-    id: 'switch_tab_7',
-    defaultCombo: 'mod+7',
-    label: 'Switch to tab 7',
-    description: 'Switch to the seventh tab or project',
-  },
-  {
-    id: 'switch_tab_8',
-    defaultCombo: 'mod+8',
-    label: 'Switch to tab 8',
-    description: 'Switch to the eighth tab or project',
-  },
-  {
-    id: 'switch_tab_9',
-    defaultCombo: 'mod+9',
-    label: 'Switch to tab 9',
-    description: 'Switch to the ninth tab or project',
   },
 ] as const;
 
@@ -609,4 +555,127 @@ export function eventMatchesShortcut(
 
 export function getModifierLabel(): string {
   return isMacOS() && isDesktopShell() ? '⌘' : 'Ctrl';
+}
+
+/**
+ * Resolves the configurable prefix for chord-style shortcuts such as
+ * "switch context panel surface", where a trailing digit key completes the
+ * combo. Unlike getEffectiveShortcutCombo, modifier-only overrides (e.g. the
+ * bare `mod` primary key) are honored so the prefix can omit a primary key.
+ * Returns UNASSIGNED_SHORTCUT when the user explicitly unassigned the prefix.
+ */
+export function getEffectiveShortcutPrefix(
+  actionId: string,
+  overrides?: Record<string, ShortcutCombo>,
+): ShortcutCombo {
+  const action = getShortcutAction(actionId);
+  if (!action) {
+    return '';
+  }
+
+  const override = overrides?.[actionId];
+  if (typeof override === 'string' && override.trim() !== '') {
+    const normalized = normalizeCombo(override);
+    if (normalized === UNASSIGNED_SHORTCUT) {
+      return UNASSIGNED_SHORTCUT;
+    }
+    if (normalized) {
+      const parsed = parseShortcut(normalized);
+      if (parsed.modifiers.size > 0 || parsed.key) {
+        return normalized;
+      }
+    }
+  }
+
+  return action.defaultCombo;
+}
+
+/**
+ * True when the physical keys required to "arm" a prefix combo are currently
+ * held. For modifiers with multiple aliases (e.g. `mod` on web macOS), at
+ * least one alias must be held.
+ */
+export function isShortcutPrefixHeld(prefixCombo: ShortcutCombo, heldKeys: ReadonlySet<string>): boolean {
+  if (isUnassignedShortcut(prefixCombo)) {
+    return false;
+  }
+
+  const parsed = parseShortcut(prefixCombo);
+
+  for (const modifier of parsed.modifiers) {
+    const aliases = MODIFIER_KEY_ALIASES[modifier];
+    if (!aliases.some((alias) => heldKeys.has(alias))) {
+      return false;
+    }
+  }
+
+  if (parsed.key && !heldKeys.has(parsed.key.toLowerCase())) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Matches an activating keydown (the caller checks the event's own key, e.g. a
+ * digit) against a chord prefix: the event's modifier state must match the
+ * prefix's modifiers, and when the prefix has a primary key that key must
+ * currently be held.
+ */
+export function eventMatchesShortcutPrefix(
+  event: KeyboardEvent | React.KeyboardEvent,
+  prefixCombo: ShortcutCombo,
+  heldKeys?: ReadonlySet<string>,
+): boolean {
+  if (isUnassignedShortcut(prefixCombo)) {
+    return false;
+  }
+
+  const parsed = parseShortcut(prefixCombo);
+
+  const expectedMod = parsed.modifiers.has('mod');
+  const expectedShift = parsed.modifiers.has('shift');
+  const expectedAlt = parsed.modifiers.has('alt');
+  const expectedCtrl = parsed.modifiers.has('ctrl');
+  const isDesktopMac = isMacOS() && isDesktopShell();
+  const isMac = isMacOS();
+
+  const modMatches = isDesktopMac
+    ? event.metaKey
+    : isMac
+      ? (event.metaKey || event.ctrlKey)
+      : event.ctrlKey;
+
+  if (expectedMod && !modMatches) {
+    return false;
+  }
+
+  if (!expectedMod && event.metaKey) {
+    return false;
+  }
+
+  if (expectedShift !== event.shiftKey) {
+    return false;
+  }
+
+  if (expectedAlt !== event.altKey) {
+    return false;
+  }
+
+  if (expectedCtrl) {
+    if (!event.ctrlKey) {
+      return false;
+    }
+  } else {
+    const ctrlUsedAsMod = expectedMod && !isDesktopMac && event.ctrlKey;
+    if (event.ctrlKey && !ctrlUsedAsMod) {
+      return false;
+    }
+  }
+
+  if (parsed.key && (!heldKeys || !heldKeys.has(parsed.key.toLowerCase()))) {
+    return false;
+  }
+
+  return true;
 }

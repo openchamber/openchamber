@@ -131,6 +131,16 @@ function insertedTextOf(transaction: { changes: { iterChanges: (fn: (fromA: numb
 }
 
 /**
+ * True for keydown events CodeMirror re-dispatches after deferring the real
+ * one (iOS Enter/Backspace/Delete, Chrome Android Enter): `dispatchKey`
+ * stamps the replacement event with a `synthetic` expando. These events are
+ * built from the key name alone, so they carry no modifier keys.
+ */
+function isDeferredSyntheticEvent(event: KeyboardEvent): boolean {
+    return Boolean((event as unknown as { synthetic?: boolean }).synthetic);
+}
+
+/**
  * Compartments are configuration keys, not per-view state, so one set can serve
  * every editor. They live at module scope because a kept-alive view outlives
  * the component that created it: per-instance compartments would be unknown to
@@ -159,6 +169,14 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
 
         const hostRef = React.useRef<HTMLDivElement | null>(null);
         const viewRef = React.useRef<EditorView | null>(null);
+
+        // The real keydown's shift state for the LAST Enter that reached the
+        // editor. CodeMirror defers Enter on iOS (and Chrome Android) and
+        // re-dispatches it as a synthetic keydown built from the key name
+        // alone, dropping every modifier (see `trackRealEnterShift` and the
+        // `interceptKeys` handler below); this ref is what lets the deferred
+        // event still tell Shift+Enter from Enter.
+        const lastRealEnterShiftRef = React.useRef(false);
 
         // Callbacks reach the CodeMirror extensions through a ref: the view is
         // built once and must not be torn down when a handler identity changes,
@@ -200,7 +218,15 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             }
 
             const interceptKeys: KeyBinding[] = [{
-                any: (_view, event) => handlersRef.current.onKeyDown?.(event) ?? false,
+                any: (_view, event) => {
+                    // A deferred Enter lost its modifiers in the re-dispatch;
+                    // give the caller's policy (Enter vs Shift+Enter) back the
+                    // shift state it saw on the real keydown.
+                    if (event.key === 'Enter' && isDeferredSyntheticEvent(event) && lastRealEnterShiftRef.current) {
+                        Object.defineProperty(event, 'shiftKey', { value: true });
+                    }
+                    return handlersRef.current.onKeyDown?.(event) ?? false;
+                },
             }];
 
             const view = new EditorView({
@@ -275,6 +301,25 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
 
             viewRef.current = view;
             if (store) store.view = view;
+
+            // CodeMirror defers Enter on iOS (and Chrome Android): the real
+            // keydown is captured without running the keymaps, the browser's
+            // native newline goes through, and the keymaps then run against a
+            // synthetic keydown `dispatchKey` builds from the key name alone —
+            // which has NO modifiers. Recording the real shift state here (a
+            // plain listener, registered after CodeMirror's own, so it runs
+            // after the deferral decision but before the deferred dispatch)
+            // lets the deferred Enter be re-presented with Shift+Enter intact
+            // instead of arriving as a plain Enter that "sends" where Enter
+            // sends. Without it, Shift+Enter on iOS/Android submits the
+            // message instead of inserting a newline. The listener lives on
+            // the kept-alive view's contentDOM, so it stays across mounts and
+            // keeps feeding the same ref the `interceptKeys` closure reads.
+            const trackRealEnterShift = (event: KeyboardEvent) => {
+                if (event.key !== 'Enter' || isDeferredSyntheticEvent(event)) return;
+                lastRealEnterShiftRef.current = event.shiftKey;
+            };
+            view.contentDOM.addEventListener('keydown', trackRealEnterShift);
 
             return () => {
                 viewRef.current = null;

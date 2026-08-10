@@ -4,13 +4,19 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { Button } from '@/components/ui/button';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
-import { DiffView } from '@/components/views/DiffView';
-import { FilesView } from '@/components/views/FilesView';
-import { GitView } from '@/components/views/GitView';
 import { PullRequestView } from '@/components/views/PullRequestView';
 import { TerminalView } from '@/components/views/TerminalView';
-import { WalkthroughView } from '@/components/views/walkthrough/WalkthroughView';
-import { PlanView } from '@/components/views/PlanView';
+import { AgentBrowserView } from '@/components/views/AgentBrowserView';
+import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+
+// Heavy views stay on-demand (same as MainLayout): importing DiffView/FilesView
+// or the walkthrough statically pulls the CodeMirror and @pierre/diffs stacks
+// into the eager startup graph even when no such tab is open.
+const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/walkthrough/WalkthroughView').then((m) => ({ default: m.WalkthroughView })));
+const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((m) => ({ default: m.DiffView })));
+const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((m) => ({ default: m.FilesView })));
+const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
+const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((m) => ({ default: m.PlanView })));
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -45,6 +51,7 @@ import {
   type EmbeddedSessionRuntimeBootstrap,
 } from './contextPanelEmbeddedChat';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
+import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import {
   type PreviewElementMetadata,
   isPreviewElementMetadata,
@@ -164,6 +171,7 @@ const getModeLabel = (
   if (mode === 'plan') return t('contextPanel.mode.plan');
   if (mode === 'preview') return t('contextPanel.mode.preview');
   if (mode === 'browser') return t('contextPanel.mode.browser');
+  if (mode === 'agentBrowser') return t('contextPanel.mode.agentBrowser');
   if (mode === 'git') return t('layout.rightSidebar.git');
   if (mode === 'pr') return t('contextPanel.mode.pr');
   if (mode === 'notes') return t('contextRail.surface.notes');
@@ -288,6 +296,10 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
 
   if (tab.mode === 'browser') {
     return <Icon name="global" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'agentBrowser') {
+    return <Icon name="search-eye" className="h-3.5 w-3.5" />;
   }
 
   return undefined;
@@ -2453,6 +2465,13 @@ export const ContextPanel: React.FC = () => {
       return;
     }
 
+    // Terminal owns Escape so the PTY receives it (e.g. Vim Normal mode).
+    // ghostty-web listens in the bubble phase; stopping capture here would
+    // swallow the key before the terminal ever sees it (issue #2644).
+    if (isTerminalEventTarget(event.target)) {
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
     handleClose();
@@ -2691,13 +2710,13 @@ export const ContextPanel: React.FC = () => {
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent />
         : activeTab?.mode === 'git'
-            ? <GitView isActive={isOpen} />
+            ? <React.Suspense fallback={null}><GitView isActive={isOpen} /></React.Suspense>
             : activeTab?.mode === 'pr'
                 ? <PullRequestView />
             : activeTab?.mode === 'notes'
                 ? <ProjectContextPanel />
         : activeTab?.mode === 'plan'
-            ? <PlanView targetPath={activeTab.targetPath} />
+            ? <React.Suspense fallback={null}><PlanView targetPath={activeTab.targetPath} /></React.Suspense>
             : activeTab?.mode === 'preview'
                 ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} onNavigate={(url) => openContextPreview(effectiveDirectory, url)} />
                 : (
@@ -2722,6 +2741,10 @@ export const ContextPanel: React.FC = () => {
   );
   const hasTerminalTab = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'terminal'),
+    [tabs],
+  );
+  const hasAgentBrowserTab = React.useMemo(
+    () => tabs.some((tab) => tab.mode === 'agentBrowser'),
     [tabs],
   );
   // Keep-alive: the walkthrough holds reading progress and scroll position that
@@ -2909,7 +2932,7 @@ export const ContextPanel: React.FC = () => {
           <div className={cn('absolute inset-0 flex', isFileTabActive ? 'flex' : 'hidden')}>
             <div className="h-full min-w-0 flex-1">
               {hasOpenEditorFile ? (
-                <FilesView mode="editor-only" />
+                <React.Suspense fallback={null}><FilesView mode="editor-only" /></React.Suspense>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                   <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />
@@ -2975,16 +2998,18 @@ export const ContextPanel: React.FC = () => {
               activeTab?.id !== tab.id && 'hidden'
             )}
           >
-            <DiffView
-              hideStackedFileSidebar
-              stackedDefaultCollapsedAll
-              pinSelectedFileHeaderToTopOnNavigate
-              showOpenInEditorAction
-              diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
-              onDiffScopeChange={handleDiffScopeChange}
-              targetFilePath={tab.targetPath}
-              flushContent
-            />
+            <React.Suspense fallback={null}>
+              <DiffView
+                hideStackedFileSidebar
+                stackedDefaultCollapsedAll
+                pinSelectedFileHeaderToTopOnNavigate
+                showOpenInEditorAction
+                diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
+                onDiffScopeChange={handleDiffScopeChange}
+                targetFilePath={tab.targetPath}
+                flushContent
+              />
+            </React.Suspense>
           </div>
         ))}
         {hasTerminalTab ? (
@@ -2992,12 +3017,19 @@ export const ContextPanel: React.FC = () => {
             <TerminalView visible={isOpen && activeTab?.mode === 'terminal'} />
           </div>
         ) : null}
-        {hasWalkthroughTab ? (
-          <div className={cn('absolute inset-0', activeTab?.mode === 'walkthrough' ? 'block' : 'hidden')}>
-            <WalkthroughView directory={effectiveDirectory} />
+        {hasAgentBrowserTab ? (
+          <div className={cn('absolute inset-0', activeTab?.mode === 'agentBrowser' ? 'block' : 'hidden')}>
+            <AgentBrowserView visible={isOpen && activeTab?.mode === 'agentBrowser'} />
           </div>
         ) : null}
-        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' ? activeNonChatContent : null}
+        {hasWalkthroughTab ? (
+          <div className={cn('absolute inset-0', activeTab?.mode === 'walkthrough' ? 'block' : 'hidden')}>
+            <React.Suspense fallback={null}>
+              <WalkthroughView directory={effectiveDirectory} />
+            </React.Suspense>
+          </div>
+        ) : null}
+        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'agentBrowser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' ? activeNonChatContent : null}
       </div>
       </div>
     </aside>

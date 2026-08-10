@@ -171,14 +171,21 @@ describe('callSmallModel — custom provider config', () => {
         provider: { custom: { options: { baseURL: 'https://proxy.example.test/v1' } } },
       });
 
-      await expect(callSmallModel({
+      const error = await callSmallModel({
         auth: {},
         catalog: {},
         workingDirectory: '/proj',
         providerID: 'custom',
         modelID: 'gpt-4o-mini',
         prompt: 'hi',
-      })).rejects.toThrow('No OpenCode login found for provider "custom"');
+      }).then(() => null, (e) => e);
+
+      expect(error).toMatchObject({
+        message: 'No OpenCode login found for provider "custom"',
+        code: 'no-provider-login',
+        statusCode: 401,
+        providerID: 'custom',
+      });
 
       // The credential gate fires before any network call.
       expect(fetchMock).not.toHaveBeenCalled();

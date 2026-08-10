@@ -176,6 +176,25 @@ export const createSettingsHelpers = (dependencies) => {
       const normalized = normalizeDirectoryPath(candidate.opencodeBinary).trim();
       result.opencodeBinary = normalized;
     }
+    // Absolute path to the Agent Browser Chrome/Chromium executable (optional).
+    // Empty string clears a previous override so discovery/managed install can win.
+    if (typeof candidate.browserExecutablePath === 'string') {
+      const normalized = normalizeDirectoryPath(candidate.browserExecutablePath).trim();
+      result.browserExecutablePath = normalized;
+    }
+    if (typeof candidate.browserNoSandbox === 'boolean') {
+      result.browserNoSandbox = candidate.browserNoSandbox;
+    }
+    if (typeof candidate.workStatusPanelEnabled === 'boolean') {
+      result.workStatusPanelEnabled = candidate.workStatusPanelEnabled;
+    }
+    if (Array.isArray(candidate.workStatusHiddenSections)) {
+      // Ids are validated on the client, which owns the section list; here we
+      // only guarantee the shape, so a malformed payload cannot land on disk.
+      result.workStatusHiddenSections = [
+        ...new Set(candidate.workStatusHiddenSections.filter((entry) => typeof entry === 'string' && entry.length > 0)),
+      ];
+    }
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
     }
@@ -564,6 +583,9 @@ export const createSettingsHelpers = (dependencies) => {
       if (mode === 'markdown' || mode === 'plain') {
         result.userMessageRenderingMode = mode;
       }
+    }
+    if (typeof candidate.collapsibleUserMessages === 'boolean') {
+      result.collapsibleUserMessages = candidate.collapsibleUserMessages;
     }
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;

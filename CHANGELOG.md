@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Observability panel:** a new panel near to the chat brings the active goal, tasks, subagents, pinned context, MCP servers, and context usage into one live view. The session list also shows how long an agent has been working.
+- **Scheduled Tasks:** projects can now define recurring tasks as Markdown files in `.agents/loops`; they appear alongside scheduled tasks, stay synchronized with the files on disk, and can be run or managed from the app (thanks to @makeittech).
+- **Settings:** OpenCode configuration changes now accumulate behind a single Apply & Restart action instead of restarting OpenCode after every edit; the confirmation warns when active chats will be stopped (thanks to @makeittech).
+- Performance: the initial web download is about 58% smaller and startup memory use is about 22% lower; heavy Settings and syntax-highlighting code now loads only when opened (thanks to @makeittech).
+- Git/Worktrees: prompts now wait for a new worktree to finish checkout before sending, and sessions resolve to the worktree that owns them instead of occasionally opening or sending against the parent repository (thanks to @ftzi).
+- Git/Worktrees: setup now runs the repository's `post-checkout` hook after creating a worktree, and deeply nested worktrees no longer fail with “Filename too long” on Windows (thanks to @ftzi, @makeittech).
+- Chat: messages submitted before switching sessions stay with the session and workspace they were sent from, and are cancelled rather than crossing into a different instance (thanks to @Wsyjq).
+- Chat: queued messages no longer send into a response that is still streaming, and tool cards left running by an interrupted response settle instead of remaining stuck (thanks to @makeittech).
+- Chat: shell command output is expanded by default, and adding a message to context returns focus to the composer (thanks to @pascalandr, @makeittech).
+- Chat: fresh messages no longer replay their entry animation after they have already been shown, and iOS users can insert a newline with Shift+Enter again (thanks to @makeittech).
+- MCP: authorization now handles browser callbacks more reliably, settings distinguish available and unavailable servers more clearly, and failed connections expose a retry action.
+- Usage: added xAI quota reporting (thanks to @iamhenry).
+- Terminal: default tab names remain unique after tabs are closed, Escape reaches terminal applications instead of closing the context panel, and background connections send fewer keepalives (thanks to @makeittech).
+- Desktop/macOS: choosing a folder after denying filesystem access now recovers correctly instead of leaving the app unable to open the directory (thanks to @deatheros).
+- Desktop/Windows: minimizing from the taskbar now remains a native minimize while the app's own minimize action can still hide to the tray (thanks to @pascalandr).
+- Desktop: overlay scrollbars auto-hide again after scrolling instead of remaining permanently visible.
+- Mobile/Android: pairing QR codes now work in older WebViews that misread `openchamber://` links (thanks to @CMBill).
+- Files: removing an attached Office or OpenDocument file also removes the images extracted from that document, and Linux reveal failures now surface as an error instead of escaping in the background (thanks to @chiamsun, @pascalandr).
+- VSCode: notebook links now open in the notebook editor when a compatible extension is installed (thanks to @TTTPOB).
+- Settings: rapid edits to notification templates no longer overwrite one another, and the collapsed-user-message preference now persists correctly (thanks to @AmanTahiliani, @pascalandr).
+- Walkthrough: branch comparisons now use the repository's actual remote default branch instead of assuming its name (thanks to @RyderAsKing).
+- Server: foreground installs managed by a user systemd service now update through a separate transient service instead of being interrupted by the server restart (thanks to @SYU8384).
+- Security: updated archive extraction to address GHSA-xcpc-8h2w-3j85 (thanks to @mel0nyrame).
+
+## [1.18.1] - 2026-08-04
+
+- **Providers:** signing in to an OAuth-only provider now actually completes — the browser login is stored and the provider list updates instead of remaining signed out. OAuth-only providers show a Connect flow instead of an API key form, and their models stay hidden until you are signed in.
+- **Sessions:** archived sessions can now be restored to the active list — from the sidebar context menu, the archived-sessions page, or the bulk-selection bar — instead of only offering permanent deletion (thanks to @makeittech).
+- Walkthrough: models without a working provider login no longer appear in the walkthrough picker, and Generate stays disabled until a usable model is selected instead of failing with a raw provider error.
+- Providers: sign-ins that need extra details (such as GitHub Copilot Enterprise) now ask for them before opening the browser, and device codes come with a working copy button.
+- Walkthrough: connecting to a server older than the app now says the server needs updating instead of showing a raw HTML parsing error, and the "Critical" tag is now "Key change" with a tooltip so it no longer reads as a problem found in your code.
+- Chat: Ctrl/Cmd+L now adds the selected text to the chat input, or focuses it when nothing is selected; the toggle-sidebar shortcut moved to Ctrl/Cmd+Alt+L.
+- Chat: a manually chosen model now stays selected after a delegated subtask finishes, instead of reverting to the agent's default model.
+- Agents/CLI: sending a prompt that never reaches its session is now reported as failed, and an unavailable model, agent, or variant is rejected with a clear error before anything is created.
+- Desktop/Linux: "Open in Terminal" no longer launches a non-terminal app that is set as the terminal launcher (thanks to @kydorn).
+
 ## [1.18.0] - 2026-08-04
 
 - **Walkthrough:** a new guided walkthrough reorders a diff into a sequence of stops — the model groups related changes, explains what each one does, and orders them so each builds on the last. Start one from the Changes and pull-request views for uncommitted work, a branch against its base, or a pull request; nothing runs on its own. Walkthroughs are written in your interface language by default, and the panel can generate one in any other supported language.

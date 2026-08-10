@@ -8,8 +8,30 @@ export const deriveBaseBranch = (options: {
   localBranches: readonly string[];
   worktreeCreatedFromBranch?: string | null;
   rootBranchHint?: string | null;
+  /**
+   * The repository's own default branch, read from a `remote/HEAD` symbolic
+   * ref. Its own option rather than another hint: `rootBranchHint` means "the
+   * branch the project root worktree is on", and a parameter that means two
+   * things is one the next caller gets wrong.
+   */
+  defaultBranch?: string | null;
+  /**
+   * The branch being compared. A branch is never its own base, so a candidate
+   * equal to it is skipped — in a plain checkout `rootBranchHint` *is* the
+   * current branch, and taking it produced a comparison with itself.
+   */
+  headBranch?: string | null;
 }): string => {
-  const { remoteNames, localBranches, worktreeCreatedFromBranch, rootBranchHint } = options;
+  const {
+    remoteNames,
+    localBranches,
+    worktreeCreatedFromBranch,
+    rootBranchHint,
+    defaultBranch,
+    headBranch,
+  } = options;
+
+  const head = typeof headBranch === 'string' ? headBranch.trim() : '';
 
   const normalizeBaseCandidate = (value: string): string => {
     if (!value) {
@@ -49,16 +71,47 @@ export const deriveBaseBranch = (options: {
     return normalized;
   };
 
-  const fromMeta = normalizeBaseCandidate(
-    typeof worktreeCreatedFromBranch === 'string' ? worktreeCreatedFromBranch : ''
-  );
+  const candidate = (value: unknown): string => {
+    const normalized = normalizeBaseCandidate(typeof value === 'string' ? value : '');
+    return normalized && normalized !== head ? normalized : '';
+  };
+
+  const fromMeta = candidate(worktreeCreatedFromBranch);
   if (fromMeta) return fromMeta;
 
-  const fromHint = normalizeBaseCandidate(typeof rootBranchHint === 'string' ? rootBranchHint : '');
+  const fromHint = candidate(rootBranchHint);
   if (fromHint) return fromHint;
+
+  // Authoritative where the hints are guesses: this is what the repository says
+  // its default branch is, so it outranks the conventional names below.
+  const fromDefault = candidate(defaultBranch);
+  if (fromDefault) return fromDefault;
 
   if (localBranches.includes('main')) return 'main';
   if (localBranches.includes('master')) return 'master';
   if (localBranches.includes('develop')) return 'develop';
   return 'main';
+};
+
+/**
+ * Whether a base branch can be resolved locally or through one of the active
+ * remote-tracking refs. Callers must not offer comparisons against the `main`
+ * fallback when that ref does not actually exist in the repository.
+ *
+ * `remoteBranches` are remote-relative (`origin/main`, `origin/feature/x`), so
+ * the remote name is dropped and the rest compared whole. A suffix test matched
+ * `origin/feature/main` for a base of `main`, which passes the check and then
+ * fails the comparison it was meant to prevent.
+ */
+export const hasResolvableBaseBranch = (options: {
+  baseBranch: string;
+  localBranches: readonly string[];
+  remoteBranches: readonly string[];
+}): boolean => {
+  const { baseBranch, localBranches, remoteBranches } = options;
+  if (localBranches.includes(baseBranch)) return true;
+  return remoteBranches.some((branch) => {
+    const slashIndex = branch.indexOf('/');
+    return slashIndex > 0 && branch.slice(slashIndex + 1) === baseBranch;
+  });
 };

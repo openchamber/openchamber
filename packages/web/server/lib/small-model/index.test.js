@@ -18,7 +18,13 @@ vi.mock('./catalog.js', () => ({
   getModelCatalog: vi.fn(),
   getCatalogProvider: vi.fn(),
 }));
-vi.mock('./call.js', () => ({ callSmallModel: vi.fn() }));
+vi.mock('./call.js', () => ({
+  callSmallModel: vi.fn(),
+  resolveProviderLogin: vi.fn(({ auth, providerID }) => {
+    const entry = auth?.[providerID];
+    return entry && typeof entry === 'object' ? entry : null;
+  }),
+}));
 
 const { generateSmallModelText, describeSmallModel } = await import('./index.js');
 const { readAuthFile } = await import('../opencode/auth.js');
@@ -126,6 +132,19 @@ describe('describeSmallModel — capability reporting', () => {
       contextTokens: 8_000,
       contextKnown: true,
       structuredOutput: true,
+      hasLogin: true,
+    });
+  });
+
+  it('reports hasLogin false when the resolved provider has no usable credential', async () => {
+    readAuthFile.mockReturnValue({});
+
+    const described = await describeSmallModel({ directory: '/proj' });
+
+    expect(described).toMatchObject({
+      providerID: 'anthropic',
+      modelID: 'claude-haiku-4-5',
+      hasLogin: false,
     });
   });
 

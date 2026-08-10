@@ -2503,20 +2503,13 @@ export const useConfigStore = create<ConfigStore>()(
                             return undefined;
                         };
 
-                        // Prefer the selected agent's configured model when switching agents.
                         const agent = agents.find((candidate) => candidate.name === agentName);
-                        const agentModelSelection = agent?.model;
-                        if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
-                            const { providerID, modelID } = agentModelSelection;
-                            const agentProvider = providers.find((provider) => provider.id === providerID);
-                            const agentModel = agentProvider?.models.find((model) => model.id === modelID);
 
-                            if (agentModel) {
-                                applyResolvedModelSelection(providerID, modelID, resolveVariantForModel(providerID, modelID, agent?.variant));
-                                return;
-                            }
-                        }
-
+                        // Prefer a session-level manual override for this agent over the
+                        // agent's configured default. Re-applying setAgent after subtask
+                        // completion / rematerialization must not clobber the override
+                        // (issue #2404). Explicit agent-picker switches still force the
+                        // agent default via ModelControls' shouldPreferAgentModel path.
                         if (currentSessionId) {
                             const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
                             if (existingAgentModel && hasProviderModel(providers, existingAgentModel.providerId, existingAgentModel.modelId)) {
@@ -2528,6 +2521,19 @@ export const useConfigStore = create<ConfigStore>()(
                                 ) {
                                     applyResolvedModelSelection(existingAgentModel.providerId, existingAgentModel.modelId, resolvedVariant);
                                 }
+                                return;
+                            }
+                        }
+
+                        // No session override — use the agent's configured/pinned model.
+                        const agentModelSelection = agent?.model;
+                        if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
+                            const { providerID, modelID } = agentModelSelection;
+                            const agentProvider = providers.find((provider) => provider.id === providerID);
+                            const agentModel = agentProvider?.models.find((model) => model.id === modelID);
+
+                            if (agentModel) {
+                                applyResolvedModelSelection(providerID, modelID, resolveVariantForModel(providerID, modelID, agent?.variant));
                                 return;
                             }
                         }

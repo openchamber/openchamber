@@ -294,6 +294,16 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  /* Surface layer tokens (Theme.colors.surface.*) */
+  --color-surface-background: var(--surface-background);
+  --color-surface-foreground: var(--surface-foreground);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-muted-foreground: var(--surface-muted-foreground);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-elevated-foreground: var(--surface-elevated-foreground);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-surface-subtle: var(--surface-subtle);
+
   /* Interactive state tokens (Theme.colors.interactive.*) */
   --color-interactive-hover: var(--interactive-hover);
   --color-interactive-active: var(--interactive-active);

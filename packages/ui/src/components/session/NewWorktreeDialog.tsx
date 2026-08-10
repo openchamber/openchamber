@@ -31,6 +31,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
+import { buildLinkedIssue } from '@/lib/linkedIssues';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { validateWorktreeCreate, createWorktree } from '@/lib/worktrees/worktreeManager';
 import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
@@ -536,6 +537,22 @@ export function NewWorktreeDialog({
         { sessionId: args.sessionId },
       );
 
+      // Record the thread this worktree session was created for, so it stays
+      // visible as a context source after the opening message scrolls away.
+      void sessionActions.setLinkedIssue(
+        args.sessionId,
+        args.directory,
+        buildLinkedIssue({
+          url: issueRes.issue.url,
+          number: issueRes.issue.number,
+          title: issueRes.issue.title,
+          kind: 'issue',
+          author: issueRes.issue.author,
+          linkedAt: Date.now(),
+        }),
+        true,
+      ).catch(() => undefined);
+
       toast.success(t('session.newWorktree.toast.sessionFromIssue'));
       return;
     }
@@ -575,6 +592,20 @@ export function NewWorktreeDialog({
         undefined,
         { sessionId: args.sessionId },
       );
+
+      void sessionActions.setLinkedIssue(
+        args.sessionId,
+        args.directory,
+        buildLinkedIssue({
+          url: prContext.pr.url,
+          number: prContext.pr.number,
+          title: prContext.pr.title,
+          kind: 'pull',
+          author: prContext.pr.author,
+          linkedAt: Date.now(),
+        }),
+        true,
+      ).catch(() => undefined);
 
       toast.success(t('session.newWorktree.toast.sessionFromPr'));
     }

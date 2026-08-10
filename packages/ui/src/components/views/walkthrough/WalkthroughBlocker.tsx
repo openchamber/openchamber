@@ -6,10 +6,10 @@ import { useI18n } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { updateDesktopSettings } from '@/lib/persistence';
-import type { WalkthroughBlockedReason, WalkthroughModel } from '@/lib/walkthrough/types';
+import type { WalkthroughBlockedState, WalkthroughModel } from '@/lib/walkthrough/types';
 
 interface WalkthroughBlockerProps {
-  reason: WalkthroughBlockedReason;
+  reason: WalkthroughBlockedState;
   model?: WalkthroughModel;
   requiredChars?: number;
   availableChars?: number;
@@ -102,6 +102,7 @@ export const WalkthroughBlocker = ({
     if (reason === 'no-model') return t('walkthrough.blocked.noModel.description');
     if (reason === 'empty-diff') return t('walkthrough.blocked.emptyDiff.description');
     if (reason === 'only-generated') return t('walkthrough.blocked.onlyGenerated.description');
+    if (reason === 'server-unsupported') return t('walkthrough.blocked.serverUnsupported.description');
     if (reason === 'output-exhausted') {
       return label
         ? t('walkthrough.blocked.outputExhausted.description', { model: label })
@@ -125,6 +126,7 @@ export const WalkthroughBlocker = ({
     if (reason === 'no-model') return t('walkthrough.blocked.noModel.title');
     if (reason === 'empty-diff') return t('walkthrough.blocked.emptyDiff.title');
     if (reason === 'only-generated') return t('walkthrough.blocked.onlyGenerated.title');
+    if (reason === 'server-unsupported') return t('walkthrough.blocked.serverUnsupported.title');
     if (reason === 'output-exhausted') return t('walkthrough.blocked.outputExhausted.title');
     if (reason === 'structured-output-unsupported') return t('walkthrough.blocked.structuredOutput.title');
     return t('walkthrough.blocked.contextTooSmall.title');
@@ -150,13 +152,15 @@ export const WalkthroughBlocker = ({
             onChange={(providerId, modelId) => {
               void handleModelChange(providerId, modelId);
             }}
-            allowedProviderIds={providers}
+            allowedProviderIds={providers ?? []}
             isModelAllowed={isStructuredOutputCapable}
           />
         </div>
       )}
 
-      {(reason === 'empty-diff' || reason === 'only-generated') && (
+      {/* Retry is the whole remedy once the server is updated, so it stays in
+          reach rather than sending the user back through the panel header. */}
+      {(reason === 'empty-diff' || reason === 'only-generated' || reason === 'server-unsupported') && (
         <Button type="button" variant="outline" size="sm" onClick={onRetry}>
           {t('walkthrough.action.refresh')}
         </Button>

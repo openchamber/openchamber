@@ -18,6 +18,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
+import { buildLinkedIssue } from '@/lib/linkedIssues';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
@@ -395,7 +396,7 @@ export function GitHubIssuePickerDialog({
 
       const sessionTitle = `#${issue.number} ${issue.title}`.trim();
 
-      const { sessionId } = await (async () => {
+      const { sessionId, sessionDirectory } = await (async () => {
         if (createInWorktree) {
           const preferred = `issue-${issue.number}-${generateBranchSlug()}`;
           const created = await createWorktreeSessionForNewBranch(
@@ -448,6 +449,23 @@ export function GitHubIssuePickerDialog({
       });
       const instructionsText = await renderMagicPrompt('github.issue.review.instructions');
       const contextText = buildIssueContextText({ repo: issueRes.repo, issue, comments });
+
+      // Record the thread this session was created for, so it stays visible as
+      // a context source once the opening message has scrolled away. A
+      // snapshot, never re-fetched; a failed write must not fail the flow.
+      void sessionActions.setLinkedIssue(
+        sessionId,
+        sessionDirectory,
+        buildLinkedIssue({
+          url: issue.url,
+          number: issue.number,
+          title: issue.title,
+          kind: 'issue',
+          author: issue.author,
+          linkedAt: Date.now(),
+        }),
+        true,
+      ).catch(() => undefined);
 
       void useSessionUIStore.getState().sendMessage(
         visiblePromptText,

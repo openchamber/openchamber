@@ -22,11 +22,11 @@ import { isSessionPinned, type SessionPinnedTarget } from '@/stores/useSessionPi
 import { Icon } from "@/components/icon/Icon";
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionPermissions } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionPermissions, useSessionQuestionCount } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
-import { nodeContainsSessionId, nodeHasPinnedMembershipChange } from './sessionNodeItemUtils';
+import { nodeContainsSessionId, nodeHasPinnedMembershipChange, selectQuestionBadgeSessionScopes } from './sessionNodeItemUtils';
 import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
@@ -34,6 +34,8 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
+import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
@@ -94,6 +96,7 @@ type Props = {
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string; sessionTitleFallback?: string; readOnly?: boolean }) => void;
   handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean; hardDelete?: boolean; skipConfirm?: boolean }) => void;
+  handleRestoreSession: (session: Session) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   renderSessionNode: (
@@ -290,6 +293,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     createFolderAndStartRename,
     openContextPanelTab,
     handleDeleteSession,
+    handleRestoreSession,
     mobileVariant,
     alwaysShowActions,
     renderSessionNode,
@@ -444,6 +448,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     React.useCallback((state) => Boolean(state.sessionMemoryState.get(viewportSessionKey(session.id))?.isZombie), [session.id]),
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
+  const statusType = sessionStatus?.type ?? 'idle';
+  const isStreaming = statusType === 'busy' || statusType === 'retry';
+  // Read as a boolean, not as the value: the row must not re-render on every
+  // tick of the counter it only decides to mount.
+  const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
   const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined, { bootstrap: false });
   const sessionGoal = getSessionGoal(resolvedSession);
@@ -464,6 +473,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   // expand the other. Matches the format of menuInstanceKey.
   const expansionKey = menuInstanceKey;
   const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
+  const questionBadgeSessionScopes = React.useMemo(
+    () => selectQuestionBadgeSessionScopes(node, isExpanded, sessionDirectory),
+    [isExpanded, node, sessionDirectory],
+  );
+  const pendingQuestionCount = useSessionQuestionCount(questionBadgeSessionScopes);
   const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
@@ -669,26 +683,31 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     );
   }
 
-  const statusType = sessionStatus?.type ?? 'idle';
-  const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
+  const pendingQuestionLabel = pendingQuestionCount === 1
+    ? t('sessions.sidebar.session.status.questionPendingSingle')
+    : t('sessions.sidebar.session.status.questionPendingMany', { count: pendingQuestionCount });
   const showUnreadStatus = !isMovingToWorktree && !isStreaming && needsAttention && !isActive;
   const showStatusMarker = isStreaming || showUnreadStatus;
-  const statusMarkerContent = isStreaming
-    ? (
-        <Icon
-          name="loader-4"
-          className="h-3 w-3 animate-spin text-primary"
-          aria-label={t('sessions.sidebar.session.status.active')}
-        />
-      )
-    : (
-        <span
-          className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
-          aria-label={t('sessions.sidebar.session.status.unread')}
-          title={t('sessions.sidebar.session.status.unread')}
-        />
-      );
+  // Both states are the same static dot; only the color separates "running"
+  // from "unread". The elapsed-turn readout on the right carries the motion
+  // that a spinner used to, at one repaint per second instead of per frame.
+  const statusMarkerLabel = isStreaming
+    ? t('sessions.sidebar.session.status.active')
+    : t('sessions.sidebar.session.status.unread');
+  const statusMarkerContent = (
+    <span
+      className={cn(
+        'h-1.5 w-1.5 rounded-full',
+        isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
+      )}
+      aria-label={statusMarkerLabel}
+      title={statusMarkerLabel}
+    />
+  );
+  // The settled duration lives exactly as long as the unread marker does, so a
+  // session read (or watched) while it finishes never keeps a stale total.
+  const showActivityDuration = (isStreaming || showUnreadStatus) && hasActivityDuration;
   const hideLeadingIndicatorOnHover = !alwaysShowActions && hasChildren && (isMovingToWorktree || showStatusMarker || isPinnedSession);
   const showPinnedMarker = isPinnedSession && !isMovingToWorktree && !showStatusMarker;
   const pinnedMarkerContent = (
@@ -1100,6 +1119,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           {t('sessions.sidebar.bulkActions.archive')}
         </Item>
       ) : null}
+      {archivedBucket ? (
+        <Item className="[&>svg]:mr-1" onClick={() => handleRestoreSession(session)}>
+          <Icon name="inbox-unarchive" className="mr-1 h-4 w-4" />
+          {t('sessions.sidebar.bulkActions.restore')}
+        </Item>
+      ) : null}
       <Item className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket, hardDelete: true })}>
         <Icon name="delete-bin" className="mr-1 h-4 w-4" />
         {t('sessions.sidebar.bulkActions.delete')}
@@ -1224,21 +1249,31 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                           would reflow the truncated title and cause a micro
                           horizontal shift when the status flips. */}
                       <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : needsAttention ? 'text-foreground' : 'text-foreground/80')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
+                      {/* While a turn runs (and until its result is read) the
+                          elapsed counter takes over this slot from the usual
+                          goal/branch/date metadata, which stays one hover or
+                          one read away. */}
                       {alwaysShowActions ? (
                         // Touch runtimes have no hover tooltip, so the compact
                         // date stays inline there.
                         <span className="ml-2 inline-flex flex-shrink-0 items-center gap-1 text-[0.72rem] text-muted-foreground/75">
-                          {sessionGoalGlyph}
-                          {showInlineBranchMarker ? (
-                            <Icon
-                              name="git-branch"
-                              className={cn('h-3 w-3', !prIconColor && 'text-muted-foreground/60')}
-                              style={prIconColor ? { color: prIconColor } : undefined}
-                            />
-                          ) : null}
-                          {sessionCompactUpdatedLabel}
+                          {showActivityDuration ? (
+                            <SessionActivityDuration sessionId={session.id} running={isStreaming} />
+                          ) : (
+                            <>
+                              {sessionGoalGlyph}
+                              {showInlineBranchMarker ? (
+                                <Icon
+                                  name="git-branch"
+                                  className={cn('h-3 w-3', !prIconColor && 'text-muted-foreground/60')}
+                                  style={prIconColor ? { color: prIconColor } : undefined}
+                                />
+                              ) : null}
+                              {sessionCompactUpdatedLabel}
+                            </>
+                          )}
                         </span>
-                      ) : (sessionGoalGlyph || showInlineBranchMarker) ? (
+                      ) : (showActivityDuration || sessionGoalGlyph || showInlineBranchMarker) ? (
                         <div className="relative ml-1 flex h-4 flex-shrink-0 items-center justify-end">
                           <span className={cn(
                             'inline-flex items-center gap-1 whitespace-nowrap text-right transition-opacity duration-150',
@@ -1246,14 +1281,24 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                               ? 'opacity-0'
                               : hideOnHoverClass,
                           )}>
-                            {sessionGoalGlyph}
-                            {showInlineBranchMarker ? (
-                              <Icon
-                                name="git-branch"
-                                className={cn('h-3 w-3', !prIconColor && 'text-muted-foreground/60')}
-                                style={prIconColor ? { color: prIconColor } : undefined}
+                            {showActivityDuration ? (
+                              <SessionActivityDuration
+                                sessionId={session.id}
+                                running={isStreaming}
+                                className="text-[0.72rem]"
                               />
-                            ) : null}
+                            ) : (
+                              <>
+                                {sessionGoalGlyph}
+                                {showInlineBranchMarker ? (
+                                  <Icon
+                                    name="git-branch"
+                                    className={cn('h-3 w-3', !prIconColor && 'text-muted-foreground/60')}
+                                    style={prIconColor ? { color: prIconColor } : undefined}
+                                  />
+                                ) : null}
+                              </>
+                            )}
                           </span>
                         </div>
                       ) : null}
@@ -1261,6 +1306,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                         <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
                           <Icon name="shield" className="h-3 w-3" />
                           <span className="leading-none">{pendingPermissionCount}</span>
+                        </span>
+                      ) : null}
+                      {pendingQuestionCount > 0 ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-status-info/10 px-1 py-0.5 text-[0.7rem] text-status-info flex-shrink-0" title={pendingQuestionLabel} aria-label={pendingQuestionLabel}>
+                          <Icon name="question" className="h-3 w-3" />
+                          <span className="leading-none">{pendingQuestionCount}</span>
                         </span>
                       ) : null}
                     </div>
@@ -1616,6 +1667,7 @@ const areSessionNodeItemPropsEqual = (prev: Props, next: Props): boolean => {
     && prev.createFolderAndStartRename === next.createFolderAndStartRename
     && prev.openContextPanelTab === next.openContextPanelTab
     && prev.handleDeleteSession === next.handleDeleteSession
+    && prev.handleRestoreSession === next.handleRestoreSession
     && prev.renderSessionNode === next.renderSessionNode;
 };
 

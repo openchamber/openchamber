@@ -104,6 +104,8 @@ import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
+import { createBrowserRuntime } from './lib/browser/runtime.js';
+import { registerBrowserRoutes } from './lib/browser/routes.js';
 import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
@@ -515,6 +517,7 @@ const tunnelAuthController = createTunnelAuth();
 let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
+let browserRuntime = null;
 let dictationRuntime = null;
 let messageStreamRuntime = null;
 let openChamberAgentEventsWebSocketRuntime = null;
@@ -1088,6 +1091,19 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     }
     return [...new Set(directories)];
   },
+  // A managed restart can move OpenCode to a NEW port (the old one may stay
+  // occupied by an orphaned process, e.g. killProcessOnPort is a no-op on
+  // Windows). Rebind the message-stream upstream readers to the current port
+  // so the UI keeps receiving events instead of staying pinned to the old
+  // process (#2638). The runtime is created later by the startup pipeline;
+  // by the time any restart runs, it is assigned.
+  onOpenCodeRestarted: () => {
+    try {
+      messageStreamRuntime?.rebindUpstream();
+    } catch (error) {
+      console.warn('Failed to rebind message stream after OpenCode restart:', error?.message ?? error);
+    }
+  },
   getManagedOpenCodeEnv: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     const managedEnv = settings?.agentControlToolEnabled === false
@@ -1269,6 +1285,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   setTerminalRuntime: (value) => {
     terminalRuntime = value;
   },
+  getBrowserRuntime: () => browserRuntime,
+  setBrowserRuntime: (value) => {
+    browserRuntime = value;
+  },
   getMessageStreamRuntime: () => messageStreamRuntime,
   setMessageStreamRuntime: (value) => {
     messageStreamRuntime = value;
@@ -1314,6 +1334,13 @@ async function main(options = {}) {
     dataDir: OPENCHAMBER_DATA_DIR,
     env: process.env,
     executeAction: (...args) => openChamberControlService.execute(...args),
+    executeBrowserAction: (action, params, options = {}) => {
+      if (!browserRuntime) throw new Error('OpenChamber browser surface is not initialized');
+      return browserRuntime.executeAction(action, params, {
+        ...options,
+        actor: 'agent',
+      });
+    },
     getActivePort: () => {
       const address = server?.address?.();
       return typeof address === 'object' && address ? address.port : null;
@@ -1510,6 +1537,10 @@ async function main(options = {}) {
   // relay candidate lazily at request time, so a late-bound holder is enough.
   let relayServiceInstance = null;
 
+  // Same pattern for the tunnel runtime: created after the base routes so
+  // /api/system/info resolves port + tunnel URL lazily at request time.
+  let tunnelRuntimeContextHolder = null;
+
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
     openchamberVersion: OPENCHAMBER_VERSION,
@@ -1546,6 +1577,15 @@ async function main(options = {}) {
         apiOnly,
       };
     },
+    // Port this instance serves on and the active tunnel's public URL (if
+    // any), for /api/system/info. Resolved lazily because the tunnel runtime
+    // is created after these base routes are registered.
+    getServerPort: () => {
+      const activePort = tunnelRuntimeContextHolder?.getActivePort?.();
+      if (Number.isFinite(activePort) && activePort > 0) return activePort;
+      return Number.isFinite(port) && port > 0 ? port : null;
+    },
+    getTunnelUrl: () => tunnelRuntimeContextHolder?.tunnelService?.getPublicUrl?.() ?? null,
     verboseRequestLogs: OPENCHAMBER_VERBOSE_REQUEST_LOGS,
     uiPassword,
     tunnelAuthController,
@@ -1621,6 +1661,7 @@ async function main(options = {}) {
 
   const tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
+  tunnelRuntimeContextHolder = tunnelRuntimeContext;
 
   // Private relay host service: config + management routes + host client
   // lifecycle. Loopback port comes from the same source the tunnel uses so
@@ -1753,6 +1794,37 @@ async function main(options = {}) {
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
   });
+
+  browserRuntime = createBrowserRuntime({
+    fs,
+    fsPromises,
+    path,
+    spawn,
+    crypto,
+    dataDir: OPENCHAMBER_DATA_DIR,
+    searchPathFor,
+    uiAuthController,
+    isRequestOriginAllowed,
+    rejectWebSocketUpgrade,
+    getBrowserSettings: () => {
+      try {
+        if (!fs.existsSync(SETTINGS_FILE_PATH)) return {};
+        const parsed = JSON.parse(fs.readFileSync(SETTINGS_FILE_PATH, 'utf8'));
+        return {
+          browserExecutablePath: parsed?.browserExecutablePath,
+          browserNoSandbox: parsed?.browserNoSandbox,
+        };
+      } catch {
+        return {};
+      }
+    },
+  });
+  registerBrowserRoutes(app, {
+    browserRuntime,
+    dataDir: OPENCHAMBER_DATA_DIR,
+    persistSettings,
+  });
+  browserRuntime.attachWebSocket(server);
 
   const startupPipelineResult = await startupPipelineRuntime.run({
     app,
