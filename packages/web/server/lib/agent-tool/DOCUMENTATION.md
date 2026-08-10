@@ -41,17 +41,46 @@ Shared UI therefore gates the tool per send. `resolveAgentToolGate`
 `capabilities.toolcall` to OpenCode's per-send `tools` map, keyed by the
 `OPENCHAMBER_AGENT_TOOL_NAME` exported here.
 
-Two constraints shape that contract:
+`tools` does two things in OpenCode, and both matter here. It is stored on the
+user message and filters that request, and it also **replaces** the session's
+permission ruleset and persists it. Because of the second effect, clients send
+the complete desired map on every send, never a partial patch, so switching
+models self-corrects.
 
-- OpenCode does not filter one request with `tools`; it replaces the session's
-  permission ruleset and persists it. Clients must send the complete desired map
-  on every send, never a partial patch, so switching models self-corrects.
-- When `agentControlToolEnabled` is `false` the tool was never injected, so no
-  `tools` field is sent and the session's permissions are left untouched.
+Constraints and consequences:
 
-Unknown capability is treated as tool-capable: metadata may not have loaded yet,
-and defaulting to disabled would silently remove the tool from models that
-support it.
+- Replacement is wholesale rather than a merge, so OpenChamber assumes sole
+  ownership of the session permission ruleset on this path. OpenChamber writes
+  session permissions nowhere else (`opencodeClient.updateSession` whitelists
+  `title`, `metadata`, and `time.archived`), and its own auto-accept and
+  scheduled-task policies are OpenChamber-side settings rather than session
+  rules — but a rule set on the same session by another OpenCode client is
+  discarded by the next send from OpenChamber.
+- The map is sent regardless of `agentControlToolEnabled`. That setting only
+  takes effect on the next managed OpenCode restart, so between toggling it off
+  and restarting the tool is still injected, and skipping the gate would let the
+  provider rejection back in. Naming a tool that was never injected is inert:
+  OpenCode filters the tools that exist and matches rule names as literal
+  wildcards, so the rule matches nothing and cannot affect another tool. This is
+  also what makes the gate safe in runtimes where the tool is never injected
+  (VS Code, external OpenCode) — see Runtime parity below.
+- Unknown capability is treated as tool-capable: metadata may not have loaded
+  yet, and defaulting to disabled would silently remove the tool from models
+  that support it. The cost is that the rejection can still occur on a send that
+  races metadata loading.
+- Subagent sessions inherit `deny` rules from their parent, so a subagent spawned
+  while an image model was selected starts without the control tool even if its
+  own model could use it. The child ruleset is derived once at spawn; only
+  `openchamber` is affected.
+- Upstream marks `tools` `@deprecated` in favour of setting permissions on the
+  session. The non-deprecated path merges instead of replacing, so it could never
+  flip a deny back to allow; this field is the only lever that self-corrects.
+
+Only the normal prompt path is gated. `session.command` (slash commands) and
+`session.shell` accept no `tools` field in the OpenCode API, and a command's own
+pinned model outranks the model the client sends, so a command bound to a
+non-tool-calling model still reaches the provider ungated. Closing that needs an
+upstream API change.
 
 ## Agent context budget
 
@@ -113,3 +142,11 @@ error state.
 - VS Code: not injected; the extension owns a separate OpenCode lifecycle.
 - Hosted and Capacitor mobile clients use the server's managed OpenCode tool
   when connected to such a server; no tool runs in the client runtime.
+
+The per-send gate is deliberately *not* conditioned on any of the above. It runs
+in every runtime that uses the shared send path, including those where the tool
+was never injected, because the client cannot know whether the running OpenCode
+process actually loaded the plugin — `agentControlToolEnabled` describes intent
+for the next restart, not the live process. Naming an absent tool is inert (see
+Per-send model gating), so the uniform behavior is safe and keeps the gate honest
+in the window where intent and process disagree.

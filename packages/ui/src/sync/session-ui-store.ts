@@ -222,7 +222,6 @@ export function routeMessage(params: {
       // actually run.
       tools: resolveAgentToolGate({
         modelSupportsToolCalls: useConfigStore.getState().getModelMetadata(params.providerID, params.modelID)?.tool_call,
-        agentControlToolEnabled: useUIStore.getState().agentControlToolEnabled,
       }),
       directory: requestDirectory,
     }).then(() => {}),
