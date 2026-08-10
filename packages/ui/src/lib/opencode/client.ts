@@ -775,6 +775,13 @@ class OpencodeService {
       schema: Record<string, unknown>;
       retryCount?: number;
     };
+    /**
+     * Per-send tool enablement forwarded to OpenCode verbatim. OpenCode turns
+     * this into the session's permission ruleset, replacing it on every send
+     * that carries the field — so callers must always send the complete desired
+     * map, never a partial patch.
+     */
+    tools?: Record<string, boolean>;
     directory?: string | null;
   }): Promise<string> {
     this.assertRuntimeUnchanged(params.runtimeKey);
@@ -879,6 +886,7 @@ class OpencodeService {
         messageID: messageId,
         ...(params.delivery ? { delivery: params.delivery } : {}),
         ...(params.format ? { format: params.format } : {}),
+        ...(params.tools ? { tools: params.tools } : {}),
         parts,
       });
       if (result.response instanceof Response) {

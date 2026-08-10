@@ -28,6 +28,31 @@ restart).
    required inputs or one non-obvious behavior, while completed calls use the
    short title in native tool metadata.
 
+## Per-send model gating
+
+Injection happens once per managed OpenCode process, before any model is known,
+so the tool would otherwise be declared to models that cannot call tools.
+Providers that reject function calling outright — Vertex Gemini image models
+return `Unable to submit request because the model does not support function
+calling` — then fail every send.
+
+Shared UI therefore gates the tool per send. `resolveAgentToolGate`
+(`packages/ui/src/sync/agent-tool-gate.ts`) maps the selected model's
+`capabilities.toolcall` to OpenCode's per-send `tools` map, keyed by the
+`OPENCHAMBER_AGENT_TOOL_NAME` exported here.
+
+Two constraints shape that contract:
+
+- OpenCode does not filter one request with `tools`; it replaces the session's
+  permission ruleset and persists it. Clients must send the complete desired map
+  on every send, never a partial patch, so switching models self-corrects.
+- When `agentControlToolEnabled` is `false` the tool was never injected, so no
+  `tools` field is sent and the session's permissions are left untouched.
+
+Unknown capability is treated as tool-capable: metadata may not have loaded yet,
+and defaulting to disabled would silently remove the tool from models that
+support it.
+
 ## Agent context budget
 
 - The tool exposes one shared parameter object rather than repeating parameters

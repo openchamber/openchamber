@@ -193,3 +193,42 @@ describe('opencodeClient prompt retry behavior', () => {
     expect(promptAsyncCalls).toHaveLength(0);
   });
 });
+
+describe('opencodeClient prompt tool gating', () => {
+  beforeEach(() => {
+    promptAsyncCalls.length = 0;
+    promptAsyncResults.length = 0;
+    runtimeKey = 'test-runtime';
+  });
+
+  test('forwards the tools map to OpenCode verbatim', async () => {
+    promptAsyncResults.push({ response: new Response(null, { status: 200 }) });
+
+    await opencodeClient.sendMessage({
+      id: 'ses_tools',
+      providerID: 'google-vertex',
+      modelID: 'gemini-2.5-flash-image',
+      text: 'draw a cow',
+      tools: { openchamber: false },
+    });
+
+    const body = promptAsyncCalls[0]?.[0] as { tools?: Record<string, boolean> };
+    expect(body.tools).toEqual({ openchamber: false });
+  });
+
+  test('omits the tools field entirely when no gate is supplied', async () => {
+    promptAsyncResults.push({ response: new Response(null, { status: 200 }) });
+
+    await opencodeClient.sendMessage({
+      id: 'ses_no_tools',
+      providerID: 'anthropic',
+      modelID: 'claude-sonnet',
+      text: 'hello',
+    });
+
+    // OpenCode replaces the session permission ruleset whenever `tools` is
+    // present, so an absent gate must not send an empty object.
+    const body = promptAsyncCalls[0]?.[0] as Record<string, unknown>;
+    expect('tools' in body).toBe(false);
+  });
+});
