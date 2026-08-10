@@ -2177,7 +2177,6 @@
   "settings.analytics.yearHeatmap.less": "少",
   "settings.analytics.yearHeatmap.more": "多",
   "settings.analytics.summary.title": "使用摘要",
-  "settings.analytics.summary.dailyByModel": "每日 · 依模型",
   "settings.analytics.summary.topModels": "熱門模型",
   "settings.analytics.summary.view.daily": "每日",
   "settings.analytics.summary.view.total": "總計",

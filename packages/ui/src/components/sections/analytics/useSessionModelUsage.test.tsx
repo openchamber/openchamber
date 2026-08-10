@@ -483,4 +483,31 @@ describe("useSessionModelUsage", () => {
     expect(reopened.value.modelUsage.size).toBe(1);
     reopened.unmount();
   });
+
+  test("retries a session whose SDK response is error-shaped on the next mount", async () => {
+    // The SDK resolves failures as `{ error }` rather than rejecting. This is
+    // the actual failure shape (mirrors unwrapSdkData's "empty response" mode)
+    // and must NOT be recorded as processed, or the session silently degrades
+    // to session-level attribution and is never retried.
+    const sessions = [makeSession("s-err")];
+
+    // First open: the SDK resolves with an error-shaped response.
+    const handle = mountHook(sessions);
+    await resolveSession("s-err", { error: { message: "upstream unavailable" } });
+    await flush();
+    expect(handle.value.modelUsage.size).toBe(0);
+    expect(messagesCallCount).toBe(1);
+    handle.unmount();
+
+    // Recover: a successful response on the next open is attributed now,
+    // because the error-shaped attempt was not recorded as processed.
+    const reopened = mountHook(sessions);
+    await resolveSession("s-err", {
+      data: [makeAssistantMessage("zai", "glm-5.2", { input: 5, output: 5, reasoning: 0, cache: { read: 0, write: 0 } }, 0)],
+    });
+    await flush();
+    expect(messagesCallCount).toBe(2);
+    expect(reopened.value.modelUsage.size).toBe(1);
+    reopened.unmount();
+  });
 });

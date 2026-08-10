@@ -1238,7 +1238,6 @@ export const dict = {
   'contextSidebar.actions.copyJson': 'JSON kopieren',
   'contextSidebar.actions.copy': 'Kopieren',
   'contextSidebar.actions.copied': 'Kopiert',
-  'contextSidebar.breakdown.estimateBadge': 'Schätzung',
   'contextSidebar.breakdown.estimateHint': 'Ungefähre Token-Nutzung je Segment; genaue Werte werden serverseitig gemessen.',
   'contextSidebar.breakdown.segment.systemTools': 'Systemwerkzeuge',
   'contextSidebar.breakdown.segment.mcpTools': 'MCP-Werkzeuge',

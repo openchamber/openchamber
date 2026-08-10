@@ -2178,7 +2178,6 @@ export const settingsDict = {
   "settings.analytics.yearHeatmap.less": "Менше",
   "settings.analytics.yearHeatmap.more": "Більше",
   "settings.analytics.summary.title": "Зведення використання",
-  "settings.analytics.summary.dailyByModel": "Щодня · за моделлю",
   "settings.analytics.summary.topModels": "Топ-моделі",
   "settings.analytics.summary.view.daily": "Щодня",
   "settings.analytics.summary.view.total": "Усього",

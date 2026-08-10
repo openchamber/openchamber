@@ -30,7 +30,6 @@ import {
 } from "./rawMessagePreview";
 import type { TimeFormatPreference } from "@/stores/useUIStore";
 import { formatDateTimeForPreference } from "@/lib/timeFormat";
-import { RiQuestionLine } from "@remixicon/react";
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -528,9 +527,18 @@ export const ContextPanelContent: React.FC = () => {
       return;
     }
     let cancelled = false;
-    void opencodeClient.listTools(providerID, modelID).then((tools) => {
-      if (!cancelled) setToolSchemas(tools);
-    });
+    void opencodeClient
+      .listTools(providerID, modelID)
+      .then((tools) => {
+        if (!cancelled) setToolSchemas(tools);
+      })
+      .catch(() => {
+        // tool.list unavailable (e.g. transient upstream failure): reset to an
+        // empty schema list so segment estimation does not inherit a stale tool
+        // set from a previous provider/model. The estimate stays coarse here
+        // rather than masquerading a failure as an authoritative tool count.
+        if (!cancelled) setToolSchemas([]);
+      });
     return () => {
       cancelled = true;
     };
@@ -649,7 +657,7 @@ export const ContextPanelContent: React.FC = () => {
               </span>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <RiQuestionLine className="text-muted-foreground" />
+                  <Icon name="question" className="size-3.5 text-muted-foreground" />
                 </TooltipTrigger>
                 <TooltipContent>
                   <p className="typography-micro leading-tight max-w-[240px]">

@@ -2177,7 +2177,6 @@ export const settingsDict = {
   "settings.analytics.yearHeatmap.less": "적음",
   "settings.analytics.yearHeatmap.more": "많음",
   "settings.analytics.summary.title": "사용량 요약",
-  "settings.analytics.summary.dailyByModel": "일별 · 모델별",
   "settings.analytics.summary.topModels": "상위 모델",
   "settings.analytics.summary.view.daily": "일별",
   "settings.analytics.summary.view.total": "합계",

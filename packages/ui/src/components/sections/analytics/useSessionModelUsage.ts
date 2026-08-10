@@ -29,8 +29,9 @@ type SdkMessagesResponse = {
  * concurrency limit and progressive — the returned map grows in batches so the
  * UI can refine model attribution incrementally.
  *
- * Sessions whose messages fail to load are silently skipped; they fall back to
- * session-level model attribution inside aggregateAnalytics.
+ * Sessions whose messages fail to load are left un-processed and retried on
+ * the next page open; until then they fall back to session-level model
+ * attribution inside aggregateAnalytics.
  *
  * Results are cached module-wide keyed by `sessionId:time.updated`, so
  * re-opening the page reuses previously fetched breakdowns.
@@ -129,11 +130,14 @@ export function useSessionModelUsage(
               setSessionModelUsage(session.id, breakdown);
             }
           }
-          // Mark processed only after a successful response (including a
-          // legitimately empty one). A thrown fetch leaves the session
-          // un-processed so a transient failure is retried on the next page
-          // open instead of silently degrading to session-level attribution.
-          markSessionProcessed(fp);
+          // Mark processed only for an authoritative success (including a
+          // legitimately empty `data: []`). A thrown fetch or a resolved
+          // `{ error }` response leaves the session un-processed so a
+          // transient failure is retried on the next page open instead of
+          // silently degrading to session-level attribution.
+          if (!response.error && Array.isArray(records)) {
+            markSessionProcessed(fp);
+          }
         } catch {
           // Transient failure: leave un-processed so the next mount retries.
         }
@@ -156,6 +160,13 @@ export function useSessionModelUsage(
     });
 
     return () => {
+      // Cancellation guards React state and the module cache: workers that
+      // resolve after this point early-return before setModelUsage /
+      // markSessionProcessed. It does NOT abort the in-flight `session.messages`
+      // fetch itself (the wrapped SDK call takes no AbortSignal), so background
+      // requests may still complete; and two concurrently-mounted pages can
+      // fetch the same unprocessed session. Both are acceptable here because the
+      // cache write is idempotent and keyed by session fingerprint.
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1211,7 +1211,6 @@ export const dict = {
   'contextSidebar.actions.copyJson': 'Copier JSON',
   'contextSidebar.actions.copy': 'Copie',
   'contextSidebar.actions.copied': 'Copié',
-  'contextSidebar.breakdown.estimateBadge': 'Estimation',
   'contextSidebar.breakdown.estimateHint': 'Utilisation approximative des jetons par segment ; les chiffres exacts sont mesurés côté serveur.',
   'contextSidebar.breakdown.segment.systemTools': 'Outils système',
   'contextSidebar.breakdown.segment.mcpTools': 'Outils MCP',

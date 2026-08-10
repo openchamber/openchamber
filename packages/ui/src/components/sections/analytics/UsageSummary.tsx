@@ -32,7 +32,6 @@ import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { ProviderLogo } from "@/components/ui/ProviderLogo";
 import { cn } from "@/lib/utils";
-import { RiBarChartGroupedLine, RiLineChartLine } from "@remixicon/react";
 
 export type HeroMetric = "tokens" | "cost" | "sessions";
 export type HeroView = "daily" | "total";
@@ -443,7 +442,7 @@ export function UsageSummary({
                 aria-label={labels.chartTypeBar}
                 onClick={() => onChangeChartType("bar")}
               >
-                <RiBarChartGroupedLine />
+                <Icon name="bar-chart-grouped" className="h-4 w-4" />
               </Button>
               <Button
                 type="button"
@@ -453,7 +452,7 @@ export function UsageSummary({
                 aria-label={labels.chartTypeLine}
                 onClick={() => onChangeChartType("line")}
               >
-                <RiLineChartLine />
+                <Icon name="line-chart" className="h-4 w-4" />
               </Button>
             </div>
           ) : null}

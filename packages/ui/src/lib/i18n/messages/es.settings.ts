@@ -2180,7 +2180,6 @@ export const settingsDict = {
   "settings.analytics.yearHeatmap.less": "Menos",
   "settings.analytics.yearHeatmap.more": "Más",
   "settings.analytics.summary.title": "Resumen de uso",
-  "settings.analytics.summary.dailyByModel": "Diario · por modelo",
   "settings.analytics.summary.topModels": "Modelos principales",
   "settings.analytics.summary.view.daily": "Diario",
   "settings.analytics.summary.view.total": "Total",

@@ -38,7 +38,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Icon } from "@/components/icon/Icon";
-import { RiRefreshLine } from "@remixicon/react";
+
 import { RankedList } from "./RankedList";
 import { useSessionModelUsage } from "./useSessionModelUsage";
 
@@ -186,7 +186,7 @@ export function AnalyticsPage() {
     <SettingsPageLayout
       title={t("settings.page.analytics.title")}
       headerEnd={
-        <div className="flex flex-wrap items-center gap-2 max-lg:w-[100cqw] lg:w-110 lg:-mbs-1">
+        <div className="flex flex-wrap items-center gap-2 @max-lg:w-[100cqw] @lg:w-110 @lg:-mbs-1">
           <SortableTabsStrip
             items={scopeOptions.map((option) => ({
               id: option.value,
@@ -238,8 +238,9 @@ export function AnalyticsPage() {
             className="rounded-lg border border-(--surface-subtle) px-2.5 py-1 typography-ui-label text-muted-foreground transition-colors hover:text-foreground"
             aria-label={t("settings.analytics.action.refresh")}
           >
-            <RiRefreshLine
-              className={status === "loading" ? "animate-spin" : undefined}
+            <Icon
+              name="refresh"
+              className={status === "loading" ? "h-4 w-4 animate-spin" : "h-4 w-4"}
             />
           </Button>
         </div>

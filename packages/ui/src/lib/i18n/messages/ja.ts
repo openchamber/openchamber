@@ -1387,7 +1387,6 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.actions.copyJson': 'JSONをコピー',
   'contextSidebar.actions.copy': 'コピー',
   'contextSidebar.actions.copied': 'コピーしました',
-  'contextSidebar.breakdown.estimateBadge': '見積もり',
   'contextSidebar.breakdown.estimateHint': 'セグメントごとの概算トークン使用量。正確な数値はサーバー側で計測されます。',
   'contextSidebar.breakdown.segment.systemTools': 'システムツール',
   'contextSidebar.breakdown.segment.mcpTools': 'MCPツール',

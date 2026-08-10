@@ -1357,7 +1357,6 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.actions.copyJson': '复制 JSON',
   'contextSidebar.actions.copy': '复制',
   'contextSidebar.actions.copied': '已复制',
-  'contextSidebar.breakdown.estimateBadge': '估算',
   'contextSidebar.breakdown.estimateHint': '各段令牌用量为估算值,精确数值由服务端计量。',
   'contextSidebar.breakdown.segment.systemTools': '系统工具',
   'contextSidebar.breakdown.segment.mcpTools': 'MCP 工具',

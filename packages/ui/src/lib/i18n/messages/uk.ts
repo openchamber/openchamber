@@ -1357,7 +1357,6 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.actions.copyJson": "Скопіювати JSON",
   "contextSidebar.actions.copy": "Копіювати",
   "contextSidebar.actions.copied": "Скопійовано",
-  "contextSidebar.breakdown.estimateBadge": "Оцінка",
   "contextSidebar.breakdown.estimateHint": "Приблизне використання токенів на сегмент; точні значення вимірюються на сервері.",
   "contextSidebar.breakdown.segment.systemTools": "Системні інструменти",
   "contextSidebar.breakdown.segment.mcpTools": "Інструменти MCP",

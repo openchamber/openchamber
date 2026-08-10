@@ -83,15 +83,15 @@ describe('opencodeClient.listTools', () => {
     expect(tools[0]!.id).toBe('bash');
   });
 
-  test('returns [] on SDK failure', async () => {
+  test('throws on SDK failure instead of masking it as []', async () => {
     toolListResults.push(new Error('down'));
 
-    expect(await opencodeClient.listTools('p', 'm')).toEqual([]);
+    await expect(opencodeClient.listTools('p', 'm')).rejects.toThrow('down');
   });
 
-  test('returns [] when SDK result has no data', async () => {
+  test('throws when SDK result has no data (empty response)', async () => {
     toolListResults.push({});
 
-    expect(await opencodeClient.listTools('p', 'm')).toEqual([]);
+    await expect(opencodeClient.listTools('p', 'm')).rejects.toThrow('tool.list failed');
   });
 });

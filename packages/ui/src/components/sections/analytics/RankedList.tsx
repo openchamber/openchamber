@@ -35,7 +35,7 @@ export function RankedList({
               className="h-2.5 w-2.5 shrink-0 rounded-full"
               style={{ backgroundColor: seriesColor(index) }}
             />
-            <span className="min-w-0 flex-1 truncate tex-sm text-foreground">
+            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
               {item.title}
             </span>
             {item.values?.map((val) => (

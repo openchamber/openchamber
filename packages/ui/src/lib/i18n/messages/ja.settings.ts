@@ -2179,7 +2179,6 @@ export const settingsDict = {
   "settings.analytics.yearHeatmap.less": "少",
   "settings.analytics.yearHeatmap.more": "多",
   "settings.analytics.summary.title": "使用状況サマリー",
-  "settings.analytics.summary.dailyByModel": "日別 · モデル別",
   "settings.analytics.summary.topModels": "トップモデル",
   "settings.analytics.summary.view.daily": "日別",
   "settings.analytics.summary.view.total": "合計",

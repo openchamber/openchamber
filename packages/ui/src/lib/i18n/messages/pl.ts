@@ -1557,7 +1557,6 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.actions.copied': 'Skopiowano',
   'contextSidebar.actions.copy': 'Kopiuj',
   'contextSidebar.actions.copyJson': 'Kopiuj JSON',
-  'contextSidebar.breakdown.estimateBadge': 'Szacunek',
   'contextSidebar.breakdown.estimateHint': 'Przybliżone użycie tokenów na segment; dokładne wartości są mierzone po stronie serwera.',
   'contextSidebar.breakdown.segment.mcpTools': 'Narzędzia MCP',
   'contextSidebar.breakdown.segment.messages': 'Wiadomości',

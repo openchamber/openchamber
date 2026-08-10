@@ -2177,7 +2177,6 @@ export const settingsDict = {
   "settings.analytics.yearHeatmap.less": "少",
   "settings.analytics.yearHeatmap.more": "多",
   "settings.analytics.summary.title": "使用摘要",
-  "settings.analytics.summary.dailyByModel": "每日 · 按模型",
   "settings.analytics.summary.topModels": "热门模型",
   "settings.analytics.summary.view.daily": "每日",
   "settings.analytics.summary.view.total": "总计",

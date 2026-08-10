@@ -1357,7 +1357,6 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.actions.copyJson": "Copiar JSON",
   "contextSidebar.actions.copy": "Copiar",
   "contextSidebar.actions.copied": "Copiado",
-  "contextSidebar.breakdown.estimateBadge": "Estimación",
   "contextSidebar.breakdown.estimateHint": "Uso aproximado de tokens por segmento; las cifras exactas se miden en el servidor.",
   "contextSidebar.breakdown.segment.systemTools": "Herramientas del sistema",
   "contextSidebar.breakdown.segment.mcpTools": "Herramientas MCP",

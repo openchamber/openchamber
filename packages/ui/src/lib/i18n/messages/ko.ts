@@ -1393,7 +1393,6 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.actions.copyJson': 'JSON 복사',
   'contextSidebar.actions.copy': '복사',
   'contextSidebar.actions.copied': '복사됨',
-  'contextSidebar.breakdown.estimateBadge': '추정치',
   'contextSidebar.breakdown.estimateHint': '세그먼트별 대략적인 토큰 사용량입니다. 정확한 수치는 서버에서 측정됩니다.',
   'contextSidebar.breakdown.segment.systemTools': '시스템 도구',
   'contextSidebar.breakdown.segment.mcpTools': 'MCP 도구',
