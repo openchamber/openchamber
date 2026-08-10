@@ -68,7 +68,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
           // a narrow pane it used to starve the title until the name was a
           // single letter and an ellipsis; giving the title block a basis lets
           // the actions drop to their own line instead.
-          <div className="mb-2 flex flex-wrap items-start justify-between gap-x-4 gap-y-3 pb-6">
+          <div className="mb-2 flex flex-wrap items-start justify-between gap-x-4 gap-y-3 pb-6 @container">
             <div className="min-w-0 flex-1 basis-64 space-y-1">
               {title != null ? (
                 isPlainTitle ? (

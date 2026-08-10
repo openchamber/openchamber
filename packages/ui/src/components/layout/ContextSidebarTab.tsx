@@ -1,24 +1,36 @@
-import React from 'react';
-import type { Message, Part } from '@opencode-ai/sdk/v2';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+import React from "react";
+import type { Message, Part } from "@opencode-ai/sdk/v2";
+import { WorkerHighlightedCode } from "@/components/code/WorkerHighlightedCode";
 
-import { deriveMessageRole } from '@/components/chat/message/messageRole';
+import { deriveMessageRole } from "@/components/chat/message/messageRole";
 import { Icon } from "@/components/icon/Icon";
-import { useConfigStore } from '@/stores/useConfigStore';
-import { useUIStore } from '@/stores/useUIStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { computeCacheHitRate } from '@/stores/utils/tokenUtils';
-import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
-import { copyTextToClipboard } from '@/lib/clipboard';
-import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
+import { useConfigStore } from "@/stores/useConfigStore";
+import { useMcpConfigStore } from "@/stores/useMcpConfigStore";
+import { useSkillsStore } from "@/stores/useSkillsStore";
+import { useShallow } from "zustand/react/shallow";
+import { useUIStore } from "@/stores/useUIStore";
+import { useSessionUIStore } from "@/sync/session-ui-store";
+import { computeCacheHitRate } from "@/stores/utils/tokenUtils";
+import { useSessions, useSessionMessageRecords } from "@/sync/sync-context";
+import { copyTextToClipboard } from "@/lib/clipboard";
+import { computeContextSegments } from "@/lib/context/segments";
+import { buildContextSegmentRows } from "@/lib/context/segmentRows";
+import { opencodeClient } from "@/lib/opencode/client";
+import { getCurrentIntlLocale, useI18n } from "@/lib/i18n";
 import {
   derivePartsLabel,
   deriveUserSnippet,
   formatAssistantTokens,
   formatMessagePreviewTime,
-} from './rawMessagePreview';
-import type { TimeFormatPreference } from '@/stores/useUIStore';
-import { formatDateTimeForPreference } from '@/lib/timeFormat';
+} from "./rawMessagePreview";
+import type { TimeFormatPreference } from "@/stores/useUIStore";
+import { formatDateTimeForPreference } from "@/lib/timeFormat";
+import { RiQuestionLine } from "@remixicon/react";
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -67,7 +79,7 @@ const EMPTY_BUCKETS: ContextBuckets = {
 };
 
 const toNonNegativeNumber = (value: unknown): number => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return 0;
   }
   return value;
@@ -78,16 +90,20 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
   const source =
     tokenCandidate !== undefined
       ? tokenCandidate
-      : (message.parts.find((part) => (part as { tokens?: unknown }).tokens !== undefined) as { tokens?: unknown } | undefined)?.tokens;
+      : (
+          message.parts.find(
+            (part) => (part as { tokens?: unknown }).tokens !== undefined,
+          ) as { tokens?: unknown } | undefined
+        )?.tokens;
 
-  if (typeof source === 'number') {
+  if (typeof source === "number") {
     return {
       ...EMPTY_BREAKDOWN,
       total: toNonNegativeNumber(source),
     };
   }
 
-  if (!source || typeof source !== 'object') {
+  if (!source || typeof source !== "object") {
     return EMPTY_BREAKDOWN;
   }
 
@@ -116,37 +132,45 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
 
 const pickString = (...values: unknown[]): string => {
   for (const value of values) {
-    if (typeof value === 'string' && value.trim().length > 0) {
+    if (typeof value === "string" && value.trim().length > 0) {
       return value;
     }
   }
-  return '';
+  return "";
 };
 
 const estimateTextLength = (value: unknown): number => {
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     return value.length;
   }
-  if (typeof value === 'number' || typeof value === 'boolean') {
+  if (typeof value === "number" || typeof value === "boolean") {
     return String(value).length;
   }
   if (Array.isArray(value)) {
     return value.reduce((sum, item) => sum + estimateTextLength(item), 0);
   }
-  if (value && typeof value === 'object') {
-    return Object.values(value as Record<string, unknown>).reduce<number>((sum, item) => sum + estimateTextLength(item), 0);
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).reduce<number>(
+      (sum, item) => sum + estimateTextLength(item),
+      0,
+    );
   }
   return 0;
 };
 
-const estimatePartChars = (part: Part, role: 'user' | 'assistant' | 'tool' | 'other'): ContextBuckets => {
+const estimatePartChars = (
+  part: Part,
+  role: "user" | "assistant" | "tool" | "other",
+): ContextBuckets => {
   const partRecord = part as Record<string, unknown>;
-  const type = typeof partRecord.type === 'string' ? partRecord.type : '';
+  const type = typeof partRecord.type === "string" ? partRecord.type : "";
 
-  if (type === 'reasoning') {
+  if (type === "reasoning") {
     return {
       ...EMPTY_BUCKETS,
-      assistant: estimateTextLength(partRecord.text) + estimateTextLength(partRecord.content),
+      assistant:
+        estimateTextLength(partRecord.text) +
+        estimateTextLength(partRecord.content),
     };
   }
 
@@ -154,52 +178,83 @@ const estimatePartChars = (part: Part, role: 'user' | 'assistant' | 'tool' | 'ot
     partRecord.text,
     partRecord.content,
     partRecord.value,
-    (partRecord.source as { value?: unknown; text?: { value?: unknown } } | undefined)?.value,
-    (partRecord.source as { value?: unknown; text?: { value?: unknown } } | undefined)?.text?.value,
+    (
+      partRecord.source as
+        | { value?: unknown; text?: { value?: unknown } }
+        | undefined
+    )?.value,
+    (
+      partRecord.source as
+        | { value?: unknown; text?: { value?: unknown } }
+        | undefined
+    )?.text?.value,
   );
 
-  if (type === 'tool' || role === 'tool') {
+  if (type === "tool" || role === "tool") {
     const toolInputOutputLength =
-      estimateTextLength(partRecord.input)
-      + estimateTextLength(partRecord.output)
-      + estimateTextLength(partRecord.error)
-      + estimateTextLength((partRecord.call as { input?: unknown; output?: unknown; error?: unknown } | undefined)?.input)
-      + estimateTextLength((partRecord.call as { input?: unknown; output?: unknown; error?: unknown } | undefined)?.output)
-      + estimateTextLength((partRecord.call as { input?: unknown; output?: unknown; error?: unknown } | undefined)?.error);
+      estimateTextLength(partRecord.input) +
+      estimateTextLength(partRecord.output) +
+      estimateTextLength(partRecord.error) +
+      estimateTextLength(
+        (
+          partRecord.call as
+            | { input?: unknown; output?: unknown; error?: unknown }
+            | undefined
+        )?.input,
+      ) +
+      estimateTextLength(
+        (
+          partRecord.call as
+            | { input?: unknown; output?: unknown; error?: unknown }
+            | undefined
+        )?.output,
+      ) +
+      estimateTextLength(
+        (
+          partRecord.call as
+            | { input?: unknown; output?: unknown; error?: unknown }
+            | undefined
+        )?.error,
+      );
 
     const toolPayloadLength =
-      toolInputOutputLength
-      + estimateTextLength(partRecord.raw)
-      + Math.round(estimateTextLength(partRecord.metadata) * 0.25)
-      + Math.round(estimateTextLength(partRecord.state) * 0.1);
+      toolInputOutputLength +
+      estimateTextLength(partRecord.raw) +
+      Math.round(estimateTextLength(partRecord.metadata) * 0.25) +
+      Math.round(estimateTextLength(partRecord.state) * 0.1);
 
     return { user: 0, assistant: 0, tool: toolPayloadLength, other: 0 };
   }
 
-  if (role === 'user') {
+  if (role === "user") {
     return { user: directText.length, assistant: 0, tool: 0, other: 0 };
   }
 
-  if (role === 'assistant') {
+  if (role === "assistant") {
     return { user: 0, assistant: directText.length, tool: 0, other: 0 };
   }
 
   return { user: 0, assistant: 0, tool: 0, other: directText.length };
 };
 
-const addBuckets = (target: ContextBuckets, value: ContextBuckets): ContextBuckets => ({
+const addBuckets = (
+  target: ContextBuckets,
+  value: ContextBuckets,
+): ContextBuckets => ({
   user: target.user + value.user,
   assistant: target.assistant + value.assistant,
   tool: target.tool + value.tool,
   other: target.other + value.other,
 });
 
-const deriveRoleBucket = (message: SessionMessage): 'user' | 'assistant' | 'tool' | 'other' => {
+const deriveRoleBucket = (
+  message: SessionMessage,
+): "user" | "assistant" | "tool" | "other" => {
   const roleInfo = deriveMessageRole(message.info);
-  if (roleInfo.isUser) return 'user';
-  if (roleInfo.role === 'assistant') return 'assistant';
-  if (roleInfo.role === 'tool') return 'tool';
-  return 'other';
+  if (roleInfo.isUser) return "user";
+  if (roleInfo.role === "assistant") return "assistant";
+  if (roleInfo.role === "tool") return "tool";
+  return "other";
 };
 
 const computeContextBreakdown = (
@@ -210,14 +265,17 @@ const computeContextBreakdown = (
     return { ...EMPTY_BUCKETS };
   }
 
-  const totalChars = sessionMessages.reduce<ContextBuckets>((acc, message) => {
-    const role = deriveRoleBucket(message);
-    let bucket = { ...EMPTY_BUCKETS };
-    for (const part of message.parts) {
-      bucket = addBuckets(bucket, estimatePartChars(part, role));
-    }
-    return addBuckets(acc, bucket);
-  }, { ...EMPTY_BUCKETS });
+  const totalChars = sessionMessages.reduce<ContextBuckets>(
+    (acc, message) => {
+      const role = deriveRoleBucket(message);
+      let bucket = { ...EMPTY_BUCKETS };
+      for (const part of message.parts) {
+        bucket = addBuckets(bucket, estimatePartChars(part, role));
+      }
+      return addBuckets(acc, bucket);
+    },
+    { ...EMPTY_BUCKETS },
+  );
 
   totalChars.user += systemPrompt.length;
 
@@ -229,26 +287,36 @@ const computeContextBreakdown = (
   };
 };
 
-const formatNumber = (value: number): string => value.toLocaleString(getCurrentIntlLocale());
+const formatNumber = (value: number): string =>
+  value.toLocaleString(getCurrentIntlLocale());
 
 const formatMoney = (value: number): string => {
-  if (!Number.isFinite(value) || value <= 0) return new Intl.NumberFormat(getCurrentIntlLocale(), { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(0);
+  if (!Number.isFinite(value) || value <= 0)
+    return new Intl.NumberFormat(getCurrentIntlLocale(), {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(0);
   return new Intl.NumberFormat(getCurrentIntlLocale(), {
-    style: 'currency',
-    currency: 'USD',
+    style: "currency",
+    currency: "USD",
     minimumFractionDigits: value < 0.01 ? 4 : 2,
     maximumFractionDigits: value < 0.01 ? 4 : 2,
   }).format(value);
 };
 
-const formatDateTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference): string => {
-  if (!timestamp || !Number.isFinite(timestamp)) return '-';
+const formatDateTime = (
+  timestamp: number | null,
+  timeFormatPreference: TimeFormatPreference,
+): string => {
+  if (!timestamp || !Number.isFinite(timestamp)) return "-";
   return formatDateTimeForPreference(timestamp, timeFormatPreference, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
 };
 
@@ -261,23 +329,32 @@ const resolveProviderAndModel = (
   const model = provider?.models?.find((entry) => entry.id === modelID);
 
   return {
-    providerName: provider?.name || providerID || '-',
-    modelName: model?.name || modelID || '-',
-    contextLimit: typeof model?.limit?.context === 'number' ? model.limit.context : null,
+    providerName: provider?.name || providerID || "-",
+    modelName: model?.name || modelID || "-",
+    contextLimit:
+      typeof model?.limit?.context === "number" ? model.limit.context : null,
   };
 };
 
 export const ContextPanelContent: React.FC = () => {
   const { t } = useI18n();
-  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
-  const [expandedRawMessages, setExpandedRawMessages] = React.useState<Record<string, boolean>>({});
-  const [copiedRawMessageId, setCopiedRawMessageId] = React.useState<string | null>(null);
+  const timeFormatPreference = useUIStore(
+    (state) => state.timeFormatPreference,
+  );
+  const [expandedRawMessages, setExpandedRawMessages] = React.useState<
+    Record<string, boolean>
+  >({});
+  const [copiedRawMessageId, setCopiedRawMessageId] = React.useState<
+    string | null
+  >(null);
   const copyResetTimeoutRef = React.useRef<number | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+  const currentSessionDirectory = useSessionUIStore(
+    (state) => state.currentSessionDirectory,
+  );
   const sessions = useSessions(currentSessionDirectory ?? undefined);
   const sessionMessages = useSessionMessageRecords(
-    currentSessionId ?? '',
+    currentSessionId ?? "",
     currentSessionDirectory ?? undefined,
   );
   const providers = useConfigStore((state) => state.providers);
@@ -287,7 +364,9 @@ export const ContextPanelContent: React.FC = () => {
       window.clearTimeout(copyResetTimeoutRef.current);
       copyResetTimeoutRef.current = null;
     }
-    setExpandedRawMessages((prev) => (Object.keys(prev).length > 0 ? {} : prev));
+    setExpandedRawMessages((prev) =>
+      Object.keys(prev).length > 0 ? {} : prev,
+    );
     setCopiedRawMessageId(null);
   }, [currentSessionDirectory, currentSessionId]);
 
@@ -300,27 +379,36 @@ export const ContextPanelContent: React.FC = () => {
     };
   }, []);
 
-  const handleCopyRawMessage = React.useCallback(async (messageId: string, value: string) => {
-    const result = await copyTextToClipboard(value);
-    if (result.ok) {
-      setCopiedRawMessageId(messageId);
-      if (copyResetTimeoutRef.current !== null) {
-        window.clearTimeout(copyResetTimeoutRef.current);
+  const handleCopyRawMessage = React.useCallback(
+    async (messageId: string, value: string) => {
+      const result = await copyTextToClipboard(value);
+      if (result.ok) {
+        setCopiedRawMessageId(messageId);
+        if (copyResetTimeoutRef.current !== null) {
+          window.clearTimeout(copyResetTimeoutRef.current);
+        }
+        copyResetTimeoutRef.current = window.setTimeout(() => {
+          setCopiedRawMessageId((prev) => (prev === messageId ? null : prev));
+          copyResetTimeoutRef.current = null;
+        }, 2000);
+      } else {
+        setCopiedRawMessageId(null);
       }
-      copyResetTimeoutRef.current = window.setTimeout(() => {
-        setCopiedRawMessageId((prev) => (prev === messageId ? null : prev));
-        copyResetTimeoutRef.current = null;
-      }, 2000);
-    } else {
-      setCopiedRawMessageId(null);
-    }
-  }, []);
+    },
+    [],
+  );
 
   const viewModel = React.useMemo(() => {
-    const currentSession = currentSessionId ? sessions.find((session) => session.id === currentSessionId) ?? null : null;
+    const currentSession = currentSessionId
+      ? (sessions.find((session) => session.id === currentSessionId) ?? null)
+      : null;
 
-    const assistantMessages = sessionMessages.filter((entry) => deriveMessageRole(entry.info).role === 'assistant');
-    const userMessages = sessionMessages.filter((entry) => deriveMessageRole(entry.info).isUser);
+    const assistantMessages = sessionMessages.filter(
+      (entry) => deriveMessageRole(entry.info).role === "assistant",
+    );
+    const userMessages = sessionMessages.filter(
+      (entry) => deriveMessageRole(entry.info).isUser,
+    );
 
     let contextMessage: SessionMessage | null = null;
     for (let i = assistantMessages.length - 1; i >= 0; i -= 1) {
@@ -331,57 +419,84 @@ export const ContextPanelContent: React.FC = () => {
       }
     }
 
-    const tokenBreakdown = contextMessage ? extractTokenBreakdown(contextMessage) : EMPTY_BREAKDOWN;
+    const tokenBreakdown = contextMessage
+      ? extractTokenBreakdown(contextMessage)
+      : EMPTY_BREAKDOWN;
 
     // Cache hit rate for the last assistant message. `input` is the non-cached portion
     // (total input - cache.read - cache.write per SDK's session.ts:getUsage),
     // so hit rate = cache.read / (input + cache.read + cache.write).
     const cacheHitRate = computeCacheHitRate({
       input: tokenBreakdown.input,
-      cache: { read: tokenBreakdown.cacheRead, write: tokenBreakdown.cacheWrite },
+      cache: {
+        read: tokenBreakdown.cacheRead,
+        write: tokenBreakdown.cacheWrite,
+      },
     });
 
     const totalAssistantCost = assistantMessages.reduce((sum, message) => {
-      const cost = toNonNegativeNumber((message.info as { cost?: unknown }).cost);
+      const cost = toNonNegativeNumber(
+        (message.info as { cost?: unknown }).cost,
+      );
       return sum + cost;
     }, 0);
 
-    const latestAssistantInfo = (contextMessage?.info ?? null) as (Message & { providerID?: string; modelID?: string }) | null;
+    const latestAssistantInfo = (contextMessage?.info ?? null) as
+      | (Message & { providerID?: string; modelID?: string })
+      | null;
     const providerModel = resolveProviderAndModel(
       providers as ProviderLike[],
-      latestAssistantInfo?.providerID || '',
-      latestAssistantInfo?.modelID || '',
+      latestAssistantInfo?.providerID || "",
+      latestAssistantInfo?.modelID || "",
     );
 
     const contextLimit = providerModel.contextLimit;
-    const usagePercent = contextLimit && contextLimit > 0
-      ? Math.min(999, (tokenBreakdown.total / contextLimit) * 100)
-      : 0;
+    const usagePercent =
+      contextLimit && contextLimit > 0
+        ? Math.min(999, (tokenBreakdown.total / contextLimit) * 100)
+        : 0;
 
-    const systemPrompt = ([...sessionMessages].reverse().find(
-      (entry) => deriveMessageRole(entry.info).isUser && typeof (entry.info as { system?: unknown }).system === 'string',
-    )?.info as { system?: string } | undefined)?.system || '';
+    const systemPrompt =
+      (
+        [...sessionMessages]
+          .reverse()
+          .find(
+            (entry) =>
+              deriveMessageRole(entry.info).isUser &&
+              typeof (entry.info as { system?: unknown }).system === "string",
+          )?.info as { system?: string } | undefined
+      )?.system || "";
 
-    const computedBreakdown = computeContextBreakdown(sessionMessages, systemPrompt);
+    const computedBreakdown = computeContextBreakdown(
+      sessionMessages,
+      systemPrompt,
+    );
 
     const userTokens = computedBreakdown.user;
     const assistantTokens = computedBreakdown.assistant;
     const toolTokens = computedBreakdown.tool;
-    const otherTokens = Math.max(0, tokenBreakdown.input - userTokens - assistantTokens - toolTokens);
-    const breakdownTotal = userTokens + assistantTokens + toolTokens + otherTokens;
 
     const firstMessageTs = sessionMessages[0]?.info?.time?.created;
-    const lastMessageTs = sessionMessages.length > 0
-      ? sessionMessages[sessionMessages.length - 1]?.info?.time?.created
-      : null;
+    const lastMessageTs =
+      sessionMessages.length > 0
+        ? sessionMessages[sessionMessages.length - 1]?.info?.time?.created
+        : null;
 
     return {
-      sessionTitle: currentSession?.title || t('contextSidebar.session.untitled'),
+      sessionTitle:
+        currentSession?.title || t("contextSidebar.session.untitled"),
       messagesCount: sessionMessages.length,
       userMessagesCount: userMessages.length,
       assistantMessagesCount: assistantMessages.length,
-      createdAt: (currentSession?.time?.created ?? firstMessageTs ?? null) as number | null,
-      lastActivityAt: (lastMessageTs ?? currentSession?.time?.created ?? null) as number | null,
+      createdAt: (currentSession?.time?.created ?? firstMessageTs ?? null) as
+        | number
+        | null,
+      lastActivityAt: (lastMessageTs ??
+        currentSession?.time?.created ??
+        null) as number | null,
+      providerID: latestAssistantInfo?.providerID || "",
+      modelID: latestAssistantInfo?.modelID || "",
+      systemPrompt,
       providerModel,
       tokenBreakdown,
       usagePercent,
@@ -392,40 +507,102 @@ export const ContextPanelContent: React.FC = () => {
         user: userTokens,
         assistant: assistantTokens,
         tool: toolTokens,
-        other: otherTokens,
       },
-      breakdownTotal,
     };
   }, [currentSessionId, providers, sessionMessages, sessions, t]);
 
+  const mcpServerNames = useMcpConfigStore(
+    useShallow((s) => s.mcpServers.map((server) => server.name)),
+  );
+  const skillsTexts = useSkillsStore(
+    useShallow((s) => s.skills.map((skill) => skill.description ?? "")),
+  );
+  const [toolSchemas, setToolSchemas] = React.useState<
+    Array<{ id: string; description: string; parameters: unknown }>
+  >([]);
+  React.useEffect(() => {
+    const providerID = viewModel.providerID;
+    const modelID = viewModel.modelID;
+    if (!providerID || !modelID) {
+      setToolSchemas([]);
+      return;
+    }
+    let cancelled = false;
+    void opencodeClient.listTools(providerID, modelID).then((tools) => {
+      if (!cancelled) setToolSchemas(tools);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewModel.providerID, viewModel.modelID]);
+  const segmentRows = React.useMemo(() => {
+    const segments = computeContextSegments({
+      inputTokens: viewModel.tokenBreakdown.input,
+      messageTokens: {
+        user: viewModel.breakdown.user,
+        assistant: viewModel.breakdown.assistant,
+        tool: viewModel.breakdown.tool,
+      },
+      systemPromptText: viewModel.systemPrompt,
+      tools: toolSchemas,
+      mcpServerNames,
+      skillsTexts,
+    });
+    return buildContextSegmentRows(segments, {
+      systemTools: t("contextSidebar.breakdown.segment.systemTools"),
+      mcpTools: t("contextSidebar.breakdown.segment.mcpTools"),
+      systemPrompt: t("contextSidebar.breakdown.segment.systemPrompt"),
+      skills: t("contextSidebar.breakdown.segment.skills"),
+      messages: t("contextSidebar.breakdown.segment.messages"),
+      other: t("contextSidebar.breakdown.segment.other"),
+    });
+  }, [viewModel, toolSchemas, mcpServerNames, skillsTexts, t]);
+
+  const toolCounts = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const message of sessionMessages) {
+      for (const part of message.parts) {
+        if (part && (part as { type?: unknown }).type === "tool") {
+          const name = (part as { tool?: unknown }).tool;
+          if (typeof name === "string" && name) {
+            counts.set(name, (counts.get(name) ?? 0) + 1);
+          }
+        }
+      }
+    }
+    return [...counts.entries()]
+      .map(([tool, count]) => ({ tool, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+  }, [sessionMessages]);
+
   if (!currentSessionId) {
     return (
-        <div className="flex h-full items-center justify-center p-6 text-center typography-ui-label text-muted-foreground">
-        {t('contextSidebar.empty.openSession')}
+      <div className="flex h-full items-center justify-center p-6 text-center typography-ui-label text-muted-foreground">
+        {t("contextSidebar.empty.openSession")}
       </div>
     );
   }
 
-  const segments: Array<{ key: string; label: string; value: number; color: string }> = [
-    { key: 'user', label: t('contextSidebar.breakdown.user'), value: viewModel.breakdown.user, color: 'var(--status-success)' },
-    { key: 'assistant', label: t('contextSidebar.breakdown.assistant'), value: viewModel.breakdown.assistant, color: 'var(--primary-base)' },
-    { key: 'tool', label: t('contextSidebar.breakdown.toolCalls'), value: viewModel.breakdown.tool, color: 'var(--status-warning)' },
-    { key: 'other', label: t('contextSidebar.breakdown.other'), value: viewModel.breakdown.other, color: 'var(--surface-muted-foreground)' },
-  ];
-
   return (
     <div className="h-full overflow-y-auto bg-background">
       <div className="mx-auto w-full max-w-[52rem] px-5 py-6">
-
         {/* ── Session header ── */}
         <div className="mb-6">
-          <h2 className="typography-ui-header font-semibold text-foreground truncate">{viewModel.sessionTitle}</h2>
+          <h2 className="typography-ui-header font-semibold text-foreground truncate">
+            {viewModel.sessionTitle}
+          </h2>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 typography-micro text-muted-foreground/70">
-            <span>{viewModel.providerModel.providerName} / {viewModel.providerModel.modelName}</span>
+            <span>
+              {viewModel.providerModel.providerName} /{" "}
+              {viewModel.providerModel.modelName}
+            </span>
             {viewModel.createdAt && (
               <>
                 <span>&middot;</span>
-                <span>{formatDateTime(viewModel.createdAt, timeFormatPreference)}</span>
+                <span>
+                  {formatDateTime(viewModel.createdAt, timeFormatPreference)}
+                </span>
               </>
             )}
           </div>
@@ -434,132 +611,289 @@ export const ContextPanelContent: React.FC = () => {
         {/* ── Context usage ── */}
         <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
           <div className="flex items-baseline justify-between">
-            <span className="typography-micro text-muted-foreground">{t('contextSidebar.section.context')}</span>
+            <span className="typography-micro text-muted-foreground">
+              {t("contextSidebar.section.context")}
+            </span>
             <span className="typography-micro tabular-nums text-muted-foreground/70">
               {formatNumber(viewModel.tokenBreakdown.total)}
-              {viewModel.contextLimit ? ` / ${formatNumber(viewModel.contextLimit)}` : ''}
+              {viewModel.contextLimit
+                ? ` / ${formatNumber(viewModel.contextLimit)}`
+                : ""}
             </span>
           </div>
-          <div className="mt-2.5 flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
+          <div className="mt-2.5 flex h-1 w-full overflow-hidden rounded-full bg-card">
             {viewModel.usagePercent > 0 && (
               <div
                 className="rounded-full transition-all duration-300"
                 style={{
                   width: `${Math.max(0.5, viewModel.usagePercent)}%`,
-                  backgroundColor: viewModel.usagePercent > 80 ? 'var(--status-warning)' : 'var(--primary-base)',
+                  backgroundColor:
+                    viewModel.usagePercent > 80
+                      ? "var(--status-warning)"
+                      : "var(--primary-base)",
                 }}
               />
             )}
           </div>
           <div className="mt-1.5 typography-micro font-medium tabular-nums text-foreground/80">
-            {t('contextSidebar.context.percentUsed', { percent: viewModel.usagePercent.toFixed(1) })}
+            {t("contextSidebar.context.percentUsed", {
+              percent: viewModel.usagePercent.toFixed(1),
+            })}
+          </div>
+
+          {/* ── Context breakdown ── */}
+          <div className="mt-6">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="typography-micro text-muted-foreground">
+                {t("contextSidebar.section.breakdown")}
+              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <RiQuestionLine className="text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="typography-micro leading-tight max-w-[240px]">
+                    {t("contextSidebar.breakdown.estimateHint")}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
+              {segmentRows.map(
+                (row) =>
+                  row.percent > 0 && (
+                    <div
+                      key={row.key}
+                      style={{
+                        width: `${row.percent}%`,
+                        backgroundColor: row.color,
+                      }}
+                    />
+                  ),
+              )}
+            </div>
+            <ul className="mt-2.5 space-y-1.5">
+              {segmentRows.map((row) =>
+                row.key === "systemTools" && toolCounts.length > 0 ? (
+                  <li key={row.key} className="w-full">
+                    <details className="group">
+                      <summary className="flex cursor-pointer list-none items-center gap-2">
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ backgroundColor: row.color }}
+                        />
+                        <span className="min-w-0 flex-1 truncate typography-micro text-muted-foreground/70 flex gap-2 items-center">
+                          {row.label}
+                          <Icon
+                            name="arrow-down-s"
+                            className="h-3 w-3 text-muted-foreground transition-transform group-open:rotate-180"
+                          />
+                        </span>
+                        <span className="typography-micro tabular-nums text-foreground/80">
+                          {row.percent.toFixed(1)}%
+                        </span>
+                      </summary>
+                      <div className="mt-2 pl-3.5">
+                        <ul className="grid grid-cols-[max-content_1fr_max-content] gap-x-2 gap-y-1">
+                          {(() => {
+                            const max = toolCounts[0]?.count ?? 1;
+                            return toolCounts.map((entry) => {
+                              const pct =
+                                max > 0 ? (entry.count / max) * 100 : 0;
+                              return (
+                                <li
+                                  key={entry.tool}
+                                  className="grid items-center"
+                                  style={{
+                                    gridColumn: "1 / -1",
+                                    gridTemplateColumns: "subgrid",
+                                  }}
+                                >
+                                  <span className="typography-micro text-foreground/70 whitespace-nowrap text-right">
+                                    {entry.tool}
+                                  </span>
+                                  <span className="h-1.5 rounded-full bg-[var(--surface-subtle)] overflow-hidden">
+                                    <span
+                                      className="block h-full rounded-full bg-[var(--chart-1)]"
+                                      style={{ width: `${pct}%` }}
+                                    />
+                                  </span>
+                                  <span className="typography-micro tabular-nums text-foreground/80 text-right">
+                                    {entry.count}
+                                  </span>
+                                </li>
+                              );
+                            });
+                          })()}
+                        </ul>
+                      </div>
+                    </details>
+                  </li>
+                ) : (
+                  <li key={row.key} className="flex items-center gap-2">
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: row.color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate typography-micro text-muted-foreground/70">
+                      {row.label}
+                    </span>
+                    <span className="typography-micro tabular-nums text-foreground/80">
+                      {row.percent.toFixed(1)}%
+                    </span>
+                  </li>
+                ),
+              )}
+            </ul>
           </div>
         </div>
 
         {/* ── Stat grid ── */}
         <div className="mb-5 grid grid-cols-2 gap-2">
-          {([
-            { label: t('contextSidebar.stats.messages'), value: formatNumber(viewModel.messagesCount) },
-            { label: t('contextSidebar.stats.user'), value: formatNumber(viewModel.userMessagesCount) },
-            { label: t('contextSidebar.stats.assistant'), value: formatNumber(viewModel.assistantMessagesCount) },
-            { label: t('contextSidebar.stats.cost'), value: formatMoney(viewModel.totalAssistantCost) },
-          ] as const).map((item) => (
-            <div key={item.label} className="rounded-lg bg-[var(--surface-elevated)]/70 px-3 py-2.5">
-              <div className="typography-micro text-muted-foreground/70">{item.label}</div>
-              <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">{item.value}</div>
+          {(
+            [
+              {
+                label: t("contextSidebar.stats.messages"),
+                value: formatNumber(viewModel.messagesCount),
+              },
+              {
+                label: t("contextSidebar.stats.user"),
+                value: formatNumber(viewModel.userMessagesCount),
+              },
+              {
+                label: t("contextSidebar.stats.assistant"),
+                value: formatNumber(viewModel.assistantMessagesCount),
+              },
+              {
+                label: t("contextSidebar.stats.cost"),
+                value: formatMoney(viewModel.totalAssistantCost),
+              },
+            ] as const
+          ).map((item) => (
+            <div
+              key={item.label}
+              className="rounded-lg bg-[var(--surface-elevated)]/70 px-3 py-2.5"
+            >
+              <div className="typography-micro text-muted-foreground/70">
+                {item.label}
+              </div>
+              <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
+                {item.value}
+              </div>
             </div>
           ))}
         </div>
 
         {/* ── Last turn tokens ── */}
         <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
-          <div className="typography-micro text-muted-foreground mb-2.5">{t('contextSidebar.section.lastAssistantMessage')}</div>
+          <div className="typography-micro text-muted-foreground mb-2.5">
+            {t("contextSidebar.section.lastAssistantMessage")}
+          </div>
           <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
-            {([
-              { label: t('contextSidebar.tokens.input'), value: viewModel.tokenBreakdown.input, format: 'count' },
-              { label: t('contextSidebar.tokens.output'), value: viewModel.tokenBreakdown.output, format: 'count' },
-              { label: t('contextSidebar.tokens.reasoning'), value: viewModel.tokenBreakdown.reasoning, format: 'count' },
-              { label: t('contextSidebar.tokens.cacheRead'), value: viewModel.tokenBreakdown.cacheRead, format: 'count' },
-              { label: t('contextSidebar.tokens.cacheWrite'), value: viewModel.tokenBreakdown.cacheWrite, format: 'count' },
-              {
-                label: t('contextSidebar.tokens.cacheHit'),
-                value: viewModel.cacheHitRate.hasInput ? viewModel.cacheHitRate.percent : null,
-                format: 'percent',
-              },
-            ] as const).map((item) => (
+            {(
+              [
+                {
+                  label: t("contextSidebar.tokens.input"),
+                  value: viewModel.tokenBreakdown.input,
+                  format: "count",
+                },
+                {
+                  label: t("contextSidebar.tokens.output"),
+                  value: viewModel.tokenBreakdown.output,
+                  format: "count",
+                },
+                {
+                  label: t("contextSidebar.tokens.reasoning"),
+                  value: viewModel.tokenBreakdown.reasoning,
+                  format: "count",
+                },
+                {
+                  label: t("contextSidebar.tokens.cacheRead"),
+                  value: viewModel.tokenBreakdown.cacheRead,
+                  format: "count",
+                },
+                {
+                  label: t("contextSidebar.tokens.cacheWrite"),
+                  value: viewModel.tokenBreakdown.cacheWrite,
+                  format: "count",
+                },
+                {
+                  label: t("contextSidebar.tokens.cacheHit"),
+                  value: viewModel.cacheHitRate.hasInput
+                    ? viewModel.cacheHitRate.percent
+                    : null,
+                  format: "percent",
+                },
+              ] as const
+            ).map((item) => (
               <div key={item.label}>
-                <div className="typography-micro text-muted-foreground/70">{item.label}</div>
+                <div className="typography-micro text-muted-foreground/70">
+                  {item.label}
+                </div>
                 <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
                   {item.value !== null && item.value !== undefined
-                    ? item.format === 'percent'
+                    ? item.format === "percent"
                       ? `${item.value.toFixed(1)}%`
                       : formatNumber(item.value)
-                    : '—'}
+                    : "—"}
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* ── Context breakdown ── */}
-        <div className="mb-6">
-          <div className="flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
-            {segments.map((segment) => {
-              if (segment.value <= 0 || viewModel.breakdownTotal <= 0) return null;
-              return (
-                <div
-                  key={segment.key}
-                  style={{
-                    width: `${(segment.value / viewModel.breakdownTotal) * 100}%`,
-                    backgroundColor: segment.color,
-                  }}
-                />
-              );
-            })}
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-            {segments.map((segment) => {
-              const pct = viewModel.breakdownTotal > 0 ? (segment.value / viewModel.breakdownTotal) * 100 : 0;
-              return (
-                <div key={segment.key} className="inline-flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: segment.color }} />
-                  <span className="typography-micro text-muted-foreground/70">
-                    {segment.label} <span className="tabular-nums">{pct.toFixed(0)}%</span>
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
         {/* ── Raw messages ── */}
         <div>
-          <div className="typography-micro text-muted-foreground">{t('contextSidebar.section.rawMessages')}</div>
+          <div className="typography-micro text-muted-foreground">
+            {t("contextSidebar.section.rawMessages")}
+          </div>
           <div className="mt-2.5 space-y-1">
             {[...sessionMessages].reverse().map((message) => {
               const roleInfo = deriveMessageRole(message.info);
               const role = roleInfo.role;
-              const isAssistant = role === 'assistant';
-              const isUser = role === 'user';
+              const isAssistant = role === "assistant";
+              const isUser = role === "user";
               const isExpanded = expandedRawMessages[message.info.id] === true;
               const isCopied = copiedRawMessageId === message.info.id;
-              const messageCreatedAt = (message.info.time?.created ?? null) as number | null;
+              const messageCreatedAt = (message.info.time?.created ?? null) as
+                | number
+                | null;
               const partsLabel = derivePartsLabel(message.parts);
-              const tokens = isAssistant ? extractTokenBreakdown({ info: message.info, parts: message.parts }) : null;
-              const userSnippet = isUser ? deriveUserSnippet(message.parts) : '';
-              const previewTime = formatMessagePreviewTime(messageCreatedAt, timeFormatPreference);
+              const tokens = isAssistant
+                ? extractTokenBreakdown({
+                    info: message.info,
+                    parts: message.parts,
+                  })
+                : null;
+              const userSnippet = isUser
+                ? deriveUserSnippet(message.parts)
+                : "";
+              const previewTime = formatMessagePreviewTime(
+                messageCreatedAt,
+                timeFormatPreference,
+              );
               // Keep token/time columns stable; the message label owns all
               // remaining space and truncates before it can push metrics.
-              const assistantLeft = partsLabel || '\u2014';
+              const assistantLeft = partsLabel || "\u2014";
               const assistantMiddle = tokens
-                ? formatAssistantTokens(tokens.input, tokens.output, formatNumber)
-                : '';
-              const otherLeft = role || 'unknown';
-              const otherLabel = partsLabel ? `${otherLeft}: ${partsLabel}` : otherLeft;
+                ? formatAssistantTokens(
+                    tokens.input,
+                    tokens.output,
+                    formatNumber,
+                  )
+                : "";
+              const otherLeft = role || "unknown";
+              const otherLabel = partsLabel
+                ? `${otherLeft}: ${partsLabel}`
+                : otherLeft;
 
               const jsonValue = isExpanded
-                ? JSON.stringify({ info: message.info, parts: message.parts }, null, 2)
-                : '';
+                ? JSON.stringify(
+                    { info: message.info, parts: message.parts },
+                    null,
+                    2,
+                  )
+                : "";
 
               return (
                 <div
@@ -579,13 +913,17 @@ export const ContextPanelContent: React.FC = () => {
                   >
                     <div
                       className="grid items-center gap-x-2 whitespace-nowrap typography-micro"
-                      style={{ gridTemplateColumns: isAssistant ? 'minmax(0, 1fr) 7.5rem max-content' : 'minmax(0, 1fr) max-content' }}
+                      style={{
+                        gridTemplateColumns: isAssistant
+                          ? "minmax(0, 1fr) 7.5rem max-content"
+                          : "minmax(0, 1fr) max-content",
+                      }}
                     >
                       {isUser ? (
-                        <span
-                          className="min-w-0 truncate text-muted-foreground"
-                        >
-                          <span className="typography-ui-label text-foreground">user:</span>{' '}
+                        <span className="min-w-0 truncate text-muted-foreground">
+                          <span className="typography-ui-label text-foreground">
+                            user:
+                          </span>{" "}
                           {userSnippet}
                         </span>
                       ) : (
@@ -593,8 +931,8 @@ export const ContextPanelContent: React.FC = () => {
                           <span
                             className={
                               isAssistant
-                                ? 'min-w-0 truncate text-muted-foreground'
-                                : 'min-w-0 truncate text-muted-foreground'
+                                ? "min-w-0 truncate text-muted-foreground"
+                                : "min-w-0 truncate text-muted-foreground"
                             }
                           >
                             {isAssistant ? assistantLeft : otherLabel}
@@ -606,7 +944,9 @@ export const ContextPanelContent: React.FC = () => {
                           )}
                         </>
                       )}
-                      <span className="text-right text-muted-foreground">{previewTime}</span>
+                      <span className="text-right text-muted-foreground">
+                        {previewTime}
+                      </span>
                     </div>
                   </button>
 
@@ -619,12 +959,27 @@ export const ContextPanelContent: React.FC = () => {
                             className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
                             onClick={(event) => {
                               event.stopPropagation();
-                              void handleCopyRawMessage(message.info.id, jsonValue);
+                              void handleCopyRawMessage(
+                                message.info.id,
+                                jsonValue,
+                              );
                             }}
-                            aria-label={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}
-                            title={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copy')}
+                            aria-label={
+                              isCopied
+                                ? t("contextSidebar.actions.copied")
+                                : t("contextSidebar.actions.copyJson")
+                            }
+                            title={
+                              isCopied
+                                ? t("contextSidebar.actions.copied")
+                                : t("contextSidebar.actions.copy")
+                            }
                           >
-                            {isCopied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
+                            {isCopied ? (
+                              <Icon name="check" className="size-3.5" />
+                            ) : (
+                              <Icon name="file-copy" className="size-3.5" />
+                            )}
                           </button>
                         </div>
                         <WorkerHighlightedCode
@@ -632,10 +987,10 @@ export const ContextPanelContent: React.FC = () => {
                           code={jsonValue}
                           style={{
                             margin: 0,
-                            padding: '0.75rem',
-                            background: 'transparent',
-                            fontSize: 'var(--text-micro)',
-                            lineHeight: '1.35',
+                            padding: "0.75rem",
+                            background: "transparent",
+                            fontSize: "var(--text-micro)",
+                            lineHeight: "1.35",
                           }}
                           wrap
                         />

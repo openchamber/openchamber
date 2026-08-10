@@ -86,6 +86,22 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
 
   const bgClass = 'bg-background';
 
+const refreshIntervalLabel = (value: string | undefined): string =>
+  value === '30000'
+    ? '30s'
+    : value === '60000'
+      ? '1m'
+      : value === '300000'
+        ? '5m'
+        : value ?? '';
+
+  const displayModeLabel = (value: string | undefined): string =>
+    value === 'usage'
+      ? t('settings.usage.sidebar.field.displayModeUsage')
+      : value === 'remaining'
+        ? t('settings.usage.sidebar.field.displayModeRemaining')
+        : value ?? '';
+
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
@@ -113,7 +129,9 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
               disabled={!usageAutoRefresh}
             >
               <SelectTrigger className="w-fit">
-                <SelectValue placeholder={t('settings.usage.sidebar.field.intervalPlaceholder')} />
+                <SelectValue placeholder={t('settings.usage.sidebar.field.intervalPlaceholder')}>
+                  {(value) => refreshIntervalLabel(value)}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="30000">30s</SelectItem>
@@ -137,7 +155,9 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
           <span className="typography-micro text-muted-foreground">{t('settings.usage.sidebar.field.display')}</span>
           <Select value={usageDisplayMode} onValueChange={handleUsageDisplayModeChange}>
             <SelectTrigger className="w-fit">
-              <SelectValue placeholder={t('settings.usage.sidebar.field.displayModePlaceholder')} />
+              <SelectValue placeholder={t('settings.usage.sidebar.field.displayModePlaceholder')}>
+                {(value) => displayModeLabel(value)}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="usage">{t('settings.usage.sidebar.field.displayModeUsage')}</SelectItem>
