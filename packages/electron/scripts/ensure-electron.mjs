@@ -225,7 +225,45 @@ export function isComplete(electronDir, expected = expectedArch()) {
   return true;
 }
 
+function resolveWindowsCommand(command) {
+  if (process.platform !== 'win32' || command !== 'bun') {
+    return command;
+  }
+
+  const resolveFromPath = (name) => {
+    const result = spawnSync('where.exe', [name], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    if (result.error || result.status !== 0) {
+      return null;
+    }
+    return String(result.stdout || '')
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .find(Boolean) ?? null;
+  };
+
+  const directExecutable = resolveFromPath('bun.exe');
+  if (directExecutable) {
+    return directExecutable;
+  }
+
+  // npm exposes Bun through a .cmd shim. Node cannot spawn that shim without
+  // a shell, so resolve the real executable from npm's global package layout.
+  const shim = resolveFromPath('bun.cmd');
+  if (shim) {
+    const npmExecutable = path.resolve(path.dirname(shim), 'node_modules', 'bun', 'bin', 'bun.exe');
+    if (fs.existsSync(npmExecutable)) {
+      return npmExecutable;
+    }
+  }
+
+  return command;
+}
+
 function resolveInstallCommands(env) {
+  const normalize = (commands) => commands.map(([bin, args]) => [resolveWindowsCommand(bin), args]);
   if (env.OPENCHAMBER_ELECTRON_INSTALL_COMMANDS) {
     try {
       const parsed = JSON.parse(env.OPENCHAMBER_ELECTRON_INSTALL_COMMANDS);
@@ -233,16 +271,16 @@ function resolveInstallCommands(env) {
         Array.isArray(parsed) &&
         parsed.every((command) => Array.isArray(command) && typeof command[0] === 'string')
       ) {
-        return parsed;
+        return normalize(parsed);
       }
     } catch {
       // Fall through to the default commands.
     }
   }
-  return [
+  return normalize([
     ['bun', ['install.js']],
     ['node', ['install.js']],
-  ];
+  ]);
 }
 
 export function repair(electronDir, options = {}) {

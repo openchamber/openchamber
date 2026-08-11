@@ -2,14 +2,18 @@ import React from 'react';
 import {
   SettingsSection,
   SettingsStackedField,
+  SettingsTwoColumn,
   SETTINGS_FIELDS_STACK_CLASS,
   SETTINGS_FIELD_LABEL_CLASS,
   SETTINGS_HELPER_CLASS,
   SETTINGS_ICON_BUTTON_CLASS,
   SETTINGS_CONTROL_CLUSTER_CLASS,
+  SETTINGS_SELECT_SIZE,
+  SETTINGS_SELECT_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import {
@@ -20,10 +24,18 @@ import {
   type CustomProviderFormState,
   type CustomProviderPersistPlan,
   type CustomProviderTranslator,
+  type CapabilitySetting,
   type FieldErrors,
   type HeaderFieldErrors,
   type ModelFieldErrors,
 } from './custom-provider-form';
+
+const CAPABILITY_SETTINGS: CapabilitySetting[] = ['default', 'supported', 'unsupported'];
+const CAPABILITY_LABEL_KEYS = {
+  default: 'settings.providers.page.custom.models.capability.default',
+  supported: 'settings.providers.page.custom.models.capability.supported',
+  unsupported: 'settings.providers.page.custom.models.capability.unsupported',
+} as const;
 
 type CustomProviderFormProps = {
   existingProviderIDs: ReadonlySet<string>;
@@ -81,16 +93,22 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
     setErr((prev) => ({ ...prev, [key]: undefined }));
   };
 
-  const setModel = (index: number, key: 'id' | 'name', value: string) => {
+  const setModel = <Key extends keyof Omit<CustomProviderFormState['models'][number], 'row'>>(
+    index: number,
+    key: Key,
+    value: CustomProviderFormState['models'][number][Key],
+  ) => {
     setForm((prev) => ({
       ...prev,
       models: prev.models.map((row, rowIndex) => (rowIndex === index ? { ...row, [key]: value } : row)),
     }));
-    setModelErrors((prev) => {
-      const next = [...prev];
-      next[index] = { ...(next[index] ?? {}), [key]: undefined };
-      return next;
-    });
+    if (key === 'id' || key === 'name' || key === 'contextLimit' || key === 'inputLimit' || key === 'outputLimit' || key === 'thinkingLevels') {
+      setModelErrors((prev) => {
+        const next = [...prev];
+        next[index] = { ...(next[index] ?? {}), [key]: undefined };
+        return next;
+      });
+    }
   };
 
   const setHeader = (index: number, key: 'key' | 'value', value: string) => {
@@ -221,40 +239,34 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
         contentClassName={SETTINGS_FIELDS_STACK_CLASS}
       >
         {form.models.map((model, index) => (
-          <div key={model.row} className={`${SETTINGS_CONTROL_CLUSTER_CLASS} space-y-2`}>
+          <div key={model.row} className="space-y-4 border-b border-border/60 pb-6 last:border-b-0 last:pb-0">
             <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1 space-y-2">
-                <div>
-                  <label className={SETTINGS_FIELD_LABEL_CLASS}>
-                    {t('settings.providers.page.custom.models.idLabel')}
-                  </label>
+              <SettingsTwoColumn className="min-w-0 flex-1 gap-4 @3xl:gap-6">
+                <SettingsStackedField label={t('settings.providers.page.custom.models.idLabel')}>
                   <Input
                     value={model.id}
                     onChange={(event) => setModel(index, 'id', event.target.value)}
                     placeholder={t('settings.providers.page.custom.models.idPlaceholder')}
-                    className="mt-1 h-8 rounded-md px-3 font-mono text-xs"
+                    className="h-8 rounded-md px-3 font-mono text-xs"
                     aria-label={t('settings.providers.page.custom.models.idLabel')}
                   />
                   {modelErrors[index]?.id ? (
                     <p className="mt-1 typography-meta text-[var(--status-error)]">{modelErrors[index]?.id}</p>
                   ) : null}
-                </div>
-                <div>
-                  <label className={SETTINGS_FIELD_LABEL_CLASS}>
-                    {t('settings.providers.page.custom.models.nameLabel')}
-                  </label>
+                </SettingsStackedField>
+                <SettingsStackedField label={t('settings.providers.page.custom.models.nameLabel')}>
                   <Input
                     value={model.name}
                     onChange={(event) => setModel(index, 'name', event.target.value)}
                     placeholder={t('settings.providers.page.custom.models.namePlaceholder')}
-                    className="mt-1 h-8 rounded-md px-3"
+                    className="h-8 rounded-md px-3"
                     aria-label={t('settings.providers.page.custom.models.nameLabel')}
                   />
                   {modelErrors[index]?.name ? (
                     <p className="mt-1 typography-meta text-[var(--status-error)]">{modelErrors[index]?.name}</p>
                   ) : null}
-                </div>
-              </div>
+                </SettingsStackedField>
+              </SettingsTwoColumn>
               <Button
                 type="button"
                 variant="ghost"
@@ -274,6 +286,122 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
                 <Icon name="delete-bin" className="size-4" />
               </Button>
             </div>
+
+            <SettingsTwoColumn className="gap-4 @3xl:gap-6">
+              <SettingsStackedField
+                label={t('settings.providers.page.custom.models.contextLimitLabel')}
+                info={t('settings.providers.page.custom.models.contextLimitInfo')}
+              >
+                <Input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={model.contextLimit ?? ''}
+                  onChange={(event) => setModel(index, 'contextLimit', event.target.value)}
+                  placeholder={t('settings.providers.page.custom.models.contextLimitPlaceholder')}
+                  className="h-8 rounded-md px-3 font-mono text-xs"
+                  aria-invalid={Boolean(modelErrors[index]?.contextLimit)}
+                  aria-label={t('settings.providers.page.custom.models.contextLimitLabel')}
+                />
+                {modelErrors[index]?.contextLimit ? (
+                  <p className="mt-1 typography-meta text-[var(--status-error)]">{modelErrors[index]?.contextLimit}</p>
+                ) : null}
+              </SettingsStackedField>
+              <SettingsStackedField
+                label={t('settings.providers.page.custom.models.outputLimitLabel')}
+                info={t('settings.providers.page.custom.models.outputLimitInfo')}
+              >
+                <Input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={model.outputLimit ?? ''}
+                  onChange={(event) => setModel(index, 'outputLimit', event.target.value)}
+                  placeholder={t('settings.providers.page.custom.models.outputLimitPlaceholder')}
+                  className="h-8 rounded-md px-3 font-mono text-xs"
+                  aria-invalid={Boolean(modelErrors[index]?.outputLimit)}
+                  aria-label={t('settings.providers.page.custom.models.outputLimitLabel')}
+                />
+                {modelErrors[index]?.outputLimit ? (
+                  <p className="mt-1 typography-meta text-[var(--status-error)]">{modelErrors[index]?.outputLimit}</p>
+                ) : null}
+              </SettingsStackedField>
+            </SettingsTwoColumn>
+
+            <SettingsTwoColumn className="gap-4 @3xl:gap-6">
+              <SettingsStackedField
+                label={t('settings.providers.page.custom.models.inputLimitLabel')}
+                info={t('settings.providers.page.custom.models.inputLimitInfo')}
+              >
+                <Input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={model.inputLimit ?? ''}
+                  onChange={(event) => setModel(index, 'inputLimit', event.target.value)}
+                  placeholder={t('settings.providers.page.custom.models.inputLimitPlaceholder')}
+                  className="h-8 rounded-md px-3 font-mono text-xs"
+                  aria-invalid={Boolean(modelErrors[index]?.inputLimit)}
+                  aria-label={t('settings.providers.page.custom.models.inputLimitLabel')}
+                />
+                {modelErrors[index]?.inputLimit ? (
+                  <p className="mt-1 typography-meta text-[var(--status-error)]">{modelErrors[index]?.inputLimit}</p>
+                ) : null}
+              </SettingsStackedField>
+              <SettingsStackedField
+                label={t('settings.providers.page.custom.models.imageInputLabel')}
+                info={t('settings.providers.page.custom.models.imageInputInfo')}
+              >
+                <CapabilitySelect
+                  value={model.imageInput ?? 'default'}
+                  onChange={(value) => setModel(index, 'imageInput', value)}
+                  ariaLabel={t('settings.providers.page.custom.models.imageInputLabel')}
+                  t={t}
+                />
+              </SettingsStackedField>
+            </SettingsTwoColumn>
+
+            <SettingsTwoColumn className="gap-4 @3xl:gap-6">
+              <SettingsStackedField
+                label={t('settings.providers.page.models.capability.reasoning')}
+                info={t('settings.providers.page.custom.models.reasoningInfo')}
+              >
+                <CapabilitySelect
+                  value={model.reasoning ?? 'default'}
+                  onChange={(value) => setModel(index, 'reasoning', value)}
+                  ariaLabel={t('settings.providers.page.models.capability.reasoning')}
+                  t={t}
+                />
+              </SettingsStackedField>
+              <SettingsStackedField
+                label={t('settings.providers.page.models.capability.toolCalling')}
+                info={t('settings.providers.page.custom.models.toolCallingInfo')}
+              >
+                <CapabilitySelect
+                  value={model.toolCalling ?? 'default'}
+                  onChange={(value) => setModel(index, 'toolCalling', value)}
+                  ariaLabel={t('settings.providers.page.models.capability.toolCalling')}
+                  t={t}
+                />
+              </SettingsStackedField>
+            </SettingsTwoColumn>
+
+            <SettingsStackedField
+              label={t('settings.providers.page.models.thinkingLevels')}
+              info={t('settings.providers.page.custom.models.thinkingLevelsInfo')}
+            >
+              <Input
+                value={model.thinkingLevels ?? ''}
+                onChange={(event) => setModel(index, 'thinkingLevels', event.target.value)}
+                placeholder={t('settings.providers.page.custom.models.thinkingLevelsPlaceholder')}
+                className="h-8 rounded-md px-3 font-mono text-xs"
+                aria-invalid={Boolean(modelErrors[index]?.thinkingLevels)}
+                aria-label={t('settings.providers.page.models.thinkingLevels')}
+              />
+              {modelErrors[index]?.thinkingLevels ? (
+                <p className="mt-1 typography-meta text-[var(--status-error)]">{modelErrors[index]?.thinkingLevels}</p>
+              ) : null}
+            </SettingsStackedField>
           </div>
         ))}
         <Button
@@ -394,3 +522,29 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
     </form>
   );
 };
+
+const CapabilitySelect: React.FC<{
+  value: CapabilitySetting;
+  onChange: (value: CapabilitySetting) => void;
+  ariaLabel: string;
+  t: ReturnType<typeof useI18n>['t'];
+}> = ({ value, onChange, ariaLabel, t }) => (
+  <Select value={value} onValueChange={onChange}>
+    <SelectTrigger
+      size={SETTINGS_SELECT_SIZE}
+      className={SETTINGS_SELECT_TRIGGER_CLASS}
+      aria-label={ariaLabel}
+    >
+      <SelectValue>
+        {t(CAPABILITY_LABEL_KEYS[value])}
+      </SelectValue>
+    </SelectTrigger>
+    <SelectContent>
+      {CAPABILITY_SETTINGS.map((setting) => (
+        <SelectItem key={setting} value={setting}>
+          {t(CAPABILITY_LABEL_KEYS[setting])}
+        </SelectItem>
+      ))}
+    </SelectContent>
+  </Select>
+);

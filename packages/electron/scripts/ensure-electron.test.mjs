@@ -259,6 +259,21 @@ test('repair skips a command whose runner errors and keeps trying the rest', (t)
   assert.deepEqual(calls, commands);
 });
 
+test('repair can invoke Bun through the Windows npm shim', (t) => {
+  if (process.platform !== 'win32') return;
+
+  const dir = withFixture(t, {
+    installScripts: {
+      'install.js': [
+        'if (!process.versions.bun) process.exit(1);',
+        installScriptContent(),
+      ].join('\n'),
+    },
+  });
+  assert.equal(repair(dir), true);
+  assert.equal(isComplete(dir), true);
+});
+
 test('repair returns false when the runner reports a failure status for every command', (t) => {
   const dir = withFixture(t);
   const calls = [];

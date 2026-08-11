@@ -15,10 +15,22 @@ export type CustomProviderTranslator = (
   vars?: Record<string, string | number | boolean>,
 ) => string;
 
+export type CapabilitySetting = 'default' | 'supported' | 'unsupported';
+
 export type ModelRow = {
   row: string;
   id: string;
   name: string;
+  inputModalities?: string[];
+  outputModalities?: string[];
+  contextLimit?: string;
+  inputLimit?: string;
+  outputLimit?: string;
+  imageInput?: CapabilitySetting;
+  reasoning?: CapabilitySetting;
+  toolCalling?: CapabilitySetting;
+  thinkingLevels?: string;
+  variantOptions?: Record<string, Record<string, unknown>>;
 };
 
 export type HeaderRow = {
@@ -46,6 +58,10 @@ export type FieldErrors = {
 export type ModelFieldErrors = {
   id?: string;
   name?: string;
+  contextLimit?: string;
+  inputLimit?: string;
+  outputLimit?: string;
+  thinkingLevels?: string;
 };
 
 export type HeaderFieldErrors = {
@@ -61,7 +77,22 @@ export type CustomProviderConfig = {
     baseURL: string;
     headers?: Record<string, string>;
   };
-  models: Record<string, { name: string }>;
+  models: Record<string, {
+    name: string;
+    reasoning?: boolean;
+    attachment?: boolean;
+    tool_call?: boolean;
+    modalities?: {
+      input?: string[];
+      output?: string[];
+    };
+    limit?: {
+      context?: number;
+      input?: number;
+      output?: number;
+    };
+    variants?: Record<string, Record<string, unknown>>;
+  }>;
 };
 
 export type CustomProviderPersistPlan = {
@@ -98,7 +129,7 @@ export type ProviderLikeForCustomForm = {
   name?: string;
   env?: string[];
   options?: Record<string, unknown> | null;
-  models?: Array<{ id?: string; name?: string; api?: { npm?: string } }> | Record<string, unknown>;
+  models?: Array<Record<string, unknown> & { id?: string; name?: string }> | Record<string, unknown>;
 };
 
 let rowCounter = 0;
@@ -109,6 +140,16 @@ export const createModelRow = (): ModelRow => ({
   row: nextRow(),
   id: '',
   name: '',
+  inputModalities: [],
+  outputModalities: [],
+  contextLimit: '',
+  inputLimit: '',
+  outputLimit: '',
+  imageInput: 'default',
+  reasoning: 'default',
+  toolCalling: 'default',
+  thinkingLevels: '',
+  variantOptions: {},
 });
 
 export const createHeaderRow = (): HeaderRow => ({
@@ -216,21 +257,24 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
     .map(([key, value]) => ({ row: nextRow(), key, value }));
 
   const modelEntries = Array.isArray(provider.models)
-    ? provider.models
+    ? provider.models.map((model) => ({
+        id: model.id,
+        name: model.name,
+        raw: model as Record<string, unknown>,
+      }))
     : (provider.models && typeof provider.models === 'object'
       ? Object.entries(provider.models).map(([id, value]) => ({
           id,
-          name: value && typeof value === 'object' && 'name' in value && typeof (value as { name?: unknown }).name === 'string'
-            ? (value as { name: string }).name
-            : id,
+          name: getString(value, 'name') ?? id,
+          raw: asRecord(value) ?? {},
         }))
       : []);
 
   const models = modelEntries.length > 0
-    ? modelEntries.map((model) => ({
-        row: nextRow(),
-        id: typeof model?.id === 'string' ? model.id : '',
-        name: typeof model?.name === 'string' ? model.name : (typeof model?.id === 'string' ? model.id : ''),
+    ? modelEntries.map((model) => modelToFormRow({
+        id: typeof model.id === 'string' ? model.id : '',
+        name: typeof model.name === 'string' ? model.name : (typeof model.id === 'string' ? model.id : ''),
+        model: model.raw,
       }))
     : [createModelRow()];
 
@@ -247,6 +291,119 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
     headers: headerRows.length > 0 ? headerRows : [createHeaderRow()],
   };
 }
+
+const MODEL_MODALITIES = new Set(['text', 'audio', 'image', 'video', 'pdf']);
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+
+const getString = (value: unknown, key: string): string | undefined => {
+  const candidate = asRecord(value)[key];
+  return typeof candidate === 'string' ? candidate : undefined;
+};
+
+const getBoolean = (value: unknown, key: string): boolean | undefined => {
+  const candidate = asRecord(value)[key];
+  return typeof candidate === 'boolean' ? candidate : undefined;
+};
+
+const getNumber = (value: unknown, key: string): number | undefined => {
+  const candidate = asRecord(value)[key];
+  return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : undefined;
+};
+
+const getCapabilityBoolean = (model: Record<string, unknown>, key: string): boolean | undefined => {
+  const direct = getBoolean(model, key);
+  if (direct !== undefined) return direct;
+
+  const capabilities = asRecord(model.capabilities);
+  if (key === 'tool_call') {
+    return getBoolean(capabilities, 'toolcall') ?? getBoolean(capabilities, 'tools');
+  }
+  return getBoolean(capabilities, key);
+};
+
+const getModalities = (model: Record<string, unknown>, direction: 'input' | 'output'): string[] | undefined => {
+  const direct = asRecord(model.modalities)[direction];
+  const capabilities = asRecord(model.capabilities);
+  const candidate = direct ?? capabilities[direction];
+  if (Array.isArray(candidate)) {
+    return candidate.filter((entry): entry is string => typeof entry === 'string');
+  }
+  const flags = asRecord(candidate);
+  if (Object.keys(flags).length === 0) return undefined;
+  return Object.entries(flags)
+    .filter(([, supported]) => supported === true)
+    .map(([modality]) => modality);
+};
+
+const capabilitySetting = (value: boolean | undefined): CapabilitySetting => {
+  if (value === true) return 'supported';
+  if (value === false) return 'unsupported';
+  return 'default';
+};
+
+const imageInputSetting = (model: Record<string, unknown>): CapabilitySetting => {
+  const modalities = getModalities(model, 'input');
+  if (modalities !== undefined) return capabilitySetting(modalities.includes('image'));
+  return capabilitySetting(getCapabilityBoolean(model, 'attachment'));
+};
+
+const getVariantOptions = (model: Record<string, unknown>): Record<string, Record<string, unknown>> => {
+  const variants = model.variants;
+  if (Array.isArray(variants)) {
+    return Object.fromEntries(
+      variants.flatMap((variant) => {
+        const entry = asRecord(variant);
+        const id = getString(entry, 'id');
+        if (!id) return [];
+        const body = asRecord(entry.body);
+        const directOptions = Object.fromEntries(
+          Object.entries(entry).filter(([key]) => key !== 'id' && key !== 'body'),
+        );
+        return [[id, { ...directOptions, ...body }]];
+      }),
+    );
+  }
+  const variantRecord = asRecord(variants);
+  return Object.fromEntries(
+    Object.entries(variantRecord).map(([id, value]) => [id, asRecord(value)]),
+  );
+};
+
+const modelToFormRow = ({
+  id,
+  name,
+  model,
+}: {
+  id: string;
+  name: string;
+  model: Record<string, unknown>;
+}): ModelRow => {
+  const limit = asRecord(model.limit);
+  const variantOptions = getVariantOptions(model);
+  const inputModalities = getModalities(model, 'input');
+
+  return {
+    row: nextRow(),
+    id,
+    name,
+    inputModalities: inputModalities ?? [],
+    outputModalities: getModalities(model, 'output') ?? [],
+    contextLimit: getNumber(limit, 'context')?.toString() ?? '',
+    inputLimit: getNumber(limit, 'input')?.toString() ?? '',
+    outputLimit: getNumber(limit, 'output')?.toString() ?? '',
+    imageInput: inputModalities !== undefined
+      ? capabilitySetting(inputModalities.includes('image'))
+      : imageInputSetting(model),
+    reasoning: capabilitySetting(getCapabilityBoolean(model, 'reasoning')),
+    toolCalling: capabilitySetting(getCapabilityBoolean(model, 'tool_call')),
+    thinkingLevels: Object.keys(variantOptions).join(', '),
+    variantOptions,
+  };
+};
 
 /**
  * Validates form input and builds the auth + OpenCode provider config payloads.
@@ -289,8 +446,8 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       : undefined;
 
   const seenModels = new Set<string>();
-  const modelErrors = input.form.models.map((model) => {
-    const id = model.id.trim();
+  const normalizedModels = input.form.models.map((model) => {
+    const id = typeof model.id === 'string' ? model.id.trim() : '';
     const modelIdError = !id
       ? input.t('settings.providers.page.custom.error.required')
       : seenModels.has(id)
@@ -299,15 +456,87 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
             seenModels.add(id);
             return undefined;
           })();
-    const modelNameError = !model.name.trim()
+    const modelName = typeof model.name === 'string' ? model.name.trim() : '';
+    const modelNameError = !modelName
       ? input.t('settings.providers.page.custom.error.required')
       : undefined;
-    return { id: modelIdError, name: modelNameError };
+    const contextLimit = parseOptionalPositiveInteger(model.contextLimit ?? '', input.t);
+    const inputLimit = parseOptionalPositiveInteger(model.inputLimit ?? '', input.t);
+    const outputLimit = parseOptionalPositiveInteger(model.outputLimit ?? '', input.t);
+    const thinkingLevels = (model.thinkingLevels ?? '')
+      .split(',')
+      .map((level) => level.trim())
+      .filter(Boolean);
+    const duplicateThinkingLevel = new Set(thinkingLevels).size !== thinkingLevels.length;
+    const errors: ModelFieldErrors = {
+      id: modelIdError,
+      name: modelNameError,
+      ...(contextLimit.error ? { contextLimit: contextLimit.error } : {}),
+      ...(inputLimit.error ? { inputLimit: inputLimit.error } : {}),
+      ...(outputLimit.error ? { outputLimit: outputLimit.error } : {}),
+      ...(duplicateThinkingLevel
+        ? { thinkingLevels: input.t('settings.providers.page.custom.error.duplicate') }
+        : {}),
+    };
+
+    const inputModalities = new Set(
+      (model.inputModalities ?? []).filter((modality) => MODEL_MODALITIES.has(modality)),
+    );
+    const outputModalities = new Set(
+      (model.outputModalities ?? []).filter((modality) => MODEL_MODALITIES.has(modality)),
+    );
+    if (model.imageInput === 'supported') {
+      inputModalities.add('text');
+      inputModalities.add('image');
+    }
+    if (model.imageInput === 'unsupported') {
+      inputModalities.add('text');
+      inputModalities.delete('image');
+    }
+
+    const limit = {
+      ...(contextLimit.value !== undefined ? { context: contextLimit.value } : {}),
+      ...(inputLimit.value !== undefined ? { input: inputLimit.value } : {}),
+      ...(outputLimit.value !== undefined ? { output: outputLimit.value } : {}),
+    };
+    const modalities = {
+      ...(inputModalities.size > 0 ? { input: Array.from(inputModalities) } : {}),
+      ...(outputModalities.size > 0 ? { output: Array.from(outputModalities) } : {}),
+    };
+    const variants = Object.fromEntries(
+      thinkingLevels.map((level) => [
+        level,
+        model.variantOptions && Object.prototype.hasOwnProperty.call(model.variantOptions, level)
+          ? model.variantOptions[level]
+          : { reasoningEffort: level },
+      ]),
+    );
+
+    return {
+      id,
+      errors,
+      config: {
+        name: modelName,
+        ...((model.reasoning ?? 'default') !== 'default' || thinkingLevels.length > 0
+          ? { reasoning: thinkingLevels.length > 0 || model.reasoning === 'supported' }
+          : {}),
+        ...((model.imageInput ?? 'default') !== 'default'
+          ? { attachment: model.imageInput === 'supported' }
+          : {}),
+        ...((model.toolCalling ?? 'default') !== 'default'
+          ? { tool_call: model.toolCalling === 'supported' }
+          : {}),
+        ...(Object.keys(modalities).length > 0 ? { modalities } : {}),
+        ...(Object.keys(limit).length > 0 ? { limit } : {}),
+        ...(thinkingLevels.length > 0 ? { variants } : {}),
+      },
+    };
   });
 
-  const modelsValid = modelErrors.every((entry) => !entry.id && !entry.name);
+  const modelErrors = normalizedModels.map((model) => model.errors);
+  const modelsValid = modelErrors.every((entry) => Object.values(entry).every((error) => !error));
   const modelConfig = Object.fromEntries(
-    input.form.models.map((model) => [model.id.trim(), { name: model.name.trim() }]),
+    normalizedModels.map((model) => [model.id, model.config]),
   );
 
   const seenHeaders = new Set<string>();
@@ -371,6 +600,22 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       },
     },
   };
+}
+
+function parseOptionalPositiveInteger(
+  input: string | undefined,
+  t: CustomProviderTranslator,
+): { value?: number; error?: string } {
+  const trimmed = typeof input === 'string' ? input.trim() : '';
+  if (!trimmed) return {};
+  if (!/^\d+$/.test(trimmed)) {
+    return { error: t('settings.providers.page.custom.error.positiveInteger') };
+  }
+  const value = Number(trimmed);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    return { error: t('settings.providers.page.custom.error.positiveInteger') };
+  }
+  return { value };
 }
 
 /**

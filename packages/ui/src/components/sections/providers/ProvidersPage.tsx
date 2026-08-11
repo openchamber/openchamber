@@ -18,6 +18,7 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { noteDeferredRestartFromPayload, recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
+import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { cn } from '@/lib/utils';
 import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
@@ -1000,52 +1001,71 @@ export const ProvidersPage: React.FC = () => {
                 {filteredModels.map((model) => {
                   const modelId = typeof model?.id === 'string' ? model.id : '';
                   const modelName = typeof model?.name === 'string' ? model.name : modelId;
-                  const metadata = modelId ? getModelMetadata(selectedProvider.id, modelId) as ModelMetadata | undefined : undefined;
+                  const metadata = modelId
+                    ? mergeModelMetadataWithLiveModel(
+                        selectedProvider.id,
+                        model,
+                        getModelMetadata(selectedProvider.id, modelId) as ModelMetadata | undefined,
+                      )
+                    : undefined;
                   const isHidden = hiddenModels.some(
                     (item) => item.providerID === selectedProvider.id && item.modelID === modelId
                   );
 
                   const contextTokens = formatTokens(metadata?.limit?.context);
                   const outputTokens = formatTokens(metadata?.limit?.output);
+                  const inputModalities = metadata?.modalities?.input;
+                  const supportsImageInput = Array.isArray(inputModalities)
+                    ? inputModalities.includes('image')
+                    : typeof metadata?.attachment === 'boolean'
+                      ? metadata.attachment
+                      : undefined;
+                  const thinkingLevels = isRecord(model?.variants)
+                    ? Object.keys(model.variants).filter((variant) => variant.trim().length > 0)
+                    : [];
 
-                  const capabilityIcons: Array<{ key: string; icon: IconName; label: string }> = [];
-                  if (metadata?.tool_call) capabilityIcons.push({ key: 'tools', icon: "tools", label: t('settings.providers.page.models.capability.toolCalling') });
-                  if (metadata?.reasoning) capabilityIcons.push({ key: 'reasoning', icon: "brain-ai-3", label: t('settings.providers.page.models.capability.reasoning') });
-                  if (metadata?.attachment) capabilityIcons.push({ key: 'image', icon: "file-image", label: t('settings.providers.page.models.capability.imageInput') });
+                  const modelDetails: Array<{ key: string; icon?: IconName; label: string }> = [];
+                  if (contextTokens) modelDetails.push({ key: 'context', label: `${contextTokens} ${t('settings.providers.page.models.tokenBadge.context')}` });
+                  if (outputTokens) modelDetails.push({ key: 'output', label: `${outputTokens} ${t('settings.providers.page.models.tokenBadge.output')}` });
+                  if (supportsImageInput === true) modelDetails.push({ key: 'image', icon: "file-image", label: t('settings.providers.page.models.capability.imageInput') });
+                  if (supportsImageInput === false) modelDetails.push({ key: 'no-image', icon: "close", label: t('settings.providers.page.models.capability.imageInputUnsupported') });
+                  if (metadata?.tool_call) modelDetails.push({ key: 'tools', icon: "tools", label: t('settings.providers.page.models.capability.toolCalling') });
+                  if (metadata?.reasoning && thinkingLevels.length === 0) modelDetails.push({ key: 'reasoning', icon: "brain-ai-3", label: t('settings.providers.page.models.capability.reasoning') });
+                  if (thinkingLevels.length > 0) {
+                    modelDetails.push({
+                      key: 'thinking-levels',
+                      icon: "brain-ai-3",
+                      label: `${t('settings.providers.page.models.thinkingLevels')}: ${thinkingLevels.join(', ')}`,
+                    });
+                  }
 
                   return (
-                    <div key={modelId} className="py-1.5">
+                    <div key={modelId} className="py-2">
                       <div
                         className={cn(
-                          "flex items-center gap-3",
+                          "flex items-start gap-3",
                           isHidden && 'opacity-50',
                         )}
                       >
-                      <span className="typography-meta font-medium text-foreground truncate flex-1 min-w-0">
-                        {modelName}
-                      </span>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {(contextTokens || outputTokens) && (
-                          <span className="typography-micro text-muted-foreground flex-shrink-0 bg-[var(--surface-muted)] px-1.5 py-0.5 rounded">
-                            {contextTokens ? `${contextTokens} ${t('settings.providers.page.models.tokenBadge.context')}` : ''}
-                            {contextTokens && outputTokens ? ' · ' : ''}
-                            {outputTokens ? `${outputTokens} ${t('settings.providers.page.models.tokenBadge.output')}` : ''}
+                        <div className="flex min-w-0 flex-1 flex-col gap-1">
+                          <span className="typography-meta font-medium text-foreground truncate">
+                            {modelName}
                           </span>
-                        )}
-                        {capabilityIcons.length > 0 && (
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            {capabilityIcons.map(({ key, icon: iconName, label }) => (
-                              <span
-                                key={key}
-                                className="flex h-5 w-5 rounded items-center justify-center text-muted-foreground bg-[var(--surface-muted)]"
-                                title={label}
-                                aria-label={label}
-                              >
-                                <Icon name={iconName} className="h-3 w-3" />
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                          {modelDetails.length > 0 ? (
+                            <div className="flex flex-wrap items-center gap-1">
+                              {modelDetails.map(({ key, icon: iconName, label }) => (
+                               <span
+                                 key={key}
+                                 className="flex min-h-5 items-center gap-1 rounded bg-[var(--surface-muted)] px-1.5 py-0.5 typography-micro text-muted-foreground"
+                                 title={label}
+                               >
+                                 {iconName ? <Icon name={iconName} className="size-3 shrink-0" /> : null}
+                                 <span>{label}</span>
+                               </span>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
                         <button
                           type="button"
                           onClick={() => toggleHiddenModel(selectedProvider.id, modelId)}
@@ -1055,7 +1075,6 @@ export const ProvidersPage: React.FC = () => {
                         >
                           {isHidden ? <Icon name="eye-off" className="h-3.5 w-3.5" /> : <Icon name="eye" className="h-3.5 w-3.5" />}
                         </button>
-                      </div>
                       </div>
                     </div>
                   );

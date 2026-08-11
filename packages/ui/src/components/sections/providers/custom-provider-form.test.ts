@@ -300,8 +300,135 @@ describe('provider edit helpers', () => {
     expect(state.name).toBe('Campus LLM');
     expect(state.baseURL).toBe('https://llm.example.edu/v1');
     expect(state.apiKey).toBe('{env:CAMPUS_KEY}');
-    expect(state.models[0]).toEqual({ row: state.models[0].row, id: 'fast', name: 'Fast' });
+    expect(state.models[0]).toEqual({
+      row: state.models[0].row,
+      id: 'fast',
+      name: 'Fast',
+      inputModalities: [],
+      outputModalities: [],
+      contextLimit: '',
+      inputLimit: '',
+      outputLimit: '',
+      imageInput: 'default',
+      reasoning: 'default',
+      toolCalling: 'default',
+      thinkingLevels: '',
+      variantOptions: {},
+    });
     expect(state.headers[0]).toEqual({ row: state.headers[0].row, key: 'X-Campus', value: '1' });
+  });
+
+  test('hydrates and serializes advanced model metadata without losing variant bodies', () => {
+    const state = providerToCustomFormState({
+      id: 'campus-llm',
+      name: 'Campus LLM',
+      env: ['CAMPUS_KEY'],
+      options: { baseURL: 'https://llm.example.edu/v1' },
+      models: {
+        'vision-fast': {
+          name: 'Vision Fast',
+          reasoning: true,
+          attachment: true,
+          tool_call: false,
+          modalities: { input: ['text', 'image'], output: ['text'] },
+          limit: { context: 128000, input: 64000, output: 8192 },
+          variants: {
+            low: { reasoningEffort: 'low', headers: { 'X-Reasoning': 'low' } },
+            high: { reasoningEffort: 'high' },
+          },
+        },
+      },
+    });
+
+    expect(state.models[0]).toEqual({
+      row: state.models[0].row,
+      id: 'vision-fast',
+      name: 'Vision Fast',
+      inputModalities: ['text', 'image'],
+      outputModalities: ['text'],
+      contextLimit: '128000',
+      inputLimit: '64000',
+      outputLimit: '8192',
+      imageInput: 'supported',
+      reasoning: 'supported',
+      toolCalling: 'unsupported',
+      thinkingLevels: 'low, high',
+      variantOptions: {
+        low: { reasoningEffort: 'low', headers: { 'X-Reasoning': 'low' } },
+        high: { reasoningEffort: 'high' },
+      },
+    });
+
+    const result = validateCustomProvider({
+      form: state,
+      t,
+      existingProviderIDs: new Set(),
+    });
+
+    expect(result.result?.config.models).toEqual({
+      'vision-fast': {
+        name: 'Vision Fast',
+        reasoning: true,
+        attachment: true,
+        tool_call: false,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+        limit: { context: 128000, input: 64000, output: 8192 },
+        variants: {
+          low: { reasoningEffort: 'low', headers: { 'X-Reasoning': 'low' } },
+          high: { reasoningEffort: 'high' },
+        },
+      },
+    });
+  });
+
+  test('removes stale image modality when image input is explicitly unsupported', () => {
+    const result = validateCustomProvider({
+      form: baseForm({
+        models: [{
+          row: 'm0',
+          id: 'text-only',
+          name: 'Text only',
+          inputModalities: ['text', 'image'],
+          imageInput: 'unsupported',
+        }],
+      }),
+      t,
+      existingProviderIDs: new Set(),
+    });
+
+    expect(result.result?.config.models['text-only']).toEqual({
+      name: 'Text only',
+      attachment: false,
+      modalities: { input: ['text'] },
+    });
+  });
+
+  test('validates positive limits and duplicate thinking levels', () => {
+    const result = validateCustomProvider({
+      form: baseForm({
+        models: [{
+          row: 'm0',
+          id: 'model-a',
+          name: 'Model A',
+          contextLimit: '0',
+          inputLimit: '1.5',
+          outputLimit: '9007199254740992',
+          thinkingLevels: 'low, medium, low',
+        }],
+      }),
+      t,
+      existingProviderIDs: new Set(),
+    });
+
+    expect(result.result).toEqual(undefined);
+    expect(result.models[0]).toEqual({
+      id: undefined,
+      name: undefined,
+      contextLimit: 'settings.providers.page.custom.error.positiveInteger',
+      inputLimit: 'settings.providers.page.custom.error.positiveInteger',
+      outputLimit: 'settings.providers.page.custom.error.positiveInteger',
+      thinkingLevels: 'settings.providers.page.custom.error.duplicate',
+    });
   });
 
   test('requires a config-layer source before treating a provider as editable custom', () => {

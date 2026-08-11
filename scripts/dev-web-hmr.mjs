@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +10,41 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const useDetachedChildren = process.platform === 'darwin';
 const webRoot = path.join(repoRoot, 'packages/web');
+
+function resolveBunExecutable() {
+  const npmExecutable = process.env.npm_execpath?.trim();
+  if (
+    npmExecutable &&
+    /^bun(?:\.exe)?$/i.test(path.basename(npmExecutable)) &&
+    existsSync(npmExecutable)
+  ) {
+    return npmExecutable;
+  }
+
+  if (process.platform === 'win32') {
+    const result = spawnSync('where.exe', ['bun.exe'], { encoding: 'utf8', windowsHide: true });
+    if (!result.error && result.status === 0) {
+      const executable = String(result.stdout || '').split(/\r?\n/).map((entry) => entry.trim()).find(Boolean);
+      if (executable) return executable;
+    }
+
+    const shimResult = spawnSync('where.exe', ['bun.cmd'], { encoding: 'utf8', windowsHide: true });
+    if (!shimResult.error && shimResult.status === 0) {
+      const shim = String(shimResult.stdout || '').split(/\r?\n/).map((entry) => entry.trim()).find(Boolean);
+      const executable = shim
+        ? path.resolve(path.dirname(shim), 'node_modules', 'bun', 'bin', 'bun.exe')
+        : '';
+      if (executable && existsSync(executable)) return executable;
+    }
+  }
+
+  return 'bun';
+}
+
+const bunExecutable = resolveBunExecutable();
+const quotedBunExecutable = /\s/.test(bunExecutable)
+  ? `"${bunExecutable.replace(/"/g, '\\"')}"`
+  : bunExecutable;
 
 function run(label, command, args, env = {}, options = {}) {
   return spawn(command, args, {
@@ -112,12 +147,25 @@ function clearViteCache() {
 
 clearViteCache();
 
-const api = run('api', 'bun', ['run', '--cwd', 'packages/web', 'dev:server:watch'], {
-  OPENCHAMBER_PORT: backendPort,
-});
+const api = run(
+  'api',
+  bunExecutable,
+  [
+    'x',
+    'nodemon',
+    '--watch',
+    'server',
+    '--ext',
+    'js',
+    '--exec',
+    `${quotedBunExecutable} server/index.js --port ${backendPort}`,
+  ],
+  { OPENCHAMBER_PORT: backendPort },
+  { cwd: webRoot },
+);
 const vite = run(
   'vite',
-  'bun',
+  bunExecutable,
   ['x', 'vite', '--force', '--host', hmrHost, '--port', uiPort, '--strictPort'],
   {
     OPENCHAMBER_PORT: backendPort,

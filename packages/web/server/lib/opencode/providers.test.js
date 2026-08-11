@@ -108,6 +108,133 @@ describe('custom provider config persistence', () => {
     expect(sources.sources.project.path).toBe(result.path);
   });
 
+  test('round-trips supported advanced model metadata', () => {
+    const result = upsertProviderConfig('advanced-provider', {
+      name: 'Advanced Provider',
+      options: { baseURL: 'https://api.example.com/v1' },
+      models: {
+        vision: {
+          name: 'Vision',
+          reasoning: true,
+          attachment: true,
+          tool_call: false,
+          modalities: {
+            input: ['text', 'image'],
+            output: ['text'],
+          },
+          limit: {
+            context: 128000,
+            input: 64000,
+            output: 8192,
+          },
+          variants: {
+            low: {
+              reasoningEffort: 'low',
+              headers: { 'X-Reasoning': 'low' },
+              options: { temperatures: [0, 0.2], enabled: true, fallback: null },
+            },
+            high: { reasoningEffort: 'high' },
+          },
+        },
+      },
+      env: ['ADVANCED_KEY'],
+    }, projectDir, 'project');
+
+    const expectedModel = {
+      name: 'Vision',
+      reasoning: true,
+      attachment: true,
+      tool_call: false,
+      modalities: {
+        input: ['text', 'image'],
+        output: ['text'],
+      },
+      limit: {
+        context: 128000,
+        input: 64000,
+        output: 8192,
+      },
+      variants: {
+        low: {
+          reasoningEffort: 'low',
+          headers: { 'X-Reasoning': 'low' },
+          options: { temperatures: [0, 0.2], enabled: true, fallback: null },
+        },
+        high: { reasoningEffort: 'high' },
+      },
+    };
+
+    expect(result.config.models.vision).toEqual(expectedModel);
+    expect(readJson(result.path).provider['advanced-provider'].models.vision).toEqual(expectedModel);
+  });
+
+  test('drops unsupported and unsafe advanced model metadata before writing', () => {
+    const unsafeVariant = JSON.parse(`{
+      "reasoningEffort": "medium",
+      "__proto__": { "polluted": true },
+      "constructor": { "polluted": true },
+      "prototype": { "polluted": true },
+      "nested": {
+        "safe": true,
+        "__proto__": { "polluted": true }
+      }
+    }`);
+    unsafeVariant.notSerializable = undefined;
+    unsafeVariant.invalidArray = ['safe', undefined];
+    const unsafeVariants = JSON.parse(`{
+      "__proto__": { "reasoningEffort": "unsafe" },
+      "constructor": { "reasoningEffort": "unsafe" },
+      "prototype": { "reasoningEffort": "unsafe" }
+    }`);
+    unsafeVariants.medium = unsafeVariant;
+    unsafeVariants.empty = undefined;
+    unsafeVariants.invalid = 'high';
+
+    const result = upsertProviderConfig('clean-provider', {
+      name: 'Clean Provider',
+      options: { baseURL: 'https://api.example.com/v1' },
+      models: {
+        clean: {
+          name: 'Clean',
+          reasoning: 'yes',
+          attachment: false,
+          tool_call: null,
+          modalities: {
+            input: ['text', 'image', 'image', 'unknown', 1],
+            output: ['unknown'],
+            extra: ['audio'],
+          },
+          limit: {
+            context: 0,
+            input: 1.5,
+            output: 4096,
+            extra: 100,
+          },
+          variants: unsafeVariants,
+          unknown: 'drop me',
+        },
+      },
+      env: ['CLEAN_KEY'],
+    }, projectDir, 'project');
+
+    const expectedModel = {
+      name: 'Clean',
+      attachment: false,
+      modalities: { input: ['text', 'image'] },
+      limit: { output: 4096 },
+      variants: {
+        medium: {
+          reasoningEffort: 'medium',
+          nested: { safe: true },
+        },
+      },
+    };
+
+    expect(result.config.models.clean).toEqual(expectedModel);
+    expect(readJson(result.path).provider['clean-provider'].models.clean).toEqual(expectedModel);
+    expect({}.polluted).toBeUndefined();
+  });
+
   test('upsertProviderConfig updates existing entry and clears disabled_providers', () => {
     const configPath = path.join(projectDir, 'opencode.json');
     writeJson(configPath, {
