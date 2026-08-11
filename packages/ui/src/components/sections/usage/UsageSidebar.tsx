@@ -86,14 +86,14 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
 
   const bgClass = 'bg-background';
 
-const refreshIntervalLabel = (value: string | undefined): string =>
-  value === '30000'
-    ? '30s'
-    : value === '60000'
-      ? '1m'
-      : value === '300000'
-        ? '5m'
-        : value ?? '';
+  const refreshIntervalLabel = (value: string | undefined): string =>
+    value === '30000'
+      ? '30s'
+      : value === '60000'
+        ? '1m'
+        : value === '300000'
+          ? '5m'
+          : value ?? '';
 
   const displayModeLabel = (value: string | undefined): string =>
     value === 'usage'
