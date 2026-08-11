@@ -45,6 +45,7 @@ import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectorie
 import { partitionSidebarSessions } from '@/components/session/sidebar/list/sessionCollection';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
+import { SessionActivityMarker } from '@/components/session/sidebar/sessions/SessionActivityMarker';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { cn } from '@/lib/utils';
@@ -471,13 +472,22 @@ const SessionRow: React.FC<{
   const time = formatRelativeShort(getSessionTimestamp(session));
   const title = session.title?.trim() || t('mobile.sessions.untitled');
   const swipeEnabled = Boolean(onRevealedChange && onArchive);
-  // Live indicators, same conventions as the desktop sidebar: busy/retry →
-  // spinner; unseen activity on a non-active row → attention dot.
+  // Live indicators follow the desktop sidebar's ring/filled-dot convention.
   const liveStatus = useGlobalSessionStatus(session.id);
   const unseenCount = useSessionUnseenCount(session.id);
   const statusType = liveStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
+  const activityState = isStreaming ? 'active' : showUnreadDot ? 'unread' : null;
+  const activityMarker = activityState ? (
+    <SessionActivityMarker
+      state={activityState}
+      label={t(activityState === 'active'
+        ? 'sessions.sidebar.session.status.active'
+        : 'sessions.sidebar.session.status.unread')}
+      decorative
+    />
+  ) : null;
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
 
@@ -606,7 +616,7 @@ const SessionRow: React.FC<{
         {/* Left gutter slot: live activity indicator takes priority over the
             subsession chevron — same position, so rows never shift. When the
             row has children the slot still toggles them either way. */}
-        {isStreaming || showUnreadDot || (hasChildren && onToggleChildren) ? (
+        {hasChildren && onToggleChildren ? (
           <button
             type="button"
             className="absolute z-10 flex w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -614,24 +624,22 @@ const SessionRow: React.FC<{
             aria-label={expanded
               ? t('sessions.sidebar.session.subsessions.collapse')
               : t('sessions.sidebar.session.subsessions.expand')}
-            disabled={!hasChildren || !onToggleChildren}
             onClick={(event) => {
               event.stopPropagation();
               onToggleChildren?.();
             }}
           >
-            {isStreaming || showUnreadDot ? (
-              <span
-                className={cn(
-                  'size-1.5 rounded-full',
-                  isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-                )}
-                aria-hidden
-              />
-            ) : (
+            {activityMarker ?? (
               <RiArrowDownSLine className={cn('size-[18px] transition-transform duration-150', expanded ? 'rotate-0' : '-rotate-90')} />
             )}
           </button>
+        ) : activityMarker ? (
+          <span
+            className="pointer-events-none absolute z-10 flex w-6 items-center justify-center"
+            style={{ left: Math.max(indent - 32, 2), top: 0, bottom: 0 }}
+          >
+            {activityMarker}
+          </span>
         ) : null}
         {renaming && onSubmitRename && onCancelRename ? (
           <SessionRenameForm

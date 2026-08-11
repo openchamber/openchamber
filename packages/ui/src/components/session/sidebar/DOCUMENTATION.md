@@ -40,6 +40,12 @@ cache. Live busy and retry state comes from `global-session-status`, never from
 the global cache or persisted history. A failed global or directory fetch keeps
 existing data; it is never treated as an authoritative empty list.
 
+Live activity markers are static: an open primary ring means `busy`/`retry`; a
+filled info dot means unread. Shape carries the distinction without relying on
+hue, animation, or the optional elapsed counter. Collapsed and mobile lists use
+the same marker; aggregates omit the counter. `SessionSwitcherDropdown` remains
+separate and still pulses its busy dot.
+
 Web and desktop show managed Chats before optional Recent activity. Chats use
 their shared managed root for folders and never expose worktree actions. Project
 display can be all projects or one selected project. The mobile sessions sheet
