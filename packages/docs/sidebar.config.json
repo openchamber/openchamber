@@ -289,6 +289,21 @@
           }
         },
         {
+          "label": "GitLab Issues & MRs",
+          "link": "/gitlab/",
+          "translations": {
+            "uk": "Завдання та MR GitLab",
+            "zh-CN": "GitLab 工单与 MR",
+            "es": "Issues y MRs de GitLab",
+            "pt-BR": "Issues e MRs do GitLab",
+            "ko": "GitLab 이슈 및 MR",
+            "pl": "Zgłoszenia i MR-y GitLab",
+            "fr": "Issues et MR GitLab",
+            "ja": "GitLab Issues と MR",
+            "de": "GitLab-Issues und MRs"
+          }
+        },
+        {
           "label": "Magic Prompts",
           "link": "/magic-prompts/",
           "translations": {
