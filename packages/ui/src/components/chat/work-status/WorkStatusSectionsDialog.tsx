@@ -2,6 +2,7 @@ import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { SettingsCheckboxRow } from '@/components/sections/shared/SettingsSection';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +13,7 @@ import {
 import {
   WORK_STATUS_SECTION_IDS,
   WORK_STATUS_SECTION_LABEL_KEYS,
+  areAllWorkStatusSectionsHidden,
   isWorkStatusSectionVisible,
 } from './sections';
 
@@ -29,6 +31,12 @@ export const WorkStatusSectionsDialog: React.FC<{
   const { t } = useI18n();
   const hidden = useUIStore((state) => state.workStatusHiddenSections);
   const setSectionVisible = useUIStore((state) => state.setWorkStatusSectionVisible);
+  const setHiddenSections = useUIStore((state) => state.setWorkStatusHiddenSections);
+
+  const allVisible = hidden.length === 0;
+  const noneVisible = areAllWorkStatusSectionsHidden(hidden);
+
+  const handleShowAll = () => setHiddenSections([]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -50,6 +58,22 @@ export const WorkStatusSectionsDialog: React.FC<{
             />
           ))}
         </div>
+
+        {!allVisible ? (
+          <div className="flex items-center justify-between border-t pt-3">
+            {noneVisible ? (
+              <span className="text-xs text-destructive">{t('chat.workStatus.sections.noneWarning')}</span>
+            ) : <span />}
+            <Button
+              variant="link"
+              size="xs"
+              onClick={handleShowAll}
+              className="normal-case text-muted-foreground hover:text-foreground"
+            >
+              {t('chat.workStatus.sections.showAll')}
+            </Button>
+          </div>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

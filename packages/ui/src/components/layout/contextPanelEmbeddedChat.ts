@@ -158,6 +158,17 @@ export const getOrCreateEmbeddedSessionChatURL = (
   return src;
 };
 
+export const getActiveEmbeddedSessionChatTab = <T extends { id: string }>(
+  tabs: T[],
+  activeTabID: string | null,
+): T | null => {
+  if (!activeTabID) {
+    return null;
+  }
+
+  return tabs.find((tab) => tab.id === activeTabID) ?? null;
+};
+
 /**
  * True when the current document is the embedded session-chat iframe
  * (`?ocPanel=session-chat`). Used to distinguish the embedded iframe from

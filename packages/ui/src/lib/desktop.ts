@@ -97,10 +97,7 @@ export type DesktopSettings = {
   summaryLength?: number;
   maxLastMessageLength?: number;
 
-  usageAutoRefresh?: boolean;
-  usageRefreshIntervalMs?: number;
   usageDisplayMode?: 'usage' | 'remaining';
-  usageShowPredValues?: boolean;
   usageDropdownProviders?: string[];
   usageSelectedModels?: Record<string, string[]>;  // Map of providerId -> selected model names
   usageCollapsedFamilies?: Record<string, string[]>;  // Map of providerId -> collapsed family IDs (UsagePage)

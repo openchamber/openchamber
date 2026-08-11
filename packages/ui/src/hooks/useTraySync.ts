@@ -554,14 +554,8 @@ export const useTraySync = (): void => {
       const { dropdownProviderIds, results } = useQuotaStore.getState();
       const needsFetch = dropdownProviderIds.length > 0
         && dropdownProviderIds.some((id) => !results.some((r) => r.providerId === id));
-      if (needsFetch) void useQuotaStore.getState().fetchAllQuotas();
+      if (needsFetch) void useQuotaStore.getState().fetchQuotas(dropdownProviderIds);
     });
-    // Keep the Usage submenu current per the user's auto-refresh setting
-    // (desktop-only; checked each tick so toggling it mid-session applies).
-    const usageRefreshTick = window.setInterval(() => {
-      const quota = useQuotaStore.getState();
-      if (quota.autoRefresh && quota.dropdownProviderIds.length > 0) void quota.fetchAllQuotas();
-    }, Math.max(30000, useQuotaStore.getState().refreshIntervalMs || 60000));
 
     // Safety net: catches anything the event subscriptions miss (e.g. a store
     // that existed before the registry subscription was attached).
@@ -575,7 +569,6 @@ export const useTraySync = (): void => {
       window.clearInterval(interval);
       window.clearInterval(refreshInterval);
       window.clearInterval(globalStatusInterval);
-      window.clearInterval(usageRefreshTick);
       unsubscribeNotif();
       unsubscribeGlobal();
       unsubscribeProjects();

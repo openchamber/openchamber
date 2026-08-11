@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Project actions: Auto-discover is now hidden for projects where no dev server can be detected (no matching project action, no supported dev-server script, no index.html) instead of always appearing and failing on click, while an active Auto-discover run still keeps its stop control and projects with no configured actions still keep the toolbar entry as an Add new action menu (thanks to @lukelabonte).
+- Usage: quota limits enabled for display now refresh every three minutes on desktop, mobile, and VS Code, with a manual refresh action available at any time.
 
 ## [1.18.2] - 2026-08-10
 

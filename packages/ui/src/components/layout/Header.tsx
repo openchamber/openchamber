@@ -41,9 +41,8 @@ import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
-import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
@@ -549,7 +548,6 @@ export const Header: React.FC<HeaderProps> = ({
   const isQuotaLoading = useQuotaStore((state) => state.isLoading);
   const quotaLastUpdated = useQuotaStore((state) => state.lastUpdated);
   const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
-  const showPredValues = useQuotaStore((state) => state.showPredValues);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
   const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
@@ -2448,12 +2446,6 @@ export const Header: React.FC<HeaderProps> = ({
                                   const displayPercent = quotaDisplayMode === 'remaining'
                                     ? window.remainingPercent
                                     : window.usedPercent;
-                                  const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
-                                  const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                    ? (quotaDisplayMode === 'remaining'
-                                        ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                        : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                    : null;
                                   const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                                   const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
                                   return (
@@ -2475,11 +2467,7 @@ export const Header: React.FC<HeaderProps> = ({
                                         percent={displayPercent}
                                         tonePercent={window.usedPercent}
                                         className="h-1.5"
-                                        expectedMarkerPercent={expectedMarker}
                                       />
-                                      {paceInfo && showPredValues ? (
-                                        <PaceIndicator paceInfo={paceInfo} compact />
-                                      ) : null}
                                     </div>
                                   );
                                 })}
@@ -2513,12 +2501,6 @@ export const Header: React.FC<HeaderProps> = ({
                                                 const displayPercent = quotaDisplayMode === 'remaining'
                                                   ? window.remainingPercent
                                                   : window.usedPercent;
-                                                const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds);
-                                                const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                                  ? (quotaDisplayMode === 'remaining'
-                                                      ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                                      : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                                  : null;
                                                 const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                                                 return (
                                                   <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
@@ -2532,11 +2514,7 @@ export const Header: React.FC<HeaderProps> = ({
                                                       percent={displayPercent}
                                                       tonePercent={window.usedPercent}
                                                       className="h-1.5"
-                                                      expectedMarkerPercent={expectedMarker}
                                                     />
-                                                    {paceInfo && showPredValues ? (
-                                                      <PaceIndicator paceInfo={paceInfo} compact />
-                                                    ) : null}
                                                   </div>
                                                 );
                                               })}

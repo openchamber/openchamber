@@ -1,5 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { preloadProviderLogos } from '@/hooks/useProviderLogo';
@@ -43,7 +45,7 @@ export const WorkStatusUsageSection: React.FC = () => {
   const isLoading = useQuotaStore((state) => state.isLoading);
   const quotaResults = useQuotaStore((state) => state.results);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
-  const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
+  const fetchQuotas = useQuotaStore((state) => state.fetchQuotas);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
 
@@ -61,8 +63,8 @@ export const WorkStatusUsageSection: React.FC = () => {
       (providerId) => !quotaResults.some((result) => result.providerId === providerId),
     );
     if (!missingProvider) return;
-    void runBackgroundNetworkTask(() => fetchAllQuotas());
-  }, [dropdownProviderIds, fetchAllQuotas, isLoading, quotaResults]);
+    void runBackgroundNetworkTask(() => fetchQuotas(dropdownProviderIds));
+  }, [dropdownProviderIds, fetchQuotas, isLoading, quotaResults]);
 
   React.useEffect(() => {
     if (groups.length === 0) return;
@@ -96,7 +98,6 @@ export const WorkStatusUsageSection: React.FC = () => {
       icon="timer"
       summary={(
         <span className="inline-flex items-center gap-1.5">
-          {isLoading ? <Icon name="refresh" className="size-3 animate-spin" /> : null}
           {headline && headlineMetric && headlineMetric !== '-' ? (
             <>
               <span className="truncate">{headline.row.label}</span>
@@ -104,6 +105,19 @@ export const WorkStatusUsageSection: React.FC = () => {
             </>
           ) : modeLabel}
         </span>
+      )}
+      action={(
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-6 shrink-0 text-muted-foreground"
+          onClick={() => void fetchQuotas(dropdownProviderIds)}
+          aria-label={t('settings.usage.sidebar.actions.refreshAria')}
+          title={t('settings.usage.sidebar.actions.refreshTitle')}
+          disabled={isLoading}
+        >
+          <Icon name="refresh" className={cn('size-3.5', isLoading && 'animate-spin')} />
+        </Button>
       )}
     >
       {groups.map((group) => (

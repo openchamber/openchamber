@@ -712,6 +712,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     const isVSCode = isVSCodeRuntime();
     const chatSurfaceMode = useChatSurfaceMode();
     const draftOpen = Boolean(newSessionDraft?.open);
+    // A draft can target another project or a pending worktree before it has a
+    // session. Keep the panel on that same directory so its project, MCP, and
+    // usage readouts describe where the draft will run rather than the project
+    // the user came from.
+    const workStatusDirectory = draftOpen
+        ? newSessionDraft?.bootstrapPendingDirectory ?? newSessionDraft?.directoryOverride ?? effectiveSessionDirectory
+        : effectiveSessionDirectory;
     const initError = useGlobalSyncStore((s) => s.error);
     // Despite the historical name, this now covers mobile too: the mobile
     // composer enters the same fullscreen-input mode via its drag handle.
@@ -722,12 +729,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     // row that holds both columns, so its width never depends on the panel's
     // own visibility.
     const { rowRef: workStatusRowRef, visible: workStatusVisible, fits: workStatusFits } = useWorkStatusVisibility({
-        directory: effectiveSessionDirectory,
+        directory: workStatusDirectory,
         isMobile,
         isVSCode,
     });
-    // Session view only. The draft branch returns its own layout before this
-    // one, so the panel has no place there yet.
     // Surfaces that never host the panel skip it entirely; the rest keep it
     // mounted so its visibility can animate rather than snap.
     const workStatusPanelMountable = !isMobile
@@ -1082,20 +1087,37 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
 			// No transform on this root: it would become the containing block for
 			// the fullscreen composer's position:fixed visual-viewport pinning in
 			// mobile browsers (see ChatInput's composerFormRef effect).
-			<div data-composer-bound className="relative flex h-full flex-col bg-background">
-				{useCompactDraftLayout && !isDesktopExpandedInput ? <DraftWelcome /> : null}
-				<div
-					className={cn(
-						'relative z-10 flex min-h-0',
-						isDesktopExpandedInput
-							? 'flex-1 bg-background'
-							: useCompactDraftLayout
-								? 'bg-background px-0'
-								: 'flex-1 items-center justify-center bg-background px-0 pb-[6vh]'
-					)}
-				>
-                        {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+			<div ref={workStatusRowRef} className="flex h-full min-h-0 bg-background">
+				<div data-composer-bound className="relative flex min-w-0 flex-1 flex-col bg-background">
+					{useCompactDraftLayout && !isDesktopExpandedInput ? <DraftWelcome /> : null}
+					<div
+						className={cn(
+							'relative z-10 flex min-h-0',
+							isDesktopExpandedInput
+								? 'flex-1 bg-background'
+								: useCompactDraftLayout
+									? 'bg-background px-0'
+									: 'flex-1 items-center justify-center bg-background px-0 pb-[6vh]'
+						)}
+					>
+                          {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+					</div>
+					{workStatusOverlayMountable ? (
+						<WorkStatusPanel
+							overlay
+							visible={showWorkStatusOverlay}
+							sessionId={null}
+							directory={workStatusDirectory ?? null}
+						/>
+					) : null}
 				</div>
+				{workStatusPanelMountable ? (
+					<WorkStatusPanel
+						visible={showWorkStatusPanel}
+						sessionId={null}
+						directory={workStatusDirectory ?? null}
+					/>
+				) : null}
 			</div>
         );
     }
@@ -1280,7 +1302,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
                     overlay
                     visible={showWorkStatusOverlay}
                     sessionId={currentSessionId ?? null}
-                    directory={effectiveSessionDirectory ?? null}
+                    directory={workStatusDirectory ?? null}
                 />
             ) : null}
 
@@ -1302,7 +1324,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
             <WorkStatusPanel
                 visible={showWorkStatusPanel}
                 sessionId={currentSessionId ?? null}
-                directory={effectiveSessionDirectory ?? null}
+                directory={workStatusDirectory ?? null}
             />
         ) : null}
         </div>
