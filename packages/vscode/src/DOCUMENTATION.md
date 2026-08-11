@@ -1,10 +1,10 @@
 # VS Code Backend Modules
 
-This document describes backend runtime modules used by the VS Code extension bridge (`packages/vscode/src/bridge.ts`).
+This document describes backend runtime modules used by the VS Code extension bridge (`packages/vscode/src/bridge.ts`) and shared webview host plumbing.
 
 ## Purpose
 
-Keep `bridge.ts` as a thin orchestration layer that delegates message handling to cohesive domain runtimes while preserving API behavior.
+Keep `bridge.ts` and webview providers as thin orchestration layers that delegate to cohesive domain modules while preserving API behavior.
 
 ## Runtime modules
 
@@ -71,6 +71,38 @@ The webview CSP permits `blob:` only for `worker-src` so shared UI parsers can r
   - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.
   - Serializes reads and read-modify-write updates, persists a monotonic policy revision, and broadcasts the exact committed snapshot to every active OpenChamber webview. Permission replies remain foreground UI-owned because VS Code does not run the OpenChamber server runtime.
 
+## Shared webview host modules
+
+- `webviewSseSession.ts`
+  - Shared SSE start/stop/abort used by Chat, Agent Manager, and Session Editor providers.
+  - Preserves the contract that bridge replies report HTTP status in `data` while `success` stays `true`.
+  - Pure stream-id/header helpers live in `webviewSseHelpers.ts` for unit testing without the VS Code host.
+
+- `activeEditorFile.ts`
+  - Debounced active-editor file + selection broadcast shared by Chat and Session Editor.
+
+- `webviewHostMessages.ts`
+  - Theme, connection status, settings sync, permission-auto-accept, and window-focus fan-out helpers.
+
+- `webviewMessageRetry.ts`
+  - Ack-tracked postMessage retries used by the chat sidebar.
+
+- `sidebarPlacement.ts`
+  - One-shot secondary-sidebar placement for VS Code hosts (skipped on Cursor-like hosts).
+
+- `openCodeStatusReport.ts`
+  - Builds the OpenCode status/debug report for `OpenChamber: Show OpenCode Status`.
+
+## Webview entry modules (`packages/vscode/webview`)
+
+- `main.tsx` — bootstrap only: runtime APIs, theme, loading overlay, fetch interceptor, command/notification registration, app mount.
+- `httpHelpers.ts` — URL/header/response helpers for the fetch interceptor.
+- `localApiRequest.ts` — OpenChamber-owned `/api/*` route emulation in the webview.
+- `fetchInterceptor.ts` — `window.fetch` override (local routes, SSE, session-message, generic OpenCode proxy).
+- `loadingOverlay.ts` — splash overlay lifecycle.
+- `commandHandlers.ts` — extension → webview command handlers.
+- `notifications.ts` — native notification claiming and session event notifications.
+
 ## Extension guideline
 
 When adding new bridge route families:
@@ -78,3 +110,5 @@ When adding new bridge route families:
 1. Prefer creating or extending a domain runtime module under `packages/vscode/src/bridge-*-runtime.ts`.
 2. Keep `bridge.ts` focused on delegation order and minimal fallthrough behavior.
 3. Inject dependencies into runtimes instead of reaching into unrelated modules directly.
+
+When adding webview host behavior shared by multiple panels, put it in a shared module under `packages/vscode/src/` rather than duplicating it across providers.

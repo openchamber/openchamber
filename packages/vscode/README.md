@@ -60,12 +60,24 @@ Select code in the editor, right-click, and find the **OpenChamber** submenu:
 <details>
 <summary>Development</summary>
 
+### First-time setup
+
 ```bash
 bun install
-bun run vscode:dev
 ```
 
-`bun run vscode:dev` now starts watchers + opens an Extension Development Host automatically. Webview UI changes use Vite HMR automatically.
+Requirements:
+
+- Bun (see root `packageManager`)
+- OpenCode CLI on `PATH`, or set `openchamber.opencodeBinary` / `OPENCODE_BINARY`
+- VS Code or Cursor 1.85+
+
+### Daily loop
+
+```bash
+# watchers + Extension Development Host (webview HMR on :5173)
+bun run vscode:dev
+```
 
 Optional overrides:
 
@@ -73,7 +85,28 @@ Optional overrides:
 - `OPENCHAMBER_VSCODE_DEV_WORKSPACE=/path/to/workspace bun run vscode:dev`
 - `bun run vscode:dev /path/to/workspace`
 
-To package manually:
+### Validate before pushing
+
+```bash
+# types for extension host + webview
+bun run vscode:type-check
+
+# lint
+bun run --cwd packages/vscode lint
+
+# focused unit tests (Bun)
+bun test packages/vscode/src/*.test.js packages/vscode/src/*.test.ts packages/vscode/webview/*.test.js packages/vscode/webview/**/*.test.ts
+
+# production bundles
+bun run vscode:build
+
+# unused export scan (non-blocking)
+bun run dead-code
+```
+
+Architecture notes for contributors live in `packages/vscode/src/DOCUMENTATION.md`.
+
+### Package a VSIX
 
 ```bash
 bun run --cwd packages/vscode build
