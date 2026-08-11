@@ -5,6 +5,7 @@ import {
   type DirectoryBootstrapContext,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
+  subscribeDirectoryPermissions,
   subscribeDirectoryQuestion,
   subscribeDirectoryQuestions,
   subscribeDirectorySessionMessages,
@@ -120,6 +121,44 @@ describe('ChildStoreManager permission subscriptions', () => {
     expect(getSyncPerformanceDiagnostics()?.permissionChangeCallbacks).toBe(1);
     for (const unsubscribe of unsubscribers) unsubscribe();
     setSyncPerformanceDiagnosticsEnabled(false);
+    manager.disposeAll();
+  });
+
+  test('aggregates hidden subagent permissions across directory stores (#2247)', () => {
+    const manager = new ChildStoreManager();
+    const parentStore = manager.ensureChild('/repo', { bootstrap: false });
+    const childStore = manager.ensureChild('/worktrees/feature', { bootstrap: false });
+    let notifications = 0;
+    const notify = () => {
+      notifications += 1;
+    };
+    const unsubscribers = [
+      subscribeDirectoryPermissions(parentStore, ['parent'], notify),
+      subscribeDirectoryPermissions(childStore, ['child'], notify),
+    ];
+    const permissionCount = () => (
+      (parentStore.getState().permission.parent?.length ?? 0)
+      + (childStore.getState().permission.child?.length ?? 0)
+    );
+
+    childStore.setState({ permission: { child: [{ id: 'child-permission' }] as never[] } });
+    expect(permissionCount()).toBe(1);
+    expect(notifications).toBe(1);
+
+    childStore.setState({
+      permission: {
+        ...childStore.getState().permission,
+        unrelated: [{ id: 'unrelated-permission' }] as never[],
+      },
+    });
+    expect(permissionCount()).toBe(1);
+    expect(notifications).toBe(1);
+
+    parentStore.setState({ permission: { parent: [{ id: 'parent-permission' }] as never[] } });
+    expect(permissionCount()).toBe(2);
+    expect(notifications).toBe(2);
+
+    for (const unsubscribe of unsubscribers) unsubscribe();
     manager.disposeAll();
   });
 });

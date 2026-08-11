@@ -54,6 +54,13 @@ only changes priority. Row mounts must not start bootstrap work. Selection and
 activity subscriptions stay session-scoped so a structural list update does not
 make every row observe unrelated streaming updates.
 
+Blocking-request badges follow one rule for both kinds. Pending permission and
+question counts stay per-session while a row is expanded, and a collapsed row
+additionally rolls up the counts of the descendants it hides, grouped by the
+directory store each descendant lives in. Neither badge bootstraps a store to do
+it, so an unbootstrapped directory contributes zero until authoritative state
+arrives rather than inventing a count.
+
 ## Loading rules
 
 - Always publish every known project root and worktree directory. Collapse/visibility changes priority only; they do not opt a directory out of authoritative refresh.
