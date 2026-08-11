@@ -43,6 +43,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   const metricsFrameRef = React.useRef<number | null>(null);
   const isDraggingRef = React.useRef(false);
   const isHoveringRef = React.useRef(false);
+  const isHoveringContainerRef = React.useRef(false);
   const lastUserIntentAtRef = React.useRef(0);
   const dragStartRef = React.useRef<{
     pointerX: number;
@@ -124,11 +125,23 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     if (hideTimeoutRef.current) {
       clearTimeout(hideTimeoutRef.current);
     }
-    // Don't schedule hide if hovering over the thumb
-    if (isHoveringRef.current) {
+    // Don't even schedule if we're already hovering something at this instant.
+    if (isHoveringRef.current || isHoveringContainerRef.current) {
       return;
     }
-    hideTimeoutRef.current = setTimeout(() => setVisible(false), hideDelayMs);
+    hideTimeoutRef.current = setTimeout(() => {
+      // Re-check hover state at fire time, not just schedule time: the thumb is a
+      // DOM sibling of the container (an absolutely-positioned overlay on top of
+      // it), not a descendant, so moving the pointer from the container onto the
+      // thumb fires the container's mouseleave (arming this timer) BEFORE the
+      // thumb's mouseenter (which would otherwise have cancelled it). Without this
+      // re-check, the thumb would vanish out from under a pointer that's now
+      // resting on it, ~hideDelayMs after the hand-off.
+      if (isHoveringRef.current || isHoveringContainerRef.current) {
+        return;
+      }
+      setVisible(false);
+    }, hideDelayMs);
   }, [hideDelayMs]);
 
   const markUserIntent = React.useCallback(() => {
@@ -180,7 +193,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     };
 
     const onContainerMouseEnter = () => {
-      isHoveringRef.current = true;
+      isHoveringContainerRef.current = true;
       if (hideTimeoutRef.current) {
         clearTimeout(hideTimeoutRef.current);
         hideTimeoutRef.current = null;
@@ -191,7 +204,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       }
     };
     const onContainerMouseLeave = () => {
-      isHoveringRef.current = false;
+      isHoveringContainerRef.current = false;
       scheduleHide();
     };
 
