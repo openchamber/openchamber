@@ -179,7 +179,29 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       }
     };
 
+    const onContainerMouseEnter = () => {
+      isHoveringRef.current = true;
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+        hideTimeoutRef.current = null;
+      }
+      if (!suppressVisibility) {
+        updateMetrics();
+        setVisible(true);
+      }
+    };
+    const onContainerMouseLeave = () => {
+      isHoveringRef.current = false;
+      scheduleHide();
+    };
+
     container.addEventListener("scroll", onScroll, { passive: true });
+    // Reveal on hover in addition to the existing scroll-triggered visibility above,
+    // so users can find the affordance without having to scroll first. Not gated by
+    // userIntentOnly/desktop-runtime -- hovering directly over the scrollable area is
+    // itself deliberate user intent, on every platform that has a pointer.
+    container.addEventListener("mouseenter", onContainerMouseEnter);
+    container.addEventListener("mouseleave", onContainerMouseLeave);
     if (userIntentOnly) {
       container.addEventListener("wheel", markUserIntent, { passive: true });
       container.addEventListener("touchstart", markUserIntent, { passive: true });
@@ -211,6 +233,8 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
 
     return () => {
       container.removeEventListener("scroll", onScroll);
+      container.removeEventListener("mouseenter", onContainerMouseEnter);
+      container.removeEventListener("mouseleave", onContainerMouseLeave);
       container.removeEventListener("input", onInput, true);
       container.removeEventListener("load", onLoad, true);
       if (userIntentOnly) {
@@ -226,7 +250,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       if (metricsFrameRef.current) cancelAnimationFrame(metricsFrameRef.current);
     };
-  }, [containerRef, handleScroll, markUserIntent, observeMutations, scheduleMetricsUpdate, syncObservedElements, updateMetrics, userIntentOnly]);
+  }, [containerRef, handleScroll, markUserIntent, observeMutations, scheduleHide, scheduleMetricsUpdate, suppressVisibility, syncObservedElements, updateMetrics, userIntentOnly]);
 
   React.useEffect(() => {
     if (!suppressVisibility) {
