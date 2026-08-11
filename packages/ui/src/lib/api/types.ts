@@ -1136,6 +1136,170 @@ export interface GitHubAPI {
   repoBranches(owner: string, repo: string): Promise<string[]>;
 }
 
+export type GitLabUserSummary = {
+  username: string;
+  id: number;
+  name?: string;
+  avatarUrl?: string;
+  webUrl?: string;
+  email?: string;
+};
+
+type GitLabRepoRef = {
+  namespace: string;
+  project: string;
+  host: string;
+  url: string;
+  baseUrl: string;
+};
+
+export type GitLabIssueSummary = {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  author: GitLabUserSummary;
+  labels: string[];
+};
+
+export type GitLabIssue = {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  body?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  author: GitLabUserSummary;
+  assignees?: GitLabUserSummary[];
+  labels: string[];
+};
+
+export type GitLabIssueComment = {
+  id: number;
+  url: string;
+  body: string;
+  createdAt?: string;
+  updatedAt?: string;
+  author: GitLabUserSummary;
+};
+
+export type GitLabIssuesListResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  issues: GitLabIssueSummary[];
+  page: number;
+  hasMore: boolean;
+};
+
+export type GitLabIssueGetResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  issue?: GitLabIssue;
+};
+
+export type GitLabIssueCommentsResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  comments: GitLabIssueComment[];
+};
+
+export type GitLabMergeRequestSummary = {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  draft: boolean;
+  author: GitLabUserSummary;
+  sourceBranch: string;
+  targetBranch: string;
+};
+
+export type GitLabMergeRequest = {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  draft: boolean;
+  body?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  author: GitLabUserSummary;
+  sourceBranch: string;
+  targetBranch: string;
+  headSha?: string;
+};
+
+type GitLabMergeRequestFile = {
+  filename: string;
+  status?: string;
+  additions?: number;
+  deletions?: number;
+  changes?: number;
+  patch?: string;
+};
+
+export type GitLabMergeRequestsListResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  mrs: GitLabMergeRequestSummary[];
+  page: number;
+  hasMore: boolean;
+};
+
+export type GitLabMergeRequestContextResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  mr?: GitLabMergeRequest;
+  comments?: GitLabIssueComment[];
+  files?: GitLabMergeRequestFile[];
+  diff?: string;
+};
+
+export type GitLabBranchesResult = {
+  branches: string[];
+};
+
+type GitLabAuthAccount = {
+  id: string;
+  user: {
+    username: string;
+    name?: string;
+    avatarUrl?: string;
+    webUrl?: string;
+  };
+  baseUrl: string;
+  current: boolean;
+};
+
+export type GitLabAuthStatus = {
+  connected: boolean;
+  user?: GitLabUserSummary;
+  accounts: GitLabAuthAccount[];
+  defaultBaseUrl: string;
+};
+
+export interface GitLabAPI {
+  authStatus(): Promise<GitLabAuthStatus>;
+  authConnect(input: { accessToken: string; baseUrl?: string }): Promise<GitLabAuthStatus>;
+  authActivate(accountId: string): Promise<GitLabAuthStatus>;
+  authDisconnect(): Promise<{ removed: boolean }>;
+  me(): Promise<GitLabUserSummary>;
+
+  issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GitLabIssuesListResult>;
+  issueGet(directory: string, number: number, options?: { namespace?: string; project?: string }): Promise<GitLabIssueGetResult>;
+  issueComments(directory: string, number: number, options?: { namespace?: string; project?: string }): Promise<GitLabIssueCommentsResult>;
+
+  mrsList(directory: string, options?: { page?: number; query?: string }): Promise<GitLabMergeRequestsListResult>;
+  mrContext(
+    directory: string,
+    number: number,
+    options?: { includeDiff?: boolean; namespace?: string; project?: string }
+  ): Promise<GitLabMergeRequestContextResult>;
+
+  repoBranches(namespace: string, project: string): Promise<string[]>;
+}
+
 export interface RemoteClientRecord {
   id: string;
   label: string;
@@ -1231,6 +1395,7 @@ export interface RuntimeAPIs {
   permissions: PermissionsAPI;
   notifications: NotificationsAPI;
   github?: GitHubAPI;
+  gitlab?: GitLabAPI;
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;
