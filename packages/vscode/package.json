@@ -141,6 +141,11 @@
         "command": "openchamber.attachExplorerToChat",
         "category": "OpenChamber",
         "title": "%command.attachExplorerToChat.title%"
+      },
+      {
+        "command": "openchamber.openWalkthrough",
+        "category": "OpenChamber",
+        "title": "%command.openWalkthrough.title%"
       }
     ],
     "submenus": [
@@ -217,7 +222,57 @@
           "description": "%configuration.opencodeBinary.description%"
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "gettingStarted",
+        "title": "%walkthrough.gettingStarted.title%",
+        "description": "%walkthrough.gettingStarted.description%",
+        "steps": [
+          {
+            "id": "openSidebar",
+            "title": "%walkthrough.gettingStarted.steps.openSidebar.title%",
+            "description": "%walkthrough.gettingStarted.steps.openSidebar.description%",
+            "media": {
+              "markdown": "%walkthrough.gettingStarted.steps.openSidebar.media%"
+            },
+            "completionEvents": [
+              "onView:openchamber.chatView"
+            ]
+          },
+          {
+            "id": "installCli",
+            "title": "%walkthrough.gettingStarted.steps.installCli.title%",
+            "description": "%walkthrough.gettingStarted.steps.installCli.description%",
+            "media": {
+              "markdown": "%walkthrough.gettingStarted.steps.installCli.media%"
+            }
+          },
+          {
+            "id": "configureBinary",
+            "title": "%walkthrough.gettingStarted.steps.configureBinary.title%",
+            "description": "%walkthrough.gettingStarted.steps.configureBinary.description%",
+            "media": {
+              "markdown": "%walkthrough.gettingStarted.steps.configureBinary.media%"
+            },
+            "completionEvents": [
+              "onCommand:openchamber.showSettings"
+            ]
+          },
+          {
+            "id": "startChatting",
+            "title": "%walkthrough.gettingStarted.steps.startChatting.title%",
+            "description": "%walkthrough.gettingStarted.steps.startChatting.description%",
+            "media": {
+              "markdown": "%walkthrough.gettingStarted.steps.startChatting.media%"
+            },
+            "completionEvents": [
+              "onCommand:openchamber.newSession"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "bun run build",

@@ -131,7 +131,7 @@ export function LocalSetupScreen({
       const response = await runtimeFetch('/health');
       if (!response.ok) return false;
       const data = await response.json();
-      return data.openCodeRunning === true || data.isOpenCodeReady === true;
+      return data.cliAvailable === true || data.openCodeRunning === true || data.isOpenCodeReady === true;
     } catch {
       return false;
     }
@@ -168,10 +168,15 @@ export function LocalSetupScreen({
       }
 
       await runtimeFetch('/api/config/reload', { method: 'POST' });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const available = await checkCliAvailability();
+      if (available) {
+        onCliAvailable?.();
+      }
     } finally {
       setTimeout(() => setIsRetrying(false), 1000);
     }
-  }, [isDesktopApp, opencodeBinary]);
+  }, [isDesktopApp, opencodeBinary, checkCliAvailability, onCliAvailable]);
 
   const handleCopy = React.useCallback(async () => {
     const result = await copyTextToClipboard(INSTALL_COMMAND);

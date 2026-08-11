@@ -1,10 +1,40 @@
 # VS Code Backend Modules
 
-This document describes backend runtime modules used by the VS Code extension bridge (`packages/vscode/src/bridge.ts`).
+This document describes backend runtime modules used by the VS Code extension bridge (`packages/vscode/src/bridge.ts`) and the shared webview host layer.
 
 ## Purpose
 
-Keep `bridge.ts` as a thin orchestration layer that delegates message handling to cohesive domain runtimes while preserving API behavior.
+Keep `bridge.ts` and `extension.ts` as thin orchestration layers that delegate to cohesive domain modules while preserving API behavior.
+
+## Extension layout
+
+- `extension.ts` — activate/deactivate entry; wires OpenCode manager, webview providers, and subscriptions.
+- `extension/commands.ts` — command registration (`registerExtensionCommands`) for sidebar, chat, sessions, settings, and internal sync commands.
+- `extension/statusReport.ts` — `openchamber.showOpenCodeStatus` diagnostic report builder.
+- `extension/sidebarPlacement.ts` — optional startup move of the chat view to the secondary sidebar (skipped on Cursor-like hosts).
+
+## Webview host layer (`host/`)
+
+Shared webview host utilities used by `ChatViewProvider`, `AgentManagerPanelProvider`, and `SessionEditorPanelProvider`:
+
+- `messageDelivery.ts` — reliable `postMessage` with ack/retry.
+- `webviewMessaging.ts` — connection/theme/focus/command post helpers (includes `cliAvailable`).
+- `buildHostWebviewHtml.ts` — HTML bootstrap for webviews.
+- `activeEditorFile.ts` / `activeEditorBroadcaster.ts` — active editor payload shaping and broadcasts.
+- `handleHostWebviewMessage.ts` — shared host message dispatch.
+- `sseProxySession.ts` — per-webview SSE proxy session wiring.
+
+## Bridge types
+
+- `bridge-types.ts` — shared bridge request/response and payload types consumed by host and bridge runtimes.
+- `bridge.ts` — re-exports types and delegates bridge messages to domain runtimes.
+
+## OpenCode manager (`opencode/`)
+
+Managed and external OpenCode lifecycle split from the legacy monolithic module:
+
+- `manager.ts` — `createOpenCodeManager`, start/stop/restart, status broadcasts.
+- `cli-discovery.ts`, `auth.ts`, `env.ts`, `readiness.ts`, `spawn.ts`, `external-url.ts` — CLI resolution, auth password helpers, shell env, readiness probes, process spawn, external URL mode.
 
 ## Runtime modules
 
