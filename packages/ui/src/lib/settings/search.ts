@@ -496,6 +496,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['github', 'account', 'oauth', 'prs', 'issues'],
   },
   {
+    id: 'git.gitlab-account',
+    page: 'git',
+    titleKey: 'settings.gitlab.page.actions.connect',
+    keywords: ['gitlab', 'account', 'pat', 'personal access token', 'issues', 'merge requests'],
+  },
+  {
     id: 'git.identities',
     page: 'git',
     titleKey: 'settings.gitIdentities.page.section.title',
