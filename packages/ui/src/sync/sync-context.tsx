@@ -14,6 +14,7 @@ import {
   ChildStoreManager,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
+  subscribeDirectoryPermissions,
   subscribeDirectoryQuestions,
   subscribeDirectorySessionMessages,
   type DirectoryBootstrapContext,
@@ -2607,16 +2608,24 @@ export function useSessionQuestions(sessionID: string, directory?: string) {
   )
 }
 
+type SessionBlockingRequestCounts = {
+  permissionCount: number
+  questionCount: number
+}
+
+const EMPTY_SESSION_BLOCKING_REQUEST_COUNTS: SessionBlockingRequestCounts = {
+  permissionCount: 0,
+  questionCount: 0,
+}
+
 /**
- * Total number of pending questions across the given session scopes. Each
- * scope names a directory store plus the session IDs to count inside it, so
- * collapsed subtree rows can roll up pending questions of hidden descendants
- * from their owning directory stores without bootstrapping them.
- *
- * Subscribes through the per-session question sidecar channel, so unrelated
- * streaming or session activity does not re-render rows.
+ * Count pending permissions and questions across exact session buckets grouped
+ * by owning directory. This lets collapsed rows cover hidden descendants
+ * without bootstrapping their stores or subscribing to unrelated updates.
  */
-export function useSessionQuestionCount(scopes: readonly { directory: string; sessionIDs: readonly string[] }[]) {
+export function useSessionBlockingRequestCounts(
+  scopes: readonly { directory: string; sessionIDs: readonly string[] }[],
+): SessionBlockingRequestCounts {
   const { childStores } = useSyncSystem()
   const scopedStores = React.useMemo(() => scopes.map((scope) => ({
     sessionIDs: scope.sessionIDs,
@@ -2628,18 +2637,30 @@ export function useSessionQuestionCount(scopes: readonly { directory: string; se
       for (const scope of scopes) childStores.unpin(scope.directory)
     }
   }, [childStores, scopes])
+  const snapshotRef = useRef(EMPTY_SESSION_BLOCKING_REQUEST_COUNTS)
   const getSnapshot = React.useCallback(() => {
-    let count = 0
+    let permissionCount = 0
+    let questionCount = 0
     for (const { sessionIDs, store } of scopedStores) {
-      const questions = store.getState().question
-      for (const sessionID of sessionIDs) count += questions[sessionID]?.length ?? 0
+      const { permission: permissions, question: questions } = store.getState()
+      for (const sessionID of sessionIDs) {
+        permissionCount += permissions[sessionID]?.length ?? 0
+        questionCount += questions[sessionID]?.length ?? 0
+      }
     }
-    return count
+    const previous = snapshotRef.current
+    if (previous.permissionCount === permissionCount && previous.questionCount === questionCount) {
+      return previous
+    }
+    const next = { permissionCount, questionCount }
+    snapshotRef.current = next
+    return next
   }, [scopedStores])
   const subscribe = React.useCallback((notify: () => void) => {
-    const unsubscribers = scopedStores.map(({ sessionIDs, store }) => (
-      subscribeDirectoryQuestions(store, sessionIDs, notify)
-    ))
+    const unsubscribers = scopedStores.flatMap(({ sessionIDs, store }) => [
+      subscribeDirectoryPermissions(store, sessionIDs, notify),
+      subscribeDirectoryQuestions(store, sessionIDs, notify),
+    ])
     return () => {
       for (const unsubscribe of unsubscribers) unsubscribe()
     }
