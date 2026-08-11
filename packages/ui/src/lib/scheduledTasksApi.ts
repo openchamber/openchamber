@@ -27,6 +27,7 @@ export type ScheduledTask = {
     goalEnabled?: boolean;
     goalTokenBudget?: number;
     permissionAutoAccept?: boolean;
+    archiveOnSuccess?: boolean;
   };
   state: {
     createdAt: number;
@@ -36,6 +37,12 @@ export type ScheduledTask = {
     lastError?: string;
     lastDurationMs?: number;
     lastSessionId?: string;
+    lastArchiveError?: string;
+    pendingArchives?: Array<{
+      sessionId: string;
+      directory: string;
+      goalEnabled: boolean;
+    }>;
     nextRunAt?: number;
   };
 };

@@ -36,6 +36,7 @@ describe('project-config runtime', () => {
           prompt: 'Summarize repository changes',
           providerID: 'openai',
           modelID: 'gpt-4.1',
+          archiveOnSuccess: true,
         },
       });
 
@@ -46,6 +47,83 @@ describe('project-config runtime', () => {
       expect(reloaded[0].name).toBe('Nightly digest');
       expect(reloaded[0].schedule.timezone).toBe('UTC');
       expect(reloaded[0].schedule.times).toEqual(['09:30']);
+      expect(reloaded[0].execution.archiveOnSuccess).toBe(true);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('persists and clears scheduled run archival warnings independently', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const created = await runtime.upsertScheduledTask('project-test', {
+        name: 'Nightly digest',
+        enabled: true,
+        schedule: { kind: 'daily', time: '09:30', timezone: 'UTC' },
+        execution: {
+          prompt: 'Summarize repository changes',
+          providerID: 'openai',
+          modelID: 'gpt-4.1',
+        },
+      });
+
+      await runtime.updateScheduledTaskState('project-test', created.task.id, {
+        lastStatus: 'success',
+        lastArchiveError: 'Failed to archive run session',
+        pendingArchives: [{ sessionId: 'ses_1', directory: '/repo', goalEnabled: false }],
+      });
+      let [task] = await runtime.listScheduledTasks('project-test');
+      expect(task.state.lastStatus).toBe('success');
+      expect(task.state.lastArchiveError).toBe('Failed to archive run session');
+      expect(task.state.pendingArchives).toEqual([
+        { sessionId: 'ses_1', directory: '/repo', goalEnabled: false },
+      ]);
+
+      await runtime.updateScheduledTaskState('project-test', created.task.id, {
+        lastArchiveError: undefined,
+        pendingArchives: [],
+      });
+      [task] = await runtime.listScheduledTasks('project-test');
+      expect(task.state.lastArchiveError).toBeUndefined();
+      expect(task.state.pendingArchives).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('preserves runtime state when an existing task is edited with a stale state snapshot', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const created = await runtime.upsertScheduledTask('project-test', {
+        name: 'Nightly digest',
+        enabled: true,
+        schedule: { kind: 'daily', time: '09:30', timezone: 'UTC' },
+        execution: {
+          prompt: 'Summarize repository changes',
+          providerID: 'openai',
+          modelID: 'gpt-4.1',
+          archiveOnSuccess: true,
+        },
+      });
+      const staleState = created.task.state;
+      await runtime.updateScheduledTaskState('project-test', created.task.id, {
+        lastStatus: 'success',
+        lastArchiveError: 'Failed to archive run session',
+        pendingArchives: [{ sessionId: 'ses_1', directory: '/repo', goalEnabled: false }],
+      });
+
+      await runtime.upsertScheduledTask('project-test', {
+        ...created.task,
+        name: 'Renamed digest',
+        state: staleState,
+      });
+
+      const [task] = await runtime.listScheduledTasks('project-test');
+      expect(task.name).toBe('Renamed digest');
+      expect(task.state.lastArchiveError).toBe('Failed to archive run session');
+      expect(task.state.pendingArchives).toEqual([
+        { sessionId: 'ses_1', directory: '/repo', goalEnabled: false },
+      ]);
     } finally {
       await cleanup();
     }
@@ -457,6 +535,7 @@ describe('project-config loop reconciliation', () => {
           goalEnabled: true,
           goalTokenBudget: 20000,
           permissionAutoAccept: true,
+          archiveOnSuccess: true,
         },
       });
 
@@ -467,6 +546,7 @@ describe('project-config loop reconciliation', () => {
       expect(task.execution.goalEnabled).toBe(true);
       expect(task.execution.goalTokenBudget).toBe(20000);
       expect(task.execution.permissionAutoAccept).toBe(true);
+      expect(task.execution.archiveOnSuccess).toBe(true);
     } finally {
       await cleanup();
     }

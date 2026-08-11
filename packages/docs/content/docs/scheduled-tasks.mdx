@@ -23,6 +23,8 @@ You can run any task immediately with **run now** to check it does what you expe
 
 Check **Run as goal** to make the run pursue its prompt to completion instead of stopping after one reply — see [Session Goals](/session-goals/).
 
+Enable **Archive successful runs** under **Lifecycle** when completed run sessions should leave Recents automatically. Normal runs archive after their session becomes idle; goal runs wait until the goal completes. Failed and blocked runs stay visible for diagnosis, and archived runs remain available from the task link and Archived view.
+
 ## Loops: scheduled tasks as markdown files
 
 A **loop** is a scheduled task defined as a portable markdown file you can commit to your repo. Drop a file into `.agents/loops/` and open the Scheduled Tasks list to sync it — no server restart needed:
@@ -68,6 +70,8 @@ If a project loop and a user loop share a name, the project loop wins.
 ## What success looks like
 
 After a run, the task shows when it last ran, whether it succeeded, and a link to the session it created. If a run fails, the error is shown there too.
+
+If automatic archival fails, the run keeps its successful status and the task shows a separate archival warning.
 
 ## Keep in mind
 
