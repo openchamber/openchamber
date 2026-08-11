@@ -1089,7 +1089,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': '선택 내용을 채팅에 추가',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': '사이드바 토글',
   'settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label': '컨텍스트 패널 표시 전환',
-  'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': 'Git 서피스 열기',
+  'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': '변경 사항 서피스 열기',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label': '파일 서피스 열기',
   'settings.openchamber.keyboardShortcuts.action.switch_context_surface.label': '컨텍스트 패널 서피스 전환',
   'settings.openchamber.keyboardShortcuts.action.switch_context_surface.suffix': ' + 1…0',

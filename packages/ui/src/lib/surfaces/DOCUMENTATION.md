@@ -50,5 +50,9 @@ the `openContext*` actions in `useUIStore`.
   positions). Singleton surfaces (git, pr, notes, plan, context) and preview
   tabs intentionally remount on switch and must restore themselves from
   their stores/snapshots instead.
+- Changes / Source Control is one rail surface (`id: 'git'`, label “Changes”).
+  File review uses an expanded `mode: 'diff'` keep-alive tab opened from the
+  change list or chat deep links — there is no separate Diff rail entry.
+  `isChangesContextMode` treats `git` and `diff` as the same rail selection.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
   mobile shell have their own layouts and do not consume this registry.

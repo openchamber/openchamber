@@ -1089,7 +1089,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label": "Додати виділення в чат",
   "settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label": "Перемкнути бічну панель",
   "settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label": 'Перемкнути контекстну панель',
-  "settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label": 'Відкрити поверхню Git',
+  "settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label": 'Відкрити поверхню Зміни',
   "settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label": 'Відкрити поверхню файлів',
   "settings.openchamber.keyboardShortcuts.action.switch_context_surface.label": "Перемкнути поверхню панелі контексту",
   "settings.openchamber.keyboardShortcuts.action.switch_context_surface.suffix": " + 1…0",

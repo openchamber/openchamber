@@ -307,6 +307,67 @@ interface FileListProps {
     onSelectFile: (path: string) => void;
 }
 
+const getFileBasename = (path: string): string => {
+    const normalized = path.replace(/\\/g, '/').trim();
+    if (!normalized) return path;
+    const parts = normalized.split('/');
+    return parts[parts.length - 1] || normalized;
+};
+
+/** Soft wrap: chips stay in a row and wrap only when the panel width requires it. */
+const HorizontalFileStrip = React.memo<FileListProps>(({
+    changedFiles,
+    selectedFile,
+    onSelectFile,
+}) => {
+    const { t } = useI18n();
+    if (changedFiles.length === 0) return null;
+
+    return (
+        <div
+            className="flex min-w-0 flex-wrap items-center gap-1 border-b border-border/40 px-3 py-1.5"
+            role="tablist"
+            aria-label={t('diffView.section.files')}
+        >
+            {changedFiles.map((file) => {
+                const descriptor = describeChange(file);
+                const isActive = selectedFile === file.path;
+                const basename = getFileBasename(file.path);
+
+                return (
+                    <button
+                        key={file.path}
+                        type="button"
+                        role="tab"
+                        aria-selected={isActive}
+                        onClick={() => onSelectFile(file.path)}
+                        title={file.path}
+                        className={cn(
+                            'inline-flex max-w-[14rem] shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors',
+                            isActive
+                                ? 'bg-interactive-selection text-interactive-selection-foreground'
+                                : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
+                        )}
+                    >
+                        <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0" />
+                        <span
+                            className="typography-micro font-semibold w-3.5 text-center uppercase"
+                            style={{ color: isActive ? undefined : descriptor.color }}
+                            aria-hidden="true"
+                        >
+                            {descriptor.code}
+                        </span>
+                        <span className="min-w-0 truncate typography-meta">
+                            {basename}
+                        </span>
+                        {formatDiffTotals(file.insertions, file.deletions, { shrink: true })}
+                    </button>
+                );
+            })}
+        </div>
+    );
+});
+
 const FileList = React.memo<FileListProps>(({
     changedFiles,
     selectedFile,
@@ -941,24 +1002,33 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
 
 interface DiffViewProps {
     hideStackedFileSidebar?: boolean;
+    /**
+     * Horizontal chip strip above a single focused diff (context-panel Changes
+     * review). Replaces the vertical Files sidebar + stacked accordion list.
+     */
+    horizontalFileStrip?: boolean;
     stackedDefaultCollapsedAll?: boolean;
     pinSelectedFileHeaderToTopOnNavigate?: boolean;
     showOpenInEditorAction?: boolean;
     diffScope?: DiffScope;
     onDiffScopeChange?: (scope: Extract<DiffScope, 'working' | 'staged' | 'turn'>) => void;
     targetFilePath?: string | null;
+    /** Called when the focused file changes via the strip or stacked list. */
+    onActiveFileChange?: (path: string) => void;
     /** Render diff content flush with the container edges (no outer padding). */
     flushContent?: boolean;
 }
 
 export const DiffView: React.FC<DiffViewProps> = ({
     hideStackedFileSidebar = false,
+    horizontalFileStrip = false,
     stackedDefaultCollapsedAll = false,
     pinSelectedFileHeaderToTopOnNavigate = false,
     showOpenInEditorAction = false,
     diffScope = 'all',
     onDiffScopeChange,
     targetFilePath = null,
+    onActiveFileChange,
     flushContent = false,
 }) => {
     const { t } = useI18n();
@@ -1013,7 +1083,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     // Same runtime and width rules as the rail surface: no point offering an
     // entry point to a surface that cannot open here.
     const showWalkthroughAction = activeDiffScope !== 'turn' && !isMobileLayout && !isVSCodeRuntime();
-    const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
+    const showFileSidebar = !horizontalFileStrip && !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
     const fileSectionRefs = React.useRef(new Map<string, HTMLDivElement | null>());
     const pendingScrollTargetRef = React.useRef<string | null>(null);
@@ -1366,6 +1436,25 @@ export const DiffView: React.FC<DiffViewProps> = ({
         }
     }, [changedFiles, displayFile]);
 
+    // Strip mode focuses one file: default to the target or the first change.
+    React.useEffect(() => {
+        if (!horizontalFileStrip || changedFiles.length === 0) {
+            return;
+        }
+        if (displayFile && changedFiles.some((file) => file.path === displayFile)) {
+            return;
+        }
+        const fallback = (targetFilePath?.trim() && changedFiles.some((file) => file.path === targetFilePath.trim())
+            ? targetFilePath.trim()
+            : changedFiles[0]?.path) ?? null;
+        if (!fallback) {
+            return;
+        }
+        setDisplayFile(fallback);
+        setDisplayFileStaged(activeDiffScope === 'staged');
+        expandStackedFile(fallback);
+    }, [activeDiffScope, changedFiles, displayFile, expandStackedFile, horizontalFileStrip, targetFilePath]);
+
     const registerSectionRef = React.useCallback((path: string, node: HTMLDivElement | null) => {
         const map = fileSectionRefs.current;
         if (node) {
@@ -1532,12 +1621,15 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
         setDisplayFile(value);
         setDisplayFileStaged(false);
+        onActiveFileChange?.(value);
         shouldPinAfterAlignRef.current = true;
         pendingScrollTargetRef.current = value;
         expandStackedFile(value);
         setScrollRequestNonce((nonce) => nonce + 1);
-        scrollToFile(value);
-    }, [cancelPendingScrollAlignment, expandStackedFile, scrollToFile]);
+        if (!horizontalFileStrip) {
+            scrollToFile(value);
+        }
+    }, [cancelPendingScrollAlignment, expandStackedFile, horizontalFileStrip, onActiveFileChange, scrollToFile]);
 
     const handleHeaderLayoutChange = React.useCallback((mode: DiffViewMode) => {
         const nextLayout: 'inline' | 'side-by-side' =
@@ -1624,57 +1716,75 @@ export const DiffView: React.FC<DiffViewProps> = ({
             return displayFileStaged && path === displayFile;
         };
 
+        const focusedPath = horizontalFileStrip
+            ? (displayFile && changedFiles.some((file) => file.path === displayFile)
+                ? displayFile
+                : changedFiles[0]?.path ?? null)
+            : null;
+        const filesToRender = focusedPath
+            ? changedFiles.filter((file) => file.path === focusedPath)
+            : changedFiles;
+
         return (
-            <div className={cn('flex min-w-0 flex-1 min-h-0 h-full', flushContent ? 'gap-0' : 'gap-3 px-3 pb-3 pt-2')}>
-                {showFileSidebar && (
-                    <section className="hidden lg:flex w-72 flex-col rounded-xl border border-border/60 bg-background/70 overflow-hidden">
-                        <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/40">
-                            <span className="typography-ui-header font-semibold text-foreground">{t('diffView.section.files')}</span>
-                            <span className="typography-meta text-muted-foreground">{changedFiles.length}</span>
-                        </div>
-                        <FileList
-                            changedFiles={changedFiles}
-                            selectedFile={null}
-                            onSelectFile={handleSelectFileAndScroll}
-                        />
-                    </section>
-                )}
-                <div className="relative flex-1 min-w-0 min-h-0 h-full">
-                    <ScrollableOverlay
-                        ref={diffScrollRef}
-                        outerClassName="min-h-0 h-full"
-                        className="[overflow-anchor:none] pb-16"
-                        disableHorizontal
-                        observeMutations={false}
-                        preventOverscroll
-                        data-diff-virtual-root
-                    >
-                        <div className="flex flex-col [overflow-anchor:none]" data-diff-virtual-content>
-                            {changedFiles.map((file) => (
-                                <MultiFileDiffEntry
-                                    key={`${file.path}:${fileDiffRefreshNonce.get(file.path) ?? 0}`}
-                                    directory={effectiveDirectory}
-                                    file={file}
-                                    layout={getLayoutForFile(file)}
-                                    wrapLines={diffWrapLines}
-                                    isSelected={false}
-                                    isExpanded={expandedFiles.has(file.path)}
-                                    isMounted={mountedStackedFiles.has(file.path) || file.path === pinnedStackedTarget}
-                                    onSelect={handleSelectFile}
-                                    onExpandedChange={handleStackedEntryExpandedChange}
-                                    registerSectionRef={registerSectionRef}
-                                    showOpenInEditorAction={showOpenInEditorAction && activeDiffScope !== 'turn'}
-                                    isOpeningInEditor={openingEditorFilePath === file.path}
-                                    onOpenInEditor={(filePath, diffData) => {
-                                        void openFileInEditorAtChange(filePath, diffData);
-                                    }}
-                                    staged={getFileStaged(file.path)}
-                                    loadFullFiles={loadFullFiles}
-                                    initialDiffData={activeDiffScope === 'turn' ? lastTurnDiffData.get(file.path) ?? null : null}
-                                />
-                            ))}
-                        </div>
-                    </ScrollableOverlay>
+            <div className="flex min-h-0 h-full min-w-0 flex-1 flex-col">
+                {horizontalFileStrip ? (
+                    <HorizontalFileStrip
+                        changedFiles={changedFiles}
+                        selectedFile={focusedPath}
+                        onSelectFile={handleSelectFileAndScroll}
+                    />
+                ) : null}
+                <div className={cn('flex min-h-0 min-w-0 flex-1', flushContent ? 'gap-0' : 'gap-3 px-3 pb-3 pt-2')}>
+                    {showFileSidebar && (
+                        <section className="hidden lg:flex w-72 flex-col rounded-xl border border-border/60 bg-background/70 overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/40">
+                                <span className="typography-ui-header font-semibold text-foreground">{t('diffView.section.files')}</span>
+                                <span className="typography-meta text-muted-foreground">{changedFiles.length}</span>
+                            </div>
+                            <FileList
+                                changedFiles={changedFiles}
+                                selectedFile={displayFile}
+                                onSelectFile={handleSelectFileAndScroll}
+                            />
+                        </section>
+                    )}
+                    <div className="relative flex-1 min-w-0 min-h-0 h-full">
+                        <ScrollableOverlay
+                            ref={diffScrollRef}
+                            outerClassName="min-h-0 h-full"
+                            className="[overflow-anchor:none] pb-16"
+                            disableHorizontal
+                            observeMutations={false}
+                            preventOverscroll
+                            data-diff-virtual-root
+                        >
+                            <div className="flex flex-col [overflow-anchor:none]" data-diff-virtual-content>
+                                {filesToRender.map((file) => (
+                                    <MultiFileDiffEntry
+                                        key={`${file.path}:${fileDiffRefreshNonce.get(file.path) ?? 0}`}
+                                        directory={effectiveDirectory}
+                                        file={file}
+                                        layout={getLayoutForFile(file)}
+                                        wrapLines={diffWrapLines}
+                                        isSelected={file.path === displayFile}
+                                        isExpanded={horizontalFileStrip ? true : expandedFiles.has(file.path)}
+                                        isMounted={horizontalFileStrip || mountedStackedFiles.has(file.path) || file.path === pinnedStackedTarget}
+                                        onSelect={handleSelectFile}
+                                        onExpandedChange={handleStackedEntryExpandedChange}
+                                        registerSectionRef={registerSectionRef}
+                                        showOpenInEditorAction={showOpenInEditorAction && activeDiffScope !== 'turn'}
+                                        isOpeningInEditor={openingEditorFilePath === file.path}
+                                        onOpenInEditor={(filePath, diffData) => {
+                                            void openFileInEditorAtChange(filePath, diffData);
+                                        }}
+                                        staged={getFileStaged(file.path)}
+                                        loadFullFiles={loadFullFiles}
+                                        initialDiffData={activeDiffScope === 'turn' ? lastTurnDiffData.get(file.path) ?? null : null}
+                                    />
+                                ))}
+                            </div>
+                        </ScrollableOverlay>
+                    </div>
                 </div>
             </div>
         );
@@ -1745,7 +1855,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         </div>
                     )
                 )}
-                {changedFiles.length > 0 && (
+                {changedFiles.length > 0 && !horizontalFileStrip && (
                     <Button
                         variant="ghost"
                         size="sm"
@@ -1765,6 +1875,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         </span>
                     </Button>
                 )}
+                {horizontalFileStrip ? <div className="ml-auto" /> : null}
                 {changedFiles.length > 0 && showReviewAction && (
                     <Button
                         variant="default"

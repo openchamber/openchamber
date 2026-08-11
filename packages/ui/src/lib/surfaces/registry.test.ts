@@ -46,6 +46,14 @@ describe('getVisibleContextRailSurfaces', () => {
     expect(getVisibleContextRailSurfaces({ ...baseOptions, tabs: [{ mode: preview.mode }] }).some((s) => s.id === 'preview')).toBe(true);
   });
 
+  test('exposes a single Changes rail surface for git+diff review', () => {
+    const surfaces = getVisibleContextRailSurfaces(baseOptions);
+    expect(surfaces.some((surface) => surface.id === 'git')).toBe(true);
+    expect(surfaces.some((surface) => surface.id === 'diff' as never)).toBe(false);
+    const git = CONTEXT_SURFACES.find((surface) => surface.id === 'git');
+    expect(git?.labelKey).toBe('contextPanel.mode.diff');
+  });
+
   test('respects the persisted user rail order', () => {
     const surfaces = getVisibleContextRailSurfaces({ ...baseOptions, railOrder: ['git', 'context'] });
     expect(surfaces.slice(0, 2).map((surface) => surface.id)).toEqual(['git', 'context']);

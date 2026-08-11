@@ -996,7 +996,7 @@
   'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': '將選取內容加入聊天',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': '切換側邊欄',
   'settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label': '切換上下文面板',
-  'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': '開啟 Git 介面',
+  'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': '開啟變更介面',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_files.label': '開啟檔案介面',
   'settings.openchamber.keyboardShortcuts.action.switch_context_surface.label': '切換上下文面板介面',
   'settings.openchamber.keyboardShortcuts.action.switch_context_surface.suffix': ' + 1…0',

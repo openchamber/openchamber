@@ -159,19 +159,56 @@ describe('useUIStore per-surface panel widths', () => {
 });
 
 describe('useUIStore contextRailOrder', () => {
-  test('setContextRailOrder drops empty and duplicate ids', () => {
-    useUIStore.getState().setContextRailOrder(['diff', 'diff', '', 'editor']);
-    expect(useUIStore.getState().contextRailOrder).toEqual(['diff', 'editor']);
-  });
-
   test('sortContextSurfaces applies persisted order and appends missing surfaces', () => {
-    const ordered = sortContextSurfaces(['browser', 'unknown-id', 'diff']);
+    const ordered = sortContextSurfaces(['browser', 'unknown-id', 'git']);
     const ids = ordered.map((surface) => surface.id);
 
-    expect(ids.slice(0, 2)).toEqual(['browser', 'diff']);
+    expect(ids.slice(0, 2)).toEqual(['browser', 'git']);
     // Assert against the registry itself so this test cannot go stale when a
     // surface is added or removed.
     expect(new Set(ids)).toEqual(new Set(CONTEXT_SURFACES.map((surface) => surface.id)));
     expect(ids).toHaveLength(CONTEXT_SURFACES.length);
+    expect(ids.includes('diff' as never)).toBe(false);
+  });
+
+  test('setContextRailOrder drops empty and duplicate ids', () => {
+    useUIStore.getState().setContextRailOrder(['git', 'git', '', 'editor']);
+    expect(useUIStore.getState().contextRailOrder).toEqual(['git', 'editor']);
+  });
+});
+
+describe('useUIStore openContextDiff combined Changes surface', () => {
+  const directory = '/repo';
+
+  test('opens the diff tab expanded for full-bleed file review', () => {
+    useUIStore.getState().openContextSurface(directory, 'git');
+    useUIStore.getState().openContextDiff(directory, 'src/a.ts', false);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.isOpen).toBe(true);
+    expect(state?.expanded).toBe(true);
+    expect(state?.activeTabId).toBe('diff');
+    const diffTab = state?.tabs.find((tab) => tab.mode === 'diff');
+    expect(diffTab?.targetPath).toBe('src/a.ts');
+    expect(diffTab?.diffScope).toBe('working');
+  });
+
+  test('returning to the Changes rail collapses review and activates git', () => {
+    useUIStore.getState().openContextDiff(directory, 'src/a.ts', true);
+    useUIStore.getState().openContextSurface(directory, 'git');
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.isOpen).toBe(true);
+    expect(state?.expanded).toBe(false);
+    const activeTab = state?.tabs.find((tab) => tab.id === state.activeTabId);
+    expect(activeTab?.mode).toBe('git');
+  });
+
+  test('setContextPanelExpanded is idempotent when already expanded', () => {
+    useUIStore.getState().openContextDiff(directory, 'src/a.ts');
+    useUIStore.getState().setContextPanelExpanded(directory, true);
+    expect(useUIStore.getState().contextPanelByDirectory[directory]?.expanded).toBe(true);
+    useUIStore.getState().setContextPanelExpanded(directory, false);
+    expect(useUIStore.getState().contextPanelByDirectory[directory]?.expanded).toBe(false);
   });
 });
