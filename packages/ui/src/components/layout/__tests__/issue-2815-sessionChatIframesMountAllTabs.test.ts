@@ -119,6 +119,15 @@ describe('issue #2815 active-only chat iframe source guard', () => {
     expect(block).toContain('src={activeChatSrc}');
     expect(block).not.toContain("'block' : 'hidden'");
   });
+
+  test('does not select a chat iframe when the context panel is closed', () => {
+    expect(contextPanelSource).toContain(
+      "const activeChatTabID = isOpen && activeTab?.mode === 'chat' ? activeTab.id : null;",
+    );
+    expect(contextPanelSource).toContain(
+      "const activeChatSessionID = isOpen && activeTab?.mode === 'chat'",
+    );
+  });
 });
 
 describe('issue #2815 persisted scenario', () => {
@@ -159,5 +168,16 @@ describe('issue #2815 persisted scenario', () => {
 
     expect(activeTab?.id).toBe(sessionChatTabs[6].id);
     expect(chatTabs.filter((tab) => tab.id === activeTab?.id)).toHaveLength(1);
+  });
+
+  test('selects no chat after the panel closes', () => {
+    useUIStore.getState().closeContextPanel(DIRECTORY);
+
+    const panel = useUIStore.getState().contextPanelByDirectory[DIRECTORY];
+    const chatTabs = panel.tabs.filter((tab) => tab.mode === 'chat');
+    const activeTabID = panel.isOpen ? panel.activeTabId : null;
+
+    expect(panel.isOpen).toBe(false);
+    expect(getActiveEmbeddedSessionChatTab(chatTabs, activeTabID)).toBeNull();
   });
 });

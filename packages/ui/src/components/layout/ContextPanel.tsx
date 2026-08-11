@@ -2488,8 +2488,8 @@ export const ContextPanel: React.FC = () => {
     () => tabs.filter((tab) => tab.mode === 'chat'),
     [tabs],
   );
-  const activeChatTabID = activeTab?.mode === 'chat' ? activeTab.id : null;
-  const activeChatSessionID = activeTab?.mode === 'chat' ? getSessionIDFromDedupeKey(activeTab.dedupeKey) : null;
+  const activeChatTabID = isOpen && activeTab?.mode === 'chat' ? activeTab.id : null;
+  const activeChatSessionID = isOpen && activeTab?.mode === 'chat' ? getSessionIDFromDedupeKey(activeTab.dedupeKey) : null;
   const activeChatTab = getActiveEmbeddedSessionChatTab(chatTabs, activeChatTabID);
 
   React.useEffect(() => {

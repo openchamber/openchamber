@@ -48,7 +48,8 @@ the `openContext*` actions in `useUIStore`.
   terminal) are keep-alive panes in `ContextPanel.tsx`. Switching these
   surfaces must not reset their state (open tabs, xterm session, scroll
   positions). Chat tab records stay open, but only the active chat iframe is
-  mounted. A selected chat restores its state from the session stores.
+  mounted while the panel is open. A selected chat restores its state from
+  the session stores. A closed panel mounts no chat iframe.
   Singleton surfaces (git, pr, notes, plan, context) and preview tabs remount
   on switch. These surfaces must restore their state from stores or snapshots.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
