@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 
+import { Icon } from '@/components/icon/Icon';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { useSwitcherItems } from '@/components/session/sidebar/hooks/useSwitcherItems';
@@ -59,14 +60,10 @@ const SwitcherRow: React.FC<{
         ) : null}
       </span>
       {/* Activity sits on the right, before the time — no reserved left gutter. */}
-      {isStreaming || showUnreadDot ? (
-        <span
-          className={cn(
-            'size-1.5 shrink-0 rounded-full',
-            isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-          )}
-          aria-hidden
-        />
+      {isStreaming ? (
+        <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
+      ) : showUnreadDot ? (
+        <span className="size-1.5 shrink-0 rounded-full bg-[var(--status-info)]" aria-hidden />
       ) : null}
       {/* The elapsed turn takes the time slot while it matters, then hands it
           back to the relative timestamp. */}

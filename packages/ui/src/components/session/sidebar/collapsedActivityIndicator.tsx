@@ -1,4 +1,5 @@
 import React from 'react';
+import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import type { CollapsedActivityState } from './collapsedActivityState';
 
@@ -14,13 +15,24 @@ export function CollapsedActivityIndicator({
   className?: string;
 }): React.ReactNode {
   const label = state === 'active' ? activeLabel : unreadLabel;
-  // Aggregate rows carry the dot only; the elapsed counter is per session and
-  // has no meaning for a collapsed group that may hold several running turns.
+  // A collapsed row spins while any session below it runs, matching the rows it
+  // hides. It carries no elapsed counter: that is per session, and the group may
+  // hold several running turns.
+  if (state === 'active') {
+    return (
+      <Icon
+        name="loader-4"
+        className={cn('h-3 w-3 shrink-0 animate-spin text-primary', className)}
+        aria-label={label}
+      />
+    );
+  }
+
   return (
     <span
       className={cn(
         'h-1.5 w-1.5 shrink-0 rounded-full',
-        state === 'active' ? 'bg-primary' : 'bg-[var(--status-info)]',
+        'bg-[var(--status-info)]',
         className,
       )}
       aria-label={label}
