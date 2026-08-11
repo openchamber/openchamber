@@ -1,3 +1,53 @@
+import type { Message, Part, ToolPart } from "@opencode-ai/sdk/v2/client"
+import type { QuestionInfo, QuestionRequest } from "@/types/question"
+
+type MessageRecord = {
+  info: Message
+  parts: Part[]
+}
+
+const RECOVERY_DELAYS_MS = [0, 500, 1500] as const
+const RUNNING_STATUSES = new Set(["running", "pending"])
+
+const isActiveQuestionTool = (part: Part): boolean => {
+  if (part.type !== "tool" || part.tool !== "question") return false
+  const status = (part as ToolPart).state.status
+  return status === "pending" || status === "running"
+}
+
+/**
+ * A persisted running question tool without a matching pending-request record
+ * is the cold-start recovery signal. Only inspect the current turn so an old,
+ * stale tool cannot trigger network work after the user has continued chatting.
+ */
+export function hasActiveQuestionToolInCurrentTurn(messages: readonly MessageRecord[]): boolean {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (!message) continue
+    if (message.info.role === "user") return false
+    if (message.parts.some(isActiveQuestionTool)) return true
+  }
+  return false
+}
+
+export async function recoverPendingQuestionWithRetry(
+  recover: () => Promise<boolean>,
+  options?: {
+    isCancelled?: () => boolean
+    sleep?: (delayMs: number) => Promise<void>
+  },
+): Promise<boolean> {
+  const isCancelled = options?.isCancelled ?? (() => false)
+  const sleep = options?.sleep ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)))
+
+  for (const delayMs of RECOVERY_DELAYS_MS) {
+    if (delayMs > 0) await sleep(delayMs)
+    if (isCancelled()) return false
+    if (await recover()) return true
+  }
+  return false
+}
+
 /**
  * Gap detection for "stuck" question prompts (issue #2448).
  *
@@ -7,20 +57,6 @@
  * blocked with no answerable form. Detecting those gaps lets the caller
  * re-run the authoritative `listPendingQuestions` resync so the real question
  * lands in the store and the normal QuestionCard renders.
- */
-import type { Message, Part } from "@opencode-ai/sdk/v2/client"
-import type { QuestionInfo, QuestionRequest } from "@/types/question"
-
-const RUNNING_STATUSES = new Set(["running", "pending"])
-
-/**
- * True when a running `question` tool part in the given message records has no
- * matching store question (its `question.asked` SSE event was lost). A part is
- * covered when the store has a question with the same tool `callID`; when the
- * part has no callID (or the store question carries no tool reference to
- * correlate), a part is still treated as covered as long as the session has any
- * store question — the real QuestionCard is already answerable and we must not
- * retrigger recovery.
  */
 export function hasPendingQuestionGap(
   messages: Array<{ info: Message; parts: Part[] }>,

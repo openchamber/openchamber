@@ -112,6 +112,37 @@ export const deleteScheduledTask = async (projectID: string, taskID: string): Pr
   return parsed.tasks as ScheduledTask[];
 };
 
+const getLoopFileEndpoint = (projectID: string, taskID: string): string => {
+  const safeProjectID = ensureProjectID(projectID);
+  const safeTaskID = ensureProjectID(taskID);
+  return `/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}/loop-file`;
+};
+
+export const setLoopScheduledTaskEnabled = async (projectID: string, taskID: string, enabled: boolean): Promise<void> => {
+  const response = await runtimeFetch(getLoopFileEndpoint(projectID, taskID), {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to update loop task'));
+  }
+};
+
+export const deleteScheduledTaskLoopFile = async (projectID: string, taskID: string): Promise<void> => {
+  const response = await runtimeFetch(getLoopFileEndpoint(projectID, taskID), {
+    method: 'DELETE',
+    headers: { accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to delete loop file'));
+  }
+};
+
+export const syncScheduledTaskLoops = async (projectID: string): Promise<void> => {
+  await fetchScheduledTasks(projectID);
+};
+
 export const runScheduledTaskNow = async (projectID: string, taskID: string): Promise<{ sessionId?: string }> => {
   const safeProjectID = ensureProjectID(projectID);
   const safeTaskID = ensureProjectID(taskID);

@@ -21,10 +21,12 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 - `packages/web/server/lib/scheduled-tasks/loops.js`
   - Discovery of `.agents/loops/*.md` (project scope, ancestors up to the worktree root) and `~/.agents/loops/*.md` (user scope)
   - Frontmatter parsing into scheduled-task definitions
-  - `syncProject` reconciles discovered loops with the persisted task list on every project sync (startup, task save/delete)
+  - `syncProject` reconciles discovered loops with the persisted task list on every project sync (startup, task list load, task save/delete)
 
 - `packages/web/server/lib/scheduled-tasks/routes.js`
   - Scheduled task CRUD endpoints
+  - Listing tasks reconciles loop files first, so opening the Scheduled Tasks UI discovers file additions, edits, and removals without a server restart
+  - Loop-file endpoints toggle `enabled` in frontmatter or delete the authoritative markdown file, then reconcile the project
   - Manual run endpoint
   - OpenChamber events SSE stream endpoint
 
@@ -93,14 +95,12 @@ project write lock on every `syncProject` when the project path is known:
 - **Malformed files** (missing `name`/`schedule`/`model`/body, invalid cron,
   unreadable) are reported to the scheduler as `definition: null` entries and
   warned about; they never block valid loops in the same or other scopes.
-- **UI edits** to a loop-sourced task are preserved in the config but the loop
-  file remains authoritative: the next reconciliation re-applies the file's
-  definition (including `enabled`). Use `enabled: false` in the file to
-  disable. Deleting a loop-sourced task through the API is rejected with a 400
-  while its loop file still exists on disk — the loop file is the removal
-  surface; once the file is gone, deleting the orphan task is allowed. The
-  scheduled-tasks UI marks loop tasks as file-managed and disables their
-  edit/enable/delete actions for the same reason; `run now` remains available.
+- **Loop-file mutations.** The loop file remains authoritative. The scheduled-
+  tasks UI opens it in the built-in file editor, updates its `enabled`
+  frontmatter through the loop-file endpoint, and deletes the file through the
+  loop-file endpoint after confirmation. Each mutation reconciles the project.
+  The general task deletion API still rejects loop-sourced tasks while their
+  file exists; once the file is gone, deleting an orphan task is allowed.
 
 ## Public exports (runtime.js)
 
@@ -119,6 +119,8 @@ project write lock on every `syncProject` when the project path is known:
   - `GET /api/projects/:projectId/scheduled-tasks`
   - `PUT /api/projects/:projectId/scheduled-tasks`
   - `DELETE /api/projects/:projectId/scheduled-tasks/:taskId`
+  - `PATCH /api/projects/:projectId/scheduled-tasks/:taskId/loop-file`
+  - `DELETE /api/projects/:projectId/scheduled-tasks/:taskId/loop-file`
   - `POST /api/projects/:projectId/scheduled-tasks/:taskId/run`
   - `GET /api/openchamber/scheduled-tasks/status`
   - `GET /api/openchamber/events`

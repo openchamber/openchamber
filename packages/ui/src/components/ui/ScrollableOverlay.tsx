@@ -18,6 +18,8 @@ type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   scrollShadowSize?: number;
   /** Suppress the top fade (e.g. when sticky headers sit at the top edge). */
   hideTopScrollShadow?: boolean;
+  /** Suppress the bottom fade while retaining scroll-state tracking. */
+  hideBottomScrollShadow?: boolean;
   userIntentOnly?: boolean;
   /** Forwarded to the inner element (e.g. textarea). */
   disabled?: boolean;
@@ -40,6 +42,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     useScrollShadow = false,
     scrollShadowSize,
     hideTopScrollShadow = false,
+    hideBottomScrollShadow = false,
     userIntentOnly = false,
     ...rest
   }, ref) => {
@@ -61,6 +64,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
             ref={containerRef as React.Ref<HTMLElement>}
             size={scrollShadowSize}
             hideTopShadow={hideTopScrollShadow}
+            hideBottomShadow={hideBottomScrollShadow}
             className={cn(
               "overlay-scrollbar-target overlay-scrollbar-container",
               preventOverscroll && "overscroll-none",
