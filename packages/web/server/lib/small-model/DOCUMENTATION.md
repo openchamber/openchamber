@@ -114,6 +114,14 @@ other runtime API.
 - `routes.js` — `GET /api/small-model` (resolution preview) and
   `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
   model?, directory? }` → `{ text, providerID, modelID, source }`).
+- `script-guard.js` — post-condition guard for generated text: `hasScriptMismatch(text, referenceText)`
+  reports whether the output uses a writing system absent from the source text it
+  was told to follow. Callers drop the output on a mismatch; the guard never
+  rewrites or regenerates. Script classes must be disjoint across the languages
+  being distinguished, so Kana and Han share one class (Han belongs to both
+  Japanese and Chinese) while Hangul stands alone — Japanese versus Chinese is
+  out of reach by design. Dependency-free on purpose: consumers that receive the
+  small-model service through injection still import this module directly.
 
 ## Registration
 
