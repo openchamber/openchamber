@@ -645,6 +645,9 @@ interface UIStore {
   sessionGoalDefaultBudgetEnabled: boolean;
   sessionGoalDefaultBudget: number;
   collapsibleThinkingBlocks: boolean;
+  /** When true, completed working turns before the latest one are collapsed
+   * into a single "Thinking" block once the session goes idle. */
+  sessionActivityCollapsed: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
@@ -821,6 +824,7 @@ interface UIStore {
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
+  setSessionActivityCollapsed: (value: boolean) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setShowOpenCodeRestartConfirm: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
@@ -985,6 +989,7 @@ export const useUIStore = create<UIStore>()(
         sessionGoalDefaultBudgetEnabled: false,
         sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
+        sessionActivityCollapsed: true,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
         showDeletionDialog: true,
@@ -1779,6 +1784,10 @@ export const useUIStore = create<UIStore>()(
           set({ activityRenderMode: value });
         },
 
+        setSessionActivityCollapsed: (value) => {
+          set({ sessionActivityCollapsed: value });
+        },
+
         setShowDeletionDialog: (value) => {
           set({ showDeletionDialog: value });
         },
@@ -2545,6 +2554,7 @@ export const useUIStore = create<UIStore>()(
           sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
           sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
+          sessionActivityCollapsed: state.sessionActivityCollapsed,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
           showDeletionDialog: state.showDeletionDialog,

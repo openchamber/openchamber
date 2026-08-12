@@ -5,6 +5,8 @@ import { elementScroll, useVirtualizer as useTanstackVirtualizer, type ReactVirt
 import ChatMessage from './ChatMessage';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
 import TurnItem from './components/TurnItem';
+import { SessionThinkingBlock } from './components/SessionThinkingBlock';
+import { hasCollapsibleActivity, projectSessionThinkingSummary, type SessionThinkingSummary } from './lib/sessionThinkingSummary';
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
@@ -476,6 +478,8 @@ interface TurnBlockProps {
     defaultActivityExpanded: boolean;
     turnUiStates: Map<string, TurnUiState>;
     onToggleTurnGroup: (turnId: string) => void;
+    sessionActivityCollapsed: boolean;
+    thinkingSummary: SessionThinkingSummary | null;
     chatRenderMode: 'sorted' | 'live';
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
@@ -496,6 +500,8 @@ const TurnBlock = React.memo(({
     defaultActivityExpanded,
     turnUiStates,
     onToggleTurnGroup,
+    sessionActivityCollapsed,
+    thinkingSummary,
     chatRenderMode,
     onMessageContentChange,
     getAnimationHandlers,
@@ -781,10 +787,17 @@ const TurnBlock = React.memo(({
         };
     }, [turn, visibleAssistantMessages]);
 
+    const activeThinkingSummary = thinkingSummary !== null ? thinkingSummary : null;
+    const hasThinkingSummary = activeThinkingSummary !== null && activeThinkingSummary.collapsedTurnCount > 0;
+    // Collapse only applies once the session is idle and the summary block is
+    // visible; while a later turn is still working the history stays expanded.
+    const collapseActivity = sessionActivityCollapsed && hasThinkingSummary && !isLastTurn && hasCollapsibleActivity(turn);
+
     return (
         <TurnItem
             turn={renderableTurn}
             stickyUserHeader={stickyUserHeader && !userMessageHidden}
+            hideAssistantContent={collapseActivity}
             renderMessage={renderMessage}
         />
     );
@@ -848,6 +861,8 @@ interface MessageListEntryProps {
     defaultActivityExpanded: boolean;
     turnUiStates: Map<string, TurnUiState>;
     onToggleTurnGroup: (turnId: string) => void;
+    sessionActivityCollapsed: boolean;
+    thinkingSummary: SessionThinkingSummary | null;
     chatRenderMode: 'sorted' | 'live';
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
@@ -878,6 +893,8 @@ const MessageListEntry = React.memo(({
     defaultActivityExpanded,
     turnUiStates,
     onToggleTurnGroup,
+    sessionActivityCollapsed,
+    thinkingSummary,
     chatRenderMode,
     shouldAnimateUserMessage,
     onUserAnimationConsumed,
@@ -913,6 +930,8 @@ const MessageListEntry = React.memo(({
             defaultActivityExpanded={defaultActivityExpanded}
             turnUiStates={turnUiStates}
             onToggleTurnGroup={onToggleTurnGroup}
+            sessionActivityCollapsed={sessionActivityCollapsed}
+            thinkingSummary={thinkingSummary}
             chatRenderMode={chatRenderMode}
             shouldAnimateUserMessage={shouldAnimateUserMessage}
             onUserAnimationConsumed={onUserAnimationConsumed}
@@ -944,13 +963,15 @@ type StaticHistoryListProps = {
     defaultActivityExpanded: boolean;
     turnUiStates: Map<string, TurnUiState>;
     onToggleTurnGroup: (turnId: string) => void;
+    sessionActivityCollapsed: boolean;
+    thinkingSummary: SessionThinkingSummary | null;
     chatRenderMode: 'sorted' | 'live';
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
 };
 
-const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, registerTanstackVirtualizer, virtualizerKey, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, reviewTransferDirection }: StaticHistoryListProps) => {
+const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, registerTanstackVirtualizer, virtualizerKey, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, sessionActivityCollapsed, thinkingSummary, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, reviewTransferDirection }: StaticHistoryListProps) => {
     const isTanstack = engine === 'tanstack';
 
     // --- Quiet-window prepend (mobile) --------------------------------------
@@ -1119,6 +1140,8 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
                 defaultActivityExpanded={defaultActivityExpanded}
                 turnUiStates={turnUiStates}
                 onToggleTurnGroup={onToggleTurnGroup}
+                sessionActivityCollapsed={sessionActivityCollapsed}
+                thinkingSummary={thinkingSummary}
                 chatRenderMode={chatRenderMode}
                 shouldAnimateUserMessage={shouldAnimateUserMessage}
                 onUserAnimationConsumed={onUserAnimationConsumed}
@@ -1127,7 +1150,7 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
                 reviewTransferDirection={reviewTransferDirection}
             />
         );
-    }, [chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, reviewTransferDirection, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
+    }, [chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, reviewTransferDirection, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates, sessionActivityCollapsed, thinkingSummary]);
 
     if (engine === 'none') {
         return (
@@ -1240,6 +1263,8 @@ const StreamingTailContent: React.FC<{
             defaultActivityExpanded={defaultActivityExpanded}
             turnUiStates={turnUiStates}
             onToggleTurnGroup={onToggleTurnGroup}
+            sessionActivityCollapsed={false}
+            thinkingSummary={null}
             chatRenderMode={chatRenderMode}
             shouldAnimateUserMessage={shouldAnimateUserMessage}
             onUserAnimationConsumed={onUserAnimationConsumed}
@@ -1271,6 +1296,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
     const showTurnChangedFiles = useUIStore((state) => state.showTurnChangedFiles);
+    const sessionActivityCollapsed = useUIStore((state) => state.sessionActivityCollapsed);
+    const setSessionActivityCollapsed = useUIStore((state) => state.setSessionActivityCollapsed);
     const defaultActivityExpanded = activityRenderMode === 'summary';
     const reviewTransferDirection = useGlobalSessionsStore((state) => {
         return state.reviewTransferBySessionId.get(sessionKey) ?? null;
@@ -1459,6 +1486,21 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     if (trailingStreamingEntry) {
         streamPerfCount('ui.message_list.render.streaming');
     }
+
+    // Completed working turns that precede the latest one, aggregated for the
+    // session-level "Thinking" block. The latest turn always renders as the
+    // streaming tail entry (even when idle), so it is excluded here; the block
+    // is only shown once the session is no longer working.
+    const thinkingSummary = React.useMemo<SessionThinkingSummary | null>(() => {
+        if (sessionIsWorking) {
+            return null;
+        }
+        const summary = projectSessionThinkingSummary(staticTurns);
+        return summary.collapsedTurnCount > 0 ? summary : null;
+    }, [sessionIsWorking, staticTurns]);
+    const onToggleSessionActivity = React.useCallback(() => {
+        setSessionActivityCollapsed(!useUIStore.getState().sessionActivityCollapsed);
+    }, [setSessionActivityCollapsed]);
 
     // Depend on the trailing entry's first message (stable while its assistant
     // streams), not the trailing entry itself, so streaming updates do not
@@ -1842,12 +1884,21 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 defaultActivityExpanded={defaultActivityExpanded}
                                 turnUiStates={turnUiStates}
                                 onToggleTurnGroup={toggleTurnGroup}
+                                sessionActivityCollapsed={sessionActivityCollapsed}
+                                thinkingSummary={thinkingSummary}
                                 chatRenderMode={chatRenderMode}
                                 shouldAnimateUserMessage={shouldAnimateUserMessage}
                                 onUserAnimationConsumed={onUserAnimationConsumed}
                                 reviewTransferDirection={reviewTransferDirection}
                             />
                         </FadeInDisabledProvider>
+                        {thinkingSummary ? (
+                            <SessionThinkingBlock
+                                summary={thinkingSummary}
+                                collapsed={sessionActivityCollapsed}
+                                onToggle={onToggleSessionActivity}
+                            />
+                        ) : null}
                         {trailingStreamingEntry ? (
                             <StreamingTailContent
                                 entry={trailingStreamingEntry}

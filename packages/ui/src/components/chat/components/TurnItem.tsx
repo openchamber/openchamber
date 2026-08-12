@@ -7,9 +7,12 @@ interface TurnItemProps {
     turn: Turn;
     stickyUserHeader?: boolean;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
+    /** When true, render only the turn's user message (assistant work is
+     * collapsed into the session-level Thinking block). */
+    hideAssistantContent?: boolean;
 }
 
-const TurnItem: React.FC<TurnItemProps> = ({ turn, stickyUserHeader = true, renderMessage }) => {
+const TurnItem: React.FC<TurnItemProps> = ({ turn, stickyUserHeader = true, renderMessage, hideAssistantContent = false }) => {
     return (
         <section
             className="relative w-full"
@@ -31,7 +34,9 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, stickyUserHeader = true, rend
                 renderMessage(turn.userMessage)
             )}
 
-            <TurnAssistantBlock assistantMessages={turn.assistantMessages} renderMessage={renderMessage} />
+            {hideAssistantContent ? null : (
+                <TurnAssistantBlock assistantMessages={turn.assistantMessages} renderMessage={renderMessage} />
+            )}
         </section>
     );
 };
