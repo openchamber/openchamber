@@ -15,6 +15,11 @@
 // from the source is a mismatch; the reverse is not, because a short note may
 // legitimately use fewer scripts than the text it summarizes.
 //
+// A missing or non-string reference is treated as empty text, so any tracked
+// script in the output counts as a mismatch. That fail-closed default is
+// deliberate: a caller that cannot say what language was asked for should not
+// get wrong-language text through.
+//
 // Keep this module dependency-free (no fs, settings, or network) so consumers
 // that inject the small-model service can still import it directly.
 

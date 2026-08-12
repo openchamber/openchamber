@@ -53,6 +53,9 @@ describe('hasScriptMismatch', () => {
     expect(hasScriptMismatch(EN, EN)).toBe(false);
   });
 
+  // Latin is not a tracked class at all, so this passes trivially — that is the
+  // point: cross-language Latin output (English versus German) is out of reach
+  // for a script check and must not be mistaken for a gap in the ranges.
   it('does not flag accented Latin output', () => {
     expect(hasScriptMismatch('Struktur des Repos erklärt', EN)).toBe(false);
   });

@@ -74,7 +74,7 @@ describe('session goal creation', () => {
   });
 
   it('drops a distilled objective written in another script', async () => {
-    // 6,400 chars — over the mocked 5,000-char limit, so distillation runs.
+    // 6,800 chars — over the mocked 5,000-char limit, so distillation runs.
     const longObjective = 'マイグレーションを完了し検証する。'.repeat(400);
     generateSmallModelTextMock.mockResolvedValueOnce({
       text: '저장소 구조를 정리하고 테스트를 통과시킨다',
