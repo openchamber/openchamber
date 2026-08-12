@@ -73,6 +73,10 @@ const getAgentsCacheKey = (directory: string | null): string => {
 
 const invalidateAgentsLoadCache = (directory: string | null = getConfigDirectory()) => {
   agentsLastLoadedAt.delete(getAgentsCacheKey(directory));
+  // A cache invalidation always precedes a fresh loadAgents() call from the
+  // caller; clear any stale error here so it doesn't linger across directory
+  // switches or bleed into a different project's empty state.
+  useAgentsStore.setState({ agentsLoadError: null });
 };
 
 const buildAgentsSignature = (agents: Agent[]): string => {
@@ -259,6 +263,9 @@ interface AgentsStore {
   selectedAgentName: string | null;
   agents: Agent[];
   isLoading: boolean;
+  // Set when loadAgents() exhausts its retries; cleared on the next successful
+  // load or when the config directory's load cache is invalidated.
+  agentsLoadError: string | null;
   agentDraft: AgentDraft | null;
 
   setSelectedAgent: (name: string | null) => void;
@@ -286,6 +293,7 @@ export const useAgentsStore = create<AgentsStore>()(
         selectedAgentName: null,
         agents: [],
         isLoading: false,
+        agentsLoadError: null,
         agentDraft: null,
 
         setSelectedAgent: (name: string | null) => {
@@ -372,9 +380,9 @@ export const useAgentsStore = create<AgentsStore>()(
 
                 const nextSignature = buildAgentsSignature(agentsWithScope);
                 if (previousSignature !== nextSignature) {
-                  set({ agents: agentsWithScope, isLoading: false });
+                  set({ agents: agentsWithScope, isLoading: false, agentsLoadError: null });
                 } else {
-                  set({ isLoading: false });
+                  set({ isLoading: false, agentsLoadError: null });
                 }
                 agentsLastLoadedAt.set(cacheKey, Date.now());
                 return true;
@@ -383,7 +391,10 @@ export const useAgentsStore = create<AgentsStore>()(
               }
             }
 
-            set({ isLoading: false });
+            set({
+              isLoading: false,
+              agentsLoadError: "Couldn't load agents — OpenCode backend unavailable",
+            });
             return false;
           })();
 
