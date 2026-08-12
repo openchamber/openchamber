@@ -3,6 +3,7 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.description': 'Połącz panel OpenCode Go, aby wyświetlać limity kroczące, tygodniowe i miesięczne.',
   'settings.providers.page.openCodeGo.workspaceId': 'ID przestrzeni roboczej',
   'settings.providers.page.openCodeGo.authCookie': 'Plik cookie uwierzytelniania',
+  'settings.providers.page.openCodeGo.apiKey': 'Klucz API',
   'settings.providers.page.openCodeGo.help': 'Skopiuj ID z adresu panelu i cookie auth z narzędzi deweloperskich przeglądarki. OpenChamber nigdy nie skanuje plików cookie przeglądarki.',
   'settings.providers.page.openCodeGo.save': 'Zapisz i sprawdź',
   'settings.providers.page.openCodeGo.replace': 'Zastąp',

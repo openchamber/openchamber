@@ -3,6 +3,7 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.description': 'Connect the OpenCode Go dashboard to show rolling, weekly, and monthly quota.',
   'settings.providers.page.openCodeGo.workspaceId': 'Workspace ID',
   'settings.providers.page.openCodeGo.authCookie': 'Auth cookie',
+  'settings.providers.page.openCodeGo.apiKey': 'API key',
   'settings.providers.page.openCodeGo.help': 'Copy the workspace ID from the dashboard URL and the auth cookie from your browser developer tools. OpenChamber never scans browser cookie storage.',
   'settings.providers.page.openCodeGo.save': 'Save and validate',
   'settings.providers.page.openCodeGo.replace': 'Replace',

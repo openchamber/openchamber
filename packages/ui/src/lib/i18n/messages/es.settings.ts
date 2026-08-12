@@ -3,6 +3,7 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.description': 'Conecta el panel de OpenCode Go para ver las cuotas móvil, semanal y mensual.',
   'settings.providers.page.openCodeGo.workspaceId': 'ID del espacio de trabajo',
   'settings.providers.page.openCodeGo.authCookie': 'Cookie de autenticación',
+  'settings.providers.page.openCodeGo.apiKey': 'Clave API',
   'settings.providers.page.openCodeGo.help': 'Copia el ID desde la URL del panel y la cookie auth desde las herramientas del navegador. OpenChamber nunca examina las cookies del navegador.',
   'settings.providers.page.openCodeGo.save': 'Guardar y validar',
   'settings.providers.page.openCodeGo.replace': 'Reemplazar',

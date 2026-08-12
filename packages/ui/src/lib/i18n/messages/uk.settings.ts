@@ -3,6 +3,7 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.description': 'Підключіть панель OpenCode Go, щоб бачити ковзну, тижневу та місячну квоту.',
   'settings.providers.page.openCodeGo.workspaceId': 'ID робочого простору',
   'settings.providers.page.openCodeGo.authCookie': 'Cookie авторизації',
+  'settings.providers.page.openCodeGo.apiKey': 'Ключ API',
   'settings.providers.page.openCodeGo.help': 'Скопіюйте ID робочого простору з URL панелі, а cookie auth з інструментів розробника браузера. OpenChamber ніколи не сканує сховище cookie браузера.',
   'settings.providers.page.openCodeGo.save': 'Зберегти й перевірити',
   'settings.providers.page.openCodeGo.replace': 'Замінити',

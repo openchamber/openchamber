@@ -3,6 +3,7 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.description': '连接 OpenCode Go 控制面板以显示滚动、每周和每月配额。',
   'settings.providers.page.openCodeGo.workspaceId': '工作区 ID',
   'settings.providers.page.openCodeGo.authCookie': '身份验证 Cookie',
+  'settings.providers.page.openCodeGo.apiKey': 'API 密钥',
   'settings.providers.page.openCodeGo.help': '从控制面板网址复制工作区 ID，并从浏览器开发者工具复制 auth Cookie。OpenChamber 绝不会扫描浏览器 Cookie 存储。',
   'settings.providers.page.openCodeGo.save': '保存并验证',
   'settings.providers.page.openCodeGo.replace': '替换',

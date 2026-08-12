@@ -215,6 +215,10 @@ The Subagents section opens itself when subagents appear where there were none,
 on that edge only: re-expanding on every count change would fight a user who
 just collapsed it.
 
+Its expanded list is capped at eight rows and scrolls independently, so a
+session with many subagents does not crowd every section below it out of the
+panel.
+
 ## Tasks
 
 Icons and strike-through match the composer's todo dropdown, so one list does

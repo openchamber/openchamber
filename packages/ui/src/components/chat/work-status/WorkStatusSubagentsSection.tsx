@@ -82,29 +82,31 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
       defaultExpanded
       summary={busyChildren > 0 ? `${busyChildren}/${children.length}` : children.length}
     >
-      {children.map((child) => {
-        const blocked = (permissions[child.id]?.length ?? 0) > 0;
-        const asked = (questions[child.id]?.length ?? 0) > 0;
-        const busy = statuses[child.id]?.type === 'busy';
-        const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
-        return (
-          <WorkStatusRow
-            key={child.id}
-            onClick={directory ? () => openChildSession(child.id, label) : undefined}
-            ariaLabel={t('chat.workStatus.action.openSubagent', { name: label })}
-            label={label}
-            value={blocked ? (
-              <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.needsPermission')}</WorkStatusValue>
-            ) : asked ? (
-              <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.askedQuestion')}</WorkStatusValue>
-            ) : busy ? (
-              <WorkStatusValue tone="info">{t('chat.workStatus.subagent.working')}</WorkStatusValue>
-            ) : (
-              <WorkStatusValue tone="muted">{t('chat.workStatus.subagent.done')}</WorkStatusValue>
-            )}
-          />
-        );
-      })}
+      <div className="max-h-56 overflow-y-auto">
+        {children.map((child) => {
+          const blocked = (permissions[child.id]?.length ?? 0) > 0;
+          const asked = (questions[child.id]?.length ?? 0) > 0;
+          const busy = statuses[child.id]?.type === 'busy';
+          const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
+          return (
+            <WorkStatusRow
+              key={child.id}
+              onClick={directory ? () => openChildSession(child.id, label) : undefined}
+              ariaLabel={t('chat.workStatus.action.openSubagent', { name: label })}
+              label={label}
+              value={blocked ? (
+                <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.needsPermission')}</WorkStatusValue>
+              ) : asked ? (
+                <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.askedQuestion')}</WorkStatusValue>
+              ) : busy ? (
+                <WorkStatusValue tone="info">{t('chat.workStatus.subagent.working')}</WorkStatusValue>
+              ) : (
+                <WorkStatusValue tone="muted">{t('chat.workStatus.subagent.done')}</WorkStatusValue>
+              )}
+            />
+          );
+        })}
+      </div>
     </WorkStatusCollapsibleSection>
   );
 };

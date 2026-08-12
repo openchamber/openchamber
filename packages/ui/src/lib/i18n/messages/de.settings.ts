@@ -3,6 +3,7 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.description': 'Verbinden Sie das OpenCode Go Dashboard, um rollierenden, wöchentlichen und monatlichen Verbrauch anzuzeigen.',
   'settings.providers.page.openCodeGo.workspaceId': 'Workspace-ID',
   'settings.providers.page.openCodeGo.authCookie': 'Auth-Cookie',
+  'settings.providers.page.openCodeGo.apiKey': 'API-Schlüssel',
   'settings.providers.page.openCodeGo.help': 'Kopieren Sie die Workspace-ID aus der Dashboard-URL und den Auth-Cookie aus den Browser-Entwicklertools. OpenChamber liest niemals den Browser-Cookie-Speicher aus.',
   'settings.providers.page.openCodeGo.save': 'Speichern und validieren',
   'settings.providers.page.openCodeGo.replace': 'Ersetzen',

@@ -331,12 +331,42 @@ describe('core-routes', () => {
     });
   });
 
-  it('advertises the caller-supplied serverUrl as the direct candidate over the request origin', async () => {
+  it('advertises the caller-supplied serverUrl first and keeps the request origin as a fallback candidate', async () => {
     const { app } = createPairingRouteApp();
 
     const response = await request(app)
       .post('/api/client-auth/pairing/sessions')
-      .set('Host', 'runtime.example')
+      .set('Host', 'chamber.example.com')
+      .set('X-Forwarded-Proto', 'https')
+      .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
+      .expect(201);
+
+    expect(response.body.server.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:2606', priority: 10 },
+      { type: 'tunnel', url: 'https://chamber.example.com', priority: 20 },
+    ]);
+  });
+
+  it('does not duplicate the request origin when it matches the caller-supplied serverUrl', async () => {
+    const { app } = createPairingRouteApp();
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', '192.168.1.20:2606')
+      .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
+      .expect(201);
+
+    expect(response.body.server.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:2606', priority: 10 },
+    ]);
+  });
+
+  it('skips a loopback request origin as the fallback candidate', async () => {
+    const { app } = createPairingRouteApp();
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', '127.0.0.1:2606')
       .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
       .expect(201);
 

@@ -819,6 +819,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         path: request.path,
         query: request.query,
         headers: request.headers,
+        hasBody: request.body !== null,
       };
       channel.send(encodeTunnelFrame(TunnelFrameType.HttpRequest, streamId, encodeJsonPayload(head)));
       void (async () => {
