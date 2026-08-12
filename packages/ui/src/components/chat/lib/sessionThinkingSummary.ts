@@ -43,15 +43,16 @@ export const projectSessionThinkingSummary = (turns: TurnRecord[]): SessionThink
 };
 
 /**
- * Compact duration like "42.0s" / "3m 24s" / "2h 15m", matching the
- * turn-duration display used elsewhere in the chat UI. Rounding is applied to
- * the total seconds first so boundary spans never emit "59m 60s".
+ * Compact duration like "42.4s" / "3m 24s" / "2h 15m", matching the
+ * turn-duration display used elsewhere in the chat UI. Boundary spans are
+ * rounded on the total first so they never emit "59m 60s" or "60.0s", while
+ * sub-minute spans keep one decimal of precision.
  */
 export const formatCompactDuration = (durationMs: number): string => {
     const totalSeconds = Math.max(0, durationMs) / 1000;
     const roundedSeconds = Math.round(totalSeconds);
     if (roundedSeconds < 60) {
-        return `${roundedSeconds.toFixed(1)}s`;
+        return `${totalSeconds.toFixed(1)}s`;
     }
     const hours = Math.floor(roundedSeconds / 3600);
     const minutes = Math.floor((roundedSeconds % 3600) / 60);

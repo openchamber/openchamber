@@ -94,6 +94,7 @@ describe('projectSessionThinkingSummary', () => {
 describe('formatCompactDuration', () => {
     test('formats sub-minute durations', () => {
         expect(formatCompactDuration(42_000)).toBe('42.0s');
+        expect(formatCompactDuration(42_400)).toBe('42.4s');
     });
 
     test('formats minute durations', () => {
