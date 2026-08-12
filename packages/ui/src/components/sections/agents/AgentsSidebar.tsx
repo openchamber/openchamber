@@ -114,6 +114,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   const {
     selectedAgentName,
     agents,
+    agentsLoadError,
     setSelectedAgent,
     setAgentDraft,
     createAgent,
@@ -122,6 +123,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   } = useAgentsStore(useShallow((s) => ({
     selectedAgentName: s.selectedAgentName,
     agents: s.agents,
+    agentsLoadError: s.agentsLoadError,
     setSelectedAgent: s.setSelectedAgent,
     setAgentDraft: s.setAgentDraft,
     createAgent: s.createAgent,
@@ -372,8 +374,20 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
         {visibleAgents.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
             <Icon name="robot-2" className="mx-auto mb-3 h-10 w-10 opacity-50" />
-            <p className="typography-ui-label font-medium">{t('settings.agents.sidebar.empty.title')}</p>
-            <p className="typography-meta mt-1 opacity-75">{t('settings.agents.sidebar.empty.description')}</p>
+            {agentsLoadError ? (
+              <>
+                <p className="typography-ui-label font-medium">{t('settings.agents.sidebar.error.title')}</p>
+                <p className="typography-meta mt-1 opacity-75">{t('settings.agents.sidebar.error.description')}</p>
+                <Button size="sm" variant="outline" className="mt-3" onClick={() => loadAgents()}>
+                  {t('settings.agents.sidebar.error.retry')}
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="typography-ui-label font-medium">{t('settings.agents.sidebar.empty.title')}</p>
+                <p className="typography-meta mt-1 opacity-75">{t('settings.agents.sidebar.empty.description')}</p>
+              </>
+            )}
           </div>
         ) : (
           <>

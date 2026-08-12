@@ -73,6 +73,10 @@ const getAgentsCacheKey = (directory: string | null): string => {
 
 const invalidateAgentsLoadCache = (directory: string | null = getConfigDirectory()) => {
   agentsLastLoadedAt.delete(getAgentsCacheKey(directory));
+  // loadAgents() also clears this at the start of every attempt; this is
+  // defense-in-depth for any invalidation path that doesn't immediately
+  // trigger a reload, so a stale error can't linger on screen either way.
+  useAgentsStore.setState({ agentsLoadError: false });
 };
 
 const buildAgentsSignature = (agents: Agent[]): string => {
@@ -259,6 +263,10 @@ interface AgentsStore {
   selectedAgentName: string | null;
   agents: Agent[];
   isLoading: boolean;
+  // True when loadAgents() exhausts its retries; cleared at the start of the
+  // next load attempt (fresh directory/retry) or on success. The localized
+  // message lives in i18n, not here -- this is a sentinel, not display copy.
+  agentsLoadError: boolean;
   agentDraft: AgentDraft | null;
 
   setSelectedAgent: (name: string | null) => void;
@@ -286,6 +294,7 @@ export const useAgentsStore = create<AgentsStore>()(
         selectedAgentName: null,
         agents: [],
         isLoading: false,
+        agentsLoadError: false,
         agentDraft: null,
 
         setSelectedAgent: (name: string | null) => {
@@ -313,7 +322,10 @@ export const useAgentsStore = create<AgentsStore>()(
           }
 
           const request = (async () => {
-            set({ isLoading: true });
+            // Clear a stale error from a previous directory/attempt as soon as a
+            // fresh load starts, so a failing project A's banner can't linger
+            // into project B's in-flight load.
+            set({ isLoading: true, agentsLoadError: false });
             const previousAgents = get().agents;
             const previousSignature = buildAgentsSignature(previousAgents);
 
@@ -383,7 +395,7 @@ export const useAgentsStore = create<AgentsStore>()(
               }
             }
 
-            set({ isLoading: false });
+            set({ isLoading: false, agentsLoadError: true });
             return false;
           })();
 
