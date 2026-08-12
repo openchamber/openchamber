@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   buildAuthSetRequest,
   buildProviderUpsertRequest,
@@ -12,6 +13,7 @@ import {
 } from './custom-provider-form';
 
 const t = (key: string) => key;
+const componentSource = readFileSync(new URL('./CustomProviderForm.tsx', import.meta.url), 'utf8');
 
 const baseForm = (overrides: Partial<CustomProviderFormState> = {}): CustomProviderFormState => ({
   providerID: 'custom-provider',
@@ -45,6 +47,12 @@ function mergeProviderConfig(
   }
   return next;
 }
+
+describe('CustomProviderForm protocol selector', () => {
+  test('renders the localized protocol label instead of the internal value', () => {
+    expect(componentSource).toContain('<SelectValue>{t(PROTOCOL_LABEL_KEYS[form.protocol])}</SelectValue>');
+  });
+});
 
 describe('validateCustomProvider', () => {
   test('builds trimmed config and auth payloads', () => {
