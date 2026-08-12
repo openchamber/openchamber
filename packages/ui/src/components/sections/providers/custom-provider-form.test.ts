@@ -49,8 +49,11 @@ function mergeProviderConfig(
 }
 
 describe('CustomProviderForm protocol selector', () => {
-  test('renders the localized protocol label instead of the internal value', () => {
-    expect(componentSource).toContain('<SelectValue>{t(PROTOCOL_LABEL_KEYS[form.protocol])}</SelectValue>');
+  test('renders a concise protocol label instead of the internal value', () => {
+    expect(componentSource).toContain('<SelectValue>{PROTOCOL_TRIGGER_LABELS[form.protocol]}</SelectValue>');
+    expect(componentSource).toContain("openaiChat: 'OpenAI Chat'");
+    expect(componentSource).toContain("openaiResponses: 'OpenAI Responses'");
+    expect(componentSource).toContain("anthropicMessages: 'Anthropic'");
   });
 });
 

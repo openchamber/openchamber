@@ -39,6 +39,11 @@ const PROTOCOL_LABEL_KEYS = {
   openaiResponses: 'settings.providers.page.custom.protocol.openaiResponses',
   anthropicMessages: 'settings.providers.page.custom.protocol.anthropicMessages',
 } as const;
+const PROTOCOL_TRIGGER_LABELS: Record<CustomProviderProtocol, string> = {
+  openaiChat: 'OpenAI Chat',
+  openaiResponses: 'OpenAI Responses',
+  anthropicMessages: 'Anthropic',
+};
 const CAPABILITY_LABEL_KEYS = {
   default: 'settings.providers.page.custom.models.capability.default',
   supported: 'settings.providers.page.custom.models.capability.supported',
@@ -216,7 +221,7 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
               className={SETTINGS_SELECT_TRIGGER_CLASS}
               aria-label={t('settings.providers.page.custom.protocol.label')}
             >
-              <SelectValue>{t(PROTOCOL_LABEL_KEYS[form.protocol])}</SelectValue>
+              <SelectValue>{PROTOCOL_TRIGGER_LABELS[form.protocol]}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {PROTOCOLS.map((protocol) => (

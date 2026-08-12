@@ -1303,6 +1303,7 @@ const AssistantMessageBody = React.memo(({
     const collapsedPreviewCount = 7;
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
     const hasStopFinish = messageFinish === 'stop';
+    const isCompletedAnswer = isMessageCompleted || hasStopFinish;
     const effectiveStreamPhase: StreamPhase = hasStopFinish ? 'completed' : streamPhase;
 
     const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
@@ -1716,7 +1717,7 @@ const AssistantMessageBody = React.memo(({
     const showErrorMessage = Boolean(errorMessage);
     const errorIconName = errorVariant === 'info' ? 'information' : 'error-warning';
     const shouldShowMessageActions = hasCopyableText;
-    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage));
+    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (isCompletedAnswer || Boolean(errorMessage));
     const shouldRenderActionsInActivity = isSortedRenderMode;
     const shouldShowStandaloneMessageActions = showSplitAssistantMessageActions && shouldShowMessageActions && !shouldShowTurnFooter && !shouldRenderActionsInActivity;
 
@@ -2158,7 +2159,7 @@ const AssistantMessageBody = React.memo(({
                 && !isReviewSessionView
                 && turnGroupingContext?.isLatestTurn === true
                 && isLastAssistantInTurn
-                && hasStopFinish
+                && isCompletedAnswer
                 && sessionId ? (
                 <Tooltip>
                     <TooltipTrigger asChild>
