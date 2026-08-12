@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Settings: the Agents list now explains when agents couldn't be loaded because the OpenCode backend was unreachable, with a Retry action, instead of silently showing an empty list.
 - Usage: quota limits enabled for display now refresh every three minutes on desktop, mobile, and VS Code, with a manual refresh action available at any time.
 
 ## [1.18.2] - 2026-08-10
