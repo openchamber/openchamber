@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Mobile/Android: launcher icon now supports Material You themed icons (thanks to @whisp2424).
+- Mobile/Android: launcher icon now supports Material You themed icons.
 - Usage: quota limits enabled for display now refresh every three minutes on desktop, mobile, and VS Code, with a manual refresh action available at any time.
 
 ## [1.18.2] - 2026-08-10
