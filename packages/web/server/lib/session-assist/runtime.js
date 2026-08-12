@@ -11,6 +11,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { hasScriptMismatch } from '../small-model/script-guard.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -273,19 +274,15 @@ export const createSessionAssistRuntime = ({
     let recap = targets.recap && typeof structured?.recap === 'string' ? structured.recap.trim().slice(0, RECAP_CHAR_LIMIT) : '';
     let suggestion = targets.suggestion && typeof structured?.suggestion === 'string' ? structured.suggestion.trim().slice(0, SUGGESTION_CHAR_LIMIT) : '';
 
-    // Hard guard against language hallucination: if the conversation contains
-    // no Cyrillic/CJK at all, the output must not either (and drop per-field,
-    // so one hallucinated field doesn't kill the other).
-    const hasCyrillic = (text) => /[\u0400-\u04FF]/.test(text);
-    const hasCjk = (text) => /[\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/.test(text);
+    // Hard guard against language hallucination (see
+    // small-model/script-guard.js). Per field, so one hallucinated field does
+    // not kill the other.
     const inputText = `${userText}\n${assistantText}`;
-    const scriptMismatch = (text) => (hasCyrillic(text) && !hasCyrillic(inputText))
-      || (hasCjk(text) && !hasCjk(inputText));
-    if (recap && scriptMismatch(recap)) {
+    if (recap && hasScriptMismatch(recap, inputText)) {
       console.warn('[session-assist] dropped recap: language mismatch with conversation');
       recap = '';
     }
-    if (suggestion && scriptMismatch(suggestion)) {
+    if (suggestion && hasScriptMismatch(suggestion, inputText)) {
       console.warn('[session-assist] dropped suggestion: language mismatch with conversation');
       suggestion = '';
     }
