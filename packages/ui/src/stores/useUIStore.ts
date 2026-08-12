@@ -639,6 +639,7 @@ interface UIStore {
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
+  showMessageSpeedMetrics: boolean;
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
   sessionGoalEnabled: boolean;
@@ -813,6 +814,7 @@ interface UIStore {
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
+  setShowMessageSpeedMetrics: (value: boolean) => void;
   setSessionRecapEnabled: (value: boolean) => void;
   setSessionSuggestionEnabled: (value: boolean) => void;
   setSessionGoalEnabled: (value: boolean) => void;
@@ -979,6 +981,7 @@ export const useUIStore = create<UIStore>()(
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
+        showMessageSpeedMetrics: false,
         sessionRecapEnabled: true,
         sessionSuggestionEnabled: true,
         sessionGoalEnabled: true,
@@ -1745,6 +1748,10 @@ export const useUIStore = create<UIStore>()(
 
         setShowReasoningTraces: (value) => {
           set({ showReasoningTraces: value });
+        },
+
+        setShowMessageSpeedMetrics: (value) => {
+          set({ showMessageSpeedMetrics: value });
         },
 
         setSessionRecapEnabled: (value) => {
@@ -2539,6 +2546,7 @@ export const useUIStore = create<UIStore>()(
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
+          showMessageSpeedMetrics: state.showMessageSpeedMetrics,
           sessionRecapEnabled: state.sessionRecapEnabled,
           sessionSuggestionEnabled: state.sessionSuggestionEnabled,
           sessionGoalEnabled: state.sessionGoalEnabled,

@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Chat: assistant messages can show time to first token, output throughput, and the uncached / cache / output token split. Turn the footer on in Settings → Chat → Message appearance. Time to first token is measured on the OpenCode server from message start to the first reasoning or text part; throughput uses the streaming window when part timestamps exist.
 - Remote access: pairing QR codes created while the app is open through a public domain (for example behind a reverse proxy) now include that domain as a connection address, so paired phones can reach the server over it instead of relying only on the local network address or the relay.
 - Usage: quota limits enabled for display now refresh every three minutes on desktop, mobile, and VS Code, with a manual refresh action available at any time.
 

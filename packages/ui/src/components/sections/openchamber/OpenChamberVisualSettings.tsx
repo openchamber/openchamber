@@ -278,7 +278,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar' | 'autoSaveEnabled';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'messageSpeedMetrics' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar' | 'autoSaveEnabled';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -303,6 +303,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const { browserTab } = usePwaDetection();
     const directoryShowHidden = useDirectoryShowHidden();
     const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
+    const showMessageSpeedMetrics = useUIStore(state => state.showMessageSpeedMetrics);
     const sessionRecapEnabled = useUIStore(state => state.sessionRecapEnabled);
     const sessionSuggestionEnabled = useUIStore(state => state.sessionSuggestionEnabled);
     const setSessionRecapEnabled = useUIStore(state => state.setSessionRecapEnabled);
@@ -314,6 +315,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const sessionGoalDefaultBudget = useUIStore(state => state.sessionGoalDefaultBudget);
     const setSessionGoalDefaultBudget = useUIStore(state => state.setSessionGoalDefaultBudget);
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
+    const setShowMessageSpeedMetrics = useUIStore(state => state.setShowMessageSpeedMetrics);
     const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
     const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
 
@@ -636,6 +638,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
     const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('expandedEditorToolbar') && !isVSCode);
     const hasBehaviorSettings = shouldShow('mermaidRendering')
+        || shouldShow('messageSpeedMetrics')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
@@ -680,6 +683,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('showTurnChangedFiles')
         || (!isMobile && shouldShow('inputSpellcheck'))
         || shouldShow('reasoning')
+        || shouldShow('messageSpeedMetrics')
         || shouldShow('expandedTools');
     // First behavior section under the page header should not draw a top border on Chat-only;
     // when Appearance (or earlier sections) already rendered, keep the default divider.
@@ -1879,12 +1883,22 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </SettingsSection>
                                 )}
 
-                                {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap')) && (
+                                {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap') || shouldShow('messageSpeedMetrics')) && (
                                 <SettingsSection
                                     title={t('settings.openchamber.visual.section.messageAppearance')}
                                     settingsItem="chat.message-appearance"
                                     contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                 >
+                                {shouldShow('messageSpeedMetrics') && (
+                                    <SettingsCheckboxRow
+                                        checked={showMessageSpeedMetrics}
+                                        onChange={setShowMessageSpeedMetrics}
+                                        label={t('settings.openchamber.visual.field.showMessageSpeedMetrics')}
+                                        ariaLabel={t('settings.openchamber.visual.field.showMessageSpeedMetricsAria')}
+                                        info={t('settings.openchamber.visual.field.showMessageSpeedMetricsInfo')}
+                                        settingsItem="chat.message-speed-metrics"
+                                    />
+                                )}
                                 {shouldShow('collapsibleUserMessages') && (
                                     <SettingsCheckboxRow
                                         checked={collapsibleUserMessages}
