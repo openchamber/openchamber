@@ -2966,7 +2966,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.mcp.failed': '失敗',
   'chat.workStatus.pinned.unavailable': '已釘選的訊息',
   'chat.workStatus.section.session': '工作階段',
-  'chat.workStatus.section.repository': '儲存庫',
+  'chat.workStatus.section.project': '專案',
   'chat.workStatus.section.subagents': '子代理',
   'chat.workStatus.section.mcp': 'MCP',
   'chat.workStatus.section.pinned': '已釘選的訊息',

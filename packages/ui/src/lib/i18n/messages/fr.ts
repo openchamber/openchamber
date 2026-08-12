@@ -2964,7 +2964,7 @@ export const dict = {
   'chat.workStatus.mcp.failed': 'Échec',
   'chat.workStatus.pinned.unavailable': 'Message épinglé',
   'chat.workStatus.section.session': 'Session',
-  'chat.workStatus.section.repository': 'Dépôt',
+  'chat.workStatus.section.project': 'Projet',
   'chat.workStatus.section.subagents': 'Sous-agents',
   'chat.workStatus.section.mcp': 'MCP',
   'chat.workStatus.section.pinned': 'Messages épinglés',

@@ -2983,7 +2983,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.mcp.failed': 'Niepowodzenie',
   'chat.workStatus.pinned.unavailable': 'Przypięta wiadomość',
   'chat.workStatus.section.session': 'Sesja',
-  'chat.workStatus.section.repository': 'Repozytorium',
+  'chat.workStatus.section.project': 'Projekt',
   'chat.workStatus.section.subagents': 'Subagenci',
   'chat.workStatus.section.mcp': 'MCP',
   'chat.workStatus.section.pinned': 'Przypięte wiadomości',

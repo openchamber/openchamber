@@ -2966,7 +2966,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.mcp.failed': '실패',
   'chat.workStatus.pinned.unavailable': '고정된 메시지',
   'chat.workStatus.section.session': '세션',
-  'chat.workStatus.section.repository': '저장소',
+  'chat.workStatus.section.project': '프로젝트',
   'chat.workStatus.section.subagents': '서브에이전트',
   'chat.workStatus.section.mcp': 'MCP',
   'chat.workStatus.section.pinned': '고정된 메시지',

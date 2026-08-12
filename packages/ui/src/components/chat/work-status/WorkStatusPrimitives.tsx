@@ -63,9 +63,11 @@ export const WorkStatusCollapsibleSection: React.FC<{
   iconColor?: string;
   /** Shown on the header while collapsed and expanded alike. */
   summary?: React.ReactNode;
+  /** An independent header action, such as refreshing this section's data. */
+  action?: React.ReactNode;
   defaultExpanded?: boolean;
   children: React.ReactNode;
-}> = ({ id, title, icon, iconNode, iconColor, summary, defaultExpanded = false, children }) => {
+}> = ({ id, title, icon, iconNode, iconColor, summary, action, defaultExpanded = false, children }) => {
   const stored = useUIStore(
     React.useCallback((state) => state.workStatusExpandedSections[id], [id]),
   );
@@ -73,35 +75,38 @@ export const WorkStatusCollapsibleSection: React.FC<{
   const expanded = stored ?? defaultExpanded;
   return (
     <section className={SECTION_CLASS}>
-      <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpandedInStore(id, !expanded)}
-        className={cn(
-          'group/section mb-0.5 flex h-6 items-center gap-1.5 rounded-md px-1 text-left',
-          // No hover fill anywhere in the panel: at this row density the blocks
-          // of colour read as selection, not as affordance. Interactivity shows
-          // through the text instead.
-          'transition-colors hover:text-foreground',
-        )}
-      >
-        {iconNode ?? (icon ? (
+      <div className="mb-0.5 flex h-6 items-center gap-1">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpandedInStore(id, !expanded)}
+          className={cn(
+            'group/section flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 text-left',
+            // No hover fill anywhere in the panel: at this row density the blocks
+            // of colour read as selection, not as affordance. Interactivity shows
+            // through the text instead.
+            'transition-colors hover:text-foreground',
+          )}
+        >
+          {iconNode ?? (icon ? (
+            <Icon
+              name={icon}
+              className={cn('size-4 shrink-0', !iconColor && 'text-muted-foreground')}
+              style={iconColor ? { color: iconColor } : undefined}
+            />
+          ) : null)}
+          <span className={cn(HEADING_CLASS, 'min-w-0 truncate')}>{title}</span>
           <Icon
-            name={icon}
-            className={cn('size-4 shrink-0', !iconColor && 'text-muted-foreground')}
-            style={iconColor ? { color: iconColor } : undefined}
+            name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
+            className="size-3.5 shrink-0 text-muted-foreground"
           />
-        ) : null)}
-        <span className={cn(HEADING_CLASS, 'min-w-0 truncate')}>{title}</span>
-        <Icon
-          name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
-          className="size-3.5 shrink-0 text-muted-foreground"
-        />
-        <span className="flex-1" />
-        {summary !== undefined && summary !== null ? (
-          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{summary}</span>
-        ) : null}
-      </button>
+          <span className="flex-1" />
+          {summary !== undefined && summary !== null ? (
+            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{summary}</span>
+          ) : null}
+        </button>
+        {action}
+      </div>
       {expanded ? children : null}
     </section>
   );
