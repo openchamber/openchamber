@@ -1,10 +1,18 @@
 /**
- * Custom / Other OpenAI-compatible provider form helpers.
+ * Custom / Other OpenAI and Anthropic provider form helpers.
  * Mirrors OpenCode web UI validation and request construction so a provider
  * can be defined from Settings without code changes.
  */
 
-export const CUSTOM_PROVIDER_NPM = '@ai-sdk/openai-compatible';
+export const CUSTOM_PROVIDER_PROTOCOLS = {
+  openaiChat: '@ai-sdk/openai-compatible',
+  openaiResponses: '@ai-sdk/openai',
+  anthropicMessages: '@ai-sdk/anthropic',
+} as const;
+export type CustomProviderProtocol = keyof typeof CUSTOM_PROVIDER_PROTOCOLS;
+export type CustomProviderNpm = typeof CUSTOM_PROVIDER_PROTOCOLS[CustomProviderProtocol];
+export const DEFAULT_CUSTOM_PROVIDER_PROTOCOL: CustomProviderProtocol = 'openaiChat';
+const CUSTOM_PROVIDER_NPMS = new Set<CustomProviderNpm>(Object.values(CUSTOM_PROVIDER_PROTOCOLS));
 export const CUSTOM_PROVIDER_ID = '__custom_provider__';
 export const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 export const BASE_URL_PATTERN = /^https?:\/\//;
@@ -42,6 +50,7 @@ export type HeaderRow = {
 export type CustomProviderFormState = {
   providerID: string;
   name: string;
+  protocol: CustomProviderProtocol;
   baseURL: string;
   apiKey: string;
   models: ModelRow[];
@@ -70,7 +79,7 @@ export type HeaderFieldErrors = {
 };
 
 export type CustomProviderConfig = {
-  npm: typeof CUSTOM_PROVIDER_NPM;
+  npm: CustomProviderNpm;
   name: string;
   env?: string[];
   options: {
@@ -127,6 +136,7 @@ export type ValidateCustomProviderResult = {
 export type ProviderLikeForCustomForm = {
   id: string;
   name?: string;
+  npm?: string;
   env?: string[];
   options?: Record<string, unknown> | null;
   models?: Array<Record<string, unknown> & { id?: string; name?: string }> | Record<string, unknown>;
@@ -161,6 +171,7 @@ export const createHeaderRow = (): HeaderRow => ({
 export const createEmptyCustomProviderForm = (): CustomProviderFormState => ({
   providerID: '',
   name: '',
+  protocol: DEFAULT_CUSTOM_PROVIDER_PROTOCOL,
   baseURL: '',
   apiKey: '',
   models: [createModelRow()],
@@ -180,12 +191,15 @@ export function parseEnvApiKey(apiKey: string): { env?: string; key?: string } {
   return { key: trimmed };
 }
 
-export function isCustomOpenAICompatibleProvider(provider: ProviderLikeForCustomForm): boolean {
-  const options = provider.options && typeof provider.options === 'object' ? provider.options : null;
-  const baseURL = typeof options?.baseURL === 'string' ? options.baseURL.trim() : '';
-  if (baseURL && BASE_URL_PATTERN.test(baseURL)) {
-    return true;
-  }
+const protocolForNpm = (npm: unknown): CustomProviderProtocol | undefined => {
+  if (typeof npm !== 'string' || !CUSTOM_PROVIDER_NPMS.has(npm as CustomProviderNpm)) return undefined;
+  return (Object.entries(CUSTOM_PROVIDER_PROTOCOLS) as Array<[CustomProviderProtocol, CustomProviderNpm]>)
+    .find(([, candidate]) => candidate === npm)?.[0];
+};
+
+const getProviderProtocol = (provider: ProviderLikeForCustomForm): CustomProviderProtocol | undefined => {
+  const direct = protocolForNpm(provider.npm);
+  if (direct) return direct;
 
   const models = Array.isArray(provider.models)
     ? provider.models
@@ -193,15 +207,36 @@ export function isCustomOpenAICompatibleProvider(provider: ProviderLikeForCustom
       ? Object.values(provider.models)
       : []);
 
-  return models.some((model) => {
-    if (!model || typeof model !== 'object') {
-      return false;
-    }
+  for (const model of models) {
+    if (!model || typeof model !== 'object') continue;
     const api = 'api' in model && model.api && typeof model.api === 'object'
       ? model.api as { npm?: unknown }
       : null;
-    return typeof api?.npm === 'string' && api.npm === CUSTOM_PROVIDER_NPM;
-  });
+    const protocol = protocolForNpm(api?.npm);
+    if (protocol) return protocol;
+  }
+  return undefined;
+};
+
+export function isSupportedCustomProvider(provider: ProviderLikeForCustomForm): boolean {
+  const options = provider.options && typeof provider.options === 'object' ? provider.options : null;
+  const baseURL = typeof options?.baseURL === 'string' ? options.baseURL.trim() : '';
+  if (!baseURL || !BASE_URL_PATTERN.test(baseURL)) return false;
+
+  const protocol = getProviderProtocol(provider);
+  if (protocol) return true;
+
+  const hasExplicitUnsupportedNpm = typeof provider.npm === 'string'
+    || (Array.isArray(provider.models) ? provider.models : Object.values(provider.models ?? {})).some((model) => {
+      if (!model || typeof model !== 'object' || !('api' in model)) return false;
+      const api = model.api;
+      return Boolean(api && typeof api === 'object' && typeof (api as { npm?: unknown }).npm === 'string');
+    });
+  if (hasExplicitUnsupportedNpm) return false;
+
+  // Legacy custom provider payloads may omit npm metadata. They default to
+  // OpenAI-compatible Chat Completions when a valid base URL is present.
+  return true;
 }
 
 export type ProviderConfigSourcesLike = {
@@ -227,7 +262,7 @@ export function isConfigDefinedCustomProvider(
   const inConfigLayer = Boolean(
     sources.user?.exists || sources.project?.exists || sources.custom?.exists,
   );
-  return inConfigLayer && isCustomOpenAICompatibleProvider(provider);
+  return inConfigLayer && isSupportedCustomProvider(provider);
 }
 
 /**
@@ -285,6 +320,7 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
   return {
     providerID: provider.id,
     name: typeof provider.name === 'string' && provider.name.trim() ? provider.name : provider.id,
+    protocol: getProviderProtocol(provider) ?? DEFAULT_CUSTOM_PROVIDER_PROTOCOL,
     baseURL,
     apiKey: envName ? `{env:${envName}}` : '',
     models,
@@ -508,7 +544,9 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
         level,
         model.variantOptions && Object.prototype.hasOwnProperty.call(model.variantOptions, level)
           ? model.variantOptions[level]
-          : { reasoningEffort: level },
+          : input.form.protocol === 'anthropicMessages'
+            ? { effort: level }
+            : { reasoningEffort: level },
       ]),
     );
 
@@ -589,7 +627,7 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       name,
       apiKey: key,
       config: {
-        npm: CUSTOM_PROVIDER_NPM,
+        npm: CUSTOM_PROVIDER_PROTOCOLS[input.form.protocol],
         name,
         ...(env ? { env: [env] } : {}),
         options: {

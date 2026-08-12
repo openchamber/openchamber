@@ -62,7 +62,7 @@ The webview CSP permits `blob:` only for `worker-src` so shared UI parsers can r
   - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`).
   - Includes Zen utility model parity handler used by shared notification settings (`/api/zen/models`).
   - Owns managed OpenCode upgrade status and mutation handlers, including capability reporting, upgrade serialization, and process restart after a successful upgrade.
-  - Provider handlers cover source lookup, disconnect (`DELETE /api/provider/:id/auth`), and custom provider upsert (`PUT /api/provider`; create/update OpenAI-compatible config with explicit `scope` for user/project/custom layers; requires `env` or stored auth; secrets via OpenCode auth API).
+  - Provider handlers cover source lookup, disconnect (`DELETE /api/provider/:id/auth`), and custom provider upsert (`PUT /api/provider`; create/update OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages config with explicit `scope` for user/project/custom layers; requires `env` or stored auth; secrets via OpenCode auth API).
   - Custom provider model persistence supports the same allowlisted metadata as the web runtime: `reasoning`, `attachment`, `tool_call`, `modalities.input/output`, `limit.context/input/output`, and recursively JSON-serializable `variants`. Unknown/invalid model values and unsafe variant IDs or nested keys (`__proto__`, `constructor`, `prototype`) are dropped before writing. Keep this contract equivalent to `packages/web/server/lib/opencode/providers.js`.
 
 - `opencode-upgrade-runtime.ts`

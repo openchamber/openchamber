@@ -17,10 +17,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import {
+  CUSTOM_PROVIDER_PROTOCOLS,
   createEmptyCustomProviderForm,
   createHeaderRow,
   createModelRow,
   validateCustomProvider,
+  type CustomProviderProtocol,
   type CustomProviderFormState,
   type CustomProviderPersistPlan,
   type CustomProviderTranslator,
@@ -31,6 +33,12 @@ import {
 } from './custom-provider-form';
 
 const CAPABILITY_SETTINGS: CapabilitySetting[] = ['default', 'supported', 'unsupported'];
+const PROTOCOLS = Object.keys(CUSTOM_PROVIDER_PROTOCOLS) as CustomProviderProtocol[];
+const PROTOCOL_LABEL_KEYS = {
+  openaiChat: 'settings.providers.page.custom.protocol.openaiChat',
+  openaiResponses: 'settings.providers.page.custom.protocol.openaiResponses',
+  anthropicMessages: 'settings.providers.page.custom.protocol.anthropicMessages',
+} as const;
 const CAPABILITY_LABEL_KEYS = {
   default: 'settings.providers.page.custom.models.capability.default',
   supported: 'settings.providers.page.custom.models.capability.supported',
@@ -192,6 +200,32 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
             aria-label={t('settings.providers.page.custom.field.name.label')}
           />
           {err.name ? <p className="mt-1 typography-meta text-[var(--status-error)]">{err.name}</p> : null}
+        </SettingsStackedField>
+
+        <SettingsStackedField
+          label={t('settings.providers.page.custom.protocol.label')}
+          info={t('settings.providers.page.custom.protocol.info')}
+        >
+          <Select
+            value={form.protocol}
+            onValueChange={(value) => setForm((prev) => ({ ...prev, protocol: value as CustomProviderProtocol }))}
+            disabled={busy}
+          >
+            <SelectTrigger
+              size={SETTINGS_SELECT_SIZE}
+              className={SETTINGS_SELECT_TRIGGER_CLASS}
+              aria-label={t('settings.providers.page.custom.protocol.label')}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PROTOCOLS.map((protocol) => (
+                <SelectItem key={protocol} value={protocol}>
+                  {t(PROTOCOL_LABEL_KEYS[protocol])}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </SettingsStackedField>
 
         <SettingsStackedField

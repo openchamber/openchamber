@@ -71,6 +71,30 @@ describe('custom provider config persistence', () => {
     }).ok).toBe(true);
   });
 
+  test('accepts supported protocol adapters and rejects arbitrary npm packages', () => {
+    for (const npm of ['@ai-sdk/openai-compatible', '@ai-sdk/openai', '@ai-sdk/anthropic']) {
+      const result = validateCustomProviderConfig('ok', {
+        name: 'X',
+        npm,
+        env: ['MY_KEY'],
+        options: { baseURL: 'https://api.example.com/v1' },
+        models: { m: { name: 'M' } },
+      });
+      expect(result.ok).toBe(true);
+      expect(result.value.config.npm).toBe(npm);
+    }
+
+    const unsupported = validateCustomProviderConfig('ok', {
+      name: 'X',
+      npm: 'untrusted-provider-package',
+      env: ['MY_KEY'],
+      options: { baseURL: 'https://api.example.com/v1' },
+      models: { m: { name: 'M' } },
+    });
+    expect(unsupported.ok).toBe(false);
+    expect(unsupported.error).toContain('not supported');
+  });
+
   test('upsertProviderConfig writes and round-trips project config', () => {
     const result = upsertProviderConfig('campus-llm', {
       name: 'Campus LLM',
@@ -106,6 +130,23 @@ describe('custom provider config persistence', () => {
     const sources = getProviderSources('campus-llm', projectDir);
     expect(sources.sources.project.exists).toBe(true);
     expect(sources.sources.project.path).toBe(result.path);
+  });
+
+  test('round-trips non-default protocol adapters through project config', () => {
+    for (const [providerId, npm] of [
+      ['responses-provider', '@ai-sdk/openai'],
+      ['anthropic-provider', '@ai-sdk/anthropic'],
+    ]) {
+      const result = upsertProviderConfig(providerId, {
+        name: providerId,
+        npm,
+        env: ['PROVIDER_KEY'],
+        options: { baseURL: 'https://api.example.com/v1' },
+        models: { model: { name: 'Model' } },
+      }, projectDir, 'project');
+      expect(result.config.npm).toBe(npm);
+      expect(readJson(result.path).provider[providerId].npm).toBe(npm);
+    }
   });
 
   test('round-trips supported advanced model metadata', () => {

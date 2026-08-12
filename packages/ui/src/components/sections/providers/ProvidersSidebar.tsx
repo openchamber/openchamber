@@ -11,6 +11,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
+import { isConfigDefinedCustomProvider } from './custom-provider-form';
 
 const ADD_PROVIDER_ID = '__add_provider__';
 
@@ -102,12 +103,17 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
   const bgClass = 'bg-background';
 
   const projectProviders = React.useMemo(() => {
-    return providers.filter((p) => Boolean(sourcesByProvider[p.id]?.project?.exists));
+    return providers.filter((p) => !isConfigDefinedCustomProvider(p, sourcesByProvider[p.id]) && Boolean(sourcesByProvider[p.id]?.project?.exists));
   }, [providers, sourcesByProvider]);
 
   const userProviders = React.useMemo(() => {
-    return providers.filter((p) => !sourcesByProvider[p.id]?.project?.exists);
+    return providers.filter((p) => !isConfigDefinedCustomProvider(p, sourcesByProvider[p.id]) && !sourcesByProvider[p.id]?.project?.exists);
   }, [providers, sourcesByProvider]);
+
+  const customProviders = React.useMemo(
+    () => providers.filter((provider) => isConfigDefinedCustomProvider(provider, sourcesByProvider[provider.id])),
+    [providers, sourcesByProvider],
+  );
 
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
@@ -165,6 +171,28 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
                   {t('settings.providers.sidebar.section.projectProviders')}
                 </div>
                 {projectProviders.map((provider) => (
+                  <ProviderListItem
+                    key={provider.id}
+                    provider={provider}
+                    selectedProviderId={selectedProviderId}
+                    onSelect={() => {
+                      setSelectedProvider(provider.id);
+                      onItemSelect?.();
+                    }}
+                  />
+                ))}
+              </>
+            )}
+
+            {customProviders.length > 0 && (
+              <>
+                <div className={cn(
+                  'px-2 pb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground',
+                  userProviders.length > 0 || projectProviders.length > 0 ? 'pt-3' : 'pt-2',
+                )}>
+                  {t('settings.providers.sidebar.section.customProviders')}
+                </div>
+                {customProviders.map((provider) => (
                   <ProviderListItem
                     key={provider.id}
                     provider={provider}

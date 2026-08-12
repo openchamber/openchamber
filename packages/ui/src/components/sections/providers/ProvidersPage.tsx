@@ -12,6 +12,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from '@/components/ui';
@@ -539,119 +540,111 @@ export const ProvidersPage: React.FC = () => {
           divider={false}
           settingsItem="providers.connect"
         >
-              <div className="flex flex-wrap items-center gap-2 py-1.5">
-                <span className="typography-ui-label text-foreground">{t('settings.providers.page.connect.providerField')}</span>
-                  {availableLoading ? (
-                    <p className="typography-meta text-muted-foreground">{t('settings.providers.page.state.loading')}</p>
-                  ) : availableError ? (
-                    <p className="typography-meta text-muted-foreground">{availableError}</p>
-                  ) : (
-                    <DropdownMenu open={providerDropdownOpen} onOpenChange={(open) => {
-                      setProviderDropdownOpen(open);
-                      if (!open) setProviderSearchQuery('');
-                    }}>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          className={SETTINGS_CUSTOM_TRIGGER_CLASS}
-                        >
-                          <span className="flex items-center gap-2 min-w-0">
-                            {candidateProviderId && candidateProviderId !== CUSTOM_PROVIDER_ID ? (
-                              <ProviderLogo providerId={candidateProviderId} className="h-3.5 w-3.5 flex-shrink-0" />
-                            ) : null}
-                            <span className={cn("truncate typography-ui-label font-normal", candidateProviderId ? "text-foreground" : "text-muted-foreground")}>
-                              {candidateProviderId === CUSTOM_PROVIDER_ID
-                                ? t('settings.providers.page.custom.optionLabel')
-                                : candidateProviderId
-                                  ? (unconnectedProviders.find(p => p.id === candidateProviderId)?.name || candidateProviderId)
-                                  : t('settings.providers.page.connect.selectProviderPlaceholder')}
-                            </span>
-                          </span>
-                          <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="start"
-                        className="w-[280px] p-0"
-                        onCloseAutoFocus={(e) => e.preventDefault()}
-                      >
-                        <div
-                          className="flex items-center gap-2 border-b border-[var(--surface-subtle)] px-3 py-2"
-                          onKeyDown={(e) => e.stopPropagation()}
-                        >
-                          <Icon name="search" className="h-4 w-4 text-muted-foreground" />
-                          <input
-                            type="text"
-                            value={providerSearchQuery}
-                            onChange={(e) => setProviderSearchQuery(e.target.value)}
-                            onKeyDown={(e) => e.stopPropagation()}
-                            placeholder={t('settings.providers.page.connect.searchProvidersPlaceholder')}
-                            className="flex-1 bg-transparent typography-meta outline-none placeholder:text-muted-foreground"
-                            autoFocus
-                          />
-                        </div>
-                        <ScrollableOverlay outerClassName="max-h-[240px]" className="p-1">
-                          {(() => {
-                            const query = providerSearchQuery.toLowerCase();
-                            const customLabel = t('settings.providers.page.custom.optionLabel');
-                            const customMatches = !query
-                              || customLabel.toLowerCase().includes(query)
-                              || 'other'.includes(query)
-                              || 'custom'.includes(query);
-                            const filtered = unconnectedProviders.filter(p => {
-                              return (p.name || p.id).toLowerCase().includes(query) || p.id.toLowerCase().includes(query);
-                            });
-                            if (filtered.length === 0 && !customMatches) {
-                              return <p className="py-4 text-center typography-meta text-muted-foreground">{t('settings.providers.page.connect.noProvidersFound')}</p>;
-                            }
-                            return (
-                              <>
-                                {filtered.map((provider) => (
-                                  <DropdownMenuItem
-                                    key={provider.id}
-                                    onSelect={() => {
-                                      setCandidateProviderId(provider.id);
-                                      setProviderDropdownOpen(false);
-                                      setProviderSearchQuery('');
-                                    }}
-                                    className="flex items-center justify-between"
-                                  >
-                                    <span className="flex items-center gap-2 min-w-0">
-                                      <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />
-                                      <span className="truncate">{provider.name || provider.id}</span>
-                                    </span>
-                                    {candidateProviderId === provider.id && (
-                                      <Icon name="check" className="h-4 w-4 text-[var(--primary-base)]" />
-                                    )}
-                                  </DropdownMenuItem>
-                                ))}
-                                {customMatches ? (
-                                  <DropdownMenuItem
-                                    key={CUSTOM_PROVIDER_ID}
-                                    onSelect={() => {
-                                      setCandidateProviderId(CUSTOM_PROVIDER_ID);
-                                      setProviderDropdownOpen(false);
-                                      setProviderSearchQuery('');
-                                    }}
-                                    className="flex items-center justify-between"
-                                  >
-                                    <span className="flex items-center gap-2 min-w-0">
-                                      <Icon name="add" className="h-4 w-4 flex-shrink-0" />
-                                      <span className="truncate">{customLabel}</span>
-                                    </span>
-                                    {candidateProviderId === CUSTOM_PROVIDER_ID && (
-                                      <Icon name="check" className="h-4 w-4 text-[var(--primary-base)]" />
-                                    )}
-                                  </DropdownMenuItem>
-                                ) : null}
-                              </>
-                            );
-                          })()}
-                        </ScrollableOverlay>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                   )}
-              </div>
+          <div className="flex flex-wrap items-center gap-2 py-1.5">
+            <span className="typography-ui-label text-foreground">{t('settings.providers.page.connect.providerField')}</span>
+            {availableLoading ? (
+              <p className="typography-meta text-muted-foreground">{t('settings.providers.page.state.loading')}</p>
+            ) : availableError ? (
+              <p className="typography-meta text-muted-foreground">{availableError}</p>
+            ) : (
+              <DropdownMenu open={providerDropdownOpen} onOpenChange={(open) => {
+                setProviderDropdownOpen(open);
+                if (!open) setProviderSearchQuery('');
+              }}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      {candidateProviderId && candidateProviderId !== CUSTOM_PROVIDER_ID ? (
+                        <ProviderLogo providerId={candidateProviderId} className="h-3.5 w-3.5 flex-shrink-0" />
+                      ) : null}
+                      <span className={cn(
+                        'truncate typography-ui-label font-normal',
+                        candidateProviderId && candidateProviderId !== CUSTOM_PROVIDER_ID ? 'text-foreground' : 'text-muted-foreground',
+                      )}>
+                        {candidateProviderId && candidateProviderId !== CUSTOM_PROVIDER_ID
+                          ? (unconnectedProviders.find(p => p.id === candidateProviderId)?.name || candidateProviderId)
+                          : t('settings.providers.page.connect.selectProviderPlaceholder')}
+                      </span>
+                    </span>
+                    <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className="w-[280px] p-0"
+                  onCloseAutoFocus={(e) => e.preventDefault()}
+                >
+                  <div
+                    className="flex items-center gap-2 border-b border-[var(--surface-subtle)] px-3 py-2"
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
+                    <Icon name="search" className="h-4 w-4 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={providerSearchQuery}
+                      onChange={(e) => setProviderSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      placeholder={t('settings.providers.page.connect.searchProvidersPlaceholder')}
+                      className="flex-1 bg-transparent typography-meta outline-none placeholder:text-muted-foreground"
+                      autoFocus
+                    />
+                  </div>
+                  <ScrollableOverlay outerClassName="max-h-[240px]" className="p-1">
+                    {(() => {
+                      const query = providerSearchQuery.toLowerCase();
+                      const filtered = unconnectedProviders.filter(p => {
+                        return (p.name || p.id).toLowerCase().includes(query) || p.id.toLowerCase().includes(query);
+                      });
+                      if (filtered.length === 0) {
+                        return <p className="py-4 text-center typography-meta text-muted-foreground">{t('settings.providers.page.connect.noProvidersFound')}</p>;
+                      }
+                      return (
+                        <>
+                          <DropdownMenuLabel className="px-2 pb-1 pt-1.5 text-muted-foreground">
+                            {t('settings.providers.page.connect.availableProvidersSection')}
+                          </DropdownMenuLabel>
+                          {filtered.map((provider) => (
+                            <DropdownMenuItem
+                              key={provider.id}
+                              onSelect={() => {
+                                setCandidateProviderId(provider.id);
+                                setProviderDropdownOpen(false);
+                                setProviderSearchQuery('');
+                              }}
+                              className="flex items-center justify-between"
+                            >
+                              <span className="flex items-center gap-2 min-w-0">
+                                <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />
+                                <span className="truncate">{provider.name || provider.id}</span>
+                              </span>
+                              {candidateProviderId === provider.id && (
+                                <Icon name="check" className="h-4 w-4 text-[var(--primary-base)]" />
+                              )}
+                            </DropdownMenuItem>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </ScrollableOverlay>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <Button
+              variant={isCustomCreateMode ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => {
+                setCandidateProviderId(CUSTOM_PROVIDER_ID);
+                setProviderDropdownOpen(false);
+                setProviderSearchQuery('');
+              }}
+            >
+              <Icon name="add" />
+              {t('settings.providers.page.connect.configureCustomProvider')}
+            </Button>
+          </div>
         </SettingsSection>
 
           {isCustomCreateMode ? (

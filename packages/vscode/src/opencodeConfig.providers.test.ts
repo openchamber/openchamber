@@ -72,6 +72,30 @@ describe('custom provider config persistence (VS Code parity)', () => {
     }).ok, true);
   });
 
+  test('accepts supported protocol adapters and rejects arbitrary npm packages', () => {
+    for (const npm of ['@ai-sdk/openai-compatible', '@ai-sdk/openai', '@ai-sdk/anthropic']) {
+      const result = validateCustomProviderConfig('ok', {
+        name: 'X',
+        npm,
+        env: ['MY_KEY'],
+        options: { baseURL: 'https://api.example.com/v1' },
+        models: { m: { name: 'M' } },
+      });
+      assert.equal(result.ok, true);
+      if (result.ok) assert.equal((result.value.config as Record<string, unknown>).npm, npm);
+    }
+
+    const unsupported = validateCustomProviderConfig('ok', {
+      name: 'X',
+      npm: 'untrusted-provider-package',
+      env: ['MY_KEY'],
+      options: { baseURL: 'https://api.example.com/v1' },
+      models: { m: { name: 'M' } },
+    });
+    assert.equal(unsupported.ok, false);
+    assert.match(unsupported.error ?? '', /not supported/);
+  });
+
   test('upsertProviderConfig writes and round-trips project config', () => {
     const result = upsertProviderConfig('campus-llm', {
       name: 'Campus LLM',
@@ -107,6 +131,23 @@ describe('custom provider config persistence (VS Code parity)', () => {
     const sources = getProviderSources('campus-llm', projectDir);
     assert.equal(sources.project.exists, true);
     assert.equal(sources.project.path, result.path);
+  });
+
+  test('round-trips non-default protocol adapters through project config', () => {
+    for (const [providerId, npm] of [
+      ['responses-provider', '@ai-sdk/openai'],
+      ['anthropic-provider', '@ai-sdk/anthropic'],
+    ]) {
+      const result = upsertProviderConfig(providerId, {
+        name: providerId,
+        npm,
+        env: ['PROVIDER_KEY'],
+        options: { baseURL: 'https://api.example.com/v1' },
+        models: { model: { name: 'Model' } },
+      }, projectDir, 'project');
+      assert.equal((result.config as Record<string, unknown>).npm, npm);
+      assert.equal(readJson(result.path).provider[providerId].npm, npm);
+    }
   });
 
   test('round-trips supported advanced model metadata', () => {
