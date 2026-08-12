@@ -51,6 +51,37 @@ describe('buildLinkedIssue', () => {
     expect(built.kind).toBe('pull');
   });
 
+  test('parses GitLab issue urls with nested namespaces on any host', () => {
+    const built = buildLinkedIssue({
+      url: 'https://gitlab.example.com/a/b/project/-/issues/5',
+      number: 5,
+      title: 'Nested issue',
+      kind: 'issue',
+      linkedAt: 5,
+    });
+    expect(built.id).toBe('a/b/project#5');
+  });
+
+  test('parses GitLab merge request urls, including legacy non-/- paths', () => {
+    const modern = buildLinkedIssue({
+      url: 'https://gitlab.com/owner/repo/-/merge_requests/7',
+      number: 7,
+      title: 'Modern MR',
+      kind: 'pull',
+      linkedAt: 5,
+    });
+    expect(modern.id).toBe('owner/repo#7');
+
+    const legacy = buildLinkedIssue({
+      url: 'https://gitlab.example.com/owner/repo/merge_requests/9',
+      number: 9,
+      title: 'Legacy MR',
+      kind: 'pull',
+      linkedAt: 5,
+    });
+    expect(legacy.id).toBe('owner/repo#9');
+  });
+
   test('falls back to a url-based id for an unparseable url', () => {
     const built = buildLinkedIssue({
       url: 'https://ghe.internal/x',

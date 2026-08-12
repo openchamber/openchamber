@@ -19,6 +19,10 @@ export type MagicPromptId =
   | 'github.pr.comments.review.instructions'
   | 'github.pr.comment.single.visible'
   | 'github.pr.comment.single.instructions'
+  | 'gitlab.pr.review.visible'
+  | 'gitlab.pr.review.instructions'
+  | 'gitlab.issue.review.visible'
+  | 'gitlab.issue.review.instructions'
   | 'plan.todo.visible'
   | 'plan.todo.instructions'
   | 'plan.improve.visible'
@@ -56,7 +60,7 @@ export interface MagicPromptDefinition {
   id: MagicPromptId;
   title: string;
   description: string;
-  group: 'Git' | 'GitHub' | 'Planning' | 'Session';
+  group: 'Git' | 'GitHub' | 'GitLab' | 'Planning' | 'Session';
   template: string;
   placeholders?: Array<{ key: string; description: string }>;
 }
@@ -311,6 +315,121 @@ Do not implement changes until I confirm; end with: "Next actions: <1 sentence>"
 - Identify exact code areas likely impacted.
 - Before proposing a plan: if the reviewer's intent is ambiguous or the required change depends on a tradeoff only I can decide, ask me focused clarifying questions in batches of at most 3 and wait for answers. Do not speculate.
 - Once intent is clear, propose a minimal implementation plan and verification steps.`,
+  },
+  {
+    id: 'gitlab.pr.review.visible',
+    title: 'MR Review Visible Prompt',
+    group: 'GitLab',
+    description: 'Visible user message when creating merge request review requests from GitLab context.',
+    placeholders: [
+      { key: 'mr_number', description: 'Merge request number.' },
+    ],
+    template: 'Review this merge request !{{mr_number}} using the provided MR context',
+  },
+  {
+    id: 'gitlab.pr.review.instructions',
+    title: 'MR Review Instructions',
+    group: 'GitLab',
+    description: 'Hidden instructions attached when generating a GitLab merge request review response.',
+    template: `You are drafting a merge request review comment that will be posted back to the MR author. You are not the implementer; do not propose to write code or run commands.
+
+Before drafting:
+- Read the MR title and body first to anchor on the author's intent. Evaluate whether the implementation matches that intent — missing pieces, incorrect behavior vs intent, scope creep.
+- The MR diff is the source of truth for what changed; the repo on disk may not yet reflect those changes. Read the diff carefully. Use the repo only as ancillary context (imports, call sites, existing patterns, nearby code) when you need to verify a specific claim — not to discover the changes themselves.
+- No speculation: every reported issue must be grounded in the diff plus ancillary repo evidence you actually read. If a claim cannot be verified, drop it — do not hedge or guess.
+- Clarifying question: if the MR's intent itself is unreadable (title/body give no "why", diff is ambiguous on purpose), ask me one focused question about intent and stop. Do not open a discovery loop — this is a review, not a planning session.
+
+High-signal bar — only report issues that meet all of:
+- Objective and verifiable from the diff plus ancillary repo evidence.
+- Introduced by this MR (not pre-existing).
+- Material: bugs that will cause incorrect runtime behavior, security/privacy risks, correctness edge cases, backwards-compat breakage, missing implementations across modules/targets, boundary violations, OR a clear CLAUDE.md / AGENTS.md violation where you can quote the exact rule.
+
+Do NOT report:
+- Pre-existing issues unrelated to the diff.
+- Pedantic nitpicks a senior engineer would not flag.
+- Issues a linter would catch.
+- Subjective style preferences not explicitly required by CLAUDE.md / AGENTS.md.
+- "Might" / "could" / "potential" concerns without concrete evidence.
+- Rules mentioned in CLAUDE.md / AGENTS.md but explicitly silenced in the code (e.g., via an ignore comment or documented exception).
+- Missing tests / coverage gaps unless CLAUDE.md / AGENTS.md explicitly requires them for the changed area.
+
+Validation pass: before writing the final comment, re-check each candidate issue against the diff + ancillary repo evidence. Drop anything you are not certain about. False positives waste the author's time.
+
+Output rules:
+- Produce a single review comment addressed to the MR author, using the exact format below.
+- No emojis. No code snippets. No fenced blocks. Short inline code identifiers are fine.
+- Reference evidence with file paths and line ranges (e.g., path/to/file.ts:120-138) derived from the diff. Use "approx" only as a last resort when the diff does not expose exact lines.
+- One bullet per unique issue; do not duplicate an issue across sections.
+- Keep the whole comment under ~300 words.
+
+Format exactly:
+<1-2 sentence summary of intent and top-level verdict>
+
+Must-fix:
+- <issue> - <brief why> - <file:line-range> - Action: <one-line action>
+Nice-to-have:
+- <issue> - <brief why> - <file:line-range> - Action: <one-line action>
+
+If nothing clears the high-signal bar, write:
+Must-fix:
+- None
+Nice-to-have:
+- None`,
+  },
+  {
+    id: 'gitlab.issue.review.visible',
+    title: 'Issue Review Visible Prompt',
+    group: 'GitLab',
+    description: 'Visible user message when creating issue review requests from GitLab context.',
+    placeholders: [
+      { key: 'issue_number', description: 'Issue number.' },
+    ],
+    template: 'Review this issue #{{issue_number}} using the provided issue context',
+  },
+  {
+    id: 'gitlab.issue.review.instructions',
+    title: 'Issue Review Instructions',
+    group: 'GitLab',
+    description: 'Hidden instructions attached when generating a GitLab issue review response.',
+    template: `Review this GitLab issue using the provided issue context.
+
+Process:
+- First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.
+- Gather any needed repository context (code, config, docs) to validate assumptions.
+- After gathering, if anything is still unclear or cannot be verified, do not speculate — state what's missing and ask targeted questions.
+
+Mode selection by type:
+- Bug / Question/Support / Ops: deliver the response directly using the matching template below. Do not bombard me with questions for straightforward diagnosis; use "Missing info" / "Repro/diagnostics needed" fields instead.
+- Feature request / Refactor with substantive unknowns: this is effectively a planning session. Do not emit the Feature template on the first turn. Instead, ask me focused clarifying questions in batches of at most 3, one topic at a time (scope, constraints, tradeoffs, UX, etc.), wait for answers, drop questions that became irrelevant, and repeat until you have no more substantive questions. Only then emit the Feature template.
+
+Output rules:
+- Compact output; pick ONE template below and omit the others.
+- No emojis. No code snippets. No fenced blocks.
+- Short inline code identifiers allowed.
+- Reference evidence with file paths and line ranges when applicable; if exact lines are not available, cite the file and say "approx" + why.
+- Keep the entire response under ~300 words (applies to the final template output, not to clarifying-question turns).
+
+Templates (choose one):
+Bug:
+- Summary (1-2 sentences)
+- Likely cause (max 2)
+- Repro/diagnostics needed (max 3)
+- Fix approach (max 4 steps)
+- Verification (max 3)
+
+Feature:
+- Summary (1-2 sentences)
+- Requirements (max 4)
+- Unknowns/questions (max 4)
+- Proposed plan (max 5 steps)
+- Verification (max 3)
+
+Question/Support:
+- Summary (1-2 sentences)
+- Answer/guidance (max 6 lines)
+- Missing info (max 4)
+
+Do not implement changes until I confirm; end with: "Next actions: <1 sentence>".`,
   },
   {
     id: 'git.conflict.resolve.visible',

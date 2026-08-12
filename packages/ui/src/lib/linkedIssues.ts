@@ -54,6 +54,26 @@ export const buildLinkedIssueId = (owner: string, repo: string, number: number):
  * separately. A URL that does not parse falls back to itself, which is still
  * unique per thread — the id only has to identify an entry, not be pretty.
  */
+const GITHUB_URL_RE = /github\.com\/([^/]+)\/([^/]+)\//;
+// GitLab puts the project path (possibly nested namespaces, e.g. a/b/project)
+// before the `/-/issues|/merge_requests/` segment on any host. The legacy
+// non-`/-/` issue/merge-request URLs are accepted too.
+const GITLAB_URL_RE = /^https?:\/\/[^/]+\/(.+?)\/(?:-\/)?(?:issues|merge_requests)\/\d+/;
+
+const buildStableIssueId = (url: string, number: number): string => {
+  const githubMatch = GITHUB_URL_RE.exec(url);
+  if (githubMatch) {
+    return buildLinkedIssueId(githubMatch[1], githubMatch[2], number);
+  }
+
+  const gitlabMatch = GITLAB_URL_RE.exec(url);
+  if (gitlabMatch) {
+    return `${gitlabMatch[1]}#${number}`;
+  }
+
+  return `${url}#${number}`;
+};
+
 export const buildLinkedIssue = (input: {
   url: string;
   number: number;
@@ -62,10 +82,7 @@ export const buildLinkedIssue = (input: {
   author?: { login?: string; avatarUrl?: string } | null;
   linkedAt: number;
 }): LinkedIssue => {
-  const match = /github\.com\/([^/]+)\/([^/]+)\//.exec(input.url);
-  const id = match
-    ? buildLinkedIssueId(match[1], match[2], input.number)
-    : `${input.url}#${input.number}`;
+  const id = buildStableIssueId(input.url, input.number);
 
   return {
     id,
