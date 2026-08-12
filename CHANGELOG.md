@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Usage: quota limits enabled for display now refresh every three minutes on desktop, mobile, and VS Code, with a manual refresh action available at any time.
+- Chat: session summaries, follow-up suggestions, and goal progress notes are no longer shown when the model writes them in a different language than the conversation, such as Korean or Chinese text in a Japanese session.
 
 ## [1.18.2] - 2026-08-10
 
