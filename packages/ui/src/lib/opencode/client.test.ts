@@ -9,6 +9,7 @@ let configCalls = 0;
 let runtimeKey = 'test-runtime';
 const promptAsyncCalls: unknown[][] = [];
 const promptAsyncResults: Array<unknown> = [];
+const forkCalls: Array<Record<string, unknown>> = [];
 
 const promptAsyncMock = mock(async (...args: unknown[]) => {
   promptAsyncCalls.push(args);
@@ -29,6 +30,10 @@ mock.module('@opencode-ai/sdk/v2', () => ({
     },
     session: {
       promptAsync: promptAsyncMock,
+      fork: mock(async (params: Record<string, unknown>) => {
+        forkCalls.push(params);
+        return { data: { id: 'ses_fork', title: 'Fork', time: { created: 1, updated: 1 } } };
+      }),
     },
   })),
 }));
@@ -64,6 +69,18 @@ beforeEach(() => {
   runtimeKey = 'test-runtime';
   promptAsyncCalls.length = 0;
   promptAsyncResults.length = 0;
+  forkCalls.length = 0;
+});
+
+describe('opencodeClient forkSession boundaries', () => {
+  test('omits messageID when forking the complete session history', async () => {
+    await opencodeClient.forkSession('ses_source', undefined, '/workspace/project');
+
+    expect(forkCalls).toEqual([{
+      sessionID: 'ses_source',
+      directory: '/workspace/project',
+    }]);
+  });
 });
 
 describe('opencodeClient getConfig cache', () => {

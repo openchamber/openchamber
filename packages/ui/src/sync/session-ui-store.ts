@@ -66,6 +66,7 @@ import {
   revertToMessage as revertToMessageAction,
   unrevertSession as unrevertSessionAction,
   forkFromMessage as forkFromMessageAction,
+  forkSession as forkSessionAction,
   fetchMessagesForSession,
   type ArchiveSessionsOptions,
   type DeleteSessionOptions,
@@ -359,6 +360,7 @@ export type SessionUIState = {
   unshareSession: (sessionId: string) => Promise<Session | null>
   revertToMessage: (sessionId: string, messageId: string, options?: { skipRedoPush?: boolean }) => Promise<void>
   forkFromMessage: (sessionId: string, messageId: string) => Promise<void>
+  forkSession: (sessionId: string) => Promise<void>
   handleSlashUndo: (sessionId: string) => Promise<void>
   handleSlashRedo: (sessionId: string, options?: { fullUnrevert?: boolean }) => Promise<void>
   createSessionFromAssistantMessage: (sourceMessageId: string, execution: AssistantMessageSessionExecution) => Promise<void>
@@ -1574,6 +1576,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const { toast } = await import("sonner")
       toast.error("Failed to fork session")
     }
+  },
+
+  forkSession: async (sessionId) => {
+    await forkSessionAction(sessionId)
   },
 
   // ---------------------------------------------------------------------------

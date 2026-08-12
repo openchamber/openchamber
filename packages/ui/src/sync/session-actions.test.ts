@@ -14,12 +14,14 @@ let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?:
 let sessionUpdateResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
 let sessionDeleteError: unknown | null = null
+let forkSessionResult: Session = { id: "session-fork", title: "Forked session", time: { created: 2, updated: 2 } } as Session
 let beforeSessionUpdateResolve: ((sessionId: string) => void) | null = null
 let beforeSessionDeleteResolve: ((sessionId: string) => void) | null = null
 const globalUpsertedSessions: unknown[] = []
 const globalRemovedSessionIds: string[] = []
 const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
+const selectedSessions: Array<{ sessionID: string | null; directory?: string | null }> = []
 
 const mockScopedClient = {
   permission: {
@@ -160,6 +162,10 @@ mock.module("@/lib/opencode/client", () => ({
       if (sessionDeleteError) throw sessionDeleteError
       return Promise.resolve(true)
     }),
+    forkSession: mock((sessionId: string, messageId?: string, directory?: string | null) => {
+      replyCalls.push({ method: "session.fork", params: { sessionID: sessionId, messageID: messageId, directory } })
+      return Promise.resolve(forkSessionResult)
+    }),
   },
 }))
 
@@ -183,7 +189,9 @@ mock.module("./session-ui-store", () => ({
         return null
       },
       currentSessionId: null,
-      setCurrentSession: () => {},
+      setCurrentSession: (sessionID: string | null, directory?: string | null) => {
+        selectedSessions.push({ sessionID, directory })
+      },
       setWorktreeMetadata: () => {},
       setSessionDirectory: (sessionID: string, directory: string) => {
         movedSessionDirectories.push({ sessionID, directory })
@@ -890,6 +898,46 @@ describe("updateSessionTitle live state", () => {
     expect(updateCall?.params.directory).toBe("/test/project")
     expect(globalUpsertedSessions).toEqual([updatedSession])
     expect(sessionStore.getState().session[0].title).toBe("New Title")
+  })
+})
+
+describe("forkSession", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    globalUpsertedSessions.length = 0
+    registeredSessionDirectories.length = 0
+    selectedSessions.length = 0
+  })
+
+  test("forks the complete history and publishes the new session before navigation", async () => {
+    const sourceSession = {
+      id: "session-a",
+      title: "Source session",
+      directory: "/test/project",
+      time: { created: 1, updated: 1 },
+    } as Session
+    forkSessionResult = {
+      id: "session-fork",
+      title: "Source session (fork)",
+      time: { created: 2, updated: 2 },
+    } as Session
+    const sessionStore = createStore({}, { session: [sourceSession], sessionTotal: 1 })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+    const { forkSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/current/project")
+
+    await forkSession("session-a")
+
+    expect(replyCalls.filter((call) => call.method === "session.fork")).toEqual([{
+      method: "session.fork",
+      params: { sessionID: "session-a", messageID: undefined, directory: "/test/project" },
+    }])
+    expect(sessionStore.getState().session.map((session) => session.id)).toContain("session-fork")
+    expect((sessionStore.getState().session.find((session) => session.id === "session-fork") as SessionWithDirectory).directory).toBe("/test/project")
+    expect(sessionStore.getState().sessionTotal).toBe(2)
+    expect(registeredSessionDirectories).toEqual([{ sessionID: "session-fork", directory: "/test/project" }])
+    expect(globalUpsertedSessions).toEqual([{ ...forkSessionResult, directory: "/test/project" }])
+    expect(selectedSessions).toEqual([{ sessionID: "session-fork", directory: "/test/project" }])
   })
 })
 
