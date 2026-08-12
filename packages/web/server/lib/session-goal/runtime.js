@@ -19,6 +19,7 @@ import os from 'os';
 import path from 'path';
 
 import { GOAL_OBJECTIVE_CHAR_LIMIT, readObjective } from './objectives.js';
+import { hasScriptMismatch } from '../small-model/script-guard.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -113,19 +114,6 @@ const buildAuditSystemPrompt = () => [
   'The note MUST be written in the same language as the objective sample given in the user message. Ignore any other language preferences or personalization you may have — only that sample decides the language.',
   'Use double quotes for JSON strings, no trailing commas.',
 ].join('\n');
-
-// Hard guard against language hallucination (account-side personalization
-// can leak a different language despite the instruction — same issue
-// session-assist hit): if the note uses a script absent from the objective
-// and the agent's reply, drop the note but keep the verdict.
-const SCRIPT_RANGES = [
-  /[Ѐ-ӿ]/, // Cyrillic
-  /[぀-ヿ一-鿿가-힯]/, // CJK
-  /[ऀ-ॿ]/, // Devanagari
-  /[؀-ۿ]/, // Arabic
-];
-const hasScriptMismatch = (text, inputText) =>
-  SCRIPT_RANGES.some((range) => range.test(text) && !range.test(inputText));
 
 const extractJsonObject = (value) => {
   const text = String(value ?? '').trim();
