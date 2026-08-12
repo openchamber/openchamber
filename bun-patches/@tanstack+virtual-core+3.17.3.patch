@@ -16,6 +16,37 @@ index 52ae6ca12f8d1c650ee7f1bd55573ee7d4f8b65f..bcee09df7377c37ffb220606b741c9ff
            lanes,
            // Pass the typed array so binary search + forward-walk can read
            // start/end directly from Float64Array, skipping the Proxy traps.
++@@ -850,5 +850,10 @@
++      if (delta !== 0) {
++        // OpenChamber patch: during a panel-resize transaction the anchor
++        // controller is the ONLY scroll writer. suppressScrollAdjustments
++        // stops both the end-anchor ("keep at bottom") and the above-viewport
++        // item-size-change compensation branches from writing scrollTop here.
++        const suppressAdjustments = this.options.suppressScrollAdjustments === true;
++        const wasAtEnd = !suppressAdjustments && this.options.anchorTo === "end" && ((_a = this.scrollState) == null ? void 0 : _a.behavior) !== "smooth" && this.getVirtualDistanceFromEnd() <= this.options.scrollEndThreshold;
++        const prevTotalSize = wasAtEnd ? this.getTotalSize() : 0;
++        const shouldAdjustScroll = !suppressAdjustments && ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
+           // The callback expects a VirtualItem; build one lazily only
+           // when the consumer actually supplied a custom predicate.
+           this.measurementsCache[index] ?? {
+             index,
+             key,
+             start: itemStart,
+             size: cachedSize,
+             end: itemStart + cachedSize,
+             lane: 0
+           },
+           delta,
+           this
+         ) : (
+           // Default: adjust when the resize is an above-viewport item.
+           // First measurement (!has(key)): always adjust — the item
+           // has never been sized, so the estimate→actual delta must
+           // be compensated regardless of scroll direction.
+           // Re-measurement (has(key)): skip during backward scroll
+           // to avoid the "items jump while scrolling up" cascade.
+           itemStart < this.getScrollOffset() + this.scrollAdjustments && (!this.itemSizeCache.has(key) || this.scrollDirection !== "backward")
+         ));
 diff --git a/dist/esm/index.js b/dist/esm/index.js
 index 3032c0ca457582be3f47923cba1f7d92c848745c..90b574881a073aabac99c075f7eab0a8f363fff6 100644
 --- a/dist/esm/index.js
@@ -34,3 +65,34 @@ index 3032c0ca457582be3f47923cba1f7d92c848745c..90b574881a073aabac99c075f7eab0a8
            lanes,
            // Pass the typed array so binary search + forward-walk can read
            // start/end directly from Float64Array, skipping the Proxy traps.
++@@ -848,5 +848,10 @@
++      if (delta !== 0) {
++        // OpenChamber patch: during a panel-resize transaction the anchor
++        // controller is the ONLY scroll writer. suppressScrollAdjustments
++        // stops both the end-anchor ("keep at bottom") and the above-viewport
++        // item-size-change compensation branches from writing scrollTop here.
++        const suppressAdjustments = this.options.suppressScrollAdjustments === true;
++        const wasAtEnd = !suppressAdjustments && this.options.anchorTo === "end" && ((_a = this.scrollState) == null ? void 0 : _a.behavior) !== "smooth" && this.getVirtualDistanceFromEnd() <= this.options.scrollEndThreshold;
++        const prevTotalSize = wasAtEnd ? this.getTotalSize() : 0;
++        const shouldAdjustScroll = !suppressAdjustments && ((_b = this.scrollState) == null ? void 0 : _b.behavior) !== "smooth" && (this.shouldAdjustScrollPositionOnItemSizeChange !== void 0 ? this.shouldAdjustScrollPositionOnItemSizeChange(
+           // The callback expects a VirtualItem; build one lazily only
+           // when the consumer actually supplied a custom predicate.
+           this.measurementsCache[index] ?? {
+             index,
+             key,
+             start: itemStart,
+             size: cachedSize,
+             end: itemStart + cachedSize,
+             lane: 0
+           },
+           delta,
+           this
+         ) : (
+           // Default: adjust when the resize is an above-viewport item.
+           // First measurement (!has(key)): always adjust — the item
+           // has never been sized, so the estimate→actual delta must
+           // be compensated regardless of scroll direction.
+           // Re-measurement (has(key)): skip during backward scroll
+           // to avoid the "items jump while scrolling up" cascade.
+           itemStart < this.getScrollOffset() + this.scrollAdjustments && (!this.itemSizeCache.has(key) || this.scrollDirection !== "backward")
+         ));

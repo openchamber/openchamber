@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
+import { usePanelResize } from './usePanelResize';
 
 const SIDEBAR_CONTENT_WIDTH = 280;
 const SIDEBAR_MIN_WIDTH = 280;
@@ -21,133 +22,71 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
     const { t } = useI18n();
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const setSidebarWidth = useUIStore((state) => state.setSidebarWidth);
-    const [isResizing, setIsResizing] = React.useState(false);
-    const startXRef = React.useRef(0);
-    const startWidthRef = React.useRef(sidebarWidth || SIDEBAR_CONTENT_WIDTH);
-    const resizingWidthRef = React.useRef<number | null>(null);
-    const activeResizePointerIDRef = React.useRef<number | null>(null);
-    const sidebarRef = React.useRef<HTMLElement | null>(null);
-
-    const clampSidebarWidth = React.useCallback((value: number) => {
-        return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value));
-    }, []);
-
-    const applyLiveWidth = React.useCallback((nextWidth: number) => {
-        const sidebar = sidebarRef.current;
-        if (!sidebar) {
-            return;
-        }
-
-        sidebar.style.width = `${nextWidth}px`;
-        sidebar.style.minWidth = `${nextWidth}px`;
-        sidebar.style.maxWidth = `${nextWidth}px`;
-        sidebar.style.setProperty('--oc-left-sidebar-width', `${nextWidth}px`);
-    }, []);
-
-    React.useEffect(() => {
-        if (isMobile && isResizing) {
-            setIsResizing(false);
-        }
-    }, [isMobile, isResizing]);
-
-    React.useEffect(() => {
-        if (!isResizing) {
-            resizingWidthRef.current = null;
-            activeResizePointerIDRef.current = null;
-        }
-    }, [isResizing]);
-
-    if (isMobile) {
-        return null;
-    }
 
     const openWidth = Math.min(
         SIDEBAR_MAX_WIDTH,
         Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth || SIDEBAR_CONTENT_WIDTH)
     );
-    const appliedWidth = isOpen ? openWidth : 0;
 
-    const handlePointerDown = (event: React.PointerEvent) => {
-        if (!isOpen) {
-            return;
-        }
+    const { isResizing, containerRef, handlePointerDown, handlePointerUp, handlePointerAbort } = usePanelResize({
+        minWidth: SIDEBAR_MIN_WIDTH,
+        maxWidth: SIDEBAR_MAX_WIDTH,
+        // Persist the manual width on pointerup ONLY — programmatic open/close
+        // never touches the saved width or the manual-resize flag.
+        onUserCommitWidth: setSidebarWidth,
+        transactionSource: 'left-sidebar',
+        widthCssVariable: '--oc-left-sidebar-width',
+        // canResize also returns false on mobile: the hook cancels an in-flight
+        // drag when the guard flips (the component stays mounted, returning
+        // null below, so an unmount-only cleanup would never run).
+        canResize: () => isOpen && !isMobile,
+        getCurrentWidth: () => openWidth,
+        traceSpanName: 'ui.sidebar.resize',
+        // Quick open/close toggles go through the SAME per-frame width writer
+        // as a pointer drag (200ms programmatic animation) so the chat anchor
+        // controller keeps the seam stable. The hook is the ONLY writer of
+        // --oc-left-sidebar-width; React re-renders never touch it.
+        programmaticTarget: {
+            key: isOpen ? 'open' : 'close',
+            width: isOpen ? openWidth : 0,
+            cause: 'visibility',
+        },
+    });
 
-        try {
-            event.currentTarget.setPointerCapture(event.pointerId);
-        } catch {
-            // ignore
-        }
-
-        activeResizePointerIDRef.current = event.pointerId;
-        setIsResizing(true);
-        startXRef.current = event.clientX;
-        startWidthRef.current = appliedWidth;
-        resizingWidthRef.current = appliedWidth;
-        applyLiveWidth(appliedWidth);
-        event.preventDefault();
-    };
-
-    const handlePointerMove = (event: React.PointerEvent) => {
-        if (isMobile || !isResizing || activeResizePointerIDRef.current !== event.pointerId) {
-            return;
-        }
-
-        const delta = event.clientX - startXRef.current;
-        const nextWidth = clampSidebarWidth(startWidthRef.current + delta);
-        if (resizingWidthRef.current === nextWidth) {
-            return;
-        }
-
-        resizingWidthRef.current = nextWidth;
-        applyLiveWidth(nextWidth);
-    };
-
-    const handlePointerEnd = (event: React.PointerEvent) => {
-        if (activeResizePointerIDRef.current !== event.pointerId || isMobile) {
-            return;
-        }
-
-        try {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-        } catch {
-            // ignore
-        }
-
-        const finalWidth = clampSidebarWidth(resizingWidthRef.current ?? appliedWidth);
-        activeResizePointerIDRef.current = null;
-        resizingWidthRef.current = null;
-        setIsResizing(false);
-        setSidebarWidth(finalWidth);
-    };
-
-    const currentWidth = isResizing ? (resizingWidthRef.current ?? appliedWidth) : appliedWidth;
+    if (isMobile) {
+        return null;
+    }
 
     return (
         <aside
-            ref={sidebarRef}
+            ref={containerRef}
             className={cn(
-                'relative flex h-full overflow-hidden border-r border-border will-change-[width] motion-reduce:transition-none',
+                'relative flex h-full overflow-hidden border-r border-border will-change-[width]',
                 'bg-sidebar',
                 !isOpen && 'border-r-0',
                 className,
             )}
             style={{
-                width: `${currentWidth}px`,
-                minWidth: `${currentWidth}px`,
-                maxWidth: `${currentWidth}px`,
-                ['--oc-left-sidebar-width' as string]: `${isResizing ? currentWidth : openWidth}px`,
+                // Live flex resize: the sidebar stays in the flex row while
+                // dragging, so the chat surface reflows in real time. Layout
+                // containment keeps the sidebar's subtree from widening the
+                // layout dirt during the drag; final width is committed once
+                // on pointerup. The width is driven by the resize hook's
+                // programmatic animation on open/close — no CSS width
+                // transition (the JS animation is the single interpolator).
+                // flex:none + the CSS variable keep React re-renders from ever
+                // overriding the hook's width writes.
+                contain: isResizing ? 'layout style paint' : undefined,
+                flex: 'none',
+                width: 'var(--oc-left-sidebar-width, 0px)',
+                minWidth: 'var(--oc-left-sidebar-width, 0px)',
+                maxWidth: 'var(--oc-left-sidebar-width, 0px)',
                 overflowX: 'clip',
-                transitionProperty: isResizing ? 'none' : 'width, min-width, max-width',
-                transitionDuration: '200ms',
-                transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
             }}
-            aria-hidden={!isOpen || appliedWidth === 0}
+            aria-hidden={!isOpen}
         >
             {isOpen && (
-                <div
-                    className="pointer-events-none absolute inset-0 z-30 shadow-[inset_-2px_0_10px_-2px_rgb(0_0_0_/_0.06)]"
-                    aria-hidden="true"
-                />
+                <div className="pointer-events-none absolute inset-0 z-30 shadow-[inset_-2px_0_10px_-2px_rgb(0_0_0_/_0.06)]" aria-hidden="true" />
             )}
             {isOpen && (
                 <div
@@ -156,9 +95,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                         isResizing && 'bg-[var(--interactive-border)]'
                     )}
                     onPointerDown={handlePointerDown}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerEnd}
-                    onPointerCancel={handlePointerEnd}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerAbort}
+                    onLostPointerCapture={handlePointerAbort}
                     role="separator"
                     aria-orientation="vertical"
                     aria-label={t('sidebar.resize.leftPanelAria')}

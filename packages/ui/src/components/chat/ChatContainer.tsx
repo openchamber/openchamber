@@ -171,6 +171,7 @@ type ChatViewportProps = {
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
     isProgrammaticFollowActive: boolean;
+    isPinned: boolean;
     showLoadOlderButton: boolean;
     onLoadOlder: () => void;
     turnIds: string[];
@@ -205,6 +206,7 @@ const ChatViewport = React.memo(({
     sessionQuestions,
     sessionPermissions,
     isProgrammaticFollowActive,
+    isPinned,
     showLoadOlderButton,
     onLoadOlder,
     turnIds,
@@ -367,6 +369,7 @@ const ChatViewport = React.memo(({
                             scrollToBottom={scrollToBottom}
                             scrollRef={scrollRef}
                             directory={directory}
+                            isPinned={isPinned}
                         />
                         {(sessionQuestions.length > 0 || sessionPermissions.length > 0) && (
                             <div>
@@ -1266,6 +1269,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
                 sessionQuestions={sessionQuestions}
                 sessionPermissions={sessionPermissions}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
+                isPinned={isPinned}
                 showLoadOlderButton={showLoadOlderButton}
                 onLoadOlder={handleLoadOlderClick}
                 turnIds={timelineController.turnIds}
