@@ -1367,7 +1367,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.imageInputInfo': '声明此模型是否接受图像。选择“支持”会添加文本和图像输入模态。',
   'settings.providers.page.custom.models.reasoningInfo': '声明此模型是否支持推理。',
   'settings.providers.page.custom.models.toolCallingInfo': '声明此模型是否支持工具调用。',
-  'settings.providers.page.custom.models.thinkingLevelsInfo': '以逗号分隔的 OpenAI 兼容推理强度值。每个值都会成为可选的模型变体。',
+  'settings.providers.page.custom.models.thinkingLevelsInfo': '以逗号分隔所选协议和模型支持的推理强度值。每个值都会成为可选的模型变体。',
   'settings.providers.page.custom.models.thinkingLevelsPlaceholder': 'low, medium, high',
   'settings.providers.page.custom.models.capability.default': '使用 OpenCode 默认值',
   'settings.providers.page.custom.models.capability.supported': '支持',

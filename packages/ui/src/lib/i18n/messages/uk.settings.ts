@@ -1367,7 +1367,7 @@ export const settingsDict = {
   "settings.providers.page.custom.models.imageInputInfo": "Укажіть, чи приймає ця модель зображення. Варіант «Підтримується» додає текстову й графічну модальності введення.",
   "settings.providers.page.custom.models.reasoningInfo": "Укажіть, чи підтримує ця модель міркування.",
   "settings.providers.page.custom.models.toolCallingInfo": "Укажіть, чи підтримує ця модель виклики інструментів.",
-  "settings.providers.page.custom.models.thinkingLevelsInfo": "Значення рівня міркування, сумісні з OpenAI, розділені комами. Кожне значення стає доступним для вибору варіантом моделі.",
+  "settings.providers.page.custom.models.thinkingLevelsInfo": "Розділені комами значення рівня міркування, які підтримують вибрані протокол і модель. Кожне значення стає доступним для вибору варіантом моделі.",
   "settings.providers.page.custom.models.thinkingLevelsPlaceholder": "low, medium, high",
   "settings.providers.page.custom.models.capability.default": "Використовувати типове значення OpenCode",
   "settings.providers.page.custom.models.capability.supported": "Підтримується",

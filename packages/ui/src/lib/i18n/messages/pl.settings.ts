@@ -1453,7 +1453,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.imageInputInfo': 'Określa, czy model przyjmuje obrazy. Opcja „Obsługiwane” dodaje modalności wejściowe tekstu i obrazu.',
   'settings.providers.page.custom.models.reasoningInfo': 'Określa, czy model obsługuje rozumowanie.',
   'settings.providers.page.custom.models.toolCallingInfo': 'Określa, czy model obsługuje wywołania narzędzi.',
-  'settings.providers.page.custom.models.thinkingLevelsInfo': 'Rozdzielone przecinkami wartości poziomu rozumowania zgodne z OpenAI. Każda wartość staje się wybieralnym wariantem modelu.',
+  'settings.providers.page.custom.models.thinkingLevelsInfo': 'Rozdzielone przecinkami wartości poziomu rozumowania obsługiwane przez wybrany protokół i model. Każda wartość staje się wybieralnym wariantem modelu.',
   'settings.providers.page.custom.models.thinkingLevelsPlaceholder': 'low, medium, high',
   'settings.providers.page.custom.models.capability.default': 'Użyj domyślnej wartości OpenCode',
   'settings.providers.page.custom.models.capability.supported': 'Obsługiwane',

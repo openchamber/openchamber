@@ -1367,7 +1367,7 @@ export const settingsDict = {
   "settings.providers.page.custom.models.imageInputInfo": "Indica si este modelo acepta imágenes. «Compatible» añade las modalidades de entrada de texto e imagen.",
   "settings.providers.page.custom.models.reasoningInfo": "Indica si este modelo admite razonamiento.",
   "settings.providers.page.custom.models.toolCallingInfo": "Indica si este modelo admite llamadas a herramientas.",
-  "settings.providers.page.custom.models.thinkingLevelsInfo": "Valores de esfuerzo de razonamiento compatibles con OpenAI, separados por comas. Cada valor se convierte en una variante de modelo seleccionable.",
+  "settings.providers.page.custom.models.thinkingLevelsInfo": "Valores de esfuerzo de razonamiento, separados por comas, compatibles con el protocolo y modelo seleccionados. Cada valor se convierte en una variante de modelo seleccionable.",
   "settings.providers.page.custom.models.thinkingLevelsPlaceholder": "low, medium, high",
   "settings.providers.page.custom.models.capability.default": "Usar valor predeterminado de OpenCode",
   "settings.providers.page.custom.models.capability.supported": "Compatible",

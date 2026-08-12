@@ -1331,7 +1331,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.imageInputInfo': 'Gibt an, ob dieses Modell Bilder akzeptiert. „Unterstützt“ fügt die Eingabemodalitäten Text und Bild hinzu.',
   'settings.providers.page.custom.models.reasoningInfo': 'Gibt an, ob dieses Modell Reasoning unterstützt.',
   'settings.providers.page.custom.models.toolCallingInfo': 'Gibt an, ob dieses Modell Tool-Aufrufe unterstützt.',
-  'settings.providers.page.custom.models.thinkingLevelsInfo': 'Kommagetrennte OpenAI-kompatible Werte für den Reasoning-Aufwand. Jeder Wert wird zu einer auswählbaren Modellvariante.',
+  'settings.providers.page.custom.models.thinkingLevelsInfo': 'Kommagetrennte Werte für den Reasoning-Aufwand, die vom ausgewählten Protokoll und Modell unterstützt werden. Jeder Wert wird zu einer auswählbaren Modellvariante.',
   'settings.providers.page.custom.models.thinkingLevelsPlaceholder': 'low, medium, high',
   'settings.providers.page.custom.models.capability.default': 'OpenCode-Standard verwenden',
   'settings.providers.page.custom.models.capability.supported': 'Unterstützt',

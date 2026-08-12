@@ -1396,7 +1396,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.imageInputInfo': 'Declare whether this model accepts images. Supported adds text and image input modalities.',
   'settings.providers.page.custom.models.reasoningInfo': 'Declare whether this model supports reasoning.',
   'settings.providers.page.custom.models.toolCallingInfo': 'Declare whether this model supports tool calls.',
-  'settings.providers.page.custom.models.thinkingLevelsInfo': 'Comma-separated OpenAI-compatible reasoning effort values. Each value becomes a selectable model variant.',
+  'settings.providers.page.custom.models.thinkingLevelsInfo': 'Comma-separated reasoning effort values supported by the selected protocol and model. Each value becomes a selectable model variant.',
   'settings.providers.page.custom.models.thinkingLevelsPlaceholder': 'low, medium, high',
   'settings.providers.page.custom.models.capability.default': 'Use OpenCode default',
   'settings.providers.page.custom.models.capability.supported': 'Supported',

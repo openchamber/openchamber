@@ -2629,7 +2629,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         {availableVariants.length > 0 && <DropdownMenuSeparator />}
                         {availableVariants.map((variant) => {
                             const selected = currentVariant === variant;
-                            const label = variant.charAt(0).toUpperCase() + variant.slice(1);
+                            const label = formatEffortLabel(variant);
                             return (
                                 <DropdownMenuItem
                                     key={variant}

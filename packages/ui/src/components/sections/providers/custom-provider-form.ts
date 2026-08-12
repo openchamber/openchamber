@@ -441,6 +441,20 @@ const modelToFormRow = ({
   };
 };
 
+const normalizeVariantForProtocol = (
+  variant: Record<string, unknown>,
+  protocol: CustomProviderProtocol,
+): Record<string, unknown> => {
+  if (protocol !== 'anthropicMessages') return variant;
+  const thinking = asRecord(variant.thinking);
+  if (thinking.type !== 'adaptive') return variant;
+
+  const normalizedThinking = Object.fromEntries(
+    Object.entries(thinking).filter(([key]) => key !== 'budgetTokens' && key !== 'budget_tokens'),
+  );
+  return { ...variant, thinking: normalizedThinking };
+};
+
 /**
  * Validates form input and builds the auth + OpenCode provider config payloads.
  */
@@ -543,9 +557,9 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       thinkingLevels.map((level) => [
         level,
         model.variantOptions && Object.prototype.hasOwnProperty.call(model.variantOptions, level)
-          ? model.variantOptions[level]
+          ? normalizeVariantForProtocol(model.variantOptions[level], input.form.protocol)
           : input.form.protocol === 'anthropicMessages'
-            ? { effort: level }
+            ? { thinking: { type: 'adaptive' }, effort: level }
             : { reasoningEffort: level },
       ]),
     );

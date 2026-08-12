@@ -1274,7 +1274,7 @@
   'settings.providers.page.custom.models.imageInputInfo': '宣告此模型是否接受影像。選擇「支援」會新增文字與影像輸入模態。',
   'settings.providers.page.custom.models.reasoningInfo': '宣告此模型是否支援推理。',
   'settings.providers.page.custom.models.toolCallingInfo': '宣告此模型是否支援工具呼叫。',
-  'settings.providers.page.custom.models.thinkingLevelsInfo': '以逗號分隔的 OpenAI 相容推理強度值。每個值都會成為可選的模型變體。',
+  'settings.providers.page.custom.models.thinkingLevelsInfo': '以逗號分隔所選協定與模型支援的推理強度值。每個值都會成為可選的模型變體。',
   'settings.providers.page.custom.models.thinkingLevelsPlaceholder': 'low, medium, high',
   'settings.providers.page.custom.models.capability.default': '使用 OpenCode 預設值',
   'settings.providers.page.custom.models.capability.supported': '支援',

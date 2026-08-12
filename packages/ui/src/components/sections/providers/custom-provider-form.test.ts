@@ -124,8 +124,8 @@ describe('validateCustomProvider', () => {
       existingProviderIDs: new Set(),
     });
     expect(anthropic.result?.config.models.claude.variants).toEqual({
-      low: { effort: 'low' },
-      high: { effort: 'high' },
+      low: { thinking: { type: 'adaptive' }, effort: 'low' },
+      high: { thinking: { type: 'adaptive' }, effort: 'high' },
     });
 
     const responses = validateCustomProvider({
@@ -139,6 +139,92 @@ describe('validateCustomProvider', () => {
     expect(responses.result?.config.models.gpt.variants).toEqual({
       low: { reasoningEffort: 'low' },
     });
+  });
+
+  test('preserves configured thinking levels for each protocol', () => {
+    const openAILevels = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+    for (const protocol of ['openaiChat', 'openaiResponses'] as const) {
+      const result = validateCustomProvider({
+        form: baseForm({
+          protocol,
+          models: [{
+            row: 'm0',
+            id: 'model',
+            name: 'Model',
+            thinkingLevels: openAILevels.join(', '),
+          }],
+        }),
+        t,
+        existingProviderIDs: new Set(),
+      });
+
+      expect(result.result?.config.models.model.variants).toEqual(Object.fromEntries(
+        openAILevels.map((level) => [level, { reasoningEffort: level }]),
+      ));
+    }
+
+    const anthropicLevels = ['low', 'medium', 'high', 'xhigh', 'max'];
+    const anthropic = validateCustomProvider({
+      form: baseForm({
+        protocol: 'anthropicMessages',
+        models: [{
+          row: 'm0',
+          id: 'model',
+          name: 'Model',
+          thinkingLevels: anthropicLevels.join(', '),
+        }],
+      }),
+      t,
+      existingProviderIDs: new Set(),
+    });
+    expect(anthropic.result?.config.models.model.variants).toEqual(Object.fromEntries(
+      anthropicLevels.map((level) => [level, { thinking: { type: 'adaptive' }, effort: level }]),
+    ));
+  });
+
+  test('round-trips existing Anthropic adaptive thinking variants', () => {
+    const resolvedVariants = {
+      low: { thinking: { type: 'adaptive' }, effort: 'low' },
+      medium: { thinking: { type: 'adaptive' }, effort: 'medium' },
+      high: { thinking: { type: 'adaptive', budgetTokens: 16000 }, effort: 'high' },
+      xhigh: { thinking: { type: 'adaptive' }, effort: 'xhigh' },
+      max: { thinking: { type: 'adaptive', budgetTokens: 31999 }, effort: 'max' },
+    };
+    const persistedVariants = {
+      low: { thinking: { type: 'adaptive' }, effort: 'low' },
+      medium: { thinking: { type: 'adaptive' }, effort: 'medium' },
+      high: { thinking: { type: 'adaptive' }, effort: 'high' },
+      xhigh: { thinking: { type: 'adaptive' }, effort: 'xhigh' },
+      max: { thinking: { type: 'adaptive' }, effort: 'max' },
+    };
+    const state = providerToCustomFormState({
+      id: 'anthropic-provider',
+      npm: '@ai-sdk/anthropic',
+      name: 'Anthropic Provider',
+      env: ['ANTHROPIC_KEY'],
+      options: { baseURL: 'https://api.example.com/v1' },
+      models: {
+        claude: {
+          name: 'Claude',
+          reasoning: true,
+          variants: resolvedVariants,
+        },
+      },
+    });
+
+    expect(state.protocol).toBe('anthropicMessages');
+    expect(state.models[0]?.thinkingLevels).toBe('low, medium, high, xhigh, max');
+
+    const result = validateCustomProvider({
+      form: state,
+      t,
+      existingProviderIDs: new Set(['anthropic-provider']),
+      editingProviderID: 'anthropic-provider',
+      allowExistingAuth: true,
+    });
+
+    expect(result.result?.config.models.claude.variants).toEqual(persistedVariants);
   });
 
   test('rejects missing credentials', () => {

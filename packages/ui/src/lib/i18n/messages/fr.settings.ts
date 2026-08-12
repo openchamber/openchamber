@@ -1285,7 +1285,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.imageInputInfo': 'Indique si ce modèle accepte les images. « Pris en charge » ajoute les modalités d’entrée texte et image.',
   'settings.providers.page.custom.models.reasoningInfo': 'Indique si ce modèle prend en charge le raisonnement.',
   'settings.providers.page.custom.models.toolCallingInfo': 'Indique si ce modèle prend en charge les appels d’outils.',
-  'settings.providers.page.custom.models.thinkingLevelsInfo': 'Valeurs d’effort de raisonnement compatibles OpenAI, séparées par des virgules. Chaque valeur devient une variante de modèle sélectionnable.',
+  'settings.providers.page.custom.models.thinkingLevelsInfo': 'Valeurs d’effort de raisonnement, séparées par des virgules, prises en charge par le protocole et le modèle sélectionnés. Chaque valeur devient une variante de modèle sélectionnable.',
   'settings.providers.page.custom.models.thinkingLevelsPlaceholder': 'low, medium, high',
   'settings.providers.page.custom.models.capability.default': 'Utiliser la valeur par défaut d’OpenCode',
   'settings.providers.page.custom.models.capability.supported': 'Pris en charge',

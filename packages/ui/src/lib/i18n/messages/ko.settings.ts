@@ -1367,7 +1367,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.imageInputInfo': '이 모델의 이미지 입력 지원 여부를 지정합니다. 지원을 선택하면 텍스트 및 이미지 입력 모달리티가 추가됩니다.',
   'settings.providers.page.custom.models.reasoningInfo': '이 모델의 추론 지원 여부를 지정합니다.',
   'settings.providers.page.custom.models.toolCallingInfo': '이 모델의 도구 호출 지원 여부를 지정합니다.',
-  'settings.providers.page.custom.models.thinkingLevelsInfo': 'OpenAI 호환 추론 노력 값을 쉼표로 구분하여 입력합니다. 각 값은 선택 가능한 모델 변형이 됩니다.',
+  'settings.providers.page.custom.models.thinkingLevelsInfo': '선택한 프로토콜과 모델이 지원하는 추론 노력 값을 쉼표로 구분하여 입력합니다. 각 값은 선택 가능한 모델 변형이 됩니다.',
   'settings.providers.page.custom.models.thinkingLevelsPlaceholder': 'low, medium, high',
   'settings.providers.page.custom.models.capability.default': 'OpenCode 기본값 사용',
   'settings.providers.page.custom.models.capability.supported': '지원',

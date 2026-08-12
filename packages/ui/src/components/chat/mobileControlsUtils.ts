@@ -49,9 +49,5 @@ export const formatEffortLabel = (variant?: string) => {
     if (!variant || variant.trim().length === 0) {
         return 'Default';
     }
-    const trimmed = variant.trim();
-    if (/^\d+(\.\d+)?$/.test(trimmed)) {
-        return trimmed;
-    }
-    return capitalizeLabel(trimmed);
+    return variant.trim();
 };

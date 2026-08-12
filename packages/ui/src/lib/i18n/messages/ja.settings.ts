@@ -1400,7 +1400,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.imageInputInfo': 'このモデルが画像を受け付けるかどうかを指定します。「対応」を選ぶと、テキストと画像の入力モダリティが追加されます。',
   'settings.providers.page.custom.models.reasoningInfo': 'このモデルが推論に対応しているかどうかを指定します。',
   'settings.providers.page.custom.models.toolCallingInfo': 'このモデルがツール呼び出しに対応しているかどうかを指定します。',
-  'settings.providers.page.custom.models.thinkingLevelsInfo': 'OpenAI 互換の推論エフォート値をカンマ区切りで指定します。各値は選択可能なモデルバリアントになります。',
+  'settings.providers.page.custom.models.thinkingLevelsInfo': '選択したプロトコルとモデルが対応する推論エフォート値をカンマ区切りで指定します。各値は選択可能なモデルバリアントになります。',
   'settings.providers.page.custom.models.thinkingLevelsPlaceholder': 'low, medium, high',
   'settings.providers.page.custom.models.capability.default': 'OpenCode のデフォルトを使用',
   'settings.providers.page.custom.models.capability.supported': '対応',
