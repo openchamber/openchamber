@@ -1539,6 +1539,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.thinkingBlock.collapseLabel': '收起',
   'chat.thinkingBlock.turn': '{count} 轮',
   'chat.thinkingBlock.turns': '{count} 轮',
+  'chat.thinkingBlock.tool': '{count} 个工具',
+  'chat.thinkingBlock.tools': '{count} 个工具',
   'chat.thinkingBlock.expandAria': '显示工作步骤',
   'chat.thinkingBlock.collapseAria': '隐藏工作步骤',
   'chat.goal.dialog.titleCreate': '设置会话目标',

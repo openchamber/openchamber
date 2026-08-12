@@ -1569,6 +1569,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.thinkingBlock.collapseLabel': '折りたたむ',
   'chat.thinkingBlock.turn': '{count} ターン',
   'chat.thinkingBlock.turns': '{count} ターン',
+  'chat.thinkingBlock.tool': '{count} ツール',
+  'chat.thinkingBlock.tools': '{count} ツール',
   'chat.thinkingBlock.expandAria': '作業手順を表示',
   'chat.thinkingBlock.collapseAria': '作業手順を非表示',
   'chat.goal.dialog.titleCreate': 'セッションゴールを設定',

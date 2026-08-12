@@ -1420,6 +1420,8 @@ export const dict = {
   'chat.thinkingBlock.collapseLabel': 'Einklappen',
   'chat.thinkingBlock.turn': '{count} Runde',
   'chat.thinkingBlock.turns': '{count} Runden',
+  'chat.thinkingBlock.tool': '{count} Werkzeug',
+  'chat.thinkingBlock.tools': '{count} Werkzeuge',
   'chat.thinkingBlock.expandAria': 'Arbeitsschritte anzeigen',
   'chat.thinkingBlock.collapseAria': 'Arbeitsschritte ausblenden',
   'chat.goal.dialog.titleCreate': 'Sitzungsziel festlegen',

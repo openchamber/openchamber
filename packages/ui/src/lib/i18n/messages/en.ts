@@ -1573,6 +1573,8 @@ export const dict = {
   'chat.thinkingBlock.collapseLabel': 'Collapse',
   'chat.thinkingBlock.turn': '{count} turn',
   'chat.thinkingBlock.turns': '{count} turns',
+  'chat.thinkingBlock.tool': '{count} tool',
+  'chat.thinkingBlock.tools': '{count} tools',
   'chat.thinkingBlock.expandAria': 'Show working steps',
   'chat.thinkingBlock.collapseAria': 'Hide working steps',
   'chat.goal.dialog.titleCreate': 'Set Session Goal',

@@ -1551,6 +1551,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.thinkingBlock.collapseLabel": "Згорнути",
   "chat.thinkingBlock.turn": "{count} хід",
   "chat.thinkingBlock.turns": "{count} ходи",
+  "chat.thinkingBlock.tool": "{count} інструмент",
+  "chat.thinkingBlock.tools": "{count} інструменти",
   "chat.thinkingBlock.expandAria": "Показати робочі кроки",
   "chat.thinkingBlock.collapseAria": "Приховати робочі кроки",
   "chat.goal.dialog.titleCreate": "Встановити ціль сесії",

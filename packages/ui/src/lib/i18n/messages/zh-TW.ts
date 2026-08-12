@@ -1543,6 +1543,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.thinkingBlock.collapseLabel': '收起',
   'chat.thinkingBlock.turn': '{count} 輪',
   'chat.thinkingBlock.turns': '{count} 輪',
+  'chat.thinkingBlock.tool': '{count} 個工具',
+  'chat.thinkingBlock.tools': '{count} 個工具',
   'chat.thinkingBlock.expandAria': '顯示工作步驟',
   'chat.thinkingBlock.collapseAria': '隱藏工作步驟',
   'chat.goal.dialog.titleCreate': '設定工作階段目標',

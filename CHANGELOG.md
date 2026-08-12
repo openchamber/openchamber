@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Usage: quota limits enabled for display now refresh every three minutes on desktop, mobile, and VS Code, with a manual refresh action available at any time.
+- Chat: when a session goes idle, the completed working turns that preceded the latest one are folded into a single collapsible Thinking block showing the turn, tool, and elapsed-time summary; user messages stay visible and the block expands back to the full per-turn view (thanks to @Dawnfz-Lenfeng).
 
 ## [1.18.2] - 2026-08-10
 

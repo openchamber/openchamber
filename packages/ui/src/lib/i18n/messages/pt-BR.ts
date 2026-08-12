@@ -1551,6 +1551,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.thinkingBlock.collapseLabel": "Recolher",
   "chat.thinkingBlock.turn": "{count} turno",
   "chat.thinkingBlock.turns": "{count} turnos",
+  "chat.thinkingBlock.tool": "{count} ferramenta",
+  "chat.thinkingBlock.tools": "{count} ferramentas",
   "chat.thinkingBlock.expandAria": "Mostrar etapas de trabalho",
   "chat.thinkingBlock.collapseAria": "Ocultar etapas de trabalho",
   "chat.goal.dialog.titleCreate": "Definir objetivo da sessão",

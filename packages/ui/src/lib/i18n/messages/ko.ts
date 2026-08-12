@@ -1575,6 +1575,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.thinkingBlock.collapseLabel': '접기',
   'chat.thinkingBlock.turn': '{count} 턴',
   'chat.thinkingBlock.turns': '{count} 턴',
+  'chat.thinkingBlock.tool': '{count} 도구',
+  'chat.thinkingBlock.tools': '{count} 도구',
   'chat.thinkingBlock.expandAria': '작업 단계 표시',
   'chat.thinkingBlock.collapseAria': '작업 단계 숨기기',
   'chat.goal.dialog.titleCreate': '세션 목표 설정',

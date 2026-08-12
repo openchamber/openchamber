@@ -2266,6 +2266,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.thinkingBlock.collapseLabel': 'Zwiń',
   'chat.thinkingBlock.turn': '{count} runda',
   'chat.thinkingBlock.turns': '{count} rund',
+  'chat.thinkingBlock.tool': '{count} narzędzie',
+  'chat.thinkingBlock.tools': '{count} narzędzi',
   'chat.thinkingBlock.expandAria': 'Pokaż kroki pracy',
   'chat.thinkingBlock.collapseAria': 'Ukryj kroki pracy',
   'chat.goal.dialog.titleCreate': 'Ustaw cel sesji',

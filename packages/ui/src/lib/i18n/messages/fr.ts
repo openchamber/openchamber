@@ -1386,6 +1386,8 @@ export const dict = {
   'chat.thinkingBlock.collapseLabel': 'Réduire',
   'chat.thinkingBlock.turn': '{count} tour',
   'chat.thinkingBlock.turns': '{count} tours',
+  'chat.thinkingBlock.tool': '{count} outil',
+  'chat.thinkingBlock.tools': '{count} outils',
   'chat.thinkingBlock.expandAria': 'Afficher les étapes de travail',
   'chat.thinkingBlock.collapseAria': 'Masquer les étapes de travail',
   'chat.goal.dialog.titleCreate': 'Définir un objectif de session',

@@ -104,6 +104,11 @@ describe('formatCompactDuration', () => {
         expect(formatCompactDuration(2 * 3600_000 + 15 * 60_000)).toBe('2h 15m');
     });
 
+    test('rounds boundary spans without emitting 59m 60s', () => {
+        expect(formatCompactDuration(59 * 60_000 + 59_600)).toBe('1h 0m');
+        expect(formatCompactDuration(59_600)).toBe('1m');
+    });
+
     test('clamps negative durations to zero', () => {
         expect(formatCompactDuration(-1000)).toBe('0.0s');
     });

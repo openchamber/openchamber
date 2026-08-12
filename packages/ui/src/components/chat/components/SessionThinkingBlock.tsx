@@ -26,6 +26,11 @@ export const SessionThinkingBlock: React.FC<SessionThinkingBlockProps> = React.m
                 ? t('chat.thinkingBlock.turn', { count: summary.collapsedTurnCount })
                 : t('chat.thinkingBlock.turns', { count: summary.collapsedTurnCount }),
         ];
+        if (summary.toolCallCount > 0) {
+            parts.push(summary.toolCallCount === 1
+                ? t('chat.thinkingBlock.tool', { count: summary.toolCallCount })
+                : t('chat.thinkingBlock.tools', { count: summary.toolCallCount }));
+        }
         const duration = formatThinkingDuration(summary);
         if (duration) {
             parts.push(duration);
