@@ -306,6 +306,9 @@ const readDesktopMinimizeToTrayStatus = () => {
   };
 };
 
+// Close-to-tray gate. The persisted key is still `desktopMinimizeToTrayEnabled`
+// (settings written by earlier versions), but the behavior it controls is the
+// window close path only; minimize stays a normal taskbar/dock minimize.
 const shouldHideMainWindowToTray = (browserWindow) => {
   if (process.platform !== 'win32' && process.platform !== 'linux') return false;
   if (!state.trayController) return false;
@@ -4398,14 +4401,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
       return null;
 
+    // Minimize always goes to the taskbar/dock, even with tray background mode
+    // on: hiding the window here would drop the taskbar entry and make the
+    // in-app minimize button behave differently from the native one. Only
+    // closing hands the window to the tray.
     case 'desktop_minimize_current_window':
       if (browserWindow && !browserWindow.isDestroyed()) {
-        if (shouldHideMainWindowToTray(browserWindow)) {
-          debounceWindowStatePersist(browserWindow, true);
-          browserWindow.hide();
-        } else {
-          browserWindow.minimize();
-        }
+        browserWindow.minimize();
       }
       return null;
 
