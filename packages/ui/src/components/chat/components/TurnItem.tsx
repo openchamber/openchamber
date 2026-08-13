@@ -17,6 +17,11 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, stickyUserHeader = true, rend
             data-turn-id={turn.turnId}
             data-scroll-spy-id={turn.turnId}
         >
+            {/* Document-flow start of the turn. position:sticky never changes
+                layout position, but this zero-size marker is a stable sibling
+                of both the sticky header and the assistant block — its top is
+                the turn's true flow start, unaffected by the sticky offset. */}
+            <div data-chat-turn-flow-start="true" aria-hidden="true" />
             {stickyUserHeader ? (
                 <div className="sticky top-0 z-20 relative bg-[var(--surface-background)] [overflow-anchor:none]">
                     <div className="relative z-10">

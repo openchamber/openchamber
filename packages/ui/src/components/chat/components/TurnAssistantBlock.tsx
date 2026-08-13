@@ -9,7 +9,7 @@ interface TurnAssistantBlockProps {
 
 const TurnAssistantBlock: React.FC<TurnAssistantBlockProps> = ({ assistantMessages, renderMessage }) => {
     return (
-        <div className="relative z-0">
+        <div className="relative z-0" data-chat-assistant-block="true">
             {assistantMessages.map((message) => renderMessage(message))}
         </div>
     );

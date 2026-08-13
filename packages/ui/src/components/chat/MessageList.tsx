@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
-import { elementScroll, useVirtualizer as useTanstackVirtualizer, type ReactVirtualizer, type VirtualItem } from '@tanstack/react-virtual';
+import { useVirtualizer as useTanstackVirtualizer, type ReactVirtualizer, type VirtualItem } from '@tanstack/react-virtual';
 
 import ChatMessage from './ChatMessage';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
@@ -8,6 +8,23 @@ import TurnItem from './components/TurnItem';
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
+import { useConversationResizeAnchor } from './hooks/useConversationResizeAnchor';
+import { extendHeldRange } from './lib/conversationResizeLayout';
+
+// The bun patch (bun-patches/@tanstack+virtual-core+3.17.3.patch) adds
+// suppressScrollAdjustments to the virtualizer options so the resize
+// transaction can stop BOTH TanStack scroll-adjustment branches (end-anchor
+// "keep at bottom" and above-viewport item-size compensation). Declare the
+// option here for the type-checker (react-virtual re-exports VirtualizerOptions
+// from virtual-core via `export *`).
+declare module '@tanstack/react-virtual' {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- generic names must match the merged interface exactly
+    interface VirtualizerOptions<TScrollElement extends Element | Window, TItemElement extends Element> {
+        /** OpenChamber patch: when true, resizeItem never writes scrollTop
+         *  (the anchor controller is the only scroll writer mid-transaction). */
+        suppressScrollAdjustments?: boolean;
+    }
+}
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
 import { getNormalizedMessageForDisplay, hasCompactionPart } from './lib/messageDisplayNormalization';
@@ -21,6 +38,13 @@ import type { StreamPhase } from './message/types';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionParts } from '@/sync/sync-context';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import {
+    getResizeInteractionPhase,
+    isResizeSettling,
+    registerResizeFinalizer,
+    subscribeResizeInteraction,
+} from '@/lib/resizeInteraction';
+import { recordPerformanceTraceEvent } from '@/stores/utils/performanceTrace';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
 import {
     USER_SHELL_MARKER,
@@ -41,6 +65,70 @@ const sameKeys = (a: readonly string[] | undefined, b: readonly string[] | undef
     return a.every((key, index) => key === b[index]);
 };
 
+// --- Resize anchor (pure layout model) --------------------------------------
+// Semantic anchor kept stable across the WHOLE resize transaction. The pure
+// layout math lives in ./lib/resizeAnchorLayout (DOM-free, unit-tested); the
+// component owns the transaction height model (cache-seeded Map over ALL
+// render entries + a frozen estimate) and the DOM adapter that reads mounted
+// row heights. Two modes:
+//   - bottom:  the list is genuinely bottom-following (<= 24px from bottom);
+//              keep the distance from the bottom constant.
+//   - entry:   a stable render-entry key (turn OR ungrouped row) the user was
+//              reading; the entry's layout top must stay pinned. Anchored on
+//              the outer non-sticky virtual row, never on the sticky user
+//              header's [data-message-id] (its visual top is CSS-clipped and
+//              is not a document coordinate). The conversation-boundary anchor
+//              lives in ./hooks/useConversationResizeAnchor (DOM controller)
+//              and ./lib/conversationResizeAnchor (pure math).
+
+/** DOM adapter: read the mounted virtual rows as {key, index, height}. Only
+ *  direct children marked [data-chat-virtual-row] qualify (nested virtualized
+ *  code rows also use [data-index]); index must be in range, unique, and the
+ *  data-turn-entry must match the entry key at that index. */
+const readMountedRowMeasurements = (
+    liveContent: HTMLElement | null,
+    entries: readonly RenderEntry[],
+): Array<{ key: string; index: number; height: number }> => {
+    if (!liveContent) {
+        return [];
+    }
+    const seen = new Set<number>();
+    const out: Array<{ key: string; index: number; height: number }> = [];
+    for (const child of Array.from(liveContent.children)) {
+        if (!(child instanceof HTMLElement)) {
+            continue;
+        }
+        if (child.getAttribute('data-chat-virtual-row') !== 'true') {
+            continue;
+        }
+        const index = Number(child.getAttribute('data-index'));
+        if (!Number.isFinite(index) || index < 0 || index >= entries.length) {
+            continue;
+        }
+        const expectedKey = entries[index]?.key;
+        if (expectedKey === undefined || child.getAttribute('data-turn-entry') !== expectedKey) {
+            continue;
+        }
+        if (seen.has(index)) {
+            continue;
+        }
+        seen.add(index);
+        const height = Math.round(child.offsetHeight);
+        if (height > 0) {
+            out.push({ key: expectedKey, index, height });
+        }
+    }
+    return out;
+};
+
+const isListVisibleForResize = (scroller: HTMLElement): boolean => {
+    if (typeof document !== 'undefined' && document.hidden) {
+        return false;
+    }
+    const rect = scroller.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+};
+
 // --- History virtualization (@tanstack/react-virtual) ----------------------
 // The history list virtualizes with @tanstack/react-virtual on all surfaces:
 // its core has bottom anchoring (anchorTo: 'end'), key-stable prepend
@@ -51,12 +139,19 @@ type TanstackVirtualizerInstance = ReactVirtualizer<HTMLDivElement, HTMLDivEleme
 type HistoryEngine = 'none' | 'tanstack';
 
 const TANSTACK_ESTIMATED_ENTRY_SIZE = 320;
-const TANSTACK_OVERSCAN = 8;
+// Overscan is FIXED for idle/dragging/finalizing (no stage switching): a
+// drag->finalize overscan expansion mounts fresh rows with stale widths and
+// lets TanStack re-adjust scrollTop — the "release jump". 2 keeps the anchor
+// turn's row and its neighbors mounted during a drag; if fast scrolling ever
+// shows blank space, raise the fixed value (3/4), never switch per phase.
+const TANSTACK_OVERSCAN = 2;
 // Touch flings cover more distance between paints than desktop wheels; a
 // larger window keeps fast mobile scrolling over mounted rows.
 const TANSTACK_MOBILE_OVERSCAN = 16;
 const resolveTanstackOverscan = (): number => (
-    isMobileSurfaceRuntime() ? TANSTACK_MOBILE_OVERSCAN : TANSTACK_OVERSCAN
+    isMobileSurfaceRuntime()
+        ? TANSTACK_MOBILE_OVERSCAN
+        : TANSTACK_OVERSCAN
 );
 // Post-prepend anchor hold: measurements of freshly
 // prepended rows settle over multiple frames, so a single restore can be
@@ -367,6 +462,9 @@ interface MessageListProps {
     scrollToBottom?: () => void;
     scrollRef?: React.RefObject<HTMLDivElement | null>;
     directory?: string;
+    /** True while auto-follow is pinned (real bottom-following). Drives the
+     *  resize anchor: only then may the controller use bottom mode. */
+    isPinned?: boolean;
 }
 
 export interface MessageListHandle {
@@ -937,6 +1035,9 @@ type StaticHistoryListProps = {
     scrollRef?: React.RefObject<HTMLDivElement | null>;
     registerTanstackVirtualizer?: (virtualizer: TanstackVirtualizerInstance | null) => void;
     virtualizerKey: string;
+    /** Held contiguous virtual range during a resize transaction (read by the
+     *  rangeExtractor; null when idle). */
+    resizeHeldRangeRef?: React.RefObject<{ start: number; end: number } | null>;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: () => void;
@@ -950,7 +1051,7 @@ type StaticHistoryListProps = {
     reviewTransferDirection?: ReviewTransferDirection | null;
 };
 
-const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, registerTanstackVirtualizer, virtualizerKey, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, reviewTransferDirection }: StaticHistoryListProps) => {
+const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, registerTanstackVirtualizer, virtualizerKey, resizeHeldRangeRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, reviewTransferDirection }: StaticHistoryListProps) => {
     const isTanstack = engine === 'tanstack';
 
     // --- Quiet-window prepend (mobile) --------------------------------------
@@ -960,6 +1061,15 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
     const lastScrollAtRef = React.useRef(0);
     const holdSinceRef = React.useRef<number | null>(null);
     const deferPrepends = isTanstack && isMobileSurfaceRuntime();
+
+    React.useEffect(() => {
+        const element = scrollRef?.current;
+        // Stable selector for the performance recorder's targeted view probe
+        // (it must not scan the whole DOM on every heartbeat).
+        if (element && !element.hasAttribute('data-message-scroll-container')) {
+            element.setAttribute('data-message-scroll-container', '');
+        }
+    }, [scrollRef]);
 
     React.useEffect(() => {
         if (!deferPrepends) return;
@@ -1040,27 +1150,115 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
     ));
 
     const sizeContainerRef = React.useRef<HTMLDivElement | null>(null);
+    // Inner flow container (the paddingTop wrapper).
+    const liveContentRef = React.useRef<HTMLDivElement | null>(null);
     // Adaptive estimate: rows this session has actually measured are a far
     // better predictor for the still-unmeasured ones than a fixed constant.
     // Smaller estimate error → smaller anchor corrections when prepended rows
     // measure in → less visible drift. The ref keeps estimateSize's identity
     // stable so updating the average never triggers a global remeasure.
     const estimatedEntrySizeRef = React.useRef(TANSTACK_ESTIMATED_ENTRY_SIZE);
+    // Counts virtualizer.measure() calls per resize transaction. The
+    // finalization must NOT call measure() at all (it clears the whole cache).
+    const measureCountRef = React.useRef(0);
+    // Counts targeted resizeItem calls per transaction (acceptance: <= number
+    // of mounted rows, one React commit).
+    const resizeItemCountRef = React.useRef(0);
+    // Subscribe to the full transaction phase (not just a settling boolean):
+    // dragging freezes the size cache, finalizing owns the single cache commit.
+    const resizePhase = React.useSyncExternalStore(
+        subscribeResizeInteraction,
+        getResizeInteractionPhase,
+        getResizeInteractionPhase,
+    );
+    // Synchronous phase mirror for high-frequency callbacks (ResizeObserver,
+    // rAF): writing during render means the ref is never a commit behind the
+    // actual phase, so a queued callback cannot treat finalizing as dragging.
+    const phaseRef = React.useRef(resizePhase);
+    phaseRef.current = resizePhase;
     const tanstackVirtualizer = useTanstackVirtualizer<HTMLDivElement, HTMLDivElement>({
         count: renderEntries.length,
         enabled: isTanstack,
         getScrollElement: () => scrollRef?.current ?? null,
+        // While dragging/finalizing, disable TanStack's end-anchored scroll
+        // following. -1 makes wasAtEnd false even at the exact bottom (a 0
+        // threshold would still match 0 <= 0); the patched core also honors
+        // suppressScrollAdjustments to stop both adjustment branches.
+        scrollEndThreshold: resizePhase !== 'idle' ? -1 : TANSTACK_AT_END_THRESHOLD_PX,
+        suppressScrollAdjustments: resizePhase !== 'idle',
         estimateSize: () => estimatedEntrySizeRef.current,
         overscan: resolveTanstackOverscan(),
-        scrollToFn: (offset, options, instance) => {
-            // Expose the new total height before core writes an anchor
-            // correction so the browser does not clamp the offset to the old
-            // height.
-            const sizeElement = sizeContainerRef.current;
-            if (sizeElement) sizeElement.style.height = `${instance.getTotalSize()}px`;
-            elementScroll(offset, options, instance);
+        // During a resize transaction the anchor turn and its previous
+        // assistant must never unmount (a large reflow would otherwise drop
+        // them and flash unrelated rows). The held range is a CONTIGUOUS
+        // window that only ever extends — rows render in normal flow inside
+        // one paddingTop wrapper, so a non-contiguous index set would collapse
+        // the intermediate space.
+        rangeExtractor: (range) => {
+            const held = resizeHeldRangeRef?.current;
+            if (held) {
+                // Monotonic extension via the shared pure helper; the merged
+                // range is written BACK so later frames keep extending.
+                const merged = extendHeldRange(
+                    held,
+                    range.startIndex - range.overscan,
+                    range.endIndex + range.overscan,
+                    range.count,
+                );
+                held.start = merged.start;
+                held.end = merged.end;
+                const arr: number[] = [];
+                for (let index = merged.start; index <= merged.end; index += 1) {
+                    arr.push(index);
+                }
+                return arr;
+            }
+            const start = Math.max(range.startIndex - range.overscan, 0);
+            const end = Math.min(range.endIndex + range.overscan, range.count - 1);
+            const arr: number[] = [];
+            for (let index = start; index <= end; index += 1) {
+                arr.push(index);
+            }
+            return arr;
         },
         getItemKey: (index) => entriesRef.current[index]?.key ?? `index:${index}`,
+        // While a transaction is active, record the real blockSize into the
+        // final-commit map and return the FROZEN cached size so TanStack's own
+        // resizeItem for this measurement is a no-op (rows reflow to the live
+        // width every frame, but writing those into the cache would make
+        // totalSize swing and fight the anchor controller). The conversation-
+        // seam controller batches the real heights itself (one flushSync per
+        // frame) and the finalizer is only a safety net at release.
+        measureElement: (element, entry, instance) => {
+            const index = instance.indexFromElement(element);
+            const key = String(instance.options.getItemKey(index));
+
+            if (phaseRef.current !== 'idle') {
+                const cached = instance.itemSizeCache.get(key);
+                if (cached !== undefined) {
+                    return cached;
+                }
+                const liveHeight = element.offsetHeight;
+                if (liveHeight > 0) {
+                    return liveHeight;
+                }
+                return instance.options.estimateSize(index);
+            }
+
+            const borderBox = entry?.borderBoxSize?.[0];
+            if (borderBox) {
+                return Math.round(borderBox.blockSize);
+            }
+
+            if (!entry) {
+                const cachedSize = instance.itemSizeCache.get(key);
+                if (cachedSize !== undefined) {
+                    return cachedSize;
+                }
+            }
+
+            return element.offsetHeight;
+        },
         // Bottom-anchored chat semantics: prepending older entries above the
         // viewport must not move what the user is reading, and iOS-specific
         // touch/momentum deferral for those adjustments lives in the core.
@@ -1075,6 +1273,11 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
     // app-level auto-follow owns pinning, so skip there too instead of
     // double-writing. (This is an instance field, not a constructor option.)
     tanstackVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+        // During drag/settling, the anchor-based compensation in the settle
+        // timeout below owns scroll stability (it tracks a specific visible
+        // row, like ChatGPT's thread-virtualizer). Disable tanstack's
+        // above-viewport heuristic here to avoid double compensation.
+        if (isResizeSettling()) return false;
         if (instance.isAtEnd(TANSTACK_AT_END_THRESHOLD_PX)) return false;
         const firstVisibleIndex = instance.range?.startIndex;
         return firstVisibleIndex !== undefined && item.index < firstVisibleIndex;
@@ -1082,6 +1285,11 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
 
     React.useEffect(() => {
         if (!isTanstack) return;
+        if (phaseRef.current !== 'idle') {
+            // The resize transaction froze the estimate; updating it mid-drag
+            // would re-value every unmeasured row and fake an anchor mutation.
+            return;
+        }
         const sizes = tanstackVirtualizer.itemSizeCache;
         if (sizes.size >= TANSTACK_ESTIMATE_MIN_SAMPLES) {
             let total = 0;
@@ -1105,6 +1313,102 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
             registerTanstackVirtualizer?.(null);
         };
     }, [isTanstack, registerTanstackVirtualizer, tanstackVirtualizer, virtualizerKey]);
+
+    // Verify after the final commit that the size container height matches the
+    // virtual total (<= 1px) — a cheap guard against cache/height divergence.
+    const verifyFinalizedHeights = React.useCallback((scroller: HTMLElement | null) => {
+        const sizeEl = sizeContainerRef.current;
+        if (!scroller || !sizeEl) {
+            return;
+        }
+        const total = tanstackVirtualizer.getTotalSize();
+        const containerHeight = Number.parseFloat(sizeEl.style.height || '0');
+        if (Number.isFinite(containerHeight) && Math.abs(containerHeight - total) > 1) {
+            recordPerformanceTraceEvent(
+                'ui.message_list.final_height_mismatch',
+                { containerHeight, total },
+                0,
+                undefined,
+            );
+        }
+    }, [tanstackVirtualizer]);
+
+    // Register the single finalization for this transaction. The anchor
+    // controller (useConversationResizeAnchor) committed the real heights
+    // per applied-width frame; this finalizer is a ZERO-CHANGE verifier:
+    // it only re-commits rows whose cached height still differs by > 0.5px
+    // (a safety net for rows that were never mounted during the drag), then
+    // verifies height/cache consistency and records diagnostics. Normally
+    // finalizeChangedRowCount is 0 — the release must not trigger a new
+    // layout-changing commit.
+    const finalizeResize = React.useCallback((signal: AbortSignal) => {
+        return new Promise<void>((resolve) => {
+            if (typeof window === 'undefined') {
+                resolve();
+                return;
+            }
+            const scroller = scrollRef?.current ?? null;
+            requestAnimationFrame(() => {
+                if (signal.aborted) {
+                    resolve();
+                    return;
+                }
+                // READ-ONLY verifier: the anchor controller already committed
+                // the real heights per applied-width frame (the final width
+                // was applied synchronously at pointerup). The finalizer must
+                // NOT re-commit mounted rows — any remaining cache/real
+                // mismatch is a hard error that fails acceptance.
+                const rows = readMountedRowMeasurements(liveContentRef.current, entriesRef.current);
+                const mismatched = rows.filter((row) => {
+                    const cached = tanstackVirtualizer.itemSizeCache.get(entriesRef.current[row.index]?.key ?? row.index);
+                    return typeof cached !== 'number' || Math.abs(cached - row.height) > 0.5;
+                });
+                verifyFinalizedHeights(scroller);
+                recordPerformanceTraceEvent(
+                    'ui.message_list.finalize',
+                    {
+                        changedRowCount: mismatched.length,
+                        mountedRowCount: rows.length,
+                        resizeItemCount: resizeItemCountRef.current,
+                    },
+                    0,
+                    undefined,
+                );
+                // Hard acceptance invariants: zero global measure() calls per
+                // transaction (it would clear the cache).
+                if (measureCountRef.current !== 0) {
+                    recordPerformanceTraceEvent(
+                        'ui.message_list.global_measure',
+                        { count: measureCountRef.current },
+                        0,
+                        undefined,
+                    );
+                }
+                resolve();
+            });
+        });
+    }, [entriesRef, liveContentRef, scrollRef, tanstackVirtualizer, verifyFinalizedHeights]);
+
+    React.useEffect(() => {
+        if (!isTanstack) return;
+        return subscribeResizeInteraction((active) => {
+            if (!active) {
+                // Release/cancel: the transaction state machine runs the
+                // registered finalizer (single final-height commit).
+                return;
+            }
+            const scroller = scrollRef?.current ?? null;
+            if (!scroller || !isListVisibleForResize(scroller)) {
+                // Hidden page or background list: no finalizer is registered,
+                // so the transaction ends on the next frame.
+                return;
+            }
+            measureCountRef.current = 0;
+            resizeItemCountRef.current = 0;
+            registerResizeFinalizer(finalizeResize);
+        });
+    }, [finalizeResize, isTanstack, scrollRef]);
+
 
     const renderEntry = React.useCallback((entry: RenderEntry) => {
         return (
@@ -1135,6 +1439,7 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
                 {renderEntries.map((entry) => (
                     <div
                         key={entry.key}
+                        data-chat-resize-row="true"
                         data-turn-entry={entry.key}
                     >
                         {renderEntry(entry)}
@@ -1156,14 +1461,32 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
         // changes when the virtual window shifts — not per scroll frame — so the
         // layout cost is negligible.
         return (
-            <div ref={sizeContainerRef} className="relative w-full" style={{ height: tanstackVirtualizer.getTotalSize() }}>
-                <div style={{ paddingTop: `${startOffset}px` }}>
+            <div
+                ref={sizeContainerRef}
+                data-vlist-size-container="true"
+                className="relative w-full"
+                style={{
+                    height: tanstackVirtualizer.getTotalSize(),
+                }}
+            >
+                <div ref={liveContentRef} style={{ paddingTop: `${startOffset}px` }}>
                     {virtualItems.map((item) => {
                         const entry = renderEntries[item.index];
                         if (!entry) return null;
+                        // NOTE: no content-visibility on virtual rows. The
+                        // virtualizer's range/size are estimate-derived during
+                        // a resize, so "overscan" here can misjudge physical
+                        // visibility and skip layout of rows that are actually
+                        // on screen (the mixed new-wrap/old-height state).
+                        // Tightening the drag overscan (0) is the controlled
+                        // knob instead; re-introduce content-visibility only
+                        // from a real IntersectionObserver if profiling shows
+                        // it is needed again.
                         return (
                             <div
                                 key={entry.key}
+                                data-chat-virtual-row="true"
+                                data-chat-resize-row="true"
                                 data-index={item.index}
                                 ref={tanstackVirtualizer.measureElement}
                                 data-turn-entry={entry.key}
@@ -1230,23 +1553,29 @@ const StreamingTailContent: React.FC<{
     }), [activeStreamingMessageId, chatRenderMode, entry, liveParts, showTurnChangedFiles, planModeEnabled]);
 
     return (
-        <MessageListEntry
-            entry={liveEntry}
-            onMessageContentChange={onMessageContentChange}
-            getAnimationHandlers={getAnimationHandlers}
-            scrollToBottom={scrollToBottom}
-            stickyUserHeader={stickyUserHeader}
-            sessionIsWorking={sessionIsWorking}
-            defaultActivityExpanded={defaultActivityExpanded}
-            turnUiStates={turnUiStates}
-            onToggleTurnGroup={onToggleTurnGroup}
-            chatRenderMode={chatRenderMode}
-            shouldAnimateUserMessage={shouldAnimateUserMessage}
-            onUserAnimationConsumed={onUserAnimationConsumed}
-            activeStreamingMessageId={activeStreamingMessageId}
-            activeStreamingPhase={activeStreamingPhase}
-            reviewTransferDirection={reviewTransferDirection}
-        />
+        // The streaming tail participates in the same seam anchor model with a
+        // stable key (explicit data-turn-entry, never falling back to the raw
+        // turn id). It has no virtual index; the held range keeps the last
+        // history row mounted and the tail itself is always rendered.
+        <div data-chat-resize-row="true" data-turn-entry={entry.key}>
+            <MessageListEntry
+                entry={liveEntry}
+                onMessageContentChange={onMessageContentChange}
+                getAnimationHandlers={getAnimationHandlers}
+                scrollToBottom={scrollToBottom}
+                stickyUserHeader={stickyUserHeader}
+                sessionIsWorking={sessionIsWorking}
+                defaultActivityExpanded={defaultActivityExpanded}
+                turnUiStates={turnUiStates}
+                onToggleTurnGroup={onToggleTurnGroup}
+                chatRenderMode={chatRenderMode}
+                shouldAnimateUserMessage={shouldAnimateUserMessage}
+                onUserAnimationConsumed={onUserAnimationConsumed}
+                activeStreamingMessageId={activeStreamingMessageId}
+                activeStreamingPhase={activeStreamingPhase}
+                reviewTransferDirection={reviewTransferDirection}
+            />
+        </div>
     );
 };
 
@@ -1264,6 +1593,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     scrollToBottom,
     scrollRef,
     directory,
+    isPinned = false,
 }, ref) => {
     streamPerfMark('react.message_list_render');
     streamPerfCount('ui.message_list.render');
@@ -1358,6 +1688,29 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }), [messages]);
 
     const historyContentRef = React.useRef<HTMLDivElement | null>(null);
+    // Root of every render surface (virtualized history, short list, streaming
+    // tail) — the conversation-boundary anchor queries turn markers here.
+    const resizeRootRef = React.useRef<HTMLDivElement | null>(null);
+    const tanstackVirtualizerRef = React.useRef<TanstackVirtualizerInstance | null>(null);
+    // Held contiguous virtual range for the resize transaction (seeded by the
+    // anchor hook on capture, cleared at idle); the virtualizer's rangeExtractor
+    // merges it monotonically so the anchor turn and its previous assistant
+    // never unmount mid-drag.
+    const resizeHeldRangeRef = React.useRef<{ start: number; end: number } | null>(null);
+    // Authoritative entry key sequence for the layout transaction (refreshed
+    // every render, including the streaming tail).
+    const resizeEntryKeysRef = React.useRef<readonly string[]>([]);
+    const localScrollRef = React.useRef<HTMLDivElement | null>(null);
+    const listScrollRef = scrollRef ?? localScrollRef;
+    useConversationResizeAnchor({
+        scrollerRef: listScrollRef,
+        containerRef: resizeRootRef,
+        isPinned,
+        sessionKey,
+        virtualizerRef: tanstackVirtualizerRef,
+        heldRangeRef: resizeHeldRangeRef,
+        entryKeysRef: resizeEntryKeysRef,
+    });
     const resolveScrollContainer = React.useCallback((): HTMLDivElement | null => {
         if (scrollRef?.current) {
             return scrollRef.current;
@@ -1492,7 +1845,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const shouldVirtualizeHistory = isMobileSurfaceRuntime()
         || historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
     const historyEngine: HistoryEngine = shouldVirtualizeHistory ? 'tanstack' : 'none';
-    const tanstackVirtualizerRef = React.useRef<TanstackVirtualizerInstance | null>(null);
     const registerTanstackVirtualizer = React.useCallback((virtualizer: TanstackVirtualizerInstance | null) => {
         tanstackVirtualizerRef.current = virtualizer;
     }, []);
@@ -1500,6 +1852,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const allEntries = React.useMemo(() => {
         return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
     }, [historyEntries, trailingStreamingEntry]);
+    // Authoritative key sequence for the resize layout transaction.
+    resizeEntryKeysRef.current = allEntries.map((entry) => entry.key);
 
     const stableHistoryContentChange = useStableEvent((reason?: ContentChangeReason) => {
         onMessageContentChange(reason);
@@ -1819,7 +2173,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const disableFadeIn = false;
 
     return (
-        <div>
+        <div ref={resizeRootRef}>
                 <FadeInDisabledProvider disabled={disableFadeIn}>
                     <div className="relative w-full">
                         {/* Virtualized history rows unmount/remount during scroll;
@@ -1835,6 +2189,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 scrollRef={scrollRef}
                                 registerTanstackVirtualizer={registerTanstackVirtualizer}
                                 virtualizerKey={sessionKey}
+                                resizeHeldRangeRef={resizeHeldRangeRef}
                                 onMessageContentChange={stableHistoryContentChange}
                                 getAnimationHandlers={stableGetAnimationHandlers}
                                 scrollToBottom={stableScrollToBottom}

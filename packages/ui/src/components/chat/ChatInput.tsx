@@ -2464,6 +2464,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         <>
         <form
             ref={composerFormRef}
+            data-chat-composer-occlusion="true"
             onSubmit={(e) => { e.preventDefault(); handlePrimaryAction(); }}
             className={cn(
                 "relative w-full pt-0 pb-4",

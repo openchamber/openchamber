@@ -53,6 +53,10 @@ import {
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import {
+  recordPerformanceTraceEvent,
+} from '@/stores/utils/performanceTrace';
+import { usePanelResize } from './usePanelResize';
+import {
   type PreviewElementMetadata,
   isPreviewElementMetadata,
   formatPreviewAnnotationMarkdown,
@@ -66,7 +70,6 @@ import {
 const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
-const RESIZE_FOLLOW_INTERVAL_MS = 100;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 const EMPTY_SESSION_TITLE_MAP = new Map<string, string>();
@@ -309,73 +312,36 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
   const { t } = useI18n();
   const width = useUIStore((state) => state.contextEditorTreeWidth);
   const setWidth = useUIStore((state) => state.setContextEditorTreeWidth);
-  const [isResizing, setIsResizing] = React.useState(false);
-  const startXRef = React.useRef(0);
-  const startWidthRef = React.useRef(width);
-  const liveWidthRef = React.useRef<number | null>(null);
-  const pointerIDRef = React.useRef<number | null>(null);
-  const columnRef = React.useRef<HTMLDivElement | null>(null);
+  // Same drag lifecycle as the main panels, but LOCAL: the tree column does
+  // not change the central chat width, so it publishes no global transaction.
+  const { isResizing, containerRef: columnRef, handlePointerDown, handlePointerUp, handlePointerAbort } = usePanelResize<HTMLDivElement>({
+    minWidth: EDITOR_TREE_MIN_WIDTH,
+    maxWidth: EDITOR_TREE_MAX_WIDTH,
+    onUserCommitWidth: setWidth,
+    widthCssVariable: '--oc-editor-tree-width',
+    directWidth: true,
+    reverse: true,
+    canResize: () => visible,
+    getCurrentWidth: () => width,
+  });
 
-  const clampTreeWidth = React.useCallback((value: number) => {
-    return Math.min(EDITOR_TREE_MAX_WIDTH, Math.max(EDITOR_TREE_MIN_WIDTH, Math.round(value)));
-  }, []);
+  const appliedWidth = visible ? width : 0;
 
-  const applyLiveTreeWidth = React.useCallback((nextWidth: number) => {
+  // During a live tree-column resize the width changes on every pointer move,
+  // reflowing the whole (non-virtualized) file tree each frame. Contain the
+  // column so those reflows/repaints stay inside the column subtree instead of
+  // leaking into the rest of the panel + chat. Paint containment also keeps
+  // repaints scoped to the column (mirrors the MessageList/Sidebar guards).
+  React.useEffect(() => {
     const column = columnRef.current;
     if (!column) {
       return;
     }
-    column.style.width = `${nextWidth}px`;
-    column.style.setProperty('--oc-editor-tree-width', `${nextWidth}px`);
-  }, []);
-
-  const handlePointerDown = (event: React.PointerEvent) => {
-    if (!visible) {
-      return;
-    }
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // ignore
-    }
-    pointerIDRef.current = event.pointerId;
-    setIsResizing(true);
-    startXRef.current = event.clientX;
-    startWidthRef.current = width;
-    liveWidthRef.current = width;
-    event.preventDefault();
-  };
-
-  const handlePointerMove = (event: React.PointerEvent) => {
-    if (!isResizing || pointerIDRef.current !== event.pointerId) {
-      return;
-    }
-    const delta = startXRef.current - event.clientX;
-    const nextWidth = clampTreeWidth(startWidthRef.current + delta);
-    if (liveWidthRef.current === nextWidth) {
-      return;
-    }
-    liveWidthRef.current = nextWidth;
-    applyLiveTreeWidth(nextWidth);
-  };
-
-  const handlePointerEnd = (event: React.PointerEvent) => {
-    if (pointerIDRef.current !== event.pointerId) {
-      return;
-    }
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // ignore
-    }
-    const finalWidth = clampTreeWidth(liveWidthRef.current ?? width);
-    pointerIDRef.current = null;
-    liveWidthRef.current = null;
-    setIsResizing(false);
-    setWidth(finalWidth);
-  };
-
-  const appliedWidth = visible ? width : 0;
+    column.style.contain = isResizing ? 'layout style paint' : '';
+    return () => {
+      column.style.contain = '';
+    };
+  }, [columnRef, isResizing]);
 
   return (
     <div
@@ -385,8 +351,8 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
         !visible && 'border-l-0',
       )}
       style={{
-        width: `${isResizing ? (liveWidthRef.current ?? appliedWidth) : appliedWidth}px`,
-        ['--oc-editor-tree-width' as string]: `${isResizing ? (liveWidthRef.current ?? width) : width}px`,
+        width: `${appliedWidth}px`,
+        ['--oc-editor-tree-width' as string]: `${appliedWidth}px`,
         overflowX: 'clip',
         transitionProperty: isResizing ? 'none' : 'width',
         transitionDuration: '200ms',
@@ -401,9 +367,9 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
             isResizing && 'bg-[var(--interactive-border)]'
           )}
           onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerEnd}
-          onPointerCancel={handlePointerEnd}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerAbort}
+          onLostPointerCapture={handlePointerAbort}
           role="separator"
           aria-orientation="vertical"
           aria-label={t('contextPanel.actions.resizePanelAria')}
@@ -2262,11 +2228,15 @@ export const ContextPanel: React.FC = () => {
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
-  const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
+  // Parent/available area width lives in a REF (never React state): the
+  // ResizeObserver fires per pixel during sidebar animations and must not
+  // re-render the whole panel content tree. The resize hook re-resolves
+  // follow targets per frame; only semantic state changes re-render.
+  const availablePanelAreaWidthRef = React.useRef<number | null>(null);
   const activeModeForWidth = activeTab?.mode ?? null;
   const manualWidth = activeModeForWidth ? panelState?.widthByMode?.[activeModeForWidth] : undefined;
   const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
-  const widthFallbackBase = availablePanelAreaWidth
+  const widthFallbackBase = availablePanelAreaWidthRef.current
     ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
   const width = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
   const chatSessionIDs = React.useMemo(() => {
@@ -2280,18 +2250,90 @@ export const ContextPanel: React.FC = () => {
   }, [tabs]);
   const sessionTitleById = useSessionTitleMap(directoryKey || undefined, chatSessionIDs);
 
-  const [isResizing, setIsResizing] = React.useState(false);
-  const startXRef = React.useRef(0);
-  const startWidthRef = React.useRef(width);
-  const resizingWidthRef = React.useRef<number | null>(null);
-  const activeResizePointerIDRef = React.useRef<number | null>(null);
-  const panelRef = React.useRef<HTMLElement | null>(null);
+  const { isResizing, containerRef: panelRef, handlePointerDown: handleResizeStart, handlePointerUp: handleResizeEnd, handlePointerAbort: handleResizeAbort, notifyAvailableWidthChange } = usePanelResize({
+    minWidth: CONTEXT_PANEL_MIN_WIDTH,
+    maxWidth: CONTEXT_PANEL_MAX_WIDTH,
+    // Persist the manual width on pointerup ONLY — programmatic open/close,
+    // mode switches and parent-layout follows never write widthByMode.
+    onUserCommitWidth: (finalWidth) => {
+      if (directoryKey && activeModeForWidth) {
+        setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
+      }
+    },
+    transactionSource: 'context-panel',
+    widthCssVariable: '--oc-context-panel-width',
+    reverse: true,
+    canResize: () => isOpen && !isExpanded && Boolean(directoryKey),
+    getCurrentWidth: () => width,
+    getAvailableWidth: (container) => getAvailablePanelWidth(container),
+    traceSpanName: 'ui.context_panel.resize',
+    traceContext: () => ({ mode: activeModeForWidth ?? 'unknown' }),
+    // Quick open/close toggles, MODE SWITCHES and expand/collapse go through
+    // the same per-frame width writer as a pointer drag (200ms programmatic
+    // animation) so the chat anchor controller keeps the seam stable. The key
+    // includes the mode AND the expanded state so any semantic transition
+    // re-directs the animation from the current width. Proportional (default)
+    // and expanded widths use cause 'parent-layout': while a global transaction
+    // is active the panel FOLLOWS the available area per frame without
+    // restarting an animation clock; manual widths use 'mode' (fixed animate).
+    programmaticTarget: isOpen
+      ? {
+          key: `${isExpanded ? 'expand' : 'open'}:${activeModeForWidth ?? ''}`,
+          width: isExpanded ? (availablePanelAreaWidthRef.current ?? width) : width,
+          cause: isExpanded || manualWidth === undefined ? 'parent-layout' : 'mode',
+        }
+      : {
+          key: `close:${activeModeForWidth ?? ''}`,
+          width: 0,
+          cause: 'visibility',
+        },
+    // Per-frame follow resolver: proportional widths re-resolve to the CURRENT
+    // parent width; expanded re-resolves to the full available width; manual
+    // widths and the closed state return null (no follow).
+    resolveFollowWidth: () => {
+      if (!isOpen) {
+        return null;
+      }
+      if (isExpanded) {
+        return availablePanelAreaWidthRef.current;
+      }
+      if (manualWidth !== undefined) {
+        return null;
+      }
+      const base = availablePanelAreaWidthRef.current;
+      if (base === null || base <= 0) {
+        return null;
+      }
+      return clampWidth(Math.round(widthFraction * base));
+    },
+  });
+  const handleContextPanelProfiler = React.useCallback<React.ProfilerOnRenderCallback>(
+    (_id, phase, actualDuration, baseDuration) => {
+      recordPerformanceTraceEvent(
+        'ui.profiler.context_panel',
+        {
+          phase,
+          actualDuration,
+          baseDuration,
+          mode: activeModeForWidth ?? 'none',
+          isOpen,
+          isResizing,
+          tabCount: tabs.length,
+        },
+        actualDuration,
+      );
+    },
+    [activeModeForWidth, isOpen, isResizing, tabs.length],
+  );
+  const panelContentRef = React.useRef<HTMLDivElement | null>(null);
   const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
   const chatFrameSrcByTabIDRef = React.useRef<Map<string, EmbeddedSessionChatURLCacheEntry>>(new Map());
   const wasOpenRef = React.useRef(false);
 
   // Tracks the panel area width so fraction-based surface defaults stay
-  // proportional as the window resizes; manual widths remain fixed px.
+  // proportional as the parent changes (left sidebar open/close, window
+  // resize); manual widths remain fixed px. Writes a REF and wakes the resize
+  // hook's follow loop — no React re-render per pixel.
   React.useLayoutEffect(() => {
     const parent = panelRef.current?.parentElement;
     if (!parent || typeof ResizeObserver === 'undefined') {
@@ -2299,13 +2341,14 @@ export const ContextPanel: React.FC = () => {
     }
 
     const observer = new ResizeObserver(() => {
-      setAvailablePanelAreaWidth(parent.clientWidth || null);
+      availablePanelAreaWidthRef.current = parent.clientWidth || null;
+      notifyAvailableWidthChange();
     });
     observer.observe(parent);
-    setAvailablePanelAreaWidth(parent.clientWidth || null);
+    availablePanelAreaWidthRef.current = parent.clientWidth || null;
 
     return () => observer.disconnect();
-  }, []);
+  }, [notifyAvailableWidthChange, panelRef]);
 
   React.useEffect(() => {
     if (!isOpen || wasOpenRef.current) {
@@ -2319,127 +2362,7 @@ export const ContextPanel: React.FC = () => {
 
     wasOpenRef.current = true;
     return () => window.cancelAnimationFrame(frame);
-  }, [isOpen]);
-
-  // Deferred resize: reflowing the chat column and the active surface (xterm,
-  // editor, embedded chat iframes) on every drag frame is unavoidably janky,
-  // so during the drag only a ghost guide line follows the pointer and the
-  // real width is applied once on release (riding the width transition).
-  const resizeAvailableWidthRef = React.useRef<number | null>(null);
-  // The panel content follows the guide line lazily: the real width is
-  // re-applied at most every RESIZE_FOLLOW_INTERVAL_MS and the standing
-  // 200ms width transition smooths each step, VS Code-style.
-  const resizeFollowTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const applyFollowWidth = React.useCallback(() => {
-    resizeFollowTimerRef.current = null;
-    const panel = panelRef.current;
-    const next = resizingWidthRef.current;
-    if (!panel || next === null) {
-      return;
-    }
-    panel.style.setProperty('--oc-context-panel-width', `${next}px`);
-  }, []);
-
-  React.useEffect(() => () => {
-    if (resizeFollowTimerRef.current !== null) {
-      clearTimeout(resizeFollowTimerRef.current);
-    }
-  }, []);
-
-  const clampWidthForDrag = React.useCallback((nextWidth: number) => {
-    const clamped = clampWidth(nextWidth);
-    const available = resizeAvailableWidthRef.current;
-    return available === null ? clamped : Math.min(clamped, Math.max(1, available));
-  }, []);
-
-  const handleResizeStart = React.useCallback((event: React.PointerEvent) => {
-    if (!isOpen || isExpanded || !directoryKey) {
-      return;
-    }
-
-    activeResizePointerIDRef.current = event.pointerId;
-    setIsResizing(true);
-    startXRef.current = event.clientX;
-    startWidthRef.current = width;
-    resizingWidthRef.current = width;
-    // Measure once per drag; no layout reads happen during pointermove.
-    resizeAvailableWidthRef.current = getAvailablePanelWidth(panelRef.current);
-    document.documentElement.style.cursor = 'col-resize';
-    event.preventDefault();
-  }, [directoryKey, isExpanded, isOpen, width]);
-
-  const finishResize = React.useCallback(() => {
-    // Apply the final width once, letting the regular 200ms width transition
-    // carry the panel to the release position.
-    const finalWidth = clampWidthForDrag(resizingWidthRef.current ?? width);
-    resizingWidthRef.current = null;
-    resizeAvailableWidthRef.current = null;
-    if (resizeFollowTimerRef.current !== null) {
-      clearTimeout(resizeFollowTimerRef.current);
-      resizeFollowTimerRef.current = null;
-    }
-    document.documentElement.style.cursor = '';
-    if (directoryKey && activeModeForWidth) {
-      setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
-    }
-    setIsResizing(false);
-    activeResizePointerIDRef.current = null;
-  }, [activeModeForWidth, clampWidthForDrag, directoryKey, setContextPanelWidth, width]);
-
-  // Window-level drag listeners: tracking the pointer via the 3px handle and
-  // pointer capture is unreliable (capture can fail over iframes and a missed
-  // pointerup leaves the drag stuck), so while resizing the whole window
-  // tracks the pointer and any release/cancel/blur ends the drag.
-  React.useEffect(() => {
-    if (!isResizing) {
-      return;
-    }
-
-    const handleMove = (event: PointerEvent) => {
-      if (activeResizePointerIDRef.current !== event.pointerId) {
-        return;
-      }
-      const delta = startXRef.current - event.clientX;
-      const nextWidth = clampWidthForDrag(startWidthRef.current + delta);
-      if (resizingWidthRef.current === nextWidth) {
-        return;
-      }
-      resizingWidthRef.current = nextWidth;
-      if (resizeFollowTimerRef.current === null) {
-        resizeFollowTimerRef.current = setTimeout(applyFollowWidth, RESIZE_FOLLOW_INTERVAL_MS);
-      }
-    };
-
-    const handleUp = (event: PointerEvent) => {
-      if (activeResizePointerIDRef.current !== event.pointerId) {
-        return;
-      }
-      finishResize();
-    };
-
-    const handleWindowBlur = () => {
-      finishResize();
-    };
-
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', handleUp);
-    window.addEventListener('pointercancel', handleUp);
-    window.addEventListener('blur', handleWindowBlur);
-    return () => {
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('pointerup', handleUp);
-      window.removeEventListener('pointercancel', handleUp);
-      window.removeEventListener('blur', handleWindowBlur);
-    };
-  }, [applyFollowWidth, clampWidthForDrag, finishResize, isResizing]);
-
-  React.useEffect(() => {
-    if (!isResizing) {
-      resizingWidthRef.current = null;
-      document.documentElement.style.cursor = '';
-    }
-  }, [isResizing]);
+  }, [isOpen, panelRef]);
 
   const handleClose = React.useCallback(() => {
     if (!directoryKey) {
@@ -2837,32 +2760,33 @@ export const ContextPanel: React.FC = () => {
     </header>
   );
 
-  // width/min/max stay interpolable across open/close (no instant min/max
-  // jumps) so the 200ms width transition matches the sidebars.
+  // The width is owned ENTIRELY by the resize hook's CSS variable — React
+  // never writes the variable or a px width on any render (open, closed,
+  // expanded, mode switch). This is what makes a re-render unable to override
+  // the in-flight animation or fight the anchor transaction.
   const panelStyle: React.CSSProperties = !isOpen
     ? {
-        ['--oc-context-panel-width' as string]: `${width}px`,
-        width: 0,
+        // Closed: the width ANIMATES to 0 through the programmatic transaction
+        // (the CSS variable is interpolated by the hook); no CSS transition.
+        width: 'var(--oc-context-panel-width, 0px)',
         maxWidth: '100%',
         overflowX: 'clip',
       }
     : isExpanded
       ? {
-          // px, not '100%': px↔% width changes do not interpolate, which
-          // would make the expand/collapse width snap instead of animating.
-          ['--oc-context-panel-width' as string]: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
-          width: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
+          // Expanded: same variable, animated to the full available width.
+          width: 'var(--oc-context-panel-width, 0px)',
           maxWidth: '100%',
         }
       : {
-          width: 'min(var(--oc-context-panel-width), 100%)',
+          width: 'min(var(--oc-context-panel-width, 0px), 100%)',
           maxWidth: '100%',
           overflowX: 'clip',
-          ['--oc-context-panel-width' as string]: `${width}px`,
         };
 
   return (
-    <aside
+    <React.Profiler id={`context_panel.${activeModeForWidth ?? 'none'}`} onRender={handleContextPanelProfiler}>
+      <aside
       ref={panelRef}
       data-context-panel="true"
       tabIndex={-1}
@@ -2876,11 +2800,20 @@ export const ContextPanel: React.FC = () => {
           ? 'absolute inset-y-0 right-0 z-20 min-w-0'
           : 'relative h-full flex-shrink-0',
         !isOpen && 'pointer-events-none',
-        'will-change-[width] motion-reduce:transition-none',
-        'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]'
+        'will-change-[width]'
       )}
       onKeyDownCapture={handlePanelKeyDownCapture}
-      style={panelStyle}
+      style={{
+        ...panelStyle,
+        // flex:none + the CSS variable keep React re-renders from ever
+        // overriding the hook's width writes. Live flex resize: the panel
+        // stays in the flex row while dragging so the chat surface reflows in
+        // real time. Layout containment keeps the panel subtree's layout from
+        // leaking outward during the drag; the real flex width is committed
+        // once when the pointer is released.
+        flex: 'none',
+        contain: 'layout style paint',
+      }}
     >
       {/* Painted divider instead of border-l: a real border eats 1px of the
           content box only while collapsed, shifting the header controls by
@@ -2899,31 +2832,44 @@ export const ContextPanel: React.FC = () => {
             isResizing && 'bg-[var(--interactive-border)]'
           )}
           onPointerDown={handleResizeStart}
+          onPointerUp={handleResizeEnd}
+          onPointerCancel={handleResizeAbort}
+          onLostPointerCapture={handleResizeAbort}
           role="separator"
           aria-orientation="vertical"
           aria-label={t('contextPanel.actions.resizePanelAria')}
         />
       )}
       <div
+        ref={panelContentRef}
         className={cn(
           'relative z-10 flex h-full min-h-0 shrink-0 flex-col duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
-          // Width animates in sync with the panel (surface switches, resize
-          // release); during the drag itself nothing resizes — only the ghost
-          // guide line moves.
-          'transition-[width,opacity]',
+          // Keep the content OPACITY animation; the width is interpolated by
+          // the resize hook's programmatic transaction (no CSS width
+          // transition — that would double-interpolate with the JS animator).
+          'transition-opacity',
           !isOpen && 'pointer-events-none select-none opacity-0'
         )}
-        // px in the expanded state too: px↔% width changes cannot interpolate,
-        // so the header controls would snap instead of riding the animation.
         style={{
-          width: isExpanded
-            ? (availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%')
-            : 'var(--oc-context-panel-width)',
+          // The content column inherits the root width via 100% — it never
+          // writes a final width of its own (the hook owns the geometry).
+          width: '100%',
+          transitionProperty: 'opacity',
         }}
         aria-hidden={!isOpen}
       >
       {header}
-      <div className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
+      <div
+        className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}
+        style={{
+          // During a live resize every mode's content (context list, file tree,
+          // git/pr/notes/plan views) reflows as the panel width changes each
+          // frame. Contain the content area so those reflows/repaints stay
+          // inside the panel instead of leaking into the chat surface, and
+          // paint containment keeps repaints scoped to the panel.
+          contain: isResizing ? 'layout style paint' : undefined,
+        }}
+      >
         {hasFileTabs ? (
           <div className={cn('absolute inset-0 flex', isFileTabActive ? 'flex' : 'hidden')}>
             <div className="h-full min-w-0 flex-1">
@@ -3008,6 +2954,7 @@ export const ContextPanel: React.FC = () => {
         {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' ? activeNonChatContent : null}
       </div>
       </div>
-    </aside>
+      </aside>
+    </React.Profiler>
   );
 };
