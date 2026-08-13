@@ -507,6 +507,7 @@ export function registerGitLabRoutes(app, options = {}) {
       const rawPage = typeof req.query?.page === 'string' ? Number(req.query.page) : 1;
       const effectivePage = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
       const searchQuery = asString(req.query?.query);
+      const sourceBranch = asString(req.query?.sourceBranch);
 
       const client = await getClient();
       if (!client) {
@@ -521,6 +522,9 @@ export function registerGitLabRoutes(app, options = {}) {
       const params = { state: 'opened', scope: 'all', per_page: 50, page: effectivePage };
       if (searchQuery) {
         params.search = searchQuery;
+      }
+      if (sourceBranch) {
+        params.source_branch = sourceBranch;
       }
       const resp = await withTimeout(client.mergeRequests(projectPath, params), ROUTE_TIMEOUT_MS, 'gitlab mrs list');
       if (resp.status === 429) {

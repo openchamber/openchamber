@@ -129,7 +129,7 @@ export const createWebGitLabAPI = ({ urls }: WebGitLabAPIOptions): GitLabAPI => 
     return payload;
   },
 
-  async mrsList(directory: string, options?: { page?: number; query?: string }): Promise<GitLabMergeRequestsListResult> {
+  async mrsList(directory: string, options?: { page?: number; query?: string; sourceBranch?: string }): Promise<GitLabMergeRequestsListResult> {
     const page = options?.page ?? 1;
     const params = new URLSearchParams({
       directory,
@@ -137,6 +137,9 @@ export const createWebGitLabAPI = ({ urls }: WebGitLabAPIOptions): GitLabAPI => 
     });
     if (options?.query) {
       params.set('query', options.query);
+    }
+    if (options?.sourceBranch) {
+      params.set('sourceBranch', options.sourceBranch);
     }
     const response = await runtimeFetch(
       `/api/gitlab/mrs/list?${params.toString()}`,

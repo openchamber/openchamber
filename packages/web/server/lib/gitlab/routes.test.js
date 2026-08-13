@@ -396,6 +396,28 @@ describe('GitLab data routes', () => {
     });
   });
 
+  test('mrs/list passes the source branch filter to the GitLab API', async () => {
+    const fetchMock = scriptedFetch([(url) => (matches(/\/merge_requests\?/)(url) ? jsonResponse([]) : null)]);
+
+    const app = createApp();
+    await request(app).get('/api/gitlab/mrs/list?directory=%2Ftmp%2Fwork&sourceBranch=feat%2Fapi');
+
+    const requestedUrl = String(fetchMock.mock.calls[0][0]);
+    expect(requestedUrl).toContain('state=opened');
+    expect(requestedUrl).toContain('source_branch=feat%2Fapi');
+    expect(requestedUrl).toContain('per_page=50');
+  });
+
+  test('mrs/list omits the source branch filter when not provided', async () => {
+    const fetchMock = scriptedFetch([(url) => (matches(/\/merge_requests\?/)(url) ? jsonResponse([]) : null)]);
+
+    const app = createApp();
+    await request(app).get('/api/gitlab/mrs/list?directory=%2Ftmp%2Fwork');
+
+    const requestedUrl = String(fetchMock.mock.calls[0][0]);
+    expect(requestedUrl).not.toContain('source_branch');
+  });
+
   test('mrs/context returns mr, comments, files, and a concatenated diff', async () => {
     scriptedFetch([
       (url) => (matches(/\/merge_requests\/9$/)(url)

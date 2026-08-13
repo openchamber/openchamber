@@ -105,6 +105,46 @@ describe('createWebGitLabAPI', () => {
     });
   });
 
+  it('passes sourceBranch query param to mrsList', async () => {
+    const result = {
+      connected: true,
+      repo: null,
+      mrs: [],
+      page: 1,
+      hasMore: false,
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(result));
+
+    const api = await createAPI();
+    await expect(api.mrsList('/workspace', { page: 1, query: 'search', sourceBranch: 'feat/api' })).resolves.toEqual(result);
+
+    const params = new URLSearchParams({ directory: '/workspace', page: '1', query: 'search', sourceBranch: 'feat/api' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitlab/mrs/list?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('omits sourceBranch when not provided to mrsList', async () => {
+    const result = {
+      connected: true,
+      repo: null,
+      mrs: [],
+      page: 1,
+      hasMore: false,
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(result));
+
+    const api = await createAPI();
+    await expect(api.mrsList('/workspace', { page: 1 })).resolves.toEqual(result);
+
+    const params = new URLSearchParams({ directory: '/workspace', page: '1' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitlab/mrs/list?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
   it('throws the server error message on {error} payloads', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'Not connected to GitLab' }, { status: 401 }));
 

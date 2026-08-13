@@ -1290,7 +1290,7 @@ export interface GitLabAPI {
   issueGet(directory: string, number: number, options?: { namespace?: string; project?: string }): Promise<GitLabIssueGetResult>;
   issueComments(directory: string, number: number, options?: { namespace?: string; project?: string }): Promise<GitLabIssueCommentsResult>;
 
-  mrsList(directory: string, options?: { page?: number; query?: string }): Promise<GitLabMergeRequestsListResult>;
+  mrsList(directory: string, options?: { page?: number; query?: string; sourceBranch?: string }): Promise<GitLabMergeRequestsListResult>;
   mrContext(
     directory: string,
     number: number,

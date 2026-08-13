@@ -74,7 +74,7 @@ Nothing in the client or repo layers assumes the token came from a PAT.
 - Issue list: `GET /projects/:id/issues?state=opened&scope=all&per_page=50&page=N&search=<query>`.
 - Issue detail: `GET /projects/:id/issues/:issue_iid`.
 - Issue notes: `GET /projects/:id/issues/:issue_iid/notes?per_page=100` (system notes are skipped; each note links as `{issue_web_url}#note_{id}`).
-- MR list: `GET /projects/:id/merge_requests?state=opened&scope=all&per_page=50&page=N&search=<query>`.
+- MR list: `GET /projects/:id/merge_requests?state=opened&scope=all&per_page=50&page=N&search=<query>&source_branch=<branch>` (the route passes `sourceBranch` through to `source_branch` when present, matching local-branch MR-status UIs).
 - MR detail: `GET /projects/:id/merge_requests/:merge_request_iid`.
 - MR diffs: `GET /projects/:id/merge_requests/:merge_request_iid/diffs?per_page=100&page=N` (paginated; the route caps at 10 pages / 3000 files).
 - MR notes: `GET /projects/:id/merge_requests/:merge_request_iid/notes?per_page=100`.
@@ -93,7 +93,7 @@ Nothing in the client or repo layers assumes the token came from a PAT.
 | GET | `/api/gitlab/issues/list` | `?directory&page&query` -> `{ connected, repo?, issues[], page, hasMore }` |
 | GET | `/api/gitlab/issues/get` | `?directory&number&namespace&project` -> `{ connected, repo?, issue }` |
 | GET | `/api/gitlab/issues/comments` | `?directory&number&namespace&project` -> `{ connected, repo?, comments[] }` |
-| GET | `/api/gitlab/mrs/list` | `?directory&page&query` -> `{ connected, repo?, mrs[], page, hasMore }` |
+| GET | `/api/gitlab/mrs/list` | `?directory&page&query&sourceBranch` -> `{ connected, repo?, mrs[], page, hasMore }` |
 | GET | `/api/gitlab/mrs/context` | `?directory&number&diff&namespace&project` -> `{ connected, repo?, mr, comments[], files[], diff? }` |
 | GET | `/api/gitlab/repo/branches` | `?namespace&project` -> `{ branches[] }` |
 
