@@ -1149,6 +1149,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.gitlabMr.createMr.removeSourceBranch': '合并后删除源分支',
   'contextPanel.gitlabMr.createMr.submit': '创建合并请求',
   'contextPanel.gitlabMr.createMr.submitting': '创建中...',
+  'contextPanel.gitlabMr.createMr.branchesLoading': '正在加载分支...',
   'contextPanel.gitlabMr.createMr.toast.created': '合并请求已创建',
   'contextPanel.gitlabMr.createMr.toast.createFailed': '创建合并请求失败',
   'contextPanel.gitlabMr.updateMr.toggle': '编辑标题和描述',

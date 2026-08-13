@@ -1145,7 +1145,7 @@ export type GitLabUserSummary = {
   email?: string;
 };
 
-type GitLabRepoRef = {
+export type GitLabRepoRef = {
   namespace: string;
   project: string;
   host: string;
@@ -1258,6 +1258,7 @@ export type GitLabMergeRequestContextResult = {
 
 export type GitLabBranchesResult = {
   branches: string[];
+  defaultBranch?: string | null;
 };
 
 export type GitLabMergeRequestCreateInput = {
@@ -1340,7 +1341,7 @@ export interface GitLabAPI {
   mrUpdate(input: GitLabMergeRequestUpdateInput): Promise<GitLabMergeRequest>;
   mrMerge(input: GitLabMergeRequestMergeInput): Promise<GitLabMergeRequestMergeResult>;
 
-  repoBranches(namespace: string, project: string): Promise<string[]>;
+  repoBranches(namespace: string, project: string): Promise<GitLabBranchesResult>;
 }
 
 export interface RemoteClientRecord {

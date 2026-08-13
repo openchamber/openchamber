@@ -3011,6 +3011,7 @@ export const dict = {
   'contextPanel.gitlabMr.createMr.removeSourceBranch': 'Quellbranch nach dem Zusammenführen löschen',
   'contextPanel.gitlabMr.createMr.submit': 'Merge-Request erstellen',
   'contextPanel.gitlabMr.createMr.submitting': 'Wird erstellt...',
+  'contextPanel.gitlabMr.createMr.branchesLoading': 'Branches werden geladen...',
   'contextPanel.gitlabMr.createMr.toast.created': 'Merge-Request erstellt',
   'contextPanel.gitlabMr.createMr.toast.createFailed': 'Merge-Request konnte nicht erstellt werden',
   'contextPanel.gitlabMr.updateMr.toggle': 'Titel und Beschreibung bearbeiten',

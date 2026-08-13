@@ -263,6 +263,39 @@ describe('createWebGitLabAPI', () => {
     await expect(api.mrMerge({ directory: '/workspace', number: 12 })).rejects.toThrow('Bad Gateway');
   });
 
+  it('parses branches and the default branch from repoBranches', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ branches: ['main', 'feat/api'], defaultBranch: 'main' }));
+
+    const api = await createAPI();
+    await expect(api.repoBranches('group', 'sub')).resolves.toEqual({ branches: ['main', 'feat/api'], defaultBranch: 'main' });
+
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/gitlab/repo/branches?namespace=group&project=sub', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('defaults defaultBranch to null when repoBranches omits it', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ branches: ['main'] }));
+
+    const api = await createAPI();
+    await expect(api.repoBranches('group', 'sub')).resolves.toEqual({ branches: ['main'], defaultBranch: null });
+  });
+
+  it('throws the server error message when repoBranches fails', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'GitLab rate limited' }, { status: 503 }));
+
+    const api = await createAPI();
+    await expect(api.repoBranches('group', 'sub')).rejects.toThrow('GitLab rate limited');
+  });
+
+  it('throws the response status text when repoBranches has no parseable payload', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(new Response('upstream gone', { status: 502, statusText: 'Bad Gateway' }));
+
+    const api = await createAPI();
+    await expect(api.repoBranches('group', 'sub')).rejects.toThrow('Bad Gateway');
+  });
+
   it('throws the server error message on {error} payloads', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'Not connected to GitLab' }, { status: 401 }));
 

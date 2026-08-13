@@ -1149,6 +1149,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.gitlabMr.createMr.removeSourceBranch": "Eliminar la rama de origen al fusionar",
   "contextPanel.gitlabMr.createMr.submit": "Crear solicitud de fusión",
   "contextPanel.gitlabMr.createMr.submitting": "Creando...",
+  "contextPanel.gitlabMr.createMr.branchesLoading": "Cargando ramas...",
   "contextPanel.gitlabMr.createMr.toast.created": "Solicitud de fusión creada",
   "contextPanel.gitlabMr.createMr.toast.createFailed": "No se pudo crear la solicitud de fusión",
   "contextPanel.gitlabMr.updateMr.toggle": "Editar título y descripción",

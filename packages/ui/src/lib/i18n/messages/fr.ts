@@ -968,6 +968,7 @@ export const dict = {
   'contextPanel.gitlabMr.createMr.removeSourceBranch': 'Supprimer la branche source lors de la fusion',
   'contextPanel.gitlabMr.createMr.submit': 'Créer une demande de fusion',
   'contextPanel.gitlabMr.createMr.submitting': 'Création...',
+  'contextPanel.gitlabMr.createMr.branchesLoading': 'Chargement des branches...',
   'contextPanel.gitlabMr.createMr.toast.created': 'Demande de fusion créée',
   'contextPanel.gitlabMr.createMr.toast.createFailed': 'Échec de la création de la demande de fusion',
   'contextPanel.gitlabMr.updateMr.toggle': 'Modifier le titre et la description',

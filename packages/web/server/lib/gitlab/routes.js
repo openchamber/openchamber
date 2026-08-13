@@ -876,10 +876,11 @@ export function registerGitLabRoutes(app, options = {}) {
 
       const client = await getClient();
       if (!client) {
-        return res.json({ branches: [] });
+        return res.json({ branches: [], defaultBranch: null });
       }
 
       const branches = [];
+      let defaultBranch = null;
       let page = 1;
       while (page <= 10) {
         const resp = await client.branches(`${namespace}/${project}`, { per_page: 100, page });
@@ -893,6 +894,9 @@ export function registerGitLabRoutes(app, options = {}) {
         for (const branch of chunk) {
           if (typeof branch?.name === 'string') {
             branches.push(branch.name);
+            if (defaultBranch === null && branch.default === true) {
+              defaultBranch = branch.name;
+            }
           }
         }
         if (chunk.length < 100 || !resp.page?.hasMore) {
@@ -901,7 +905,7 @@ export function registerGitLabRoutes(app, options = {}) {
         page += 1;
       }
 
-      return res.json({ branches });
+      return res.json({ branches, defaultBranch });
     } catch (error) {
       console.error('Failed to fetch GitLab repo branches:', error);
       return res.status(500).json({ error: error.message || 'Failed to fetch GitLab repo branches' });

@@ -1149,6 +1149,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.gitlabMr.createMr.removeSourceBranch': '병합 시 소스 브랜치 삭제',
   'contextPanel.gitlabMr.createMr.submit': '병합 요청 만들기',
   'contextPanel.gitlabMr.createMr.submitting': '만드는 중...',
+  'contextPanel.gitlabMr.createMr.branchesLoading': '브랜치 불러오는 중...',
   'contextPanel.gitlabMr.createMr.toast.created': '병합 요청이 생성되었습니다',
   'contextPanel.gitlabMr.createMr.toast.createFailed': '병합 요청 생성에 실패했습니다',
   'contextPanel.gitlabMr.updateMr.toggle': '제목 및 설명 편집',

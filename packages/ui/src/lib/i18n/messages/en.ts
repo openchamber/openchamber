@@ -1148,6 +1148,7 @@ export const dict = {
   'contextPanel.gitlabMr.createMr.removeSourceBranch': 'Remove source branch on merge',
   'contextPanel.gitlabMr.createMr.submit': 'Create merge request',
   'contextPanel.gitlabMr.createMr.submitting': 'Creating...',
+  'contextPanel.gitlabMr.createMr.branchesLoading': 'Loading branches...',
   'contextPanel.gitlabMr.createMr.toast.created': 'Merge request created',
   'contextPanel.gitlabMr.createMr.toast.createFailed': 'Failed to create merge request',
   'contextPanel.gitlabMr.updateMr.toggle': 'Edit title & description',

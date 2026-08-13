@@ -1149,6 +1149,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.gitlabMr.createMr.removeSourceBranch": "Видалити вихідну гілку після злиття",
   "contextPanel.gitlabMr.createMr.submit": "Створити запит на злиття",
   "contextPanel.gitlabMr.createMr.submitting": "Створення...",
+  "contextPanel.gitlabMr.createMr.branchesLoading": "Завантаження гілок...",
   "contextPanel.gitlabMr.createMr.toast.created": "Запит на злиття створено",
   "contextPanel.gitlabMr.createMr.toast.createFailed": "Не вдалося створити запит на злиття",
   "contextPanel.gitlabMr.updateMr.toggle": "Редагувати назву та опис",

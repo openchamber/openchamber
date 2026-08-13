@@ -1486,6 +1486,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.gitlabMr.createMr.removeSourceBranch': 'Usuń gałąź źródłową po scaleniu',
   'contextPanel.gitlabMr.createMr.submit': 'Utwórz żądanie scalenia',
   'contextPanel.gitlabMr.createMr.submitting': 'Tworzenie...',
+  'contextPanel.gitlabMr.createMr.branchesLoading': 'Wczytywanie gałęzi...',
   'contextPanel.gitlabMr.createMr.toast.created': 'Utworzono żądanie scalenia',
   'contextPanel.gitlabMr.createMr.toast.createFailed': 'Nie udało się utworzyć żądania scalenia',
   'contextPanel.gitlabMr.updateMr.toggle': 'Edytuj tytuł i opis',

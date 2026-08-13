@@ -1149,6 +1149,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.gitlabMr.createMr.removeSourceBranch": "Remover branch de origem ao mesclar",
   "contextPanel.gitlabMr.createMr.submit": "Criar solicitação de merge",
   "contextPanel.gitlabMr.createMr.submitting": "Criando...",
+  "contextPanel.gitlabMr.createMr.branchesLoading": "Carregando branches...",
   "contextPanel.gitlabMr.createMr.toast.created": "Solicitação de merge criada",
   "contextPanel.gitlabMr.createMr.toast.createFailed": "Falha ao criar solicitação de merge",
   "contextPanel.gitlabMr.updateMr.toggle": "Editar título e descrição",

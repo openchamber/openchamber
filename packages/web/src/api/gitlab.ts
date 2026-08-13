@@ -232,7 +232,7 @@ export const createWebGitLabAPI = ({ urls }: WebGitLabAPIOptions): GitLabAPI => 
     };
   },
 
-  async repoBranches(namespace: string, project: string): Promise<string[]> {
+  async repoBranches(namespace: string, project: string): Promise<GitLabBranchesResult> {
     const response = await runtimeFetch(
       `/api/gitlab/repo/branches?namespace=${encodeURIComponent(namespace)}&project=${encodeURIComponent(project)}`,
       { method: 'GET', headers: { Accept: 'application/json' } }
@@ -241,6 +241,9 @@ export const createWebGitLabAPI = ({ urls }: WebGitLabAPIOptions): GitLabAPI => 
     if (!response.ok || !body) {
       throw new Error(body?.error || response.statusText || 'Failed to fetch GitLab repo branches');
     }
-    return body.branches ?? [];
+    return {
+      branches: body.branches ?? [],
+      defaultBranch: body.defaultBranch ?? null,
+    };
   },
 });

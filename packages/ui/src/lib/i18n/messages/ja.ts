@@ -1145,6 +1145,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.gitlabMr.createMr.removeSourceBranch': 'マージ時にソースブランチを削除する',
   'contextPanel.gitlabMr.createMr.submit': 'マージリクエストを作成',
   'contextPanel.gitlabMr.createMr.submitting': '作成中...',
+  'contextPanel.gitlabMr.createMr.branchesLoading': 'ブランチを読み込み中...',
   'contextPanel.gitlabMr.createMr.toast.created': 'マージリクエストを作成しました',
   'contextPanel.gitlabMr.createMr.toast.createFailed': 'マージリクエストの作成に失敗しました',
   'contextPanel.gitlabMr.updateMr.toggle': 'タイトルと説明を編集',

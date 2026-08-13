@@ -12,11 +12,12 @@ import { useGitLabAuthStore } from '@/stores/useGitLabAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { openExternalUrl } from '@/lib/url';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
-import type { GitLabMergeRequestContextResult, GitLabMergeRequestSummary } from '@/lib/api/types';
+import type { GitLabMergeRequestContextResult, GitLabMergeRequestSummary, GitLabRepoRef } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 
 const mrStateColor = (state: string): string => {
@@ -88,6 +89,7 @@ export const GitLabMrView: React.FC = () => {
   const [branchMrLoading, setBranchMrLoading] = React.useState(false);
   const [branchMrError, setBranchMrError] = React.useState<string | null>(null);
   const [retryToken, setRetryToken] = React.useState(0);
+  const [repoRef, setRepoRef] = React.useState<GitLabRepoRef | null>(null);
 
   const retry = React.useCallback(() => setRetryToken((value) => value + 1), []);
 
@@ -98,6 +100,11 @@ export const GitLabMrView: React.FC = () => {
     let cancelled = false;
     setBranchMrLoading(true);
     setBranchMrError(null);
+    // Re-resolving the repo context invalidates the previously fetched branch
+    // list so a stale repo's branches never leak into the create form.
+    setRepoRef(null);
+    setBranches([]);
+    setDefaultBranch(null);
     void gitlab
       .mrsList(currentDirectory, { sourceBranch: currentBranch })
       .then((result) => {
@@ -112,6 +119,7 @@ export const GitLabMrView: React.FC = () => {
           ?? candidates.find((mr) => mr.state === 'merged')
           ?? null;
         setBranchMr(matching);
+        setRepoRef(result.repo ?? null);
       })
       .catch((error) => {
         if (!cancelled) {
@@ -247,10 +255,25 @@ export const GitLabMrView: React.FC = () => {
 
   const [createTitle, setCreateTitle] = React.useState('');
   const [createDescription, setCreateDescription] = React.useState('');
+  const [createSourceBranch, setCreateSourceBranch] = React.useState(currentBranch ?? '');
   const [createTargetBranch, setCreateTargetBranch] = React.useState('main');
   const [createRemoveSourceBranch, setCreateRemoveSourceBranch] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const createTargetTouchedRef = React.useRef(false);
+
+  // Repository branches for the source/target dropdowns, fetched lazily once
+  // the create form is visible.
+  const [branches, setBranches] = React.useState<string[]>([]);
+  const [defaultBranch, setDefaultBranch] = React.useState<string | null>(null);
+  const [branchesLoading, setBranchesLoading] = React.useState(false);
+
+  // The current branch is only known after git status resolves, so adopt it as
+  // the default source branch when it arrives without clobbering a pick.
+  React.useEffect(() => {
+    if (currentBranch) {
+      setCreateSourceBranch((previous) => previous || currentBranch);
+    }
+  }, [currentBranch]);
 
   // The default target branch is the target of the repository's previously
   // listed open MRs when available; otherwise fall back to main.
@@ -265,8 +288,62 @@ export const GitLabMrView: React.FC = () => {
     if (branchMrLoading || branchMr || createTargetTouchedRef.current) {
       return;
     }
-    setCreateTargetBranch(defaultTargetBranch);
-  }, [branchMr, branchMrLoading, defaultTargetBranch]);
+    setCreateTargetBranch(defaultBranch ?? defaultTargetBranch);
+  }, [branchMr, branchMrLoading, defaultBranch, defaultTargetBranch]);
+
+  // The source dropdown must always offer the picked/current branch, even
+  // before the branch list resolves.
+  const sourceBranchOptions = React.useMemo(() => {
+    if (!createSourceBranch) {
+      return branches;
+    }
+    return branches.includes(createSourceBranch) ? branches : [createSourceBranch, ...branches];
+  }, [branches, createSourceBranch]);
+
+  // A merge request cannot target its own source branch once there is more
+  // than one branch to choose from.
+  const targetBranchOptions = React.useMemo(
+    () => (branches.length >= 2 ? branches.filter((branch) => branch !== createSourceBranch) : branches),
+    [branches, createSourceBranch],
+  );
+
+  // Fetch the repository's branches lazily once the create form is visible so
+  // the source/target dropdowns can offer real values. Failure surfaces as a
+  // toast and leaves the dropdowns on the current-branch fallback.
+  React.useEffect(() => {
+    if (!repoRef || branchMr || !connected || !gitlab?.repoBranches) {
+      return;
+    }
+    let cancelled = false;
+    setBranchesLoading(true);
+    void gitlab
+      .repoBranches(repoRef.namespace, repoRef.project)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setBranches(result.branches ?? []);
+        setDefaultBranch(result.defaultBranch ?? null);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setBranches([]);
+        setDefaultBranch(null);
+        toast.error(t('contextPanel.gitlabMr.error.loadFailed'), {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBranchesLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [branchMr, connected, gitlab, repoRef, t]);
 
   const [updateOpen, setUpdateOpen] = React.useState(false);
   const [editTitle, setEditTitle] = React.useState('');
@@ -291,7 +368,7 @@ export const GitLabMrView: React.FC = () => {
       const created = await gitlab.mrCreate({
         directory: currentDirectory,
         title: createTitle.trim() || currentBranch,
-        sourceBranch: currentBranch,
+        sourceBranch: createSourceBranch,
         targetBranch,
         ...(createDescription.trim() ? { description: createDescription } : {}),
         ...(createRemoveSourceBranch ? { removeSourceBranch: true } : {}),
@@ -306,7 +383,7 @@ export const GitLabMrView: React.FC = () => {
       setCreateDescription('');
       setCreateRemoveSourceBranch(false);
       createTargetTouchedRef.current = false;
-      setCreateTargetBranch(defaultTargetBranch);
+      setCreateTargetBranch(defaultBranch ?? defaultTargetBranch);
     } catch (error) {
       toast.error(t('contextPanel.gitlabMr.createMr.toast.createFailed'), {
         description: error instanceof Error ? error.message : String(error),
@@ -314,7 +391,7 @@ export const GitLabMrView: React.FC = () => {
     } finally {
       setCreating(false);
     }
-  }, [createDescription, createRemoveSourceBranch, createTargetBranch, createTitle, currentBranch, currentDirectory, defaultTargetBranch, gitlab, t]);
+  }, [createDescription, createRemoveSourceBranch, createSourceBranch, createTargetBranch, createTitle, currentBranch, currentDirectory, defaultBranch, defaultTargetBranch, gitlab, t]);
 
   const toggleUpdate = React.useCallback(async () => {
     if (!branchMr) {
@@ -691,19 +768,36 @@ export const GitLabMrView: React.FC = () => {
 
               <label className="space-y-1">
                 <div className="typography-micro text-muted-foreground">{t('contextPanel.gitlabMr.createMr.sourceBranch')}</div>
-                <Input value={currentBranch} readOnly />
+                <Select value={createSourceBranch} onValueChange={(value) => setCreateSourceBranch(value)}>
+                  <SelectTrigger size="default" className="w-full">
+                    <SelectValue>{branchesLoading ? t('contextPanel.gitlabMr.createMr.branchesLoading') : createSourceBranch}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sourceBranchOptions.map((branch) => (
+                      <SelectItem key={branch} value={branch}>{branch}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
 
               <label className="space-y-1">
                 <div className="typography-micro text-muted-foreground">{t('contextPanel.gitlabMr.createMr.targetBranch')}</div>
-                <Input
+                <Select
                   value={createTargetBranch}
-                  onChange={(event) => {
+                  onValueChange={(value) => {
                     createTargetTouchedRef.current = true;
-                    setCreateTargetBranch(event.target.value);
+                    setCreateTargetBranch(value);
                   }}
-                  placeholder="main"
-                />
+                >
+                  <SelectTrigger size="default" className="w-full">
+                    <SelectValue>{branchesLoading ? t('contextPanel.gitlabMr.createMr.branchesLoading') : createTargetBranch}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {targetBranchOptions.map((branch) => (
+                      <SelectItem key={branch} value={branch}>{branch}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
 
               <label className="space-y-1">

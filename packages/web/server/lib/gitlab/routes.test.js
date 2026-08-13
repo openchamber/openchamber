@@ -490,7 +490,20 @@ describe('GitLab data routes', () => {
     expect(response.body.diff).toContain('line two');
   });
 
-  test('repo/branches returns branch names', async () => {
+  test('repo/branches returns branch names and the default branch', async () => {
+    scriptedFetch([
+      (url) => (matches(/\/repository\/branches\?/)(url)
+        ? jsonResponse([{ name: 'main', default: true }, { name: 'feat/api' }])
+        : null),
+    ]);
+
+    const app = createApp();
+    const response = await request(app).get('/api/gitlab/repo/branches?namespace=group&project=sub');
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ branches: ['main', 'feat/api'], defaultBranch: 'main' });
+  });
+
+  test('repo/branches returns null defaultBranch when no branch is marked default', async () => {
     scriptedFetch([
       (url) => (matches(/\/repository\/branches\?/)(url)
         ? jsonResponse([{ name: 'main' }, { name: 'feat/api' }])
@@ -500,7 +513,15 @@ describe('GitLab data routes', () => {
     const app = createApp();
     const response = await request(app).get('/api/gitlab/repo/branches?namespace=group&project=sub');
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ branches: ['main', 'feat/api'] });
+    expect(response.body).toEqual({ branches: ['main', 'feat/api'], defaultBranch: null });
+  });
+
+  test('repo/branches returns empty branches and null defaultBranch when not connected', async () => {
+    clearGitLabAuth();
+    const app = createApp();
+    const response = await request(app).get('/api/gitlab/repo/branches?namespace=group&project=sub');
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ branches: [], defaultBranch: null });
   });
 
   test('repo/branches requires namespace and project', async () => {

@@ -1161,6 +1161,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.gitlabMr.createMr.removeSourceBranch': '合併後刪除來源分支',
   'contextPanel.gitlabMr.createMr.submit': '建立合併請求',
   'contextPanel.gitlabMr.createMr.submitting': '建立中...',
+  'contextPanel.gitlabMr.createMr.branchesLoading': '正在載入分支...',
   'contextPanel.gitlabMr.createMr.toast.created': '合併請求已建立',
   'contextPanel.gitlabMr.createMr.toast.createFailed': '建立合併請求失敗',
   'contextPanel.gitlabMr.updateMr.toggle': '編輯標題與描述',

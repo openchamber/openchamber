@@ -101,7 +101,7 @@ Nothing in the client or repo layers assumes the token came from a PAT.
 | POST | `/api/gitlab/mrs/create` | body `{ directory, title, sourceBranch, targetBranch, description?, removeSourceBranch? }` -> `{ connected, repo?, mr }`; `400` for missing fields, unresolvable repo, or a token without the `api` scope |
 | PUT | `/api/gitlab/mrs/update` | body `{ directory, number, title?, description? }` -> `{ connected, repo?, mr }`; `404` when the MR does not exist |
 | PUT | `/api/gitlab/mrs/merge` | body `{ directory, number, squash? }` -> `{ connected, merged: true }` on success; non-mergeable MRs -> the GitLab status (`405`/`406`/`409`/`422`) with `{ connected, merged: false, message }` |
-| GET | `/api/gitlab/repo/branches` | `?namespace&project` -> `{ branches[] }` |
+| GET | `/api/gitlab/repo/branches` | `?namespace&project` -> `{ branches[], defaultBranch? }` (`defaultBranch` is `null` when the repo has no marked default branch or GitLab is disconnected) |
 
 Conventions mirror `github/routes.js`:
 
