@@ -14,6 +14,10 @@ import { openExternalUrl } from '@/lib/url';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import type { GitLabMergeRequestContextResult, GitLabMergeRequestSummary } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { toast } from '@/components/ui';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 const mrStateColor = (state: string): string => {
   switch (state) {
@@ -199,6 +203,19 @@ export const GitLabMrView: React.FC = () => {
     setContextError(null);
   }, [branchMr?.number]);
 
+  // A different branch MR invalidates the update/merge transient state so the
+  // previous MR's edit form, squash flag, and in-flight requests don't leak.
+  React.useEffect(() => {
+    setUpdateOpen(false);
+    setEditTitle('');
+    setEditDescription('');
+    setEditDescriptionKnown(false);
+    setEditDescriptionLoading(false);
+    setUpdating(false);
+    setMergeSquash(false);
+    setMerging(false);
+  }, [branchMr?.number]);
+
   const toggleContext = React.useCallback(async (mr: GitLabMergeRequestSummary) => {
     if (!currentDirectory || !gitlab?.mrContext) {
       return;
@@ -225,6 +242,175 @@ export const GitLabMrView: React.FC = () => {
       setContextLoading(false);
     }
   }, [contextOpen, currentDirectory, gitlab, t]);
+
+  // ---- Create / update / merge actions -----------------------------------
+
+  const [createTitle, setCreateTitle] = React.useState('');
+  const [createDescription, setCreateDescription] = React.useState('');
+  const [createTargetBranch, setCreateTargetBranch] = React.useState('main');
+  const [createRemoveSourceBranch, setCreateRemoveSourceBranch] = React.useState(false);
+  const [creating, setCreating] = React.useState(false);
+  const createTargetTouchedRef = React.useRef(false);
+
+  // The default target branch is the target of the repository's previously
+  // listed open MRs when available; otherwise fall back to main.
+  const defaultTargetBranch = React.useMemo(
+    () => openMrs.find((mr) => mr.targetBranch)?.targetBranch ?? 'main',
+    [openMrs],
+  );
+
+  // Adopt the repository's target branch default once the open-MR list
+  // resolves, unless the user has already typed into the field.
+  React.useEffect(() => {
+    if (branchMrLoading || branchMr || createTargetTouchedRef.current) {
+      return;
+    }
+    setCreateTargetBranch(defaultTargetBranch);
+  }, [branchMr, branchMrLoading, defaultTargetBranch]);
+
+  const [updateOpen, setUpdateOpen] = React.useState(false);
+  const [editTitle, setEditTitle] = React.useState('');
+  const [editDescription, setEditDescription] = React.useState('');
+  const [editDescriptionKnown, setEditDescriptionKnown] = React.useState(false);
+  const [editDescriptionLoading, setEditDescriptionLoading] = React.useState(false);
+  const [updating, setUpdating] = React.useState(false);
+
+  const [mergeSquash, setMergeSquash] = React.useState(false);
+  const [merging, setMerging] = React.useState(false);
+
+  const createMr = React.useCallback(async () => {
+    if (!currentDirectory || !currentBranch || !gitlab?.mrCreate) {
+      return;
+    }
+    const targetBranch = createTargetBranch.trim();
+    if (!targetBranch) {
+      return;
+    }
+    setCreating(true);
+    try {
+      const created = await gitlab.mrCreate({
+        directory: currentDirectory,
+        title: createTitle.trim() || currentBranch,
+        sourceBranch: currentBranch,
+        targetBranch,
+        ...(createDescription.trim() ? { description: createDescription } : {}),
+        ...(createRemoveSourceBranch ? { removeSourceBranch: true } : {}),
+      });
+      toast.success(t('contextPanel.gitlabMr.createMr.toast.created'));
+      // Show the created MR immediately and refresh both the branch MR and
+      // the open list so the card flips to the opened state.
+      setBranchMr(created);
+      setRetryToken((value) => value + 1);
+      // Clear the form.
+      setCreateTitle('');
+      setCreateDescription('');
+      setCreateRemoveSourceBranch(false);
+      createTargetTouchedRef.current = false;
+      setCreateTargetBranch(defaultTargetBranch);
+    } catch (error) {
+      toast.error(t('contextPanel.gitlabMr.createMr.toast.createFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setCreating(false);
+    }
+  }, [createDescription, createRemoveSourceBranch, createTargetBranch, createTitle, currentBranch, currentDirectory, defaultTargetBranch, gitlab, t]);
+
+  const toggleUpdate = React.useCallback(async () => {
+    if (!branchMr) {
+      return;
+    }
+    if (updateOpen) {
+      setUpdateOpen(false);
+      return;
+    }
+    setUpdateOpen(true);
+    setEditTitle(branchMr.title);
+    const knownBody = contextResult?.mr?.body;
+    if (typeof knownBody === 'string') {
+      setEditDescription(knownBody);
+      setEditDescriptionKnown(true);
+      return;
+    }
+    setEditDescription('');
+    setEditDescriptionKnown(false);
+    if (!currentDirectory || !gitlab?.mrContext) {
+      return;
+    }
+    setEditDescriptionLoading(true);
+    try {
+      const result = await gitlab.mrContext(currentDirectory, branchMr.number, { includeDiff: false });
+      if (result.connected === false) {
+        setEditDescription('');
+        return;
+      }
+      setEditDescription(result.mr?.body ?? '');
+      setEditDescriptionKnown(true);
+    } catch {
+      // Leave the description empty; the title can still be edited.
+    } finally {
+      setEditDescriptionLoading(false);
+    }
+  }, [branchMr, contextResult?.mr?.body, currentDirectory, gitlab, updateOpen]);
+
+  const saveMr = React.useCallback(async () => {
+    if (!currentDirectory || !branchMr || !gitlab?.mrUpdate) {
+      return;
+    }
+    const trimmedTitle = editTitle.trim();
+    if (!trimmedTitle) {
+      return;
+    }
+    setUpdating(true);
+    try {
+      await gitlab.mrUpdate({
+        directory: currentDirectory,
+        number: branchMr.number,
+        title: trimmedTitle,
+        // Only send the description when it was actually loaded so an
+        // unresolved description can never be wiped out by a title-only save.
+        ...(editDescriptionKnown ? { description: editDescription } : {}),
+      });
+      toast.success(t('contextPanel.gitlabMr.updateMr.toast.updated'));
+      setUpdateOpen(false);
+      setRetryToken((value) => value + 1);
+    } catch (error) {
+      toast.error(t('contextPanel.gitlabMr.updateMr.toast.updateFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setUpdating(false);
+    }
+  }, [branchMr, currentDirectory, editDescription, editDescriptionKnown, editTitle, gitlab, t]);
+
+  const mergeMr = React.useCallback(async () => {
+    if (!currentDirectory || !branchMr || !gitlab?.mrMerge) {
+      return;
+    }
+    setMerging(true);
+    try {
+      const result = await gitlab.mrMerge({
+        directory: currentDirectory,
+        number: branchMr.number,
+        ...(mergeSquash ? { squash: true } : {}),
+      });
+      if (result.merged) {
+        toast.success(t('contextPanel.gitlabMr.mergeMr.toast.merged'));
+      } else {
+        toast.error(t('contextPanel.gitlabMr.mergeMr.toast.mergeFailed'), {
+          ...(result.message ? { description: result.message } : {}),
+        });
+      }
+      // Refresh the branch MR (flips to the merged state) and the open list.
+      setRetryToken((value) => value + 1);
+    } catch (error) {
+      toast.error(t('contextPanel.gitlabMr.mergeMr.toast.mergeFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setMerging(false);
+    }
+  }, [branchMr, currentDirectory, gitlab, mergeSquash, t]);
 
   const formatTimestamp = React.useCallback((value?: string) => {
     if (!value) {
@@ -361,7 +547,91 @@ export const GitLabMrView: React.FC = () => {
                   )}
                   {contextOpen ? t('contextPanel.gitlabMr.hideContext') : t('contextPanel.gitlabMr.loadContext')}
                 </Button>
+                {branchMr.state === 'opened' ? (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 gap-1.5 px-2"
+                      onClick={() => void toggleUpdate()}
+                      disabled={updating}
+                    >
+                      <Icon name="edit" className="size-4" />
+                      {t('contextPanel.gitlabMr.updateMr.toggle')}
+                    </Button>
+                    <div
+                      className="flex items-center gap-2 cursor-pointer"
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={mergeSquash}
+                      onClick={() => setMergeSquash((value) => !value)}
+                      onKeyDown={(event) => {
+                        if (event.key === ' ' || event.key === 'Enter') {
+                          event.preventDefault();
+                          setMergeSquash((value) => !value);
+                        }
+                      }}
+                    >
+                      <Checkbox
+                        size="sm"
+                        checked={mergeSquash}
+                        onChange={(next) => setMergeSquash(next)}
+                        ariaLabel={t('contextPanel.gitlabMr.mergeMr.squash')}
+                      />
+                      <span className="typography-ui-label text-foreground select-none">{t('contextPanel.gitlabMr.mergeMr.squash')}</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="h-7 gap-1.5 px-2"
+                      onClick={() => void mergeMr()}
+                      disabled={merging || updating}
+                    >
+                      {merging ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="git-merge" className="size-4" />}
+                      {merging ? t('contextPanel.gitlabMr.mergeMr.merging') : t('contextPanel.gitlabMr.mergeMr.action')}
+                    </Button>
+                  </>
+                ) : null}
               </div>
+
+              {updateOpen && branchMr.state === 'opened' ? (
+                <div className="flex min-w-0 flex-col gap-2 border-t border-border/40 pt-3">
+                  <label className="space-y-1">
+                    <div className="typography-micro text-muted-foreground">{t('contextPanel.gitlabMr.createMr.titleLabel')}</div>
+                    <Input
+                      value={editTitle}
+                      onChange={(event) => setEditTitle(event.target.value)}
+                      placeholder={t('contextPanel.gitlabMr.createMr.titlePlaceholder')}
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <div className="typography-micro text-muted-foreground">{t('contextPanel.gitlabMr.createMr.descriptionLabel')}</div>
+                    {editDescriptionLoading ? (
+                      <div className="flex items-center gap-2 typography-micro text-muted-foreground">
+                        <Icon name="loader-4" className="size-4 animate-spin" />
+                        {t('contextPanel.gitlabMr.loading')}
+                      </div>
+                    ) : (
+                      <Textarea
+                        value={editDescription}
+                        onChange={(event) => setEditDescription(event.target.value)}
+                        className="min-h-[80px]"
+                        placeholder={t('gitView.pr.placeholder.whatChanged')}
+                      />
+                    )}
+                  </label>
+                  <div className="flex justify-end">
+                    <Button
+                      size="sm"
+                      className="h-7 gap-1.5 px-2"
+                      onClick={() => void saveMr()}
+                      disabled={updating || editDescriptionLoading || !editTitle.trim()}
+                    >
+                      {updating ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="check" className="size-4" />}
+                      {updating ? t('contextPanel.gitlabMr.updateMr.saving') : t('contextPanel.gitlabMr.updateMr.save')}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
 
               {contextOpen ? (
                 <div className="flex min-w-0 flex-col gap-3 border-t border-border/40 pt-3">
@@ -414,6 +684,80 @@ export const GitLabMrView: React.FC = () => {
                   )}
                 </div>
               ) : null}
+            </div>
+          ) : currentBranch ? (
+            <div className="flex min-w-0 flex-col gap-2 rounded-md border border-border/40 p-3">
+              <div className="typography-ui-label font-semibold text-foreground">{t('contextPanel.gitlabMr.createMr.title')}</div>
+
+              <label className="space-y-1">
+                <div className="typography-micro text-muted-foreground">{t('contextPanel.gitlabMr.createMr.sourceBranch')}</div>
+                <Input value={currentBranch} readOnly />
+              </label>
+
+              <label className="space-y-1">
+                <div className="typography-micro text-muted-foreground">{t('contextPanel.gitlabMr.createMr.targetBranch')}</div>
+                <Input
+                  value={createTargetBranch}
+                  onChange={(event) => {
+                    createTargetTouchedRef.current = true;
+                    setCreateTargetBranch(event.target.value);
+                  }}
+                  placeholder="main"
+                />
+              </label>
+
+              <label className="space-y-1">
+                <div className="typography-micro text-muted-foreground">{t('contextPanel.gitlabMr.createMr.titleLabel')}</div>
+                <Input
+                  value={createTitle}
+                  onChange={(event) => setCreateTitle(event.target.value)}
+                  placeholder={currentBranch}
+                />
+              </label>
+
+              <label className="space-y-1">
+                <div className="typography-micro text-muted-foreground">{t('contextPanel.gitlabMr.createMr.descriptionLabel')}</div>
+                <Textarea
+                  value={createDescription}
+                  onChange={(event) => setCreateDescription(event.target.value)}
+                  className="min-h-[80px]"
+                  placeholder={t('gitView.pr.placeholder.whatChanged')}
+                />
+              </label>
+
+              <div
+                className="flex items-center gap-2 cursor-pointer"
+                role="button"
+                tabIndex={0}
+                aria-pressed={createRemoveSourceBranch}
+                onClick={() => setCreateRemoveSourceBranch((value) => !value)}
+                onKeyDown={(event) => {
+                  if (event.key === ' ' || event.key === 'Enter') {
+                    event.preventDefault();
+                    setCreateRemoveSourceBranch((value) => !value);
+                  }
+                }}
+              >
+                <Checkbox
+                  size="sm"
+                  checked={createRemoveSourceBranch}
+                  onChange={(next) => setCreateRemoveSourceBranch(next)}
+                  ariaLabel={t('contextPanel.gitlabMr.createMr.removeSourceBranch')}
+                />
+                <span className="typography-ui-label text-foreground select-none">{t('contextPanel.gitlabMr.createMr.removeSourceBranch')}</span>
+              </div>
+
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  className="h-7 gap-1.5 px-2"
+                  onClick={() => void createMr()}
+                  disabled={creating || !createTargetBranch.trim()}
+                >
+                  {creating ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="git-pull-request" className="size-4" />}
+                  {creating ? t('contextPanel.gitlabMr.createMr.submitting') : t('contextPanel.gitlabMr.createMr.submit')}
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="typography-micro text-muted-foreground">{t('contextPanel.gitlabMr.noMrForBranch')}</div>
