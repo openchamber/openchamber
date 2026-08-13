@@ -43,10 +43,7 @@ export const UsageProviderCards: React.FC<{
         {group.rows.length > 0 ? (
           <div className="mt-1.5 space-y-1">
             {group.rows.map((row) => {
-              const displayPercent = displayMode === 'remaining'
-                ? row.window.remainingPercent
-                : row.window.usedPercent;
-              const metricLabel = formatQuotaValueLabel(row.window.valueLabel, displayPercent);
+              const metricLabel = formatQuotaValueLabel(row.window, displayMode);
               const resetLabel = formatQuotaResetLabel(
                 row.window.resetAt,
                 row.window.resetAfterFormatted ?? row.window.resetAtFormatted,

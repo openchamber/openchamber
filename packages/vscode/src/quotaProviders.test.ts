@@ -1,4 +1,4 @@
-import { after, afterEach, beforeEach, describe, test } from 'node:test';
+import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,9 +20,22 @@ const AUTH = JSON.stringify({
   'command-code': { type: 'oauth', access: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
+  sub2api: { key: 'test-token' },
 });
+const SUB2API_CONFIG = JSON.stringify({
+  provider: {
+    sub2api: {
+      options: { baseURL: 'https://example.com/v1' },
+    },
+  },
+});
+const FILE_CONTENTS: Record<string, string> = {};
+FILE_CONTENTS[path.join(os.homedir(), '.config', 'opencode', 'config.json')] = SUB2API_CONFIG;
+FILE_CONTENTS[path.join(os.homedir(), '.config', 'opencode', 'opencode.json')] = SUB2API_CONFIG;
+FILE_CONTENTS[path.join(os.homedir(), '.config', 'opencode', 'opencode.jsonc')] = SUB2API_CONFIG;
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
-((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
+((fs as unknown) as { readFileSync: (filePath: string) => string }).readFileSync = (filePath: string) =>
+  FILE_CONTENTS[filePath] ?? AUTH;
 
 import { fetchQuotaForProvider } from './quotaProviders';
 
@@ -500,11 +513,6 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
   });
 
   // Restore fs so other test files (which use the real auth file) are unaffected.
-  test('teardown: restore fs', () => {
-    const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
-    fsMock.existsSync = ORIGINAL_FS.existsSync;
-    fsMock.readFileSync = ORIGINAL_FS.readFileSync;
-  });
 });
 
 describe('DeepSeek quota provider (VS Code parity)', () => {
@@ -589,10 +597,188 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$0.00');
   });
+});
+
+
+describe('Sub2API quota provider (VS Code parity)', () => {
+  before(() => {
+    // The DeepSeek suite re-stubs readFileSync to return only AUTH; re-establish
+    // the config/auth file mapping for this suite.
+    ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
+    ((fs as unknown) as { readFileSync: (filePath: string) => string }).readFileSync = (filePath: string) =>
+      FILE_CONTENTS[filePath] ?? AUTH;
+  });
+
+  test('requests the normalized /v1/usage URL with Authorization only', async () => {
+    let requestUrl: string | undefined;
+    let requestHeaders: Record<string, string> | undefined;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      requestUrl = url;
+      requestHeaders = init?.headers as Record<string, string> | undefined;
+      return mockResponse({ mode: 'unrestricted', balance: 10, unit: 'USD' });
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('sub2api');
+
+    assert.equal(result.ok, true);
+    assert.equal(requestUrl, 'https://example.com/v1/usage');
+    assert.equal(requestHeaders?.Authorization, 'Bearer test-token');
+    assert.equal(requestHeaders?.['X-Gateway-Token'], undefined);
+  });
+
+  test('parses quota_limited windows and statistics', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      mode: 'quota_limited',
+      isValid: true,
+      status: 'active',
+      quota: { limit: 100, used: 36.5, remaining: 63.5, unit: 'USD' },
+      remaining: 63.5,
+      unit: 'USD',
+      rate_limits: [
+        { window: '5h', limit: 10, used: 4, remaining: 6, window_start: '2026-08-13T00:00:00Z', reset_at: '2026-08-13T05:00:00Z' },
+        { window: '7d', limit: 100, used: 40, remaining: 60, window_start: '2026-08-11T00:00:00Z', reset_at: '2026-08-18T00:00:00Z' },
+      ],
+      usage: {
+        today: { requests: 10, input_tokens: 10000, output_tokens: 2000, cache_read_tokens: 5000, total_tokens: 17000, actual_cost: 0.4 },
+        total: { requests: 100, input_tokens: 100000, output_tokens: 20000, cache_read_tokens: 50000, total_tokens: 170000, actual_cost: 4 },
+      },
+      model_stats: [
+        { model: 'gpt-example', requests: 20, input_tokens: 50000, output_tokens: 10000, cache_read_tokens: 20000, total_tokens: 80000, actual_cost: 2, account_cost: 1.5 },
+      ],
+    })));
+
+    const result = await fetchQuotaForProvider('sub2api');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.providerId, 'sub2api');
+
+    const total = result.usage!.windows.plan_limit;
+    assert.ok(Math.abs((total!.usedPercent as number) - 36.5) < 1e-2);
+    assert.equal(total!.usedLabel, '$36.50');
+    assert.equal(total!.remainingLabel, '$63.50');
+
+    const fiveHour = result.usage!.windows['5h'];
+    assert.equal(fiveHour!.usedPercent, 40);
+    assert.equal(fiveHour!.windowSeconds, 5 * 60 * 60);
+    assert.equal(fiveHour!.resetAt, Date.parse('2026-08-13T05:00:00Z'));
+
+    const sevenDay = result.usage!.windows['7d'];
+    assert.equal(sevenDay!.windowSeconds, 7 * 24 * 60 * 60);
+
+    assert.equal(result.statistics?.unit, 'USD');
+    assert.equal(result.statistics?.today?.requests, 10);
+    assert.equal(result.statistics?.total?.actualCost, 4);
+    assert.equal(result.statistics?.models?.['gpt-example']?.actualCost, 2);
+  });
+
+  test('parses subscription limits with weekly reset and plan balance', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      mode: 'unrestricted',
+      isValid: true,
+      planName: 'Plan Name',
+      unit: 'USD',
+      remaining: 10,
+      subscription: {
+        daily_usage_usd: 1,
+        weekly_usage_usd: 4,
+        monthly_usage_usd: 12,
+        daily_limit_usd: 5,
+        weekly_limit_usd: 20,
+        monthly_limit_usd: 50,
+        weekly_window_start: '2026-08-10T00:00:00Z',
+        expires_at: '2026-09-01T00:00:00Z',
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('sub2api');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.daily!.usedPercent, 20);
+    assert.equal(result.usage!.windows.weekly!.usedPercent, 20);
+    assert.equal(result.usage!.windows.weekly!.resetAt, Date.parse('2026-08-17T00:00:00Z'));
+    assert.equal(result.usage!.windows.monthly!.usedPercent, 24);
+    assert.equal(result.usage!.windows.monthly!.remainingLabel, '$38.00');
+    assert.equal(result.usage!.windows['Plan Name']!.valueLabel, '$10.00');
+  });
+
+  test('parses wallet balance as a non-percent value', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      mode: 'unrestricted',
+      isValid: true,
+      planName: '钱包余额',
+      remaining: 23.45,
+      balance: 23.45,
+      unit: 'USD',
+    })));
+
+    const result = await fetchQuotaForProvider('sub2api');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.credits_balance!.usedPercent, null);
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$23.45');
+  });
+
+  test('keeps quota_exhausted status as a successful result', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      mode: 'quota_limited',
+      status: 'quota_exhausted',
+      isValid: false,
+      quota: { limit: 100, used: 100, remaining: 0, unit: 'USD' },
+    })));
+
+    const result = await fetchQuotaForProvider('sub2api');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 'quota_exhausted');
+    assert.equal(result.usage!.windows.plan_limit!.usedPercent, 100);
+  });
+
+  test('maps 401 to authentication failure', async () => {
+    stubFetchFailing(async () => ({ code: 'INVALID_API_KEY' }), { ok: false, status: 401 });
+
+    const result = await fetchQuotaForProvider('sub2api');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Sub2API authentication failed');
+  });
+
+  test('maps 429 to an HTTP error', async () => {
+    stubFetchFailing(async () => ({}), { ok: false, status: 429 });
+
+    const result = await fetchQuotaForProvider('sub2api');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Sub2API usage API returned HTTP 429');
+  });
+
+  test('reports invalid-response on JSON parse failure', async () => {
+    globalThis.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => { throw new SyntaxError('Unexpected token'); },
+    }) as unknown as Response) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('sub2api');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Invalid response from provider');
+  });
+
+  test('returns no-quota-data on a 200 payload with no usable windows', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({ mode: 'unrestricted' })));
+
+    const result = await fetchQuotaForProvider('sub2api');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'No quota data in response');
+    assert.equal(result.usage, null);
+  });
+});
 
   test('teardown: restore fs', () => {
     const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
     fsMock.existsSync = ORIGINAL_FS.existsSync;
     fsMock.readFileSync = ORIGINAL_FS.readFileSync;
   });
-});

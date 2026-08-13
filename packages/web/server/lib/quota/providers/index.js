@@ -27,6 +27,7 @@ import * as neuralwatt from './neuralwatt.js';
 import * as ollamaCloud from './ollama-cloud.js';
 import * as wafer from './wafer.js';
 import * as opencodeGo from './opencode-go.js';
+import * as sub2api from './sub2api.js';
 import * as xai from './xai.js';
 
 const registry = {
@@ -149,6 +150,12 @@ const registry = {
     providerName: neuralwatt.providerName,
     isConfigured: neuralwatt.isConfigured,
     fetchQuota: neuralwatt.fetchQuota
+  },
+  sub2api: {
+    providerId: sub2api.providerId,
+    providerName: sub2api.providerName,
+    isConfigured: sub2api.isConfigured,
+    fetchQuota: sub2api.fetchQuota
   },
   xai: {
     providerId: xai.providerId,

@@ -19,9 +19,11 @@ description: 跟踪你已使用的提供商套餐额度。
 
 ## 支持的提供商
 
-用量功能适用于那些公布配额的提供商，包括 Claude、Codex、GitHub Copilot、Google、OpenRouter、Kimi、NanoGPT、z.ai、Zhipu、MiniMax、Ollama Cloud 和 Wafer。
+用量功能适用于那些公布配额的提供商，包括 Claude、Codex、GitHub Copilot、Google、OpenRouter、Kimi、NanoGPT、z.ai、Zhipu、MiniMax、Ollama Cloud、Wafer 和 Sub2API。
 
 只有在你于 [提供商](/zh-cn/providers/) 页面登录某个提供商后，它才会显示用量。少数提供商需要额外的步骤 — 例如，Ollama Cloud 会读取一个你单独设置的会话文件。如果某个提供商没有显示数据，通常意味着缺少这个额外的凭证。
+
+对于 Sub2API，请在提供商页面连接一个 ID 为 `sub2api` 的 OpenAI 兼容自定义提供商（使用你聊天时所用的 base URL 和模型）。用量功能随后会以该提供商的 API 密钥查询 `GET <baseUrl>/v1/usage`，并根据你的密钥展示配额受限、订阅或钱包余额，以及可选的 30 天模型统计。
 
 ## 相关内容
 

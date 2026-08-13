@@ -545,6 +545,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['models', 'quota', 'limits', 'tokens'],
   },
   {
+    id: 'usage.statistics',
+    page: 'usage',
+    titleKey: 'usage.statistics.title',
+    descriptionKey: 'usage.statistics.info',
+    keywords: ['usage', 'statistics', 'requests', 'tokens', 'cost', 'spend'],
+  },
+  {
     id: 'projects.name',
     page: 'projects',
     titleKey: 'settings.projects.page.field.projectName',

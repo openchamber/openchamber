@@ -1,6 +1,7 @@
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { formatDateTimeForPreference, formatTimeForPreference } from '@/lib/timeFormat';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
+import type { UsageWindow } from '@/types';
 
 const t = (key: Parameters<typeof formatMessage>[1]) => formatMessage(useI18nStore.getState().dictionary, key);
 
@@ -19,10 +20,20 @@ export const formatPercent = (value: number | null): string => {
 };
 
 export const formatQuotaValueLabel = (
-  valueLabel: string | null | undefined,
-  percent: number | null,
+  window: Pick<UsageWindow, 'usedLabel' | 'remainingLabel' | 'valueLabel' | 'usedPercent' | 'remainingPercent'>,
+  displayMode: 'usage' | 'remaining',
 ): string => {
-  return valueLabel ?? formatPercent(percent);
+  if (displayMode === 'remaining') {
+    const remainingLabel = window.remainingLabel;
+    if (remainingLabel != null && remainingLabel !== '') return remainingLabel;
+  } else {
+    const usedLabel = window.usedLabel;
+    if (usedLabel != null && usedLabel !== '') return usedLabel;
+  }
+  const valueLabel = window.valueLabel;
+  if (valueLabel != null && valueLabel !== '') return valueLabel;
+  const percent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
+  return formatPercent(percent);
 };
 
 export const formatQuotaResetLabel = (

@@ -2,6 +2,8 @@ export type {
   QuotaProviderId,
   UsageWindow,
   UsageWindows,
+  UsageStatistics,
+  ProviderUsageStatistics,
   ProviderResult
 } from './quota';
 

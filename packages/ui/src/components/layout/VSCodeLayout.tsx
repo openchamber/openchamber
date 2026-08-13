@@ -974,7 +974,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                     const displayPercent = quotaDisplayMode === 'remaining'
                       ? window.remainingPercent
                       : window.usedPercent;
-                    const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
+                    const metricLabel = formatQuotaValueLabel(window, quotaDisplayMode);
                     return (
                     <DropdownMenuItem
                       key={`${group.providerId}-${label}`}

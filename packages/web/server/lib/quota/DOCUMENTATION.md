@@ -37,6 +37,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `wafer` | Wafer.ai | `providers/wafer.js` | `wafer`, `wafer-ai`, `wafer_ai`, `wafer.ai` |
 | `opencode-go` | OpenCode Go | `providers/opencode-go.js` | `opencode-go` API key from OpenCode `auth.json` |
 | `neuralwatt` | NeuralWatt | `providers/neuralwatt.js` | `neuralwatt` (API key under `key` or `token`) |
+| `sub2api` | Sub2API | `providers/sub2api.js` | `sub2api` API key from OpenCode `auth.json`; base URL from the custom `sub2api` provider config |
 | `xai` | xAI | `providers/xai.js` | `xai` OAuth entry in OpenCode `auth.json` |
 
 ## Internal-only provider module
@@ -95,6 +96,20 @@ In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 mo
 - Each `limits[].detail` rate-limit block returns `remaining` (available) with no `used` field.
 
 The provider computes `usedPercent` from whichever of `used`/`remaining` is present (`used` takes precedence when both exist) rather than assuming one field name. Both `packages/web/server/lib/quota/providers/kimi.js` and `packages/vscode/src/quotaProviders.ts` (`fetchKimiQuota`) must stay in sync — the VS Code extension duplicates this parsing logic rather than importing it.
+
+## Sub2API provider
+
+`sub2api` reads the custom OpenAI-compatible provider block for the exact provider ID `sub2api` (custom > project > user precedence) and requests `GET <baseUrl>/v1/usage` with `Authorization: Bearer <apiKey>` where the key comes from the `sub2api` entry in OpenCode `auth.json`. Base URLs ending in `/v1` are normalized so the request is exactly `<origin-or-base>/v1/usage`; non-HTTP(S) base URLs are treated as unconfigured. Provider config `options.headers` (for example a gateway token used at chat time) are never forwarded to the usage endpoint.
+
+The response contract distinguishes three modes:
+
+- `quota_limited`: total quota surfaces as a `plan_limit` window with display-mode-aware `usedLabel`/`remainingLabel` amounts; every `rate_limits[]` entry becomes its own window (`5h`/`1d`→`daily`/`7d` or the raw label) with duration derived from `window_start`/`reset_at` when available.
+- `unrestricted` with `subscription`: daily, weekly, and monthly `used / limit` windows, weekly reset from `weekly_window_start` plus seven days, and the plan name / remaining balance as an informational non-percent window.
+- `unrestricted` wallet: a non-percent `credits_balance` window (`balance`, falling back to `remaining`) — never a percentage.
+
+`status: quota_exhausted` / `expired` on a successful payload remain successful results with the reported limits/balance rendered; the raw status is passed through `ProviderResult.status` so UI can surface it. Optional aggregate (`usage.today`/`usage.total`) and `model_stats[]` data is retained as `ProviderResult.statistics` with `actual_cost` as the user-facing amount; `account_cost` and standard `cost` are never used in its place. Missing best-effort statistics never fail the provider.
+
+`sub2api` is a distinct quota provider from the built-in `xai` provider (OAuth-based xAI billing) and from any legacy `XAI`-named custom gateway config; the quota dispatcher routes only the exact `sub2api` ID and never adds alias dispatch.
 
 ## Notes for contributors
 - Keep provider IDs stable; clients use them directly.

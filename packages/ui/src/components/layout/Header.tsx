@@ -2446,7 +2446,7 @@ export const Header: React.FC<HeaderProps> = ({
                                   const displayPercent = quotaDisplayMode === 'remaining'
                                     ? window.remainingPercent
                                     : window.usedPercent;
-                                  const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
+                                  const metricLabel = formatQuotaValueLabel(window, quotaDisplayMode);
                                   const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
                                   return (
                                     <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
@@ -2501,7 +2501,7 @@ export const Header: React.FC<HeaderProps> = ({
                                                 const displayPercent = quotaDisplayMode === 'remaining'
                                                   ? window.remainingPercent
                                                   : window.usedPercent;
-                                                const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
+                                                const metricLabel = formatQuotaValueLabel(window, quotaDisplayMode);
                                                 return (
                                                   <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
                                                     <div className="flex min-w-0 items-center justify-between gap-3">
