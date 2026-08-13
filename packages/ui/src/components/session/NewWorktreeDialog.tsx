@@ -243,6 +243,7 @@ export function NewWorktreeDialog({
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const gitlabAuthStatus = useGitLabAuthStore((state) => state.status);
   const gitlabAuthChecked = useGitLabAuthStore((state) => state.hasChecked);
+  const refreshGitLabAuth = useGitLabAuthStore((state) => state.refreshStatus);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   
   const projectDirectory = activeProject?.path ?? null;
@@ -318,6 +319,15 @@ export function NewWorktreeDialog({
   
   const [githubDialogOpen, setGithubDialogOpen] = React.useState(false);
   const [gitlabDialogOpen, setGitlabDialogOpen] = React.useState(false);
+
+  // Populate the GitLab auth status on mount so the "Start from GitLab issue/MR"
+  // action is available without first visiting Settings. refreshStatus dedupes
+  // when already checked and falls back to runtimeFetch when the runtime API
+  // is unavailable.
+  React.useEffect(() => {
+    void refreshGitLabAuth(gitlab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Desktop branch picker states
   const [existingBranchDropdownOpen, setExistingBranchDropdownOpen] = React.useState(false);
