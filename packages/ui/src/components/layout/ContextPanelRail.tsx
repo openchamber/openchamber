@@ -17,11 +17,13 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDeviceInfo } from '@/lib/device';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { useGitProvider } from '@/lib/gitProvider';
 import { useI18n } from '@/lib/i18n';
 import {
   getVisibleContextRailSurfaces,
@@ -167,6 +169,9 @@ export const ContextPanelRail: React.FC = () => {
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const { screenWidth } = useDeviceInfo();
   const gitStatus = useGitStatus(directoryKey || null);
+  // Provider-aware 'pr' branding: GitLab repositories get the MR descriptor
+  // (icon + labels) on the rail instead of the GitHub pull-request branding.
+  const gitProvider = useGitProvider(directoryKey);
 
   const surfaceSwitchPrefix = React.useMemo(
     () => getEffectiveShortcutPrefix('switch_context_surface', shortcutOverrides),
@@ -260,8 +265,9 @@ export const ContextPanelRail: React.FC = () => {
       isVSCode: isVSCodeRuntime(),
       screenWidth,
       tabs,
+      gitProvider,
     });
-  }, [contextRailOrder, planModeEnabled, screenWidth, tabs]);
+  }, [contextRailOrder, gitProvider, planModeEnabled, screenWidth, tabs]);
 
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const { active, over } = event;
@@ -291,7 +297,17 @@ export const ContextPanelRail: React.FC = () => {
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={surfaces.map((surface) => surface.id)} strategy={verticalListSortingStrategy}>
           {surfaces.map((surface, index) => {
-            const label = t(surface.labelKey);
+            // The 'pr' surface renders the GitLab MR view in GitLab repos, so
+            // it borrows GitLab's merge-request branding instead of GitHub's.
+            const gitlabMrSurface: ContextSurfaceDescriptor = surface.id === 'pr' && gitProvider === 'gitlab'
+              ? {
+                  ...surface,
+                  icon: 'git-merge' as IconName,
+                  labelKey: 'contextPanel.mode.mr',
+                  descriptionKey: 'contextRail.surface.mr.description',
+                }
+              : surface;
+            const label = t(gitlabMrSurface.labelKey);
             // Git shows a numeric badge instead of the old activity dot.
             // Other surfaces never inherit git's changed-files signal.
             // The work-status panel reports the same count in words a few
@@ -301,11 +317,11 @@ export const ContextPanelRail: React.FC = () => {
             return (
               <ContextPanelRailItem
                 key={surface.id}
-                surface={surface}
+                surface={gitlabMrSurface}
                 isActive={activeMode === surface.mode}
                 showActivityDot={false}
                 label={label}
-                description={t(surface.descriptionKey)}
+                description={t(gitlabMrSurface.descriptionKey)}
                 badgeCount={badgeCount}
                 badgeAriaLabel={badgeCount !== null
                   ? t(
