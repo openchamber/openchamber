@@ -925,6 +925,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['background', 'push'],
     isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
   },
+  {
+    id: 'notifications.sounds',
+    page: 'notifications',
+    titleKey: 'settings.notifications.page.sounds.title',
+    keywords: ['sound', 'audio', 'volume', 'beep', 'chime', 'alert'],
+  },
 ] as const;
 
 interface BuildSettingsSearchResultsOptions {
