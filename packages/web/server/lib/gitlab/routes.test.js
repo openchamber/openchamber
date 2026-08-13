@@ -350,7 +350,7 @@ describe('GitLab data routes', () => {
         body: 'Looks good to me',
         createdAt: '2026-01-01T01:00:00Z',
         updatedAt: undefined,
-        author: { username: 'alice', name: 'Alice Example', avatarUrl: null, id: 42 },
+        author: { username: 'alice', name: 'Alice Example', avatarUrl: null, id: 42, webUrl: null },
       },
     ]);
   });
@@ -508,6 +508,299 @@ describe('GitLab data routes', () => {
     const response = await request(app).get('/api/gitlab/repo/branches?namespace=group');
     expect(response.status).toBe(400);
     expect(response.body).toEqual({ error: 'namespace and project are required' });
+  });
+
+  test('mrs/create POSTs source/target/title and returns the created MR summary', async () => {
+    const createdMr = {
+      iid: 12,
+      title: 'Add feature',
+      web_url: 'https://gitlab.com/group/sub/-/merge_requests/12',
+      state: 'opened',
+      draft: false,
+      work_in_progress: false,
+      author: {
+        id: 42,
+        username: 'alice',
+        name: 'Alice Example',
+        avatar_url: 'https://gitlab.com/alice.png',
+        web_url: 'https://gitlab.com/alice',
+      },
+      source_branch: 'feat/add',
+      target_branch: 'main',
+    };
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests$/)(url) && options.method === 'POST') {
+          return jsonResponse(createdMr, { status: 201 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/mrs/create')
+      .send({
+        directory: '/tmp/work',
+        title: 'Add feature',
+        sourceBranch: 'feat/add',
+        targetBranch: 'main',
+        description: 'Adds the feature',
+        removeSourceBranch: true,
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      repo: { namespace: 'group', project: 'sub', host: 'gitlab.com' },
+      mr: {
+        number: 12,
+        title: 'Add feature',
+        url: 'https://gitlab.com/group/sub/-/merge_requests/12',
+        state: 'opened',
+        draft: false,
+        author: {
+          username: 'alice',
+          name: 'Alice Example',
+          avatarUrl: 'https://gitlab.com/alice.png',
+          webUrl: 'https://gitlab.com/alice',
+        },
+        sourceBranch: 'feat/add',
+        targetBranch: 'main',
+      },
+    });
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({
+      source_branch: 'feat/add',
+      target_branch: 'main',
+      title: 'Add feature',
+      description: 'Adds the feature',
+      remove_source_branch: true,
+    });
+  });
+
+  test('mrs/create defaults remove_source_branch to false and omits description', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests$/)(url) && options.method === 'POST') {
+          return jsonResponse(
+            { iid: 1, title: 'T', web_url: 'u', state: 'opened', draft: false, author: {}, source_branch: 's', target_branch: 'm' },
+            { status: 201 },
+          );
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    await request(app)
+      .post('/api/gitlab/mrs/create')
+      .send({ directory: '/tmp/work', title: 'T', sourceBranch: 's', targetBranch: 'm' });
+
+    const [, options] = fetchMock.mock.calls[0];
+    const body = JSON.parse(options.body);
+    expect(body).toEqual({ source_branch: 's', target_branch: 'm', title: 'T', remove_source_branch: false });
+    expect(body.description).toBeUndefined();
+  });
+
+  test('mrs/create rejects missing fields with 400', async () => {
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/mrs/create')
+      .send({ directory: '/tmp/work', title: 'Add feature' });
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'directory, title, sourceBranch, targetBranch are required' });
+  });
+
+  test('mrs/create reports connected:false when not authenticated', async () => {
+    clearGitLabAuth();
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/mrs/create')
+      .send({ directory: '/tmp/work', title: 'Add feature', sourceBranch: 'feat/add', targetBranch: 'main' });
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ connected: false });
+  });
+
+  test('mrs/create surfaces a 403 as an api-scope error', async () => {
+    scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests$/)(url) && options.method === 'POST') {
+          return jsonResponse({ message: '403 Forbidden' }, { status: 403 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/mrs/create')
+      .send({ directory: '/tmp/work', title: 'Add feature', sourceBranch: 'feat/add', targetBranch: 'main' });
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Your GitLab token needs the api scope to create merge requests' });
+  });
+
+  test('mrs/create surfaces GitLab validation errors with the api message', async () => {
+    scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests$/)(url) && options.method === 'POST') {
+          return jsonResponse({ message: { source_branch: ['is missing'], title: ['is invalid'] } }, { status: 400 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/mrs/create')
+      .send({ directory: '/tmp/work', title: 'Add feature', sourceBranch: 'feat/add', targetBranch: 'main' });
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'source_branch: is missing; title: is invalid' });
+  });
+
+  test('mrs/update PUTs title/description and returns the updated MR summary', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests\/12$/)(url) && options.method === 'PUT') {
+          return jsonResponse({
+            iid: 12,
+            title: 'Updated title',
+            web_url: 'https://gitlab.com/group/sub/-/merge_requests/12',
+            state: 'opened',
+            draft: false,
+            work_in_progress: false,
+            author: { id: 42, username: 'alice', name: 'Alice Example', avatar_url: 'https://gitlab.com/alice.png' },
+            source_branch: 'feat/add',
+            target_branch: 'main',
+          });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .put('/api/gitlab/mrs/update')
+      .send({ directory: '/tmp/work', number: 12, title: 'Updated title', description: 'New body' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      mr: { number: 12, title: 'Updated title', state: 'opened', sourceBranch: 'feat/add', targetBranch: 'main' },
+    });
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.method).toBe('PUT');
+    expect(JSON.parse(options.body)).toEqual({ title: 'Updated title', description: 'New body' });
+  });
+
+  test('mrs/update omits title/description when not provided', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests\/12$/)(url) && options.method === 'PUT') {
+          return jsonResponse({
+            iid: 12,
+            title: 'T',
+            web_url: 'u',
+            state: 'opened',
+            draft: false,
+            author: {},
+            source_branch: 's',
+            target_branch: 'm',
+          });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    await request(app).put('/api/gitlab/mrs/update').send({ directory: '/tmp/work', number: 12 });
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({});
+  });
+
+  test('mrs/update returns 404 for a missing merge request', async () => {
+    scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests\/999$/)(url) && options.method === 'PUT') {
+          return jsonResponse({ message: '404 Not Found' }, { status: 404 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .put('/api/gitlab/mrs/update')
+      .send({ directory: '/tmp/work', number: 999, title: 'x' });
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'Merge request not found' });
+  });
+
+  test('mrs/merge PUTs squash and reports merged:true', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests\/12\/merge$/)(url) && options.method === 'PUT') {
+          return jsonResponse({ iid: 12, state: 'merged' });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .put('/api/gitlab/mrs/merge')
+      .send({ directory: '/tmp/work', number: 12, squash: true });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ connected: true, merged: true });
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.method).toBe('PUT');
+    expect(JSON.parse(options.body)).toEqual({ squash: true });
+  });
+
+  test('mrs/merge passes through a GitLab merge rejection as merged:false', async () => {
+    scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests\/12\/merge$/)(url) && options.method === 'PUT') {
+          return jsonResponse({ message: '405 Method Not Allowed: This merge request is not open' }, { status: 405 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .put('/api/gitlab/mrs/merge')
+      .send({ directory: '/tmp/work', number: 12 });
+
+    expect(response.status).toBe(405);
+    expect(response.body).toEqual({
+      connected: true,
+      merged: false,
+      message: '405 Method Not Allowed: This merge request is not open',
+    });
+  });
+
+  test('mrs/merge surfaces a 403 as an api-scope error', async () => {
+    scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests\/12\/merge$/)(url) && options.method === 'PUT') {
+          return jsonResponse({ message: '403 Forbidden' }, { status: 403 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .put('/api/gitlab/mrs/merge')
+      .send({ directory: '/tmp/work', number: 12 });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Your GitLab token needs the api scope to create merge requests' });
   });
 
   test('data routes surface a 503 when GitLab rate limits', async () => {

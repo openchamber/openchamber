@@ -1260,6 +1260,46 @@ export type GitLabBranchesResult = {
   branches: string[];
 };
 
+export type GitLabMergeRequestCreateInput = {
+  directory: string;
+  title: string;
+  sourceBranch: string;
+  targetBranch: string;
+  description?: string;
+  removeSourceBranch?: boolean;
+};
+
+export type GitLabMergeRequestUpdateInput = {
+  directory: string;
+  number: number;
+  title?: string;
+  description?: string;
+};
+
+export type GitLabMergeRequestMergeInput = {
+  directory: string;
+  number: number;
+  squash?: boolean;
+};
+
+export type GitLabMergeRequestCreateResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  mr?: GitLabMergeRequest;
+};
+
+export type GitLabMergeRequestUpdateResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  mr?: GitLabMergeRequest;
+};
+
+export type GitLabMergeRequestMergeResult = {
+  connected: boolean;
+  merged: boolean;
+  message?: string;
+};
+
 type GitLabAuthAccount = {
   id: string;
   user: {
@@ -1296,6 +1336,9 @@ export interface GitLabAPI {
     number: number,
     options?: { includeDiff?: boolean; namespace?: string; project?: string }
   ): Promise<GitLabMergeRequestContextResult>;
+  mrCreate(input: GitLabMergeRequestCreateInput): Promise<GitLabMergeRequest>;
+  mrUpdate(input: GitLabMergeRequestUpdateInput): Promise<GitLabMergeRequest>;
+  mrMerge(input: GitLabMergeRequestMergeInput): Promise<GitLabMergeRequestMergeResult>;
 
   repoBranches(namespace: string, project: string): Promise<string[]>;
 }

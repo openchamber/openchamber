@@ -2,8 +2,8 @@
 
 ## Purpose
 
-- This module owns GitLab auth (Personal Access Token), raw REST v4 client access, remote-URL repo resolution, and read-only GitLab issue / merge-request (MR) APIs for OpenChamber.
-- From a user perspective, this is the layer that lets the app show GitLab issues and merge requests for a local project, including comments and per-file diffs.
+- This module owns GitLab auth (Personal Access Token), raw REST v4 client access, remote-URL repo resolution, and GitLab issue / merge-request (MR) APIs for OpenChamber, including MR create/update/merge writes.
+- From a user perspective, this is the layer that lets the app show GitLab issues and merge requests for a local project, including comments and per-file diffs, and create, edit, and merge merge requests.
 - The module mirrors `packages/web/server/lib/github/` but uses a **Personal Access Token (PAT)** with a configurable base URL (gitlab.com by default, or a self-hosted instance), and talks to GitLab's REST v4 API directly via `fetch` — no new dependencies.
 
 ## Entrypoints and structure
@@ -32,7 +32,7 @@
 
 ### Client (`client.js`)
 
-- `createGitLabClient({ token, baseUrl })`: raw-fetch REST v4 client with `request(path, { method, query, body })` plus convenience methods `user()`, `project(path)`, `issues(path, params)`, `issue(path, iid)`, `issueNotes(path, iid, params)`, `mergeRequests(path, params)`, `mergeRequest(path, iid)`, `mergeRequestDiffs(path, iid, params)`, `branches(path, params)`.
+- `createGitLabClient({ token, baseUrl })`: raw-fetch REST v4 client with `request(path, { method, query, body })` plus convenience methods `user()`, `project(path)`, `issues(path, params)`, `issue(path, iid)`, `issueNotes(path, iid, params)`, `mergeRequests(path, params)`, `mergeRequest(path, iid)`, `mergeRequestDiffs(path, iid, params)`, `createMergeRequest(path, body)`, `updateMergeRequest(path, iid, body)`, `mergeMergeRequest(path, iid, body)`, `branches(path, params)`.
 - `getGitLabClientOrNull()`: client for the current account, or `null`.
 - `isGitLabRateLimited()` / `noteGitLabRateLimit(error)`: own module-level rate-limit cooldown (not shared with the GitHub module's `rate-limit.js`).
 
@@ -78,6 +78,9 @@ Nothing in the client or repo layers assumes the token came from a PAT.
 - MR detail: `GET /projects/:id/merge_requests/:merge_request_iid`.
 - MR diffs: `GET /projects/:id/merge_requests/:merge_request_iid/diffs?per_page=100&page=N` (paginated; the route caps at 10 pages / 3000 files).
 - MR notes: `GET /projects/:id/merge_requests/:merge_request_iid/notes?per_page=100`.
+- MR create: `POST /projects/:id/merge_requests` with `{ source_branch, target_branch, title, description?, remove_source_branch }` (description omitted when absent; `remove_source_branch` defaults to `false`).
+- MR update: `PUT /projects/:id/merge_requests/:merge_request_iid` with `{ title?, description? }` (undefined fields omitted).
+- MR merge: `PUT /projects/:id/merge_requests/:merge_request_iid/merge` with `{ squash? }`.
 - Branches: `GET /projects/:id/repository/branches?per_page=100&page=N`.
 - User: `GET /user` -> `{ id, username, name, state, avatar_url, web_url, email, ... }`.
 
@@ -95,6 +98,9 @@ Nothing in the client or repo layers assumes the token came from a PAT.
 | GET | `/api/gitlab/issues/comments` | `?directory&number&namespace&project` -> `{ connected, repo?, comments[] }` |
 | GET | `/api/gitlab/mrs/list` | `?directory&page&query&sourceBranch` -> `{ connected, repo?, mrs[], page, hasMore }` |
 | GET | `/api/gitlab/mrs/context` | `?directory&number&diff&namespace&project` -> `{ connected, repo?, mr, comments[], files[], diff? }` |
+| POST | `/api/gitlab/mrs/create` | body `{ directory, title, sourceBranch, targetBranch, description?, removeSourceBranch? }` -> `{ connected, repo?, mr }`; `400` for missing fields, unresolvable repo, or a token without the `api` scope |
+| PUT | `/api/gitlab/mrs/update` | body `{ directory, number, title?, description? }` -> `{ connected, repo?, mr }`; `404` when the MR does not exist |
+| PUT | `/api/gitlab/mrs/merge` | body `{ directory, number, squash? }` -> `{ connected, merged: true }` on success; non-mergeable MRs -> the GitLab status (`405`/`406`/`409`/`422`) with `{ connected, merged: false, message }` |
 | GET | `/api/gitlab/repo/branches` | `?namespace&project` -> `{ branches[] }` |
 
 Conventions mirror `github/routes.js`:
@@ -114,8 +120,10 @@ Conventions mirror `github/routes.js`:
 ## Failure handling
 
 - If GitLab is disconnected, read routes return `connected: false`.
-- A repo that does not resolve from the local git remote yields `repo: null` with empty lists, matching the GitHub behavior.
+- A repo that does not resolve from the local git remote yields `repo: null` with empty lists, matching the GitHub behavior. Write routes reject an unresolvable repo with `400 { error: 'Unable to resolve GitLab repo from directory' }`.
 - Invalid/expired tokens are cleared on `401`/`403` and reported as disconnected.
+- GitLab `403` on write routes means the token lacks the `api` scope; they respond `400 { error: 'Your GitLab token needs the api scope to ...' }`.
+- MR merge rejections (`405`/`406`/`409`/`422` from GitLab) are surfaced as `{ connected, merged: false, message }` with the GitLab status so clients can show the message without treating it as a transport error (mirrors `github/pr/merge`).
 - Rate-limit and timeout failures surface explicit `503` responses so clients keep last-known state rather than clearing UI.
 
 ## Notes for contributors
@@ -124,4 +132,4 @@ Conventions mirror `github/routes.js`:
 - Never log tokens. Error messages must not include the access token.
 - Do not double-encode project paths; convenience methods already call `encodeURIComponent` on the `pathWithNamespace`.
 - The ETag cache and rate-limit cooldown are module-level and per-instance — they are NOT shared with the GitHub module.
-- To add GitLab write operations (comment, assign, merge), add the endpoint in `routes.js`, add a convenience method in `client.js`, and extend the shared types — mirror the GitHub PR write routes.
+- To add further GitLab write operations (comment, assign, issue writes), add the endpoint in `routes.js`, add a convenience method in `client.js`, and extend the shared types — mirror the existing MR write routes and the GitHub PR write routes.

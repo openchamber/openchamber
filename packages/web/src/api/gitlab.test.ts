@@ -145,6 +145,124 @@ describe('createWebGitLabAPI', () => {
     });
   });
 
+  it('posts to /api/gitlab/mrs/create with the input body and returns the created MR', async () => {
+    const created = {
+      connected: true,
+      repo: null,
+      mr: {
+        number: 12,
+        title: 'Add feature',
+        url: 'https://gitlab.com/group/sub/-/merge_requests/12',
+        state: 'opened',
+        draft: false,
+        author: { username: 'octocat', id: 1 },
+        sourceBranch: 'feat/add',
+        targetBranch: 'main',
+      },
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(created));
+
+    const api = await createAPI();
+    await expect(api.mrCreate({
+      directory: '/workspace',
+      title: 'Add feature',
+      sourceBranch: 'feat/add',
+      targetBranch: 'main',
+      removeSourceBranch: true,
+    })).resolves.toEqual(created.mr);
+
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/gitlab/mrs/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        directory: '/workspace',
+        title: 'Add feature',
+        sourceBranch: 'feat/add',
+        targetBranch: 'main',
+        removeSourceBranch: true,
+      }),
+    });
+  });
+
+  it('throws the server error when mrCreate fails', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(
+      { error: 'Your GitLab token needs the api scope to create merge requests' },
+      { status: 400 },
+    ));
+
+    const api = await createAPI();
+    await expect(api.mrCreate({
+      directory: '/workspace',
+      title: 'Add feature',
+      sourceBranch: 'feat/add',
+      targetBranch: 'main',
+    })).rejects.toThrow('Your GitLab token needs the api scope to create merge requests');
+  });
+
+  it('PUTs to /api/gitlab/mrs/update with the input body and returns the updated MR', async () => {
+    const updated = {
+      connected: true,
+      repo: null,
+      mr: { number: 12, title: 'Renamed', url: 'u', state: 'opened', draft: false, author: { username: 'octocat', id: 1 }, sourceBranch: 'feat/add', targetBranch: 'main' },
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(updated));
+
+    const api = await createAPI();
+    await expect(api.mrUpdate({ directory: '/workspace', number: 12, title: 'Renamed', description: 'New body' })).resolves.toEqual(updated.mr);
+
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/gitlab/mrs/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ directory: '/workspace', number: 12, title: 'Renamed', description: 'New body' }),
+    });
+  });
+
+  it('returns merged:false without throwing when the server rejects a merge', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(
+      { connected: true, merged: false, message: '405 Method Not Allowed: not open' },
+      { status: 405 },
+    ));
+
+    const api = await createAPI();
+    await expect(api.mrMerge({ directory: '/workspace', number: 12, squash: true })).resolves.toEqual({
+      connected: true,
+      merged: false,
+      message: '405 Method Not Allowed: not open',
+    });
+
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/gitlab/mrs/merge', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ directory: '/workspace', number: 12, squash: true }),
+    });
+  });
+
+  it('resolves merged:true on a successful merge', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, merged: true }));
+
+    const api = await createAPI();
+    await expect(api.mrMerge({ directory: '/workspace', number: 12 })).resolves.toEqual({ connected: true, merged: true });
+  });
+
+  it('throws the server error when mrMerge hits a real error payload', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(
+      { error: 'Your GitLab token needs the api scope to create merge requests' },
+      { status: 400 },
+    ));
+
+    const api = await createAPI();
+    await expect(api.mrMerge({ directory: '/workspace', number: 12 })).rejects.toThrow(
+      'Your GitLab token needs the api scope to create merge requests',
+    );
+  });
+
+  it('throws the response status text when mrMerge has no parseable payload', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(new Response('upstream gone', { status: 502, statusText: 'Bad Gateway' }));
+
+    const api = await createAPI();
+    await expect(api.mrMerge({ directory: '/workspace', number: 12 })).rejects.toThrow('Bad Gateway');
+  });
+
   it('throws the server error message on {error} payloads', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'Not connected to GitLab' }, { status: 401 }));
 

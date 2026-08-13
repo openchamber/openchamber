@@ -5,8 +5,15 @@ import type {
   GitLabIssueCommentsResult,
   GitLabIssueGetResult,
   GitLabIssuesListResult,
+  GitLabMergeRequest,
   GitLabMergeRequestContextResult,
+  GitLabMergeRequestCreateInput,
+  GitLabMergeRequestCreateResult,
+  GitLabMergeRequestMergeInput,
+  GitLabMergeRequestMergeResult,
   GitLabMergeRequestsListResult,
+  GitLabMergeRequestUpdateInput,
+  GitLabMergeRequestUpdateResult,
   GitLabUserSummary,
 } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
@@ -173,6 +180,56 @@ export const createWebGitLabAPI = ({ urls }: WebGitLabAPIOptions): GitLabAPI => 
       throw new Error(payload?.error || response.statusText || 'Failed to load GitLab merge request context');
     }
     return payload;
+  },
+
+  async mrCreate(input: GitLabMergeRequestCreateInput): Promise<GitLabMergeRequest> {
+    const response = await runtimeFetch('/api/gitlab/mrs/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const payload = await jsonOrNull<GitLabMergeRequestCreateResult & { error?: string }>(response);
+    if (!response.ok || !payload?.mr) {
+      throw new Error(payload?.error || response.statusText || 'Failed to create GitLab merge request');
+    }
+    return payload.mr;
+  },
+
+  async mrUpdate(input: GitLabMergeRequestUpdateInput): Promise<GitLabMergeRequest> {
+    const response = await runtimeFetch('/api/gitlab/mrs/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const payload = await jsonOrNull<GitLabMergeRequestUpdateResult & { error?: string }>(response);
+    if (!response.ok || !payload?.mr) {
+      throw new Error(payload?.error || response.statusText || 'Failed to update GitLab merge request');
+    }
+    return payload.mr;
+  },
+
+  async mrMerge(input: GitLabMergeRequestMergeInput): Promise<GitLabMergeRequestMergeResult> {
+    const response = await runtimeFetch('/api/gitlab/mrs/merge', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const payload = await jsonOrNull<GitLabMergeRequestMergeResult & { error?: string }>(response);
+    // The server rejects non-mergeable requests with 405/409/422 and a
+    // `{ connected, merged: false, message }` body — parse it and return it
+    // instead of throwing. Only throw when there is no parseable payload
+    // (network failure) or the server surfaced a real `{ error }`.
+    if (!payload) {
+      throw new Error(response.statusText || 'Failed to merge GitLab merge request');
+    }
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+    return {
+      connected: Boolean(payload.connected),
+      merged: Boolean(payload.merged),
+      ...(payload.message ? { message: payload.message } : {}),
+    };
   },
 
   async repoBranches(namespace: string, project: string): Promise<string[]> {

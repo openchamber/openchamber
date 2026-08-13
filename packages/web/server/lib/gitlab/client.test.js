@@ -214,6 +214,65 @@ describe('etag conditional cache', () => {
   });
 });
 
+describe('merge request write methods', () => {
+  test('createMergeRequest POSTs a JSON body to the merge_requests endpoint', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ iid: 5, title: 'New MR' }, { status: 201 }));
+    globalThis.fetch = fetchMock;
+
+    const client = createGitLabClient({ token: 't', baseUrl: 'https://gitlab.com' });
+    const result = await client.createMergeRequest('group/sub', {
+      source_branch: 'feat/x',
+      target_branch: 'main',
+      title: 'New MR',
+    });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitlab.com/api/v4/projects/group%2Fsub/merge_requests');
+    expect(options.method).toBe('POST');
+    expect(options.headers['content-type']).toBe('application/json');
+    expect(JSON.parse(options.body)).toEqual({ source_branch: 'feat/x', target_branch: 'main', title: 'New MR' });
+    expect(result.status).toBe(201);
+    expect(result.data).toEqual({ iid: 5, title: 'New MR' });
+  });
+
+  test('updateMergeRequest PUTs a JSON body to the merge request endpoint', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ iid: 5, title: 'Updated' }));
+    globalThis.fetch = fetchMock;
+
+    const client = createGitLabClient({ token: 't', baseUrl: 'https://gitlab.com' });
+    await client.updateMergeRequest('group/sub', 5, { title: 'Updated', description: 'Body text' });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitlab.com/api/v4/projects/group%2Fsub/merge_requests/5');
+    expect(options.method).toBe('PUT');
+    expect(options.headers['content-type']).toBe('application/json');
+    expect(JSON.parse(options.body)).toEqual({ title: 'Updated', description: 'Body text' });
+  });
+
+  test('mergeMergeRequest PUTs a JSON body to the merge endpoint', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ iid: 5, state: 'merged' }));
+    globalThis.fetch = fetchMock;
+
+    const client = createGitLabClient({ token: 't', baseUrl: 'https://gitlab.com' });
+    await client.mergeMergeRequest('group/sub', 5, { squash: true });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitlab.com/api/v4/projects/group%2Fsub/merge_requests/5/merge');
+    expect(options.method).toBe('PUT');
+    expect(JSON.parse(options.body)).toEqual({ squash: true });
+  });
+
+  test('write methods surface error statuses without throwing', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ message: 'Method Not Allowed' }, { status: 405 }));
+    globalThis.fetch = fetchMock;
+
+    const client = createGitLabClient({ token: 't', baseUrl: 'https://gitlab.com' });
+    const result = await client.mergeMergeRequest('group/sub', 5, {});
+    expect(result.status).toBe(405);
+    expect(result.data).toEqual({ message: 'Method Not Allowed' });
+  });
+});
+
 describe('rate limiting', () => {
   // NOTE: these tests run last in this file. The rate-limit cooldown is
   // module-level and has no reset export, so earlier tests must not set one.

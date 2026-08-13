@@ -57,6 +57,7 @@ const mapAuthor = (author) => {
     username: typeof author.username === 'string' ? author.username : null,
     name: typeof author.name === 'string' ? author.name : null,
     avatarUrl: typeof author.avatar_url === 'string' ? author.avatar_url : null,
+    webUrl: typeof author.web_url === 'string' ? author.web_url : null,
     id: typeof author.id === 'number' ? author.id : null,
   };
 };
@@ -89,6 +90,34 @@ const mapComment = (note, webUrl) => ({
   updatedAt: typeof note.updated_at === 'string' ? note.updated_at : undefined,
   author: mapAuthor(note.author) || {},
 });
+
+// GitLab error bodies carry `message` as a string ("405 Method Not Allowed") or
+// as a field->errors object ({ title: ['is invalid'] }); some endpoints use an
+// `error` field instead. Flatten whichever shape is present into one readable
+// string so write routes can surface it in { error } or { message }.
+const gitLabErrorMessage = (data) => {
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+  const message = data.message;
+  if (typeof message === 'string' && message) {
+    return message;
+  }
+  if (message && typeof message === 'object') {
+    const parts = Object.entries(message).map(([field, errors]) => {
+      const list = Array.isArray(errors) ? errors : [errors];
+      const detail = list.filter((item) => typeof item === 'string' && item).join(', ');
+      return detail ? `${field}: ${detail}` : field;
+    });
+    if (parts.length > 0) {
+      return parts.join('; ');
+    }
+  }
+  if (typeof data.error === 'string' && data.error) {
+    return data.error;
+  }
+  return null;
+};
 
 const countDiffLines = (diffText) => {
   if (typeof diffText !== 'string') {
@@ -652,6 +681,186 @@ export function registerGitLabRoutes(app, options = {}) {
     } catch (error) {
       console.error('Failed to load GitLab merge request context:', error);
       return res.status(500).json({ error: error.message || 'Failed to load GitLab merge request context' });
+    }
+  });
+
+  // ================= GitLab Merge Request Write APIs =================
+
+  app.post('/api/gitlab/mrs/create', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const title = asString(req.body?.title);
+      const sourceBranch = asString(req.body?.sourceBranch);
+      const targetBranch = asString(req.body?.targetBranch);
+      if (!directory || !title || !sourceBranch || !targetBranch) {
+        return res.status(400).json({ error: 'directory, title, sourceBranch, targetBranch are required' });
+      }
+      const description = typeof req.body?.description === 'string' && req.body.description
+        ? req.body.description
+        : undefined;
+      const removeSourceBranch = typeof req.body?.removeSourceBranch === 'boolean'
+        ? req.body.removeSourceBranch
+        : false;
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedProject = getRequestedProject(req);
+      const { projectPath, repo } = await resolveProjectForRequest(directory, requestedProject);
+      if (!projectPath) {
+        return res.status(400).json({ error: 'Unable to resolve GitLab repo from directory' });
+      }
+
+      const body = {
+        source_branch: sourceBranch,
+        target_branch: targetBranch,
+        title,
+        remove_source_branch: removeSourceBranch,
+      };
+      if (description !== undefined) {
+        body.description = description;
+      }
+
+      const resp = await withTimeout(client.createMergeRequest(projectPath, body), ROUTE_TIMEOUT_MS, 'gitlab mr create');
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your GitLab token needs the api scope to create merge requests' });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: gitLabErrorMessage(resp.data) || 'GitLab returned an error while creating the merge request' });
+      }
+      if (!resp.data) {
+        return res.status(500).json({ error: 'GitLab returned an empty response while creating the merge request' });
+      }
+
+      return res.json({
+        connected: true,
+        repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl),
+        mr: mapMergeRequestSummary(resp.data),
+      });
+    } catch (error) {
+      console.error('Failed to create GitLab merge request:', error);
+      return res.status(500).json({ error: error.message || 'Failed to create GitLab merge request' });
+    }
+  });
+
+  app.put('/api/gitlab/mrs/update', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      if (!directory || !number) {
+        return res.status(400).json({ error: 'directory and number are required' });
+      }
+      const title = asString(req.body?.title);
+      const description = typeof req.body?.description === 'string' ? req.body.description : undefined;
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedProject = getRequestedProject(req);
+      const { projectPath, repo } = await resolveProjectForRequest(directory, requestedProject);
+      if (!projectPath) {
+        return res.status(400).json({ error: 'Unable to resolve GitLab repo from directory' });
+      }
+
+      const body = {};
+      if (title) {
+        body.title = title;
+      }
+      if (description !== undefined) {
+        body.description = description;
+      }
+
+      const resp = await withTimeout(client.updateMergeRequest(projectPath, number, body), ROUTE_TIMEOUT_MS, 'gitlab mr update');
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your GitLab token needs the api scope to update merge requests' });
+      }
+      if (resp.status === 404) {
+        return res.status(404).json({ error: 'Merge request not found' });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: gitLabErrorMessage(resp.data) || 'GitLab returned an error while updating the merge request' });
+      }
+      if (!resp.data) {
+        return res.status(500).json({ error: 'GitLab returned an empty response while updating the merge request' });
+      }
+
+      return res.json({
+        connected: true,
+        repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl),
+        mr: mapMergeRequestSummary(resp.data),
+      });
+    } catch (error) {
+      console.error('Failed to update GitLab merge request:', error);
+      return res.status(500).json({ error: error.message || 'Failed to update GitLab merge request' });
+    }
+  });
+
+  app.put('/api/gitlab/mrs/merge', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      if (!directory || !number) {
+        return res.status(400).json({ error: 'directory and number are required' });
+      }
+      const squash = typeof req.body?.squash === 'boolean' ? req.body.squash : undefined;
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedProject = getRequestedProject(req);
+      const { projectPath, repo } = await resolveProjectForRequest(directory, requestedProject);
+      if (!projectPath) {
+        return res.status(400).json({ error: 'Unable to resolve GitLab repo from directory' });
+      }
+
+      const body = {};
+      if (squash !== undefined) {
+        body.squash = squash;
+      }
+
+      const resp = await withTimeout(client.mergeMergeRequest(projectPath, number, body), ROUTE_TIMEOUT_MS, 'gitlab mr merge');
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your GitLab token needs the api scope to create merge requests' });
+      }
+      if (resp.status === 404) {
+        return res.status(404).json({ error: 'Merge request not found' });
+      }
+      // GitLab rejects non-mergeable requests with 405/406/409/422 and a
+      // `message` in the body — surface it as a merge rejection (mirrors the
+      // GitHub pr/merge contract) instead of a generic error.
+      if (resp.status === 405 || resp.status === 406 || resp.status === 409 || resp.status === 422) {
+        return res.status(resp.status).json({
+          connected: true,
+          merged: false,
+          message: gitLabErrorMessage(resp.data) || 'Merge request not mergeable',
+        });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: gitLabErrorMessage(resp.data) || 'GitLab returned an error while merging the merge request' });
+      }
+
+      return res.json({ connected: true, merged: true });
+    } catch (error) {
+      console.error('Failed to merge GitLab merge request:', error);
+      return res.status(500).json({ error: error.message || 'Failed to merge GitLab merge request' });
     }
   });
 

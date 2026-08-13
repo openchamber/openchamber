@@ -267,6 +267,12 @@ export function createGitLabClient({ token, baseUrl }) {
       request(`/projects/${encodeProject(pathWithNamespace)}/merge_requests/${iid}`),
     mergeRequestDiffs: (pathWithNamespace, iid, params = {}) =>
       request(`/projects/${encodeProject(pathWithNamespace)}/merge_requests/${iid}/diffs`, { query: params }),
+    createMergeRequest: (pathWithNamespace, body) =>
+      request(`/projects/${encodeProject(pathWithNamespace)}/merge_requests`, { method: 'POST', body }),
+    updateMergeRequest: (pathWithNamespace, iid, body) =>
+      request(`/projects/${encodeProject(pathWithNamespace)}/merge_requests/${iid}`, { method: 'PUT', body }),
+    mergeMergeRequest: (pathWithNamespace, iid, body) =>
+      request(`/projects/${encodeProject(pathWithNamespace)}/merge_requests/${iid}/merge`, { method: 'PUT', body }),
     branches: (pathWithNamespace, params = {}) =>
       request(`/projects/${encodeProject(pathWithNamespace)}/repository/branches`, { query: params }),
   };
