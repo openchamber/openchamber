@@ -25,6 +25,34 @@ const urls: RuntimeUrlResolver = {
 };
 
 describe('createWebFilesAPI', () => {
+  it('preserves the directory permission failure contract', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(
+      { error: 'Access to directory denied', reason: 'os-permission' },
+      { status: 403 },
+    ));
+
+    const error = await api.listDirectory('/protected').catch((caught) => caught);
+
+    expect(error).toMatchObject({
+      name: 'FilesystemError',
+      reason: 'os-permission',
+      status: 403,
+      message: 'Access to directory denied',
+    });
+  });
+
+  it('rejects malformed successful directory listings', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ path: '/workspace' }));
+
+    await expect(api.listDirectory('/workspace')).rejects.toMatchObject({
+      reason: 'invalid-response',
+    });
+  });
+
   it('uses per-call workspace directory for stat and read requests', async () => {
     const { createWebFilesAPI } = await import('./files');
     const api = createWebFilesAPI({ urls, getDirectory: () => '/stale-workspace' });

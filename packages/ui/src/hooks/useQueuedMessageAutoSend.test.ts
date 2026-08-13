@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { Agent } from '@opencode-ai/sdk/v2';
+import type { Agent, Message } from '@opencode-ai/sdk/v2';
 import type { QueuedMessage } from '../stores/messageQueueStore';
+import { ChildStoreManager } from '@/sync/child-store';
+import { setSyncRefs } from '@/sync/sync-refs';
 
 let visibleAgents: Agent[] = [];
 const sendMessageCalls: unknown[][] = [];
@@ -32,6 +34,7 @@ import {
   createQueuedAutoSendRetryScheduler,
   getQueuedAutoSendRetryDelayMs,
   isQueuedAutoSendBackedOff,
+  resolveQueuedSessionStatusType,
   sendQueuedAutoSendPayload,
   shouldDispatchQueuedAutoSend,
 } from './useQueuedMessageAutoSend';
@@ -116,6 +119,59 @@ describe('queued auto-send retry backoff', () => {
     expect(isQueuedAutoSendBackedOff(failure, 'queued-1', 10_000)).toBe(false);
     expect(isQueuedAutoSendBackedOff(failure, 'queued-2', 9_999)).toBe(false);
     expect(isQueuedAutoSendBackedOff(undefined, 'queued-1', 0)).toBe(false);
+  });
+});
+
+describe('resolveQueuedSessionStatusType', () => {
+  const DIRECTORY = '/repo';
+
+  const assistantMessage = (id: string, completed?: number): Message => ({
+    id,
+    role: 'assistant',
+    sessionID: 'ses_1',
+    time: { created: 1, ...(completed !== undefined ? { completed } : {}) },
+  } as Message);
+
+  let childStores: ChildStoreManager;
+
+  beforeEach(() => {
+    childStores = new ChildStoreManager();
+    const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
+    store.setState({ status: 'complete', session_status: {}, message: {} });
+    setSyncRefs({} as never, childStores, DIRECTORY);
+  });
+
+  test('treats a session with an in-flight assistant turn as busy even when the status entry is missing', () => {
+    // The server status map only lists busy/retry sessions, so a missed busy
+    // event leaves NO status entry while the turn is still streaming. The
+    // queue gate must not read that absence as idle: queued prompts would be
+    // dispatched into the running turn and merged into one model response.
+    childStores.ensureChild(DIRECTORY, { bootstrap: false }).setState({
+      message: { ses_1: [assistantMessage('msg_streaming')] },
+    });
+
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('busy');
+  });
+
+  test('resolves an explicit busy or retry status entry', () => {
+    const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
+    store.setState({ session_status: { ses_1: { type: 'busy' } } });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('busy');
+    store.setState({ session_status: { ses_1: { type: 'retry', attempt: 2, message: 'boom', next: 30 } } });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('retry');
+  });
+
+  test('resolves idle when the trailing assistant message has completed', () => {
+    const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
+    store.setState({ message: { ses_1: [assistantMessage('msg_done', 5)] } });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
+  });
+
+  test('resolves an explicit idle entry and unknown sessions as idle', () => {
+    const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
+    store.setState({ session_status: { ses_1: { type: 'idle' } } });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
+    expect(resolveQueuedSessionStatusType('ses_unknown', DIRECTORY)).toBe('idle');
   });
 });
 
@@ -216,7 +272,11 @@ describe('buildQueuedAutoSendPayload', () => {
     ]);
 
     expect(payload).not.toBeNull();
-    await sendQueuedAutoSendPayload('session-original', '/repo', payload!, {
+    await sendQueuedAutoSendPayload({
+      runtimeKey: 'runtime-original',
+      sessionId: 'session-original',
+      directory: '/repo',
+    }, payload!, {
       providerID: 'provider-1',
       modelID: 'model-1',
       agent: 'agent-1',
@@ -234,7 +294,13 @@ describe('buildQueuedAutoSendPayload', () => {
       undefined,
       'variant-1',
       'normal',
-      { sessionId: 'session-original', directory: '/repo' },
+      {
+        target: {
+          runtimeKey: 'runtime-original',
+          sessionId: 'session-original',
+          directory: '/repo',
+        },
+      },
     ]);
   });
 });

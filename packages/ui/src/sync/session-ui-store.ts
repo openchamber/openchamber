@@ -122,6 +122,7 @@ export function expandSlashCommandGoalObjective(content: string, commands: GoalC
 // ---------------------------------------------------------------------------
 
 export function routeMessage(params: {
+  runtimeKey?: string
   sessionId: string
   directory?: string | null
   content: string
@@ -138,6 +139,7 @@ export function routeMessage(params: {
   const requestDirectory = params.directory ?? undefined
   if (params.inputMode === "shell") {
     return opencodeClient.shellSession({
+      runtimeKey: params.runtimeKey,
       sessionId: params.sessionId,
       directory: requestDirectory,
       agent: params.agent ?? "",
@@ -166,6 +168,7 @@ export function routeMessage(params: {
 
     if (isCommand) {
       return optimisticSend({
+        runtimeKey: params.runtimeKey,
         sessionId: params.sessionId,
         content: params.content,
         providerID: params.providerID,
@@ -174,6 +177,7 @@ export function routeMessage(params: {
         directory: requestDirectory,
         files: params.files,
         send: (messageID) => opencodeClient.sendCommand({
+          runtimeKey: params.runtimeKey,
           id: params.sessionId,
           providerID: params.providerID,
           modelID: params.modelID,
@@ -191,6 +195,7 @@ export function routeMessage(params: {
 
   // Normal prompt — optimistic insert so message appears instantly
   return optimisticSend({
+    runtimeKey: params.runtimeKey,
     sessionId: params.sessionId,
     content: params.content,
     providerID: params.providerID,
@@ -199,6 +204,7 @@ export function routeMessage(params: {
     directory: requestDirectory,
     files: params.files,
     send: (messageID) => opencodeClient.sendMessage({
+      runtimeKey: params.runtimeKey,
       id: params.sessionId,
       providerID: params.providerID,
       modelID: params.modelID,
@@ -215,9 +221,18 @@ export function routeMessage(params: {
   })
 }
 
+type CapturedSendTarget = {
+  runtimeKey: string
+  sessionId: string
+  directory: string
+}
+
 type SendMessageOptions = {
+  target?: CapturedSendTarget
   sessionId?: string
   directory?: string
+  /** Immutable copy of the new-session draft at submit time; used instead of the live draft. */
+  draftSnapshot?: NewSessionDraftState
   delivery?: 'steer'
 }
 
@@ -239,9 +254,6 @@ function notifyMessageSent(sessionId: string): void {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type { SyntheticContextPart } from "./input-store"
-export type { SessionMemoryState } from "./viewport-store"
 
 export type NewSessionDraftState = {
   open: boolean
@@ -596,9 +608,9 @@ export async function materializeOpenDraftSession(selection: {
   modelID: string
   agent?: string
   variant?: string
-}): Promise<MaterializedDraftSession | null> {
+}, draftOverride?: NewSessionDraftState): Promise<MaterializedDraftSession | null> {
   const store = useSessionUIStore.getState()
-  const draft = store.newSessionDraft
+  const draft = draftOverride ?? store.newSessionDraft
   if (!draft?.open) return null
   const draftPermissionAutoAcceptEnabled = draft.permissionAutoAcceptEnabled === true
 
@@ -1198,15 +1210,20 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     inputMode?: "normal" | "shell",
     options?: SendMessageOptions,
   ) => {
+    const capturedTarget = options?.target
+    if (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey()) {
+      throw new Error("Message was not sent because the runtime changed.")
+    }
+
     // Clear non-Git changed-files bar on new user message for current session
-    const sid = options?.sessionId ?? get().currentSessionId;
+    const sid = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId;
     if (sid) {
       const map = new Map(get().pendingChangesBarDismissed);
       map.delete(sid);
       set({ pendingChangesBarDismissed: map });
     }
 
-    const draft = get().newSessionDraft
+    const draft = options?.draftSnapshot ?? get().newSessionDraft
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
     const goalArm = inputMode !== "shell" && content.trim().length > 0
@@ -1258,13 +1275,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     // ---- New session from draft ----
-    if (!options?.sessionId && draft?.open) {
+    if (!capturedTarget && !options?.sessionId && draft?.open) {
       const createdDraftSession = await materializeOpenDraftSession({
         providerID,
         modelID,
         agent: trimmedAgent,
         variant,
-      })
+      }, options?.draftSnapshot)
       if (!createdDraftSession) throw new Error("Failed to create session")
 
       const mergedAdditionalParts = createdDraftSession.syntheticParts?.length
@@ -1310,7 +1327,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     // ---- Existing session ----
-    const targetSessionId = options?.sessionId ?? get().currentSessionId
+    const targetSessionId = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
     const sessionAgentSelection = targetSessionId
       ? useSelectionStore.getState().getSessionAgentSelection(targetSessionId)
       : null
@@ -1345,7 +1362,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     const currentSessionDirectory = targetSessionId
-      ? normalizePath(options?.directory ?? get().getDirectoryForSession(targetSessionId))
+      ? normalizePath(capturedTarget?.directory ?? options?.directory ?? get().getDirectoryForSession(targetSessionId))
       : null
     if (targetSessionId) {
       notifyMessageSent(targetSessionId)
@@ -1366,6 +1383,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       await applyArmedGoal(targetSessionId, currentSessionDirectory)
     }
     await routeMessage({
+      runtimeKey: capturedTarget?.runtimeKey,
       sessionId: targetSessionId || "",
       directory: currentSessionDirectory,
       content,

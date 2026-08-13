@@ -1,4 +1,5 @@
 import type { DesktopSettings } from '@/lib/desktop';
+import { sanitizeWorkStatusHiddenSections } from '@/components/chat/work-status/sections';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { useUIStore } from '@/stores/useUIStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
@@ -524,6 +525,8 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     darkThemeId: DEFAULT_DARK_THEME_ID,
     openInAppId: DEFAULT_OPEN_IN_APP_ID,
     showReasoningTraces: defaults.showReasoningTraces,
+    workStatusPanelEnabled: defaults.workStatusPanelEnabled,
+    workStatusHiddenSections: defaults.workStatusHiddenSections,
     sessionRecapEnabled: defaults.sessionRecapEnabled,
     sessionSuggestionEnabled: defaults.sessionSuggestionEnabled,
     sessionGoalEnabled: defaults.sessionGoalEnabled,
@@ -614,6 +617,16 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     : null;
   const queueStore = useMessageQueueStore.getState();
 
+  if (typeof settings.workStatusPanelEnabled === 'boolean'
+    && settings.workStatusPanelEnabled !== store.workStatusPanelEnabled) {
+    store.setWorkStatusPanelEnabled(settings.workStatusPanelEnabled);
+  }
+  if (Array.isArray(settings.workStatusHiddenSections)) {
+    const next = sanitizeWorkStatusHiddenSections(settings.workStatusHiddenSections);
+    if (next.join('\u0000') !== store.workStatusHiddenSections.join('\u0000')) {
+      store.setWorkStatusHiddenSections(next);
+    }
+  }
   if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
     store.setShowReasoningTraces(settings.showReasoningTraces);
   }
@@ -1075,6 +1088,14 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.draftStartersScheduleTaskAdded === 'boolean') {
     result.draftStartersScheduleTaskAdded = candidate.draftStartersScheduleTaskAdded;
   }
+  if (typeof candidate.workStatusPanelEnabled === 'boolean') {
+    result.workStatusPanelEnabled = candidate.workStatusPanelEnabled;
+  }
+  if (Array.isArray(candidate.workStatusHiddenSections)) {
+    // Unknown ids are dropped rather than kept: they would hide nothing and
+    // accumulate forever as sections get renamed.
+    result.workStatusHiddenSections = sanitizeWorkStatusHiddenSections(candidate.workStatusHiddenSections);
+  }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
   }
@@ -1239,17 +1260,8 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.maxLastMessageLength === 'number' && Number.isFinite(candidate.maxLastMessageLength)) {
     result.maxLastMessageLength = Math.max(10, Math.round(candidate.maxLastMessageLength));
   }
-  if (typeof candidate.usageAutoRefresh === 'boolean') {
-    result.usageAutoRefresh = candidate.usageAutoRefresh;
-  }
-  if (typeof candidate.usageRefreshIntervalMs === 'number' && Number.isFinite(candidate.usageRefreshIntervalMs)) {
-    result.usageRefreshIntervalMs = candidate.usageRefreshIntervalMs;
-  }
   if (candidate.usageDisplayMode === 'usage' || candidate.usageDisplayMode === 'remaining') {
     result.usageDisplayMode = candidate.usageDisplayMode;
-  }
-  if (typeof candidate.usageShowPredValues === 'boolean') {
-    result.usageShowPredValues = candidate.usageShowPredValues;
   }
   if (Array.isArray(candidate.usageDropdownProviders)) {
     result.usageDropdownProviders = candidate.usageDropdownProviders.filter(

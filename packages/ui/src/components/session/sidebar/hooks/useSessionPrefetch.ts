@@ -28,7 +28,7 @@ const sessionDirectory = (session: Session | null | undefined): string | null =>
   return typeof directory === 'string' && directory.trim() ? directory : null;
 };
 
-export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSessions, recentSessions = [], prefetchSession }: Args): void => {
+const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSessions, recentSessions = [], prefetchSession }: Args): void => {
   const sessionPrefetchTimersRef = React.useRef<Map<string, number>>(new Map());
   const sessionPrefetchQueueRef = React.useRef<PrefetchRequest[]>([]);
   const sessionPrefetchInFlightRef = React.useRef<Set<string>>(new Set());

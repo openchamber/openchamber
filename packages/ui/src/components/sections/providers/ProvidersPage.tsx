@@ -17,7 +17,7 @@ import {
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
-import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
+import { noteDeferredRestartFromPayload, recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
 import { cn } from '@/lib/utils';
 import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
@@ -394,7 +394,7 @@ export const ProvidersPage: React.FC = () => {
 
       toast.success(t('settings.providers.page.toast.apiKeySaved'));
       setApiKeyInputs((prev) => ({ ...prev, [providerId]: '' }));
-      await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
+      recordDeferredOpenCodeRestart('providers', { id: providerId });
       setSelectedProvider(providerId);
     } catch (error) {
       console.error('Failed to save API key:', error);
@@ -452,7 +452,7 @@ export const ProvidersPage: React.FC = () => {
       setEditingCustomScope(null);
       setCustomAuthFailureHint(null);
       setLastCustomPersistId(null);
-      await reloadOpenCodeConfiguration({ scopes: ['providers'], mode: 'active' });
+      noteDeferredRestartFromPayload(payload, 'providers', { id: plan.providerID });
       setSelectedProvider(plan.providerID);
     } catch (error) {
       console.error('Failed to save custom provider:', error);
@@ -469,9 +469,9 @@ export const ProvidersPage: React.FC = () => {
   const oauthMethodFallbackLabel = (index: number) =>
     t('settings.providers.page.auth.oauthMethodFallback', { index: String(index + 1) });
 
-  const handleOAuthConnected = async (providerId: string) => {
+  const handleOAuthConnected = (providerId: string) => {
     setShowAuthPanel(false);
-    await reloadOpenCodeConfiguration({ scopes: ['providers'], mode: 'active' });
+    recordDeferredOpenCodeRestart('providers', { id: providerId });
     setSelectedProvider(providerId);
   };
 
@@ -491,7 +491,9 @@ export const ProvidersPage: React.FC = () => {
       }
 
       toast.success(t('settings.providers.page.toast.providerDisconnected'));
-      await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
+      // Only accumulate when the server actually deferred a restart (e.g. auth removed).
+      // removed:false payloads must not create a phantom pending Apply & Restart.
+      noteDeferredRestartFromPayload(payload, 'providers', { id: providerId });
     } catch (error) {
       console.error('Failed to disconnect provider:', error);
       toast.error(t('settings.providers.page.toast.providerDisconnectFailed'));

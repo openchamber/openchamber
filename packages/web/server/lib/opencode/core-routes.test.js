@@ -331,12 +331,42 @@ describe('core-routes', () => {
     });
   });
 
-  it('advertises the caller-supplied serverUrl as the direct candidate over the request origin', async () => {
+  it('advertises the caller-supplied serverUrl first and keeps the request origin as a fallback candidate', async () => {
     const { app } = createPairingRouteApp();
 
     const response = await request(app)
       .post('/api/client-auth/pairing/sessions')
-      .set('Host', 'runtime.example')
+      .set('Host', 'chamber.example.com')
+      .set('X-Forwarded-Proto', 'https')
+      .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
+      .expect(201);
+
+    expect(response.body.server.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:2606', priority: 10 },
+      { type: 'tunnel', url: 'https://chamber.example.com', priority: 20 },
+    ]);
+  });
+
+  it('does not duplicate the request origin when it matches the caller-supplied serverUrl', async () => {
+    const { app } = createPairingRouteApp();
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', '192.168.1.20:2606')
+      .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
+      .expect(201);
+
+    expect(response.body.server.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:2606', priority: 10 },
+    ]);
+  });
+
+  it('skips a loopback request origin as the fallback candidate', async () => {
+    const { app } = createPairingRouteApp();
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', '127.0.0.1:2606')
       .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
       .expect(201);
 
@@ -790,5 +820,47 @@ describe('client auth routes', () => {
       headers: { host: '192.168.1.5:57123' },
       socket: { remoteAddress: '203.0.113.10' },
     })).toBe('unknown-public');
+  });
+
+  it('reports null port and tunnel URL on /api/system/info when no getters are wired', async () => {
+    const app = express();
+    registerServerStatusRoutes(app, {
+      process,
+      serverStartedAt: '2026-01-01T00:00:00.000Z',
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      express,
+    });
+
+    const response = await request(app).get('/api/system/info');
+    expect(response.status).toBe(200);
+    expect(response.body.openchamberVersion).toBe('1.0.0');
+    expect(response.body.runtime).toBe('test');
+    expect(response.body.pid).toBeTypeOf('number');
+    expect(response.body.startedAt).toBeTypeOf('string');
+    expect(response.body.port).toBeNull();
+    expect(response.body.tunnelUrl).toBeNull();
+  });
+
+  it('reports the instance port and tunnel URL on /api/system/info from the wired getters', async () => {
+    const app = express();
+    registerServerStatusRoutes(app, {
+      process,
+      serverStartedAt: '2026-01-01T00:00:00.000Z',
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      express,
+      getServerPort: () => 9988,
+      getTunnelUrl: () => 'https://worktree-a.example.trycloudflare.com',
+    });
+
+    const response = await request(app).get('/api/system/info');
+    expect(response.status).toBe(200);
+    expect(response.body.port).toBe(9988);
+    expect(response.body.tunnelUrl).toBe('https://worktree-a.example.trycloudflare.com');
   });
 });

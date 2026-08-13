@@ -243,6 +243,8 @@ export const AgentsPage: React.FC = () => {
       if (result.ok) {
         if (result.requiresManualRestart) {
           toast.warning(t('settings.agents.page.toast.savedManualRestart'));
+        } else if (result.restartDeferred) {
+          toast.success(t('settings.view.pendingRestart.saved'));
         } else {
           toast.success(isNewAgent ? t('settings.agents.page.toast.created') : t('settings.agents.page.toast.updated'));
         }

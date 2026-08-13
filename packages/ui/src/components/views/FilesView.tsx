@@ -75,6 +75,8 @@ import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
+import { syncScheduledTaskLoops } from '@/lib/scheduledTasksApi';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 
 type FileNode = {
   name: string;
@@ -1666,6 +1668,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         const relativePath = getDisplayPath(root, selectedFile.path);
         if (relativePath) {
           sessionEvents.requestGitRefresh({ directory: root, paths: [relativePath] });
+        }
+      }
+      if (root && /(?:^|\/)\.agents\/loops\/[^/]+\.md$/i.test(normalizePath(selectedFile.path))) {
+        const project = useProjectsStore.getState().projects.find((entry) => normalizePath(entry.path) === normalizePath(root));
+        if (project) {
+          try {
+            await syncScheduledTaskLoops(project.id);
+          } catch {
+            toast.error(t('sessions.scheduledTasks.dialog.toast.updateFailed'));
+          }
         }
       }
       if (selectedFile?.path && isDrawioFile(selectedFile.path)) {

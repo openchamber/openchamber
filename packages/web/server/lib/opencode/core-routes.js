@@ -1,3 +1,5 @@
+import { buildExternalManualRestartResponse } from './config-mutation-response.js';
+
 const parseLoopbackUrl = (rawUrl) => {
   if (typeof rawUrl !== 'string') {
     return null;
@@ -67,6 +69,12 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     serverStartedAt,
     gracefulShutdown,
     getHealthSnapshot,
+    // Port this OpenChamber instance serves on and the tunnel public URL (if
+    // a tunnel is active). Exposed on /api/system/info so the UI can surface
+    // the active instance's service URLs. Optional: older wiring omits them
+    // and the endpoint reports null.
+    getServerPort = () => null,
+    getTunnelUrl = () => null,
     // Stable server identity (hash of the public signing key — not a secret).
     // Exposed on /health and /api/version so a client can verify that a
     // learned/probed address belongs to the expected server BEFORE sending its
@@ -356,6 +364,8 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       runtime: runtimeName,
       pid: process.pid,
       startedAt: serverStartedAt,
+      port: getServerPort(),
+      tunnelUrl: getTunnelUrl(),
     });
   });
 
@@ -550,6 +560,23 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     }
   };
 
+  const candidateUrlType = (url) => {
+    try {
+      return new URL(url).protocol === 'https:' ? 'tunnel' : 'lan';
+    } catch {
+      return 'lan';
+    }
+  };
+
+  const isLoopbackCandidateUrl = (url) => {
+    try {
+      const hostname = new URL(url).hostname.toLowerCase();
+      return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
+    } catch {
+      return true;
+    }
+  };
+
   // `preferredServerUrl` is the caller-supplied externally reachable URL (the
   // desktop UI reaches its own server over loopback, so the request origin is not
   // scannable — it passes the LAN URL instead). Falls back to the request origin
@@ -563,15 +590,21 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   const pairingServerCandidates = async (req, { preferredServerUrl, includeRelay, includeDirect = true } = {}) => {
     const candidates = [];
     if (includeDirect) {
-      const direct = normalizeCandidateUrl(preferredServerUrl) || requestOrigin(req);
+      const preferred = normalizeCandidateUrl(preferredServerUrl);
+      const origin = normalizeCandidateUrl(requestOrigin(req));
+      const direct = preferred || origin;
       if (direct) {
-        let type = 'lan';
-        try {
-          const parsed = new URL(direct);
-          type = parsed.protocol === 'https:' ? 'tunnel' : 'lan';
-        } catch {
-        }
-        candidates.push({ type, url: direct, priority: 10 });
+        candidates.push({ type: candidateUrlType(direct), url: direct, priority: 10 });
+      }
+      // The origin the creator is browsing over (e.g. a public https domain in
+      // front of a reverse proxy) is a reachable address the server cannot
+      // discover from its own interfaces. Carry it as an additional direct
+      // candidate so the paired device can keep using that same domain instead
+      // of depending on LAN hairpin behavior or relay availability. Loopback
+      // origins (desktop shell, localhost dev) are unreachable from another
+      // device and are skipped.
+      if (origin && direct && origin !== direct && !isLoopbackCandidateUrl(origin)) {
+        candidates.push({ type: candidateUrlType(origin), url: origin, priority: 20 });
       }
     }
     // The client races candidates and falls back to relay only if the direct URL
@@ -1024,7 +1057,13 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
     try {
       console.log('[Server] Manual configuration reload requested');
 
-      await refreshOpenCodeAfterConfigChange('manual configuration reload');
+      const refreshResult = await refreshOpenCodeAfterConfigChange('manual configuration reload');
+
+      if (refreshResult?.external) {
+        return res.json(buildExternalManualRestartResponse(
+          'Configuration is saved on disk. Restart your connected OpenCode server to apply the changes.',
+        ));
+      }
 
       res.json({
         success: true,

@@ -33,6 +33,7 @@ const WORKTREE_PHASE_GIT_READY = 'git-ready' as const;
 const WORKTREE_PHASE_SETUP_READY = 'setup-ready' as const;
 const WORKTREE_INDEX_LOCK_RETRY_DELAY_MS = 250;
 const WORKTREE_INDEX_LOCK_STALE_DELAY_MS = 750;
+const GIT_NULL_REF = '0'.repeat(40);
 
 const toBootstrapStateKey = (directory: string): string => {
   const normalized = normalizeDirectoryPath(directory);
@@ -1116,34 +1117,71 @@ const getFileIdentity = async (filePath: string): Promise<string | null> => {
   }
 };
 
+// OpenChamber places managed worktrees under a deep data-dir path
+// (`<XDG_DATA_HOME>/opencode/worktree/<40-char project id>/<name>/`). On
+// Windows that prefix plus a deeply nested repo file routinely exceeds
+// MAX_PATH (260). Git can check those paths out when core.longpaths is
+// enabled; without it, `git reset --hard` during bootstrap fails with
+// "Filename too long" and leaves a half-populated worktree (issue #2746).
+const WORKTREE_POPULATE_RESET_ARGS = ['-c', 'core.longpaths=true', 'reset', '--hard'] as const;
+
+const isFilenameTooLongError = (message: string | null | undefined): boolean =>
+  /file ?name too long/i.test(String(message || ''));
+
+const formatWorktreePopulateError = (message: string | null | undefined): string => {
+  const text = String(message || '').trim() || 'Failed to populate worktree';
+  if (!isFilenameTooLongError(text)) {
+    return text;
+  }
+  return [
+    text,
+    'The worktree checkout path exceeds this system\'s path-length limit.',
+    'OpenChamber enables Git `core.longpaths` for worktree population; if this still fails on Windows, enable OS long paths (LongPathsEnabled) or open the repository from a shorter absolute path.',
+  ].join('\n');
+};
+
+const ensureWorktreeLongpaths = async (directory: string): Promise<void> => {
+  const current = await runGitCommand(directory, ['config', '--get', 'core.longpaths']);
+  if (String(current.stdout || '').trim().toLowerCase() === 'true') {
+    return;
+  }
+  // Local config is shared across linked worktrees via the common git dir, so
+  // subsequent OpenChamber and CLI git operations in this repo also get long
+  // path support. Failures here are non-fatal: populate still passes
+  // `-c core.longpaths=true` on reset.
+  await runGitCommand(directory, ['config', 'core.longpaths', 'true']);
+};
+
 const populateWorktreeWithLockRecovery = async (directory: string): Promise<void> => {
-  let result = await runGitCommand(directory, ['reset', '--hard']);
+  await ensureWorktreeLongpaths(directory);
+
+  let result = await runGitCommand(directory, [...WORKTREE_POPULATE_RESET_ARGS]);
   if (result.success) {
     return;
   }
   if (!isIndexLockError(result)) {
-    throw new Error(result.message || 'Failed to populate worktree');
+    throw new Error(formatWorktreePopulateError(result.message));
   }
 
   await wait(WORKTREE_INDEX_LOCK_RETRY_DELAY_MS);
-  result = await runGitCommand(directory, ['reset', '--hard']);
+  result = await runGitCommand(directory, [...WORKTREE_POPULATE_RESET_ARGS]);
   if (result.success) {
     return;
   }
   if (!isIndexLockError(result)) {
-    throw new Error(result.message || 'Failed to populate worktree');
+    throw new Error(formatWorktreePopulateError(result.message));
   }
 
   const lockPath = await getWorktreeIndexLockPath(directory);
   const identity = lockPath ? await getFileIdentity(lockPath) : null;
   await wait(WORKTREE_INDEX_LOCK_STALE_DELAY_MS);
 
-  result = await runGitCommand(directory, ['reset', '--hard']);
+  result = await runGitCommand(directory, [...WORKTREE_POPULATE_RESET_ARGS]);
   if (result.success) {
     return;
   }
   if (!isIndexLockError(result) || !lockPath || !identity || await getFileIdentity(lockPath) !== identity) {
-    throw new Error(result.message || 'Failed to populate worktree');
+    throw new Error(formatWorktreePopulateError(result.message));
   }
 
   await fs.promises.unlink(lockPath).catch((error) => {
@@ -1151,7 +1189,66 @@ const populateWorktreeWithLockRecovery = async (directory: string): Promise<void
       throw error;
     }
   });
-  await runGitCommandOrThrow(directory, ['reset', '--hard'], 'Failed to populate worktree');
+  const finalResult = await runGitCommand(directory, [...WORKTREE_POPULATE_RESET_ARGS]);
+  if (!finalResult.success) {
+    throw new Error(formatWorktreePopulateError(finalResult.message || 'Failed to populate worktree'));
+  }
+};
+
+// Worktrees are created with `git worktree add --no-checkout` and populated
+// with `git reset --hard`, neither of which runs git's post-checkout hook —
+// git only runs it for checkouts, clone, and worktree add *without*
+// --no-checkout. Invoke the hook explicitly after population to restore git's
+// checkout semantics: git passes the previous HEAD (null ref for a brand-new
+// worktree), the new HEAD, and flag 1 for a branch checkout, and runs the hook
+// from the worktree top-level.
+const runPostCheckoutHook = async (directory: string): Promise<void> => {
+  let hookDirectory: string | null = null;
+  try {
+    const result = await runGitCommand(directory, ['rev-parse', '--git-path', 'hooks']);
+    if (!result.success) return;
+    hookDirectory = normalizeDirectoryPath(String(result.stdout || '').trim());
+  } catch {
+    return;
+  }
+  if (!hookDirectory) return;
+
+  const hookPath = path.join(hookDirectory, 'post-checkout');
+  try {
+    const stat = await fs.promises.stat(hookPath);
+    if (!stat.isFile()) return;
+    if (process.platform !== 'win32') {
+      await fs.promises.access(hookPath, fs.constants.X_OK);
+    }
+  } catch {
+    // Missing or non-executable hooks are skipped, matching git.
+    return;
+  }
+
+  const [headResult, gitDirResult] = await Promise.all([
+    runGitCommand(directory, ['rev-parse', 'HEAD']),
+    runGitCommand(directory, ['rev-parse', '--absolute-git-dir']),
+  ]);
+  if (!headResult.success || !gitDirResult.success) return;
+  const head = String(headResult.stdout || '').trim();
+  const gitDir = String(gitDirResult.stdout || '').trim();
+  if (!head || !gitDir) return;
+
+  try {
+    await execFileAsync(hookPath, [GIT_NULL_REF, head, '1'], {
+      cwd: directory,
+      env: {
+        ...(await buildGitEnv()),
+        GIT_DIR: gitDir,
+        GIT_WORK_TREE: path.resolve(directory),
+      },
+      windowsHide: true,
+    });
+  } catch (error) {
+    // A failing hook must not fail worktree creation or session bootstrap:
+    // warn and continue.
+    console.warn('[GitService] post-checkout hook failed in worktree:', error instanceof Error ? error.message : String(error));
+  }
 };
 
 const ensureOpenCodeProjectId = async (primaryWorktree: string): Promise<string> => {
@@ -1478,6 +1575,7 @@ const queueWorktreeBootstrap = (args: {
   const task = new Promise<void>((resolve) => setTimeout(resolve, 0))
     .then(async () => {
       await populateWorktreeWithLockRecovery(directory);
+      await runPostCheckoutHook(directory);
       if (setUpstream) {
         await applyUpstreamConfiguration({
           primaryWorktree,

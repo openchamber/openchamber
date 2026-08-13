@@ -10,9 +10,11 @@ import {
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { runBackgroundNetworkTask } from "@/lib/background-network";
+import { noteDeferredRestartFromPayload } from "@/lib/opencode/deferredRestart";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 
 import { opencodeClient } from '@/lib/opencode/client';
+import { filterSkillsByRuntimeFlags } from './skillVisibility';
 
 // Prefer the active project path so Settings/Skills discovery matches the
 // project selector (and Commands/Agents). Falling back only to the session
@@ -183,6 +185,44 @@ export const invalidateSkillsLoadCache = (directory: string | null = getRequestD
   skillsLastLoadedAt.delete(getSkillsCacheKey(directory));
 };
 
+const upsertSkillLocal = (
+  set: (state: Partial<SkillsStore>) => void,
+  get: () => SkillsStore,
+  name: string,
+  config: Partial<SkillConfig>,
+) => {
+  const existing = get().skills.find((skill) => skill.name === name);
+  const path = config.targetPath ?? existing?.path ?? '';
+  const nextSkill: DiscoveredSkill = {
+    ...existing,
+    name,
+    path,
+    scope: config.scope ?? existing?.scope ?? 'user',
+    source: config.source ?? existing?.source ?? 'opencode',
+    description: config.description ?? existing?.description ?? '',
+    group: parseSkillGroup(path),
+  };
+  const skills = get().skills;
+  const nextSkills = skills.some((skill) => skill.name === name)
+    ? skills.map((skill) => (skill.name === name ? nextSkill : skill))
+    : [...skills, nextSkill];
+  set({ skills: nextSkills });
+};
+
+const removeSkillLocal = (
+  set: (state: Partial<SkillsStore>) => void,
+  get: () => SkillsStore,
+  name: string,
+) => {
+  const nextState: Partial<SkillsStore> = {
+    skills: get().skills.filter((skill) => skill.name !== name),
+  };
+  if (get().selectedSkillName === name) {
+    nextState.selectedSkillName = null;
+  }
+  set(nextState);
+};
+
 const MAX_HEALTH_WAIT_MS = 20000;
 const FAST_HEALTH_POLL_INTERVAL_MS = 300;
 const FAST_HEALTH_POLL_ATTEMPTS = 4;
@@ -252,7 +292,21 @@ export const useSkillsStore = create<SkillsStore>()(
                   renamable: s.renamable === true,
                 }));
 
-                set({ skills: configSkills, isLoading: false });
+                // OpenCode loads a narrower set than this scan finds, and the
+                // rules live in server-side env flags the browser cannot read.
+                // The route reports them; `filterSkillsByRuntimeFlags` mirrors
+                // OpenCode's discovery, including the `.agents`-wins dedup that
+                // matters when `.claude/skills` are symlinks back into it.
+                //
+                // Deliberately not OpenCode's own skill endpoint: measured
+                // against 1.18.14 it lists only global and builtin skills and
+                // omits the project skills the agent actually has.
+                const visibleSkills = filterSkillsByRuntimeFlags(
+                  configSkills,
+                  data.externalSkills ?? null,
+                );
+
+                set({ skills: visibleSkills, isLoading: false });
                 skillsLastLoadedAt.set(cacheKey, Date.now());
                 return true;
               } catch (error) {
@@ -294,8 +348,6 @@ export const useSkillsStore = create<SkillsStore>()(
         },
 
         createSkill: async (config: SkillConfig) => {
-          startConfigUpdate("Creating skill...");
-          let requiresReload = false;
           try {
             const skillConfig: Record<string, unknown> = {
               name: config.name,
@@ -325,10 +377,21 @@ export const useSkillsStore = create<SkillsStore>()(
               throw new Error(message);
             }
 
-            const needsReload = payload?.requiresReload ?? false;
             invalidateSkillsLoadCache(directory);
-            if (needsReload) {
-              requiresReload = true;
+
+            if (payload?.requiresManualRestart) {
+              upsertSkillLocal(set, get, config.name, config);
+              return true;
+            }
+
+            if (noteDeferredRestartFromPayload(payload, 'skills', { id: config.name })) {
+              upsertSkillLocal(set, get, config.name, config);
+              emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
+              return true;
+            }
+
+            if (payload?.requiresReload) {
+              startConfigUpdate("Creating skill...");
               await refreshSkillsAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
@@ -343,16 +406,10 @@ export const useSkillsStore = create<SkillsStore>()(
             return loaded;
           } catch {
             return false;
-          } finally {
-            if (!requiresReload) {
-              finishConfigUpdate();
-            }
           }
         },
 
         updateSkill: async (name: string, config: Partial<SkillConfig>) => {
-          startConfigUpdate("Updating skill...");
-          let requiresReload = false;
           try {
             const skillConfig: Record<string, unknown> = {};
 
@@ -379,10 +436,21 @@ export const useSkillsStore = create<SkillsStore>()(
               throw new Error(message);
             }
 
-            const needsReload = payload?.requiresReload ?? false;
             invalidateSkillsLoadCache(directory);
-            if (needsReload) {
-              requiresReload = true;
+
+            if (payload?.requiresManualRestart) {
+              upsertSkillLocal(set, get, name, config);
+              return true;
+            }
+
+            if (noteDeferredRestartFromPayload(payload, 'skills', { id: name })) {
+              upsertSkillLocal(set, get, name, config);
+              emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
+              return true;
+            }
+
+            if (payload?.requiresReload) {
+              startConfigUpdate("Updating skill...");
               await refreshSkillsAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
@@ -397,10 +465,6 @@ export const useSkillsStore = create<SkillsStore>()(
             return loaded;
           } catch {
             return false;
-          } finally {
-            if (!requiresReload) {
-              finishConfigUpdate();
-            }
           }
         },
 
@@ -452,8 +516,6 @@ export const useSkillsStore = create<SkillsStore>()(
         },
 
         deleteSkill: async (name: string) => {
-          startConfigUpdate("Deleting skill...");
-          let requiresReload = false;
           try {
             const directory = getRequestDirectory();
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
@@ -469,10 +531,21 @@ export const useSkillsStore = create<SkillsStore>()(
               throw new Error(message);
             }
 
-            const needsReload = payload?.requiresReload ?? false;
             invalidateSkillsLoadCache(directory);
-            if (needsReload) {
-              requiresReload = true;
+
+            if (payload?.requiresManualRestart) {
+              removeSkillLocal(set, get, name);
+              return true;
+            }
+
+            if (noteDeferredRestartFromPayload(payload, 'skills', { id: name })) {
+              removeSkillLocal(set, get, name);
+              emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
+              return true;
+            }
+
+            if (payload?.requiresReload) {
+              startConfigUpdate("Deleting skill...");
               await refreshSkillsAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
@@ -492,10 +565,6 @@ export const useSkillsStore = create<SkillsStore>()(
             return loaded;
           } catch {
             return false;
-          } finally {
-            if (!requiresReload) {
-              finishConfigUpdate();
-            }
           }
         },
 

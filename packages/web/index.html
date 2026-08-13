@@ -15,12 +15,6 @@
     <link rel="apple-touch-icon" sizes="167x167" href="/apple-touch-icon-167x167.png" />
     <link rel="apple-touch-icon" sizes="152x152" href="/apple-touch-icon-152x152.png" />
 
-    <!-- Preload Nerd Fonts for terminal icon display -->
-    <link rel="preload" href="https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/JetBrainsMonoNerdFont-Regular.woff2"
-          as="font" type="font/woff2" crossorigin="anonymous">
-    <link rel="preload" href="https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/FiraCodeNerdFont-Regular.woff2"
-          as="font" type="font/woff2" crossorigin="anonymous">
-
     <!-- Web app manifest (endpoint-first with data URL fallback) -->
     <script>
       const baseUrl = location.origin;
@@ -599,31 +593,41 @@
       }, 10000);
     </script>
 
-    <!-- CSS Font Loading API for reliable Nerd Font loading -->
+    <!-- CSS Font Loading API for reliable Nerd Font loading. The ~2 MB of
+         Nerd Fonts are only used by the terminal viewport, so they are no
+         longer downloaded on every cold start: the terminal requests them on
+         first mount through this idempotent hook. -->
     <script>
       (function() {
-        const fonts = [
-          {
-            name: 'JetBrainsMono Nerd Font',
-            url: 'https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/JetBrainsMonoNerdFont-Regular.woff2'
-          },
-          {
-            name: 'FiraCode Nerd Font',
-            url: 'https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/FiraCodeNerdFont-Regular.woff2'
+        let nerdFontsPromise = null;
+        window.__openchamberEnsureNerdFonts = function() {
+          if (nerdFontsPromise) {
+            return nerdFontsPromise;
           }
-        ];
+          const fonts = [
+            {
+              name: 'JetBrainsMono Nerd Font',
+              url: 'https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/JetBrainsMonoNerdFont-Regular.woff2'
+            },
+            {
+              name: 'FiraCode Nerd Font',
+              url: 'https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/FiraCodeNerdFont-Regular.woff2'
+            }
+          ];
 
-        const fontPromises = fonts.map(font => {
-          const fontFace = new FontFace(font.name, `url(${font.url}) format('woff2')`);
-          document.fonts.add(fontFace);
-          return fontFace.load().catch(err => {
-            console.warn(`Failed to load font: ${font.name}`, err);
+          const fontPromises = fonts.map(font => {
+            const fontFace = new FontFace(font.name, `url(${font.url}) format('woff2')`);
+            document.fonts.add(fontFace);
+            return fontFace.load().catch(err => {
+              console.warn(`Failed to load font: ${font.name}`, err);
+            });
           });
-        });
 
-        Promise.allSettled(fontPromises).then(() => {
-          document.documentElement.classList.add('fonts-loaded');
-        });
+          nerdFontsPromise = Promise.allSettled(fontPromises).then(() => {
+            document.documentElement.classList.add('fonts-loaded');
+          });
+          return nerdFontsPromise;
+        };
       })();
     </script>
 

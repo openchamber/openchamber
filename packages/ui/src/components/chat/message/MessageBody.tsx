@@ -21,7 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 
-import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
+import { MarkdownImageGallery, SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { flattenAssistantTextParts, suggestPlanTitleFromText } from '@/lib/messages/messageText';
@@ -284,16 +284,15 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
 const SHELL_CODE_TAG_STYLE: React.CSSProperties = { background: 'transparent', backgroundColor: 'transparent' };
 
 const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) => {
-    const [expanded, setExpanded] = React.useState(false);
+    const output = typeof part.shellAction?.output === 'string' ? part.shellAction.output : '';
+    const [expanded, setExpanded] = React.useState(true);
     const [copiedOutput, setCopiedOutput] = React.useState(false);
     const copiedResetTimeoutRef = React.useRef<number | null>(null);
     const { t } = useI18n();
 
     const command = typeof part.shellAction?.command === 'string' ? part.shellAction.command.trim() : '';
-    const output = typeof part.shellAction?.output === 'string' ? part.shellAction.output : '';
     const status = typeof part.shellAction?.status === 'string' ? part.shellAction.status.trim().toLowerCase() : '';
     const hasOutput = output.trim().length > 0;
-
     const clearCopiedResetTimeout = React.useCallback(() => {
         if (copiedResetTimeoutRef.current !== null && typeof window !== 'undefined') {
             window.clearTimeout(copiedResetTimeoutRef.current);
@@ -1212,6 +1211,11 @@ const AssistantMessageBody = React.memo(({
     const assistantTextParts = React.useMemo(() => {
         return visibleParts.filter((part) => part.type === 'text');
     }, [visibleParts]);
+    const finalizedAssistantMarkdownContents = React.useMemo(() => (
+        isMessageCompleted
+            ? assistantTextParts.map(extractTextContent).filter((text) => text.trim().length > 0)
+            : []
+    ), [assistantTextParts, isMessageCompleted]);
     const assistantPlanText = React.useMemo(() => flattenAssistantTextParts(assistantTextParts), [assistantTextParts]);
     const suggestedPlanTitle = React.useMemo(() => suggestPlanTitleFromText(assistantPlanText), [assistantPlanText]);
 
@@ -1864,6 +1868,7 @@ const AssistantMessageBody = React.memo(({
                             chatRenderMode={chatRenderMode}
                             onContentChange={onContentChange}
                             onShowPopup={onShowPopup}
+                            enableMarkdownImages={isMessageCompleted}
                         />
                     </div>
                 );
@@ -2018,6 +2023,7 @@ const AssistantMessageBody = React.memo(({
         collapsedPreviewCount,
         expandedTools,
         isMobile,
+        isMessageCompleted,
         isActivityOwnerMessage,
         isSortedRenderMode,
         lastRenderableTextPartIndex,
@@ -2229,6 +2235,10 @@ const AssistantMessageBody = React.memo(({
                     )}
                 </div>
                 <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} />
+                <MarkdownImageGallery
+                    contents={finalizedAssistantMarkdownContents}
+                    onShowPopup={onShowPopup}
+                />
                 {shouldRenderStandaloneActionsAfterContent && (
                     <div className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
                         <div className="flex items-center gap-1.5" data-message-action-group="true">

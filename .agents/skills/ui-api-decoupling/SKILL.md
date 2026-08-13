@@ -11,6 +11,7 @@ description: Use when creating or modifying OpenChamber shared UI data access, O
 - OpenChamber-owned HTTP capabilities use `RuntimeAPIs` where runtime-specific behavior exists, otherwise explicit OpenChamber routes through `runtimeFetch`.
 - Browser/realtime consumers use shared runtime URL/socket helpers.
 - Shared UI never hardcodes localhost, ports, API origins, credentials, or one runtime's transport assumptions.
+- Treat runtime adapters as the imperative shell: they own transport, auth, serialization, and platform mechanics. Shared feature code receives trusted contracts and owns domain decisions.
 
 ## Classify First
 
@@ -45,6 +46,9 @@ Load every matching reference before editing.
 8. **Authoritative fetches must signal failure.** Do not convert failure into a valid empty value that callers use to clear state.
 9. **Keep privileges at the native/runtime boundary.** UI visibility and prompts are not authorization.
 10. **Confirm trust-boundary mutations.** Host imports, credential writes, privileged deep links, and runtime switching require explicit user intent.
+11. **Parse at the boundary.** Treat external, persisted, bridge, IPC, and network payloads as unknown until a schema, parser, or narrow constructor produces the trusted type consumed by shared code. Do not validate fields and then continue passing the raw payload.
+12. **Model the real contract.** Prefer precise result/state unions and required dependencies over loose strings, boolean combinations, optional callback bags, `any`, or repeated casts. Make unsupported runtime behavior and failure distinct from valid empty success.
+13. **Keep adapters deep and bridges thin.** Hide meaningful protocol or platform mechanics behind an intention-revealing runtime operation; do not add pass-through layers that only rename SDK, fetch, or bridge calls.
 
 ## HTTP Decision Rules
 
@@ -69,6 +73,8 @@ Plain `fetch` is reserved for intentional external origins that are not the acti
 
 Review runtime base URL, auth, SDK clients, terminal/realtime transports, stores, session memory, and caches. Key caches by runtime identity where IDs, paths, or URLs can collide. Reset or reconnect affected state through the established runtime-switch flow.
 
+Re-parse values obtained after a switch at their owning boundary. A type established for one runtime response does not make cached raw data from another runtime trustworthy.
+
 ## Common Anti-Patterns
 
 | Avoid | Use |
@@ -80,6 +86,8 @@ Review runtime base URL, auth, SDK clients, terminal/realtime transports, stores
 | Web-only shared route | Explicit VS Code/mobile decision |
 | Returning `[]` after authoritative fetch failure | Throw or distinct failure result |
 | Rebuilding SDK `Request` from URL only | Preserve original request body/headers/signal |
+| Component validates unknown JSON then passes it onward | Adapter parses once and returns a trusted contract |
+| Boolean/nullable combinations for exclusive outcomes | Discriminated result or state union |
 
 ## Verification
 

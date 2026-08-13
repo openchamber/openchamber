@@ -1,4 +1,4 @@
-import { marked, type Tokens } from 'marked';
+import { Marked, marked, type Tokens } from 'marked';
 import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
@@ -9,6 +9,95 @@ import { escapeRawMarkdownHtml, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecuri
 
 const escapeAttr = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const LOCAL_IMAGE_EXTENSION_RE = /\.(?:png|jpe?g|gif|webp)(?:[?#].*)?$/i;
+const WINDOWS_ABSOLUTE_PATH_RE = /^[A-Za-z]:[\\/]/;
+const URL_SCHEME_RE = /^[A-Za-z][A-Za-z\d+.-]*:/;
+
+export interface MarkdownImageCandidate {
+  source: string;
+  filename: string;
+}
+
+export const MAX_MARKDOWN_IMAGE_COUNT = 12;
+
+const isLocalMarkdownImageSource = (source: string): boolean => {
+  if (/^\/\//.test(source) || !LOCAL_IMAGE_EXTENSION_RE.test(source)) return false;
+  return WINDOWS_ABSOLUTE_PATH_RE.test(source)
+    || /^file:\/\//i.test(source)
+    || !URL_SCHEME_RE.test(source);
+};
+
+const isSupportedMarkdownImageSource = (source: string): boolean => (
+  /^(?:https?:)?\/\//i.test(source)
+  || /^data:image\/(?:png|jpeg|gif|webp);base64,/i.test(source)
+  || isLocalMarkdownImageSource(source)
+);
+
+export const getMarkdownImageFilename = (source: string, fallback: string): string => {
+  if (/^data:/i.test(source)) return fallback.trim();
+
+  const path = source.split(/[?#]/, 1)[0]?.replace(/\\/g, '/') ?? '';
+  const encodedName = path.split('/').filter(Boolean).at(-1) ?? '';
+  if (!encodedName) return fallback.trim();
+  try {
+    return decodeURIComponent(encodedName);
+  } catch {
+    return encodedName;
+  }
+};
+
+export const extractMarkdownImageCandidates = (
+  markdownTexts: readonly string[],
+  limit = MAX_MARKDOWN_IMAGE_COUNT,
+): MarkdownImageCandidate[] => {
+  if (limit <= 0) return [];
+
+  const candidates: MarkdownImageCandidate[] = [];
+  const seen = new Set<string>();
+
+  for (const markdown of markdownTexts) {
+    if (!markdown || candidates.length >= limit) continue;
+    const tokens = marked.lexer(markdown);
+    marked.walkTokens(tokens, (token) => {
+      if (candidates.length >= limit) return;
+
+      if (token.type !== 'image' && token.type !== 'link') return;
+      if (token.type === 'link' && !isLocalMarkdownImageSource(token.href ?? '')) return;
+
+      const source = token.href ?? '';
+      if (!source || !isSupportedMarkdownImageSource(source) || seen.has(source)) return;
+      const fallback = typeof token.text === 'string' ? token.text : '';
+      const filename = getMarkdownImageFilename(source, fallback);
+      if (!filename) return;
+
+      seen.add(source);
+      candidates.push({ source, filename });
+    });
+  }
+
+  return candidates;
+};
+
+const renderMarkdownImage = ({
+  href,
+  title,
+  text,
+}: {
+  href: string;
+  title?: string | null;
+  text: string;
+}): string => {
+  const source = href ?? '';
+  const alt = escapeAttr(text ?? '');
+  const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
+  const supported = isSupportedMarkdownImageSource(source);
+  if (!supported) {
+    return `<span role="img" aria-label="${alt}"${titleAttr}>${alt}</span>`;
+  }
+
+  return `<span role="img" aria-label="${alt}"${titleAttr} data-openchamber-markdown-image-placeholder="true">${alt}</span>`;
+};
 
 // ---------------------------------------------------------------------------
 // Streaming block segmentation (port of OpenCode's markdown-stream)
@@ -162,7 +251,7 @@ const blockMathExtension = {
   },
 };
 
-const parser = marked.use({
+const createParser = (deferImages: boolean) => new Marked().use({
   gfm: true,
   breaks: false,
   extensions: [inlineMathExtension, blockMathExtension],
@@ -175,6 +264,11 @@ const parser = marked.use({
     },
     link({ href, title, text }) {
       const target = href ?? '';
+      if (deferImages && isLocalMarkdownImageSource(target)) {
+        const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
+        const filename = getMarkdownImageFilename(target, '');
+        return `<a href="${escapeAttr(target)}"${titleAttr} class="external-link" target="_blank" rel="noopener noreferrer" data-openchamber-markdown-image-link="true" data-openchamber-markdown-image-source="${escapeAttr(target)}" data-openchamber-markdown-image-filename="${escapeAttr(filename)}">${text}</a>`;
+      }
       const agentName = parseAgentHref(target);
       if (agentName) {
         return `<a href="${escapeAttr(buildAgentMentionUrl(agentName))}" data-openchamber-agent-mention="true" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${text}</a>`;
@@ -186,8 +280,12 @@ const parser = marked.use({
       const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
       return `<a href="${escapeAttr(target)}"${titleAttr} class="external-link" target="_blank" rel="noopener noreferrer">${text}</a>`;
     },
+    ...(deferImages ? { image: renderMarkdownImage } : {}),
   },
 });
+
+const parser = createParser(false);
+const imageParser = createParser(true);
 
 // ---------------------------------------------------------------------------
 // Math (KaTeX) — post-process the parsed HTML, skipping code/pre/kbd content
@@ -341,8 +439,8 @@ const touch = (key: string, entry: { hash: string; html: string }): void => {
   if (oldest) htmlCache.delete(oldest);
 };
 
-const parseBlock = async (block: MarkdownBlock): Promise<string> => {
-  const parsed = await Promise.resolve(parser.parse(block.src));
+const parseBlock = async (block: MarkdownBlock, deferImages: boolean): Promise<string> => {
+  const parsed = await Promise.resolve((deferImages ? imageParser : parser).parse(block.src));
   const withMath = renderMathExpressions(parsed);
   const highlighted = block.highlight ? await highlightCodeBlocks(withMath) : withMath;
   return sanitize(highlighted);
@@ -357,9 +455,9 @@ const parseBlock = async (block: MarkdownBlock): Promise<string> => {
  * is synchronous (marked is not configured `async`), so this never blocks on a
  * worker round-trip.
  */
-export const renderMarkdownSync = (text: string): string => {
+export const renderMarkdownSync = (text: string, deferImages = false): string => {
   if (!text) return '';
-  const parsed = parser.parse(text) as string;
+  const parsed = (deferImages ? imageParser : parser).parse(text) as string;
   const withMath = renderMathExpressions(parsed);
   return sanitize(withMath);
 };
@@ -382,6 +480,7 @@ export const renderMarkdownBlocks = async (
   text: string,
   streaming: boolean,
   cacheKey: string,
+  deferImages = false,
 ): Promise<RenderedBlock[]> => {
   if (!text) return [];
 
@@ -389,14 +488,14 @@ export const renderMarkdownBlocks = async (
   return Promise.all(
     blocks.map(async (block, index) => {
       const contentHash = hash(block.raw);
-      const id = `${contentHash}:${block.mode}:${block.highlight ? 1 : 0}`;
-      const key = `${cacheKey}:${index}:${block.mode}`;
+      const id = `${contentHash}:${block.mode}:${block.highlight ? 1 : 0}:${deferImages ? 1 : 0}`;
+      const key = `${cacheKey}:${index}:${block.mode}:${deferImages ? 1 : 0}`;
       const cached = htmlCache.get(key);
       if (cached && cached.hash === contentHash) {
         touch(key, cached);
         return { id, html: cached.html };
       }
-      const html = await parseBlock(block);
+      const html = await parseBlock(block, deferImages);
       touch(key, { hash: contentHash, html });
       return { id, html };
     }),

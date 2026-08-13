@@ -1,4 +1,5 @@
 import type { SidebarSection } from '@/constants/sidebar';
+import type { IconName } from '@/components/icon/icons';
 
 export type SettingsPageSlug =
   | 'home'
@@ -236,4 +237,66 @@ export function resolveSettingsSlug(value: string | null | undefined): SettingsP
   }
 
   return 'home';
+}
+
+// Lives here (not in SettingsView) so light consumers such as the command
+// palette can render settings entries without statically importing the whole
+// settings surface into the eager startup graph.
+export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
+  switch (slug) {
+    case 'general':
+      return 'settings-3';
+    case 'projects':
+      return 'folders';
+    case 'remote-instances':
+      return 'computer';
+    case 'appearance':
+      return 'palette';
+    case 'chat':
+      return 'chat-ai-3';
+    case 'magic-prompts':
+      return 'ai-generate-2';
+    case 'snippets':
+      return 'chat-thread';
+    case 'notifications':
+      return 'notification-3';
+    case 'shortcuts':
+      return 'command';
+    case 'sessions':
+      return 'chat-history';
+
+    case 'providers':
+      return 'cloud';
+    case 'agents':
+      return 'ai-agent';
+    case 'behavior':
+      return 'brain';
+    case 'commands':
+      return 'slash-commands-2';
+    case 'mcp':
+      return null;
+    case 'plugins':
+      return 'plug-2';
+
+    case 'skills.installed':
+      return 'book-open';
+    case 'skills.catalog':
+      return 'book';
+
+    case 'git':
+      return 'git-branch';
+
+    case 'usage':
+      return 'bar-chart-2';
+    case 'voice':
+      return 'mic';
+    case 'tunnel':
+      return 'home-office';
+    case 'about':
+      return 'information';
+    case 'home':
+      return null;
+    default:
+      return 'robot-2';
+  }
 }

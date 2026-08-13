@@ -44,7 +44,7 @@ bun run electron:dev
 
 The Electron workspace package trusts Electron's install script so `bun install` downloads the platform runtime in fresh checkouts and worktrees.
 
-Electron's postinstall (`node install.js`) is run by `bun install` with the system Node. Under Node 24, the bundled `extract-zip@2.0.1` silently unpacks only the first entry of the Electron zip, leaving `dist/` without the binary and `path.txt` missing. To keep this from blocking desktop work:
+Electron's postinstall (`node install.js`) is run by `bun install` with the system Node. Older Electron releases bundled `extract-zip@2.0.1`, which under Node 24 silently unpacked only the first entry of the Electron zip, leaving `dist/` without the binary and `path.txt` missing. Electron 43+ ships its own fixed extractor (`@electron-internal/extract-zip`), but to keep interrupted or wrong-architecture installs from blocking desktop work:
 
 - The root `postinstall` runs `ensure-electron.mjs --best-effort`, which detects an incomplete Electron install (missing binary, stale `dist/version`/`path.txt`, or a binary of the wrong architecture) and repairs it by re-running the postinstall under Bun (which extracts correctly), falling back to Node.
 - `electron-dev.mjs` runs the same check (fail-fast, not best-effort) before launching, so `bun run electron:dev` self-heals even when an install was interrupted.
@@ -104,6 +104,8 @@ A loopback-only updater fixture is available for contributor QA of N-to-N+1 AppI
 
 The package supports macOS, Windows, and Linux desktop features. Linux AppImage builds include in-app window controls, auto-update, system tray (right-click Show / Hide / Close), and launch-at-login (XDG autostart). Opening files in installed apps, installed-app discovery, and FreeDesktop icon lookup (including the default file manager) work on macOS, Windows, and Linux.
 
+On Windows and Linux, the General setting persisted as `desktopMinimizeToTrayEnabled` keeps the app running in the tray when the main window is **closed**. Minimize — the in-app control, the native title-bar button, and the taskbar — always performs a normal window minimize, so the taskbar entry stays available.
+
 The macOS menu bar item is enabled by default and can be disabled in General settings. The setting applies after restart; while disabled, Desktop does not create the native tray controller or start the renderer subscriptions, polling, quota refresh, or IPC updates that feed it.
 
 ## Bundled OpenCode CLI
@@ -143,6 +145,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 - Floating Mini Chat windows.
 - Multiple native windows.
 - Native notifications.
+- User-confirmed local folder selection. The shared UI supplies the requested directory as the picker `defaultPath`; confirmation is required before filesystem access is retried.
 - One-click open/reveal/open-in-app actions.
 - Desktop host switcher and deep-link imports.
 - Local and remote instance handling.

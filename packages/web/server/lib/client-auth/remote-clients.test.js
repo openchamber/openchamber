@@ -94,6 +94,50 @@ describe('remote client auth runtime', () => {
     }
   });
 
+  it('self-heals usesRelay when a request arrives through the relay tunnel', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      // Pairing-time snapshot said "no relay" (pre-pairing-v2 record, or a QR
+      // without a relay candidate).
+      const created = await runtime.createClient({ label: 'Phone' });
+      expect(created.client.usesRelay).toBe(false);
+      expect(await runtime.hasActiveRelayClients()).toBe(false);
+
+      // A tunneled request is the authoritative proof the device uses the relay.
+      const relayReq = { headers: { 'x-openchamber-relay-connection': 'conn-1' } };
+      const authenticated = await runtime.authenticateBearerToken(created.token, relayReq);
+      expect(authenticated?.ok).toBe(true);
+      expect(authenticated?.client.usesRelay).toBe(true);
+      expect(await runtime.hasActiveRelayClients()).toBe(true);
+
+      // Sticky: a later direct request must not clear relay demand.
+      await runtime.authenticateBearerToken(created.token, { headers: {} });
+      const listed = await runtime.listClients();
+      expect(listed[0].usesRelay).toBe(true);
+      expect(listed[0].lastTransport).toBe('direct');
+      expect(await runtime.hasActiveRelayClients()).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('counts an observed relay transport as relay demand even without the pairing flag', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const created = await runtime.createClient({ label: 'Tablet' });
+      // Simulate a store written by a build that tracked lastTransport but not
+      // the healed usesRelay flag.
+      const storePath = path.join(dir, 'remote-clients.json');
+      const store = JSON.parse(await fs.readFile(storePath, 'utf8'));
+      store.clients[0].lastTransport = 'relay';
+      await fs.writeFile(storePath, JSON.stringify(store));
+      expect(created.client.usesRelay).toBe(false);
+      expect(await runtime.hasActiveRelayClients()).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('does not resurrect revoked clients after concurrent auth traffic', async () => {
     const { dir, runtime } = await createRuntime();
     try {

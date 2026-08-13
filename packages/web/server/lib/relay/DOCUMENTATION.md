@@ -45,6 +45,8 @@ Everything a client normally sends to the single OpenChamber origin:
 
 The host dispatcher restricts tunneled traffic to explicit path allowlists (one for HTTP, one for WS).
 
+Request bodies crossing the tunnel are buffered on the host and forwarded to loopback only once the client's `StreamEnd` frame arrives (bodies above ~512 KB stream live instead). A body whose frames were lost in transit therefore never reaches the loopback server as an empty/truncated chunked body — the host aborts the stream and the client sees an ambiguous transport failure it can retry, instead of the loopback server's bare `400` ("Failed to send message (400)" from the mobile app).
+
 ## Authentication model
 
 - The tunnel is **transport only**. The OpenChamber server still authenticates every tunneled request exactly as it authenticates a direct remote client. The relay path grants reachability, not authorization.

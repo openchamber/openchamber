@@ -13,7 +13,7 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownTheme';
+import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
 import { useWorkerHighlightedLines } from '@/components/code/useWorkerHighlightedLines';
 
 // ── Threshold: files smaller than this render without virtualization ──
