@@ -11,6 +11,7 @@ const context = (overrides: Partial<ComposerLanguageContext> = {}): ComposerLang
     confirmedMentions: new Set(),
     knownSlashNames: new Set(['review']),
     knownSnippetTriggers: new Set(['sig']),
+    knownFusionPresets: new Set(),
     attachmentFilenames: [],
     ...overrides,
 });

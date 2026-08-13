@@ -42,6 +42,8 @@ export interface ComposerLanguageContext {
     knownSlashNames: ReadonlySet<string>;
     /** Lowercased snippet names and aliases invocable with `#`. */
     knownSnippetTriggers: ReadonlySet<string>;
+    /** Exact fusion preset names invocable with `%` (case-sensitive). */
+    knownFusionPresets: ReadonlySet<string>;
     /** Filenames of the currently attached files, cited inline as `[name]`. */
     attachmentFilenames: readonly string[];
 }
@@ -85,12 +87,12 @@ export function tokenizeComposer(
         ranges.push({ start: token.start, end: token.end, style: 'mentionSnippet' });
     }
 
-    // A fusion directive inserted by the % picker. Inert like `~path`: the
-    // pattern is only ever produced by the picker itself, so it is styled
-    // unconditionally, with the same name charset the settings layer enforces.
-    for (const match of text.matchAll(/\[fusion\s+preset:\s*([A-Za-z0-9][A-Za-z0-9._-]{0,63})\]/g)) {
-        if (typeof match.index !== 'number') continue;
-        ranges.push({ start: match.index, end: match.index + match[0].length, style: 'mentionFusion' });
+    // A `%preset` inserted by the fusion picker (or typed against a known
+    // preset name). Membership is the authority, exactly like `@` mentions:
+    // an unknown `%word` stays plain prose, so percentages and `50%off`
+    // spellings never get painted as references.
+    for (const token of filterKnownTokens(scanPrefixTokens(text, '%'), context.knownFusionPresets, 'exact')) {
+        ranges.push({ start: token.start, end: token.end, style: 'mentionFusion' });
     }
 
     if (context.attachmentFilenames.length > 0 && text.includes('[')) {

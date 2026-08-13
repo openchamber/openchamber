@@ -8,6 +8,7 @@ import {
 
 const slashNames = (text: string) => scanPrefixTokens(text, '/').map((token) => token.name);
 const hashNames = (text: string) => scanPrefixTokens(text, '#').map((token) => token.name);
+const percentNames = (text: string) => scanPrefixTokens(text, '%').map((token) => token.name);
 
 describe('scanPrefixTokens — boundaries', () => {
     test('a token at the start of the text', () => {
@@ -135,5 +136,29 @@ describe('collectKnownTokenNames', () => {
 
     test('no tokens yields an empty list', () => {
         expect(collectKnownTokenNames('plain text', '/', new Set(['plan']))).toEqual([]);
+    });
+});
+
+describe('scanPrefixTokens — fusion presets', () => {
+    test('a percent token after whitespace or at the start', () => {
+        expect(percentNames('use %deep-dive now')).toEqual(['deep-dive']);
+        expect(percentNames('%deep-dive first')).toEqual(['deep-dive']);
+    });
+
+    test('preset names may contain dots', () => {
+        expect(percentNames('run %deep.dive')).toEqual(['deep.dive']);
+    });
+
+    test('a percent inside a word is not a token', () => {
+        expect(percentNames('discount50%')).toEqual([]);
+        expect(percentNames('50%off')).toEqual([]);
+    });
+
+    test('a bare percent is not a token', () => {
+        expect(percentNames('a % b')).toEqual([]);
+    });
+
+    test('a name must start with an alphanumeric', () => {
+        expect(percentNames('%_under')).toEqual([]);
     });
 });

@@ -13,6 +13,7 @@ const context = (overrides: Partial<ComposerLanguageContext> = {}): ComposerLang
     confirmedMentions: new Set(['NOTES']),
     knownSlashNames: new Set(['review', 'explore']),
     knownSnippetTriggers: new Set(['sig']),
+    knownFusionPresets: new Set(['deep-dive', 'deep.dive']),
     attachmentFilenames: [],
     ...overrides,
 });
@@ -51,28 +52,34 @@ describe('tokenizeComposer — reference constructs', () => {
         expect(styled('end with #sig')).toEqual([['#sig', 'mentionSnippet']]);
     });
 
-    test('a fusion directive is styled as a fusion chip', () => {
-        expect(styled('run [fusion preset: deep-dive] now')).toEqual([['[fusion preset: deep-dive]', 'mentionFusion']]);
+    test('a known fusion preset token is styled as a fusion chip', () => {
+        expect(styled('run %deep-dive now')).toEqual([['%deep-dive', 'mentionFusion']]);
     });
 
-    test('a fusion directive tolerates the picker formatting', () => {
-        expect(styled('[fusion preset:deep-dive]')).toEqual([['[fusion preset:deep-dive]', 'mentionFusion']]);
-        expect(styled('[fusion preset:  deep-dive]')).toEqual([['[fusion preset:  deep-dive]', 'mentionFusion']]);
+    test('a fusion token at the start of the text is styled', () => {
+        expect(styled('%deep-dive first')).toEqual([['%deep-dive', 'mentionFusion']]);
     });
 
-    test('a malformed fusion directive stays plain prose', () => {
-        expect(styled('[fusion preset]')).toEqual([]);
-        expect(styled('[fusion preset: ]')).toEqual([]);
-        expect(styled('[fusion preset: bad name]')).toEqual([]);
+    test('a fusion token with a dotted preset name is styled', () => {
+        expect(styled('run %deep.dive')).toEqual([['%deep.dive', 'mentionFusion']]);
     });
 
-    test('multiple fusion directives all get styled', () => {
-        expect(stylesOf('[fusion preset: a] and [fusion preset: b]'))
-            .toEqual(new Set(['mentionFusion']));
+    test('an unknown percent word stays plain prose', () => {
+        expect(styled('use %stranger')).toEqual([]);
     });
 
-    test('shell mode leaves a fusion directive plain', () => {
-        expect(tokenizeComposer('[fusion preset: deep-dive]', context({ inputMode: 'shell' })))
+    test('percentages and in-word percents are never tokens', () => {
+        expect(styled('50% done')).toEqual([]);
+        expect(styled('discount50%')).toEqual([]);
+        expect(styled('50%off')).toEqual([]);
+    });
+
+    test('an empty preset registry leaves percent words plain', () => {
+        expect(styled('%deep-dive', context({ knownFusionPresets: new Set() }))).toEqual([]);
+    });
+
+    test('shell mode leaves a fusion token plain', () => {
+        expect(tokenizeComposer('%deep-dive', context({ inputMode: 'shell' })))
             .toEqual([]);
     });
 

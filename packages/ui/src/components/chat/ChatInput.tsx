@@ -76,6 +76,7 @@ import { usePermissionStore } from '@/stores/permissionStore';
 import { togglePermissionAutoAccept } from './permissionAutoAccept';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
@@ -291,6 +292,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const skillRef = React.useRef<SkillAutocompleteHandle>(null);
     const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
     const fusionRef = React.useRef<FusionAutocompleteHandle>(null);
+    // Fusion presets known to the composer: the authoritative set that decides
+    // whether a `%token` is painted as a chip and expanded at send time.
+    const [fusionPresets, setFusionPresets] = React.useState<FusionPreset[]>([]);
     // Ref to track current message value without triggering re-renders in effects
     const messageRef = React.useRef(message);
     const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
@@ -572,6 +576,31 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         [attachedFiles],
     );
 
+    // Load the preset registry for the composer: painting `%preset` chips and
+    // expanding them at send time both need the exact persisted names. The
+    // picker refetches on open, and this effect rides the same moment so a
+    // preset created in Settings is known as soon as the user opens the picker.
+    React.useEffect(() => {
+        if (openAutocomplete !== 'fusion') return;
+        let cancelled = false;
+        void runtimeFetch('/api/openchamber/fusion/presets')
+            .then((response) => (response.ok ? response.json() : null))
+            .then((body: { presets?: FusionPreset[] } | null) => {
+                if (!cancelled && Array.isArray(body?.presets)) {
+                    setFusionPresets(body.presets);
+                }
+            })
+            .catch(() => undefined);
+        return () => {
+            cancelled = true;
+        };
+    }, [openAutocomplete]);
+
+    const knownFusionPresets = React.useMemo(
+        () => new Set(fusionPresets.map((preset) => preset.name)),
+        [fusionPresets],
+    );
+
     /**
      * Everything the prompt language needs to resolve references. Rebuilt only
      * when a registry changes, so typing does not churn the tokenizer input.
@@ -582,8 +611,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         confirmedMentions: confirmedMentionsRef.current,
         knownSlashNames,
         knownSnippetTriggers,
+        knownFusionPresets,
         attachmentFilenames,
-    }), [attachmentFilenames, inputMode, knownAgentNames, knownSlashNames, knownSnippetTriggers]);
+    }), [attachmentFilenames, inputMode, knownAgentNames, knownFusionPresets, knownSlashNames, knownSnippetTriggers]);
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: readonly AttachedFile[] | undefined): AttachedFile[] => [...(files ?? [])]
@@ -1073,6 +1103,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             },
             sanitizeAttachments: sanitizeAttachmentsForSend,
             collectSkillNames: (text) => collectInlineSkillMentions(text, availableSkillNames),
+            expandFusionPresets: (text) => {
+                // `%preset` at a word boundary, expanded only when the name is
+                // a known preset — so percentages and `50%off` spellings are
+                // never rewritten.
+                if (!text.includes('%') || knownFusionPresets.size === 0) return text;
+                return text.replace(
+                    /(^|\s)%([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)/g,
+                    (full, boundary: string, name: string) => (
+                        knownFusionPresets.has(name)
+                            ? `${boundary}[fusion preset: ${name}]`
+                            : full
+                    ),
+                );
+            },
             appendComments: (text, comments) =>
                 appendInlineComments(text, comments as InlineCommentDraft[]),
             buildSkillInstruction: buildSkillMentionInstruction,
@@ -1985,25 +2029,31 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         composerRef.current?.focus();
     };
 
-    // Replaces the typed %preset token with the visible fusion directive, so
-    // the sent message tells the LLM exactly which user preset to run (and the
-    // user sees their choice in the transcript).
+    // Replaces the typed %preset token with the short `%preset` form, which
+    // the composer paints as a fusion chip. The full `[fusion preset: X]`
+    // directive is expanded at send time, so the model still receives the
+    // exact preset name while the composer stays clean.
     const handleFusionSelect = (preset: FusionPreset) => {
         const textarea = composerRef.current;
         const cursorPosition = textarea?.getSelection().start ?? message.length;
         const textBeforeCursor = message.substring(0, cursorPosition);
         const lastPercentSymbol = textBeforeCursor.lastIndexOf('%');
         const startIndex = lastPercentSymbol !== -1 ? lastPercentSymbol : cursorPosition;
-        const directive = `[fusion preset: ${preset.name}]`;
-        const newMessage = `${message.substring(0, startIndex)}${directive} ${message.substring(cursorPosition)}`;
+        const token = `%${preset.name}`;
+        const newMessage = `${message.substring(0, startIndex)}${token} ${message.substring(cursorPosition)}`;
         setMessage(newMessage);
-        const nextCursor = startIndex + directive.length + 1;
+        const nextCursor = startIndex + token.length + 1;
         requestAnimationFrame(() => {
             if (composerRef.current) {
                 composerRef.current.setSelection(nextCursor);
             }
             updateAutocompleteState(newMessage, nextCursor);
         });
+        // The selected preset is known by construction — make sure the
+        // composer paints the chip immediately, even before any refetch.
+        setFusionPresets((current) => (
+            current.some((entry) => entry.name === preset.name) ? current : [...current, preset]
+        ));
         closeAutocomplete();
         composerRef.current?.focus();
     };
