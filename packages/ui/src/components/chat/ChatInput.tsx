@@ -61,6 +61,9 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
+import { GitLabIssuePickerDialog } from '@/components/session/GitLabIssuePickerDialog';
+import { GitLabMrPickerDialog } from '@/components/session/GitLabMrPickerDialog';
+import { useGitProvider } from '@/lib/gitProvider';
 import { Icon } from "@/components/icon/Icon";
 import { DraftPresetChips } from './DraftPresetChips';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
@@ -376,6 +379,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const { currentTheme } = useThemeSystem();
     const chatSearchDirectory = useChatSearchDirectory();
     const isGitRepo = useIsGitRepo(currentDirectory);
+    const gitProvider = useGitProvider(currentDirectory);
     const currentGitStatus = useGitStore((state) =>
         currentDirectory ? state.directories.get(currentDirectory)?.status ?? null : null,
     );
@@ -663,6 +667,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Issue linking state
     const [issuePickerOpen, setIssuePickerOpen] = React.useState(false);
     const [prPickerOpen, setPrPickerOpen] = React.useState(false);
+    const [gitlabIssuePickerOpen, setGitlabIssuePickerOpen] = React.useState(false);
+    const [gitlabMrPickerOpen, setGitlabMrPickerOpen] = React.useState(false);
     const [linkedIssue, setLinkedIssue] = React.useState<{ 
         number: number; 
         title: string; 
@@ -945,12 +951,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [isExpandedInput, setExpandedInput]);
 
     const openIssuePicker = React.useCallback(() => {
-        setIssuePickerOpen(true);
-    }, []);
+        if (gitProvider === 'gitlab') {
+            setGitlabIssuePickerOpen(true);
+        } else {
+            setIssuePickerOpen(true);
+        }
+    }, [gitProvider]);
 
     const openPrPicker = React.useCallback(() => {
-        setPrPickerOpen(true);
-    }, []);
+        if (gitProvider === 'gitlab') {
+            setGitlabMrPickerOpen(true);
+        } else {
+            setPrPickerOpen(true);
+        }
+    }, [gitProvider]);
 
     const getSubmitErrorMessage = (error: unknown, fallback: string) => {
         const message = error instanceof Error ? error.message : '';
@@ -2545,7 +2559,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         author={linkedIssue.author}
                         openInBrowserLabel={t('chat.chatInput.linked.issue.openInBrowserAria')}
                         removeLabel={t('chat.chatInput.linked.issue.removeAria')}
-                        onReopenPicker={() => setIssuePickerOpen(true)}
+                        onReopenPicker={openIssuePicker}
                         onRemove={() => setLinkedIssue(null)}
                     />
                 ) : null}
@@ -2558,7 +2572,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         branches={{ head: linkedPr.head, base: linkedPr.base }}
                         openInBrowserLabel={t('chat.chatInput.linked.pr.openInBrowserAria')}
                         removeLabel={t('chat.chatInput.linked.pr.removeAria')}
-                        onReopenPicker={() => setPrPickerOpen(true)}
+                        onReopenPicker={openPrPicker}
                         onRemove={() => setLinkedPr(null)}
                     />
                 ) : null}
@@ -2878,6 +2892,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 setLinkedIssue(null);
             }}
         />
+        <GitLabIssuePickerDialog
+            open={gitlabIssuePickerOpen}
+            onOpenChange={setGitlabIssuePickerOpen}
+            mode="select"
+            onSelect={(issue) => {
+                setLinkedIssue(issue);
+                setLinkedPr(null);
+            }}
+        />
+        <GitLabMrPickerDialog
+            open={gitlabMrPickerOpen}
+            onOpenChange={setGitlabMrPickerOpen}
+            onSelect={(pr) => {
+                setLinkedPr(pr);
+                setLinkedIssue(null);
+            }}
+        />
         <ReviewFlowDialog
             open={reviewDialogOpen}
             onOpenChange={setReviewDialogOpen}
@@ -2944,8 +2975,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             requestAnimationFrame(openIssuePicker);
                         }}
                     >
-                        <Icon name="github" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {t('chat.chatInput.actions.linkGithubIssue')}
+                        <Icon name={gitProvider === 'gitlab' ? 'git-branch' : 'github'} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {gitProvider === 'gitlab' ? t('chat.chatInput.actions.linkGitlabIssue') : t('chat.chatInput.actions.linkGithubIssue')}
                     </button>
                     <button
                         type="button"
@@ -2956,8 +2987,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             requestAnimationFrame(openPrPicker);
                         }}
                     >
-                        <Icon name="git-pull-request" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {t('chat.chatInput.actions.linkGithubPr')}
+                        <Icon name={gitProvider === 'gitlab' ? 'git-merge' : 'git-pull-request'} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {gitProvider === 'gitlab' ? t('chat.chatInput.actions.linkGitlabMr') : t('chat.chatInput.actions.linkGithubPr')}
                     </button>
                 </div>
             </MobileOverlayPanel>

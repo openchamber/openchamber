@@ -27,7 +27,7 @@ type ComposerAttachmentControlsProps = {
     handlePickLocalFiles: () => void;
     openIssuePicker: () => void;
     openPrPicker: () => void;
-    /** Only shows the GitHub issue/PR attach actions when the repo is GitHub. */
+    /** Shows the GitHub issue/PR or GitLab issue/MR attach actions based on the repo provider. */
     gitProvider?: GitProvider | null;
     onOpenSettings?: () => void;
     onMenuOpenChange?: (open: boolean) => void;
@@ -119,6 +119,25 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                     >
                                         <Icon name="git-pull-request"/>
                                         {t('chat.chatInput.actions.linkGithubPr')}
+                                    </DropdownMenuItem>
+                                </>
+                            ) : gitProvider === 'gitlab' ? (
+                                <>
+                                    <DropdownMenuItem
+                                        onSelect={() => {
+                                            requestAnimationFrame(openIssuePicker);
+                                        }}
+                                    >
+                                        <Icon name="git-branch"/>
+                                        {t('chat.chatInput.actions.linkGitlabIssue')}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        onSelect={() => {
+                                            requestAnimationFrame(openPrPicker);
+                                        }}
+                                    >
+                                        <Icon name="git-merge"/>
+                                        {t('chat.chatInput.actions.linkGitlabMr')}
                                     </DropdownMenuItem>
                                 </>
                             ) : null}
