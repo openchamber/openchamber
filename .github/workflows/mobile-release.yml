@@ -174,8 +174,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          cp app/build/outputs/bundle/release/*.aab "release-assets/OpenChamber-${VERSION_NAME}-${BUILD_NUMBER}-android.aab"
-          cp app/build/outputs/apk/release/*.apk "release-assets/OpenChamber-${VERSION_NAME}-${BUILD_NUMBER}-android.apk"
+          cp app/build/outputs/bundle/release/*.aab "release-assets/Sharpie-${VERSION_NAME}-${BUILD_NUMBER}-android.aab"
+          cp app/build/outputs/apk/release/*.apk "release-assets/Sharpie-${VERSION_NAME}-${BUILD_NUMBER}-android.apk"
           files=(
             app/build/outputs/bundle/release/*.aab
             app/build/outputs/apk/release/*.apk
@@ -330,7 +330,7 @@ jobs:
             -scheme App \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/OpenChamber.xcarchive" \
+            -archivePath "$RUNNER_TEMP/Sharpie.xcarchive" \
             "OTHER_CODE_SIGN_FLAGS=--keychain $RUNNER_TEMP/app-signing.keychain-db"
         working-directory: ${{ env.IOS_PROJECT_DIR }}
 
@@ -376,8 +376,8 @@ jobs:
           </plist>
           PLIST
           xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/OpenChamber.xcarchive" \
-            -exportPath "$RUNNER_TEMP/OpenChamberExport" \
+            -archivePath "$RUNNER_TEMP/Sharpie.xcarchive" \
+            -exportPath "$RUNNER_TEMP/SharpieExport" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
         working-directory: ${{ env.IOS_PROJECT_DIR }}
 
@@ -385,7 +385,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openchamber-ios-${{ needs.resolve-version.outputs.version_name }}-${{ needs.resolve-version.outputs.build_number }}
-          path: ${{ runner.temp }}/OpenChamberExport/*.ipa
+          path: ${{ runner.temp }}/SharpieExport/*.ipa
           if-no-files-found: error
 
       - name: Upload to TestFlight
@@ -400,6 +400,6 @@ jobs:
           printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_BASE64" | base64 -D > "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
           xcrun altool --upload-app \
             --type ios \
-            --file "$RUNNER_TEMP/OpenChamberExport/App.ipa" \
+            --file "$RUNNER_TEMP/SharpieExport/App.ipa" \
             --apiKey "$APP_STORE_CONNECT_KEY_ID" \
             --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"

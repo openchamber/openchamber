@@ -14,7 +14,7 @@ const OPENCHAMBER_SETTINGS_FILE = path.join(
   'settings.json',
 );
 
-// OpenChamber's own settings: when the user unchecks "use default small model"
+// Sharpie's own settings: when the user unchecks "use default small model"
 // their explicit override outranks every other resolution step.
 const readSmallModelSettingsOverride = () => {
   try {

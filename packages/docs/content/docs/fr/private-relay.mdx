@@ -1,15 +1,15 @@
 ---
 title: Relais privé
-description: Joignez votre serveur OpenChamber depuis n’importe où via un relais chiffré de bout en bout — sans ports, sans tunnels, sans configuration.
+description: Joignez votre serveur Sharpie depuis n’importe où via un relais chiffré de bout en bout — sans ports, sans tunnels, sans configuration.
 ---
 
 # Relais privé
 
-Le relais privé OpenChamber (Private Relay) permet à vos appareils associés de joindre votre serveur depuis n’importe où — réseau cellulaire, Wi-Fi de café, autre ville — sans ouvrir de ports, sans configurer de tunnel et sans exposer votre machine à internet. Il se gère tout seul : associer un appareil avec **Partout** dans [Connecter un appareil](/connect-devices/) suffit.
+Le relais privé Sharpie (Private Relay) permet à vos appareils associés de joindre votre serveur depuis n’importe où — réseau cellulaire, Wi-Fi de café, autre ville — sans ouvrir de ports, sans configurer de tunnel et sans exposer votre machine à internet. Il se gère tout seul : associer un appareil avec **Partout** dans [Connecter un appareil](/connect-devices/) suffit.
 
 ## Comment ça marche
 
-Votre serveur ouvre une connexion sortante vers l’infrastructure de relais d’OpenChamber et la maintient active. Quand l’un de vos appareils est hors de votre réseau, il se connecte lui aussi au relais, et le relais fait transiter le trafic chiffré entre les deux. Rien sur votre machine n’écoute de connexions entrantes depuis internet.
+Votre serveur ouvre une connexion sortante vers l’infrastructure de relais d’Sharpie et la maintient active. Quand l’un de vos appareils est hors de votre réseau, il se connecte lui aussi au relais, et le relais fait transiter le trafic chiffré entre les deux. Rien sur votre machine n’écoute de connexions entrantes depuis internet.
 
 Quand une connexion directe est disponible — vous êtes de retour à la maison sur le même Wi-Fi — vos appareils la préfèrent et contournent complètement le relais.
 
@@ -29,12 +29,12 @@ Le relais gère son propre cycle de vie — aucun interrupteur à retenir :
 - **Il démarre à la demande.** Créer une association **Partout** active le relais, et il revient après un redémarrage tant qu’un appareil associé en dépend encore.
 - **Il s’arrête tout seul.** Dès qu’aucun appareil ni aucune association en attente n’utilise le relais — par exemple après avoir révoqué le dernier appareil associé via le relais — il s’éteint automatiquement.
 
-**Paramètres → Instances distantes → OpenChamber Relay** affiche l’état en direct (Connecté, Reconnexion, …) et le nombre d’appareils connectés à travers lui en ce moment. Vous pouvez aussi y presser **Désactiver** pour couper immédiatement l’accès via le relais ; les appareils sur votre réseau local ne sont pas affectés.
+**Paramètres → Instances distantes → Sharpie Relay** affiche l’état en direct (Connecté, Reconnexion, …) et le nombre d’appareils connectés à travers lui en ce moment. Vous pouvez aussi y presser **Désactiver** pour couper immédiatement l’accès via le relais ; les appareils sur votre réseau local ne sont pas affectés.
 
 ## Relais ou tunnel ?
 
 - Utilisez le **relais** pour joindre votre propre serveur depuis vos propres appareils associés. Zéro configuration, et rien n’est exposé publiquement.
-- Utilisez un [tunnel](/tunnels/) quand il vous faut une simple **URL publique** — par exemple pour ouvrir OpenChamber dans un navigateur ordinaire sur une machine que vous ne pouvez pas associer, ou pour partager l’accès derrière un [mot de passe UI](/security/).
+- Utilisez un [tunnel](/tunnels/) quand il vous faut une simple **URL publique** — par exemple pour ouvrir Sharpie dans un navigateur ordinaire sur une machine que vous ne pouvez pas associer, ou pour partager l’accès derrière un [mot de passe UI](/security/).
 
 ## Pages liées
 

@@ -43,7 +43,7 @@ const formatModelsOutput = (settings = {}) => {
 
 async function modelsCommand(options = {}, action = 'show') {
   if (action === 'help') {
-    process.stdout.write(`OpenChamber Models Commands\n\nUSAGE:\n  openchamber models [OPTIONS]\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n`);
+    process.stdout.write(`Sharpie Models Commands\n\nUSAGE:\n  openchamber models [OPTIONS]\n\nOUTPUT OPTIONS:\n  -p, --port <port>       Sharpie server port\n  --json                  Output machine-readable JSON\n`);
     return;
   }
   if (action !== 'show') {

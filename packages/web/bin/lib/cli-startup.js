@@ -71,7 +71,7 @@ function getStartupEnvFilePath() {
 }
 
 function getMacosStartupWrapperPath() {
-  return path.join(getDataDir(), 'bin', 'OpenChamber');
+  return path.join(getDataDir(), 'bin', 'Sharpie');
 }
 
 function collectStartupEnv(options = {}) {
@@ -193,7 +193,7 @@ function buildMacosLaunchAgent(options = {}) {
   const wrapperPath = writeMacosStartupWrapper(options);
   const args = [wrapperPath];
   const env = collectStartupEnv(options);
-  const logDir = path.join(os.homedir(), 'Library', 'Logs', 'OpenChamber');
+  const logDir = path.join(os.homedir(), 'Library', 'Logs', 'Sharpie');
   const argXml = args.map((arg) => `    <string>${escapeXml(arg)}</string>`).join('\n');
   const envXml = Object.entries(env).length > 0
     ? `  <key>EnvironmentVariables</key>\n  <dict>\n${Object.entries(env).map(([key, value]) => `    <key>${escapeXml(key)}</key>\n    <string>${escapeXml(value)}</string>`).join('\n')}\n  </dict>\n`
@@ -229,7 +229,7 @@ function buildSystemdUserService(options = {}) {
   const args = buildStartupArgs(options).map((arg) => `"${systemdEscapeArg(arg)}"`).join(' ');
   const envFilePath = getStartupEnvFilePath();
   return `[Unit]
-Description=OpenChamber web server
+Description=Sharpie web server
 After=network-online.target
 
 [Service]
@@ -301,7 +301,7 @@ function enableStartupService(options = {}) {
   if (paths.platform === 'macos') {
     removeStartupEnvFile();
     fs.mkdirSync(path.dirname(paths.servicePath), { recursive: true, mode: 0o700 });
-    fs.mkdirSync(path.join(os.homedir(), 'Library', 'Logs', 'OpenChamber'), { recursive: true, mode: 0o700 });
+    fs.mkdirSync(path.join(os.homedir(), 'Library', 'Logs', 'Sharpie'), { recursive: true, mode: 0o700 });
     fs.writeFileSync(paths.servicePath, buildMacosLaunchAgent(options), { mode: 0o600 });
     runStartupCommand('/bin/launchctl', ['bootout', `gui/${process.getuid()}`, paths.servicePath], { allowFailure: true });
     runStartupCommand('/bin/launchctl', ['bootstrap', `gui/${process.getuid()}`, paths.servicePath]);

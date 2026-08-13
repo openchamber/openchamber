@@ -62,7 +62,7 @@ All notable changes to this project will be documented in this file.
 - UI/Localization: added German interface translations and German documentation (thanks to @SGD-DEV).
 - Mobile/Android: pairing QR codes can now be scanned on devices without Google Play Services; the camera closes as soon as a code is recognized, followed by a connection-in-progress screen.
 - Mobile/Android: left and right drawer swipes can now start farther from the screen edge, outside Android's system Back gesture area.
-- Sessions: launching OpenChamber from a directory other than your project (for example your home folder) no longer produces repeated "not a git repository" errors that could stop sessions and projects from loading (thanks to @makeittech).
+- Sessions: launching Sharpie from a directory other than your project (for example your home folder) no longer produces repeated "not a git repository" errors that could stop sessions and projects from loading (thanks to @makeittech).
 - Sidebar: a worktree shared by more than one project no longer appears twice (thanks to @makeittech).
 - Sidebar: session titles no longer clip at the ends of their rows.
 - Git/Diff: opening a changed file now jumps its header directly to the top, and live updates refresh only files that actually changed while preserving the current review position. Saves from the built-in file editor update the diff too.
@@ -71,7 +71,7 @@ All notable changes to this project will be documented in this file.
 - Chat: queued messages now retry after a temporary send failure or an interrupted turn instead of remaining stuck until another session update.
 - Chat: prompts sent through the private relay no longer produce duplicate replies when the connection drops after OpenCode accepted the message, and a queued message already being sent is no longer included in another send.
 - Settings/Skills: repository-local `.agents/skills` now appear for the active project (thanks to @makeittech).
-- Settings/Skills: renaming a skill now preserves its instructions and supporting files; only skills in locations OpenChamber can safely rename show the action (thanks to @makeittech).
+- Settings/Skills: renaming a skill now preserves its instructions and supporting files; only skills in locations Sharpie can safely rename show the action (thanks to @makeittech).
 - Sessions: sessions in a newly created worktree now appear without restarting or refreshing the app.
 - Agents/CLI: creating a session in a new worktree no longer reports a timeout while the worktree continues to be created in the background.
 - Sessions: archiving and unarchiving now stays scoped to the current instance and workspace (thanks to @alexandrereyes).
@@ -86,7 +86,7 @@ All notable changes to this project will be documented in this file.
 
 - **Mobile:** rebuilt the app navigation around two swipe drawers — a sessions drawer (left) with a cross-project tree, swipe actions to rename, archive, or delete sessions, and a workspace drawer (right) with Changes, Files, Terminal, Notes, and MCP tabs. Tapping the session title in the header switches recents from a compact overlay with live status indicators. Cold launches reopen the last active session and land on an explicit connect screen on failure instead of flashing an empty draft.
 - **Desktop/Windows:** added Windows ARM64 support (thanks to @airtaxi).
-- UI: a new OpenChamber theme (dark and light) is now the default, replacing the previous default theme.
+- UI: a new Sharpie theme (dark and light) is now the default, replacing the previous default theme.
 - Desktop: the active session header now has a menu with rename, share, export, archive, delete, and copy-ID actions; share links copy to the clipboard automatically when created.
 - Performance: opening the first session after startup is faster — background startup requests no longer queue ahead of the initial message load (thanks to @yulia-ivashko).
 - Sessions: a root session can now be moved with all its sub-sessions into a new worktree directly from the header menu.
@@ -107,7 +107,7 @@ All notable changes to this project will be documented in this file.
 - **Chat tools:** Bash tool cards now show output before a command finishes, keep it in a fixed-height pane, and follow new lines until you scroll away. Long-running commands no longer remain at a 300-second duration, and their timers continue until they finish.
 - System prompt optimization: added an optional Behavior setting that reduces OpenCode's built-in system prompt by about 40% for the build and plan agents; it applies after restarting OpenCode and is unsuitable for custom build or plan definitions.
 - OpenCode: chats now recover when OpenCode stops responding during a response, and managed OpenCode no longer restarts repeatedly during a temporary connectivity failure.
-- Desktop: bundled OpenCode no longer offers a separate update; it updates with OpenChamber (thanks to @yulia-ivashko).
+- Desktop: bundled OpenCode no longer offers a separate update; it updates with Sharpie (thanks to @yulia-ivashko).
 - Chat: fully loaded histories no longer show "Load older" again after a refresh.
 - Chat: messages removed by reverting no longer reappear after you send another message.
 - Chat: slash-command starters now include text already entered in the draft as command arguments.
@@ -122,7 +122,7 @@ All notable changes to this project will be documented in this file.
 - **Context panel:** a new surface rail brings Changes, pull requests, files, terminal, notes, plans, previews, and side chats into one resizable panel. The pull-request surface now shows live checks and comments, and can attach failed checks or comments to a chat draft.
 - **Desktop/Linux:** official AppImage releases for x64 and arm64, with in-app updates, frameless window controls, system tray minimize, launch at login, multi-window support, and “Open in” for discovered installed apps. Missing update manifests are treated as “no update” instead of a hard failure, and updater errors surface in About/sidebar (thanks to @BestSithInEU, @jibanez-staticduo, @makeittech).
 - **Sidebar:** sessions are organized into Recent and project zones with worktree-grouped or flat views. Scheduled tasks, archived sessions, multi-run, and worktree management now open as full-page views from the sidebar.
-- **Agents/CLI:** agents on managed local instances can now create, send to, fork, inspect, and wait for sessions; create isolated worktrees; and manage scheduled tasks through the OpenChamber tool. The CLI adds matching `session`, `schedule`, `projects`, and `models` commands, and a new Schedule a Task starter guides task setup from chat.
+- **Agents/CLI:** agents on managed local instances can now create, send to, fork, inspect, and wait for sessions; create isolated worktrees; and manage scheduled tasks through the Sharpie tool. The CLI adds matching `session`, `schedule`, `projects`, and `models` commands, and a new Schedule a Task starter guides task setup from chat.
 - Chat composer: prompts now render Markdown emphasis, attention lines, file and agent mentions, slash commands, snippets, attachment citations, and `~path` references directly while you type. File mentions can be edited in place, and the mobile composer grows with its content instead of using a separate fullscreen gesture.
 - Desktop/Linux: fixed an intermittent freeze or crash while chats were streaming with the system tray enabled (thanks to @kydorn).
 - Small Model: GitHub Copilot models now use their supported API, fixing summaries, goal audits, commit messages, and other Small Model actions for models that do not support Chat Completions (thanks to @jakoss).
@@ -159,12 +159,12 @@ All notable changes to this project will be documented in this file.
 
 - **Terminal:** rebuilt terminal sessions across the Web, Desktop, and Mobile apps with faster rendering, retained scrollback after reconnecting, shell and login-shell selection, restart and selected-output attachment actions, live theme changes, and more accurate Unicode and full-screen app rendering. Mobile now includes a full-screen terminal workspace with touch scrolling and selection, quick keys, and Ctrl/Alt input.
 - **Pinned messages:** pin important user or assistant messages to restore their text to the agent after conversation compaction.
-- **Settings:** pages now use a consistent responsive layout, navigation is grouped into OpenChamber, Workspace, OpenCode, and Library sections, and save failures are shown in the page header. Agent tool permissions now distinguish inherited and explicit rules and show session-granted rules separately (thanks to @makeittech).
+- **Settings:** pages now use a consistent responsive layout, navigation is grouped into Sharpie, Workspace, OpenCode, and Library sections, and save failures are shown in the page header. Agent tool permissions now distinguish inherited and explicit rules and show session-granted rules separately (thanks to @makeittech).
 - Session goals: audits now wait while direct subagents are still active, and goal details show the model used for the latest successful evaluation.
 - Chat: if creating a session fails, the new-session draft stays open and restores the submitted prompt instead of discarding it.
 - Sessions: new drafts and sessions now stay with the project selected in the sidebar, including workspaces with nested or sibling projects (thanks to @bashrusakh).
 - Small Model: provider API keys referenced through environment variables or files now work for summaries, goal audits, and other Small Model features; Gemini 3 Flash models now use their supported thinking setting.
-- VSCode: per-session permission auto-accept works again, persists across extension restarts, and applies to subagent sessions while an OpenChamber view is open.
+- VSCode: per-session permission auto-accept works again, persists across extension restarts, and applies to subagent sessions while an Sharpie view is open.
 - Mobile/Android: update downloads now select an APK when a release also includes an Android App Bundle.
 
 ## [1.16.1] - 2026-07-14
@@ -182,7 +182,7 @@ All notable changes to this project will be documented in this file.
 - **Session goals:** arm the new target button in the composer and your next prompt becomes a [goal](https://docs.openchamber.dev/session-goals/) — the session keeps working toward it on its own, with an independent small-model audit checking each finished turn, until the objective is verifiably complete, blocked, or over its optional token budget. The loop runs on the server, so it continues with the app closed and survives restarts. A goal strip above the composer shows progress with pause/resume; goals can also start from the plan-implement dialog, from scheduled tasks ("Run as goal"), or with the new "Craft a Goal" starter and `/craft-goal` command. While a goal runs, per-turn "ready" notifications are replaced by a single notification when it settles.
 - **Usage:** OpenCode Go usage tracking is here, and Codex quota windows now show the correct reset times.
 - **Remote access:** connecting over the relay got much faster — the app no longer waits for a stale local address to time out before trying the relay (previously up to ~20 seconds on a phone away from home). When your computer gets a new local IP, paired devices now learn the new address over the relay and quietly move back to the local network on their own — no re-pairing. The phone's launch screen shows which device it is connecting to.
-- Remote access: running several OpenChamber instances on the same machine no longer makes paired devices land on a random one of them — only one process per machine serves the relay now. This was behind intermittent "Unable to reach server" errors on paired phones.
+- Remote access: running several Sharpie instances on the same machine no longer makes paired devices land on a random one of them — only one process per machine serves the relay now. This was behind intermittent "Unable to reach server" errors on paired phones.
 - Permissions: per-session auto-accept now lives on the server — sessions keep auto-accepting tool calls while the app is closed and after a server restart, subagent sessions inherit the setting, and it can be enabled on a draft before the first message (thanks to @bashrusakh for the draft fix).
 - Chat: subagent sessions can now be prompted directly — open a subagent from the context panel and send it follow-up messages (off by default, available in settings).
 - Chat: queued messages now send when the session is already idle instead of waiting forever in some cases, pending agent questions stay answerable after a server restart, and session renames no longer flicker back to the old title (thanks to @bashrusakh).
@@ -203,7 +203,7 @@ All notable changes to this project will be documented in this file.
 ## [1.15.0] - 2026-07-10
 
 - **Remote access:** a new [private relay](https://docs.openchamber.dev/private-relay/) lets you reach your instance from anywhere — no open ports and no third-party tunnel, over an end-to-end-encrypted tunnel. It turns on by itself when you pair a device over it and turns off once no paired device uses it (thanks to @yulia-ivashko).
-- **Mobile:** the native iOS and Android apps open for testing — join the [iOS public beta on TestFlight](https://testflight.apple.com/join/5ek6GU1E) or grab the Android APK from the [latest release](https://github.com/openchamber/openchamber/releases/latest). Connect by scanning a QR code from "Add a device" on your server; the app then moves between your local network and the private relay on its own — leaving home carries the open session onto the relay and coming back returns it to Wi-Fi, no re-pairing. Saved instances show a live Connected status with the active transport, iPad gets a split layout with a persistent sessions sidebar and a resizable Changes/Files sidebar, and the app checks for OpenChamber updates itself (Android shows a download toast).
+- **Mobile:** the native iOS and Android apps open for testing — join the [iOS public beta on TestFlight](https://testflight.apple.com/join/5ek6GU1E) or grab the Android APK from the [latest release](https://github.com/openchamber/openchamber/releases/latest). Connect by scanning a QR code from "Add a device" on your server; the app then moves between your local network and the private relay on its own — leaving home carries the open session onto the relay and coming back returns it to Wi-Fi, no re-pairing. Saved instances show a live Connected status with the active transport, iPad gets a split layout with a persistent sessions sidebar and a resizable Changes/Files sidebar, and the app checks for Sharpie updates itself (Android shows a download toast).
 - **Pairing:** a redesigned ["Add a device"](https://docs.openchamber.dev/connect-devices/) dialog asks where you'll use the device — Anywhere (relay with local network preferred at home), Home network only, or This computer only — then shows a large scannable QR code with a copyable link, and closes itself once the device connects. Links are single-use expiring codes redeemed on connect instead of embedding a long-lived token in the QR (thanks to @yulia-ivashko).
 - Devices: the "Connect to this server" list now shows each paired device with a live status — Connected · Local network or Relay — and a platform badge (iOS, Android, macOS, Windows, Linux). Re-pairing or re-entering the password on the same device updates its existing entry instead of adding a duplicate.
 - Devices: a paired phone or desktop names the connection after the server's hostname; the name typed when creating the link labels the device in the server's list.
@@ -267,7 +267,7 @@ All notable changes to this project will be documented in this file.
 - Mobile: added the native iOS and Android app projects ahead of the mobile app release, with continued polish for saved connections, password unlock, QR-code connection scanning, push notifications, iOS widgets, app resume, and native layout details.
 - Desktop: the app can now use a bundled OpenCode CLI, or you can choose your own CLI path in settings.
 - Desktop: added a Keep awake setting for the upcoming desktop app release to prevent the computer from sleeping while the app is running.
-- Desktop: you can now specify optional custom headers when adding a remote OpenChamber instance to the desktop app, including for Cloudflare Access-style setups; settings and environment variables can still override them, and the bundled CLI can be replaced by setting a direct OpenCode CLI path.
+- Desktop: you can now specify optional custom headers when adding a remote Sharpie instance to the desktop app, including for Cloudflare Access-style setups; settings and environment variables can still override them, and the bundled CLI can be replaced by setting a direct OpenCode CLI path.
 - Desktop: SSH remote instances with a saved UI password now open directly after the tunnel connects instead of showing the unlock screen again.
 - Chat: fixed edge cases where late-loading tool content, subagent content, or streaming Thinking blocks could pull the conversation away from the latest message or fight manual scrolling.
 - Chat: embedded JSON examples in messages no longer render as generated-result cards.
@@ -278,7 +278,7 @@ All notable changes to this project will be documented in this file.
 ## [1.13.8] - 2026-06-29
 
 - Startup: launching the app no longer hangs for around 20 seconds before you can open a session, load a diff, or send a message — GitHub pull request status checks no longer tie up the connection to the server during startup.
-- OpenCode: when a separate OpenCode is already running (the TUI, `opencode serve`, or a daemon on the default port 4096), the app now starts its own server instead of attaching to it. This fixes the "OpenChamber could not finish initialization" error and stops the app from opening or closing your separate OpenCode when it starts and quits. Connecting to an external OpenCode now requires setting `OPENCODE_HOST`, `OPENCODE_PORT`, or `OPENCODE_SKIP_START`.
+- OpenCode: when a separate OpenCode is already running (the TUI, `opencode serve`, or a daemon on the default port 4096), the app now starts its own server instead of attaching to it. This fixes the "Sharpie could not finish initialization" error and stops the app from opening or closing your separate OpenCode when it starts and quits. Connecting to an external OpenCode now requires setting `OPENCODE_HOST`, `OPENCODE_PORT`, or `OPENCODE_SKIP_START`.
 - Chat: a new Follow-up behavior setting (Settings → Chat) controls what happens when you press Enter on a message while the agent is still responding — Steer inserts it into the agent's current turn, or Queue holds it until the turn finishes. Replaces the previous queue-mode toggle (thanks to @bashrusakh).
 - Sessions: deleting a worktree group from the sidebar, or permanently deleting an archived session that has subagent sessions, now removes those subagent sessions too instead of leaving them behind (thanks to @bashrusakh).
 - Sessions: clicking a session inside a worktree group no longer briefly jumps the selection to the project's first session while the sidebar data catches up (thanks to @bashrusakh).
@@ -320,7 +320,7 @@ All notable changes to this project will be documented in this file.
 - Providers: the add-provider form no longer loses the selected provider during background provider refreshes (thanks to @IbrahimKhan12).
 - Worktrees: messages sent to new worktree sessions now wait until the worktree session is ready instead of racing ahead (thanks to @bashrusakh).
 - Git: commit and pull-request generation from a draft session now starts from the created chat session instead of a temporary draft (thanks to @bashrusakh).
-- CLI: startup and status commands now check the live server port before treating an existing process as the active OpenChamber server.
+- CLI: startup and status commands now check the live server port before treating an existing process as the active Sharpie server.
 
 ## [1.13.3] - 2026-06-24
 
@@ -340,7 +340,7 @@ All notable changes to this project will be documented in this file.
 - Usage: MiniMax M3 and Token Plan usage now handle the provider's latest API response format (thanks to @baruchvitorino).
 - VSCode: font size and padding preferences now apply inside the extension webview (thanks to @Sin991114).
 - Startup: managed OpenCode server processes left behind by a previous crash are cleaned up on the next start.
-- CLI: stale server PID files are checked more carefully so unrelated processes are not mistaken for an OpenChamber server.
+- CLI: stale server PID files are checked more carefully so unrelated processes are not mistaken for an Sharpie server.
 - Files: downloads and file names with non-Latin characters now handle those characters correctly in headers (thanks to @FanFan4204).
 - Mobile: subagent chevrons no longer overlap long session titles, and session grouping now matches the exact workspace directory (thanks to @weixiang1862, @lilyzhaun).
 
@@ -402,7 +402,7 @@ All notable changes to this project will be documented in this file.
 - Security: file previews and downloads now reject paths outside the allowed workspace unless access has been granted.
 - Sessions: fixed a bug where a running session would briefly flicker as idle (in the sidebar, the send/stop button, and the status row) when the app is protected by a password.
 - Desktop: you can now open developer tools from the Help menu.
-- Sessions: new draft sessions now start from the default model and agent instead of inheriting the previous session's selection, and fall back to OpenCode's own `default_agent` (and its model) when no OpenChamber default is set.
+- Sessions: new draft sessions now start from the default model and agent instead of inheriting the previous session's selection, and fall back to OpenCode's own `default_agent` (and its model) when no Sharpie default is set.
 - Startup: cached settings and session state now appear earlier while the live API finishes connecting.
 - Startup: the model and agent now appear faster on the initial draft — config loads under the project key up front (no reload when the draft opens) and the agent list is fetched once instead of per consumer.
 - VSCode: the extension opens faster with cached sessions, models, providers, and projects, then refreshes in the background.
@@ -480,7 +480,7 @@ All notable changes to this project will be documented in this file.
 - Chat/Input: queued messages no longer auto-send before the active session is ready, and thinking-variant choices are preserved for generated messages.
 - Chat/UI: markdown-rendered user messages now preserve line breaks.
 - Web/Browser: added a Browser feature for opening websites in the web app and sharing annotations with screenshots to agents.
-- Web/Remote Instances: added a headless web app mode, and remote instance switching now changes the OpenChamber API endpoint without loading the full remote UI.
+- Web/Remote Instances: added a headless web app mode, and remote instance switching now changes the Sharpie API endpoint without loading the full remote UI.
 - UI/Themes: added JetBrains Light and JetBrains Dark themes, and VS Code chat colors now map more closely to the active editor theme.
 
 ## [1.11.7] - 2026-05-27
@@ -498,7 +498,7 @@ All notable changes to this project will be documented in this file.
 
 - Settings/Plugins: added a Plugins page for managing opencode plugins, with npm update checks and user/project scopes (thanks to @Quat3rnion).
 - Tunnels: added Ngrok as a quick tunnel provider in the CLI and Desktop tunnel settings, with readiness checks (requires Ngrok cli and auth).
-- Desktop: added optional password setting in OpenChamber sessions settings for the local Desktop server.
+- Desktop: added optional password setting in Sharpie sessions settings for the local Desktop server.
 - Multi-Run: new multi-run sessions now appear in the session list immediately, and slash-command prompts are sent to the created run sessions correctly.
 - Mobile: restored the new-session action in the session sidebar header.
 
@@ -1021,7 +1021,7 @@ All notable changes to this project will be documented in this file.
 
 ## [1.6.4] - 2026-02-5
 
-- Desktop: switch between local and remote OpenChamber instances, plus a thinner runtime.
+- Desktop: switch between local and remote Sharpie instances, plus a thinner runtime.
 - VSCode: improved Windows PATH resolution and cold-start readiness checks to reduce "stuck loading" for sessions/models/agents.
 - Mobile: split Agent/Model controls and a quick commands button with autocomplete (Commands/Agents/Files) for easier input (thanks to @Jovines, @gsxdsm).
 - Chat: select text in messages to quickly add it to your prompt or start a new session (thanks to @gsxdsm).
@@ -1273,7 +1273,7 @@ All notable changes to this project will be documented in this file.
 - Build workflow now generates separate builds for Apple Silicon (arm64) and Intel (x86_64) Macs (thanks to @rothnic).
 - Improved dev server HMR by reusing a healthy OpenCode process to avoid zombie instances.
 - Added queued message mode with chips, batching, and idle auto‑send (including attachments).
-- Added queue mode toggle to OpenChamber settings (chat section) with persistence across runtimes.
+- Added queue mode toggle to Sharpie settings (chat section) with persistence across runtimes.
 - Fixed scroll position persistence for active conversation turns across session switches.
 - Refactored Agents/Commands management with ability to configure project/user scopes.
 
@@ -1443,7 +1443,7 @@ All notable changes to this project will be documented in this file.
 ## [1.1.0] - 2025-12-13
 
 - Added assistant answer fork flow.
-- Added OpenChamber VS Code extension with editor integration: file picker, click-to-open in tool parts.
+- Added Sharpie VS Code extension with editor integration: file picker, click-to-open in tool parts.
 - Improved scroll performance with force flag and RAF placeholder.
 - Added git polling backoff optimization.
 
@@ -1490,6 +1490,6 @@ All notable changes to this project will be documented in this file.
 
 ## [1.0.1] - 2025-12-07
 
-- Initial public release of OpenChamber web and desktop packages in a unified monorepo.
+- Initial public release of Sharpie web and desktop packages in a unified monorepo.
 - Added GitHub Actions release pipeline with macOS signing/notarization, npm publish, and release asset uploads.
 - Introduced OpenCode agent chat experience with section-based navigation, theming, and session persistence.

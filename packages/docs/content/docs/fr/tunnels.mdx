@@ -1,17 +1,17 @@
 ---
 title: Tunnels
-description: Exposez OpenChamber en sécurité pour l’accès distant et mobile.
+description: Exposez Sharpie en sécurité pour l’accès distant et mobile.
 ---
 
 # Tunnels
 
-Un tunnel est un lien public vers votre OpenChamber, pour y accéder depuis un navigateur ordinaire sur un autre réseau. Utilisez `openchamber tunnel` pour en créer un pour une instance en cours d’exécution.
+Un tunnel est un lien public vers votre Sharpie, pour y accéder depuis un navigateur ordinaire sur un autre réseau. Utilisez `openchamber tunnel` pour en créer un pour une instance en cours d’exécution.
 
 > Connecter vos **propres appareils** (l’application mobile, un autre desktop) ne nécessite généralement pas de tunnel — [associez-les](/connect-devices/) plutôt et laissez le [Relais privé](/private-relay/), chiffré de bout en bout, gérer l’accès hors du domicile sans aucune configuration.
 
 ## Prérequis
 
-OpenChamber démarre la CLI du fournisseur de tunnel sur votre machine. Installez d’abord le fournisseur que vous voulez utiliser :
+Sharpie démarre la CLI du fournisseur de tunnel sur votre machine. Installez d’abord le fournisseur que vous voulez utiliser :
 
 ```bash
 brew install cloudflared
@@ -26,7 +26,7 @@ ngrok config add-authtoken <your-ngrok-token>
 
 ## Démarrage rapide
 
-1. Démarrez OpenChamber :
+1. Démarrez Sharpie :
 
 ```bash
 openchamber
@@ -52,9 +52,9 @@ openchamber tunnel start --provider ngrok --mode quick
 openchamber tunnel status
 ```
 
-Quand le tunnel est actif, `status` affiche une URL publique. Ouvrez-la, ou scannez le QR code, pour joindre OpenChamber depuis n’importe où.
+Quand le tunnel est actif, `status` affiche une URL publique. Ouvrez-la, ou scannez le QR code, pour joindre Sharpie depuis n’importe où.
 
-Par défaut, OpenChamber affiche un QR code dans les sessions TTY interactives. Utilisez `--qr` pour forcer la sortie QR, ou `--no-qr` pour la désactiver.
+Par défaut, Sharpie affiche un QR code dans les sessions TTY interactives. Utilisez `--qr` pour forcer la sortie QR, ou `--no-qr` pour la désactiver.
 
 ## Fournisseurs
 
@@ -106,7 +106,7 @@ openchamber tunnel stop --port 3000
 
 ## Notes de comportement
 
-- un tunnel actif par instance OpenChamber (port)
+- un tunnel actif par instance Sharpie (port)
 - démarrer un nouveau mode/fournisseur sur la même instance remplace le tunnel précédent
 - générer un nouveau lien de connexion révoque le précédent lien inutilisé
 - l’auto-démarrage du tunnel conserve les flags serveur comme `--ui-password` et `--api-only` dans les paramètres d’instance utilisés par les flux de redémarrage/mise à jour
@@ -116,5 +116,5 @@ openchamber tunnel stop --port 3000
 - [Connecter un appareil](/connect-devices/) — associer vos propres appareils sans URL publique
 - [Sécurité](/security/) — protéger l’UI avant de l’exposer
 - [Tunnels desktop](/desktop-tunnels/) — configuration des tunnels de l’application desktop sans démarrage CLI
-- [PWA et mobile](/mobile/) — joindre OpenChamber depuis votre téléphone
+- [PWA et mobile](/mobile/) — joindre Sharpie depuis votre téléphone
 - [Dépannage](/troubleshooting/) — si le lien de tunnel ne fonctionne pas

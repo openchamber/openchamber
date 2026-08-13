@@ -5,7 +5,7 @@ description: Transformez un prompt en objectif vers lequel l'agent travaille aut
 
 # Objectifs de session
 
-Un objectif transforme un seul prompt en ligne d'arrivée. Au lieu de relancer l'agent avec « continue » après chaque réponse, vous définissez l'objectif une fois — et OpenChamber fait travailler la session vers lui automatiquement, en vérifiant la progression avec un auditeur indépendant après chaque tour. Le travail continue même en votre absence.
+Un objectif transforme un seul prompt en ligne d'arrivée. Au lieu de relancer l'agent avec « continue » après chaque réponse, vous définissez l'objectif une fois — et Sharpie fait travailler la session vers lui automatiquement, en vérifiant la progression avec un auditeur indépendant après chaque tour. Le travail continue même en votre absence.
 
 ## Démarrer un objectif
 
@@ -31,7 +31,7 @@ Pour de petits ajustements contextuels, pas besoin d'objectif — envoyez un mes
 
 ## Comment ça marche
 
-Quand l'agent s'arrête et que la session reste calme un instant, OpenChamber :
+Quand l'agent s'arrête et que la session reste calme un instant, Sharpie :
 
 1. Demande à un petit modèle économique d'auditer le dernier tour par rapport à l'objectif : continuer, terminé ou bloqué ?
 2. Si le verdict est « continuer », il envoie un prompt de continuation et l'agent reprend le travail.
@@ -63,7 +63,7 @@ Dans **Paramètres → Chat → Objectif**, vous pouvez définir un budget de to
 
 ## À garder en tête
 
-- La boucle d'objectif tourne dans le serveur OpenChamber, pas dans votre onglet de navigateur. Fermez l'onglet, verrouillez le téléphone — l'agent continue, et vous recevez une notification quand l'objectif se termine. Le serveur (app de bureau ou processus `openchamber`) doit rester lancé.
+- La boucle d'objectif tourne dans le serveur Sharpie, pas dans votre onglet de navigateur. Fermez l'onglet, verrouillez le téléphone — l'agent continue, et vous recevez une notification quand l'objectif se termine. Le serveur (app de bureau ou processus `openchamber`) doit rester lancé.
 - Les objectifs utilisent le fournisseur et le modèle de votre propre session, y compris pour les appels de l'auditeur — rien ne part vers des fournisseurs que vous n'utilisez pas déjà.
 - Un objectif par session à la fois.
 

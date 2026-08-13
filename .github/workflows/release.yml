@@ -77,7 +77,7 @@ jobs:
           draft: true
           generate_release_notes: false
           body_path: artifacts/release-notes.md
-          name: OpenChamber v${{ steps.get_version.outputs.version }}
+          name: Sharpie v${{ steps.get_version.outputs.version }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -450,7 +450,7 @@ jobs:
           MANIFEST: ${{ matrix.manifest }}
         run: |
           set -euo pipefail
-          APPIMAGE="dist/OpenChamber-${VERSION}-linux-${ARTIFACT_ARCH}.AppImage"
+          APPIMAGE="dist/Sharpie-${VERSION}-linux-${ARTIFACT_ARCH}.AppImage"
           node ./scripts/verify-update-manifest.mjs "dist/${MANIFEST}" "$APPIMAGE" "$VERSION"
 
       - name: Upload validated Linux release files
@@ -458,7 +458,7 @@ jobs:
         with:
           name: linux-release-${{ matrix.arch }}
           path: |
-            packages/electron/dist/OpenChamber-${{ needs.create-release.outputs.version }}-linux-${{ matrix.artifact_arch }}.AppImage
+            packages/electron/dist/Sharpie-${{ needs.create-release.outputs.version }}-linux-${{ matrix.artifact_arch }}.AppImage
             packages/electron/dist/${{ matrix.manifest }}
           if-no-files-found: error
           retention-days: 1
@@ -488,11 +488,11 @@ jobs:
           set -euo pipefail
           node packages/electron/scripts/verify-update-manifest.mjs \
             artifacts/x64/latest-linux.yml \
-            "artifacts/x64/OpenChamber-${VERSION}-linux-x86_64.AppImage" \
+            "artifacts/x64/Sharpie-${VERSION}-linux-x86_64.AppImage" \
             "$VERSION"
           node packages/electron/scripts/verify-update-manifest.mjs \
             artifacts/arm64/latest-linux-arm64.yml \
-            "artifacts/arm64/OpenChamber-${VERSION}-linux-arm64.AppImage" \
+            "artifacts/arm64/Sharpie-${VERSION}-linux-arm64.AppImage" \
             "$VERSION"
 
       - name: Upload Linux AppImages and manifests to release
@@ -501,9 +501,9 @@ jobs:
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
           files: |
-            artifacts/x64/OpenChamber-${{ needs.create-release.outputs.version }}-linux-x86_64.AppImage
+            artifacts/x64/Sharpie-${{ needs.create-release.outputs.version }}-linux-x86_64.AppImage
             artifacts/x64/latest-linux.yml
-            artifacts/arm64/OpenChamber-${{ needs.create-release.outputs.version }}-linux-arm64.AppImage
+            artifacts/arm64/Sharpie-${{ needs.create-release.outputs.version }}-linux-arm64.AppImage
             artifacts/arm64/latest-linux-arm64.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -572,9 +572,9 @@ jobs:
           (async () => {
           const { REPOSITORY: repo, VERSION: version, GITHUB_TOKEN: token } = process.env;
           const expected = [
-            `OpenChamber-${version}-linux-x86_64.AppImage`,
+            `Sharpie-${version}-linux-x86_64.AppImage`,
             'latest-linux.yml',
-            `OpenChamber-${version}-linux-arm64.AppImage`,
+            `Sharpie-${version}-linux-arm64.AppImage`,
             'latest-linux-arm64.yml',
           ];
           const response = await fetch(`https://api.github.com/repos/${repo}/releases/tags/v${version}`, {
@@ -632,11 +632,11 @@ jobs:
             }
 
             const release = await releaseRes.json();
-            const description = (release.body || `OpenChamber ${tag} released.`).slice(0, 4096);
+            const description = (release.body || `Sharpie ${tag} released.`).slice(0, 4096);
             const mention = updateRoleId ? `<@&${updateRoleId}>` : '';
 
             const payload = {
-              username: 'OpenChamber Releases',
+              username: 'Sharpie Releases',
               ...(mention ? { content: mention } : {}),
               ...(updateRoleId
                 ? {
@@ -647,11 +647,11 @@ jobs:
                 : {}),
               embeds: [
                 {
-                  title: release.name || `OpenChamber ${tag}`,
+                  title: release.name || `Sharpie ${tag}`,
                   url: release.html_url,
                   description,
                   color: 2105893,
-                  footer: { text: 'OpenChamber Changelog' },
+                  footer: { text: 'Sharpie Changelog' },
                 },
               ],
             };

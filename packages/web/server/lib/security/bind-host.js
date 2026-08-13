@@ -35,6 +35,6 @@ export const isUnsafeUnauthenticatedLanAllowed = (env = process.env) =>
   env?.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN === 'true';
 
 export const getUnauthenticatedLanErrorMessage = (host) =>
-  `OpenChamber refuses to bind to ${host || 'a network-exposed host'} without UI authentication. `
+  `Sharpie refuses to bind to ${host || 'a network-exposed host'} without UI authentication. `
   + 'Set --ui-password or OPENCHAMBER_UI_PASSWORD before exposing it over LAN, '
   + 'or set OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN=true to accept the risk.';

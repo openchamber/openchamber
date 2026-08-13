@@ -323,7 +323,7 @@ const fetchUsage = async (accessToken) => {
       'Content-Type': 'application/grpc-web+proto',
       'x-grpc-web': '1',
       'x-user-agent': 'connect-es/2.1.1',
-      'User-Agent': 'OpenChamber'
+      'User-Agent': 'Sharpie'
     },
     body: EMPTY_GRPC_WEB_BODY,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)

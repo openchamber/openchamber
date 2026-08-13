@@ -39,10 +39,10 @@ const mergePluginConfig = (rawConfig, pluginUrl) => {
     ? parseJsonc(rawConfig, errors, { allowTrailingComma: true })
     : {};
   if (errors.length > 0 || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('OPENCODE_CONFIG_CONTENT must contain a valid JSON object before OpenChamber can inject its system prompt optimizer');
+    throw new Error('OPENCODE_CONFIG_CONTENT must contain a valid JSON object before Sharpie can inject its system prompt optimizer');
   }
   if (parsed.plugin !== undefined && !Array.isArray(parsed.plugin)) {
-    throw new Error('OPENCODE_CONFIG_CONTENT plugin must be an array before OpenChamber can inject its system prompt optimizer');
+    throw new Error('OPENCODE_CONFIG_CONTENT plugin must be an array before Sharpie can inject its system prompt optimizer');
   }
   const configured = Array.isArray(parsed.plugin) ? parsed.plugin : [];
   parsed.plugin = [

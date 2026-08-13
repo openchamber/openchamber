@@ -10,7 +10,7 @@ const script = fileURLToPath(new URL('./finalize-latest-yml.mjs', import.meta.ur
 
 const manifest = (architecture) => `version: 1.2.3
 files:
-  - url: OpenChamber-1.2.3-win-${architecture}.exe
+  - url: Sharpie-1.2.3-win-${architecture}.exe
     sha512: ${architecture}-checksum
     size: 123
 releaseDate: '2026-07-30T00:00:00.000Z'

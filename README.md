@@ -1,4 +1,4 @@
-# <picture><source media="(prefers-color-scheme: dark)" srcset="docs/references/badges/openchamber-logo-dark.svg"><img src="docs/references/badges/openchamber-logo-light.svg" width="32" height="32" align="absmiddle" /></picture> OpenChamber
+# <picture><source media="(prefers-color-scheme: dark)" srcset="docs/references/badges/openchamber-logo-dark.svg"><img src="docs/references/badges/openchamber-logo-light.svg" width="32" height="32" align="absmiddle" /></picture> Sharpie
 
 [![GitHub stars](https://img.shields.io/github/stars/openchamber/openchamber?style=flat&labelColor=100F0F&color=66800B)](https://github.com/openchamber/openchamber/stargazers)
 [![GitHub release](https://img.shields.io/github/v/release/openchamber/openchamber?style=flat&labelColor=100F0F&color=205EA6)](https://github.com/openchamber/openchamber/releases/latest)
@@ -7,11 +7,11 @@
 
 ## Run agent work. Keep control. Ship from anywhere.
 
-**OpenChamber is an open-source workspace for running, supervising, and reviewing AI coding work across desktop, browser, editor, and mobile.**
+**Sharpie is an open-source workspace for running, supervising, and reviewing AI coding work across desktop, browser, editor, and mobile.**
 
-OpenChamber gives you one place to direct agent work, understand the changes, and move them toward release. Your projects stay available when you switch devices or step away.
+Sharpie gives you one place to direct agent work, understand the changes, and move them toward release. Your projects stay available when you switch devices or step away.
 
-![OpenChamber Chat](docs/references/chat_example.png)
+![Sharpie Chat](docs/references/chat_example.png)
 
 <details>
 <summary>More screenshots</summary>
@@ -19,17 +19,17 @@ OpenChamber gives you one place to direct agent work, understand the changes, an
 ![VS Code Extension](packages/vscode/extension.jpg)
 
 <p>
-<img src="docs/references/pwa_chat_example.png" width="45%" alt="OpenChamber PWA chat">
-<img src="docs/references/pwa_diff_example.png" width="45%" alt="OpenChamber PWA diff review">
+<img src="docs/references/pwa_chat_example.png" width="45%" alt="Sharpie PWA chat">
+<img src="docs/references/pwa_diff_example.png" width="45%" alt="Sharpie PWA diff review">
 </p>
 
 </details>
 
-## What you can do with OpenChamber
+## What you can do with Sharpie
 
 ### Goals that continue on their own
 
-Give a session a finish line with **Session Goals**. OpenChamber checks the result after every turn and keeps the agent working until the goal is complete, blocked, or reaches the limit you set — even after you close the app.
+Give a session a finish line with **Session Goals**. Sharpie checks the result after every turn and keeps the agent working until the goal is complete, blocked, or reaches the limit you set — even after you close the app.
 
 ### Compare and combine runs
 
@@ -45,7 +45,7 @@ Open your app beside the conversation with **Preview**. Point at an element and 
 
 ### GitHub context from issue to pull request
 
-Start a session from a GitHub issue or pull request with its context attached. Send failed checks or review comments back to the agent, then update or merge the pull request from OpenChamber.
+Start a session from a GitHub issue or pull request with its context attached. Send failed checks or review comments back to the agent, then update or merge the pull request from Sharpie.
 
 ### Continue on another device
 
@@ -71,7 +71,7 @@ Run a prompt once, daily, weekly, or on a cron schedule. Scheduled tasks can use
 | **Web / PWA** | Open your workspace in a browser, install it as an app, and stay up to date through background notifications |
 | **VS Code** | Keep sessions beside your code, send selections to the agent, open results in the editor, and compare parallel runs |
 | **iOS / Android** | Review and steer work away from your desk, receive completion alerts, and use the terminal with touch controls |
-| **CLI / Server** | Run OpenChamber on a workstation or server, schedule work, manage remote access, and keep it available after login |
+| **CLI / Server** | Run Sharpie on a workstation or server, schedule work, manage remote access, and keep it available after login |
 
 ## Quick start
 
@@ -82,15 +82,15 @@ Download the latest release from [GitHub Releases](https://github.com/openchambe
 Linux releases are available as x86_64 and ARM64 AppImages. Make the downloaded AppImage executable and keep it in a writable location for in-app updates:
 
 ```bash
-chmod +x OpenChamber-*.AppImage
-./OpenChamber-*.AppImage
+chmod +x Sharpie-*.AppImage
+./Sharpie-*.AppImage
 ```
 
 Linux AppImages require FUSE (`libfuse.so.2`). Without FUSE, run with `APPIMAGE_EXTRACT_AND_RUN=1`.
 
 ### VS Code
 
-Install [OpenChamber from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber), or search for “OpenChamber” in Extensions.
+Install [Sharpie from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber), or search for “Sharpie” in Extensions.
 
 ### CLI — Web and PWA
 
@@ -113,11 +113,11 @@ openchamber stop
 openchamber update
 ```
 
-OpenChamber binds to localhost by default. Use `--lan` only on a trusted network and protect browser access with `--ui-password`.
+Sharpie binds to localhost by default. Use `--lan` only on a trusted network and protect browser access with `--ui-password`.
 
 ## Guides
 
-Go deeper with the OpenChamber guides:
+Go deeper with the Sharpie guides:
 
 - [Quick start](packages/docs/content/docs/quickstart.mdx)
 - [Installation](packages/docs/content/docs/install.mdx)
@@ -136,11 +136,11 @@ For self-hosting details, see the [reverse proxy guide](docs/REVERSE_PROXY.md). 
 
 ## Why OpenCode?
 
-OpenChamber uses [OpenCode](https://opencode.ai) to power its coding agents. We chose it because we believe it provides the best open-source agentic coding experience today: capable, extensible, and open by design.
+Sharpie uses [OpenCode](https://opencode.ai) to power its coding agents. We chose it because we believe it provides the best open-source agentic coding experience today: capable, extensible, and open by design.
 
-Around that foundation, OpenChamber brings together the work that happens before, during, and after an agent run — deciding what to try, keeping it on track, reviewing the result, connecting from anywhere, and getting the change shipped.
+Around that foundation, Sharpie brings together the work that happens before, during, and after an agent run — deciding what to try, keeping it on track, reviewing the result, connecting from anywhere, and getting the change shipped.
 
-OpenChamber is an independent project and is not affiliated with the OpenCode team.
+Sharpie is an independent project and is not affiliated with the OpenCode team.
 
 ## Contributing
 
@@ -154,7 +154,7 @@ Special thanks to:
 - [Pierre](https://pierrejs-docs.vercel.app/) for its fast diff viewer and syntax highlighting
 - [Ghostty-web](https://github.com/coder/ghostty-web) for its Ghostty web renderer
 - [Yulia Ivashko](https://github.com/yulia-ivashko), who built the firework celebration that plays on every successful push
-- Every contributor who shaped OpenChamber with code, ideas, and attention to detail
+- Every contributor who shaped Sharpie with code, ideas, and attention to detail
 
 ## License
 

@@ -1,11 +1,11 @@
 ---
 title: 원격 인스턴스
-description: 데스크톱 앱을 SSH로 다른 컴퓨터의 OpenChamber에 연결하세요.
+description: 데스크톱 앱을 SSH로 다른 컴퓨터의 Sharpie에 연결하세요.
 ---
 
 # 원격 인스턴스
 
-데스크톱 앱은 SSH를 통해 업무 서버, 클라우드 인스턴스, 홈랩 등 다른 컴퓨터에서 실행 중인 OpenChamber에 연결하여, 마치 로컬인 것처럼 그 UI를 화면에 가져올 수 있습니다. **Settings → Remote Instances**에서 설정합니다.
+데스크톱 앱은 SSH를 통해 업무 서버, 클라우드 인스턴스, 홈랩 등 다른 컴퓨터에서 실행 중인 Sharpie에 연결하여, 마치 로컬인 것처럼 그 UI를 화면에 가져올 수 있습니다. **Settings → Remote Instances**에서 설정합니다.
 
 > 원격 인스턴스는 **데스크톱 전용** 기능입니다. 웹이나 VS Code에서는 대신 [OpenCode Server](/ko/opencode-server/)의 환경 변수로 원격 서버에 연결하세요.
 
@@ -13,20 +13,20 @@ description: 데스크톱 앱을 SSH로 다른 컴퓨터의 OpenChamber에 연�
 
 1. **Settings → Remote Instances**를 열고 하나를 추가합니다.
 2. 평소에 그 컴퓨터에 접근할 때 사용하는 SSH 명령과 별칭을 지정합니다.
-3. OpenChamber가 거기서 실행되는 방식을 선택합니다.
-   - **managed** — OpenChamber가 원격 컴퓨터에 직접 설치하고 시작합니다
+3. Sharpie가 거기서 실행되는 방식을 선택합니다.
+   - **managed** — Sharpie가 원격 컴퓨터에 직접 설치하고 시작합니다
    - **external** — 이미 실행 중인 것에 연결합니다
 4. 연결합니다.
 
-OpenChamber가 연결 확인, 원격 설정, 서버 시작, 포트 포워딩 단계를 안내하며 각 단계의 진행 상황을 보여줍니다. **ready**에 도달하면 원격 UI가 로컬에 로드됩니다.
+Sharpie가 연결 확인, 원격 설정, 서버 시작, 포트 포워딩 단계를 안내하며 각 단계의 진행 상황을 보여줍니다. **ready**에 도달하면 원격 UI가 로컬에 로드됩니다.
 
 ## 자격 증명
 
-SSH 및 UI 비밀번호를 저장할지, 매번 입력할지 결정합니다. 연결이 끊기면 OpenChamber가 어느 단계가 실패했는지 알려주므로 고칠 수 있습니다. [Remote access](/ko/troubleshooting/remote-access/)를 참고하세요.
+SSH 및 UI 비밀번호를 저장할지, 매번 입력할지 결정합니다. 연결이 끊기면 Sharpie가 어느 단계가 실패했는지 알려주므로 고칠 수 있습니다. [Remote access](/ko/troubleshooting/remote-access/)를 참고하세요.
 
 ## 연결 링크
 
-원격 머신에서 OpenChamber가 이미 실행 중이라면 데스크톱 앱을 연결하는 가장 쉬운 방법은 페어링 링크입니다. 원격 서버의 UI에서 **Settings → Remote Instances → 이 서버에 연결 → 기기 추가**를 열어 링크를 만들고, 데스크톱의 **Settings → Remote Instances → 다른 OpenChamber 서버 → 링크 가져오기**에서 가져오세요. 전체 흐름은 [기기 연결](/ko/connect-devices/)을 참고하세요.
+원격 머신에서 Sharpie가 이미 실행 중이라면 데스크톱 앱을 연결하는 가장 쉬운 방법은 페어링 링크입니다. 원격 서버의 UI에서 **Settings → Remote Instances → 이 서버에 연결 → 기기 추가**를 열어 링크를 만들고, 데스크톱의 **Settings → Remote Instances → 다른 Sharpie 서버 → 링크 가져오기**에서 가져오세요. 전체 흐름은 [기기 연결](/ko/connect-devices/)을 참고하세요.
 
 **어디서나**로 만든 링크에는 직접 주소와 [Private Relay](/ko/private-relay/) 경로가 모두 들어 있습니다. 데스크톱이 서버에 도달할 수 있으면(같은 네트워크) 직접 연결하고, 밖에 있으면 종단 간 암호화 릴레이로 대체합니다. 저장된 각 서버 옆의 상태에 어느 경로가 사용 중인지 표시됩니다.
 

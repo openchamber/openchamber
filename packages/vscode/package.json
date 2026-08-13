@@ -1,6 +1,6 @@
 {
   "name": "openchamber",
-  "displayName": "OpenChamber",
+  "displayName": "Sharpie",
   "description": "%extension.description%",
   "version": "1.18.2",
   "publisher": "fedaykindev",
@@ -44,7 +44,7 @@
       "activitybar": [
         {
           "id": "openchamber",
-          "title": "OpenChamber",
+          "title": "Sharpie",
           "icon": "assets/icon.svg"
         }
       ]
@@ -61,7 +61,7 @@
     "commands": [
       {
         "command": "openchamber.openSidebar",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.openSidebar.title%",
         "icon": {
           "light": "assets/icon.svg",
@@ -70,34 +70,34 @@
       },
       {
         "command": "openchamber.focusChat",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.focusChat.title%"
       },
       {
         "command": "openchamber.restartApi",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.restartApi.title%"
       },
       {
         "command": "openchamber.showOpenCodeStatus",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.showOpenCodeStatus.title%"
       },
       {
         "command": "openchamber.openAgentManager",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.openAgentManager.title%",
         "icon": "$(circuit-board)"
       },
       {
         "command": "openchamber.openActiveSessionInEditor",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.openActiveSessionInEditor.title%",
         "icon": "$(link-external)"
       },
       {
         "command": "openchamber.openNewSessionInEditor",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.openNewSessionInEditor.title%",
         "icon": {
           "light": "assets/icon.svg",
@@ -106,47 +106,47 @@
       },
       {
         "command": "openchamber.openCurrentOrNewSessionInEditor",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.openCurrentOrNewSessionInEditor.title%",
         "icon": "$(link-external)"
       },
       {
         "command": "openchamber.addToContext",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.addToContext.title%"
       },
       {
         "command": "openchamber.explain",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.explain.title%"
       },
       {
         "command": "openchamber.improveCode",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.improveCode.title%"
       },
       {
         "command": "openchamber.newSession",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.newSession.title%",
         "icon": "$(add)"
       },
       {
         "command": "openchamber.showSettings",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.showSettings.title%",
         "icon": "$(settings-gear)"
       },
       {
         "command": "openchamber.attachExplorerToChat",
-        "category": "OpenChamber",
+        "category": "Sharpie",
         "title": "%command.attachExplorerToChat.title%"
       }
     ],
     "submenus": [
       {
         "id": "openchamber.submenu",
-        "label": "OpenChamber"
+        "label": "Sharpie"
       }
     ],
     "menus": {
@@ -204,7 +204,7 @@
       ]
     },
     "configuration": {
-      "title": "OpenChamber",
+      "title": "Sharpie",
       "properties": {
         "openchamber.apiUrl": {
           "type": "string",

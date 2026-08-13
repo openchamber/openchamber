@@ -390,7 +390,7 @@ export function buildAuthSetRequest(plan: CustomProviderPersistPlan): {
 }
 
 /**
- * Builds the OpenChamber provider upsert request body (config persistence).
+ * Builds the Sharpie provider upsert request body (config persistence).
  * `scope` selects the OpenCode config layer (user/project/custom). Create
  * defaults to user; edit must pass the provider's effective existing layer.
  */

@@ -205,8 +205,8 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
             ? 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER'
             : 'OPENCODE_UPGRADE_UNSUPPORTED',
           error: capability.reason === 'bundled'
-            ? 'OpenCode is bundled with OpenChamber Desktop and updates with the app.'
-            : 'This OpenCode runtime cannot be upgraded by OpenChamber.',
+            ? 'OpenCode is bundled with Sharpie Desktop and updates with the app.'
+            : 'This OpenCode runtime cannot be upgraded by Sharpie.',
         });
       }
       if (openCodeUpgradePromise) {
@@ -534,7 +534,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
       }
       return finish(200, {
         title: 'Authorization Complete',
-        message: 'You can close this tab and return to OpenChamber.',
+        message: 'You can close this tab and return to Sharpie.',
       });
     } catch (error) {
       return finish(502, {

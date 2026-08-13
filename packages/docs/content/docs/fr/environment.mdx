@@ -1,17 +1,17 @@
 ---
 title: Variables d’environnement
-description: Configurez OpenChamber et l’intégration OpenCode avec des variables d’environnement.
+description: Configurez Sharpie et l’intégration OpenCode avec des variables d’environnement.
 ---
 
 # Variables d’environnement
 
-OpenChamber lit ces variables d’environnement au démarrage. Pour les services de démarrage, `openchamber startup enable` capture l’environnement actuel par défaut ; relancez donc la commande après avoir changé les variables que le service doit utiliser.
+Sharpie lit ces variables d’environnement au démarrage. Pour les services de démarrage, `openchamber startup enable` capture l’environnement actuel par défaut ; relancez donc la commande après avoir changé les variables que le service doit utiliser.
 
-## Serveur OpenChamber
+## Serveur Sharpie
 
 ### `OPENCHAMBER_HOST`
 
-Adresse d’écoute du serveur web OpenChamber. Utilisez `0.0.0.0` pour autoriser l’accès depuis d’autres machines.
+Adresse d’écoute du serveur web Sharpie. Utilisez `0.0.0.0` pour autoriser l’accès depuis d’autres machines.
 
 ### `OPENCHAMBER_UI_PASSWORD`
 
@@ -19,11 +19,11 @@ Mot de passe pour l’UI navigateur. Utilisez-le lorsque vous écoutez hors de l
 
 ### `OPENCHAMBER_API_ONLY`
 
-Démarre OpenChamber en mode headless lorsqu’il vaut `true` ou `1`. Les routes API restent disponibles pour les clients desktop et mobile, mais l’UI navigateur n’est pas servie.
+Démarre Sharpie en mode headless lorsqu’il vaut `true` ou `1`. Les routes API restent disponibles pour les clients desktop et mobile, mais l’UI navigateur n’est pas servie.
 
 ### `OPENCHAMBER_DATA_DIR`
 
-Remplace le dossier de données OpenChamber. La valeur par défaut est `~/.config/openchamber`.
+Remplace le dossier de données Sharpie. La valeur par défaut est `~/.config/openchamber`.
 
 ### `OPENCHAMBER_COMPRESS_API`
 
@@ -49,23 +49,23 @@ Force le gestionnaire de paquets utilisé par les opérations de mise à jour lo
 
 ### `OPENCODE_HOST`
 
-Connecte OpenChamber à un serveur OpenCode existant. La valeur doit être une origine `http` ou `https` avec un port explicite, sans chemin, query ni hash. `OPENCODE_HOST` a priorité sur `OPENCODE_PORT`.
+Connecte Sharpie à un serveur OpenCode existant. La valeur doit être une origine `http` ou `https` avec un port explicite, sans chemin, query ni hash. `OPENCODE_HOST` a priorité sur `OPENCODE_PORT`.
 
 ### `OPENCODE_PORT`
 
-Définit le port du serveur OpenCode. Avec OpenCode géré, cela demande le port géré ; avec `OPENCODE_SKIP_START=true`, OpenChamber se connecte à un serveur externe sur ce port.
+Définit le port du serveur OpenCode. Avec OpenCode géré, cela demande le port géré ; avec `OPENCODE_SKIP_START=true`, Sharpie se connecte à un serveur externe sur ce port.
 
 ### `OPENCODE_SKIP_START`
 
-Empêche OpenChamber de démarrer son propre serveur OpenCode lorsqu’il vaut `true`.
+Empêche Sharpie de démarrer son propre serveur OpenCode lorsqu’il vaut `true`.
 
 ### `OPENCHAMBER_OPENCODE_HOSTNAME`
 
-Nom d’hôte d’écoute du serveur OpenCode géré par OpenChamber. La valeur par défaut est `127.0.0.1`.
+Nom d’hôte d’écoute du serveur OpenCode géré par Sharpie. La valeur par défaut est `127.0.0.1`.
 
 ### `OPENCODE_BINARY`
 
-Chemin vers l’exécutable `opencode` qu’OpenChamber doit lancer.
+Chemin vers l’exécutable `opencode` qu’Sharpie doit lancer.
 
 ### `OPENCODE_CONFIG`
 
@@ -85,7 +85,7 @@ Sélectionne la distribution WSL utilisée pour l’intégration OpenCode sur Wi
 
 ### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
 
-Alias propre à OpenChamber pour sélectionner la distribution WSL. `OPENCODE_WSL_DISTRO` a priorité lorsque les deux sont définies.
+Alias propre à Sharpie pour sélectionner la distribution WSL. `OPENCODE_WSL_DISTRO` a priorité lorsque les deux sont définies.
 
 ### `OPENCODE_JWT_SECRET`
 
@@ -95,15 +95,15 @@ Secret utilisé pour signer les tokens d’authentification UI. Utilisez une lon
 
 ### `OPENCHAMBER_TERMINAL_SHELL`
 
-Exécutable shell utilisé pour les sessions de terminal OpenChamber.
+Exécutable shell utilisé pour les sessions de terminal Sharpie.
 
 ### `OPENCHAMBER_GIT_BINARY`
 
-Exécutable Git utilisé par les fonctionnalités Git d’OpenChamber.
+Exécutable Git utilisé par les fonctionnalités Git d’Sharpie.
 
 ### `GIT_BINARY`
 
-Autre exécutable Git de remplacement. Préférez `OPENCHAMBER_GIT_BINARY` pour une configuration propre à OpenChamber.
+Autre exécutable Git de remplacement. Préférez `OPENCHAMBER_GIT_BINARY` pour une configuration propre à Sharpie.
 
 ### `OPENCHAMBER_GIT_READ_CACHE_TTL_MS`
 
@@ -113,7 +113,7 @@ Durée de vie, en millisecondes, du cache de lecture des fichiers adossés à Gi
 
 ### `OPENAI_API_KEY`
 
-Clé API utilisée par les fonctionnalités vocales d’OpenChamber qui appellent des services compatibles OpenAI.
+Clé API utilisée par les fonctionnalités vocales d’Sharpie qui appellent des services compatibles OpenAI.
 
 ### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
 
@@ -121,17 +121,17 @@ Autorise les URL de base compatibles OpenAI distantes pour les fonctionnalités 
 
 ### `NGROK_AUTHTOKEN`
 
-Token d’authentification ngrok utilisé par les commandes de tunnel OpenChamber. Vous pouvez aussi configurer ngrok avec `ngrok config add-authtoken <token>`.
+Token d’authentification ngrok utilisé par les commandes de tunnel Sharpie. Vous pouvez aussi configurer ngrok avec `ngrok config add-authtoken <token>`.
 
 ## Helpers runtime
 
 ### `BUN_BINARY`
 
-Exécutable Bun qu’OpenChamber doit utiliser lorsqu’il lance des processus daemon.
+Exécutable Bun qu’Sharpie doit utiliser lorsqu’il lance des processus daemon.
 
 ### `BUN_INSTALL`
 
-Racine d’installation de Bun. OpenChamber l’utilise pour trouver `bin/bun` lors du démarrage des daemons et des mises à jour.
+Racine d’installation de Bun. Sharpie l’utilise pour trouver `bin/bun` lors du démarrage des daemons et des mises à jour.
 
 ### `VITE_OPENCODE_URL`
 

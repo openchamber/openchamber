@@ -19,18 +19,18 @@ async function logsCommand(options) {
   if (options.all) {
     targets = running;
     if (targets.length === 0) {
-      throw new Error('No running OpenChamber instance found.');
+      throw new Error('No running Sharpie instance found.');
     }
   } else if (options.explicitPort) {
     const found = running.find((entry) => entry.port === options.port);
     if (!found) {
-      throw new Error(`No running OpenChamber instance found on port ${options.port}.`);
+      throw new Error(`No running Sharpie instance found on port ${options.port}.`);
     }
     targets = [found];
   } else {
     const latest = getLatestInstance(running);
     if (!latest) {
-      throw new Error('No running OpenChamber instance found.');
+      throw new Error('No running Sharpie instance found.');
     }
     targets = [latest];
     if (shouldRenderHumanOutput(options)) {
@@ -55,7 +55,7 @@ async function logsCommand(options) {
   }
 
   if (showFrames) {
-    clackIntro('OpenChamber Logs');
+    clackIntro('Sharpie Logs');
   }
 
   for (const target of targets) {

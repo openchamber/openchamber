@@ -131,7 +131,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       <div className="w-full space-y-6 pb-2">
         <div className="flex flex-col items-center text-center">
           <OpenChamberLogo width={72} height={72} />
-          <h2 className={`mt-4 ${SETTINGS_BRAND_TITLE_CLASS}`}>OpenChamber</h2>
+          <h2 className={`mt-4 ${SETTINGS_BRAND_TITLE_CLASS}`}>Sharpie</h2>
           <div className="mt-2 space-y-1 typography-ui text-muted-foreground">
             <p>{t('aboutDialog.openChamberVersionLabel', { version: currentVersion })}</p>
             <p>{t('aboutDialog.openCodeVersionLabel', { version: openCodeVersion || t('settings.openchamber.about.state.unknown') })}</p>

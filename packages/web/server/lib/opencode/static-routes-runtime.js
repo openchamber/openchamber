@@ -69,7 +69,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OpenChamber API-only mode</title>
+  <title>Sharpie API-only mode</title>
   <style>
     :root {
       color-scheme: dark;
@@ -171,7 +171,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
 </head>
 <body>
   <main>
-    <svg class="logo" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenChamber logo">
+    <svg class="logo" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sharpie logo">
       <path d="M50 50 L8.432 26 L8.432 74 L50 98 Z" fill="currentColor" fill-opacity=".15" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
       <path d="M8.432 26 L18.824 32 L18.824 44 L8.432 38 Z" fill="currentColor" fill-opacity=".2"/>
       <path d="M18.824 32 L29.216 38 L29.216 50 L18.824 44 Z" fill="currentColor" fill-opacity=".45"/>
@@ -212,8 +212,8 @@ export const createStaticRoutesRuntime = (dependencies) => {
         <path d="M-8 -4 L8 -4 L8 12 L-8 12 Z" fill="currentColor" fill-opacity=".4"/>
       </g>
     </svg>
-    <h1>OpenChamber is running in headless mode</h1>
-    <p>This server is ready. Open it from the OpenChamber desktop or mobile app to use it.</p>
+    <h1>Sharpie is running in headless mode</h1>
+    <p>This server is ready. Open it from the Sharpie desktop or mobile app to use it.</p>
     <div class="command">
       <code id="connect-command">${command}</code>
       <button type="button" id="copy-command" aria-label="Copy command" title="Copy command">
@@ -249,10 +249,10 @@ export const createStaticRoutesRuntime = (dependencies) => {
 </html>`);
         },
         json: () => {
-          res.json({ ok: true, mode: 'api-only', message: 'OpenChamber is running in API-only mode' });
+          res.json({ ok: true, mode: 'api-only', message: 'Sharpie is running in API-only mode' });
         },
         default: () => {
-          res.type('text/plain').send('OpenChamber is running in API-only mode');
+          res.type('text/plain').send('Sharpie is running in API-only mode');
         },
       });
     });

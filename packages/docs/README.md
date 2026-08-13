@@ -1,6 +1,6 @@
-# OpenChamber Docs Source
+# Sharpie Docs Source
 
-This package is the source-of-truth for OpenChamber public docs content.
+This package is the source-of-truth for Sharpie public docs content.
 
 ## Layout
 

@@ -31,7 +31,7 @@ const isJsonResponse = (response: Response): boolean =>
  * keeps its own failure rather than becoming advice to upgrade.
  */
 const serverUnsupported = () =>
-  new WalkthroughError('This OpenChamber server has no walkthrough API', { code: 'server-unsupported' });
+  new WalkthroughError('This Sharpie server has no walkthrough API', { code: 'server-unsupported' });
 
 const looksUnsupported = (response: Response): boolean =>
   !isJsonResponse(response) && (response.ok || response.status === 404);

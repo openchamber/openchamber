@@ -1,11 +1,11 @@
 ---
 title: Zdalne instancje
-description: Połącz aplikację na komputerze z OpenChamber na innej maszynie przez SSH.
+description: Połącz aplikację na komputerze z Sharpie na innej maszynie przez SSH.
 ---
 
 # Zdalne instancje
 
-Aplikacja na komputerze może połączyć się z OpenChamber działającym na innej maszynie przez SSH — serwer służbowy, maszyna w chmurze, homelab — i przenieść jego UI na Twój ekran, jakby był lokalny. Skonfiguruj to w **Settings → Remote Instances**.
+Aplikacja na komputerze może połączyć się z Sharpie działającym na innej maszynie przez SSH — serwer służbowy, maszyna w chmurze, homelab — i przenieść jego UI na Twój ekran, jakby był lokalny. Skonfiguruj to w **Settings → Remote Instances**.
 
 > Zdalne instancje to funkcja **tylko na komputerze**. W wersji webowej lub w VS Code połącz się ze zdalnym serwerem za pomocą zmiennych środowiskowych z [OpenCode Server](/pl/opencode-server/).
 
@@ -13,20 +13,20 @@ Aplikacja na komputerze może połączyć się z OpenChamber działającym na in
 
 1. Otwórz **Settings → Remote Instances** i dodaj jedną.
 2. Podaj polecenie SSH, którego normalnie używasz, by dotrzeć do maszyny, oraz przydomek.
-3. Wybierz, jak OpenChamber tam działa:
-   - **managed** — OpenChamber instaluje i uruchamia się sam na zdalnej maszynie
+3. Wybierz, jak Sharpie tam działa:
+   - **managed** — Sharpie instaluje i uruchamia się sam na zdalnej maszynie
    - **external** — połącz się z tym, który już działa
 4. Połącz.
 
-OpenChamber przeprowadza przez kolejne kroki — sprawdzenie połączenia, skonfigurowanie zdalnej maszyny, uruchomienie serwera i przekazanie portu — i pokazuje, na jakim etapie się znajduje. Gdy osiągnie stan **ready**, zdalne UI ładuje się lokalnie.
+Sharpie przeprowadza przez kolejne kroki — sprawdzenie połączenia, skonfigurowanie zdalnej maszyny, uruchomienie serwera i przekazanie portu — i pokazuje, na jakim etapie się znajduje. Gdy osiągnie stan **ready**, zdalne UI ładuje się lokalnie.
 
 ## Poświadczenia
 
-Sam decydujesz, czy zapisać hasła SSH i UI, czy wpisywać je za każdym razem. Jeśli połączenie zostanie zerwane, OpenChamber zgłasza, który krok zawiódł, byś mógł to naprawić — zobacz [Dostęp zdalny](/pl/troubleshooting/remote-access/).
+Sam decydujesz, czy zapisać hasła SSH i UI, czy wpisywać je za każdym razem. Jeśli połączenie zostanie zerwane, Sharpie zgłasza, który krok zawiódł, byś mógł to naprawić — zobacz [Dostęp zdalny](/pl/troubleshooting/remote-access/).
 
 ## Linki połączenia
 
-Jeśli zdalna maszyna już uruchamia OpenChamber, najprostszym sposobem połączenia aplikacji desktopowej jest link parowania. W UI zdalnego serwera otwórz **Settings → Remote Instances → Połącz z tym serwerem → Dodaj urządzenie**, utwórz link i zaimportuj go na swoim komputerze w **Settings → Remote Instances → Inne serwery OpenChamber → Importuj link**. Pełny opis znajdziesz w [Połącz urządzenie](/pl/connect-devices/).
+Jeśli zdalna maszyna już uruchamia Sharpie, najprostszym sposobem połączenia aplikacji desktopowej jest link parowania. W UI zdalnego serwera otwórz **Settings → Remote Instances → Połącz z tym serwerem → Dodaj urządzenie**, utwórz link i zaimportuj go na swoim komputerze w **Settings → Remote Instances → Inne serwery Sharpie → Importuj link**. Pełny opis znajdziesz w [Połącz urządzenie](/pl/connect-devices/).
 
 Link utworzony z opcją **Wszędzie** zawiera zarówno adres bezpośredni, jak i trasę przez [Private Relay](/pl/private-relay/): aplikacja desktopowa łączy się bezpośrednio, gdy może dotrzeć do serwera (ta sama sieć), a poza domem przełącza się na szyfrowany end-to-end relay. Status obok każdego zapisanego serwera pokazuje, która trasa jest używana.
 

@@ -11,20 +11,20 @@ Utilisez **Paramètres → Instances distantes** dans l’application desktop po
 
 ## Importer un host SSH
 
-OpenChamber peut lire les hosts depuis votre config SSH locale, le même endroit que les commandes comme `ssh work-server` utilisent.
+Sharpie peut lire les hosts depuis votre config SSH locale, le même endroit que les commandes comme `ssh work-server` utilisent.
 
 1. Ouvrez **Paramètres → Instances distantes**.
 2. Choisissez un host dans **Saved SSH hosts**.
 3. Si le host est un pattern, saisissez la vraie destination, par exemple `deploy@app.example.com`.
 4. Enregistrez et connectez-vous.
 
-OpenChamber crée une instance distante avec cette commande SSH. Quand elle atteint **ready**, l’UI OpenChamber distante s’ouvre dans l’application desktop.
+Sharpie crée une instance distante avec cette commande SSH. Quand elle atteint **ready**, l’UI Sharpie distante s’ouvre dans l’application desktop.
 
 ## Ajouter des transferts de ports
 
 Chaque instance distante possède une section **Port Forwards**. Utilisez-la quand quelque chose d’un côté de la connexion SSH doit joindre un port de l’autre côté.
 
-OpenChamber prend en charge trois types de transfert :
+Sharpie prend en charge trois types de transfert :
 
 - **Local (-L)** — ouvre un port sur votre ordinateur qui se connecte à quelque chose sur la machine distante.
 - **Remote (-R)** — ouvre un port sur la machine distante qui se reconnecte à votre ordinateur.
@@ -34,7 +34,7 @@ Pour la plupart des aperçus d’app et dashboards qui tournent sur la machine d
 
 ## Utiliser le proxy SOCKS
 
-Choisissez **Dynamic (-D)** quand vous voulez que d’autres outils sur votre ordinateur naviguent via la machine distante. OpenChamber ouvre un port proxy SOCKS local pour cette connexion SSH.
+Choisissez **Dynamic (-D)** quand vous voulez que d’autres outils sur votre ordinateur naviguent via la machine distante. Sharpie ouvre un port proxy SOCKS local pour cette connexion SSH.
 
 Une fois la connexion prête, copiez ou utilisez l’adresse proxy locale depuis la ligne du transfert. Configurez votre navigateur ou outil pour l’utiliser comme proxy SOCKS5.
 
@@ -44,5 +44,5 @@ Utilisez `127.0.0.1` ou `localhost` comme hosts de bind locaux, sauf si vous vou
 
 ## Pages liées
 
-- [Instances distantes](/remote-instances/) — connecter l’application desktop à OpenChamber sur une autre machine
+- [Instances distantes](/remote-instances/) — connecter l’application desktop à Sharpie sur une autre machine
 - [Accès distant](/troubleshooting/remote-access/) — quand SSH ou l’accès distant ne se connecte pas

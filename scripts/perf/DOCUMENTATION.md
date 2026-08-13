@@ -1,7 +1,7 @@
 # Performance Measurement Tooling
 
 Owns the unattended performance capture commands and their shared Chrome
-DevTools Protocol plumbing. Read this before measuring OpenChamber performance
+DevTools Protocol plumbing. Read this before measuring Sharpie performance
 or extending these scripts. The methodology rules they enforce come from
 `.agents/skills/performance-engineering/SKILL.md`.
 

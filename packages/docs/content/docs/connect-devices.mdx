@@ -1,15 +1,15 @@
 ---
 title: Connect a Device
-description: Pair your phone, desktop, or another browser with your OpenChamber server using a one-time QR code.
+description: Pair your phone, desktop, or another browser with your Sharpie server using a one-time QR code.
 ---
 
 # Connect a Device
 
-Pair another device — the mobile app, the desktop app, or a browser on another machine — with your OpenChamber server by scanning a one-time QR code. This is the recommended way to connect devices; there are no ports to open and no addresses to type.
+Pair another device — the mobile app, the desktop app, or a browser on another machine — with your Sharpie server by scanning a one-time QR code. This is the recommended way to connect devices; there are no ports to open and no addresses to type.
 
 ## Pair a device
 
-1. On the machine running OpenChamber, open **Settings → Remote Instances → Connect to this server** and press **Add a device**.
+1. On the machine running Sharpie, open **Settings → Remote Instances → Connect to this server** and press **Add a device**.
 2. Give the device a name (e.g. *My iPhone*) so you can recognize it later.
 3. Pick where you'll use the device:
    - **This computer only** — for apps running on this same machine
@@ -18,7 +18,7 @@ Pair another device — the mobile app, the desktop app, or a browser on another
 4. Press **Create QR code**.
 5. On the other device, scan the code:
    - **mobile app** — tap **Scan QR code** on the connect screen (or in the instances list)
-   - **desktop app** — copy the connection link instead and paste it in **Settings → Remote Instances → Other OpenChamber servers → Import Link**
+   - **desktop app** — copy the connection link instead and paste it in **Settings → Remote Instances → Other Sharpie servers → Import Link**
 
 The dialog closes on its own as soon as the device connects, and the device appears in the list with a live status. That's it — you're paired.
 
@@ -56,7 +56,7 @@ openchamber connect-url --relay --qr
 
 A `--relay` link carries both routes, just like the dialog: the device connects directly over your local network when it can reach the server, and falls back to the [Private Relay](/private-relay/) when away. The relay starts on its own: a running instance picks the link up within a minute, a stopped one on its next launch.
 
-> The direct route only works if the server actually listens on your network. By default OpenChamber listens on the machine itself only — start it with `--lan` to make it reachable over Wi-Fi. The command warns you (`[LAN_UNREACHABLE]`) when the link's direct route won't be usable from other devices; a `--relay` link still works then, just always through the relay.
+> The direct route only works if the server actually listens on your network. By default Sharpie listens on the machine itself only — start it with `--lan` to make it reachable over Wi-Fi. The command warns you (`[LAN_UNREACHABLE]`) when the link's direct route won't be usable from other devices; a `--relay` link still works then, just always through the relay.
 
 The printed link and QR code work exactly like the ones from the settings dialog — single-use, expiring, revocable.
 

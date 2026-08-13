@@ -2,7 +2,7 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-// Control Center control (iOS 18+): tap the OpenChamber logo to start a new session.
+// Control Center control (iOS 18+): tap the Sharpie logo to start a new session.
 //
 // IMPORTANT: this file is a member of BOTH the app target and the widget extension target.
 // iOS requires the control's AppIntent to exist in the app target too, otherwise tapping the
@@ -21,13 +21,13 @@ struct OpenChamberNewSessionControl: ControlWidget {
             }
         }
         .displayName("New Session")
-        .description("Start a new OpenChamber session.")
+        .description("Start a new Sharpie session.")
     }
 }
 
 @available(iOS 18.0, *)
 struct OpenNewSessionIntent: AppIntent {
-    static let title: LocalizedStringResource = "New OpenChamber Session"
+    static let title: LocalizedStringResource = "New Sharpie Session"
     static let openAppWhenRun: Bool = true
     static let isDiscoverable: Bool = true
 

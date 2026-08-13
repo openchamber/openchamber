@@ -90,7 +90,7 @@ struct OverviewWidget: Widget {
             OverviewWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("OpenChamber")
+        .configurationDisplayName("Sharpie")
         .description("Recent sessions and quick actions.")
         .supportedFamilies([.systemMedium])
     }
@@ -266,7 +266,7 @@ struct LockNewSessionWidget: Widget {
                 .containerBackground(.clear, for: .widget)
         }
         .configurationDisplayName("New Session")
-        .description("Start a new OpenChamber session.")
+        .description("Start a new Sharpie session.")
         .supportedFamilies([.accessoryCircular])
     }
 }

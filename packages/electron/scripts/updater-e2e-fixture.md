@@ -19,8 +19,8 @@ production GitHub updater provider. It supports native x64 and arm64 hosts.
    ```bash
    bun run updater:e2e:fixture -- run \
      --arch x64 \
-     --current /absolute/path/OpenChamber-N-linux-x86_64.AppImage \
-     --next /absolute/path/OpenChamber-N+1-linux-x86_64.AppImage \
+     --current /absolute/path/Sharpie-N-linux-x86_64.AppImage \
+     --next /absolute/path/Sharpie-N+1-linux-x86_64.AppImage \
      --version N+1 \
      --dir /tmp/openchamber-updater-e2e
    ```

@@ -1,15 +1,15 @@
 ---
 title: Serveur OpenCode
-description: Connectez OpenChamber à un serveur OpenCode local ou distant.
+description: Connectez Sharpie à un serveur OpenCode local ou distant.
 ---
 
 # Serveur OpenCode
 
-OpenChamber fonctionne par-dessus un serveur OpenCode. Par défaut, il en démarre un pour vous, donc vous n’avez rien à faire. Vous n’avez besoin de cette page que si vous voulez pointer OpenChamber vers un serveur que vous exécutez déjà, ou gérer celui qu’il démarre.
+Sharpie fonctionne par-dessus un serveur OpenCode. Par défaut, il en démarre un pour vous, donc vous n’avez rien à faire. Vous n’avez besoin de cette page que si vous voulez pointer Sharpie vers un serveur que vous exécutez déjà, ou gérer celui qu’il démarre.
 
-## Comment OpenChamber trouve un serveur
+## Comment Sharpie trouve un serveur
 
-Au démarrage, OpenChamber cherche un serveur dans cet ordre :
+Au démarrage, Sharpie cherche un serveur dans cet ordre :
 
 1. réutiliser un serveur qu’il a déjà démarré
 2. se connecter à un serveur externe si vous le lui avez indiqué (voir ci-dessous)
@@ -20,18 +20,18 @@ Si rien n’est configuré, l’étape 4 se fait automatiquement et vous pouvez 
 
 ## Se connecter à un serveur que vous exécutez déjà
 
-Définissez ces variables avant de lancer OpenChamber :
+Définissez ces variables avant de lancer Sharpie :
 
 ```bash
 OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 ```
 
 - `OPENCODE_HOST` — l’adresse complète de votre serveur OpenCode, port inclus (par exemple `http://localhost:4096`). Elle ne doit pas se terminer par un chemin.
-- `OPENCODE_SKIP_START=true` — indique à OpenChamber de ne pas démarrer son propre serveur.
+- `OPENCODE_SKIP_START=true` — indique à Sharpie de ne pas démarrer son propre serveur.
 
 Si vous voulez seulement changer le port, définissez `OPENCODE_PORT` au lieu de `OPENCODE_HOST`.
 
-Si `OPENCODE_HOST` n’a pas de port ou contient un chemin, OpenChamber l’ignore et revient au démarrage de son propre serveur. Surveillez les logs de démarrage pour un avertissement `[config]` si une connexion attendue ne se fait pas.
+Si `OPENCODE_HOST` n’a pas de port ou contient un chemin, Sharpie l’ignore et revient au démarrage de son propre serveur. Surveillez les logs de démarrage pour un avertissement `[config]` si une connexion attendue ne se fait pas.
 
 ## Gérer le serveur depuis la CLI
 
@@ -44,9 +44,9 @@ openchamber stop
 
 `openchamber` seul démarre le serveur en arrière-plan. Ajoutez `--foreground` pour le garder attaché à votre terminal.
 
-## Lancer OpenChamber à la connexion
+## Lancer Sharpie à la connexion
 
-Utilisez `startup enable` pour installer un service utilisateur natif. OpenChamber utilise `launchd` sur macOS, `systemd --user` sur Linux et le Planificateur de tâches sur Windows.
+Utilisez `startup enable` pour installer un service utilisateur natif. Sharpie utilise `launchd` sur macOS, `systemd --user` sur Linux et le Planificateur de tâches sur Windows.
 
 ```bash
 openchamber startup enable
@@ -70,7 +70,7 @@ openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password s
 
 Le service de démarrage mémorise `--port`, `--host`, `--ui-password` et `--api-only`. Les redémarrages CLI et les redémarrages après mise à jour réutilisent ces réglages enregistrés.
 
-Pour créer un lien de connexion pour une autre application OpenChamber, utilisez :
+Pour créer un lien de connexion pour une autre application Sharpie, utilisez :
 
 ```bash
 openchamber connect-url --port 3000 --server http://your-host:3000 --qr
@@ -89,7 +89,7 @@ Arrêter le tunnel ne redémarre ni le service ni l’application.
 
 ## « OpenCode redémarre »
 
-Pendant que le serveur démarre ou redémarre, OpenChamber affiche l’état « OpenCode redémarre » et met les requêtes en pause jusqu’à ce qu’il soit prêt. C’est normal juste après un lancement ou un redémarrage. Si l’état ne disparaît jamais, consultez [Connexion à OpenCode](/troubleshooting/opencode-connection/).
+Pendant que le serveur démarre ou redémarre, Sharpie affiche l’état « OpenCode redémarre » et met les requêtes en pause jusqu’à ce qu’il soit prêt. C’est normal juste après un lancement ou un redémarrage. Si l’état ne disparaît jamais, consultez [Connexion à OpenCode](/troubleshooting/opencode-connection/).
 
 ## Pages liées
 

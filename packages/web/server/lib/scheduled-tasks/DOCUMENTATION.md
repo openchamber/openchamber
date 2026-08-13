@@ -1,13 +1,13 @@
 # Scheduled Tasks module
 
-Server-owned scheduled task runtime and routes for OpenChamber-only automation.
+Server-owned scheduled task runtime and routes for Sharpie-only automation.
 
 ## Scope
 
 - Per-project scheduled task persistence is owned by `packages/web/server/lib/projects/project-config.js`.
 - Markdown loop discovery/parsing is owned by `packages/web/server/lib/scheduled-tasks/loops.js`.
 - Runtime orchestration and execution is owned by `packages/web/server/lib/scheduled-tasks/runtime.js`.
-- This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
+- This module is Sharpie feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
 
 ## Files
 
@@ -16,7 +16,7 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
   - Timer scheduling and queueing
   - Concurrency controls
   - Session create + prompt_async execution
-  - Emits OpenChamber task-run events
+  - Emits Sharpie task-run events
 
 - `packages/web/server/lib/scheduled-tasks/loops.js`
   - Discovery of `.agents/loops/*.md` (project scope, ancestors up to the worktree root) and `~/.agents/loops/*.md` (user scope)
@@ -28,7 +28,7 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
   - Listing tasks reconciles loop files first, so opening the Scheduled Tasks UI discovers file additions, edits, and removals without a server restart
   - Loop-file endpoints toggle `enabled` in frontmatter or delete the authoritative markdown file, then reconcile the project
   - Manual run endpoint
-  - OpenChamber events SSE stream endpoint
+  - Sharpie events SSE stream endpoint
 
 ## Loop file format
 

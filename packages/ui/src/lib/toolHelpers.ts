@@ -188,7 +188,7 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     },
 
     openchamber: {
-      displayName: 'OpenChamber',
+      displayName: 'Sharpie',
       category: 'system',
       outputLanguage: 'json',
       inputFields: []

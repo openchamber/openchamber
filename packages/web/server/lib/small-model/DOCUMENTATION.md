@@ -3,7 +3,7 @@
 Server-side direct LLM calls that reuse the user's existing OpenCode provider
 logins (`~/.local/share/opencode/auth.json`). OpenCode uses a "small model"
 internally (titles, summaries) but does not expose it through the SDK or
-plugins — this module replicates that mechanism as an OpenChamber runtime API.
+plugins — this module replicates that mechanism as an Sharpie runtime API.
 
 ## Security boundary
 
@@ -16,7 +16,7 @@ other runtime API.
 
 - `index.js` — orchestration: `generateSmallModelText()` / `describeSmallModel()`.
 - `resolve.js` — model selection, mirroring OpenCode's `getSmallModel` chain:
-  0. OpenChamber's own settings override (Settings → Sessions → Small Model):
+  0. Sharpie's own settings override (Settings → Sessions → Small Model):
      when `smallModelUseDefault` is `false`, `smallModelOverride`
      (`provider/model`) outranks everything below. Sanitized in
      `settings-helpers.js` (server), `persistence.ts` (client), and

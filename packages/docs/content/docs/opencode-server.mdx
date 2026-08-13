@@ -1,15 +1,15 @@
 ---
 title: OpenCode Server
-description: Connect OpenChamber to a local or remote OpenCode server.
+description: Connect Sharpie to a local or remote OpenCode server.
 ---
 
 # OpenCode Server
 
-OpenChamber runs on top of an OpenCode server. By default it starts one for you, so you don't have to do anything. You only need this page if you want to point OpenChamber at a server you already run, or manage the one it starts.
+Sharpie runs on top of an OpenCode server. By default it starts one for you, so you don't have to do anything. You only need this page if you want to point Sharpie at a server you already run, or manage the one it starts.
 
-## How OpenChamber finds a server
+## How Sharpie finds a server
 
-When OpenChamber starts, it looks for a server in this order:
+When Sharpie starts, it looks for a server in this order:
 
 1. reuse a server it already started
 2. connect to an external one if you told it to (see below)
@@ -20,18 +20,18 @@ If nothing is configured, step 4 happens automatically and you're up and running
 
 ## Connect to a server you already run
 
-Set these before starting OpenChamber:
+Set these before starting Sharpie:
 
 ```bash
 OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 ```
 
 - `OPENCODE_HOST` — the full address of your OpenCode server, including the port (a value like `http://localhost:4096`). It must not have a path at the end.
-- `OPENCODE_SKIP_START=true` — tells OpenChamber not to start its own server.
+- `OPENCODE_SKIP_START=true` — tells Sharpie not to start its own server.
 
 If you only need to change the port, set `OPENCODE_PORT` instead of `OPENCODE_HOST`.
 
-If `OPENCODE_HOST` is missing its port or has a path, OpenChamber ignores it and falls back to starting its own server. Watch the startup logs for a `[config]` warning if a connection you expected didn't happen.
+If `OPENCODE_HOST` is missing its port or has a path, Sharpie ignores it and falls back to starting its own server. Watch the startup logs for a `[config]` warning if a connection you expected didn't happen.
 
 ## Manage the server from the CLI
 
@@ -44,9 +44,9 @@ openchamber stop
 
 `openchamber` on its own starts the server in the background. Add `--foreground` to keep it attached to your terminal.
 
-## Start OpenChamber at login
+## Start Sharpie at login
 
-Use `startup enable` to install a native user service. OpenChamber uses `launchd` on macOS, `systemd --user` on Linux, and Task Scheduler on Windows.
+Use `startup enable` to install a native user service. Sharpie uses `launchd` on macOS, `systemd --user` on Linux, and Task Scheduler on Windows.
 
 ```bash
 openchamber startup enable
@@ -70,7 +70,7 @@ openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password s
 
 The startup service remembers `--port`, `--host`, `--ui-password`, and `--api-only`. CLI restart and update restart reuse those saved settings.
 
-To create a connection link for another OpenChamber app, use:
+To create a connection link for another Sharpie app, use:
 
 ```bash
 openchamber connect-url --port 3000 --server http://your-host:3000 --qr
@@ -89,7 +89,7 @@ Stopping the tunnel does not restart the service or the app.
 
 ## "OpenCode is restarting"
 
-While the server is starting or restarting, OpenChamber shows an "OpenCode is restarting" state and pauses requests until it's ready. This is normal right after launch or a restart. If it never clears, see [OpenCode connection](/troubleshooting/opencode-connection/).
+While the server is starting or restarting, Sharpie shows an "OpenCode is restarting" state and pauses requests until it's ready. This is normal right after launch or a restart. If it never clears, see [OpenCode connection](/troubleshooting/opencode-connection/).
 
 ## Related
 

@@ -18,7 +18,7 @@ const showWebviewNotification = async (payload?: NotificationPayload): Promise<b
 
   const title = typeof payload?.title === 'string' && payload.title.trim().length > 0
     ? payload.title.trim()
-    : 'OpenChamber';
+    : 'Sharpie';
   const body = typeof payload?.body === 'string' ? payload.body : '';
 
   new Notification(title, { body });

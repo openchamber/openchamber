@@ -1,15 +1,15 @@
 ---
 title: Połącz urządzenie
-description: Sparuj telefon, komputer lub inną przeglądarkę ze swoim serwerem OpenChamber za pomocą jednorazowego kodu QR.
+description: Sparuj telefon, komputer lub inną przeglądarkę ze swoim serwerem Sharpie za pomocą jednorazowego kodu QR.
 ---
 
 # Połącz urządzenie
 
-Sparuj inne urządzenie — aplikację mobilną, aplikację desktopową lub przeglądarkę na innej maszynie — ze swoim serwerem OpenChamber, skanując jednorazowy kod QR. To zalecany sposób łączenia urządzeń: nie ma portów do otwierania ani adresów do wpisywania.
+Sparuj inne urządzenie — aplikację mobilną, aplikację desktopową lub przeglądarkę na innej maszynie — ze swoim serwerem Sharpie, skanując jednorazowy kod QR. To zalecany sposób łączenia urządzeń: nie ma portów do otwierania ani adresów do wpisywania.
 
 ## Sparuj urządzenie
 
-1. Na maszynie z uruchomionym OpenChamber otwórz **Settings → Remote Instances → Połącz z tym serwerem** i naciśnij **Dodaj urządzenie**.
+1. Na maszynie z uruchomionym Sharpie otwórz **Settings → Remote Instances → Połącz z tym serwerem** i naciśnij **Dodaj urządzenie**.
 2. Nadaj urządzeniu nazwę (np. *Mój iPhone*), by później je rozpoznać.
 3. Wybierz, gdzie będziesz go używać:
    - **Tylko ten komputer** — dla aplikacji działających na tej samej maszynie
@@ -18,7 +18,7 @@ Sparuj inne urządzenie — aplikację mobilną, aplikację desktopową lub prze
 4. Naciśnij **Utwórz kod QR**.
 5. Na drugim urządzeniu zeskanuj kod:
    - **aplikacja mobilna** — stuknij **Skanuj kod QR** na ekranie łączenia (lub na liście instancji)
-   - **aplikacja desktopowa** — zamiast tego skopiuj link połączenia i wklej go w **Settings → Remote Instances → Inne serwery OpenChamber → Importuj link**
+   - **aplikacja desktopowa** — zamiast tego skopiuj link połączenia i wklej go w **Settings → Remote Instances → Inne serwery Sharpie → Importuj link**
 
 Okno dialogowe zamknie się samo, gdy tylko urządzenie się połączy, a urządzenie pojawi się na liście z bieżącym statusem. To wszystko — jesteście sparowani.
 
@@ -56,7 +56,7 @@ openchamber connect-url --relay --qr
 
 Link `--relay` zawiera obie trasy, dokładnie jak okno dialogowe: urządzenie łączy się bezpośrednio przez sieć lokalną, gdy może dotrzeć do serwera, a poza domem przełącza się na [Private Relay](/pl/private-relay/). Relay uruchamia się sam: działająca instancja podejmuje link w ciągu minuty, a zatrzymana — przy następnym starcie.
 
-> Trasa bezpośrednia działa tylko wtedy, gdy serwer rzeczywiście nasłuchuje w Twojej sieci. Domyślnie OpenChamber nasłuchuje wyłącznie na samej maszynie — uruchom go z `--lan`, aby był osiągalny przez Wi-Fi. Polecenie ostrzega (`[LAN_UNREACHABLE]`), gdy trasa bezpośrednia linku nie będzie użyteczna z innych urządzeń; link `--relay` nadal wtedy działa, tyle że zawsze przez relay.
+> Trasa bezpośrednia działa tylko wtedy, gdy serwer rzeczywiście nasłuchuje w Twojej sieci. Domyślnie Sharpie nasłuchuje wyłącznie na samej maszynie — uruchom go z `--lan`, aby był osiągalny przez Wi-Fi. Polecenie ostrzega (`[LAN_UNREACHABLE]`), gdy trasa bezpośrednia linku nie będzie użyteczna z innych urządzeń; link `--relay` nadal wtedy działa, tyle że zawsze przez relay.
 
 Wypisany link i kod QR działają dokładnie tak samo jak te z okna ustawień — są jednorazowe, wygasają i można je unieważnić.
 

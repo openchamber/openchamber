@@ -1,11 +1,11 @@
 ---
 title: Instâncias Remotas
-description: Conecte o app de desktop ao OpenChamber em outra máquina via SSH.
+description: Conecte o app de desktop ao Sharpie em outra máquina via SSH.
 ---
 
 # Instâncias Remotas
 
-O app de desktop pode conectar ao OpenChamber rodando em outra máquina via SSH — um servidor de trabalho, uma máquina na nuvem, um homelab — e trazer a UI dela para a sua tela como se fosse local. Configure isso em **Settings → Remote Instances**.
+O app de desktop pode conectar ao Sharpie rodando em outra máquina via SSH — um servidor de trabalho, uma máquina na nuvem, um homelab — e trazer a UI dela para a sua tela como se fosse local. Configure isso em **Settings → Remote Instances**.
 
 > As instâncias remotas são um recurso **apenas para desktop**. Na web ou no VS Code, conecte a um servidor remoto com as variáveis de ambiente em [OpenCode Server](/pt-br/opencode-server/) em vez disso.
 
@@ -13,20 +13,20 @@ O app de desktop pode conectar ao OpenChamber rodando em outra máquina via SSH 
 
 1. Abra **Settings → Remote Instances** e adicione uma.
 2. Forneça o comando SSH que você normalmente usaria para alcançar a máquina, mais um apelido.
-3. Escolha como o OpenChamber roda ali:
-   - **managed** — o OpenChamber se instala e inicia na máquina remota
+3. Escolha como o Sharpie roda ali:
+   - **managed** — o Sharpie se instala e inicia na máquina remota
    - **external** — conecte a um que já está em execução
 4. Conecte.
 
-O OpenChamber percorre as etapas — verificando a conexão, configurando o remoto, iniciando o servidor e encaminhando a porta — e mostra em que ponto está em cada estágio. Quando chega a **ready**, a UI remota carrega localmente.
+O Sharpie percorre as etapas — verificando a conexão, configurando o remoto, iniciando o servidor e encaminhando a porta — e mostra em que ponto está em cada estágio. Quando chega a **ready**, a UI remota carrega localmente.
 
 ## Credenciais
 
-Você decide se quer salvar as senhas SSH e de UI ou inseri-las a cada vez. Se a conexão cair, o OpenChamber informa qual etapa falhou para você corrigi-la — veja [Acesso remoto](/pt-br/troubleshooting/remote-access/).
+Você decide se quer salvar as senhas SSH e de UI ou inseri-las a cada vez. Se a conexão cair, o Sharpie informa qual etapa falhou para você corrigi-la — veja [Acesso remoto](/pt-br/troubleshooting/remote-access/).
 
 ## Links de conexão
 
-Se uma máquina remota já executa OpenChamber, a forma mais fácil de conectar o app de desktop é um link de pareamento. Na UI do servidor remoto, abra **Settings → Remote Instances → Conectar a este servidor → Adicionar um dispositivo**, crie um link e importe-o no seu desktop em **Settings → Remote Instances → Outros servidores OpenChamber → Importar link**. Veja [Conectar um Dispositivo](/pt-br/connect-devices/) para o fluxo completo.
+Se uma máquina remota já executa Sharpie, a forma mais fácil de conectar o app de desktop é um link de pareamento. Na UI do servidor remoto, abra **Settings → Remote Instances → Conectar a este servidor → Adicionar um dispositivo**, crie um link e importe-o no seu desktop em **Settings → Remote Instances → Outros servidores Sharpie → Importar link**. Veja [Conectar um Dispositivo](/pt-br/connect-devices/) para o fluxo completo.
 
 Um link criado com **Em qualquer lugar** carrega tanto um endereço direto quanto uma rota pelo [Private Relay](/pt-br/private-relay/): o desktop conecta diretamente quando consegue alcançar o servidor (mesma rede) e recorre ao relay criptografado de ponta a ponta quando você está fora. O status ao lado de cada servidor salvo mostra qual rota está em uso.
 

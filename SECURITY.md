@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in OpenChamber, please report it responsibly.
+If you discover a security vulnerability in Sharpie, please report it responsibly.
 
 **Email:** [security@openchamber.dev](mailto:security@openchamber.dev)
 
@@ -18,7 +18,7 @@ I'll acknowledge receipt within 48 hours and aim to provide a fix or mitigation 
 
 ## Scope
 
-OpenChamber handles sensitive context including:
+Sharpie handles sensitive context including:
 - UI authentication (password-protected sessions, JWT tokens)
 - Cloudflare tunnel access (remote connectivity)
 - Terminal access (PTY sessions)

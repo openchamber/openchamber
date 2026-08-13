@@ -214,7 +214,7 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
       return false;
     }
     // The walkthrough needs room for a stop list beside real code, and its
-    // diffs come from OpenChamber's Git routes, which VS Code does not serve.
+    // diffs come from Sharpie's Git routes, which VS Code does not serve.
     if (surface.id === 'walkthrough' && (options.isVSCode || options.screenWidth < WALKTHROUGH_MIN_WIDTH)) {
       return false;
     }

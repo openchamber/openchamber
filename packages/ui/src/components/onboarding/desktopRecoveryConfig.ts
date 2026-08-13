@@ -99,7 +99,7 @@ export function getDesktopRecoveryConfig(
       const host = formatHostDisplay(hostLabel, hostUrl);
       return {
         title: 'Incompatible Server',
-        description: `The server at "${host || 'unknown'}" is not running OpenChamber. Verify the address points to an OpenChamber server.`,
+        description: `The server at "${host || 'unknown'}" is not running Sharpie. Verify the address points to a Sharpie server.`,
         titleKey: 'onboarding.desktopRecovery.incompatibleServer.title',
         descriptionKey: 'onboarding.desktopRecovery.incompatibleServer.description',
         descriptionParams: host ? { host } : undefined,
@@ -118,7 +118,7 @@ export function getDesktopRecoveryConfig(
       const host = formatHostDisplay(hostLabel, hostUrl);
       return {
         title: 'Server Update Required',
-        description: `The OpenChamber server at "${host || 'unknown'}" is not compatible with this app version. Update OpenChamber on the server, then try again.`,
+        description: `The Sharpie server at "${host || 'unknown'}" is not compatible with this app version. Update Sharpie on the server, then try again.`,
         titleKey: 'onboarding.desktopRecovery.remoteIncompatible.title',
         descriptionKey: 'onboarding.desktopRecovery.remoteIncompatible.description',
         descriptionParams: host ? { host } : undefined,

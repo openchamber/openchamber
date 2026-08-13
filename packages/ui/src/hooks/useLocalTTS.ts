@@ -2,7 +2,7 @@
  * useLocalTTS Hook
  *
  * React hook for local (Kokoro via sherpa-onnx) text-to-speech playback.
- * Synthesis runs on the OpenChamber server in the dictation worker.
+ * Synthesis runs on the Sharpie server in the dictation worker.
  *
  * Long texts are pipelined by sentence chunks: the first chunk starts playing
  * as soon as it is synthesized while the next chunk synthesizes in the

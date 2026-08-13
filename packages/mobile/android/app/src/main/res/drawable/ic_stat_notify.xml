@@ -1,7 +1,7 @@
-<!-- Notification small icon: a monochrome (alpha-only) silhouette of the OpenChamber cube.
+<!-- Notification small icon: a monochrome (alpha-only) silhouette of the Sharpie cube.
      Android tints it white in the status bar / notification, so only the shape matters. The small
      filled diamond on the top face is a minimal stand-in for the OpenCode mark, so the tiny
-     silhouette still reads as the OpenChamber logo rather than a generic cube. -->
+     silhouette still reads as the Sharpie logo rather than a generic cube. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"

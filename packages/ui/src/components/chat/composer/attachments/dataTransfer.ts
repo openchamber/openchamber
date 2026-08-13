@@ -3,7 +3,7 @@
  *
  * Hosts describe a dragged file in incompatible ways: a browser exposes real
  * `File` entries, VS Code's explorer offers only proprietary data types whose
- * payloads must be parsed for paths, and OpenChamber's own file tree marks an
+ * payloads must be parsed for paths, and Sharpie's own file tree marks an
  * internal drag with a private type. These helpers answer the three questions
  * the composer actually asks of a `DataTransfer`, and are pure so they can be
  * exercised without a browser.
@@ -14,7 +14,7 @@
 
 import { parseDroppedFileReferences, VS_CODE_DROP_DATA_TYPES } from './filePaths';
 
-/** Data type marking a drag that started in OpenChamber's own file tree. */
+/** Data type marking a drag that started in Sharpie's own file tree. */
 export const INTERNAL_FILE_PATH_TYPE = 'application/x-openchamber-file-path';
 
 /** Data types that, by their presence alone, mean files are being dragged. */

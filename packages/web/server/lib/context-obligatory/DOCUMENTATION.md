@@ -15,5 +15,5 @@ make no requests.
 After a successful send, the runtime merge-writes
 `context_obligatory_last_compaction_message_id`. This cursor prevents a
 replayed compaction event from reinjecting the same summary. The runtime is
-owned by the OpenChamber web backend and therefore is not available in
+owned by the Sharpie web backend and therefore is not available in
 extension-only VS Code mode.

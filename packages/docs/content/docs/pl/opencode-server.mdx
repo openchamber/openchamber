@@ -1,15 +1,15 @@
 ---
 title: OpenCode Server
-description: Połącz OpenChamber z lokalnym lub zdalnym serwerem OpenCode.
+description: Połącz Sharpie z lokalnym lub zdalnym serwerem OpenCode.
 ---
 
 # OpenCode Server
 
-OpenChamber działa na bazie serwera OpenCode. Domyślnie uruchamia go za Ciebie, więc nie musisz robić nic dodatkowego. Ta strona jest potrzebna tylko wtedy, gdy chcesz wskazać OpenChamber serwer, który już uruchamiasz, albo zarządzać tym, który sam startuje.
+Sharpie działa na bazie serwera OpenCode. Domyślnie uruchamia go za Ciebie, więc nie musisz robić nic dodatkowego. Ta strona jest potrzebna tylko wtedy, gdy chcesz wskazać Sharpie serwer, który już uruchamiasz, albo zarządzać tym, który sam startuje.
 
-## Jak OpenChamber znajduje serwer
+## Jak Sharpie znajduje serwer
 
-Gdy OpenChamber się uruchamia, szuka serwera w tej kolejności:
+Gdy Sharpie się uruchamia, szuka serwera w tej kolejności:
 
 1. ponownie używa serwera, który już uruchomił
 2. łączy się z zewnętrznym, jeśli mu to wskazałeś (zobacz niżej)
@@ -20,18 +20,18 @@ Jeśli nic nie jest skonfigurowane, krok 4 dzieje się automatycznie i od razu m
 
 ## Połącz się z serwerem, który już uruchamiasz
 
-Ustaw te wartości przed uruchomieniem OpenChamber:
+Ustaw te wartości przed uruchomieniem Sharpie:
 
 ```bash
 OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 ```
 
 - `OPENCODE_HOST` — pełny adres Twojego serwera OpenCode, wraz z portem (wartość taka jak `http://localhost:4096`). Nie może zawierać ścieżki na końcu.
-- `OPENCODE_SKIP_START=true` — informuje OpenChamber, aby nie uruchamiał własnego serwera.
+- `OPENCODE_SKIP_START=true` — informuje Sharpie, aby nie uruchamiał własnego serwera.
 
 Jeśli chcesz zmienić tylko port, ustaw `OPENCODE_PORT` zamiast `OPENCODE_HOST`.
 
-Jeśli w `OPENCODE_HOST` brakuje portu lub zawiera ścieżkę, OpenChamber go zignoruje i wróci do uruchamiania własnego serwera. Obserwuj logi startowe pod kątem ostrzeżenia `[config]`, jeśli oczekiwane połączenie nie nastąpiło.
+Jeśli w `OPENCODE_HOST` brakuje portu lub zawiera ścieżkę, Sharpie go zignoruje i wróci do uruchamiania własnego serwera. Obserwuj logi startowe pod kątem ostrzeżenia `[config]`, jeśli oczekiwane połączenie nie nastąpiło.
 
 ## Zarządzaj serwerem z poziomu CLI
 
@@ -44,9 +44,9 @@ openchamber stop
 
 Samo `openchamber` uruchamia serwer w tle. Dodaj `--foreground`, aby pozostał dołączony do Twojego terminala.
 
-## Uruchamianie OpenChamber po zalogowaniu
+## Uruchamianie Sharpie po zalogowaniu
 
-Użyj `startup enable`, aby zainstalować natywną usługę użytkownika. OpenChamber używa `launchd` na macOS, `systemd --user` na Linuksie i Harmonogramu zadań w Windows.
+Użyj `startup enable`, aby zainstalować natywną usługę użytkownika. Sharpie używa `launchd` na macOS, `systemd --user` na Linuksie i Harmonogramu zadań w Windows.
 
 ```bash
 openchamber startup enable
@@ -70,7 +70,7 @@ openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password s
 
 Usługa startowa pamięta `--port`, `--host`, `--ui-password` i `--api-only`. Restart z CLI oraz restart podczas aktualizacji używają tych zapisanych ustawień.
 
-Aby utworzyć link połączenia dla innej aplikacji OpenChamber, użyj:
+Aby utworzyć link połączenia dla innej aplikacji Sharpie, użyj:
 
 ```bash
 openchamber connect-url --port 3000 --server http://your-host:3000 --qr
@@ -89,7 +89,7 @@ Zatrzymanie tunelu nie restartuje usługi ani aplikacji.
 
 ## „OpenCode uruchamia się ponownie”
 
-Gdy serwer startuje lub uruchamia się ponownie, OpenChamber pokazuje stan „OpenCode uruchamia się ponownie” i wstrzymuje żądania, aż będzie gotowy. To normalne tuż po uruchomieniu lub restarcie. Jeśli ten stan nigdy nie znika, zobacz [Połączenie z OpenCode](/pl/troubleshooting/opencode-connection/).
+Gdy serwer startuje lub uruchamia się ponownie, Sharpie pokazuje stan „OpenCode uruchamia się ponownie” i wstrzymuje żądania, aż będzie gotowy. To normalne tuż po uruchomieniu lub restarcie. Jeśli ten stan nigdy nie znika, zobacz [Połączenie z OpenCode](/pl/troubleshooting/opencode-connection/).
 
 ## Powiązane
 

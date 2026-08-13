@@ -391,7 +391,7 @@ JSON body-parser allowlist in `core-routes.js`.
 
 ## A server that does not have these routes
 
-An `/api/*` path no OpenChamber route claims reaches the OpenCode proxy, and
+An `/api/*` path no Sharpie route claims reaches the OpenCode proxy, and
 OpenCode answers any path it does not know with its embedded web UI — HTML, with
 status **200**. So a client newer than the server it is connected to is not told
 "no such route"; it is handed a web page. Parsing that as JSON is where
@@ -407,5 +407,5 @@ telling someone to upgrade would send them after the wrong thing.
 ## Runtime availability
 
 Web, desktop, and hosted mobile reach these routes normally. VS Code serves Git
-through its own bridge rather than the OpenChamber Git routes, so the feature is
+through its own bridge rather than the Sharpie Git routes, so the feature is
 not offered there; the surface is also gated to tablet width and above.

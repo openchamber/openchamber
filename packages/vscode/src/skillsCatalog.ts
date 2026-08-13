@@ -118,7 +118,7 @@ async function clawdhubFetch(url: string, options?: RequestInit): Promise<Respon
       ...options,
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'OpenChamber-VSCode/1.0',
+        'User-Agent': 'Sharpie-VSCode/1.0',
         ...options?.headers,
       },
     });

@@ -38,7 +38,7 @@ describe('OpenCode upgrade routes', () => {
       .expect(409, {
         success: false,
         code: 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER',
-        error: 'OpenCode is bundled with OpenChamber Desktop and updates with the app.',
+        error: 'OpenCode is bundled with Sharpie Desktop and updates with the app.',
       });
 
     expect(globalThis.fetch).not.toHaveBeenCalled();

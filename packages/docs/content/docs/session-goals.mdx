@@ -5,7 +5,7 @@ description: Turn a prompt into a goal the agent keeps working toward automatica
 
 # Session Goals
 
-A goal turns one prompt into a finish line. Instead of nudging the agent with "continue" after every reply, you set a goal once — and OpenChamber keeps the session working toward it automatically, checking progress with an independent auditor after every turn. It keeps running even while you are away.
+A goal turns one prompt into a finish line. Instead of nudging the agent with "continue" after every reply, you set a goal once — and Sharpie keeps the session working toward it automatically, checking progress with an independent auditor after every turn. It keeps running even while you are away.
 
 ## Start a goal
 
@@ -31,7 +31,7 @@ For small contextual follow-ups you don't need a goal — just send a normal mes
 
 ## How it works
 
-After the agent stops and the session stays quiet for a moment, OpenChamber:
+After the agent stops and the session stays quiet for a moment, Sharpie:
 
 1. Asks a small, cheap model to audit the latest turn against the objective: keep going, done, or stuck?
 2. If the verdict is "keep going", it sends a continuation prompt and the agent picks the work back up.
@@ -63,7 +63,7 @@ In **Settings → Chat → Goal** you can set a default token budget for new goa
 
 ## Keep in mind
 
-- The goal loop runs in the OpenChamber server, not in your browser tab. Close the tab, lock the phone — the agent keeps working, and you get a notification when the goal settles. The server (desktop app or `openchamber` process) must stay running.
+- The goal loop runs in the Sharpie server, not in your browser tab. Close the tab, lock the phone — the agent keeps working, and you get a notification when the goal settles. The server (desktop app or `openchamber` process) must stay running.
 - Goals use your session's own provider and model, including the auditor calls — nothing leaves the providers you already use.
 - One goal per session at a time.
 

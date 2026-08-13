@@ -29,7 +29,7 @@
 - Chat/Tools: Bash output now applies terminal control characters and strips ANSI formatting, preventing progress output and rewritten lines from appearing as raw escape sequences (thanks to @catan271).
 - Chat: queued messages now retry after a temporary send failure or an interrupted turn instead of remaining stuck until another session update.
 - Settings/Skills: repository-local `.agents/skills` now appear for the active workspace (thanks to @makeittech).
-- Settings/Skills: renaming a skill now preserves its instructions and supporting files; only skills in locations OpenChamber can safely rename show the action (thanks to @makeittech).
+- Settings/Skills: renaming a skill now preserves its instructions and supporting files; only skills in locations Sharpie can safely rename show the action (thanks to @makeittech).
 - Usage: added DeepSeek quota tracking (thanks to @airtaxi).
 - Usage: Kimi for Coding now calculates usage correctly when the provider reports either used or remaining quota (thanks to @makeittech).
 - Chat: clicking an apply_patch tool result now opens each changed file at its correct path instead of always opening the first file (thanks to @nabsiddiqui).
@@ -88,7 +88,7 @@
 ## [1.16.2] - 2026-07-18
 
 - **Settings:** pages now use a consistent responsive layout, navigation is grouped by area, and save failures are shown in the page header. Agent tool permissions now distinguish inherited and explicit rules and show session-granted rules separately (thanks to @makeittech).
-- Permissions: per-session auto-accept works again, persists across extension restarts, and applies to subagent sessions while an OpenChamber view is open.
+- Permissions: per-session auto-accept works again, persists across extension restarts, and applies to subagent sessions while an Sharpie view is open.
 - Sessions: new drafts and sessions now stay with the workspace selected in the sidebar, including multi-root and nested workspace setups (thanks to @bashrusakh).
 - Chat: if creating a session fails, the new-session draft stays open and restores the submitted prompt instead of discarding it.
 

@@ -1,6 +1,6 @@
 # Icon System
 
-OpenChamber uses an SVG sprite-based icon system for performance. Remixicon glyphs and explicitly registered custom glyphs are rendered via a single hidden SVG sprite injected into the DOM, referenced by `<use href="#oc-icon-name"/>`.
+Sharpie uses an SVG sprite-based icon system for performance. Remixicon glyphs and explicitly registered custom glyphs are rendered via a single hidden SVG sprite injected into the DOM, referenced by `<use href="#oc-icon-name"/>`.
 
 ## Usage
 

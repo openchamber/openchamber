@@ -2,7 +2,7 @@
 
 Server-side control loop that keeps a session working toward a user-defined
 objective stored under `metadata.openchamber.goal`, with the small model as
-an independent progress auditor. Built on OpenChamber's backend-driven
+an independent progress auditor. Built on Sharpie's backend-driven
 architecture (session-assist is the structural template): the loop lives in
 the web server and survives UI disconnects.
 
@@ -56,7 +56,7 @@ before touching the filesystem). Rationale: metadata rides every
 
 - `objectives.js` — write/read/delete, 5000-char clamp.
 - `routes.js` — `PUT/GET/DELETE /api/goals/objective/:sessionId`
-  (OpenChamber-owned, registered before the generic proxy; JSON parsing via
+  (Sharpie-owned, registered before the generic proxy; JSON parsing via
   the `/api/goals` family in core-routes). The UI writes the file BEFORE
   patching the goal metadata and falls back to an inline objective when the
   write fails; `clearSessionGoal` deletes the file best-effort.

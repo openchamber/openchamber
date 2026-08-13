@@ -1,17 +1,17 @@
 ---
 title: Túneis
-description: Exponha o OpenChamber com segurança para acesso remoto e móvel.
+description: Exponha o Sharpie com segurança para acesso remoto e móvel.
 ---
 
 # Túneis
 
-Um túnel é um link público para o seu OpenChamber, para que você possa acessá-lo de um navegador comum em outra rede. Use `openchamber tunnel` para criar um para uma instância em execução.
+Um túnel é um link público para o seu Sharpie, para que você possa acessá-lo de um navegador comum em outra rede. Use `openchamber tunnel` para criar um para uma instância em execução.
 
 > Conectar os **seus próprios dispositivos** (o app móvel, outro desktop) geralmente não precisa de túnel — [pareie-os](/pt-br/connect-devices/) e deixe o [Private Relay](/pt-br/private-relay/) criptografado de ponta a ponta cuidar do acesso fora de casa, sem nenhuma configuração.
 
 ## Pré-requisitos
 
-O OpenChamber inicia o CLI do provedor de túnel na sua máquina. Instale primeiro o provedor que você quer usar:
+O Sharpie inicia o CLI do provedor de túnel na sua máquina. Instale primeiro o provedor que você quer usar:
 
 ```bash
 brew install cloudflared
@@ -26,7 +26,7 @@ ngrok config add-authtoken <your-ngrok-token>
 
 ## Início rápido
 
-1. Inicie o OpenChamber:
+1. Inicie o Sharpie:
 
 ```bash
 openchamber
@@ -52,9 +52,9 @@ openchamber tunnel start --provider ngrok --mode quick
 openchamber tunnel status
 ```
 
-Quando o túnel estiver no ar, o `status` mostra uma URL pública. Abra-a, ou escaneie o QR code, para acessar o OpenChamber de qualquer lugar.
+Quando o túnel estiver no ar, o `status` mostra uma URL pública. Abra-a, ou escaneie o QR code, para acessar o Sharpie de qualquer lugar.
 
-Por padrão, o OpenChamber imprime um QR code em sessões TTY interativas. Use `--qr` para forçar a saída do QR, ou `--no-qr` para desativá-la.
+Por padrão, o Sharpie imprime um QR code em sessões TTY interativas. Use `--qr` para forçar a saída do QR, ou `--no-qr` para desativá-la.
 
 ## Provedores
 
@@ -106,7 +106,7 @@ openchamber tunnel stop --port 3000
 
 ## Notas de comportamento
 
-- um único túnel ativo por instância do OpenChamber (porta)
+- um único túnel ativo por instância do Sharpie (porta)
 - iniciar um novo modo/provedor na mesma instância substitui o túnel anterior
 - gerar um novo link de conexão revoga o anterior não utilizado
 - o auto-start do túnel preserva flags do servidor como `--ui-password` e `--api-only` nas configurações da instância usadas por reinícios e atualizações
@@ -116,5 +116,5 @@ openchamber tunnel stop --port 3000
 - [Conectar um Dispositivo](/pt-br/connect-devices/) — pareie seus próprios dispositivos sem uma URL pública
 - [Segurança](/pt-br/security/) — proteja a interface antes de expô-la
 - [Túneis no desktop](/pt-br/desktop-tunnels/) — configuração de túnel no app desktop sem iniciar pelo CLI
-- [PWA e Acesso Móvel](/pt-br/mobile/) — acesse o OpenChamber pelo celular
+- [PWA e Acesso Móvel](/pt-br/mobile/) — acesse o Sharpie pelo celular
 - [Solução de problemas](/pt-br/troubleshooting/) — se o link do túnel não funcionar

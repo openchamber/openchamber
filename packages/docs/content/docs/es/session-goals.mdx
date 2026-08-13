@@ -5,7 +5,7 @@ description: Convierte un prompt en un objetivo hacia el que el agente trabaja a
 
 # Objetivos de sesión
 
-Un objetivo convierte un solo prompt en una línea de meta. En lugar de empujar al agente con "continúa" tras cada respuesta, defines el objetivo una vez — y OpenChamber mantiene la sesión trabajando hacia él automáticamente, comprobando el progreso con un auditor independiente después de cada turno. Sigue funcionando incluso mientras no estás.
+Un objetivo convierte un solo prompt en una línea de meta. En lugar de empujar al agente con "continúa" tras cada respuesta, defines el objetivo una vez — y Sharpie mantiene la sesión trabajando hacia él automáticamente, comprobando el progreso con un auditor independiente después de cada turno. Sigue funcionando incluso mientras no estás.
 
 ## Iniciar un objetivo
 
@@ -31,7 +31,7 @@ Para pequeños ajustes contextuales no necesitas un objetivo — envía un mensa
 
 ## Cómo funciona
 
-Cuando el agente se detiene y la sesión queda en silencio un momento, OpenChamber:
+Cuando el agente se detiene y la sesión queda en silencio un momento, Sharpie:
 
 1. Pide a un modelo pequeño y barato que audite el último turno contra el objetivo: ¿seguir, hecho o atascado?
 2. Si el veredicto es "seguir", envía un prompt de continuación y el agente retoma el trabajo.
@@ -63,7 +63,7 @@ En **Ajustes → Chat → Objetivo** puedes definir un presupuesto de tokens pre
 
 ## Ten en cuenta
 
-- El bucle del objetivo corre en el servidor de OpenChamber, no en tu pestaña del navegador. Cierra la pestaña, bloquea el teléfono — el agente sigue trabajando y recibirás una notificación cuando el objetivo termine. El servidor (app de escritorio o proceso `openchamber`) debe seguir en marcha.
+- El bucle del objetivo corre en el servidor de Sharpie, no en tu pestaña del navegador. Cierra la pestaña, bloquea el teléfono — el agente sigue trabajando y recibirás una notificación cuando el objetivo termine. El servidor (app de escritorio o proceso `openchamber`) debe seguir en marcha.
 - Los objetivos usan el proveedor y modelo de tu propia sesión, incluidas las llamadas del auditor — nada sale hacia proveedores que no uses ya.
 - Un objetivo por sesión a la vez.
 

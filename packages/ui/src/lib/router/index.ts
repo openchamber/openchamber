@@ -1,5 +1,5 @@
 /**
- * Router module for URL-based navigation in OpenChamber.
+ * Router module for URL-based navigation in Sharpie.
  *
  * Provides bidirectional sync between URL query parameters and application state.
  * Works across web, desktop, and VS Code (state-only mode).

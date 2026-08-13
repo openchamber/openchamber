@@ -88,7 +88,7 @@ async function statusCommand(options = {}) {
     return;
   }
 
-  clackIntro('OpenChamber Status');
+  clackIntro('Sharpie Status');
 
   if (runningCount === 0) {
     logStatus('warning', 'stopped');

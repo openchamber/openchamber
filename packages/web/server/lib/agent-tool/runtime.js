@@ -74,7 +74,7 @@ export const OpenChamberPlugin = async () => ({
     openchamber: {
       description: "Control OpenChamber projects, sessions, and scheduled tasks on the user's behalf. Sessions and scheduled tasks you create are for the user to follow and interact with; never use this tool to delegate parts of your own current task. Use one action per call. Scope with projectId or directory; omit both to use the current session directory. Session dispatches return immediately by default and you receive no notification when a dispatched session finishes, so never promise to report back on it; the user follows it in OpenChamber; a dispatched session needs no follow-up from you. If the user later asks how it went, use session.messages (add wait to block until it is idle, lastAssistant for just the final answer) — session.send always sends a NEW prompt and never just waits. Set wait only when the user asks or the next step requires the completed result. Session and worktree deletion are unavailable.",
       args: {
-        action: { type: "string", enum: ${JSON.stringify(OPENCHAMBER_AGENT_TOOL_ACTIONS)}, oneOf: ${JSON.stringify(OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "OpenChamber action to perform" },
+        action: { type: "string", enum: ${JSON.stringify(OPENCHAMBER_AGENT_TOOL_ACTIONS)}, oneOf: ${JSON.stringify(OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "Sharpie action to perform" },
         parameters: { type: "object", properties: ${JSON.stringify(PLUGIN_PARAMETER_PROPERTIES)}, additionalProperties: false, description: "Inputs for the action; use an empty object when none are needed" },
       },
       async execute(input, context) {
@@ -99,7 +99,7 @@ export const OpenChamberPlugin = async () => ({
           metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: false } },
         })
         if (!endpoint || !token) {
-          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber managed tool connection is unavailable" } })
+          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "Sharpie managed tool connection is unavailable" } })
         }
 
         try {
@@ -128,7 +128,7 @@ export const OpenChamberPlugin = async () => ({
             },
           })
           if (valid) return { title, output, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true } } }
-          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
+          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "Sharpie returned an invalid response", kind: "runtime", status: response.status } })
         } catch (error) {
           if (context.abort.aborted) throw error
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
@@ -173,7 +173,7 @@ export const createAgentToolRuntime = (dependencies) => {
   const prepareManagedOpenCodeEnv = async () => {
     const port = getActivePort();
     if (!Number.isInteger(port) || port <= 0) {
-      throw new Error('OpenChamber listener port is unavailable for managed tool injection');
+      throw new Error('Sharpie listener port is unavailable for managed tool injection');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginPath, createPluginSource(), { mode: 0o600 });
@@ -201,7 +201,7 @@ export const createAgentToolRuntime = (dependencies) => {
       return createResult({ ok: false, action, error: { message: `Unsupported OpenChamber action: ${action || 'missing'}`, kind: 'usage' } });
     }
     if (typeof executeAction !== 'function') {
-      return createResult({ ok: false, action, error: { message: 'OpenChamber control service is unavailable', kind: 'runtime' } });
+      return createResult({ ok: false, action, error: { message: 'Sharpie control service is unavailable', kind: 'runtime' } });
     }
     try {
       const data = await executeAction(action, payload.input, payload.contextDirectory, options);

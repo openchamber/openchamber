@@ -1,7 +1,7 @@
 # UI Auth Module Documentation
 
 ## Purpose
-This module owns OpenChamber UI authentication for browser access, including password session auth, WebAuthn passkeys, and trusted-device session handling.
+This module owns Sharpie UI authentication for browser access, including password session auth, WebAuthn passkeys, and trusted-device session handling.
 
 Trusted-device access has one durable credential model: a remote client bearer token stored by `packages/web/server/lib/client-auth/remote-clients.js`. Password, passkey, and Pairing v2 are issuance methods for that credential, not separate credential systems. Issued client tokens are returned once, stored server-side only as hashes, and are later authenticated via `Authorization: Bearer oc_client_...`.
 

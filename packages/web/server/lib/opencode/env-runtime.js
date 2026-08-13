@@ -940,7 +940,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
   const createConfiguredOpencodeBinaryError = (raw, normalized) => {
     const configured = typeof raw === 'string' ? raw.trim() : '';
     const candidate = typeof normalized === 'string' && normalized.trim().length > 0 ? normalized.trim() : configured;
-    const messageSuffix = 'OpenChamber needs the standalone opencode CLI. Install it and set settings.opencodeBinary to the CLI path, for example ~/.opencode/bin/opencode, or leave the setting empty to use PATH lookup.';
+    const messageSuffix = 'Sharpie needs the standalone opencode CLI. Install it and set settings.opencodeBinary to the CLI path, for example ~/.opencode/bin/opencode, or leave the setting empty to use PATH lookup.';
     const error = (() => {
       if (isKnownOpenCodeDesktopAppPath(candidate) || isKnownOpenCodeDesktopAppPath(configured)) {
         const platformName = process.platform === 'win32' ? 'Windows desktop app install' : 'macOS desktop app bundle';
@@ -973,7 +973,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const createConfiguredWslOpencodeError = (raw) => new Error(
-    `Configured settings.opencodeBinary uses WSL but OpenChamber could not resolve a WSL OpenCode command: ${raw}. Ensure WSL is available and opencode is installed in the configured distro.`
+    `Configured settings.opencodeBinary uses WSL but Sharpie could not resolve a WSL OpenCode command: ${raw}. Ensure WSL is available and opencode is installed in the configured distro.`
   );
 
   const normalizeOpencodeBinarySetting = (raw) => {
@@ -1028,7 +1028,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
         if (strict) {
           throw createConfiguredWslOpencodeError(raw);
         }
-        console.warn(`Configured settings.opencodeBinary uses WSL, which is no longer supported by OpenChamber desktop: ${raw}`);
+        console.warn(`Configured settings.opencodeBinary uses WSL, which is no longer supported by Sharpie desktop: ${raw}`);
         return null;
       }
 
@@ -1037,7 +1037,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
         if (strict) {
           throw createConfiguredWslOpencodeError(raw);
         }
-        console.warn(`Configured settings.opencodeBinary points to WSL, which is no longer supported by OpenChamber desktop: ${raw}`);
+        console.warn(`Configured settings.opencodeBinary points to WSL, which is no longer supported by Sharpie desktop: ${raw}`);
         return null;
       }
 

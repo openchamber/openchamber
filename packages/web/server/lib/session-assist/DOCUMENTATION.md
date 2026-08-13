@@ -33,7 +33,7 @@ and one suggested user follow-up with the small model
 
 ## Settings gate
 
-`sessionRecapEnabled` and `sessionSuggestionEnabled` in OpenChamber settings
+`sessionRecapEnabled` and `sessionSuggestionEnabled` in Sharpie settings
 (Settings → Chat, default on) are hard generation switches checked at fire
 time. When both are off, no small-model calls run and nothing is written. When
 one is on, the runtime still makes at most one small-model call and asks only

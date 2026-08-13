@@ -1,11 +1,11 @@
 ---
 title: OpenCode-Verbindung
-description: Beheben Sie, dass OpenChamber keine Verbindung zu seinem OpenCode-Server herstellt.
+description: Beheben Sie, dass Sharpie keine Verbindung zu seinem OpenCode-Server herstellt.
 ---
 
 # OpenCode-Verbindung
 
-Wenn OpenChamber lädt, aber nie über „OpenCode is restarting“ hinauskommt, oder der Chat nicht antwortet, ist der Server, mit dem es spricht, nicht erreichbar. Gehen Sie diese Punkte durch.
+Wenn Sharpie lädt, aber nie über „OpenCode is restarting“ hinauskommt, oder der Chat nicht antwortet, ist der Server, mit dem es spricht, nicht erreichbar. Gehen Sie diese Punkte durch.
 
 ## Es hängt bei „OpenCode is restarting“
 
@@ -16,11 +16,11 @@ Wenn OpenChamber lädt, aber nie über „OpenCode is restarting“ hinauskommt,
 
 ## Sie verbinden sich mit Ihrem eigenen Server
 
-Wenn Sie OpenChamber so konfiguriert haben, dass es einen vorhandenen Server nutzt, prüfen Sie die Einrichtung aus [OpenCode Server](/opencode-server/) noch einmal:
+Wenn Sie Sharpie so konfiguriert haben, dass es einen vorhandenen Server nutzt, prüfen Sie die Einrichtung aus [OpenCode Server](/opencode-server/) noch einmal:
 
 - `OPENCODE_HOST` muss den Port enthalten, aber keinen Pfad — zum Beispiel `http://localhost:4096`
-- setzen Sie `OPENCODE_SKIP_START=true`, damit OpenChamber nicht auch noch seinen eigenen Server startet
-- wenn die Adresse ungültig ist, ignoriert OpenChamber sie und startet stattdessen seinen eigenen Server — achten Sie in den Logs auf eine `[config]`-Warnung
+- setzen Sie `OPENCODE_SKIP_START=true`, damit Sharpie nicht auch noch seinen eigenen Server startet
+- wenn die Adresse ungültig ist, ignoriert Sharpie sie und startet stattdessen seinen eigenen Server — achten Sie in den Logs auf eine `[config]`-Warnung
 
 ## Es schlägt immer noch fehl
 
@@ -30,5 +30,5 @@ Wenn Sie OpenChamber so konfiguriert haben, dass es einen vorhandenen Server nut
 
 ## Verwandt
 
-- [OpenCode Server](/opencode-server/) — wie OpenChamber den Server findet und verwaltet
+- [OpenCode Server](/opencode-server/) — wie Sharpie den Server findet und verwaltet
 - [Fehlerbehebung](/troubleshooting/) — weitere häufige Probleme

@@ -103,7 +103,7 @@ const notifyWithServiceWorker = async (payload?: NotificationPayload): Promise<b
   }
 
   try {
-    await registration.showNotification(payload?.title ?? 'OpenChamber', {
+    await registration.showNotification(payload?.title ?? 'Sharpie', {
       body: payload?.body,
       tag: payload?.tag,
     });
@@ -168,7 +168,7 @@ const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean>
       return true;
     }
 
-    new Notification(payload?.title ?? 'OpenChamber', {
+    new Notification(payload?.title ?? 'Sharpie', {
       body: payload?.body,
       tag: payload?.tag,
     });

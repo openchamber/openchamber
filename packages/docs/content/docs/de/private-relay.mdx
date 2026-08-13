@@ -1,15 +1,15 @@
 ---
 title: Privates Relay
-description: Erreiche deinen OpenChamber-Server von überall über ein Ende-zu-Ende-verschlüsseltes Relay — ohne Ports, ohne Tunnel, ohne Einrichtung.
+description: Erreiche deinen Sharpie-Server von überall über ein Ende-zu-Ende-verschlüsseltes Relay — ohne Ports, ohne Tunnel, ohne Einrichtung.
 ---
 
 # Privates Relay
 
-Das OpenChamber Private Relay ermöglicht es deinen gekoppelten Geräten, deinen Server von überall aus zu erreichen — im Mobilfunknetz, im Café, in einer anderen Stadt — ohne Ports zu öffnen, einen Tunnel einzurichten oder deinen Rechner direkt mit dem Internet zu verbinden. Die Einrichtung ist selbstständig: Ein Gerät mit **Anywhere** unter [Connect a Device](/connect-devices/) zu koppeln reicht aus.
+Das Sharpie Private Relay ermöglicht es deinen gekoppelten Geräten, deinen Server von überall aus zu erreichen — im Mobilfunknetz, im Café, in einer anderen Stadt — ohne Ports zu öffnen, einen Tunnel einzurichten oder deinen Rechner direkt mit dem Internet zu verbinden. Die Einrichtung ist selbstständig: Ein Gerät mit **Anywhere** unter [Connect a Device](/connect-devices/) zu koppeln reicht aus.
 
 ## So funktioniert es
 
-Dein Server baut eine ausgehende Verbindung zur Relay-Infrastruktur von OpenChamber auf und hält sie offen. Wenn eines deiner Geräte außerhalb deines Netzwerks ist, verbindet es sich ebenfalls mit dem Relay, und das Relay leitet die verschlüsselten Daten zwischen beiden weiter. Auf deinem Rechner lauscht nichts auf eingehende Verbindungen aus dem Internet.
+Dein Server baut eine ausgehende Verbindung zur Relay-Infrastruktur von Sharpie auf und hält sie offen. Wenn eines deiner Geräte außerhalb deines Netzwerks ist, verbindet es sich ebenfalls mit dem Relay, und das Relay leitet die verschlüsselten Daten zwischen beiden weiter. Auf deinem Rechner lauscht nichts auf eingehende Verbindungen aus dem Internet.
 
 Wenn eine direkte Verbindung verfügbar ist — du bist wieder zu Hause im selben WLAN — bevorzugen deine Geräte sie und umgehen das Relay vollständig.
 
@@ -29,12 +29,12 @@ Das Relay verwaltet seinen Lebenszyklus selbst — es gibt keinen Schalter, den 
 - **Es startet bei Bedarf.** Das Erstellen einer **Anywhere**-Kopplung schaltet das Relay ein, und es kommt nach einem Neustart zurück, solange noch ein gekoppeltes Gerät davon abhängt.
 - **Es stoppt von selbst.** Sobald kein Gerät und keine ausstehende Kopplung das Relay mehr nutzt — zum Beispiel nachdem du das letzte Relay-gekoppelte Gerät widerrufen hast — fährt es automatisch herunter.
 
-**Settings → Remote Instances → OpenChamber Relay** zeigt den Live-Status (Connected, Reconnecting, …) und wie viele Geräte gerade darüber verbunden sind. Dort kannst du auch **Disable** drücken, um den Relay-Zugriff sofort zu beenden; Geräte im lokalen Netzwerk sind davon nicht betroffen.
+**Settings → Remote Instances → Sharpie Relay** zeigt den Live-Status (Connected, Reconnecting, …) und wie viele Geräte gerade darüber verbunden sind. Dort kannst du auch **Disable** drücken, um den Relay-Zugriff sofort zu beenden; Geräte im lokalen Netzwerk sind davon nicht betroffen.
 
 ## Relay oder ein Tunnel?
 
 - Nutze das **Relay**, um von deinen eigenen gekoppelten Geräten aus deinen eigenen Server zu erreichen. Es kommt ohne Einrichtung aus, und nichts ist öffentlich exponiert.
-- Nutze einen [Tunnel](/tunnels/), wenn du eine einfache **öffentliche URL** brauchst — zum Beispiel um OpenChamber in einem normalen Browser auf einem Rechner zu öffnen, den du nicht koppeln kannst, oder um Zugriff hinter einem [UI password](/security/) zu teilen.
+- Nutze einen [Tunnel](/tunnels/), wenn du eine einfache **öffentliche URL** brauchst — zum Beispiel um Sharpie in einem normalen Browser auf einem Rechner zu öffnen, den du nicht koppeln kannst, oder um Zugriff hinter einem [UI password](/security/) zu teilen.
 
 ## Verwandt
 

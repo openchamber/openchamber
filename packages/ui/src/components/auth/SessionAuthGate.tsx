@@ -127,7 +127,7 @@ const submitPassword = async (password: string, trustDevice: boolean): Promise<R
       password,
       trustDevice,
       issueClientToken,
-      clientLabel: 'OpenChamber Desktop',
+      clientLabel: 'Sharpie Desktop',
       ...desktopClientAuthMetadata(),
     }),
   });
@@ -146,7 +146,7 @@ const issueDesktopClientToken = async (): Promise<string> => {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ label: 'OpenChamber Desktop', ...desktopClientAuthMetadata() }),
+    body: JSON.stringify({ label: 'Sharpie Desktop', ...desktopClientAuthMetadata() }),
   }).catch(() => null);
   if (!response?.ok) {
     return '';
@@ -765,7 +765,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     try {
       const payload = await authenticateWithPasskey(trustDevice, {
         issueClientToken: shouldIssueDesktopClientToken(),
-        clientLabel: 'OpenChamber Desktop',
+        clientLabel: 'Sharpie Desktop',
         ...desktopClientAuthMetadata(),
       }) as { clientToken?: unknown } | null;
       const clientToken = shouldIssueDesktopClientToken() && typeof payload?.clientToken === 'string' && payload.clientToken.trim()

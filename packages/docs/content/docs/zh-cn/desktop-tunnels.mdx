@@ -5,11 +5,11 @@ description: 从桌面应用创建 Cloudflare 或 Ngrok 隧道。
 
 # 桌面端隧道
 
-桌面应用可以在 **Settings → OpenChamber → Tunnel** 中创建公开隧道。这个流程不需要你从 CLI 启动 OpenChamber。
+桌面应用可以在 **Settings → Sharpie → Tunnel** 中创建公开隧道。这个流程不需要你从 CLI 启动 Sharpie。
 
 ## 安装提供商
 
-OpenChamber 会在你的机器上启动提供商 CLI。请先安装你想使用的提供商：
+Sharpie 会在你的机器上启动提供商 CLI。请先安装你想使用的提供商：
 
 ```bash
 brew install cloudflared
@@ -24,7 +24,7 @@ ngrok config add-authtoken <your-ngrok-token>
 
 ## 从应用启动
 
-1. 打开 **Settings → OpenChamber → Tunnel**。
+1. 打开 **Settings → Sharpie → Tunnel**。
 2. 选择 **Cloudflare** 或 **Ngrok**。
 3. 启动 quick tunnel。
 4. 用手机扫描生成的二维码。
@@ -33,9 +33,9 @@ Ngrok 目前支持 quick tunnels。Cloudflare 支持 quick tunnels 和 Cloudflar
 
 ## 访问保护
 
-即使提供商 URL 本身是公开的，OpenChamber 仍会用自己的 connect token 保护访问。生成的连接链接包含一次性 token，有 TTL；当你生成新链接或停止/重启隧道时，旧的未使用链接会被撤销。
+即使提供商 URL 本身是公开的，Sharpie 仍会用自己的 connect token 保护访问。生成的连接链接包含一次性 token，有 TTL；当你生成新链接或停止/重启隧道时，旧的未使用链接会被撤销。
 
 ## 相关内容
 
 - [隧道](/zh-cn/tunnels/) — CLI 隧道用法和 Cloudflare 托管模式
-- [PWA 与移动访问](/zh-cn/mobile/) — 从手机访问 OpenChamber
+- [PWA 与移动访问](/zh-cn/mobile/) — 从手机访问 Sharpie

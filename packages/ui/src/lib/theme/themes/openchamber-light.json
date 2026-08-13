@@ -1,9 +1,9 @@
 {
   "metadata": {
     "id": "openchamber-light",
-    "name": "OpenChamber",
-    "description": "The OpenChamber signature - Vitesse syntax on warm paper with Flexoki accents, harmonized in OKLCH (light variant)",
-    "author": "OpenChamber",
+    "name": "Sharpie",
+    "description": "The Sharpie signature - Vitesse syntax on warm paper with Flexoki accents, harmonized in OKLCH (light variant)",
+    "author": "Sharpie",
     "version": "1.0.0",
     "variant": "light",
     "tags": [

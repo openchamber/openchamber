@@ -119,7 +119,7 @@ export interface AgentConfig {
 /**
  * Result of an agent config mutation.
  * `requiresManualRestart` is true when the change was persisted to disk but the
- * connected (external) OpenCode server could not be reloaded by OpenChamber, so
+ * connected (external) OpenCode server could not be reloaded by Sharpie, so
  * the user must restart that server before the change takes effect.
  * `restartDeferred` is true when the change is saved and waiting for an explicit
  * Apply & Restart OpenCode action.

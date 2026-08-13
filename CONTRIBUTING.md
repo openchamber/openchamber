@@ -1,4 +1,4 @@
-# Contributing to OpenChamber
+# Contributing to Sharpie
 
 ## Getting Started
 

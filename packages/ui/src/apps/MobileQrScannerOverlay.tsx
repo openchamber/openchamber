@@ -26,7 +26,7 @@ export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onC
     document.documentElement.style.setProperty('background-color', 'rgba(0, 0, 0, 0)', 'important');
     document.body.style.setProperty('background-color', 'rgba(0, 0, 0, 0)', 'important');
 
-    // startScan() places CameraX behind the WebView. OpenChamber has several
+    // startScan() places CameraX behind the WebView. Sharpie has several
     // independent portal roots, so hiding only #root (or relying on inherited
     // visibility) can leave a sheet/sidebar painted over the preview. Opacity on
     // each top-level sibling is composited for its whole subtree and cannot be

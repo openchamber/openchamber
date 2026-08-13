@@ -5,11 +5,11 @@ description: デスクトップアプリから Cloudflare または Ngrok トン
 
 # デスクトップトンネル
 
-デスクトップアプリでは **Settings → OpenChamber → Tunnel** から公開トンネルを作成できます。この方法では CLI から OpenChamber を起動する必要はありません。
+デスクトップアプリでは **Settings → Sharpie → Tunnel** から公開トンネルを作成できます。この方法では CLI から Sharpie を起動する必要はありません。
 
 ## プロバイダーをインストールする
 
-OpenChamber はあなたのマシン上でプロバイダー CLI を起動します。使いたいプロバイダーを先にインストールしてください。
+Sharpie はあなたのマシン上でプロバイダー CLI を起動します。使いたいプロバイダーを先にインストールしてください。
 
 ```bash
 brew install cloudflared
@@ -24,7 +24,7 @@ ngrok config add-authtoken <your-ngrok-token>
 
 ## アプリから開始する
 
-1. **Settings → OpenChamber → Tunnel** を開きます。
+1. **Settings → Sharpie → Tunnel** を開きます。
 2. **Cloudflare** または **Ngrok** を選びます。
 3. クイックトンネルを開始します。
 4. 生成された QR コードをスマートフォンでスキャンします。
@@ -33,9 +33,9 @@ ngrok config add-authtoken <your-ngrok-token>
 
 ## アクセス保護
 
-プロバイダー URL 自体が公開されていても、OpenChamber は独自の接続トークンでアクセスを保護します。生成される接続リンクには一度きりのトークンが含まれ、TTL があり、新しいリンクを生成するかトンネルを停止/再起動すると、未使用の古いリンクは無効化されます。
+プロバイダー URL 自体が公開されていても、Sharpie は独自の接続トークンでアクセスを保護します。生成される接続リンクには一度きりのトークンが含まれ、TTL があり、新しいリンクを生成するかトンネルを停止/再起動すると、未使用の古いリンクは無効化されます。
 
 ## 関連
 
 - [トンネル](/tunnels/) — CLI でのトンネル利用と管理対象 Cloudflare モード
-- [PWA とモバイル](/mobile/) — スマートフォンから OpenChamber にアクセスする
+- [PWA とモバイル](/mobile/) — スマートフォンから Sharpie にアクセスする

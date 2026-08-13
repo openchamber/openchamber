@@ -1,6 +1,6 @@
 # CLI Module Map
 
-This directory contains the non-entrypoint implementation for the OpenChamber CLI. `packages/web/bin/cli.js` should stay thin: it owns bootstrap, command wiring, top-level dispatch, signal/cancel handling, and compatibility exports. Domain logic belongs in these modules.
+This directory contains the non-entrypoint implementation for the Sharpie CLI. `packages/web/bin/cli.js` should stay thin: it owns bootstrap, command wiring, top-level dispatch, signal/cancel handling, and compatibility exports. Domain logic belongs in these modules.
 
 ## Entrypoint Boundary
 
@@ -36,7 +36,7 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Maps options to control-service inputs and renders results; project resolution, validation, persistence, and execution remain server-owned.
 
 - `commands-models.js`
-  - Prints OpenChamber default, favorite, and recent model settings.
+  - Prints Sharpie default, favorite, and recent model settings.
 
 - `commands-projects.js`
   - Prints configured project labels, ids, and directories for later control-plane calls.
@@ -89,11 +89,11 @@ These modules hold reusable, non-presentational logic for commands.
   - Owns local desktop bearer auth and managed CLI-instance UI password retry for control-plane requests.
 
 - `cli-control.js`
-  - Sends one typed action request to the authenticated OpenChamber control endpoint and maps HTTP failures to CLI exit behavior.
+  - Sends one typed action request to the authenticated Sharpie control endpoint and maps HTTP failures to CLI exit behavior.
   - Must not reproduce session, scheduled-task, project-resolution, or wait orchestration.
 
 - `cli-api-target.js`
-  - Resolves the target OpenChamber runtime for control-plane commands, preferring desktop unless a port is explicit.
+  - Resolves the target Sharpie runtime for control-plane commands, preferring desktop unless a port is explicit.
 
 - `cli-goal.js`
   - Owns shared Goal Mode token-budget validation for session and schedule commands.

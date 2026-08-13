@@ -10,7 +10,7 @@ const MAX_EMBEDDED_IMAGE_BYTES = 20 * 1024 * 1024
 const MAX_EMBEDDED_IMAGES_BYTES = 40 * 1024 * 1024
 const MAX_EXTRACTED_TEXT_CHARS = 2_000_000
 const MAX_ODF_SPACES_PER_ELEMENT = 100
-const TEXT_TRUNCATION_NOTICE = "\n\n[Document text truncated by OpenChamber]\n"
+const TEXT_TRUNCATION_NOTICE = "\n\n[Document text truncated by Sharpie]\n"
 
 const OFFICE_EXTENSIONS = new Set(["docx", "pptx", "xlsx", "odt", "odp", "ods"])
 const IMAGE_MIMES = new Map([

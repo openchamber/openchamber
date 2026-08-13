@@ -5,7 +5,7 @@ description: Verwandelt eine Aufforderung in ein Ziel, auf das der Agent automat
 
 # Sitzungsziele
 
-Ein Ziel macht aus einer Aufforderung eine Ziellinie. Statt den Agenten nach jeder Antwort mit "continue" anzustupsen, legst du das Ziel einmal fest — und OpenChamber hält die Sitzung automatisch darauf ausgerichtet und prüft nach jedem Zug mit einem unabhängigen Prüfer den Fortschritt. Es läuft weiter, auch wenn du nicht da bist.
+Ein Ziel macht aus einer Aufforderung eine Ziellinie. Statt den Agenten nach jeder Antwort mit "continue" anzustupsen, legst du das Ziel einmal fest — und Sharpie hält die Sitzung automatisch darauf ausgerichtet und prüft nach jedem Zug mit einem unabhängigen Prüfer den Fortschritt. Es läuft weiter, auch wenn du nicht da bist.
 
 ## Ein Ziel starten
 
@@ -31,7 +31,7 @@ Für kleine nachgelagerte Rückfragen mit Kontext brauchst du kein Ziel — send
 
 ## So funktioniert es
 
-Nachdem der Agent anhält und die Sitzung für einen Moment ruhig bleibt, macht OpenChamber Folgendes:
+Nachdem der Agent anhält und die Sitzung für einen Moment ruhig bleibt, macht Sharpie Folgendes:
 
 1. Es bittet ein kleines, günstiges Modell, den letzten Zug gegen das Ziel zu prüfen: weitermachen, fertig oder festgefahren?
 2. Wenn das Urteil "weitermachen" lautet, sendet es eine Fortsetzungsaufforderung und der Agent nimmt die Arbeit wieder auf.
@@ -63,7 +63,7 @@ In **Einstellungen → Chat → Goal** kannst du ein Standard-Token-Budget für 
 
 ## Beachten
 
-- Die Zielschleife läuft im OpenChamber-Server, nicht in deinem Browser-Tab. Schließe den Tab, sperre das Telefon — der Agent arbeitet weiter, und du bekommst eine Benachrichtigung, wenn das Ziel zur Ruhe kommt. Der Server (Desktop-App oder `openchamber`-Prozess) muss weiterlaufen.
+- Die Zielschleife läuft im Sharpie-Server, nicht in deinem Browser-Tab. Schließe den Tab, sperre das Telefon — der Agent arbeitet weiter, und du bekommst eine Benachrichtigung, wenn das Ziel zur Ruhe kommt. Der Server (Desktop-App oder `openchamber`-Prozess) muss weiterlaufen.
 - Ziele verwenden den eigenen Provider und das Modell deiner Sitzung, einschließlich der Prüferaufrufe — nichts verlässt die Provider, die du bereits nutzt.
 - Pro Sitzung immer nur ein Ziel gleichzeitig.
 

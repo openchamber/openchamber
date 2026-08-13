@@ -8,7 +8,7 @@ import type { DesktopWindowControlAction, DesktopWindowControlsSide } from '@/li
 import { useUIStore } from '@/stores/useUIStore';
 
 // macOS chrome colors; intentionally theme-independent — these replicate a
-// foreign platform's chrome, not OpenChamber's own status tokens, so the
+// foreign platform's chrome, not Sharpie's own status tokens, so the
 // theme-system hex rule does not apply.
 const TRAFFIC_LIGHT_FILL: Record<DesktopWindowControlAction, string> = {
   close: '#FF5F57',

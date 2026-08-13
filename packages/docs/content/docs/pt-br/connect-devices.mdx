@@ -1,15 +1,15 @@
 ---
 title: Conectar um Dispositivo
-description: Pareie seu celular, desktop ou outro navegador com o seu servidor OpenChamber usando um código QR de uso único.
+description: Pareie seu celular, desktop ou outro navegador com o seu servidor Sharpie usando um código QR de uso único.
 ---
 
 # Conectar um Dispositivo
 
-Pareie outro dispositivo — o app móvel, o app de desktop ou um navegador em outra máquina — com o seu servidor OpenChamber escaneando um código QR de uso único. Esta é a forma recomendada de conectar dispositivos; não há portas para abrir nem endereços para digitar.
+Pareie outro dispositivo — o app móvel, o app de desktop ou um navegador em outra máquina — com o seu servidor Sharpie escaneando um código QR de uso único. Esta é a forma recomendada de conectar dispositivos; não há portas para abrir nem endereços para digitar.
 
 ## Parear um dispositivo
 
-1. Na máquina que executa o OpenChamber, abra **Settings → Remote Instances → Conectar a este servidor** e pressione **Adicionar um dispositivo**.
+1. Na máquina que executa o Sharpie, abra **Settings → Remote Instances → Conectar a este servidor** e pressione **Adicionar um dispositivo**.
 2. Dê um nome ao dispositivo (por exemplo, *Meu iPhone*) para reconhecê-lo depois.
 3. Escolha onde você vai usar o dispositivo:
    - **Somente este computador** — para aplicativos nesta mesma máquina
@@ -18,7 +18,7 @@ Pareie outro dispositivo — o app móvel, o app de desktop ou um navegador em o
 4. Pressione **Criar código QR**.
 5. No outro dispositivo, escaneie o código:
    - **app móvel** — toque em **Ler código QR** na tela de conexão (ou na lista de instâncias)
-   - **app de desktop** — copie o link de conexão e cole em **Settings → Remote Instances → Outros servidores OpenChamber → Importar link**
+   - **app de desktop** — copie o link de conexão e cole em **Settings → Remote Instances → Outros servidores Sharpie → Importar link**
 
 O diálogo fecha sozinho assim que o dispositivo se conecta, e o dispositivo aparece na lista com status ao vivo. Pronto — vocês estão pareados.
 
@@ -56,7 +56,7 @@ openchamber connect-url --relay --qr
 
 Um link com `--relay` carrega as duas rotas, igual ao diálogo: o dispositivo conecta diretamente pela sua rede local quando consegue alcançar o servidor e recorre ao [Private Relay](/pt-br/private-relay/) quando está fora. O relay inicia sozinho: uma instância em execução capta o link em até um minuto; uma parada, na próxima vez que iniciar.
 
-> A rota direta só funciona se o servidor de fato escutar na sua rede. Por padrão, o OpenChamber escuta apenas na própria máquina — inicie-o com `--lan` para torná-lo alcançável pelo Wi-Fi. O comando avisa (`[LAN_UNREACHABLE]`) quando a rota direta do link não será utilizável de outros dispositivos; um link com `--relay` ainda funciona nesse caso, só que sempre pelo relay.
+> A rota direta só funciona se o servidor de fato escutar na sua rede. Por padrão, o Sharpie escuta apenas na própria máquina — inicie-o com `--lan` para torná-lo alcançável pelo Wi-Fi. O comando avisa (`[LAN_UNREACHABLE]`) quando a rota direta do link não será utilizável de outros dispositivos; um link com `--relay` ainda funciona nesse caso, só que sempre pelo relay.
 
 O link e o código QR impressos funcionam exatamente como os do diálogo de configurações — de uso único, com expiração e revogáveis.
 

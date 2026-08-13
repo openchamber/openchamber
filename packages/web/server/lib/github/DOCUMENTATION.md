@@ -2,7 +2,7 @@
 
 ## Purpose
 
-- This module owns GitHub auth, Octokit access, repo resolution, and Pull Request status resolution for OpenChamber.
+- This module owns GitHub auth, Octokit access, repo resolution, and Pull Request status resolution for Sharpie.
 - From user perspective, this is the layer that lets the app know which PR belongs to a local branch and keeps that UI feeling current.
 
 ## Entrypoints and structure

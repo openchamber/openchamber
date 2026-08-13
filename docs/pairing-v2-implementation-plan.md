@@ -300,7 +300,7 @@ Response:
     "label": "Pair new device"
   },
   "server": {
-    "label": "OpenChamber",
+    "label": "Sharpie",
     "candidates": [
       {
         "type": "lan",
@@ -427,7 +427,7 @@ Response:
 {
   "ok": true,
   "server": {
-    "label": "OpenChamber",
+    "label": "Sharpie",
     "url": "https://selected-or-current-url",
     "fingerprint": "ABCD-1234"
   },

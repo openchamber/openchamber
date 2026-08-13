@@ -16,7 +16,7 @@ import React from 'react';
 
 const EDGE_ZONE = 32; // px from a side where the swipe must begin
 // Android reserves the physical screen edge for system navigation. Accept a
-// wider start area so both OpenChamber drawers can be invoked beyond the
+// wider start area so both Sharpie drawers can be invoked beyond the
 // system Back gesture region without changing the browser/iOS gesture.
 const ANDROID_EDGE_ZONE = 80;
 const MIN_DISTANCE = 64; // px of horizontal travel required to commit

@@ -29,9 +29,9 @@ async function resolveAvailablePort(desiredPort, explicitPort = false, onNotice)
   const occupant = await fetchSystemInfoFromPort(startPort);
   let message;
   if (occupant?.runtime === 'desktop') {
-    message = `Port ${startPort} is used by OpenChamber Desktop; using a free port`;
+    message = `Port ${startPort} is used by Sharpie Desktop; using a free port`;
   } else if (occupant?.runtime) {
-    message = `Port ${startPort} is used by an existing OpenChamber instance; using a free port`;
+    message = `Port ${startPort} is used by an existing Sharpie instance; using a free port`;
   } else {
     message = `Port ${startPort} in use; using a free port`;
   }

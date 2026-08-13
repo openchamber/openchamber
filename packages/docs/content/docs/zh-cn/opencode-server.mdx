@@ -1,15 +1,15 @@
 ---
 title: OpenCode Server
-description: 将 OpenChamber 连接到本地或远程的 OpenCode 服务器。
+description: 将 Sharpie 连接到本地或远程的 OpenCode 服务器。
 ---
 
 # OpenCode Server
 
-OpenChamber 运行在 OpenCode 服务器之上。默认情况下，它会为你启动一个，所以你无需做任何事。只有当你想让 OpenChamber 指向一个你已经运行的服务器，或者管理它所启动的服务器时，才需要本页内容。
+Sharpie 运行在 OpenCode 服务器之上。默认情况下，它会为你启动一个，所以你无需做任何事。只有当你想让 Sharpie 指向一个你已经运行的服务器，或者管理它所启动的服务器时，才需要本页内容。
 
-## OpenChamber 如何查找服务器
+## Sharpie 如何查找服务器
 
-OpenChamber 启动时，会按以下顺序查找服务器：
+Sharpie 启动时，会按以下顺序查找服务器：
 
 1. 复用它已经启动的服务器
 2. 如果你指定了外部服务器，则连接到它（见下文）
@@ -20,18 +20,18 @@ OpenChamber 启动时，会按以下顺序查找服务器：
 
 ## 连接到你已经运行的服务器
 
-在启动 OpenChamber 之前设置这些变量：
+在启动 Sharpie 之前设置这些变量：
 
 ```bash
 OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 ```
 
 - `OPENCODE_HOST` — 你的 OpenCode 服务器的完整地址，包括端口（类似 `http://localhost:4096` 这样的值）。末尾不能带路径。
-- `OPENCODE_SKIP_START=true` — 告诉 OpenChamber 不要启动它自己的服务器。
+- `OPENCODE_SKIP_START=true` — 告诉 Sharpie 不要启动它自己的服务器。
 
 如果你只需要更改端口，请设置 `OPENCODE_PORT` 而不是 `OPENCODE_HOST`。
 
-如果 `OPENCODE_HOST` 缺少端口或带有路径，OpenChamber 会忽略它并回退到启动自己的服务器。如果你期望的连接没有发生，请留意启动日志中的 `[config]` 警告。
+如果 `OPENCODE_HOST` 缺少端口或带有路径，Sharpie 会忽略它并回退到启动自己的服务器。如果你期望的连接没有发生，请留意启动日志中的 `[config]` 警告。
 
 ## 从 CLI 管理服务器
 
@@ -44,9 +44,9 @@ openchamber stop
 
 单独运行 `openchamber` 会在后台启动服务器。添加 `--foreground` 可以让它保持附加在你的终端上。
 
-## 登录时启动 OpenChamber
+## 登录时启动 Sharpie
 
-使用 `startup enable` 安装原生用户服务。OpenChamber 在 macOS 上使用 `launchd`，在 Linux 上使用 `systemd --user`，在 Windows 上使用 Task Scheduler。
+使用 `startup enable` 安装原生用户服务。Sharpie 在 macOS 上使用 `launchd`，在 Linux 上使用 `systemd --user`，在 Windows 上使用 Task Scheduler。
 
 ```bash
 openchamber startup enable
@@ -70,7 +70,7 @@ openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password s
 
 启动服务会记住 `--port`、`--host`、`--ui-password` 和 `--api-only`。CLI restart 和更新期间的 restart 会复用这些已保存设置。
 
-要为另一个 OpenChamber 应用创建连接链接，请使用：
+要为另一个 Sharpie 应用创建连接链接，请使用：
 
 ```bash
 openchamber connect-url --port 3000 --server http://your-host:3000 --qr
@@ -89,7 +89,7 @@ openchamber tunnel stop --port 3000
 
 ## “OpenCode is restarting”
 
-当服务器正在启动或重启时，OpenChamber 会显示 “OpenCode is restarting” 状态，并暂停请求直到服务器就绪。这在启动或重启后立即出现是正常的。如果它一直无法消失，请参阅 [OpenCode 连接](/zh-cn/troubleshooting/opencode-connection/)。
+当服务器正在启动或重启时，Sharpie 会显示 “OpenCode is restarting” 状态，并暂停请求直到服务器就绪。这在启动或重启后立即出现是正常的。如果它一直无法消失，请参阅 [OpenCode 连接](/zh-cn/troubleshooting/opencode-connection/)。
 
 ## 相关内容
 

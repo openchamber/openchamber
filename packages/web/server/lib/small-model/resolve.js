@@ -76,7 +76,7 @@ const pickWithinProvider = (providerID, auth, catalog, family) => {
 };
 
 export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSmallModel, preferredProviderID, preferredModelID }) {
-  // OpenChamber's own setting (Settings → Sessions → Small Model override)
+  // Sharpie's own setting (Settings → Sessions → Small Model override)
   // outranks everything, including the OpenCode config.
   const fromSettings = parseModelRef(settingsSmallModel);
   if (fromSettings) {

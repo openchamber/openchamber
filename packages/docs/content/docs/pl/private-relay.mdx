@@ -1,15 +1,15 @@
 ---
 title: Private Relay
-description: Dotrzyj do swojego serwera OpenChamber z dowolnego miejsca przez szyfrowany end-to-end relay — bez portów, tuneli i konfiguracji.
+description: Dotrzyj do swojego serwera Sharpie z dowolnego miejsca przez szyfrowany end-to-end relay — bez portów, tuneli i konfiguracji.
 ---
 
 # Private Relay
 
-OpenChamber Private Relay pozwala Twoim sparowanym urządzeniom dotrzeć do serwera z dowolnego miejsca — z sieci komórkowej, kawiarnianego Wi-Fi, innego miasta — bez otwierania portów, konfigurowania tunelu czy wystawiania maszyny do internetu. Zarządza sobą sam: wystarczy sparować urządzenie z opcją **Wszędzie** w [Połącz urządzenie](/pl/connect-devices/).
+Sharpie Private Relay pozwala Twoim sparowanym urządzeniom dotrzeć do serwera z dowolnego miejsca — z sieci komórkowej, kawiarnianego Wi-Fi, innego miasta — bez otwierania portów, konfigurowania tunelu czy wystawiania maszyny do internetu. Zarządza sobą sam: wystarczy sparować urządzenie z opcją **Wszędzie** w [Połącz urządzenie](/pl/connect-devices/).
 
 ## Jak to działa
 
-Twój serwer otwiera wychodzące połączenie do infrastruktury relay OpenChamber i utrzymuje je aktywne. Gdy jedno z Twoich urządzeń jest poza Twoją siecią, również łączy się z relayem, a relay przekazuje zaszyfrowany ruch między nimi. Nic na Twojej maszynie nie nasłuchuje na połączenia przychodzące z internetu.
+Twój serwer otwiera wychodzące połączenie do infrastruktury relay Sharpie i utrzymuje je aktywne. Gdy jedno z Twoich urządzeń jest poza Twoją siecią, również łączy się z relayem, a relay przekazuje zaszyfrowany ruch między nimi. Nic na Twojej maszynie nie nasłuchuje na połączenia przychodzące z internetu.
 
 Gdy dostępne jest połączenie bezpośrednie — jesteś z powrotem w domu, w tej samej sieci Wi-Fi — Twoje urządzenia wybierają je i całkowicie pomijają relay.
 
@@ -29,12 +29,12 @@ Relay sam zarządza swoim cyklem życia — nie ma przełącznika, o którym trz
 - **Uruchamia się na żądanie.** Utworzenie parowania **Wszędzie** włącza relay, a po restarcie wraca on tak długo, jak długo korzysta z niego jakiekolwiek sparowane urządzenie.
 - **Zatrzymuje się sam.** Gdy żadne urządzenie ani oczekujące parowanie nie używa relaya — na przykład po unieważnieniu ostatniego sparowanego przez relay urządzenia — wyłącza się automatycznie.
 
-**Settings → Remote Instances → OpenChamber Relay** pokazuje bieżący stan (Połączono, Ponowne łączenie, …) oraz liczbę aktualnie połączonych przez relay urządzeń. Możesz tam też nacisnąć **Wyłącz**, aby natychmiast odciąć dostęp przez relay; urządzenia w Twojej sieci lokalnej pozostają bez zmian.
+**Settings → Remote Instances → Sharpie Relay** pokazuje bieżący stan (Połączono, Ponowne łączenie, …) oraz liczbę aktualnie połączonych przez relay urządzeń. Możesz tam też nacisnąć **Wyłącz**, aby natychmiast odciąć dostęp przez relay; urządzenia w Twojej sieci lokalnej pozostają bez zmian.
 
 ## Relay czy tunel?
 
 - Użyj **relaya**, aby docierać do własnego serwera z własnych sparowanych urządzeń. Zero konfiguracji i nic nie jest wystawione publicznie.
-- Użyj [tunelu](/pl/tunnels/), gdy potrzebujesz zwykłego **publicznego adresu URL** — na przykład by otworzyć OpenChamber w zwykłej przeglądarce na maszynie, której nie możesz sparować, albo udostępnić dostęp za [hasłem UI](/pl/security/).
+- Użyj [tunelu](/pl/tunnels/), gdy potrzebujesz zwykłego **publicznego adresu URL** — na przykład by otworzyć Sharpie w zwykłej przeglądarce na maszynie, której nie możesz sparować, albo udostępnić dostęp za [hasłem UI](/pl/security/).
 
 ## Powiązane
 

@@ -1,11 +1,11 @@
 ---
 title: Instances distantes
-description: Connectez l’application desktop à OpenChamber sur une autre machine via SSH.
+description: Connectez l’application desktop à Sharpie sur une autre machine via SSH.
 ---
 
 # Instances distantes
 
-L’application desktop peut se connecter à OpenChamber exécuté sur une autre machine via SSH — serveur de travail, machine cloud, homelab — et afficher son UI sur votre écran comme si elle était locale. Configurez cela dans **Paramètres → Instances distantes**.
+L’application desktop peut se connecter à Sharpie exécuté sur une autre machine via SSH — serveur de travail, machine cloud, homelab — et afficher son UI sur votre écran comme si elle était locale. Configurez cela dans **Paramètres → Instances distantes**.
 
 > Les instances distantes sont une fonctionnalité **desktop uniquement**. Sur le web ou dans VS Code, connectez-vous à un serveur distant avec les variables d’environnement de [Serveur OpenCode](/opencode-server/) à la place.
 
@@ -13,20 +13,20 @@ L’application desktop peut se connecter à OpenChamber exécuté sur une autre
 
 1. Ouvrez **Paramètres → Instances distantes** et ajoutez-en une.
 2. Donnez la commande SSH que vous utilisez normalement pour joindre la machine, plus un surnom.
-3. Choisissez comment OpenChamber s’y exécute :
-   - **managed** — OpenChamber s’installe et se démarre sur la machine distante
+3. Choisissez comment Sharpie s’y exécute :
+   - **managed** — Sharpie s’installe et se démarre sur la machine distante
    - **external** — se connecter à une instance déjà en cours d’exécution
 4. Connectez-vous.
 
-OpenChamber déroule les étapes — vérification de la connexion, configuration du remote, démarrage du serveur et transfert du port — et montre où il en est à chaque étape. Quand il atteint **ready**, l’UI distante se charge localement.
+Sharpie déroule les étapes — vérification de la connexion, configuration du remote, démarrage du serveur et transfert du port — et montre où il en est à chaque étape. Quand il atteint **ready**, l’UI distante se charge localement.
 
 ## Identifiants
 
-Vous décidez d’enregistrer les mots de passe SSH et UI ou de les saisir à chaque fois. Si la connexion tombe, OpenChamber indique l’étape qui a échoué pour vous aider à corriger — voir [Accès distant](/troubleshooting/remote-access/).
+Vous décidez d’enregistrer les mots de passe SSH et UI ou de les saisir à chaque fois. Si la connexion tombe, Sharpie indique l’étape qui a échoué pour vous aider à corriger — voir [Accès distant](/troubleshooting/remote-access/).
 
 ## Liens de connexion
 
-Si une machine distante exécute déjà OpenChamber, le moyen le plus simple de connecter l’application desktop est un lien d’association. Sur l’UI du serveur distant, ouvrez **Paramètres → Instances distantes → Se connecter à ce serveur → Ajouter un appareil**, créez un lien, puis importez-le sur votre desktop dans **Paramètres → Instances distantes → Autres serveurs OpenChamber → Importer le lien**. Voir [Connecter un appareil](/connect-devices/) pour le flux complet.
+Si une machine distante exécute déjà Sharpie, le moyen le plus simple de connecter l’application desktop est un lien d’association. Sur l’UI du serveur distant, ouvrez **Paramètres → Instances distantes → Se connecter à ce serveur → Ajouter un appareil**, créez un lien, puis importez-le sur votre desktop dans **Paramètres → Instances distantes → Autres serveurs Sharpie → Importer le lien**. Voir [Connecter un appareil](/connect-devices/) pour le flux complet.
 
 Un lien créé avec **Partout** contient à la fois une adresse directe et une route via le [Relais privé](/private-relay/) : le desktop se connecte directement quand il peut joindre le serveur (même réseau), et bascule sur le relais chiffré de bout en bout quand vous êtes en déplacement. Le statut à côté de chaque serveur enregistré indique la route utilisée.
 

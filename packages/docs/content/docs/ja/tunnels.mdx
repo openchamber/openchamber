@@ -1,17 +1,17 @@
 ---
 title: トンネル
-description: リモートおよびモバイルアクセス向けに OpenChamber を安全に公開します。
+description: リモートおよびモバイルアクセス向けに Sharpie を安全に公開します。
 ---
 
 # トンネル
 
-トンネルは OpenChamber への公開リンクです。別ネットワークの普通のブラウザからアクセスできます。実行中のインスタンスに対して作成するには `openchamber tunnel` を使います。
+トンネルは Sharpie への公開リンクです。別ネットワークの普通のブラウザからアクセスできます。実行中のインスタンスに対して作成するには `openchamber tunnel` を使います。
 
 > **自分のデバイス**（モバイルアプリ、別のデスクトップ）の接続には、通常トンネルは不要です。代わりに [ペアリング](/connect-devices/) して、エンドツーエンド暗号化の [Private Relay](/private-relay/) にセットアップ不要で外出先アクセスを任せましょう。
 
 ## 前提条件
 
-OpenChamber はあなたのマシン上でトンネルプロバイダー CLI を起動します。使いたいプロバイダーを先にインストールしてください。
+Sharpie はあなたのマシン上でトンネルプロバイダー CLI を起動します。使いたいプロバイダーを先にインストールしてください。
 
 ```bash
 brew install cloudflared
@@ -26,7 +26,7 @@ ngrok config add-authtoken <your-ngrok-token>
 
 ## クイックスタート
 
-1. OpenChamber を起動します。
+1. Sharpie を起動します。
 
 ```bash
 openchamber
@@ -52,9 +52,9 @@ openchamber tunnel start --provider ngrok --mode quick
 openchamber tunnel status
 ```
 
-トンネルが起動すると、`status` に公開 URL が表示されます。それを開くか QR コードをスキャンすると、どこからでも OpenChamber にアクセスできます。
+トンネルが起動すると、`status` に公開 URL が表示されます。それを開くか QR コードをスキャンすると、どこからでも Sharpie にアクセスできます。
 
-デフォルトでは、OpenChamber は対話型 TTY セッションで QR コードを表示します。QR 出力を強制するには `--qr`、無効にするには `--no-qr` を使います。
+デフォルトでは、Sharpie は対話型 TTY セッションで QR コードを表示します。QR 出力を強制するには `--qr`、無効にするには `--no-qr` を使います。
 
 ## プロバイダー
 
@@ -106,7 +106,7 @@ openchamber tunnel stop --port 3000
 
 ## 動作メモ
 
-- OpenChamber インスタンス（ポート）ごとにアクティブなトンネルは 1 つです
+- Sharpie インスタンス（ポート）ごとにアクティブなトンネルは 1 つです
 - 同じインスタンスで新しい mode/provider を開始すると、前のトンネルは置き換えられます
 - 新しい接続リンクを生成すると、以前の未使用リンクは無効化されます
 - トンネルの自動起動は、restart/update フローで使うインスタンス設定に `--ui-password` や `--api-only` などのサーバーフラグを保持します
@@ -116,5 +116,5 @@ openchamber tunnel stop --port 3000
 - [デバイスを接続する](/connect-devices/) — 公開 URL なしで自分のデバイスをペアリングする
 - [セキュリティ](/security/) — 公開する前に UI を保護する
 - [デスクトップトンネル](/desktop-tunnels/) — CLI 起動なしでデスクトップアプリからトンネルを設定する
-- [モバイルアプリと PWA](/mobile/) — スマートフォンから OpenChamber にアクセスする
+- [モバイルアプリと PWA](/mobile/) — スマートフォンから Sharpie にアクセスする
 - [トラブルシューティング](/troubleshooting/) — トンネルリンクが動かない場合

@@ -1,4 +1,4 @@
-# OpenChamber Mobile Handoff
+# Sharpie Mobile Handoff
 
 Status and process reference for the native iOS/Android apps. Written so work can continue after
 merge — either by finishing CI/release automation, or by adding features as follow-up fixes. The
@@ -11,7 +11,7 @@ renderer), not the desktop shell. The native app is a WKWebView (iOS) / Android 
 bundled copy of the web build; native capabilities are added via Capacitor plugins and two iOS app
 extensions.
 
-- App id / package: `com.openchamber.app`; app name `OpenChamber`.
+- App id / package: `com.openchamber.app`; app name `Sharpie`.
 - Capacitor config: `capacitor.config.ts` (Keyboard `resize: 'none'`, StatusBar overlay, Push
   `presentationOptions: []`).
 - Renderer: the web build's `mobile.html` entry (`MobileApp`), copied into `dist/` and served by

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- usesCleartextTraffic: OpenChamber connects to user-hosted servers over
+    <!-- usesCleartextTraffic: Sharpie connects to user-hosted servers over
          plain http:// on the local network (LAN transport). Android blocks all
          cleartext HTTP by default (targetSdk >= 28), which silently failed every
          LAN probe and forced Android onto relay-only. This mirrors the iOS ATS

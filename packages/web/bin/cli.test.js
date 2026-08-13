@@ -29,7 +29,7 @@ import {
 import {
   assertAuthenticatedNetworkExposure,
   commands,
-  discoverOpenChamberInstanceOnPort,
+  discoverSharpieInstanceOnPort,
   discoverLifecycleInstances,
   discoverRunningInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
@@ -44,7 +44,7 @@ import {
   resolveServeUiPassword,
 } from './cli.js';
 
-async function withTempOpenChamberDataDir(fn) {
+async function withTempSharpieDataDir(fn) {
   const previous = process.env.OPENCHAMBER_DATA_DIR;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-cli-test-'));
   process.env.OPENCHAMBER_DATA_DIR = dir;
@@ -84,7 +84,7 @@ async function captureStdout(fn) {
   }
 }
 
-async function startMockOpenChamberServer(options = {}) {
+async function startMockSharpieServer(options = {}) {
   const runtime = options.runtime || 'web';
   const pid = Number.isFinite(options.pid) ? options.pid : null;
   let shutdownRequested = false;
@@ -172,11 +172,11 @@ async function waitForTcpPort(port, timeoutMs = 3000) {
   return false;
 }
 
-function spawnOpenChamberLikeIdleProcess() {
+function spawnSharpieLikeIdleProcess() {
   return spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'openchamber-idle'], { stdio: 'ignore' });
 }
 
-function spawnOpenChamberLikeHungServer(port) {
+function spawnSharpieLikeHungServer(port) {
   const script = `
     const net = require('net');
     const sockets = new Set();
@@ -659,7 +659,7 @@ describe('cli API target resolution', () => {
       discoverDesktopInstance: async () => null,
       discoverLifecycleInstances: async () => [{ port: 3001 }, { port: 3002 }],
       isServerHealthReady: async () => false,
-    })).rejects.toThrow('Multiple OpenChamber instances are running');
+    })).rejects.toThrow('Multiple Sharpie instances are running');
   });
 });
 
@@ -763,7 +763,7 @@ describe('serve host resolution', () => {
 
 describe('compatibility exports', () => {
   it('allows tunnel profile migration before command options are initialized', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const store = ensureTunnelProfilesMigrated();
 
       expect(store).toEqual({ version: 1, profiles: [] });
@@ -771,7 +771,7 @@ describe('compatibility exports', () => {
   });
 
   it('includes ngrok in fallback tunnel providers when no server is reachable', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const port = await allocateLoopbackPort();
       const output = await captureStdout(async () => {
         await commands.tunnel({ json: true, explicitPort: true, port }, 'providers');
@@ -784,7 +784,7 @@ describe('compatibility exports', () => {
   });
 
   it('supports ngrok quick dry-run with an explicit port', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const output = await captureStdout(async () => {
         await commands.tunnel({
           json: true,
@@ -830,7 +830,7 @@ describe('CLI HTTP helpers', () => {
   });
 
   it('retries UI-authenticated API requests with the stored instance password', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const port = 45678;
       fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'secret' }, null, 2));
       const originalFetch = globalThis.fetch;
@@ -875,7 +875,7 @@ describe('CLI HTTP helpers', () => {
   });
 
   it('prefers the stored instance password over a non-explicit env password', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const port = 45679;
       fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'stored-secret' }, null, 2));
       const originalFetch = globalThis.fetch;
@@ -913,7 +913,7 @@ describe('CLI HTTP helpers', () => {
   });
 
   it('authenticates desktop-local API requests with the stored client token', async () => {
-    await withTempOpenChamberDataDir(async (dir) => {
+    await withTempSharpieDataDir(async (dir) => {
       const port = 57123;
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({
         desktopLocalPort: port,
@@ -995,7 +995,7 @@ describe('cli entry detection', () => {
 });
 
 describe('isOpenchamberCmdline', () => {
-  it('accepts OpenChamber CLI and daemon cmdlines', () => {
+  it('accepts Sharpie CLI and daemon cmdlines', () => {
     expect(isOpenchamberCmdline('node /x/@openchamber/web/bin/cli.js serve')).toBe(true);
     expect(isOpenchamberCmdline('node /x/@openchamber/web/server/index.js --port 9090')).toBe(true);
     expect(isOpenchamberCmdline('bun /home/u/projects/openchamber/packages/web/server/index.js --port 3001')).toBe(true);
@@ -1018,7 +1018,7 @@ describe('isOpenchamberProcessRunning', () => {
   // platforms a live but unrelated process (a recycled stale PID) must read as
   // not-running so it can't trip the "already running" guard (issue #1721).
   it.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')(
-    'returns false for a live non-OpenChamber PID',
+    'returns false for a live non-Sharpie PID',
     async () => {
       const child = spawn('sleep', ['30'], { stdio: 'ignore' });
       try {
@@ -1033,10 +1033,10 @@ describe('isOpenchamberProcessRunning', () => {
 
 describe('lifecycle instance discovery', () => {
   it('does not attribute a desktop runtime response to a different explicit port', async () => {
-    await withTempOpenChamberDataDir(async (dir) => {
+    await withTempSharpieDataDir(async (dir) => {
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ desktopLocalPort: 57123 }, null, 2));
 
-      const instance = await discoverOpenChamberInstanceOnPort(3003, {
+      const instance = await discoverSharpieInstanceOnPort(3003, {
         fetchImpl: async () => createMockJsonResponse({ runtime: 'desktop', pid: 934 }),
       });
 
@@ -1045,10 +1045,10 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('attributes a desktop runtime response to its configured desktop port', async () => {
-    await withTempOpenChamberDataDir(async (dir) => {
+    await withTempSharpieDataDir(async (dir) => {
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ desktopLocalPort: 57123 }, null, 2));
 
-      const instance = await discoverOpenChamberInstanceOnPort(57123, {
+      const instance = await discoverSharpieInstanceOnPort(57123, {
         fetchImpl: async () => createMockJsonResponse({ runtime: 'desktop', pid: 934 }),
       });
 
@@ -1061,7 +1061,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('does not mark tunnel attachability as desktop for a different explicit port', async () => {
-    await withTempOpenChamberDataDir(async (dir) => {
+    await withTempSharpieDataDir(async (dir) => {
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ desktopLocalPort: 57123 }, null, 2));
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () => createMockJsonResponse({ runtime: 'desktop', pid: 934 });
@@ -1076,7 +1076,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('keeps pid and instance files when live port probe confirms a cmdline mismatch', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const port = 45123;
       const pid = 12345;
       const pidFile = await getPidFilePath(port);
@@ -1098,7 +1098,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('removes stale pid and instance files when a cmdline mismatch is not confirmed by live probe', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const port = 45124;
       const pid = 12346;
       const pidFile = await getPidFilePath(port);
@@ -1118,7 +1118,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('preserves matched pid and instance files when the recorded port probe is inconclusive', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const port = 45126;
       const pid = 12347;
       const pidFile = await getPidFilePath(port);
@@ -1138,7 +1138,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('preserves unknown-identity pid and instance files when the recorded port probe is inconclusive', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const port = 45129;
       const pid = 12350;
       const pidFile = await getPidFilePath(port);
@@ -1157,8 +1157,8 @@ describe('lifecycle instance discovery', () => {
     });
   });
 
-  it('uses the live system-info pid instead of a stale OpenChamber-looking pid-file pid', async () => {
-    await withTempOpenChamberDataDir(async () => {
+  it('uses the live system-info pid instead of a stale Sharpie-looking pid-file pid', async () => {
+    await withTempSharpieDataDir(async () => {
       const port = 45127;
       const stalePid = 12348;
       const livePid = 54321;
@@ -1179,7 +1179,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('uses the explicit host when probing a pid-file entry without a stored host', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const port = 45128;
       const pid = 12349;
       const host = '192.0.2.10';
@@ -1206,7 +1206,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('tries loopback before treating an explicit-host pid-file probe as inconclusive', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const port = 45130;
       const pid = 12351;
       const host = '192.0.2.11';
@@ -1236,7 +1236,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('does not accept a fallback loopback probe with a different pid for a concrete host registry', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const port = 45131;
       const pid = 12352;
       const otherPid = 54322;
@@ -1264,8 +1264,8 @@ describe('lifecycle instance discovery', () => {
     });
   });
 
-  it('discovers an explicit live OpenChamber port without a pid-file registry entry', async () => {
-    await withTempOpenChamberDataDir(async () => {
+  it('discovers an explicit live Sharpie port without a pid-file registry entry', async () => {
+    await withTempSharpieDataDir(async () => {
       const port = 45125;
       const instances = await discoverLifecycleInstances(
         { explicitPort: true, port },
@@ -1279,9 +1279,9 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('cleans a matched pid-file entry without stopping it when the recorded port is free', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const port = await allocateLoopbackPort();
-      const child = spawnOpenChamberLikeIdleProcess();
+      const child = spawnSharpieLikeIdleProcess();
       const pidFile = await getPidFilePath(port);
       const instanceFile = await getInstanceFilePath(port);
       try {
@@ -1303,9 +1303,9 @@ describe('lifecycle instance discovery', () => {
 });
 
 describe('lifecycle commands with unmanaged explicit ports', () => {
-  it('serve refuses to start on a live OpenChamber port without requiring pid files', async () => {
-    await withTempOpenChamberDataDir(async () => {
-      const server = await startMockOpenChamberServer();
+  it('serve refuses to start on a live Sharpie port without requiring pid files', async () => {
+    await withTempSharpieDataDir(async () => {
+      const server = await startMockSharpieServer();
       try {
         await expect(commands.serve({ explicitPort: true, port: server.port, quiet: true })).rejects.toThrow(
           /already running on port/
@@ -1317,8 +1317,8 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('status --port reports a live unmanaged server when the registry is empty', async () => {
-    await withTempOpenChamberDataDir(async () => {
-      const server = await startMockOpenChamberServer();
+    await withTempSharpieDataDir(async () => {
+      const server = await startMockSharpieServer();
       try {
         const output = await captureStdout(() => commands.status({ explicitPort: true, port: server.port, json: true }));
         const payload = JSON.parse(output);
@@ -1334,8 +1334,8 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('stop --port reaches unmanaged shutdown when the registry is empty', async () => {
-    await withTempOpenChamberDataDir(async () => {
-      const server = await startMockOpenChamberServer();
+    await withTempSharpieDataDir(async () => {
+      const server = await startMockSharpieServer();
       try {
         await commands.stop({ explicitPort: true, port: server.port, quiet: true, suppressQuietOutput: true });
         expect(server.shutdownRequested).toBe(true);
@@ -1346,9 +1346,9 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('stop --port can recover a matched pid-file instance whose HTTP endpoint is unresponsive', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempSharpieDataDir(async () => {
       const port = await allocateLoopbackPort();
-      const child = spawnOpenChamberLikeHungServer(port);
+      const child = spawnSharpieLikeHungServer(port);
       const pidFile = await getPidFilePath(port);
       const instanceFile = await getInstanceFilePath(port);
       try {
@@ -1368,8 +1368,8 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('plain stop ignores a stale CLI registry entry that resolves to desktop runtime', async () => {
-    await withTempOpenChamberDataDir(async () => {
-      const server = await startMockOpenChamberServer({ runtime: 'desktop' });
+    await withTempSharpieDataDir(async () => {
+      const server = await startMockSharpieServer({ runtime: 'desktop' });
       const child = spawn('sleep', ['30'], { stdio: 'ignore' });
       const pidFile = await getPidFilePath(server.port);
       const instanceFile = await getInstanceFilePath(server.port);
@@ -1391,8 +1391,8 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('restart --port restarts a live unmanaged server through the shared explicit-port discovery path', async () => {
-    await withTempOpenChamberDataDir(async () => {
-      const server = await startMockOpenChamberServer();
+    await withTempSharpieDataDir(async () => {
+      const server = await startMockSharpieServer();
       const calls = [];
       const host = '127.0.0.1';
       try {

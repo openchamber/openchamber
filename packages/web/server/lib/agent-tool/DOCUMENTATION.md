@@ -1,9 +1,9 @@
-# Managed OpenChamber Agent Tool
+# Managed Sharpie Agent Tool
 
 ## Purpose
 
-This module exposes OpenChamber orchestration to agents as one typed OpenCode
-custom tool named `openchamber`. It is injected only when OpenChamber launches
+This module exposes Sharpie orchestration to agents as one typed OpenCode
+custom tool named `openchamber`. It is injected only when Sharpie launches
 and owns the OpenCode process, and only while the persisted
 `agentControlToolEnabled` setting is not `false` (default on; toggled in
 Settings → General → OpenCode CLI and applied on the next managed OpenCode
@@ -11,7 +11,7 @@ restart).
 
 ## Runtime flow
 
-1. The OpenChamber HTTP listener binds and publishes its authoritative port.
+1. The Sharpie HTTP listener binds and publishes its authoritative port.
 2. `prepareManagedOpenCodeEnv()` materializes the plugin under
    `<openchamber-data-dir>/agent-tool/` and appends its `file://` URL to
    `OPENCODE_CONFIG_CONTENT` without replacing existing plugin entries.
@@ -20,7 +20,7 @@ restart).
 4. The plugin calls `POST /api/openchamber/agent-tool` with its typed input and
    OpenCode's authoritative session directory.
 5. The route delegates the fixed action allowlist directly to the shared
-   OpenChamber control service. The CLI uses the same service through its
+   Sharpie control service. The CLI uses the same service through its
    authenticated HTTP adapter, so Goal Mode ordering, wait behavior,
    partial-failure reporting, and scheduled-task contracts have one owner.
 6. Each action definition owns a short presentation title and a separate
@@ -84,7 +84,7 @@ error state.
 
 - Web and Desktop managed OpenCode: injected automatically.
 - External OpenCode selected with `OPENCODE_HOST` or skip-start: not injected,
-  because OpenChamber does not control that process environment.
+  because Sharpie does not control that process environment.
 - VS Code: not injected; the extension owns a separate OpenCode lifecycle.
 - Hosted and Capacitor mobile clients use the server's managed OpenCode tool
   when connected to such a server; no tool runs in the client runtime.

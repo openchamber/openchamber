@@ -1,17 +1,17 @@
 ---
 title: Tunnels
-description: Expose OpenChamber safely for remote and mobile access.
+description: Expose Sharpie safely for remote and mobile access.
 ---
 
 # Tunnels
 
-A tunnel is a public link to your OpenChamber, so you can reach it from an ordinary browser on another network. Use `openchamber tunnel` to create one for a running instance.
+A tunnel is a public link to your Sharpie, so you can reach it from an ordinary browser on another network. Use `openchamber tunnel` to create one for a running instance.
 
 > Connecting your **own devices** (the mobile app, another desktop) usually doesn't need a tunnel — [pair them](/connect-devices/) instead and let the end-to-end encrypted [Private Relay](/private-relay/) handle away-from-home access with zero setup.
 
 ## Prerequisites
 
-OpenChamber starts the tunnel provider CLI on your machine. Install the provider you want to use first:
+Sharpie starts the tunnel provider CLI on your machine. Install the provider you want to use first:
 
 ```bash
 brew install cloudflared
@@ -26,7 +26,7 @@ ngrok config add-authtoken <your-ngrok-token>
 
 ## Quick start
 
-1. Start OpenChamber:
+1. Start Sharpie:
 
 ```bash
 openchamber
@@ -52,9 +52,9 @@ openchamber tunnel start --provider ngrok --mode quick
 openchamber tunnel status
 ```
 
-When the tunnel is up, `status` shows a public URL. Open it, or scan the QR code, to reach OpenChamber from anywhere.
+When the tunnel is up, `status` shows a public URL. Open it, or scan the QR code, to reach Sharpie from anywhere.
 
-By default, OpenChamber prints a QR code in interactive TTY sessions. Use `--qr` to force QR output, or `--no-qr` to disable it.
+By default, Sharpie prints a QR code in interactive TTY sessions. Use `--qr` to force QR output, or `--no-qr` to disable it.
 
 ## Providers
 
@@ -106,7 +106,7 @@ openchamber tunnel stop --port 3000
 
 ## Behavior notes
 
-- one active tunnel per OpenChamber instance (port)
+- one active tunnel per Sharpie instance (port)
 - starting a new mode/provider on same instance replaces previous tunnel
 - generating a new connect link revokes previous unused one
 - tunnel auto-start preserves server flags like `--ui-password` and `--api-only` in the instance settings used by restart/update flows
@@ -116,5 +116,5 @@ openchamber tunnel stop --port 3000
 - [Connect a Device](/connect-devices/) — pair your own devices without a public URL
 - [Security](/security/) — protect the UI before exposing it
 - [Desktop Tunnels](/desktop-tunnels/) — desktop app tunnel setup without CLI startup
-- [PWA & Mobile](/mobile/) — reach OpenChamber from your phone
+- [PWA & Mobile](/mobile/) — reach Sharpie from your phone
 - [Troubleshooting](/troubleshooting/) — if the tunnel link doesn't work

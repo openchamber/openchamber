@@ -45,7 +45,7 @@ export const isConfigured = () => {
 export const fetchOllamaCloudUsage = async (credential, fetchImpl = fetch) => {
   const response = await fetchImpl('https://ollama.com/settings', {
     method: 'GET',
-    headers: { Cookie: credential.cookie, 'User-Agent': 'OpenChamber quota provider' },
+    headers: { Cookie: credential.cookie, 'User-Agent': 'Sharpie quota provider' },
     redirect: 'manual',
     signal: AbortSignal.timeout(15_000),
   });

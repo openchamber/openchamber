@@ -142,7 +142,7 @@ async function resolveTargetInstance({
 
   if (options.all && requireAll) {
     if (running.length === 0) {
-      throw new Error('No running OpenChamber instance found. Start one with `openchamber serve`.');
+      throw new Error('No running Sharpie instance found. Start one with `openchamber serve`.');
     }
     return running;
   }
@@ -155,11 +155,11 @@ async function resolveTargetInstance({
         if (!attachability.attachable) {
           if (attachability.reason === 'desktop') {
             throw new Error(
-              `Port ${options.port} is used by OpenChamber Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
+              `Port ${options.port} is used by Sharpie Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
             );
           }
           throw new Error(
-            `Port ${options.port} is not an attachable OpenChamber tunnel instance. Ensure it is healthy and running OpenChamber CLI runtime.`
+            `Port ${options.port} is not an attachable Sharpie tunnel instance. Ensure it is healthy and running Sharpie CLI runtime.`
           );
         }
       }
@@ -170,7 +170,7 @@ async function resolveTargetInstance({
       const systemInfo = await fetchSystemInfoFromPort(options.port, globalThis.fetch, options.host);
       if (isDesktopRuntimeForPort(systemInfo, options.port)) {
         throw new Error(
-          `Port ${options.port} is used by OpenChamber Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
+          `Port ${options.port} is used by Sharpie Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
         );
       }
     }
@@ -190,7 +190,7 @@ async function resolveTargetInstance({
       const started = running.find((entry) => entry.port === options.port);
       if (started) return { ...started, autoStarted: true };
     }
-    throw new Error(`No running OpenChamber instance found on port ${options.port}.`);
+    throw new Error(`No running Sharpie instance found on port ${options.port}.`);
   }
 
   if (rejectDesktopRuntime) {
@@ -212,7 +212,7 @@ async function resolveTargetInstance({
 
     if (attachableEntries.length > 1) {
       const ports = attachableEntries.map((entry) => entry.port).join(', ');
-      throw new Error(`Multiple attachable OpenChamber instances found: ${ports}. Use --port <port> or --all.`);
+      throw new Error(`Multiple attachable Sharpie instances found: ${ports}. Use --port <port> or --all.`);
     }
 
     if (allowAutoStart) {
@@ -229,10 +229,10 @@ async function resolveTargetInstance({
     }
 
     if (sawDesktop) {
-      throw new Error('Only OpenChamber Desktop instance(s) detected. Tunnel attach requires a CLI instance from `openchamber serve`.');
+      throw new Error('Only Sharpie Desktop instance(s) detected. Tunnel attach requires a CLI instance from `openchamber serve`.');
     }
 
-    throw new Error('No attachable OpenChamber instance found. Start one with `openchamber serve`.');
+    throw new Error('No attachable Sharpie instance found. Start one with `openchamber serve`.');
   }
 
   if (running.length === 1) {
@@ -251,11 +251,11 @@ async function resolveTargetInstance({
       const started = running.find((entry) => entry.port === startedPort) || getLatestInstance(running);
       if (started) return { ...started, autoStarted: true };
     }
-    throw new Error('No running OpenChamber instance found. Start one with `openchamber serve`.');
+    throw new Error('No running Sharpie instance found. Start one with `openchamber serve`.');
   }
 
   const ports = running.map((entry) => entry.port).join(', ');
-  throw new Error(`Multiple OpenChamber instances found: ${ports}. Use --port <port> or --all.`);
+  throw new Error(`Multiple Sharpie instances found: ${ports}. Use --port <port> or --all.`);
 }
 
 async function resolveTunnelReadEntries(options) {
@@ -264,13 +264,13 @@ async function resolveTunnelReadEntries(options) {
   if (options.explicitPort) {
     const found = running.find((entry) => entry.port === options.port);
     if (!found) {
-      throw new Error(`No running OpenChamber instance found on port ${options.port}.`);
+      throw new Error(`No running Sharpie instance found on port ${options.port}.`);
     }
     return [found];
   }
 
   if (running.length === 0) {
-    throw new Error('No running OpenChamber instance found. Start one with `openchamber serve`.');
+    throw new Error('No running Sharpie instance found. Start one with `openchamber serve`.');
   }
 
   return running;
@@ -1081,7 +1081,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
                 key: 'managed-remote-port',
                 code: '[PORT_MISMATCH]',
                 lines: [
-                  'Cloudflare target must match the active OpenChamber CLI port.',
+                  'Cloudflare target must match the active Sharpie CLI port.',
                   'Example: `http://127.0.0.1:<port>`',
                   'If CLI picked a different port, update Cloudflare or run `openchamber serve --port <port>`.',
                 ],
@@ -1436,7 +1436,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
             const safeInstances = runningInstances.filter((entry) => !isUnsafeBrowserPort(entry.port));
             if (safeInstances.length === 0) {
               throw new TunnelCliError(
-                'All discovered OpenChamber instance ports are browser-unsafe. Start or target a safe port (3000, 5173, 8080, or high ephemeral).',
+                'All discovered Sharpie instance ports are browser-unsafe. Start or target a safe port (3000, 5173, 8080, or high ephemeral).',
                 EXIT_CODE.USAGE_ERROR,
               );
             }
@@ -1453,13 +1453,13 @@ async function tunnelCommand(options, subcommand, action, deps) {
 
             if (attachableSafeInstances.length === 0) {
               throw new TunnelCliError(
-                'No attachable OpenChamber CLI instances found on safe ports. Start one with `openchamber serve --port 3000`.',
+                'No attachable Sharpie CLI instances found on safe ports. Start one with `openchamber serve --port 3000`.',
                 EXIT_CODE.USAGE_ERROR,
               );
             }
 
             const selectedPort = await clackSelect({
-              message: 'Select OpenChamber instance port',
+              message: 'Select Sharpie instance port',
               options: attachableSafeInstances.map((entry) => ({
                 value: entry.port,
                 label: `port ${entry.port}`,
@@ -1494,7 +1494,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
 
         if (instance?.autoStarted) {
           const healthProgress = await createProgress(options, { max: 60 });
-          healthProgress?.start(`Waiting for OpenChamber on port ${instance.port} to become healthy (up to 60s)...`);
+          healthProgress?.start(`Waiting for Sharpie on port ${instance.port} to become healthy (up to 60s)...`);
           let progressedSeconds = 0;
           const healthy = await waitForServerHealth(instance.port, {
             timeoutMs: 60000,
@@ -1506,7 +1506,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
               if (delta > 0) {
                 healthProgress.advance(delta);
                 progressedSeconds = elapsedSeconds;
-                healthProgress.message(`Waiting for OpenChamber health (${progressedSeconds}s / 60s)...`);
+                healthProgress.message(`Waiting for Sharpie health (${progressedSeconds}s / 60s)...`);
               }
               if (complete && progressedSeconds < 60) {
                 const remaining = 60 - progressedSeconds;
@@ -1518,9 +1518,9 @@ async function tunnelCommand(options, subcommand, action, deps) {
             },
           });
           if (!healthy) {
-            healthProgress?.stop('OpenChamber is still starting');
+            healthProgress?.stop('Sharpie is still starting');
             throw new Error(
-              `OpenChamber on port ${instance.port} is still starting after 60s. Startup time can vary by machine performance. ` +
+              `Sharpie on port ${instance.port} is still starting after 60s. Startup time can vary by machine performance. ` +
               `Wait another minute, then check health with \`curl -fsS ${buildLocalUrl(instance.port, '/health')}\`. ` +
               `If health is OK, retry tunnel start with \`openchamber tunnel start --port ${instance.port}\`. ` +
               `For diagnostics run \`openchamber logs -p ${instance.port}\`.`

@@ -37,7 +37,7 @@ openchamber tunnel start --provider cloudflare --mode quick --qr
 openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
 openchamber tunnel status --all      # Show tunnel state across instances
 openchamber tunnel stop --port 3000  # Stop tunnel only (server stays running)
-openchamber connect-url --port 3000  # Add this server to OpenChamber Desktop
+openchamber connect-url --port 3000  # Add this server to Sharpie Desktop
 openchamber connect-url --server http://host:3000 --qr
 openchamber connect-url --port 3000 --qr
 openchamber logs                     # Follow latest instance logs
@@ -49,7 +49,7 @@ openchamber update                   # Update to latest version
 
 `startup enable` snapshots your current environment into the native service so startup behaves like you launched `openchamber` from the same shell. This preserves provider tokens, PATH, SSH agent settings, and other CLI auth/config env vars. Use `--no-env-snapshot` for a minimal service env.
 
-When OpenChamber launches the local OpenCode server, it also registers a native
+When Sharpie launches the local OpenCode server, it also registers a native
 `openchamber` agent tool for project, session, and scheduled-task orchestration.
 The tool is not injected when connecting to an external OpenCode server.
 Behavior settings can optionally inject a managed system-prompt optimizer on
@@ -58,14 +58,14 @@ external OpenCode servers.
 
 ### Tunnel behavior notes
 
-- One active tunnel per running OpenChamber instance (port).
+- One active tunnel per running Sharpie instance (port).
 - Starting a different tunnel mode/provider on the same instance replaces the active tunnel.
 - Replacing or stopping a tunnel revokes existing connect links and invalidates remote tunnel sessions.
 - Connect links are one-time tokens; generating a new link revokes the previous unused link.
 
-### Connect other OpenChamber apps
+### Connect other Sharpie apps
 
-Use `connect-url` when a web/API server should be added to OpenChamber Desktop or another OpenChamber app. If no server is running on the selected port, OpenChamber starts one first.
+Use `connect-url` when a web/API server should be added to Sharpie Desktop or another Sharpie app. If no server is running on the selected port, Sharpie starts one first.
 
 ```bash
 openchamber connect-url --port 3000
@@ -77,7 +77,7 @@ openchamber connect-url --port 3000 --lan --server http://workstation.local:3000
 
 ### Headless/API-only server for Desktop
 
-Use this on a remote machine when you want OpenChamber running as a web/API server, then connect to it from OpenChamber Desktop on another machine:
+Use this on a remote machine when you want Sharpie running as a web/API server, then connect to it from Sharpie Desktop on another machine:
 
 ```bash
 openchamber connect-url --port 3000 --api-only --lan --server http://workstation.local:3000 --qr --ui-password your-password
@@ -85,7 +85,7 @@ openchamber connect-url --port 3000 --api-only --lan --server http://workstation
 
 `--api-only` starts API routes without serving browser UI assets. `--lan` binds the server so other machines can reach it. `--server` is the address saved into the Desktop connection link. `--ui-password` protects browser access if UI routes are enabled elsewhere; the generated client token is what Desktop uses for API access.
 
-This creates a remote client token and prints an `openchamber://connect?...` link. The link contains the server URL, token, label, and payload version. In OpenChamber Desktop, paste it in **Settings -> Remote Instances -> Direct Instances -> Import Link** to add that server as an Instance.
+This creates a remote client token and prints an `openchamber://connect?...` link. The link contains the server URL, token, label, and payload version. In Sharpie Desktop, paste it in **Settings -> Remote Instances -> Direct Instances -> Import Link** to add that server as an Instance.
 
 If the server was started with `--lan` or `--host 0.0.0.0`, `connect-url` automatically advertises a detected LAN IP instead of `127.0.0.1`. Use `--server <url>` when you want to advertise a specific DNS name, Tailscale address, reverse proxy URL, or HTTPS endpoint.
 
@@ -95,7 +95,7 @@ If you are exposing the server beyond localhost, start it with a password:
 openchamber serve --lan --port 3000 --ui-password your-password
 ```
 
-Generating a client token does not automatically password-protect the hosted browser UI. `--ui-password` protects browser access; the client token lets another OpenChamber app connect to this server.
+Generating a client token does not automatically password-protect the hosted browser UI. `--ui-password` protects browser access; the client token lets another Sharpie app connect to this server.
 
 <details>
 <summary>Connect to external OpenCode server</summary>
@@ -111,7 +111,7 @@ OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
 | `OPENCODE_PORT` | Port of external server |
 | `OPENCODE_SKIP_START` | Skip starting embedded OpenCode server |
 | `OPENCHAMBER_OPENCODE_HOSTNAME` | Bind hostname for managed OpenCode server (default: `127.0.0.1`, use `0.0.0.0` for LAN/remote access — trusted networks only). Invalid values are rejected with an error and fall back to loopback |
-| `OPENCHAMBER_HOST` | Bind hostname for the OpenChamber web server (default: `127.0.0.1`; use `0.0.0.0` for LAN/remote access — trusted networks only) |
+| `OPENCHAMBER_HOST` | Bind hostname for the Sharpie web server (default: `127.0.0.1`; use `0.0.0.0` for LAN/remote access — trusted networks only) |
 | `OPENCHAMBER_VERBOSE_REQUEST_LOGS` | Set to `true` to log every HTTP request; disabled by default to keep user logs small |
 | `OPENCHAMBER_SKIP_API_COMPRESSION` | Set to `true` to disable gzip compression for `/api/*` responses |
 | `OPENCHAMBER_COMPRESS_API` | Set to `true` to force `/api/*` compression, or `false` to disable it. Desktop runtime disables API compression by default to reduce local sidecar CPU use |
@@ -206,7 +206,7 @@ WantedBy=default.target
 **`~/.config/systemd/user/openchamber.service`**
 ```ini
 [Unit]
-Description=OpenChamber Web Server
+Description=Sharpie Web Server
 After=opencode.service
 
 [Service]

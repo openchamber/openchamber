@@ -335,7 +335,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       const onExit = (code, signal) => {
         const reason = signal ? `signal ${signal}` : `code ${code}`;
         const appBundleHint = process.platform === 'darwin' && /\/OpenCode\.app\/Contents\/MacOS\/(?:OpenCode|opencode-cli)$/i.test(binary)
-          ? ' The configured binary appears to point at the macOS desktop app bundle; OpenChamber needs the standalone opencode CLI.'
+          ? ' The configured binary appears to point at the macOS desktop app bundle; Sharpie needs the standalone opencode CLI.'
           : '';
         finish(reject, new Error(`OpenCode process exited before serving with ${reason}. Binary used: ${binary}.${appBundleHint} ${formatCapturedOutput({ stdout, stderr })}`));
       };
@@ -824,7 +824,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     // A managed OpenCode process is restarted (and thus re-reads config from
     // disk) by restartOpenCode(). An external OpenCode server is NOT owned by
-    // OpenChamber: restartOpenCode() only re-probes its health, so the freshly
+    // Sharpie: restartOpenCode() only re-probes its health, so the freshly
     // written config is on disk but the running server keeps serving its old,
     // startup-cached config until the user restarts it themselves. Report this
     // honestly so callers don't claim the change is live.

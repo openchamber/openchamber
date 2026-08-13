@@ -1,15 +1,15 @@
 ---
 title: 리버스 프록시
-description: Nginx, Nginx Proxy Manager 또는 다른 리버스 프록시 뒤에서 OpenChamber를 올바르게 구성하세요.
+description: Nginx, Nginx Proxy Manager 또는 다른 리버스 프록시 뒤에서 Sharpie를 올바르게 구성하세요.
 ---
 
 # 리버스 프록시
 
-Nginx, Nginx Proxy Manager, Caddy, Cloudflare 또는 다른 리버스 프록시 뒤에서 OpenChamber를 실행한다면 이 페이지를 사용하세요.
+Nginx, Nginx Proxy Manager, Caddy, Cloudflare 또는 다른 리버스 프록시 뒤에서 Sharpie를 실행한다면 이 페이지를 사용하세요.
 
 ## 프록시를 두기 전에
 
-1. 먼저 OpenChamber가 직접 작동하는지 확인하세요.
+1. 먼저 Sharpie가 직접 작동하는지 확인하세요.
 2. 같은 네트워크에서 `http://<server-ip>:3000` 또는 사용자 지정 포트를 여세요.
 3. 직접 연결이 작동한 후에만 리버스 프록시를 추가하세요.
 
@@ -32,14 +32,14 @@ Nginx, Nginx Proxy Manager, Caddy, Cloudflare 또는 다른 리버스 프록시 
 
 - WebSocket 프록시를 활성화하세요.
 - SSE 경로에서 버퍼링을 비활성화하세요.
-- OpenChamber가 이미 응답을 압축한다면 프록시에서 gzip을 비활성화하세요.
+- Sharpie가 이미 응답을 압축한다면 프록시에서 gzip을 비활성화하세요.
 - 압축은 한 계층에서만 켜두세요.
 - `Host`, `X-Forwarded-For`, `X-Forwarded-Proto` 같은 일반 프록시 헤더를 전달하세요.
 - 사용자가 파일을 업로드한다면 본문 크기 제한을 늘리세요.
 
 ## 빠른 체크리스트
 
-- LAN에서 OpenChamber에 직접 접근 가능
+- LAN에서 Sharpie에 직접 접근 가능
 - 프록시에서 WebSocket 활성화
 - SSE 경로의 버퍼링 꺼짐
 - 프록시 호스트에서 `gzip off`, 또는 다른 방식으로 프록시 압축 비활성화
@@ -329,7 +329,7 @@ Caddy는 WebSocket 업그레이드를 자동으로 처리합니다 — 추가 �
 
 리버스 프록시 앞에 CDN(예: Cloudflare)을 두는 경우 이중 압축에 유의하세요:
 
-- OpenChamber는 HTTP 응답을 gzip으로 압축합니다(임계값 1KB).
+- Sharpie는 HTTP 응답을 gzip으로 압축합니다(임계값 1KB).
 - Cloudflare와 다른 CDN도 기본적으로 응답을 압축합니다.
 - 이로 인해 이중 압축된 응답이나 잘못된 `Content-Encoding` 헤더가 발생할 수 있습니다.
 
@@ -339,7 +339,7 @@ Caddy는 WebSocket 업그레이드를 자동으로 처리합니다 — 추가 �
 - **Nginx:** `gzip off`(위 예시에 이미 표시됨).
 - **Caddy:** 업스트림이 이미 압축된 콘텐츠를 보내면 Caddy는 기본적으로 다시 압축하지 않습니다.
 
-SSE 스트리밍 경로는 OpenChamber에서 압축에서 제외되지만, CDN이 여전히 버퍼링할 수 있습니다. SSE 경로에서 버퍼링을 비활성화하는 방법은 CDN 문서를 확인하세요.
+SSE 스트리밍 경로는 Sharpie에서 압축에서 제외되지만, CDN이 여전히 버퍼링할 수 있습니다. SSE 경로에서 버퍼링을 비활성화하는 방법은 CDN 문서를 확인하세요.
 
 ## 관련 항목
 

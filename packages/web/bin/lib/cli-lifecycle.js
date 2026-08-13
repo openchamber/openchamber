@@ -191,8 +191,8 @@ async function discoverRunningInstances(options = {}) {
       }
 
       // A live PID-file is only the right instance if the recorded port also
-      // confirms OpenChamber. Cmdline identity alone can match a recycled PID
-      // from another OpenChamber process on a different port. Try all plausible
+      // confirms Sharpie. Cmdline identity alone can match a recycled PID
+      // from another Sharpie process on a different port. Try all plausible
       // hosts first; if matched/unknown identity still can't be confirmed, keep
       // the registry files but don't claim the instance is running.
       const { info: liveInfo, host: confirmedHost } = await fetchSystemInfoFromPortCandidates(
@@ -247,7 +247,7 @@ async function discoverRunningInstances(options = {}) {
   return instances;
 }
 
-async function discoverOpenChamberInstanceOnPort(port, options = {}) {
+async function discoverSharpieInstanceOnPort(port, options = {}) {
   if (!Number.isFinite(port) || port <= 0) return null;
   const runningInstances = Array.isArray(options.runningInstances)
     ? options.runningInstances
@@ -273,7 +273,7 @@ async function discoverLifecycleInstances(options = {}, deps = {}) {
   }
   const found = runningInstances.find((entry) => entry.port === options.port);
   if (found) return [found];
-  const liveInstance = await discoverOpenChamberInstanceOnPort(options.port, {
+  const liveInstance = await discoverSharpieInstanceOnPort(options.port, {
     ...deps,
     host: options.host,
     runningInstances,
@@ -410,7 +410,7 @@ async function resolveTunnelProviders(options = {}, deps = {}) {
 export {
   resolveDoctorPortStatuses,
   discoverRunningInstances,
-  discoverOpenChamberInstanceOnPort,
+  discoverSharpieInstanceOnPort,
   discoverLifecycleInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
   getLatestInstance,

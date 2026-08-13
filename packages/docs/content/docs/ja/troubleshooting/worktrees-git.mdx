@@ -9,9 +9,9 @@ description: よくある worktree と Git の問題を修正します。
 
 ## worktree に注意が必要
 
-OpenChamber は、worktree に異常があるとフラグを立てます。
+Sharpie は、worktree に異常があるとフラグを立てます。
 
-- **folder missing** — worktree のフォルダが削除された、または OpenChamber 外で移動されました。セッションを削除し、新しい worktree を作成してください
+- **folder missing** — worktree のフォルダが削除された、または Sharpie 外で移動されました。セッションを削除し、新しい worktree を作成してください
 - **detached or unborn branch** — worktree が通常のブランチ上にありません。ブランチをチェックアウトしてください
 - **merge, rebase, or cherry-pick in progress** — 操作が途中で残っています。Git ビューから完了または中止してください
 
@@ -27,7 +27,7 @@ OpenChamber は、worktree に異常があるとフラグを立てます。
 ## SSH または Windows パスの問題
 
 - リポジトリが使う SSH キーが [Git ID](/git-identities/) に設定したものか確認します
-- Windows では Git が Unix 形式のパス（`/c/Users/...` など）を使います。OpenChamber はこれを扱えますが、カスタム SSH キーパスも同じ形式にしてください
+- Windows では Git が Unix 形式のパス（`/c/Users/...` など）を使います。Sharpie はこれを扱えますが、カスタム SSH キーパスも同じ形式にしてください
 
 ## 関連
 

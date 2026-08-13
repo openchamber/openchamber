@@ -5,7 +5,7 @@ import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensi
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 
-const APP_TITLE = 'OpenChamber';
+const APP_TITLE = 'Sharpie';
 
 const formatProjectLabel = (label: string): string => {
   return label.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());

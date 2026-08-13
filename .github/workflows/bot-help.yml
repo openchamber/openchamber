@@ -53,7 +53,7 @@ jobs:
               ;;
           esac
 
-          gh issue comment "$ISSUE_NUMBER" --body "<h3>OpenChamber Bot Commands</h3>
+          gh issue comment "$ISSUE_NUMBER" --body "<h3>Sharpie Bot Commands</h3>
 
           Use one command at the start of a comment. Any text after the command is passed as maintainer focus.
 

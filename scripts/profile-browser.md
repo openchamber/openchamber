@@ -1,6 +1,6 @@
 # Browser performance capture
 
-Start OpenChamber locally, then run:
+Start Sharpie locally, then run:
 
 ```bash
 bun run profile:browser
@@ -8,7 +8,7 @@ bun run profile:browser
 
 The command opens an isolated Chrome profile. On the first run, complete any
 login or setup in that window, prepare the sessions and screen you want to
-measure, then return to the terminal and press Enter. Use OpenChamber normally
+measure, then return to the terminal and press Enter. Use Sharpie normally
 for the next 60 seconds.
 
 Google Chrome is selected first on macOS, with Chrome Canary and Chromium as

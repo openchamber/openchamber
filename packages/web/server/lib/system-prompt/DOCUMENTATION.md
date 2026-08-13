@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This module injects an opt-in OpenCode plugin only when OpenChamber launches
+This module injects an opt-in OpenCode plugin only when Sharpie launches
 and owns the OpenCode process and `optimizeSystemPrompt` is enabled. The plugin
 replaces OpenCode's built-in behavioral/provider prompt with a short identity
 while preserving the environment, project instructions, MCP instructions,
@@ -10,7 +10,7 @@ skills, conversation history, and separately supplied tools.
 
 ## Runtime flow
 
-1. Settings persist `optimizeSystemPrompt` in OpenChamber's `settings.json`.
+1. Settings persist `optimizeSystemPrompt` in Sharpie's `settings.json`.
 2. The setting is applied when managed OpenCode restarts.
 3. The runtime materializes the plugin under
    `<openchamber-data-dir>/system-prompt/` and appends its `file://` URL to

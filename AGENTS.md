@@ -1,8 +1,8 @@
-# OpenChamber Agent Guide
+# Sharpie Agent Guide
 
 ## Purpose
 
-OpenChamber provides shared web, desktop, VS Code, hosted-mobile, and native-mobile UI surfaces for OpenCode.
+Sharpie provides shared web, desktop, VS Code, hosted-mobile, and native-mobile UI surfaces for OpenCode.
 
 This file contains only always-on repository rules and routing. Detailed workflows belong to project skills and module documentation.
 
@@ -23,15 +23,15 @@ read. Skill loading is a required part of the task, not optional guidance.
 ## Runtime Boundaries
 
 - `packages/ui`: shared React UI, state, sync, and runtime contracts.
-- `packages/web`: web surfaces, OpenChamber server, managed/external OpenCode lifecycle, and CLI.
+- `packages/web`: web surfaces, Sharpie server, managed/external OpenCode lifecycle, and CLI.
 - `packages/electron`: native desktop shell and privileged Electron boundary.
 - `packages/vscode`: extension host, webview, and runtime bridge.
-- `packages/mobile`: Capacitor iOS/Android shell; bundles the mobile web surface and connects to an existing OpenChamber server.
+- `packages/mobile`: Capacitor iOS/Android shell; bundles the mobile web surface and connects to an existing Sharpie server.
 - `packages/docs`: product documentation; not a Bun workspace.
 
-Shared UI calls official OpenCode APIs through `@opencode-ai/sdk/v2`. OpenChamber-owned capabilities use `RuntimeAPIs`, `runtimeFetch`, and shared browser/realtime transport helpers. Server-side upstream integrations may use their owning runtime modules.
+Shared UI calls official OpenCode APIs through `@opencode-ai/sdk/v2`. Sharpie-owned capabilities use `RuntimeAPIs`, `runtimeFetch`, and shared browser/realtime transport helpers. Server-side upstream integrations may use their owning runtime modules.
 
-Electron starts the OpenChamber backend in-process, never as a sidecar. Development may load loopback/HMR UI; packaged builds load staged assets through `openchamber-ui://` while the loopback server remains the API backend. Keep domain backends in web/runtime modules unless behavior is inherently native.
+Electron starts the Sharpie backend in-process, never as a sidecar. Development may load loopback/HMR UI; packaged builds load staged assets through `openchamber-ui://` while the loopback server remains the API backend. Keep domain backends in web/runtime modules unless behavior is inherently native.
 
 Shared contracts must define intentional behavior for every applicable runtime: web, desktop, VS Code, hosted mobile, and Capacitor mobile.
 

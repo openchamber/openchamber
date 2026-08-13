@@ -1,15 +1,15 @@
 ---
 title: Reverse proxy
-description: Configurez correctement OpenChamber derrière Nginx, Nginx Proxy Manager ou un autre reverse proxy.
+description: Configurez correctement Sharpie derrière Nginx, Nginx Proxy Manager ou un autre reverse proxy.
 ---
 
 # Reverse proxy
 
-Utilisez cette page si vous exécutez OpenChamber derrière Nginx, Nginx Proxy Manager, Caddy, Cloudflare ou un autre reverse proxy.
+Utilisez cette page si vous exécutez Sharpie derrière Nginx, Nginx Proxy Manager, Caddy, Cloudflare ou un autre reverse proxy.
 
 ## Avant de le proxifier
 
-1. Confirmez d’abord qu’OpenChamber fonctionne en accès direct.
+1. Confirmez d’abord qu’Sharpie fonctionne en accès direct.
 2. Ouvrez `http://<server-ip>:3000` ou votre port personnalisé depuis le même réseau.
 3. N’ajoutez le reverse proxy qu’une fois la connexion directe fonctionnelle.
 
@@ -32,14 +32,14 @@ Utilisez cette page si vous exécutez OpenChamber derrière Nginx, Nginx Proxy M
 
 - Activez le proxy WebSocket.
 - Désactivez le buffering sur les routes SSE.
-- Désactivez gzip sur le proxy si OpenChamber compresse déjà les réponses.
+- Désactivez gzip sur le proxy si Sharpie compresse déjà les réponses.
 - Gardez la compression active dans une seule couche.
 - Transmettez les headers proxy normaux comme `Host`, `X-Forwarded-For` et `X-Forwarded-Proto`.
 - Augmentez les limites de taille de corps si les utilisateurs uploadent des fichiers.
 
 ## Checklist rapide
 
-- OpenChamber joignable directement sur le LAN
+- Sharpie joignable directement sur le LAN
 - WebSockets activés dans le proxy
 - buffering désactivé sur les routes SSE
 - `gzip off` sur le proxy host, ou compression proxy désactivée autrement
@@ -329,7 +329,7 @@ Caddy gère automatiquement les upgrades WebSocket — aucune configuration supp
 
 Si vous placez un CDN (comme Cloudflare) devant votre reverse proxy, faites attention à la double compression :
 
-- OpenChamber compresse les réponses HTTP avec gzip (seuil de 1 Ko).
+- Sharpie compresse les réponses HTTP avec gzip (seuil de 1 Ko).
 - Cloudflare et d’autres CDN compressent aussi les réponses par défaut.
 - Cela peut produire des réponses compressées deux fois ou des headers `Content-Encoding` incorrects.
 
@@ -339,7 +339,7 @@ Pour éviter cela, désactivez la compression à **une** couche :
 - **Nginx :** `gzip off` (déjà montré dans les exemples ci-dessus).
 - **Caddy :** Caddy ne re-compresse pas par défaut si l’upstream envoie déjà du contenu compressé.
 
-Les routes de streaming SSE sont exclues de la compression par OpenChamber, mais le CDN peut encore les bufferiser. Consultez la documentation de votre CDN pour désactiver le buffering sur les chemins SSE.
+Les routes de streaming SSE sont exclues de la compression par Sharpie, mais le CDN peut encore les bufferiser. Consultez la documentation de votre CDN pour désactiver le buffering sur les chemins SSE.
 
 ## Pages liées
 

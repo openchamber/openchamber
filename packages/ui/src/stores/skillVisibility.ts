@@ -1,7 +1,7 @@
 /**
  * Narrowing the discovered skill list to what the agent can actually invoke.
  *
- * OpenChamber scans every root it knows about. OpenCode loads a narrower set,
+ * Sharpie scans every root it knows about. OpenCode loads a narrower set,
  * governed by environment flags the browser cannot read — the server reports
  * them alongside the scan.
  *

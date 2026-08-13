@@ -1,15 +1,15 @@
 ---
 title: Connecter un appareil
-description: Associez votre téléphone, votre desktop ou un autre navigateur à votre serveur OpenChamber avec un QR code à usage unique.
+description: Associez votre téléphone, votre desktop ou un autre navigateur à votre serveur Sharpie avec un QR code à usage unique.
 ---
 
 # Connecter un appareil
 
-Associez un autre appareil — l’application mobile, l’application desktop ou un navigateur sur une autre machine — à votre serveur OpenChamber en scannant un QR code à usage unique. C’est la méthode recommandée pour connecter des appareils : aucun port à ouvrir, aucune adresse à taper.
+Associez un autre appareil — l’application mobile, l’application desktop ou un navigateur sur une autre machine — à votre serveur Sharpie en scannant un QR code à usage unique. C’est la méthode recommandée pour connecter des appareils : aucun port à ouvrir, aucune adresse à taper.
 
 ## Associer un appareil
 
-1. Sur la machine qui exécute OpenChamber, ouvrez **Paramètres → Instances distantes → Se connecter à ce serveur** et pressez **Ajouter un appareil**.
+1. Sur la machine qui exécute Sharpie, ouvrez **Paramètres → Instances distantes → Se connecter à ce serveur** et pressez **Ajouter un appareil**.
 2. Donnez un nom à l’appareil (par ex. *Mon iPhone*) pour le reconnaître plus tard.
 3. Choisissez où vous utiliserez l’appareil :
    - **Cet ordinateur uniquement** — pour les applications sur cette même machine
@@ -18,7 +18,7 @@ Associez un autre appareil — l’application mobile, l’application desktop o
 4. Pressez **Créer le code QR**.
 5. Sur l’autre appareil, scannez le code :
    - **application mobile** — touchez **Scanner le code QR** sur l’écran de connexion (ou dans la liste des instances)
-   - **application desktop** — copiez plutôt le lien de connexion et collez-le dans **Paramètres → Instances distantes → Autres serveurs OpenChamber → Importer le lien**
+   - **application desktop** — copiez plutôt le lien de connexion et collez-le dans **Paramètres → Instances distantes → Autres serveurs Sharpie → Importer le lien**
 
 Le dialogue se ferme tout seul dès que l’appareil se connecte, et l’appareil apparaît dans la liste avec un statut en direct. C’est tout — vous êtes associé.
 
@@ -56,7 +56,7 @@ openchamber connect-url --relay --qr
 
 Un lien `--relay` contient les deux routes, exactement comme le dialogue : l’appareil se connecte directement via votre réseau local quand il peut joindre le serveur, et bascule sur le [Relais privé](/private-relay/) en déplacement. Le relais démarre tout seul : une instance en cours d’exécution prend le lien en compte en moins d’une minute, une instance arrêtée au prochain lancement.
 
-> La route directe ne fonctionne que si le serveur écoute réellement sur votre réseau. Par défaut, OpenChamber n’écoute que sur la machine elle-même — démarrez-le avec `--lan` pour le rendre joignable en Wi-Fi. La commande vous prévient (`[LAN_UNREACHABLE]`) quand la route directe du lien ne sera pas utilisable depuis d’autres appareils ; un lien `--relay` fonctionne quand même dans ce cas, simplement toujours via le relais.
+> La route directe ne fonctionne que si le serveur écoute réellement sur votre réseau. Par défaut, Sharpie n’écoute que sur la machine elle-même — démarrez-le avec `--lan` pour le rendre joignable en Wi-Fi. La commande vous prévient (`[LAN_UNREACHABLE]`) quand la route directe du lien ne sera pas utilisable depuis d’autres appareils ; un lien `--relay` fonctionne quand même dans ce cas, simplement toujours via le relais.
 
 Le lien et le QR code affichés fonctionnent exactement comme ceux du dialogue des paramètres — à usage unique, avec expiration, révocables.
 

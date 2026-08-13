@@ -1,15 +1,15 @@
 ---
 title: OpenCode Server
-description: Conecta OpenChamber a un servidor de OpenCode local o remoto.
+description: Conecta Sharpie a un servidor de OpenCode local o remoto.
 ---
 
 # OpenCode Server
 
-OpenChamber se ejecuta sobre un servidor de OpenCode. De forma predeterminada inicia uno por ti, así que no tienes que hacer nada. Solo necesitas esta página si quieres apuntar OpenChamber a un servidor que ya ejecutas, o gestionar el que él inicia.
+Sharpie se ejecuta sobre un servidor de OpenCode. De forma predeterminada inicia uno por ti, así que no tienes que hacer nada. Solo necesitas esta página si quieres apuntar Sharpie a un servidor que ya ejecutas, o gestionar el que él inicia.
 
-## Cómo encuentra OpenChamber un servidor
+## Cómo encuentra Sharpie un servidor
 
-Cuando OpenChamber arranca, busca un servidor en este orden:
+Cuando Sharpie arranca, busca un servidor en este orden:
 
 1. reutilizar un servidor que ya inició
 2. conectarse a uno externo si se lo indicaste (ver más abajo)
@@ -20,18 +20,18 @@ Si no hay nada configurado, el paso 4 ocurre automáticamente y ya tienes todo e
 
 ## Conéctate a un servidor que ya ejecutas
 
-Define esto antes de iniciar OpenChamber:
+Define esto antes de iniciar Sharpie:
 
 ```bash
 OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 ```
 
 - `OPENCODE_HOST` — la dirección completa de tu servidor de OpenCode, incluido el puerto (un valor como `http://localhost:4096`). No debe tener una ruta al final.
-- `OPENCODE_SKIP_START=true` — le indica a OpenChamber que no inicie su propio servidor.
+- `OPENCODE_SKIP_START=true` — le indica a Sharpie que no inicie su propio servidor.
 
 Si solo necesitas cambiar el puerto, define `OPENCODE_PORT` en lugar de `OPENCODE_HOST`.
 
-Si a `OPENCODE_HOST` le falta el puerto o tiene una ruta, OpenChamber lo ignora y recurre a iniciar su propio servidor. Observa los registros de arranque por si aparece una advertencia `[config]` cuando una conexión que esperabas no ocurrió.
+Si a `OPENCODE_HOST` le falta el puerto o tiene una ruta, Sharpie lo ignora y recurre a iniciar su propio servidor. Observa los registros de arranque por si aparece una advertencia `[config]` cuando una conexión que esperabas no ocurrió.
 
 ## Gestiona el servidor desde la CLI
 
@@ -44,9 +44,9 @@ openchamber stop
 
 `openchamber` por sí solo inicia el servidor en segundo plano. Añade `--foreground` para mantenerlo asociado a tu terminal.
 
-## Iniciar OpenChamber al iniciar sesión
+## Iniciar Sharpie al iniciar sesión
 
-Usa `startup enable` para instalar un servicio nativo de usuario. OpenChamber usa `launchd` en macOS, `systemd --user` en Linux y Task Scheduler en Windows.
+Usa `startup enable` para instalar un servicio nativo de usuario. Sharpie usa `launchd` en macOS, `systemd --user` en Linux y Task Scheduler en Windows.
 
 ```bash
 openchamber startup enable
@@ -70,7 +70,7 @@ openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password s
 
 El servicio de inicio recuerda `--port`, `--host`, `--ui-password` y `--api-only`. El reinicio por CLI y el reinicio durante una actualización reutilizan esos ajustes guardados.
 
-Para crear un enlace de conexión para otra app de OpenChamber, usa:
+Para crear un enlace de conexión para otra app de Sharpie, usa:
 
 ```bash
 openchamber connect-url --port 3000 --server http://your-host:3000 --qr
@@ -89,7 +89,7 @@ Detener el túnel no reinicia el servicio ni la app.
 
 ## "OpenCode is restarting"
 
-Mientras el servidor se inicia o reinicia, OpenChamber muestra un estado "OpenCode is restarting" y pausa las solicitudes hasta que esté listo. Esto es normal justo después de iniciar o reiniciar. Si nunca desaparece, consulta [Conexión de OpenCode](/es/troubleshooting/opencode-connection/).
+Mientras el servidor se inicia o reinicia, Sharpie muestra un estado "OpenCode is restarting" y pausa las solicitudes hasta que esté listo. Esto es normal justo después de iniciar o reiniciar. Si nunca desaparece, consulta [Conexión de OpenCode](/es/troubleshooting/opencode-connection/).
 
 ## Relacionado
 

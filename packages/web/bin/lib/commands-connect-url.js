@@ -56,7 +56,7 @@ function resolveRelayUrl(settings) {
 // whole object and writes it back with the relay keys added, so other settings
 // are preserved. Enough for the CLI without wiring the full settings runtime.
 function createSettingsAccessors() {
-  const settingsPath = path.join(getOpenChamberDataDir(), SETTINGS_FILE_NAME);
+  const settingsPath = path.join(getSharpieDataDir(), SETTINGS_FILE_NAME);
   const readSettingsFromDiskMigrated = async () => {
     try {
       return JSON.parse(await fs.promises.readFile(settingsPath, 'utf8'));
@@ -101,7 +101,7 @@ async function buildRelayPairingCandidate() {
 // session created here is redeemable by the live server. createPairingSession
 // only writes the store (no server needed to mint); redeem is served by the host.
 function createCliPairingRuntime() {
-  const dataDir = getOpenChamberDataDir();
+  const dataDir = getSharpieDataDir();
   const remoteClientAuthRuntime = createRemoteClientAuthRuntime({
     fsPromises: fs.promises,
     path,
@@ -206,7 +206,7 @@ function normalizeServerUrlForConnection(value) {
   }
 }
 
-function getOpenChamberDataDir() {
+function getSharpieDataDir() {
   return process.env.OPENCHAMBER_DATA_DIR
     ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
     : path.join(os.homedir(), '.config', 'openchamber');
@@ -225,7 +225,7 @@ async function displayTunnelQrCode(url) {
 
 function createConnectUrlCommand({ serveCommand }) {
   return async function connectUrlCommand(options = {}) {
-    assertSafeBrowserPort(options.port, { context: 'OpenChamber connect-url' });
+    assertSafeBrowserPort(options.port, { context: 'Sharpie connect-url' });
     const explicitServerUrl = options.server ? normalizeServerUrlForConnection(options.server) : null;
     if (options.server && !explicitServerUrl) {
       throw new TunnelCliError('Invalid --server URL. Use an http:// or https:// URL.', EXIT_CODE.USAGE_ERROR);
@@ -290,9 +290,9 @@ function createConnectUrlCommand({ serveCommand }) {
       return;
     }
 
-    clackIntro('OpenChamber pairing link');
+    clackIntro('Sharpie pairing link');
     if (serverState.autoStarted) {
-      logStatus('success', `started OpenChamber on port ${options.port}`);
+      logStatus('success', `started Sharpie on port ${options.port}`);
     }
     logStatus('success', connectUrl);
     clackLog.info(`Server URL: ${serverUrl}`);
@@ -306,20 +306,20 @@ function createConnectUrlCommand({ serveCommand }) {
       clackLog.info(`Fingerprint: ${pairing.fingerprint}`);
     }
     if (resolvedServerUrl.source === 'lan-detected') {
-      clackLog.info('Detected a LAN address because OpenChamber is bound to all interfaces. Use --server to override it.');
+      clackLog.info('Detected a LAN address because Sharpie is bound to all interfaces. Use --server to override it.');
     } else if (resolvedServerUrl.source === 'loopback-fallback') {
-      clackLog.warn('OpenChamber is bound to all interfaces, but no LAN address was detected. Use --server to provide a reachable URL.');
+      clackLog.warn('Sharpie is bound to all interfaces, but no LAN address was detected. Use --server to provide a reachable URL.');
     } else if (isLoopbackServerUrl(serverUrl)) {
       // The direct candidate points at this machine only — other devices cannot
       // use it. Say so instead of letting a "LAN" link silently not work (or a
       // --relay link silently go relay-only).
       if (options.relay) {
-        logStatus('warn', '[LAN_UNREACHABLE]', 'OpenChamber only listens on this machine, so devices will always connect through the relay. Restart with --lan to allow direct home-network connections.');
+        logStatus('warn', '[LAN_UNREACHABLE]', 'Sharpie only listens on this machine, so devices will always connect through the relay. Restart with --lan to allow direct home-network connections.');
       } else {
-        logStatus('warn', '[LAN_UNREACHABLE]', 'OpenChamber only listens on this machine, so other devices cannot use this link. Restart with --lan, or use --server to provide a reachable URL.');
+        logStatus('warn', '[LAN_UNREACHABLE]', 'Sharpie only listens on this machine, so other devices cannot use this link. Restart with --lan, or use --server to provide a reachable URL.');
       }
     }
-    clackLog.info('Scan or paste this link into another OpenChamber client. It is single-use and expires.');
+    clackLog.info('Scan or paste this link into another Sharpie client. It is single-use and expires.');
     if (options.qr === true) {
       await displayTunnelQrCode(connectUrl);
     }

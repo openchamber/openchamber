@@ -2,8 +2,8 @@
   "name": "@openchamber/electron",
   "version": "1.18.2",
   "private": true,
-  "description": "Electron desktop runtime for OpenChamber",
-  "author": "OpenChamber",
+  "description": "Electron desktop runtime for Sharpie",
+  "author": "Sharpie",
   "type": "module",
   "main": "./dist-bundle/main.mjs",
   "dependencies": {
@@ -51,8 +51,8 @@
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
-    "appId": "dev.openchamber.desktop",
-    "productName": "OpenChamber",
+    "appId": "dev.sharpie.desktop",
+    "productName": "Sharpie",
     "files": [
       "dist-bundle/main.mjs",
       "preload.mjs"
@@ -121,8 +121,8 @@
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "desktop": {
         "entry": {
-          "Name": "OpenChamber",
-          "Comment": "Desktop runtime for OpenChamber",
+          "Name": "Sharpie",
+          "Comment": "Desktop runtime for Sharpie",
           "Icon": "openchamber",
           "StartupWMClass": "openchamber"
         }

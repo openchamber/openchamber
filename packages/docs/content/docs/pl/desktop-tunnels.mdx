@@ -5,11 +5,11 @@ description: Twórz tunele Cloudflare lub Ngrok z aplikacji desktopowej.
 
 # Tunele w aplikacji desktopowej
 
-Aplikacja desktopowa może utworzyć publiczny tunel z poziomu **Settings → OpenChamber → Tunnel**. W tym trybie nie musisz uruchamiać OpenChamber z CLI.
+Aplikacja desktopowa może utworzyć publiczny tunel z poziomu **Settings → Sharpie → Tunnel**. W tym trybie nie musisz uruchamiać Sharpie z CLI.
 
 ## Zainstaluj dostawcę
 
-OpenChamber uruchamia CLI dostawcy na Twoim komputerze. Najpierw zainstaluj dostawcę, którego chcesz użyć:
+Sharpie uruchamia CLI dostawcy na Twoim komputerze. Najpierw zainstaluj dostawcę, którego chcesz użyć:
 
 ```bash
 brew install cloudflared
@@ -24,7 +24,7 @@ ngrok config add-authtoken <your-ngrok-token>
 
 ## Uruchom z aplikacji
 
-1. Otwórz **Settings → OpenChamber → Tunnel**.
+1. Otwórz **Settings → Sharpie → Tunnel**.
 2. Wybierz **Cloudflare** albo **Ngrok**.
 3. Uruchom quick tunnel.
 4. Zeskanuj wygenerowany kod QR telefonem.
@@ -33,9 +33,9 @@ Ngrok obsługuje teraz quick tunnels. Cloudflare obsługuje quick tunnels i zarz
 
 ## Ochrona dostępu
 
-Nawet jeśli URL dostawcy jest publiczny, OpenChamber nadal chroni dostęp własnym connect tokenem. Wygenerowany link zawiera jednorazowy token, ma TTL, a stare nieużyte linki są unieważniane po wygenerowaniu nowego linku albo zatrzymaniu/restarcie tunelu.
+Nawet jeśli URL dostawcy jest publiczny, Sharpie nadal chroni dostęp własnym connect tokenem. Wygenerowany link zawiera jednorazowy token, ma TTL, a stare nieużyte linki są unieważniane po wygenerowaniu nowego linku albo zatrzymaniu/restarcie tunelu.
 
 ## Powiązane
 
 - [Tunele](/pl/tunnels/) — użycie tuneli przez CLI i zarządzane tryby Cloudflare
-- [PWA i dostęp z telefonu](/pl/mobile/) — korzystaj z OpenChamber z telefonu
+- [PWA i dostęp z telefonu](/pl/mobile/) — korzystaj z Sharpie z telefonu

@@ -10,7 +10,7 @@ import { parseUpdateManifest, verifyUpdateManifest } from './verify-update-manif
 test('stages architecture-specific generic updater fixtures with valid metadata', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-updater-fixture-'));
   try {
-    const source = path.join(root, 'OpenChamber-1.15.1-linux-arm64.AppImage');
+    const source = path.join(root, 'Sharpie-1.15.1-linux-arm64.AppImage');
     const directory = path.join(root, 'feed');
     fs.writeFileSync(source, 'fixture-appimage');
     const result = stageUpdaterFixture({
@@ -27,7 +27,7 @@ test('stages architecture-specific generic updater fixtures with valid metadata'
       artifactPath: result.artifactPath,
       expectedVersion: '1.15.1',
     }), {
-      name: 'OpenChamber-1.15.1-linux-arm64.AppImage',
+      name: 'Sharpie-1.15.1-linux-arm64.AppImage',
       size: 16,
       version: '1.15.1',
     });
@@ -38,12 +38,12 @@ test('stages architecture-specific generic updater fixtures with valid metadata'
 
 test('serves only staged fixture files over loopback', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-updater-server-'));
-  const artifact = path.join(root, 'OpenChamber.AppImage');
+  const artifact = path.join(root, 'Sharpie.AppImage');
   fs.writeFileSync(artifact, 'fixture');
   const { server, url } = await createFixtureServer({ directory: root });
   try {
     assert.equal(new URL(url).hostname, '127.0.0.1');
-    const response = await fetch(`${url}OpenChamber.AppImage`);
+    const response = await fetch(`${url}Sharpie.AppImage`);
     assert.equal(response.status, 200);
     assert.equal(await response.text(), 'fixture');
     assert.equal((await fetch(`${url}../package.json`)).status, 404);

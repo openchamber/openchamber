@@ -14,7 +14,7 @@
   "command.improveCode.title": "Improve Code",
   "command.newSession.title": "New Session",
   "command.showSettings.title": "Settings",
-  "command.attachExplorerToChat.title": "Attach to OpenChamber Chat",
+  "command.attachExplorerToChat.title": "Attach to Sharpie Chat",
   "configuration.apiUrl.description": "URL of an external OpenCode API server. Leave empty to auto-start a local instance.",
   "configuration.opencodeBinary.description": "Optional absolute path to the opencode CLI binary. Useful if PATH lookup fails. Requires window reload or API restart to apply."
 }

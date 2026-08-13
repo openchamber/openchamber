@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This module owns the authoritative permission auto-accept policy for web, desktop, and mobile runtimes. Policy is persisted in OpenChamber settings so permission handling survives UI disconnects and server restarts.
+This module owns the authoritative permission auto-accept policy for web, desktop, and mobile runtimes. Policy is persisted in Sharpie settings so permission handling survives UI disconnects and server restarts.
 
 ## Policy
 
@@ -21,13 +21,13 @@ Unknown lineage and failed policy loads fail closed. A failed pending-permission
 - `GET /api/permission-auto-accept`
 - `PUT /api/permission-auto-accept/sessions/:sessionId`
 
-These are normal authenticated OpenChamber runtime routes. They must not be added to browser URL-token allowlists.
+These are normal authenticated Sharpie runtime routes. They must not be added to browser URL-token allowlists.
 
 ## UI ownership
 
 `packages/ui/src/stores/permissionStore.ts` is a projection of server policy and does not persist an independent policy. The server is the sole responder and the UI renders pending requests until the authoritative `permission.replied` event arrives.
 
-VS Code retains its foreground-only responder because it does not run the web server runtime. Its extension host persists and broadcasts the authoritative policy across webviews, while the active UI handles live events plus startup, reconnect, and enablement reconciliation. With all OpenChamber webviews closed or suspended, permissions are not auto-accepted; this is an intentional VS Code limitation.
+VS Code retains its foreground-only responder because it does not run the web server runtime. Its extension host persists and broadcasts the authoritative policy across webviews, while the active UI handles live events plus startup, reconnect, and enablement reconciliation. With all Sharpie webviews closed or suspended, permissions are not auto-accepted; this is an intentional VS Code limitation.
 
 ## Tests
 

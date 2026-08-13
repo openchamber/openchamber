@@ -1,10 +1,10 @@
-# OpenChamber Control Service
+# Sharpie Control Service
 
 ## Purpose
 
-This module owns the typed control contract shared by the OpenChamber CLI and
+This module owns the typed control contract shared by the Sharpie CLI and
 the managed OpenCode `openchamber` tool. Both adapters delegate to
-`createOpenChamberControlService()`; neither adapter may call or spawn the
+`createSharpieControlService()`; neither adapter may call or spawn the
 other.
 
 ## Boundaries

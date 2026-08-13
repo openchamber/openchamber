@@ -69,7 +69,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     serverStartedAt,
     gracefulShutdown,
     getHealthSnapshot,
-    // Port this OpenChamber instance serves on and the tunnel public URL (if
+    // Port this Sharpie instance serves on and the tunnel public URL (if
     // a tunnel is active). Exposed on /api/system/info so the UI can surface
     // the active instance's service URLs. Optional: older wiring omits them
     // and the endpoint reports null.
@@ -412,7 +412,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     getServerId = async () => null,
     // Display name a paired device shows for THIS server (issuing machine's
     // hostname), distinct from the per-device pairing label typed by the operator.
-    getServerLabel = () => 'OpenChamber',
+    getServerLabel = () => 'Sharpie',
   } = dependencies;
   const PAIRING_REDEEM_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
   const PAIRING_REDEEM_RATE_LIMIT_MAX_ATTEMPTS = 10;

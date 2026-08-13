@@ -135,7 +135,7 @@ function isOpenchamberCmdline(cmdline) {
   return cmdline.toLowerCase().includes('openchamber');
 }
 
-// Liveness + identity — "is the OpenChamber instance recorded in a pid file
+// Liveness + identity — "is the Sharpie instance recorded in a pid file
 // still the process running under this PID". Use this (not isProcessRunning)
 // when validating a PID read from a pid file. After an ungraceful shutdown
 // removePidFile never runs, so the stale PID can be recycled to an unrelated

@@ -1,15 +1,15 @@
 ---
 title: OpenCode サーバー
-description: OpenChamber をローカルまたはリモートの OpenCode サーバーに接続します。
+description: Sharpie をローカルまたはリモートの OpenCode サーバーに接続します。
 ---
 
 # OpenCode サーバー
 
-OpenChamber は OpenCode サーバーの上で動作します。デフォルトでは OpenChamber がサーバーを起動するため、何もする必要はありません。このページが必要なのは、すでに実行しているサーバーに OpenChamber を向けたい場合、または OpenChamber が起動するサーバーを管理したい場合だけです。
+Sharpie は OpenCode サーバーの上で動作します。デフォルトでは Sharpie がサーバーを起動するため、何もする必要はありません。このページが必要なのは、すでに実行しているサーバーに Sharpie を向けたい場合、または Sharpie が起動するサーバーを管理したい場合だけです。
 
-## OpenChamber がサーバーを見つける順序
+## Sharpie がサーバーを見つける順序
 
-OpenChamber の起動時、次の順序でサーバーを探します。
+Sharpie の起動時、次の順序でサーバーを探します。
 
 1. すでに起動済みのサーバーを再利用する
 2. 指定されていれば外部サーバーに接続する（下記参照）
@@ -20,18 +20,18 @@ OpenChamber の起動時、次の順序でサーバーを探します。
 
 ## すでに実行しているサーバーに接続する
 
-OpenChamber を起動する前に次を設定します。
+Sharpie を起動する前に次を設定します。
 
 ```bash
 OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
 ```
 
 - `OPENCODE_HOST` — ポートを含む OpenCode サーバーの完全なアドレスです（`http://localhost:4096` のような値）。末尾にパスを付けてはいけません。
-- `OPENCODE_SKIP_START=true` — OpenChamber に自分のサーバーを起動しないよう伝えます。
+- `OPENCODE_SKIP_START=true` — Sharpie に自分のサーバーを起動しないよう伝えます。
 
 ポートだけを変えたい場合は、`OPENCODE_HOST` ではなく `OPENCODE_PORT` を設定します。
 
-`OPENCODE_HOST` にポートがない、またはパスが含まれている場合、OpenChamber はそれを無視し、自分のサーバー起動にフォールバックします。期待した接続が行われなかった場合は、起動ログの `[config]` 警告を確認してください。
+`OPENCODE_HOST` にポートがない、またはパスが含まれている場合、Sharpie はそれを無視し、自分のサーバー起動にフォールバックします。期待した接続が行われなかった場合は、起動ログの `[config]` 警告を確認してください。
 
 ## CLI からサーバーを管理する
 
@@ -44,9 +44,9 @@ openchamber stop
 
 `openchamber` だけを実行すると、サーバーはバックグラウンドで起動します。ターミナルに接続したままにするには `--foreground` を追加します。
 
-## ログイン時に OpenChamber を起動する
+## ログイン時に Sharpie を起動する
 
-`startup enable` を使うと、ネイティブのユーザーサービスをインストールできます。OpenChamber は macOS では `launchd`、Linux では `systemd --user`、Windows では Task Scheduler を使います。
+`startup enable` を使うと、ネイティブのユーザーサービスをインストールできます。Sharpie は macOS では `launchd`、Linux では `systemd --user`、Windows では Task Scheduler を使います。
 
 ```bash
 openchamber startup enable
@@ -70,7 +70,7 @@ openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password s
 
 スタートアップサービスは `--port`、`--host`、`--ui-password`、`--api-only` を記憶します。CLI の restart と update restart は保存済み設定を再利用します。
 
-別の OpenChamber アプリ向けに接続リンクを作成するには、次を使います。
+別の Sharpie アプリ向けに接続リンクを作成するには、次を使います。
 
 ```bash
 openchamber connect-url --port 3000 --server http://your-host:3000 --qr
@@ -89,7 +89,7 @@ openchamber tunnel stop --port 3000
 
 ## "OpenCode is restarting"
 
-サーバーの起動中または再起動中、OpenChamber は "OpenCode is restarting" 状態を表示し、準備が整うまでリクエストを一時停止します。これは起動直後や再起動直後には正常です。いつまでも消えない場合は、[OpenCode 接続](/troubleshooting/opencode-connection/) を参照してください。
+サーバーの起動中または再起動中、Sharpie は "OpenCode is restarting" 状態を表示し、準備が整うまでリクエストを一時停止します。これは起動直後や再起動直後には正常です。いつまでも消えない場合は、[OpenCode 接続](/troubleshooting/opencode-connection/) を参照してください。
 
 ## 関連
 

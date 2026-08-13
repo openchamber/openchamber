@@ -50,7 +50,7 @@ async function startupCommand(options, action = 'status') {
     return;
   }
 
-  clackIntro('OpenChamber Startup');
+  clackIntro('Sharpie Startup');
   logStatus(result.enabled ? 'success' : 'info', `startup ${result.enabled ? 'enabled' : 'disabled'}`, result.servicePath || undefined);
   if (typeof result.activeState === 'string') {
     logStatus(result.active ? 'success' : result.activeState === 'failed' ? 'error' : 'warning', `service ${result.activeState}`);

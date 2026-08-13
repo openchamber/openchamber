@@ -5,7 +5,7 @@ description: Transforme um prompt em um objetivo no qual o agente trabalha autom
 
 # Objetivos de sessão
 
-Um objetivo transforma um único prompt em uma linha de chegada. Em vez de cutucar o agente com "continua" após cada resposta, você define o objetivo uma vez — e o OpenChamber mantém a sessão trabalhando em direção a ele automaticamente, verificando o progresso com um auditor independente após cada turno. Continua rodando mesmo enquanto você está ausente.
+Um objetivo transforma um único prompt em uma linha de chegada. Em vez de cutucar o agente com "continua" após cada resposta, você define o objetivo uma vez — e o Sharpie mantém a sessão trabalhando em direção a ele automaticamente, verificando o progresso com um auditor independente após cada turno. Continua rodando mesmo enquanto você está ausente.
 
 ## Iniciar um objetivo
 
@@ -31,7 +31,7 @@ Para pequenos ajustes contextuais você não precisa de um objetivo — envie um
 
 ## Como funciona
 
-Quando o agente para e a sessão fica quieta por um momento, o OpenChamber:
+Quando o agente para e a sessão fica quieta por um momento, o Sharpie:
 
 1. Pede a um modelo pequeno e barato que audite o último turno contra o objetivo: continuar, pronto ou travado?
 2. Se o veredicto for "continuar", envia um prompt de continuação e o agente retoma o trabalho.
@@ -63,7 +63,7 @@ Em **Configurações → Chat → Objetivo** você pode definir um orçamento de
 
 ## Tenha em mente
 
-- O loop do objetivo roda no servidor do OpenChamber, não na aba do navegador. Feche a aba, bloqueie o celular — o agente continua trabalhando, e você recebe uma notificação quando o objetivo se resolve. O servidor (app desktop ou processo `openchamber`) precisa continuar rodando.
+- O loop do objetivo roda no servidor do Sharpie, não na aba do navegador. Feche a aba, bloqueie o celular — o agente continua trabalhando, e você recebe uma notificação quando o objetivo se resolve. O servidor (app desktop ou processo `openchamber`) precisa continuar rodando.
 - Objetivos usam o provedor e o modelo da sua própria sessão, incluindo as chamadas do auditor — nada sai para provedores que você já não use.
 - Um objetivo por sessão de cada vez.
 

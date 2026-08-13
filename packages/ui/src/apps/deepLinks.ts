@@ -1,5 +1,5 @@
 /**
- * OpenChamber deep-link vocabulary — the single source of truth for the `openchamber://`
+ * Sharpie deep-link vocabulary — the single source of truth for the `openchamber://`
  * URL scheme used across every native entry point: notification taps, home-screen / lock-
  * screen widgets, and (later) Live Activities. Anything that wants to drive navigation
  * builds a URL with {@link buildDeepLink} and anything that receives one parses it with
@@ -44,7 +44,7 @@ const segmentsOf = (url: URL): string[] => {
 
 /**
  * Parse a raw `openchamber://…` string into a typed intent, or `null` if it isn't a
- * recognised OpenChamber deep link. Tolerant by design: unknown routes return `null`
+ * recognised Sharpie deep link. Tolerant by design: unknown routes return `null`
  * rather than throwing, so callers can fall back without a try/catch.
  */
 export function parseDeepLink(raw: string | null | undefined): DeepLinkIntent | null {

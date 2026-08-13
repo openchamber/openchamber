@@ -2,8 +2,8 @@
   "metadata": {
     "id": "jetbrains-dark",
     "name": "JetBrains",
-    "description": "JetBrains IDE-inspired colors for OpenChamber - dark variant",
-    "author": "Artem Evsevev, adapted for OpenChamber",
+    "description": "JetBrains IDE-inspired colors for Sharpie - dark variant",
+    "author": "Artem Evsevev, adapted for Sharpie",
     "version": "1.0.0",
     "variant": "dark",
     "tags": [

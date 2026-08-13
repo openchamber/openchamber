@@ -19,7 +19,7 @@ function isVSCodeContext(): boolean {
 }
 
 /**
- * Hook that provides bidirectional URL routing for OpenChamber.
+ * Hook that provides bidirectional URL routing for Sharpie.
  *
  * On mount:
  * - Parses URL parameters and applies them to app state

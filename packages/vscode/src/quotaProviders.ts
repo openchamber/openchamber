@@ -2657,7 +2657,7 @@ const fetchXaiQuota = async (): Promise<ProviderResult> => {
         'Content-Type': 'application/grpc-web+proto',
         'x-grpc-web': '1',
         'x-user-agent': 'connect-es/2.1.1',
-        'User-Agent': 'OpenChamber',
+        'User-Agent': 'Sharpie',
       },
       body: new Uint8Array([0, 0, 0, 0, 0]),
       signal: AbortSignal.timeout(15_000),

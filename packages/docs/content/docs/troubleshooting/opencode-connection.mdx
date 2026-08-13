@@ -1,11 +1,11 @@
 ---
 title: OpenCode Connection
-description: Fix OpenChamber not connecting to its OpenCode server.
+description: Fix Sharpie not connecting to its OpenCode server.
 ---
 
 # OpenCode Connection
 
-If OpenChamber loads but never gets past "OpenCode is restarting," or chat won't respond, the server it talks to isn't reachable. Work through these.
+If Sharpie loads but never gets past "OpenCode is restarting," or chat won't respond, the server it talks to isn't reachable. Work through these.
 
 ## It's stuck on "OpenCode is restarting"
 
@@ -16,11 +16,11 @@ If OpenChamber loads but never gets past "OpenCode is restarting," or chat won't
 
 ## You're connecting to your own server
 
-If you set OpenChamber to use an existing server, double-check the setup from [OpenCode Server](/opencode-server/):
+If you set Sharpie to use an existing server, double-check the setup from [OpenCode Server](/opencode-server/):
 
 - `OPENCODE_HOST` must include the port, with no path — for example `http://localhost:4096`
-- set `OPENCODE_SKIP_START=true` so OpenChamber doesn't also start its own
-- if the address is invalid, OpenChamber ignores it and starts its own server instead — look for a `[config]` warning in the logs
+- set `OPENCODE_SKIP_START=true` so Sharpie doesn't also start its own
+- if the address is invalid, Sharpie ignores it and starts its own server instead — look for a `[config]` warning in the logs
 
 ## Still failing
 
@@ -30,5 +30,5 @@ If you set OpenChamber to use an existing server, double-check the setup from [O
 
 ## Related
 
-- [OpenCode Server](/opencode-server/) — how OpenChamber finds and manages the server
+- [OpenCode Server](/opencode-server/) — how Sharpie finds and manages the server
 - [Troubleshooting](/troubleshooting/) — other common issues
