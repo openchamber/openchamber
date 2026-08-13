@@ -128,6 +128,10 @@ before touching the filesystem). Rationale: metadata rides every
      audit unavailable") — resumable, and settling resets the streak so
      Resume gets fresh tolerance. A dead small model can never drive the
      loop blind to the turn cap;
+     The note is dropped when it uses a writing system absent from the objective
+     and the agent's reply (`small-model/script-guard.js`); the verdict always
+     survives that drop, because the verdict is the loop's only termination
+     authority.
    - continue: persist accounting + `turnsUsed` first (a crash after the
      write just waits for the next idle tick; the reverse could double-send),
      re-check the tail, then `POST /session/:id/prompt_async` with the

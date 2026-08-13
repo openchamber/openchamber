@@ -73,6 +73,39 @@ describe('session goal creation', () => {
     }
   });
 
+  it('drops a distilled objective written in another script', async () => {
+    // 6,800 chars — over the mocked 5,000-char limit, so distillation runs.
+    const longObjective = 'マイグレーションを完了し検証する。'.repeat(400);
+    generateSmallModelTextMock.mockResolvedValueOnce({
+      text: '저장소 구조를 정리하고 테스트를 통과시킨다',
+    });
+    const onWarning = vi.fn();
+    const fetchMock = vi.fn(async () => ({ ok: true }));
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    try {
+      await createSessionGoal({
+        baseUrl: 'http://opencode.test',
+        authHeaders: {},
+        sessionID: 'ses_123',
+        directory: '/repo/app',
+        objective: longObjective,
+        onWarning,
+      });
+
+      expect(generateSmallModelTextMock).toHaveBeenCalledOnce();
+      const stored = writeObjectiveMock.mock.calls[0][1];
+      expect(stored).not.toContain('저장소');
+      expect(stored).toContain('objective trimmed for the auditor');
+      expect(onWarning).toHaveBeenCalledWith(
+        'goal objective distillation dropped: script mismatch with the objective',
+        undefined,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('builds the same goal intro with an optional budget', () => {
     expect(buildGoalIntroText(null)).toContain('Goal mode is active for this session.');
     expect(buildGoalIntroText(200_000)).toContain('A token budget of 200000 tokens applies to this goal.');

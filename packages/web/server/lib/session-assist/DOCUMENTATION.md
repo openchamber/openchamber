@@ -30,6 +30,10 @@ and one suggested user follow-up with the small model
    re-checked (a stale result is dropped) and the metadata is merged from a
    fresh session read so concurrent metadata writes made during generation are
    preserved.
+   A field whose text uses a writing system absent from the conversation is
+   dropped before the write (`small-model/script-guard.js`), per field, so one
+   hallucinated field does not remove the other; when both drop, nothing is
+   written at all.
 
 ## Settings gate
 

@@ -1,4 +1,5 @@
 import { GOAL_OBJECTIVE_CHAR_LIMIT, writeObjective } from './objectives.js';
+import { hasScriptMismatch } from '../small-model/script-guard.js';
 
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full prompt was delivered in the chat message …]\n\n';
 
@@ -36,6 +37,13 @@ const fitObjective = async ({ objective, directory, providerID, modelID, warn })
       preferredModelID: modelID,
     });
     distilled = typeof generated?.text === 'string' ? generated.text.trim() : null;
+    // A distilled objective in the wrong language would silently become what
+    // the auditor judges against for the rest of the goal. Falling through to
+    // the head/tail trim below keeps the user's own words instead.
+    if (distilled && hasScriptMismatch(distilled, objective)) {
+      warn('goal objective distillation dropped: script mismatch with the objective');
+      distilled = null;
+    }
   } catch (error) {
     warn('goal objective distillation failed', error);
   }

@@ -176,4 +176,65 @@ describe('session goal live activity gate', () => {
     });
     runtime.stop();
   });
+
+  it('drops an audit note written in a script the objective never used', async () => {
+    const japaneseGoal = { ...goal, objective: 'リポジトリの構成を整理し、テストを通す' };
+    const japaneseSession = {
+      id: SESSION_ID,
+      directory: DIRECTORY,
+      metadata: { openchamber: { goal: japaneseGoal } },
+    };
+    const requests = [];
+    const fetchImpl = vi.fn(async (input, init = {}) => {
+      const pathname = requestPath(input);
+      requests.push({ pathname, method: init.method ?? 'GET', body: init.body });
+      if (pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') return jsonResponse(japaneseSession);
+      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(japaneseSession);
+      if (pathname === '/session/status') return jsonResponse({});
+      if (pathname === `/session/${SESSION_ID}/children`) return jsonResponse([]);
+      if (pathname === `/session/${SESSION_ID}/message`) {
+        return jsonResponse([{
+          info: {
+            id: 'msg_assistant',
+            sessionID: SESSION_ID,
+            role: 'assistant',
+            providerID: 'provider',
+            modelID: 'model',
+            time: { completed: 2 },
+            tokens: { input: 1, output: 1, cache: { read: 0 } },
+          },
+          parts: [{ type: 'text', text: 'テストを追加し、すべて通ることを確認しました。' }],
+        }]);
+      }
+      throw new Error(`Unexpected request: ${pathname}`);
+    });
+    const service = {
+      generateSmallModelText: vi.fn(async () => ({
+        text: '{"verdict":"complete","note":"저장소 구조를 정리하고 테스트를 통과했습니다"}',
+        providerID: 'provider',
+        modelID: 'model',
+      })),
+    };
+    vi.stubGlobal('fetch', fetchImpl);
+    const runtime = createSessionGoalRuntime({
+      buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      getSmallModelService: async () => service,
+      idleQuietMs: 10,
+    });
+
+    runtime.processPayload({
+      type: 'session.status',
+      properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory: DIRECTORY },
+    });
+    await vi.advanceTimersByTimeAsync(10);
+
+    const patch = requests.find((request) => request.pathname === `/session/${SESSION_ID}` && request.method === 'PATCH');
+    expect(patch).toBeDefined();
+    const writtenGoal = JSON.parse(patch.body).metadata.openchamber.goal;
+    expect(writtenGoal.note).toBe('');
+    // The verdict is the audit's termination authority and survives the drop.
+    expect(writtenGoal.status).toBe('complete');
+    runtime.stop();
+  });
 });
