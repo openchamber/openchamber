@@ -17,6 +17,9 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
   - Concurrency controls
   - Session create + prompt_async execution
   - Emits OpenChamber task-run events
+  - Tracks opted-in run sessions through authoritative OpenCode status events
+    with polling recovery, then archives after normal idle or terminal goal
+    completion
 
 - `packages/web/server/lib/scheduled-tasks/loops.js`
   - Discovery of `.agents/loops/*.md` (project scope, ancestors up to the worktree root) and `~/.agents/loops/*.md` (user scope)
@@ -58,11 +61,12 @@ Field mapping (model: `packages/ui/src/lib/scheduledTasksApi.ts`):
 | `timezone` | `schedule.timezone` (optional, IANA; defaults to the server zone) |
 | body | `execution.prompt` (required) |
 
-`thinking_level` and `goalEnabled`/`goalTokenBudget` are not part of the portable
-format (UI/JSON-only today); `daily`/`weekly`/`once` schedules remain UI/JSON-only.
-Runtime state (`lastRunAt`, `nextRunAt`, `lastStatus`, `lastError`, `lastSessionId`,
-`lastDurationMs`) is never written to the markdown file — it continues to live in
-the project config state store.
+`thinking_level`, `goalEnabled`/`goalTokenBudget`, and `archiveOnSuccess` are not
+part of the portable format (UI/JSON-only today); `daily`/`weekly`/`once`
+schedules remain UI/JSON-only. Runtime state (`lastRunAt`, `nextRunAt`,
+`lastStatus`, `lastError`, `lastSessionId`, `lastDurationMs`, `lastArchiveError`,
+and `pendingArchives`) is never written to the markdown file — it continues to
+live in the project config state store.
 
 ## Loop reconciliation rules
 
@@ -78,8 +82,8 @@ project write lock on every `syncProject` when the project path is known:
   `id` and runtime `state` are preserved (markdown wins on conflict).
 - **UI-only fields survive adoption.** Execution fields the file format does
   not define (`goalEnabled`, `goalTokenBudget`, `permissionAutoAccept`,
-  `variant`) are preserved from the task when a loop adopts it; only fields the
-  file defines are re-applied.
+  `archiveOnSuccess`, `variant`) are preserved from the task when a loop adopts
+  it; only fields the file defines are re-applied.
 - **Deletion.** A task carrying the `loopFile` marker whose loop file is no
   longer discovered (removed or renamed) is unscheduled (removed from the
   config). The marker is persisted in the config file, so removal is detected
@@ -111,6 +115,8 @@ project write lock on every `syncProject` when the project path is known:
   - `syncAllProjects()`
   - `syncProject(projectId)`
   - `runNow(projectId, taskId)`
+  - `processPayload(payload)`
+  - `processGoalSettled(event)`
 
 ## Public exports (routes.js)
 

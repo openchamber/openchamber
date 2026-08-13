@@ -477,8 +477,8 @@ type ScheduledTaskDraft = {
     goalEnabled: boolean;
     goalTokenBudget: number | null;
     permissionAutoAccept: boolean;
+    archiveOnSuccess: boolean;
   };
-  state?: ScheduledTask['state'];
 };
 
 const normalizeDraftTimes = (task: ScheduledTask | null): string[] => {
@@ -529,6 +529,7 @@ const toDraft = (
         goalEnabled: false,
         goalTokenBudget: null,
         permissionAutoAccept: false,
+        archiveOnSuccess: false,
       },
     };
   }
@@ -567,8 +568,8 @@ const toDraft = (
         ? task.execution.goalTokenBudget
         : null,
       permissionAutoAccept: task.execution.permissionAutoAccept === true,
+      archiveOnSuccess: task.execution.archiveOnSuccess === true,
     },
-    state: task.state,
   };
 };
 
@@ -1173,12 +1174,12 @@ export function ScheduledTaskEditorDialog(props: {
         ...(draft.execution.variant.trim() ? { variant: draft.execution.variant.trim() } : {}),
         ...(draft.execution.agent.trim() ? { agent: draft.execution.agent.trim() } : {}),
         ...(draft.execution.permissionAutoAccept ? { permissionAutoAccept: true } : {}),
+        ...(draft.execution.archiveOnSuccess ? { archiveOnSuccess: true } : {}),
         ...(draft.execution.goalEnabled ? { goalEnabled: true } : {}),
         ...(draft.execution.goalEnabled && draft.execution.goalTokenBudget
           ? { goalTokenBudget: draft.execution.goalTokenBudget }
           : {}),
       },
-      ...(draft.state ? { state: draft.state } : {}),
     };
 
     setSaving(true);
@@ -1664,6 +1665,23 @@ export function ScheduledTaskEditorDialog(props: {
             ) : null}
           </div>
           ) : null}
+
+          <div className="border-t border-border pt-4">
+            <FieldLabel>{t('sessions.scheduledTasks.editor.lifecycle.title')}</FieldLabel>
+            <label className="mt-2 inline-flex cursor-pointer items-center gap-2">
+              <Checkbox
+                checked={draft.execution.archiveOnSuccess}
+                onChange={(archiveOnSuccess) => setDraft((prev) => ({
+                  ...prev,
+                  execution: { ...prev.execution, archiveOnSuccess },
+                }))}
+                ariaLabel={t('sessions.scheduledTasks.editor.archiveOnSuccess.aria')}
+              />
+              <span className="typography-meta">
+                {t('sessions.scheduledTasks.editor.archiveOnSuccess.label')}
+              </span>
+            </label>
+          </div>
     </div>
   );
 
