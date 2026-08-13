@@ -119,6 +119,7 @@ import {
     toServerFileUrl,
 } from './composer/attachments/filePaths';
 import { buildOutgoingMessage } from './composer/submit/buildOutgoingMessage';
+import { expandFusionPresets } from './composer/submit/expandFusionPresets';
 import {
     buildCommandVariables,
     canRunCommand,
@@ -1103,20 +1104,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             },
             sanitizeAttachments: sanitizeAttachmentsForSend,
             collectSkillNames: (text) => collectInlineSkillMentions(text, availableSkillNames),
-            expandFusionPresets: (text) => {
-                // `%preset` at a word boundary, expanded only when the name is
-                // a known preset — so percentages and `50%off` spellings are
-                // never rewritten.
-                if (!text.includes('%') || knownFusionPresets.size === 0) return text;
-                return text.replace(
-                    /(^|\s)%([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)/g,
-                    (full, boundary: string, name: string) => (
-                        knownFusionPresets.has(name)
-                            ? `${boundary}[fusion preset: ${name}]`
-                            : full
-                    ),
-                );
-            },
+            expandFusionPresets: (text) => expandFusionPresets(text, knownFusionPresets),
             appendComments: (text, comments) =>
                 appendInlineComments(text, comments as InlineCommentDraft[]),
             buildSkillInstruction: buildSkillMentionInstruction,

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createFusionRuntime, isFusedChildTitle } from './fusion.js';
+import { createFusionRuntime } from './fusion.js';
 
 const createRunner = (overrides = {}) => {
   const runner = {
@@ -220,30 +220,5 @@ describe('model fusion runtime', () => {
       sessionIDs: expect.any(Array),
       directory: '/work',
     }));
-  });
-
-  it('aborts only fused children of a session', async () => {
-    const runner = createRunner({
-      getClient: vi.fn(async () => ({ session: { children: vi.fn(async () => ({ data: [
-        { id: 'c1', title: 'Fused: anthropic/claude-sonnet-4' },
-        { id: 'c2', title: 'Fused: openai/gpt-5' },
-        { id: 'c3', title: 'some other subtask' },
-      ] })) } })),
-    });
-    const runtime = createRuntime(runner);
-    runner.abortSessions.mockImplementation(async ({ sessionIDs }) => sessionIDs.length);
-
-    const result = await runtime.abortChildren({ sessionId: 'parent-1', directory: '/work' });
-
-    expect(runner.abortSessions).toHaveBeenCalledWith(expect.objectContaining({
-      sessionIDs: ['c1', 'c2'],
-      directory: '/work',
-    }));
-    expect(result).toEqual({ aborted: 2, total: 2 });
-  });
-
-  it('recognizes fused child titles', () => {
-    expect(isFusedChildTitle('Fused: anthropic/claude-sonnet-4')).toBe(true);
-    expect(isFusedChildTitle('some other subtask')).toBe(false);
   });
 });

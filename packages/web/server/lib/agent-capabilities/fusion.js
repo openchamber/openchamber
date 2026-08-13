@@ -8,10 +8,6 @@ import {
 const DEFAULT_MAX_FUSION_MODELS = 4;
 const FUSED_TITLE_PREFIX = 'Fused: ';
 
-export const isFusedChildTitle = (title, prefix = FUSED_TITLE_PREFIX) => {
-  return typeof title === 'string' && title.startsWith(prefix);
-};
-
 const normalizeModels = (value, maxModels) => {
   if (!Array.isArray(value)) {
     throw new OpenChamberControlError('models must contain at least 2 models in provider/model format', 400);
@@ -171,27 +167,7 @@ export const createFusionRuntime = (dependencies) => {
     }
   };
 
-  // Aborts every live fusion child of a session. Scoped by the fused title
-  // prefix so ordinary subagent children are never touched.
-  const abortChildren = async ({ sessionId, directory }) => {
-    const parentSessionID = asNonEmptyString(sessionId);
-    const sessionDirectory = asNonEmptyString(directory);
-    if (!parentSessionID) throw new OpenChamberControlError('sessionId is required', 400);
-    if (!sessionDirectory) throw new OpenChamberControlError('directory is required', 400);
-    const client = await runner.getClient();
-    const response = await client.session.children({ sessionID: parentSessionID, directory: sessionDirectory });
-    const children = Array.isArray(response?.data) ? response.data : [];
-    const fused = children.filter((child) => child?.id && isFusedChildTitle(child.title, fusedTitlePrefix));
-    const aborted = await runner.abortSessions({
-      client,
-      sessionIDs: fused.map((child) => child.id),
-      directory: sessionDirectory,
-    });
-    return { aborted, total: fused.length };
-  };
-
   return {
     execute,
-    abortChildren,
   };
 };

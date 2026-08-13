@@ -6,6 +6,7 @@ import {
     type OutgoingMessageDeps,
     type OutgoingMessageInput,
 } from '../buildOutgoingMessage';
+import { expandFusionPresets } from '../expandFusionPresets';
 
 const attachment = (id: string) => ({ id, filename: `${id}.txt` } as unknown as AttachedFile);
 
@@ -28,12 +29,7 @@ const deps = (overrides: Partial<OutgoingMessageDeps> = {}): OutgoingMessageDeps
     },
     sanitizeAttachments: (files) => [...(files ?? [])],
     collectSkillNames: (text) => [...text.matchAll(/\/(\w+)/g)].map((m) => m[1]),
-    expandFusionPresets: (text) => text.replace(
-        /(^|\s)%([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)/g,
-        (full, boundary: string, name: string) => (
-            knownFusionNames.has(name) ? `${boundary}[fusion preset: ${name}]` : full
-        ),
-    ),
+    expandFusionPresets: (text) => expandFusionPresets(text, knownFusionNames),
     appendComments: (text, comments) => `${text}\n[${comments.length} comments]`,
     buildSkillInstruction: (names) => (names.length ? `use: ${names.join(',')}` : null),
     ...overrides,
@@ -277,6 +273,13 @@ describe('fusion preset expansion', () => {
     test('an unknown percent word is left untouched', () => {
         expect(buildOutgoingMessage(input({ composerText: '50% done, use %stranger' }), deps()).primaryText)
             .toBe('50% done, use %stranger');
+    });
+
+    test('trailing punctuation is preserved around the directive', () => {
+        expect(buildOutgoingMessage(input({ composerText: 'run %deep-dive:' }), deps()).primaryText)
+            .toBe('run [fusion preset: deep-dive]:');
+        expect(buildOutgoingMessage(input({ composerText: '%deep-dive, please' }), deps()).primaryText)
+            .toBe('[fusion preset: deep-dive], please');
     });
 
     test('queued messages are expanded too', () => {

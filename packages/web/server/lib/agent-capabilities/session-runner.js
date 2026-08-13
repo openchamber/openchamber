@@ -171,7 +171,7 @@ export const createSessionRunner = (dependencies) => {
     for (const record of records) {
       const info = record?.info;
       if (info?.role !== 'assistant' || !Number.isFinite(info?.time?.completed)) continue;
-      if (!latest || (info.time.created || 0) >= (latest.time?.created || 0)) latest = record;
+      if (!latest || (info.time.created || 0) >= (latest.info?.time?.created || 0)) latest = record;
     }
     return latest;
   };
@@ -192,12 +192,16 @@ export const createSessionRunner = (dependencies) => {
   // quickly instead of waiting the full timeout for nothing.
   const SILENT_RUN_GRACE_MS = 15_000;
 
-  // Waits until the run reports activity (busy) and then goes idle, or a new
-  // completed assistant message appears. For a freshly created child session
-  // there is no history, so the first completed assistant message IS the run
-  // result — no baseline bookkeeping is needed. If the session stays idle
-  // without producing a message the run died silently; fail fast after the
-  // grace window instead of hanging the caller for the full timeout.
+  // Waits until the run reports activity (busy) and then goes idle with a
+  // completed assistant message. For a freshly created child session there is
+  // no history, so the first completed assistant message IS the run result —
+  // no baseline bookkeeping is needed. Two terminal escapes keep the caller
+  // from hanging when no deadline is set:
+  //  - before any activity, staying idle for the grace window means the run
+  //    never started (silent dispatch failure);
+  //  - after activity, going idle without a completed assistant message for
+  //    the grace window means the run ended (aborted or failed server-side)
+  //    without a result record — surface it instead of polling forever.
   const waitForIdle = async ({ client, sessionID, directory, timeoutMs, signal }) => {
     // No timeout means no deadline: like the Task tool, the wait ends when the
     // run produces a result or the caller aborts.
@@ -215,12 +219,15 @@ export const createSessionRunner = (dependencies) => {
         if (message?.info && Number.isFinite(message.info.time?.completed)) {
           return;
         }
-        if (!observedActivity) {
-          const nowMs = now();
-          if (idleSince === null) idleSince = nowMs;
-          if (nowMs - idleSince > SILENT_RUN_GRACE_MS) {
-            throw new OpenChamberControlError('The run did not start; no assistant activity was recorded', 500);
-          }
+        const nowMs = now();
+        if (idleSince === null) idleSince = nowMs;
+        if (nowMs - idleSince > SILENT_RUN_GRACE_MS) {
+          throw new OpenChamberControlError(
+            observedActivity
+              ? 'The run ended without a completed assistant message'
+              : 'The run did not start; no assistant activity was recorded',
+            500,
+          );
         }
       }
       if (deadline !== null) {
