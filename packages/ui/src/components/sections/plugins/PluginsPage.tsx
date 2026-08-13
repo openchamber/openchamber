@@ -183,6 +183,8 @@ export const PluginsPage: React.FC = () => {
               result.message || t('settings.plugins.toast.reloadFailed'),
               { description: result.warning },
             );
+          } else if (result.restartDeferred) {
+            toast.success(t('settings.view.pendingRestart.saved'));
           } else {
             toast.success(result.message || t('settings.plugins.toast.updated'));
           }
@@ -299,6 +301,8 @@ export const PluginsPage: React.FC = () => {
               result.message || t('settings.plugins.toast.reloadFailed'),
               { description: result.warning },
             );
+          } else if (result.restartDeferred) {
+            toast.success(t('settings.view.pendingRestart.saved'));
           } else {
             toast.success(result.message || t('settings.plugins.toast.updated'));
           }

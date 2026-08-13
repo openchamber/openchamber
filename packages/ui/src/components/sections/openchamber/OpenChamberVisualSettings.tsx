@@ -18,7 +18,6 @@ import {
 } from '@/components/ui/select';
 import { Icon } from "@/components/icon/Icon";
 import {
-    invokeDesktop,
     isDesktopShell,
     isVSCodeRuntime,
     isWebRuntime,
@@ -409,16 +408,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     } = useThemeSystem();
 
     const [themesReloading, setThemesReloading] = React.useState(false);
-
-    // macOS-desktop-only vibrancy toggle. Changing it needs a full relaunch
-    // (vibrancy is a window-creation option), so we persist + restart on save.
-    const macVibrancySupported = React.useMemo(
-        () => isDesktopShell() && typeof window !== 'undefined' && window.__OPENCHAMBER_ELECTRON__?.macVibrancySupported === true,
-        [],
-    );
-    const macVibrancyEnabled = typeof window !== 'undefined' && window.__OPENCHAMBER_ELECTRON__?.macVibrancy === true;
-    const [vibrancyChecked, setVibrancyChecked] = React.useState(macVibrancyEnabled);
-    const [vibrancyRestarting, setVibrancyRestarting] = React.useState(false);
 
     // macOS-desktop-only dock badge that counts chats with unseen activity.
     // The tray sync (mac-only) pumps the count to the main process, so the
@@ -978,36 +967,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     </div>
                                 </SettingsTwoColumn>
-
-                                {macVibrancySupported && (
-                                    <SettingsInset settingsItem="appearance.window-transparency" className="flex flex-col gap-1.5">
-                                        <SettingsCheckboxRow
-                                            checked={vibrancyChecked}
-                                            onChange={setVibrancyChecked}
-                                            disabled={vibrancyRestarting}
-                                            label={t('settings.openchamber.visual.field.macVibrancy')}
-                                            info={t('settings.openchamber.visual.field.macVibrancyHint')}
-                                            ariaLabel={t('settings.openchamber.visual.field.macVibrancy')}
-                                        />
-                                        {vibrancyChecked !== macVibrancyEnabled && (
-                                            <div className="pl-6">
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    disabled={vibrancyRestarting}
-                                                    onClick={() => {
-                                                        setVibrancyRestarting(true);
-                                                        void invokeDesktop('desktop_set_vibrancy', { enabled: vibrancyChecked });
-                                                    }}
-                                                >
-                                                    {vibrancyRestarting
-                                                        ? t('settings.openchamber.visual.actions.restarting')
-                                                        : t('settings.openchamber.visual.actions.saveAndRestart')}
-                                                </Button>
-                                            </div>
-                                        )}
-                                    </SettingsInset>
-                                )}
 
                                 {dockBadgeSupported && (
                                     <SettingsInset settingsItem="appearance.dock-badge">

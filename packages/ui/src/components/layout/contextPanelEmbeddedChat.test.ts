@@ -6,6 +6,7 @@ import {
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
   getOrCreateEmbeddedSessionChatURL,
+  getActiveEmbeddedSessionChatTab,
   getEmbeddedSessionChatOriginSessionId,
   isEmbeddedSessionChat,
   requestEmbeddedSessionRuntimeBootstrap,
@@ -142,6 +143,22 @@ describe('embedded session chat URL', () => {
     expect(readOnly).not.toBe(writable);
     expect(new URL(writable).searchParams.get('readOnly')).toBeNull();
     expect(new URL(readOnly).searchParams.get('readOnly')).toBe('1');
+  });
+});
+
+describe('active embedded session chat', () => {
+  const tabs = Array.from({ length: 8 }, (_, index) => ({
+    id: `chat-${index + 1}`,
+    sessionID: `ses_${index + 1}`,
+  }));
+
+  test('selects one tab from persisted chat tabs', () => {
+    expect(getActiveEmbeddedSessionChatTab(tabs, 'chat-5')).toEqual(tabs[4]);
+  });
+
+  test('selects no tab when a chat is not active', () => {
+    expect(getActiveEmbeddedSessionChatTab(tabs, null)).toBeNull();
+    expect(getActiveEmbeddedSessionChatTab(tabs, 'missing-chat')).toBeNull();
   });
 });
 

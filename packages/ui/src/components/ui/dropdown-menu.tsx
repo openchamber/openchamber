@@ -123,7 +123,6 @@ function DropdownMenuContent({
         <BaseMenu.Popup
           data-slot="dropdown-menu-content"
           style={{
-            backgroundColor: 'var(--surface-elevated)',
             color: 'var(--surface-elevated-foreground)',
             ...style,
           }}
@@ -280,7 +279,6 @@ function DropdownMenuSubContent({
         <BaseMenu.Popup
           data-slot="dropdown-menu-sub-content"
           style={{
-            backgroundColor: 'var(--surface-elevated)',
             color: 'var(--surface-elevated-foreground)',
           }}
           className={cn(

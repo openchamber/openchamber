@@ -12,6 +12,7 @@ import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { runBackgroundNetworkTask } from '@/lib/background-network';
+import { noteDeferredRestartFromPayload } from "@/lib/opencode/deferredRestart";
 
 
 export type CommandScope = 'user' | 'project';
@@ -63,6 +64,42 @@ const buildCommandsSignature = (commands: Command[]): string => {
       String(command.isBuiltIn === true),
     ].join('|'))
     .join('||');
+};
+
+const upsertCommandLocal = (
+  set: (state: Partial<CommandsStore>) => void,
+  get: () => CommandsStore,
+  name: string,
+  config: Partial<CommandConfig>,
+) => {
+  const existing = get().commands.find((command) => command.name === name);
+  const nextCommand: Command = {
+    ...existing,
+    name,
+    ...config,
+    source: config.source ?? existing?.source,
+    scope: config.scope ?? existing?.scope,
+    isBuiltIn: existing?.isBuiltIn,
+  };
+  const commands = get().commands;
+  const nextCommands = commands.some((command) => command.name === name)
+    ? commands.map((command) => (command.name === name ? nextCommand : command))
+    : [...commands, nextCommand];
+  set({ commands: nextCommands });
+};
+
+const removeCommandLocal = (
+  set: (state: Partial<CommandsStore>) => void,
+  get: () => CommandsStore,
+  name: string,
+) => {
+  const nextState: Partial<CommandsStore> = {
+    commands: get().commands.filter((command) => command.name !== name),
+  };
+  if (get().selectedCommandName === name) {
+    nextState.selectedCommandName = null;
+  }
+  set(nextState);
 };
 
 const getRequestDirectory = (): string | null => {
@@ -245,8 +282,6 @@ export const useCommandsStore = create<CommandsStore>()(
         },
 
         createCommand: async (config: CommandConfig) => {
-          startConfigUpdate("Creating command configuration…");
-          let requiresReload = false;
           try {
             console.log('[CommandsStore] Creating command:', config.name);
 
@@ -281,10 +316,21 @@ export const useCommandsStore = create<CommandsStore>()(
 
             console.log('[CommandsStore] Command created successfully');
 
-            const needsReload = payload?.requiresReload ?? true;
             invalidateCommandsLoadCache(directory);
-            if (needsReload) {
-              requiresReload = true;
+
+            if (payload?.requiresManualRestart) {
+              upsertCommandLocal(set, get, config.name, config);
+              return true;
+            }
+
+            if (noteDeferredRestartFromPayload(payload, 'commands', { id: config.name })) {
+              upsertCommandLocal(set, get, config.name, config);
+              emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
+              return true;
+            }
+
+            if (payload?.requiresReload) {
+              startConfigUpdate("Creating command configuration…");
               await performFullConfigRefresh({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
@@ -300,16 +346,10 @@ export const useCommandsStore = create<CommandsStore>()(
           } catch (error) {
             console.error("[CommandsStore] Failed to create command:", error);
             return false;
-          } finally {
-            if (!requiresReload) {
-              finishConfigUpdate();
-            }
           }
         },
 
         updateCommand: async (name: string, config: Partial<CommandConfig>) => {
-          startConfigUpdate("Updating command configuration…");
-          let requiresReload = false;
           try {
             console.log('[CommandsStore] Updating command:', name);
             console.log('[CommandsStore] Config received:', config);
@@ -343,10 +383,21 @@ export const useCommandsStore = create<CommandsStore>()(
 
             console.log('[CommandsStore] Command updated successfully');
 
-            const needsReload = payload?.requiresReload ?? true;
             invalidateCommandsLoadCache(directory);
-            if (needsReload) {
-              requiresReload = true;
+
+            if (payload?.requiresManualRestart) {
+              upsertCommandLocal(set, get, name, config);
+              return true;
+            }
+
+            if (noteDeferredRestartFromPayload(payload, 'commands', { id: name })) {
+              upsertCommandLocal(set, get, name, config);
+              emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
+              return true;
+            }
+
+            if (payload?.requiresReload) {
+              startConfigUpdate("Updating command configuration…");
               await performFullConfigRefresh({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
@@ -362,16 +413,10 @@ export const useCommandsStore = create<CommandsStore>()(
           } catch (error) {
             console.error("[CommandsStore] Failed to update command:", error);
             return false;
-          } finally {
-            if (!requiresReload) {
-              finishConfigUpdate();
-            }
           }
         },
 
         deleteCommand: async (name: string) => {
-          startConfigUpdate("Deleting command configuration…");
-          let requiresReload = false;
           try {
             // Use active project root for project-level command support
             const directory = getRequestDirectory();
@@ -390,10 +435,21 @@ export const useCommandsStore = create<CommandsStore>()(
 
             console.log('[CommandsStore] Command deleted successfully');
 
-            const needsReload = payload?.requiresReload ?? true;
             invalidateCommandsLoadCache(directory);
-            if (needsReload) {
-              requiresReload = true;
+
+            if (payload?.requiresManualRestart) {
+              removeCommandLocal(set, get, name);
+              return true;
+            }
+
+            if (noteDeferredRestartFromPayload(payload, 'commands', { id: name })) {
+              removeCommandLocal(set, get, name);
+              emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
+              return true;
+            }
+
+            if (payload?.requiresReload) {
+              startConfigUpdate("Deleting command configuration…");
               await performFullConfigRefresh({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
@@ -414,10 +470,6 @@ export const useCommandsStore = create<CommandsStore>()(
           } catch (error) {
             console.error("Failed to delete command:", error);
             return false;
-          } finally {
-            if (!requiresReload) {
-              finishConfigUpdate();
-            }
           }
         },
 

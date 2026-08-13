@@ -61,7 +61,7 @@ const DialogOverlay = React.forwardRef<
       ref={ref as React.Ref<HTMLDivElement>}
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/50 dark:bg-black/75",
+        "oc-glass-backdrop fixed inset-0 z-50 bg-black/25 dark:bg-black/40",
         "transition-opacity duration-150 ease-out",
         "data-[starting-style]:opacity-0 data-[ending-style]:opacity-0",
         className

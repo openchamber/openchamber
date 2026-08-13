@@ -72,6 +72,12 @@ interface McpStore {
   connect: (name: string, directory?: string | null) => Promise<void>;
   disconnect: (name: string, directory?: string | null) => Promise<void>;
   startAuth: (name: string, directory?: string | null) => Promise<string>;
+  /**
+   * OpenCode's native full OAuth flow: OpenCode opens the browser, receives
+   * the callback on its own fixed loopback listener, and exchanges the code
+   * itself. Resolves only when the whole flow finishes (minutes, not ms).
+   */
+  authenticate: (name: string, directory?: string | null) => Promise<void>;
   completeAuth: (name: string, code: string, directory?: string | null) => Promise<void>;
   clearAuth: (name: string, directory?: string | null) => Promise<void>;
   testConnection: (name: string, directory?: string | null) => Promise<TestConnectionResult>;
@@ -177,6 +183,29 @@ export const useMcpStore = create<McpStore>()(
       return authorizationUrl;
     },
 
+
+    authenticate: async (name, directory) => {
+      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
+      const key = toKey(normalized);
+      const api = getMcpApiClient(normalized);
+      try {
+        await api.mcp.auth.authenticate({ name }, { throwOnError: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Authorization failed';
+        set((state) => ({
+          diagnosticsByDirectory: {
+            ...state.diagnosticsByDirectory,
+            [key]: {
+              ...(state.diagnosticsByDirectory[key] ?? {}),
+              [name]: { status: 'failed', error: message },
+            },
+          },
+        }));
+        throw error;
+      }
+      await get().refresh({ directory: normalized, silent: true });
+    },
+
     completeAuth: async (name, code, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const api = getMcpApiClient(normalized);
@@ -188,6 +217,14 @@ export const useMcpStore = create<McpStore>()(
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const api = getMcpApiClient(normalized);
       await api.mcp.auth.remove({ name }, { throwOnError: true });
+
+      // Removing the stored tokens does not touch the live session, so the
+      // server kept reporting `connected` until something forced a reconnect —
+      // the user had to run a connection test to see that authorization was
+      // gone. Dropping the connection makes the reported state match the
+      // credentials that remain.
+      await api.mcp.disconnect({ name }).catch(() => undefined);
+
       await get().refresh({ directory: normalized, silent: true });
     },
 

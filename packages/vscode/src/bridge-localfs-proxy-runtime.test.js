@@ -1,32 +1,25 @@
 import { describe, expect, it, mock } from 'bun:test';
 
+const existingFiles = new Set();
+const fsPromises = {
+  realpath: mock(async (filePath) => {
+    if (existingFiles.has(filePath)) return filePath;
+    const error = new Error('missing');
+    error.code = 'ENOENT';
+    throw error;
+  }),
+  stat: mock(async (filePath) => {
+    if (existingFiles.has(filePath)) return { isFile: () => true, size: 4, mtimeMs: 1 };
+    const error = new Error('missing');
+    error.code = 'ENOENT';
+    throw error;
+  }),
+  readFile: mock(async () => Buffer.from('test')),
+};
+
 mock.module('fs', () => ({
-  promises: {
-    realpath: mock(async () => {
-      const error = new Error('missing');
-      error.code = 'ENOENT';
-      throw error;
-    }),
-    stat: mock(async () => {
-      const error = new Error('missing');
-      error.code = 'ENOENT';
-      throw error;
-    }),
-  },
-  default: {
-    promises: {
-      realpath: mock(async () => {
-        const error = new Error('missing');
-        error.code = 'ENOENT';
-        throw error;
-      }),
-      stat: mock(async () => {
-        const error = new Error('missing');
-        error.code = 'ENOENT';
-        throw error;
-      }),
-    },
-  },
+  promises: fsPromises,
+  default: { promises: fsPromises },
 }));
 
 mock.module('vscode', () => ({
@@ -34,7 +27,10 @@ mock.module('vscode', () => ({
     file: (fsPath) => ({ fsPath }),
   },
   workspace: {
-    workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
+    workspaceFolders: [
+      { uri: { fsPath: '/workspace' } },
+      { uri: { fsPath: '/workspace-two' } },
+    ],
   },
 }));
 
@@ -55,5 +51,16 @@ describe('bridge local fs proxy', () => {
     const response = await tryHandleLocalFsProxy('GET', '/api/fs/stat?path=%2Fmissing.ts');
 
     expect(response?.status).toBe(404);
+  });
+
+  it('reads from the active directory when it is the second workspace root', async () => {
+    existingFiles.add('/workspace-two/image.png');
+    const response = await tryHandleLocalFsProxy(
+      'GET',
+      '/api/fs/raw?path=%2Fworkspace-two%2Fimage.png&directory=%2Fworkspace-two',
+    );
+
+    expect(response?.status).toBe(200);
+    expect(Buffer.from(response?.bodyBase64 ?? '', 'base64').toString()).toBe('test');
   });
 });

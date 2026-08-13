@@ -240,10 +240,32 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
 
+  // session.send/fork default the directory to the caller's context directory,
+  // which is wrong for sessions living in other worktrees: prompt_async then
+  // targets an instance that does not hold the session and the run dies with
+  // UnknownError. Resolve the target session's directory from the global
+  // session list when the caller did not scope explicitly.
+  const resolveSessionDirectory = async (sessionID) => {
+    try {
+      const client = await getClient();
+      const response = await client.experimental?.session?.list?.({});
+      const sessions = Array.isArray(response?.data) ? response.data : [];
+      const session = sessions.find((item) => item?.id === sessionID);
+      return asNonEmptyString(session?.directory) || null;
+    } catch {
+      return null;
+    }
+  };
+
   const executeSessionAction = async (action, input, contextDirectory, signal) => {
     if (input.timeout !== undefined && input.wait !== true) throw new OpenChamberControlError('timeout requires wait', 400);
     if (input.lastAssistant === true && input.wait !== true) throw new OpenChamberControlError('lastAssistant requires wait', 400);
-    const directory = asNonEmptyString(input.directory) || (!input.projectId ? asNonEmptyString(contextDirectory) : null);
+    const sessionID = asNonEmptyString(input.sessionId);
+    let directory = asNonEmptyString(input.directory) || (!input.projectId ? asNonEmptyString(contextDirectory) : null);
+    if (sessionID && action !== 'session.create' && !asNonEmptyString(input.directory) && !input.projectId) {
+      const resolvedSessionDirectory = await resolveSessionDirectory(sessionID);
+      if (resolvedSessionDirectory) directory = resolvedSessionDirectory;
+    }
     const payload = {
       ...(directory ? { directory } : {}),
       ...(asNonEmptyString(input.projectId) ? { projectId: input.projectId.trim() } : {}),
@@ -262,7 +284,6 @@ export const createOpenChamberControlService = (dependencies) => {
       ...(typeof input.setUpstream === 'boolean' ? { setUpstream: input.setUpstream } : {}),
       ...(asNonEmptyString(input.messageId) ? { messageId: input.messageId.trim() } : {}),
     };
-    const sessionID = asNonEmptyString(input.sessionId);
     const startedAt = now();
     let result;
     if (action === 'session.create') {

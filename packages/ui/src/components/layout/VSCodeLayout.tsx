@@ -30,9 +30,8 @@ import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
-import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
 import { Icon } from "@/components/icon/Icon";
-import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { formatTimeForPreference } from '@/lib/timeFormat';
@@ -673,7 +672,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   const isQuotaLoading = useQuotaStore((state) => state.isLoading);
   const quotaLastUpdated = useQuotaStore((state) => state.lastUpdated);
   const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
-  const showPredValues = useQuotaStore((state) => state.showPredValues);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
@@ -975,12 +973,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                     const displayPercent = quotaDisplayMode === 'remaining'
                       ? window.remainingPercent
                       : window.usedPercent;
-                    const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
-                    const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                      ? (quotaDisplayMode === 'remaining'
-                          ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                          : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                      : null;
                     const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                     return (
                     <DropdownMenuItem
@@ -999,13 +991,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                                 percent={displayPercent}
                                 tonePercent={window.usedPercent}
                                 className="h-1"
-                                expectedMarkerPercent={expectedMarker}
                               />
-                              {paceInfo && showPredValues && (
-                                <div className="mt-0.5">
-                                  <PaceIndicator paceInfo={paceInfo} compact />
-                                </div>
-                              )}
                               <span className="flex items-center justify-between typography-micro text-muted-foreground text-[10px]">
                                 <span>{formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference)}</span>
                               </span>

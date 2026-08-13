@@ -1825,6 +1825,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         openNewSessionDraft={openNewSessionDraft}
         setActiveMainTab={setActiveMainTab}
         setSessionSwitcherOpen={setSessionSwitcherOpen}
+        sessionOwnerBySessionId={sessionOwnership.bySessionId}
       />
       <SessionPrefetchEffect
         enabled={isVisible}

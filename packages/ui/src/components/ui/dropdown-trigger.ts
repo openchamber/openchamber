@@ -1,4 +1,4 @@
-import { cva, type VariantProps } from 'class-variance-authority';
+import { cva } from 'class-variance-authority';
 
 /**
  * Single source of truth for every dropdown-style trigger surface in the app:
@@ -34,6 +34,3 @@ export const dropdownTriggerVariants = cva(
     },
   },
 );
-
-export type DropdownTriggerVariantProps = VariantProps<typeof dropdownTriggerVariants>;
-export type DropdownTriggerSize = NonNullable<DropdownTriggerVariantProps['size']>;

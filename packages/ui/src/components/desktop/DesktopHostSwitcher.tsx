@@ -23,7 +23,6 @@ import {
   desktopOpenNewWindowAtUrl,
   desktopOpenNewWindowForHost,
   getDesktopHostApiUrl,
-  locationMatchesHost,
   normalizeHostUrl,
   probeRelayDesktopHost,
   redactSensitiveUrl,
@@ -31,10 +30,17 @@ import {
   type DesktopHost,
   type HostProbeResult,
 } from '@/lib/desktopHosts';
+import {
+  LOCAL_HOST_ID,
+  buildLocalDesktopHost,
+  getLocalDesktopOrigin,
+  resolveCurrentDesktopHost,
+  runtimeKeyForDesktopHost,
+} from '@/lib/desktopCurrentHost';
 import { scheduleDesktopHostCandidateRefresh } from '@/lib/desktopRelayRestore';
 import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import {
   desktopSshConnect,
   desktopSshDisconnect,
@@ -43,14 +49,8 @@ import {
   type DesktopSshInstanceStatus,
 } from '@/lib/desktopSsh';
 
-const LOCAL_HOST_ID = 'local';
 const SSH_CONNECT_TIMEOUT_MS = 90_000;
 const SSH_CONNECT_CANCELLED_ERROR = 'SSH connection cancelled';
-
-const runtimeKeyForHost = (host: DesktopHost): string => {
-  if (host.id === LOCAL_HOST_ID) return 'local';
-  return `host:${host.id}`;
-};
 
 type HostStatus = {
   status: HostProbeResult['status'];
@@ -81,11 +81,6 @@ const toNavigationUrl = (rawUrl: string): string => {
   } catch {
     return normalized;
   }
-};
-
-const getLocalOrigin = (): string => {
-  if (typeof window === 'undefined') return '';
-  return window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
 };
 
 const getLocalClientToken = async (): Promise<string> => {
@@ -236,67 +231,6 @@ const waitForSshReady = async (
   throw new Error('Timed out waiting for SSH connection');
 };
 
-const buildLocalHost = (localOrigin?: string | null): DesktopHost => ({
-  id: LOCAL_HOST_ID,
-  label: 'Local',
-  url: localOrigin || getLocalOrigin(),
-});
-
-const resolveCurrentHost = (hosts: DesktopHost[]) => {
-  const currentHref = typeof window === 'undefined' ? '' : window.location.href;
-  const localOrigin = hosts.find((host) => host.id === LOCAL_HOST_ID)?.url || getLocalOrigin();
-  const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
-  const normalizedLocal = normalizeHostUrl(localOrigin) || localOrigin;
-  const normalizedCurrent = normalizeHostUrl(currentHref) || currentHref;
-
-  // Relay hosts share the window origin as their (virtual) API base, so URL
-  // matching can't distinguish them — identify the active relay host by its
-  // stable runtime key instead.
-  const activeRuntimeKey = getRuntimeKey();
-  const relayMatch = hosts.find((h) => h.relay && runtimeKeyForHost(h) === activeRuntimeKey);
-  if (relayMatch) {
-    return { id: relayMatch.id, label: relayMatch.label, url: relayMatch.url };
-  }
-
-  if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
-    return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
-  }
-
-  const runtimeMatch = hosts.find((h) => {
-    return runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(h)) : false;
-  });
-
-  if (runtimeMatch) {
-    return {
-      id: runtimeMatch.id,
-      label: runtimeMatch.label,
-      url: normalizeHostUrl(getDesktopHostApiUrl(runtimeMatch)) || getDesktopHostApiUrl(runtimeMatch),
-    };
-  }
-
-  if (currentHref && locationMatchesHost(currentHref, localOrigin)) {
-    return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
-  }
-
-  const match = hosts.find((h) => {
-    return currentHref ? locationMatchesHost(currentHref, h.url) : false;
-  });
-
-  if (match) {
-    return { id: match.id, label: match.label, url: normalizeHostUrl(match.url) || match.url };
-  }
-
-  if (currentHref.startsWith('openchamber-ui://')) {
-    return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
-  }
-
-  return {
-    id: 'custom',
-    label: redactSensitiveUrl(normalizedCurrent || 'Instance'),
-    url: normalizedCurrent,
-  };
-};
-
 type DesktopHostSwitcherDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -342,7 +276,7 @@ export function DesktopHostSwitcherDialog({
     error: null,
   });
   const [error, setError] = React.useState<string>('');
-  const [localOrigin, setLocalOrigin] = React.useState<string>(() => getLocalOrigin());
+  const [localOrigin, setLocalOrigin] = React.useState<string>(() => getLocalDesktopOrigin());
 
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editLabel, setEditLabel] = React.useState('');
@@ -352,7 +286,7 @@ export function DesktopHostSwitcherDialog({
   const sshSwitchTokenRef = React.useRef(0);
 
   const allHosts = React.useMemo(() => {
-    const local = buildLocalHost(localOrigin);
+    const local = buildLocalDesktopHost(localOrigin);
     const normalizedRemote = configHosts.map((h) => ({
       ...h,
       url: normalizeHostUrl(h.url) || h.url,
@@ -366,7 +300,7 @@ export function DesktopHostSwitcherDialog({
 
   const current = React.useMemo(() => {
     void runtimeEndpointEpoch;
-    return resolveCurrentHost(allHosts);
+    return resolveCurrentDesktopHost(allHosts);
   }, [allHosts, runtimeEndpointEpoch]);
   const currentDefaultLabel = React.useMemo(() => {
     const id = defaultHostId || LOCAL_HOST_ID;
@@ -525,7 +459,7 @@ export function DesktopHostSwitcherDialog({
       switchRuntimeEndpoint({
         apiBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
         clientToken: host.clientToken || null,
-        runtimeKey: runtimeKeyForHost(host),
+        runtimeKey: runtimeKeyForDesktopHost(host),
         relay,
       });
       // On the relay: learn the server's current LAN address in the background
@@ -551,7 +485,7 @@ export function DesktopHostSwitcherDialog({
         if (cached.via === 'relay' && host.relay) {
           activateRelay(host.relay);
         } else if (apiOrigin) {
-          switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForHost(host) });
+          switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForDesktopHost(host) });
         } else if (host.relay) {
           activateRelay(host.relay);
         }
@@ -590,7 +524,7 @@ export function DesktopHostSwitcherDialog({
       if (transport === 'relay' && host.relay) {
         activateRelay(host.relay, relayProbeTunnel);
       } else {
-        switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForHost(host) });
+        switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForDesktopHost(host) });
       }
       onHostSwitched?.();
       setSwitchingHostId(null);

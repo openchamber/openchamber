@@ -91,7 +91,7 @@ export function buildImagePasteInsertion(pastedText: string, citationText: strin
  * A single-line URL pasted over a selection becomes a markdown link rather
  * than replacing the selected text.
  */
-export const PASTE_LINK_URL_PATTERN = /^(https?:\/\/|mailto:)\S+$/i;
+const PASTE_LINK_URL_PATTERN = /^(https?:\/\/|mailto:)\S+$/i;
 
 /**
  * Whether a pasted URL should wrap the selection as `[selected](url)`. A URL
