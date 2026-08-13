@@ -2980,7 +2980,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             requestAnimationFrame(openIssuePicker);
                         }}
                     >
-                        <Icon name={gitProvider === 'gitlab' ? 'git-branch' : 'github'} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        <Icon name={gitProvider === 'gitlab' ? 'gitlab' : 'github'} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
                         {gitProvider === 'gitlab' ? t('chat.chatInput.actions.linkGitlabIssue') : t('chat.chatInput.actions.linkGithubIssue')}
                     </button>
                     <button
@@ -2992,7 +2992,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             requestAnimationFrame(openPrPicker);
                         }}
                     >
-                        <Icon name={gitProvider === 'gitlab' ? 'git-merge' : 'git-pull-request'} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        <Icon name={gitProvider === 'gitlab' ? 'gitlab' : 'git-pull-request'} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
                         {gitProvider === 'gitlab' ? t('chat.chatInput.actions.linkGitlabMr') : t('chat.chatInput.actions.linkGithubPr')}
                     </button>
                 </div>

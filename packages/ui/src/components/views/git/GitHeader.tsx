@@ -399,7 +399,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
           className="h-8 gap-1.5 px-2 typography-micro"
         >
           <Icon
-            name="git-merge"
+            name="gitlab"
             className="size-3.5"
             style={{ color: `var(--pr-${gitLabMrVisualState})` }}
           />

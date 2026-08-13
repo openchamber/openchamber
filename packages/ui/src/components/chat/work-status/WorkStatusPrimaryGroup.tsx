@@ -304,7 +304,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
 
           {hasGitLabMr && gitLabMr ? (
             <WorkStatusRow
-              icon="git-merge"
+              icon="gitlab"
               onClick={directory ? () => openSurface('pr') : undefined}
               ariaLabel={t('chat.workStatus.action.openMr')}
               iconColor={`var(--pr-${gitLabMrVisualState})`}

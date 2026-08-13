@@ -302,7 +302,7 @@ export const ContextPanelRail: React.FC = () => {
             const gitlabMrSurface: ContextSurfaceDescriptor = surface.id === 'pr' && gitProvider === 'gitlab'
               ? {
                   ...surface,
-                  icon: 'git-merge' as IconName,
+                  icon: 'gitlab' as IconName,
                   labelKey: 'contextPanel.mode.mr',
                   descriptionKey: 'contextRail.surface.mr.description',
                 }

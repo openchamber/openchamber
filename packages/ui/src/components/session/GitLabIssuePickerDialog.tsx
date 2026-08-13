@@ -718,7 +718,7 @@ export function GitLabIssuePickerDialog({
       <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
-            <Icon name="git-branch" className="h-5 w-5" />
+            <Icon name="gitlab" className="h-5 w-5" />
             {title}
           </DialogTitle>
           <DialogDescription>

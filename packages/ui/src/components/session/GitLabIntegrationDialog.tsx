@@ -348,7 +348,7 @@ export function GitLabIntegrationDialog({
     <>
       {!isGitLabConnected ? (
         <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4">
-          <Icon name="git-branch" className="h-12 w-12 text-muted-foreground" />
+          <Icon name="gitlab" className="h-12 w-12 text-muted-foreground" />
           <div className="text-center">
             <p className="typography-ui-label text-foreground">{t('session.gitlabIntegration.connect.title')}</p>
             <p className="typography-small text-muted-foreground mt-1">
@@ -606,8 +606,8 @@ export function GitLabIntegrationDialog({
               <div className="w-full">
                 <SortableTabsStrip
                   items={[
-                    { id: 'issues', label: t('session.gitlabIntegration.tabs.issues'), icon: <Icon name="git-branch" className="h-3.5 w-3.5" /> },
-                    { id: 'mrs', label: t('session.gitlabIntegration.tabs.mergeRequests'), icon: <Icon name="git-merge" className="h-3.5 w-3.5" /> },
+                    { id: 'issues', label: t('session.gitlabIntegration.tabs.issues'), icon: <Icon name="gitlab" className="h-3.5 w-3.5" /> },
+                    { id: 'mrs', label: t('session.gitlabIntegration.tabs.mergeRequests'), icon: <Icon name="gitlab" className="h-3.5 w-3.5" /> },
                   ]}
                   activeId={activeTab}
                   onSelect={(id) => {
@@ -647,7 +647,7 @@ export function GitLabIntegrationDialog({
             <DialogHeader className="flex flex-row items-center justify-between">
               <div className="flex items-center gap-3">
                 <DialogTitle className="flex items-center gap-2 shrink-0">
-                  <Icon name="git-branch" className="h-5 w-5" />
+                  <Icon name="gitlab" className="h-5 w-5" />
                   {t('session.gitlabIntegration.title')}
                 </DialogTitle>
                 
@@ -655,8 +655,8 @@ export function GitLabIntegrationDialog({
                 <div className="w-[220px]">
                   <SortableTabsStrip
                     items={[
-                      { id: 'issues', label: t('session.gitlabIntegration.tabs.issues'), icon: <Icon name="git-branch" className="h-3.5 w-3.5" /> },
-                      { id: 'mrs', label: t('session.gitlabIntegration.tabs.mergeRequests'), icon: <Icon name="git-merge" className="h-3.5 w-3.5" /> },
+                      { id: 'issues', label: t('session.gitlabIntegration.tabs.issues'), icon: <Icon name="gitlab" className="h-3.5 w-3.5" /> },
+                      { id: 'mrs', label: t('session.gitlabIntegration.tabs.mergeRequests'), icon: <Icon name="gitlab" className="h-3.5 w-3.5" /> },
                     ]}
                     activeId={activeTab}
                     onSelect={(id) => {

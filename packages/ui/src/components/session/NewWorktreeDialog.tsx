@@ -1585,7 +1585,7 @@ export function NewWorktreeDialog({
                           onClick={() => setGitlabDialogOpen(true)}
                           className="gap-1.5 h-7"
                         >
-                          <Icon name="git-merge" className="size-4 text-status-success" />
+                          <Icon name="gitlab" className="size-4 text-status-success" />
                             {newBranchState.linkedGitLabIssue || newBranchState.linkedGitLabMr ? t('session.newWorktree.actions.change') : t('session.newWorktree.actions.startFromGitLabIssueMr')}
                         </Button>
                       )}
@@ -1851,7 +1851,7 @@ export function NewWorktreeDialog({
                   {newBranchState.linkedIssue || newBranchState.linkedPr ? (
                     <Icon name="github" className="h-3.5 w-3.5 text-status-success shrink-0" />
                   ) : (
-                    <Icon name="git-merge" className="h-3.5 w-3.5 text-status-success shrink-0" />
+                    <Icon name="gitlab" className="h-3.5 w-3.5 text-status-success shrink-0" />
                   )}
                   
                     {newBranchState.linkedIssue && (
@@ -2113,7 +2113,7 @@ export function NewWorktreeDialog({
                             onClick={() => setGitlabDialogOpen(true)}
                             className="gap-1.5 h-7"
                           >
-                            <Icon name="git-merge" className="size-4 text-status-success" />
+                            <Icon name="gitlab" className="size-4 text-status-success" />
                           {newBranchState.linkedGitLabIssue || newBranchState.linkedGitLabMr ? t('session.newWorktree.actions.change') : t('session.newWorktree.actions.startFromGitLabIssueMr')}
                           </Button>
                         )}
@@ -2353,7 +2353,7 @@ export function NewWorktreeDialog({
                     {newBranchState.linkedIssue || newBranchState.linkedPr ? (
                       <Icon name="github" className="h-3.5 w-3.5 text-status-success shrink-0" />
                     ) : (
-                      <Icon name="git-merge" className="h-3.5 w-3.5 text-status-success shrink-0" />
+                      <Icon name="gitlab" className="h-3.5 w-3.5 text-status-success shrink-0" />
                     )}
                     
                     {newBranchState.linkedIssue && (

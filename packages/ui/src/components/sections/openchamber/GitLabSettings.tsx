@@ -168,7 +168,7 @@ export const GitLabSettings: React.FC = () => {
                 />
               ) : (
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
-                  <Icon name="git-branch" className="h-4 w-4 text-muted-foreground" />
+                  <Icon name="gitlab" className="h-4 w-4 text-muted-foreground" />
                 </div>
               )}
 
@@ -177,7 +177,7 @@ export const GitLabSettings: React.FC = () => {
                   {user?.name?.trim() || user?.username || 'GitLab'}
                 </div>
                 <div className={cn('flex items-center gap-2 typography-meta text-muted-foreground mt-0.5', isMobile ? 'flex-wrap' : 'truncate')}>
-                  <Icon name="git-branch" className="h-3.5 w-3.5 shrink-0" />
+                  <Icon name="gitlab" className="h-3.5 w-3.5 shrink-0" />
                   <span>{t('settings.gitlab.page.connectedAs')}</span>
                   <span className="font-mono">{user?.username || t('settings.gitlab.page.label.unknownUser')}</span>
                   <span className="opacity-50">•</span>
@@ -257,7 +257,7 @@ export const GitLabSettings: React.FC = () => {
                         />
                       ) : (
                         <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
-                          <Icon name="git-branch" className="h-3 w-3 text-muted-foreground" />
+                          <Icon name="gitlab" className="h-3 w-3 text-muted-foreground" />
                         </div>
                       )}
                       <div className="min-w-0 flex flex-col">

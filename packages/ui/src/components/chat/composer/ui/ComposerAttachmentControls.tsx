@@ -128,7 +128,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                             requestAnimationFrame(openIssuePicker);
                                         }}
                                     >
-                                        <Icon name="git-branch"/>
+                                        <Icon name="gitlab"/>
                                         {t('chat.chatInput.actions.linkGitlabIssue')}
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
@@ -136,7 +136,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                             requestAnimationFrame(openPrPicker);
                                         }}
                                     >
-                                        <Icon name="git-merge"/>
+                                        <Icon name="gitlab"/>
                                         {t('chat.chatInput.actions.linkGitlabMr')}
                                     </DropdownMenuItem>
                                 </>

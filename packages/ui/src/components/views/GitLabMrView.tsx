@@ -434,7 +434,7 @@ export const GitLabMrView: React.FC = () => {
   if (!currentDirectory) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <Icon name="git-merge" className="h-12 w-12 text-muted-foreground/50" />
+        <Icon name="gitlab" className="h-12 w-12 text-muted-foreground/50" />
         <div className="typography-ui-header text-foreground">{t('contextPanel.gitlabMr.title')}</div>
         <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.gitlabMr.empty.noActiveProject')}</div>
       </div>
@@ -453,7 +453,7 @@ export const GitLabMrView: React.FC = () => {
   if (connected === false) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <Icon name="git-merge" className="h-12 w-12 text-muted-foreground/50" />
+        <Icon name="gitlab" className="h-12 w-12 text-muted-foreground/50" />
         <div className="typography-ui-header text-foreground">{t('contextPanel.gitlabMr.error.notConnected')}</div>
         <Button variant="outline" size="sm" onClick={openGitLabSettings} className="w-fit">
           {t('contextPanel.gitlabMr.actions.openSettings')}
