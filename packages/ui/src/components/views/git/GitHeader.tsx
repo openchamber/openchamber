@@ -19,6 +19,7 @@ import type {
   GitRemoteComparison,
   GitHubPullRequest,
   GitHubChecksSummary,
+  GitLabMergeRequestSummary,
 } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
@@ -51,6 +52,8 @@ interface GitHeaderProps {
   pullRequest?: GitHubPullRequest | null;
   prChecks?: GitHubChecksSummary | null;
   onOpenPullRequest?: () => void;
+  gitLabMr?: GitLabMergeRequestSummary | null;
+  onOpenGitLabMr?: () => void;
 }
 
 const IDENTITY_ICON_MAP: Record<string, IconName> = {
@@ -258,6 +261,8 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   pullRequest,
   prChecks,
   onOpenPullRequest,
+  gitLabMr,
+  onOpenGitLabMr,
 }) => {
   const { t } = useI18n();
   if (!status) {
@@ -371,6 +376,40 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     </Tooltip>
   ) : null;
 
+  // GitLab merge request chip, mirroring the GitHub PR chip above. GitLab
+  // states are surfaced with the same PR state palette so merged/closed/open
+  // read identically across providers.
+  const gitLabMrVisualState = gitLabMr
+    ? gitLabMr.state === 'merged'
+      ? 'merged'
+      : gitLabMr.state === 'closed'
+        ? 'closed'
+        : gitLabMr.draft
+          ? 'draft'
+          : 'open'
+    : null;
+
+  const gitLabMrChip = gitLabMr && onOpenGitLabMr ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenGitLabMr}
+          className="h-8 gap-1.5 px-2 typography-micro"
+        >
+          <Icon
+            name="git-merge"
+            className="size-3.5"
+            style={{ color: `var(--pr-${gitLabMrVisualState})` }}
+          />
+          <span className="tabular-nums text-foreground/80">!{gitLabMr.number}</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={8}>{t('gitView.header.openMergeRequest')}</TooltipContent>
+    </Tooltip>
+  ) : null;
+
   const syncButtons = (
     <SyncActions
       syncAction={syncAction}
@@ -435,6 +474,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
 
       <div className="mt-3 flex h-8 min-w-0 items-center gap-2">
         {prChip ? <div className="shrink-0">{prChip}</div> : null}
+        {gitLabMrChip ? <div className="shrink-0">{gitLabMrChip}</div> : null}
         <div className="min-w-0 flex-1" />
         {upstreamStatusPill ? (
           <div className="min-w-0 shrink">{upstreamStatusPill}</div>

@@ -4,6 +4,8 @@ import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { useGitLabMrForBranch } from '@/lib/gitlabMrStatus';
+import { useGitProvider } from '@/lib/gitProvider';
 import { useSession, useSessionMessages } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -113,6 +115,12 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   );
   const prSummary = usePrVisualSummary(prKey);
 
+  // GitLab merge requests ride the same shared TTL cache as the git view and
+  // the walkthrough, so every surface that reports the branch's request stays
+  // consistent without extra requests.
+  const gitProvider = useGitProvider(directory);
+  const { mr: gitLabMr } = useGitLabMrForBranch(directory, branch);
+
   // `getCurrentModel` is an imperative getter: its reference never changes, so
   // calling it in render subscribes to nothing. Subscribe to the selected model
   // ids and recompute the limits from those.
@@ -201,7 +209,17 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
 
   const cost = typeof session?.cost === 'number' && session.cost > 0 ? session.cost : null;
   const hasSession = showSession && (usagePercent !== null || cost !== null || Boolean(goalRow));
-  const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel);
+  const hasGitLabMr = gitProvider === 'gitlab' && gitLabMr !== null;
+  const gitLabMrVisualState = gitLabMr
+    ? gitLabMr.state === 'merged'
+      ? 'merged'
+      : gitLabMr.state === 'closed'
+        ? 'closed'
+        : gitLabMr.draft
+          ? 'draft'
+          : 'open'
+    : null;
+  const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel || hasGitLabMr);
 
   useReportWorkStatusPresence('session-repository', hasSession || hasRepository);
 
@@ -281,6 +299,24 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                   <WorkStatusValue tone="error">{`−${changed.deletions}`}</WorkStatusValue>
                 </>
               ) : undefined}
+            />
+          ) : null}
+
+          {hasGitLabMr && gitLabMr ? (
+            <WorkStatusRow
+              icon="git-merge"
+              onClick={directory ? () => openSurface('pr') : undefined}
+              ariaLabel={t('chat.workStatus.action.openMr')}
+              iconColor={`var(--pr-${gitLabMrVisualState})`}
+              label={gitLabMr.title || t('chat.workStatus.mr.untitled')}
+              value={(
+                <WorkStatusPill
+                  color={`var(--pr-${gitLabMrVisualState})`}
+                  background={`color-mix(in srgb, var(--pr-${gitLabMrVisualState}) 18%, transparent)`}
+                >
+                  {gitLabMr.draft ? t('chat.workStatus.pr.draft') : `!${gitLabMr.number}`}
+                </WorkStatusPill>
+              )}
             />
           ) : null}
 

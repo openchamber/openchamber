@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n, type Locale } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { useGitProvider } from '@/lib/gitProvider';
+import { useGitLabMrForBranch } from '@/lib/gitlabMrStatus';
 import { buildWalkthroughView } from '@/lib/walkthrough/model';
 import type { WalkthroughSource, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
@@ -210,6 +211,7 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
   const setPrStatusParams = useGitHubPrStatusStore((state) => state.setParams);
   const refreshPrStatusTargets = useGitHubPrStatusStore((state) => state.refreshTargets);
   const gitProvider = useGitProvider(directory);
+  const gitLabMr = useGitLabMrForBranch(directory, currentBranch);
 
   useEffect(() => {
     if (!directory || !currentBranch || !githubAuthChecked || !githubConnected || gitProvider !== 'github') return;
@@ -250,12 +252,18 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
     [requestedSource, scope]
   );
 
-  // Offer whichever pull request we know about: the one already selected, or
-  // the one this branch has.
+  // Offer whichever pull request or merge request we know about: the one
+  // already selected, or the one this branch has. GitLab repos get their MR
+  // number from the branch lookup; everything else falls back to the GitHub PR
+  // status store, which the polling effect above only fills for GitHub repos.
   const prSource = useMemo<Extract<WalkthroughSource, { kind: 'pr' }> | null>(() => {
     if (source.kind === 'pr') return source;
+    if (gitProvider === 'gitlab') {
+      const number = gitLabMr.mr?.number;
+      return number ? { kind: 'pr', number } : null;
+    }
     return branchPrNumber ? { kind: 'pr', number: branchPrNumber } : null;
-  }, [branchPrNumber, source]);
+  }, [branchPrNumber, gitLabMr.mr, gitProvider, source]);
 
   const selectWorkingTree = useCallback(
     (value: WalkthroughWorkingTreeScope) => {
@@ -341,7 +349,9 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
   const sourceLabel = source.kind === 'branch'
     ? t('walkthrough.scope.branch')
     : source.kind === 'pr'
-      ? t('walkthrough.scope.pullRequest', { number: source.number })
+      ? gitProvider === 'gitlab'
+        ? t('walkthrough.scope.mergeRequest', { number: source.number })
+        : t('walkthrough.scope.pullRequest', { number: source.number })
       : scope === 'all'
         ? t('walkthrough.scope.all')
         : scope === 'staged'
@@ -547,7 +557,9 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
               )}
               {prSource && (
                 <DropdownMenuRadioItem value="pr">
-                  {t('walkthrough.scope.pullRequest', { number: prSource.number })}
+                  {gitProvider === 'gitlab'
+                    ? t('walkthrough.scope.mergeRequest', { number: prSource.number })
+                    : t('walkthrough.scope.pullRequest', { number: prSource.number })}
                 </DropdownMenuRadioItem>
               )}
             </DropdownMenuRadioGroup>
