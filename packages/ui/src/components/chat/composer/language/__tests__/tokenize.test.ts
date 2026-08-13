@@ -51,6 +51,31 @@ describe('tokenizeComposer — reference constructs', () => {
         expect(styled('end with #sig')).toEqual([['#sig', 'mentionSnippet']]);
     });
 
+    test('a fusion directive is styled as a fusion chip', () => {
+        expect(styled('run [fusion preset: deep-dive] now')).toEqual([['[fusion preset: deep-dive]', 'mentionFusion']]);
+    });
+
+    test('a fusion directive tolerates the picker formatting', () => {
+        expect(styled('[fusion preset:deep-dive]')).toEqual([['[fusion preset:deep-dive]', 'mentionFusion']]);
+        expect(styled('[fusion preset:  deep-dive]')).toEqual([['[fusion preset:  deep-dive]', 'mentionFusion']]);
+    });
+
+    test('a malformed fusion directive stays plain prose', () => {
+        expect(styled('[fusion preset]')).toEqual([]);
+        expect(styled('[fusion preset: ]')).toEqual([]);
+        expect(styled('[fusion preset: bad name]')).toEqual([]);
+    });
+
+    test('multiple fusion directives all get styled', () => {
+        expect(stylesOf('[fusion preset: a] and [fusion preset: b]'))
+            .toEqual(new Set(['mentionFusion']));
+    });
+
+    test('shell mode leaves a fusion directive plain', () => {
+        expect(tokenizeComposer('[fusion preset: deep-dive]', context({ inputMode: 'shell' })))
+            .toEqual([]);
+    });
+
     test('an attachment citation is styled as a file', () => {
         expect(styled('here [shot.png]', context({ attachmentFilenames: ['shot.png'] })))
             .toEqual([['[shot.png]', 'mentionFile']]);

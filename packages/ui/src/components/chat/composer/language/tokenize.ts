@@ -85,6 +85,14 @@ export function tokenizeComposer(
         ranges.push({ start: token.start, end: token.end, style: 'mentionSnippet' });
     }
 
+    // A fusion directive inserted by the % picker. Inert like `~path`: the
+    // pattern is only ever produced by the picker itself, so it is styled
+    // unconditionally, with the same name charset the settings layer enforces.
+    for (const match of text.matchAll(/\[fusion\s+preset:\s*([A-Za-z0-9][A-Za-z0-9._-]{0,63})\]/g)) {
+        if (typeof match.index !== 'number') continue;
+        ranges.push({ start: match.index, end: match.index + match[0].length, style: 'mentionFusion' });
+    }
+
     if (context.attachmentFilenames.length > 0 && text.includes('[')) {
         for (const range of findAttachmentCitationRanges(text, [...context.attachmentFilenames])) {
             ranges.push({ ...range, style: 'mentionFile' });
