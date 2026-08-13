@@ -193,6 +193,7 @@ const getTabLabel = (
 const getTabIcon = (
   tab: { mode: ContextPanelMode; targetPath: string | null },
   faviconByOrigin: Record<string, string> = {},
+  gitProvider: GitProvider | null,
 ): React.ReactNode | undefined => {
   if (tab.mode === 'file') {
     return tab.targetPath
@@ -213,7 +214,7 @@ const getTabIcon = (
   }
 
   if (tab.mode === 'pr') {
-    return <Icon name="github" className="h-3.5 w-3.5" />;
+    return <Icon name={gitProvider === 'gitlab' ? 'git-merge' : 'github'} className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'notes') {
@@ -930,7 +931,7 @@ export const ContextPanel: React.FC = () => {
     return {
       id: tab.id,
       label,
-      icon: getTabIcon(tab, faviconByOrigin),
+      icon: getTabIcon(tab, faviconByOrigin, gitProvider),
       title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
       closeLabel: t('contextPanel.tab.closeTabAria', { label }),
     };
@@ -1006,7 +1007,7 @@ export const ContextPanel: React.FC = () => {
         />
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">
-          {activeTab ? getTabIcon(activeTab, faviconByOrigin) : null}
+          {activeTab ? getTabIcon(activeTab, faviconByOrigin, gitProvider) : null}
           <span className="truncate typography-ui-label text-foreground">
             {activeTab ? getModeLabel(activeTab.mode, t, gitProvider) : null}
           </span>
