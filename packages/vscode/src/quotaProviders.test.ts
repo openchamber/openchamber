@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, test } from 'node:test';
+import { after, afterEach, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const previousQuotaDataDirectory = process.env.OPENCHAMBER_DATA_DIR;
+const temporaryQuotaDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-quota-'));
+process.env.OPENCHAMBER_DATA_DIR = temporaryQuotaDataDirectory;
 
 // readAuthFile reads ~/.local/share/opencode/auth.json via fs.readFileSync.
 // Stub fs to serve a known auth entry so the providers treat themselves as
@@ -10,6 +16,7 @@ const AUTH = JSON.stringify({
   openai: { access: 'test-token' },
   crof: { key: 'test-token' },
   neuralwatt: { key: 'test-token' },
+  'opencode-go': { key: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
 });
@@ -19,6 +26,12 @@ const AUTH = JSON.stringify({
 import { fetchQuotaForProvider } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
+
+after(() => {
+  if (previousQuotaDataDirectory === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+  else process.env.OPENCHAMBER_DATA_DIR = previousQuotaDataDirectory;
+  fs.rmSync(temporaryQuotaDataDirectory, { recursive: true, force: true });
+});
 
 const mockResponse = (body: unknown, init: MockResponseInit = {}): Response => ({
   ok: 'ok' in init ? init.ok! : true,
@@ -68,6 +81,26 @@ const stubFetchReturning = (resolver: () => Promise<unknown>): void => {
 const stubFetchFailing = (json: () => Promise<unknown>, init: MockResponseInit): void => {
   globalThis.fetch = (async () => ({ json, ...init }) as unknown as Response) as typeof fetch;
 };
+
+describe('OpenCode Go quota provider (VS Code parity)', () => {
+  test('uses the opencode-go key from auth.json', async () => {
+    let request: RequestInit | undefined;
+    const legacyPath = path.join(temporaryQuotaDataDirectory, 'quota', 'opencode-go.json');
+    fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
+    fs.writeFileSync(legacyPath, '{not valid json');
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      request = init;
+      return mockResponse({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } });
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('opencode-go');
+
+    assert.equal(result.ok, true);
+    assert.equal((request?.headers as Record<string, string>).Authorization, 'Bearer test-token');
+    assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
+    assert.throws(() => fs.statSync(legacyPath));
+  });
+});
 
 describe('Crof quota provider (VS Code parity)', () => {
   test('reports credits balance as valueLabel with null percent', async () => {

@@ -61,6 +61,11 @@ export interface TunnelHttpRequestPayload {
   path: string;
   query: string;
   headers: Record<string, string>;
+  /** True when the client had a request body to send. The host uses this to
+   * distinguish a genuine bodyless request from one whose body frames were lost
+   * through the tunnel (which it must abort as an ambiguous transport failure
+   * instead of forwarding an empty body the loopback server rejects with 400). */
+  hasBody?: boolean;
 }
 
 export interface TunnelHttpResponsePayload {

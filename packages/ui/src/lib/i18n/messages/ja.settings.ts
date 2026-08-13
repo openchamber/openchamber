@@ -3,6 +3,7 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.description': 'OpenCode Go ダッシュボードを接続して、ローリング、週間、月間のクォータを表示します。',
   'settings.providers.page.openCodeGo.workspaceId': 'ワークスペース ID',
   'settings.providers.page.openCodeGo.authCookie': '認証 Cookie',
+  'settings.providers.page.openCodeGo.apiKey': 'API キー',
   'settings.providers.page.openCodeGo.help': 'ダッシュボード URL からワークスペース ID を、ブラウザーの開発者ツールから auth Cookie をコピーしてください。OpenChamber がブラウザーの Cookie を走査することはありません。',
   'settings.providers.page.openCodeGo.save': '保存して検証',
   'settings.providers.page.openCodeGo.replace': '置換',

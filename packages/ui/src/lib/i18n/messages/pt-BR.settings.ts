@@ -3,6 +3,7 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.description': 'Conecte o painel do OpenCode Go para exibir as cotas móvel, semanal e mensal.',
   'settings.providers.page.openCodeGo.workspaceId': 'ID do workspace',
   'settings.providers.page.openCodeGo.authCookie': 'Cookie de autenticação',
+  'settings.providers.page.openCodeGo.apiKey': 'Chave de API',
   'settings.providers.page.openCodeGo.help': 'Copie o ID da URL do painel e o cookie auth das ferramentas do navegador. O OpenChamber nunca examina os cookies do navegador.',
   'settings.providers.page.openCodeGo.save': 'Salvar e validar',
   'settings.providers.page.openCodeGo.replace': 'Substituir',

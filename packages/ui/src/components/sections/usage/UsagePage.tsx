@@ -80,7 +80,7 @@ export const UsagePage: React.FC = () => {
     ? selectedResult.error
     : null;
   const showInDropdown = selectedProviderId ? dropdownProviderIds.includes(selectedProviderId) : false;
-  const hasCredentialsForm = selectedProviderId === 'opencode-go' || selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor';
+  const hasCredentialsForm = selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor';
   const handleDropdownToggle = React.useCallback((enabled: boolean) => {
     if (!selectedProviderId) {
       return;
@@ -199,7 +199,7 @@ export const UsagePage: React.FC = () => {
         </div>
       )}
 
-      {(selectedProviderId === 'opencode-go' || selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor') && (
+      {(selectedProviderId === 'ollama-cloud' || selectedProviderId === 'cursor') && (
         <QuotaCredentials providerId={selectedProviderId} providerName={providerName} />
       )}
 
