@@ -525,6 +525,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     darkThemeId: DEFAULT_DARK_THEME_ID,
     openInAppId: DEFAULT_OPEN_IN_APP_ID,
     showReasoningTraces: defaults.showReasoningTraces,
+    showMessageSpeedMetrics: defaults.showMessageSpeedMetrics,
     workStatusPanelEnabled: defaults.workStatusPanelEnabled,
     workStatusHiddenSections: defaults.workStatusHiddenSections,
     sessionRecapEnabled: defaults.sessionRecapEnabled,
@@ -629,6 +630,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
     store.setShowReasoningTraces(settings.showReasoningTraces);
+  }
+  if (typeof settings.showMessageSpeedMetrics === 'boolean' && settings.showMessageSpeedMetrics !== store.showMessageSpeedMetrics) {
+    store.setShowMessageSpeedMetrics(settings.showMessageSpeedMetrics);
   }
   if (typeof settings.sessionRecapEnabled === 'boolean' && settings.sessionRecapEnabled !== store.sessionRecapEnabled) {
     store.setSessionRecapEnabled(settings.sessionRecapEnabled);
@@ -1098,6 +1102,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
+  }
+  if (typeof candidate.showMessageSpeedMetrics === 'boolean') {
+    result.showMessageSpeedMetrics = candidate.showMessageSpeedMetrics;
   }
   if (typeof candidate.sessionRecapEnabled === 'boolean') {
     result.sessionRecapEnabled = candidate.sessionRecapEnabled;

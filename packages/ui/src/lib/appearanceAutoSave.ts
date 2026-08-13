@@ -7,6 +7,7 @@ import type { TerminalShell } from '@/lib/api/types';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
+  showMessageSpeedMetrics: boolean;
   workStatusPanelEnabled: boolean;
   workStatusHiddenSections: string[];
   sessionRecapEnabled: boolean;
@@ -62,6 +63,7 @@ export const startAppearanceAutoSave = (): void => {
 
   let previous: AppearanceSlice = {
     showReasoningTraces: useUIStore.getState().showReasoningTraces,
+    showMessageSpeedMetrics: useUIStore.getState().showMessageSpeedMetrics,
     workStatusPanelEnabled: useUIStore.getState().workStatusPanelEnabled,
     workStatusHiddenSections: useUIStore.getState().workStatusHiddenSections,
     sessionRecapEnabled: useUIStore.getState().sessionRecapEnabled,
@@ -104,6 +106,7 @@ export const startAppearanceAutoSave = (): void => {
   useUIStore.subscribe((state) => {
     const current: AppearanceSlice = {
       showReasoningTraces: state.showReasoningTraces,
+      showMessageSpeedMetrics: state.showMessageSpeedMetrics,
       workStatusPanelEnabled: state.workStatusPanelEnabled,
       workStatusHiddenSections: state.workStatusHiddenSections,
       sessionRecapEnabled: state.sessionRecapEnabled,
@@ -155,6 +158,9 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.showReasoningTraces !== previous.showReasoningTraces) {
       diff.showReasoningTraces = current.showReasoningTraces;
+    }
+    if (current.showMessageSpeedMetrics !== previous.showMessageSpeedMetrics) {
+      diff.showMessageSpeedMetrics = current.showMessageSpeedMetrics;
     }
     if (current.sessionRecapEnabled !== previous.sessionRecapEnabled) {
       diff.sessionRecapEnabled = current.sessionRecapEnabled;

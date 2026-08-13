@@ -1171,6 +1171,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 footerAgentName={headerAgentName}
                                 footerVariant={headerVariant}
                                 isDarkTheme={isDarkTheme}
+                                messageTokens={(message.info as { tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } } }).tokens}
                             />
 
                         </div>

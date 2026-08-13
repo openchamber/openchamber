@@ -227,6 +227,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['thinking', 'reasoning'],
   },
   {
+    id: 'chat.message-speed-metrics',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.showMessageSpeedMetrics',
+    keywords: ['ttft', 'tokens', 'throughput', 'cache', 'latency', 'speed'],
+  },
+  {
     id: 'chat.reasoning',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.section.reasoning',

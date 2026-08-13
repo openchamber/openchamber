@@ -25,6 +25,13 @@ import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { flattenAssistantTextParts, suggestPlanTitleFromText } from '@/lib/messages/messageText';
+import {
+    deriveMessageSpeedMetrics,
+    formatDurationMs,
+    formatTokenCount,
+    formatThroughput,
+    type TokenBreakdown,
+} from '@/lib/messages/messageSpeedMetrics';
 import { MULTIRUN_EXECUTION_FORK_PROMPT_META_TEXT } from '@/lib/messages/executionMeta';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -443,6 +450,7 @@ interface MessageBodyProps {
     footerAgentName?: string;
     footerVariant?: string;
     isDarkTheme?: boolean;
+    messageTokens?: TokenBreakdown | number;
 }
 
 const TOOL_REVEAL_CACHE_MAX = 200;
@@ -1100,6 +1108,7 @@ const AssistantMessageBody = React.memo(({
     footerAgentName,
     footerVariant,
     isDarkTheme = false,
+    messageTokens,
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t, locale } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
@@ -2046,6 +2055,46 @@ const AssistantMessageBody = React.memo(({
         return formatTurnDuration(messageCompletedAt - userCreatedAt);
     }, [isLastAssistantInTurn, hasStopFinish, turnGroupingContext?.userMessageCreatedAt, messageCompletedAt]);
 
+    const showMessageSpeedMetrics = useUIStore((state) => state.showMessageSpeedMetrics);
+    const speedMetrics = React.useMemo(() => {
+        if (!showMessageSpeedMetrics) return null;
+        return deriveMessageSpeedMetrics({
+            createdAt: messageCreatedAt,
+            completedAt: messageCompletedAt,
+            parts,
+            tokens: messageTokens,
+        });
+    }, [showMessageSpeedMetrics, messageCreatedAt, messageCompletedAt, parts, messageTokens]);
+
+    const speedMetricsRow = speedMetrics ? (
+        <span
+            className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-muted-foreground/60 tabular-nums"
+            aria-label={t('chat.message.speed.aria', {
+                ttft: speedMetrics.ttftMs != null ? formatDurationMs(speedMetrics.ttftMs) : t('common.unavailable'),
+                throughput: speedMetrics.throughputTps != null ? formatThroughput(speedMetrics.throughputTps) : t('common.unavailable'),
+                input: formatTokenCount(speedMetrics.input),
+                cache: formatTokenCount(speedMetrics.cacheRead),
+                output: formatTokenCount(speedMetrics.output),
+            })}
+        >
+            {speedMetrics.ttftMs != null ? (
+                <span>{t('chat.message.speed.ttft', { value: formatDurationMs(speedMetrics.ttftMs) })}</span>
+            ) : null}
+            {speedMetrics.throughputTps != null ? (
+                <span>{t('chat.message.speed.throughput', { value: formatThroughput(speedMetrics.throughputTps) })}</span>
+            ) : null}
+            <span>{t('chat.message.speed.input', { value: formatTokenCount(speedMetrics.input) })}</span>
+            <span>{t('chat.message.speed.cacheRead', { value: formatTokenCount(speedMetrics.cacheRead) })}</span>
+            {speedMetrics.cacheWrite > 0 ? (
+                <span>{t('chat.message.speed.cacheWrite', { value: formatTokenCount(speedMetrics.cacheWrite) })}</span>
+            ) : null}
+            <span>{t('chat.message.speed.output', { value: formatTokenCount(speedMetrics.output) })}</span>
+            {speedMetrics.reasoning > 0 ? (
+                <span>{t('chat.message.speed.reasoning', { value: formatTokenCount(speedMetrics.reasoning) })}</span>
+            ) : null}
+        </span>
+    ) : null;
+
     const footerTimestamp = React.useMemo(() => {
         void locale;
         const timestamp = typeof messageCompletedAt === 'number' && messageCompletedAt > 0
@@ -2228,6 +2277,9 @@ const AssistantMessageBody = React.memo(({
                     )}
                 </div>
                 <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} />
+                {!shouldShowTurnFooter && speedMetricsRow ? (
+                    <div className="mt-1.5 flex min-w-0">{speedMetricsRow}</div>
+                ) : null}
                 {shouldRenderStandaloneActionsAfterContent && (
                     <div className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
                         <div className="flex items-center gap-1.5" data-message-action-group="true">
@@ -2288,6 +2340,7 @@ const AssistantMessageBody = React.memo(({
                                 <TooltipContent>{turnDurationText}</TooltipContent>
                             </Tooltip>
                         ) : null}
+                        {speedMetricsRow}
                         {footerTimestamp ? (
                             <Tooltip>
                                 <TooltipTrigger asChild>
