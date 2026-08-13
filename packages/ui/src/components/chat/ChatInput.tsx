@@ -41,6 +41,7 @@ import type { FileMentionHandle } from './FileMentionAutocomplete';
 import type { CommandAutocompleteHandle, CommandInfo } from './CommandAutocomplete';
 import type { SkillAutocompleteHandle } from './SkillAutocomplete';
 import type { SnippetAutocompleteHandle } from './SnippetAutocomplete';
+import type { FusionAutocompleteHandle, FusionPreset } from './FusionAutocomplete';
 import { cn } from "@/lib/utils";
 import { ModelControls } from './ModelControls';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
@@ -289,6 +290,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const commandRef = React.useRef<CommandAutocompleteHandle>(null);
     const skillRef = React.useRef<SkillAutocompleteHandle>(null);
     const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
+    const fusionRef = React.useRef<FusionAutocompleteHandle>(null);
     // Ref to track current message value without triggering re-renders in effects
     const messageRef = React.useRef(message);
     const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
@@ -1441,6 +1443,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
+        if (openAutocomplete === 'fusion' && fusionRef.current) {
+            if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
+                e.preventDefault();
+                e.stopPropagation();
+                fusionRef.current.handleKeyDown(e.key);
+                return;
+            }
+        }
+
         if (openAutocomplete === 'mention' && mentionRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
@@ -1964,6 +1975,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const newMessage = `${message.substring(0, startIndex)}#${trigger} ${message.substring(cursorPosition)}`;
         setMessage(newMessage);
         const nextCursor = startIndex + trigger.length + 2;
+        requestAnimationFrame(() => {
+            if (composerRef.current) {
+                composerRef.current.setSelection(nextCursor);
+            }
+            updateAutocompleteState(newMessage, nextCursor);
+        });
+        closeAutocomplete();
+        composerRef.current?.focus();
+    };
+
+    // Replaces the typed %preset token with the visible fusion directive, so
+    // the sent message tells the LLM exactly which user preset to run (and the
+    // user sees their choice in the transcript).
+    const handleFusionSelect = (preset: FusionPreset) => {
+        const textarea = composerRef.current;
+        const cursorPosition = textarea?.getSelection().start ?? message.length;
+        const textBeforeCursor = message.substring(0, cursorPosition);
+        const lastPercentSymbol = textBeforeCursor.lastIndexOf('%');
+        const startIndex = lastPercentSymbol !== -1 ? lastPercentSymbol : cursorPosition;
+        const directive = `[fusion preset: ${preset.name}]`;
+        const newMessage = `${message.substring(0, startIndex)}${directive} ${message.substring(cursorPosition)}`;
+        setMessage(newMessage);
+        const nextCursor = startIndex + directive.length + 1;
         requestAnimationFrame(() => {
             if (composerRef.current) {
                 composerRef.current.setSelection(nextCursor);
@@ -2658,11 +2692,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         skillRef={skillRef}
                         snippetRef={snippetRef}
                         mentionRef={mentionRef}
+                        fusionRef={fusionRef}
                         onCommandSelect={handleCommandSelect}
                         onSkillSelect={handleSkillSelect}
                         onSnippetSelect={handleSnippetSelect}
                         onFileSelect={handleFileSelect}
                         onAgentSelect={handleAgentSelect}
+                        onFusionSelect={handleFusionSelect}
                         onClose={closeAutocomplete}
                     />
                     {/* Positioning context for the dictation overlay: covers the

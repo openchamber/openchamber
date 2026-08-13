@@ -20,7 +20,15 @@ type SessionCreatedEvent = {
   dispatchedAsCommand: boolean;
 };
 
-type OpenChamberEvent = ScheduledTaskRanEvent | SessionCreatedEvent;
+type FusionChildrenCreatedEvent = {
+  type: 'fusion-children-created';
+  sessionId: string;
+  directory: string;
+  preset?: string;
+  children: Array<{ model: string; sessionId: string }>;
+};
+
+type OpenChamberEvent = ScheduledTaskRanEvent | SessionCreatedEvent | FusionChildrenCreatedEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -125,6 +133,39 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
       ...(typeof properties?.projectId === 'string' && properties.projectId.length > 0
         ? { projectId: properties.projectId }
         : {}),
+    };
+    for (const listener of listeners) {
+      listener(nextEvent);
+    }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:fusion-children-created') {
+    const properties = getEventProperties(envelope.properties);
+    const sessionId = typeof properties?.sessionId === 'string' ? properties.sessionId : '';
+    const directory = typeof properties?.directory === 'string' ? properties.directory : '';
+    if (!sessionId || !directory) {
+      return;
+    }
+    const children = Array.isArray(properties?.children)
+      ? properties.children.filter((child): child is { model: string; sessionId: string } => (
+        !!child
+        && typeof child === 'object'
+        && typeof (child as { model?: unknown }).model === 'string'
+        && typeof (child as { sessionId?: unknown }).sessionId === 'string'
+      ))
+      : [];
+    if (children.length === 0) {
+      return;
+    }
+    const nextEvent: FusionChildrenCreatedEvent = {
+      type: 'fusion-children-created',
+      sessionId,
+      directory,
+      ...(typeof properties?.preset === 'string' && properties.preset.length > 0
+        ? { preset: properties.preset }
+        : {}),
+      children,
     };
     for (const listener of listeners) {
       listener(nextEvent);
