@@ -1,7 +1,7 @@
 import type { ProjectEntry } from '@/lib/api/types';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 
-export const normalizePath = (value?: string | null): string =>
-  (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
+export const normalizePath = (value?: string | null): string => normalizePathImpl(value) ?? '';
 
 export const getProjectLabel = (path: string): string => {
   const normalized = normalizePath(path);

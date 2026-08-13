@@ -8,6 +8,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useGitmojiList } from '@/hooks/useGitmojiList';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { normalizePath } from '@/lib/pathNormalization';
 import {
   useGitStore,
   useGitStatus,
@@ -176,9 +177,6 @@ const rememberSnapshot = (key: string, snapshot: GitViewSnapshot) => {
     }
   }
 };
-
-const normalizePath = (value?: string | null): string =>
-  (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
 const isStagedStatusFile = (file: GitStatus['files'][number]): boolean => {
   const indexStatus = file.index?.trim();
