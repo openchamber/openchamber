@@ -17,6 +17,7 @@ The following functions are exported and used by the web server:
 
 ### Repository Operations
 - `isGitRepository(directory)`: Check if a directory is a Git repository.
+- `findNestedGitRepositories(directory, options)`: Find Git repositories nested inside a directory that is itself not a repository. Bounded, cheap heuristic: walks subdirectories up to `depth` levels (default 2, `maxRepositories` default 50) collecting directories that contain a `.git` entry (directory for regular repos, file for linked worktrees/submodules). Never descends into `node_modules` or hidden directories, and returns `[]` when the root itself is a repository or the path is missing. Exposed as `GET /api/git/nested-repositories` (`{ repositories: [{ path, relativePath, name }] }`).
 - `getGlobalIdentity()`: Get global Git user.name, user.email, and core.sshCommand.
 - `getCurrentIdentity(directory)`: Get local Git identity (fallback to global if not set locally).
 - `hasLocalIdentity(directory)`: Check if local Git identity is configured.

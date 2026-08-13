@@ -33,6 +33,7 @@ import type {
   CherryPickResponse,
   RevertCommitResponse,
   ResetToCommitResponse,
+  NestedGitRepository,
 } from './api/types';
 import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
@@ -113,6 +114,15 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
       gitRepoInFlight.delete(key);
     }
   }
+}
+
+export async function findNestedGitRepositories(directory: string): Promise<NestedGitRepository[]> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/nested-repositories`, directory));
+  if (!response.ok) {
+    throw new Error(`Failed to find nested git repositories: ${response.statusText}`);
+  }
+  const payload = await response.json() as { repositories?: NestedGitRepository[] };
+  return Array.isArray(payload.repositories) ? payload.repositories : [];
 }
 
 export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus> {

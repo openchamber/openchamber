@@ -98,6 +98,20 @@ interface GitStatusFile {
   working_dir: string;
 }
 
+/**
+ * A Git repository nested inside a project folder that is itself not a
+ * repository. Detected by the server with a bounded filesystem walk that
+ * looks for `.git` entries in subdirectories (see `findNestedGitRepositories`).
+ */
+export interface NestedGitRepository {
+  /** Absolute path to the repository root. */
+  path: string;
+  /** Path relative to the opened project folder (e.g. "Backend"). */
+  relativePath: string;
+  /** Directory basename (e.g. "Backend"). */
+  name: string;
+}
+
 export interface GitMergeInProgress {
   /** Short SHA of MERGE_HEAD */
   head: string;
@@ -462,6 +476,13 @@ interface GitWorktreeAPI {
 
 export interface GitAPI {
   checkIsGitRepository(directory: string): Promise<boolean>;
+  /**
+   * List Git repositories nested inside a project folder that is itself not a
+   * repository. Optional: runtimes that do not serve the nested-repository
+   * routes (e.g. the VS Code extension host) omit it and the Git tab degrades
+   * to the existing single-repository behavior.
+   */
+  findNestedGitRepositories?(directory: string): Promise<NestedGitRepository[]>;
   getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus>;
   getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
