@@ -5,6 +5,7 @@ import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { Button } from '@/components/ui/button';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { PullRequestView } from '@/components/views/PullRequestView';
+import { GitLabMrView } from '@/components/views/GitLabMrView';
 import { TerminalView } from '@/components/views/TerminalView';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
@@ -938,7 +939,7 @@ export const ContextPanel: React.FC = () => {
         : activeTab?.mode === 'git'
             ? <React.Suspense fallback={null}><GitView isActive={isOpen} /></React.Suspense>
             : activeTab?.mode === 'pr'
-                ? (gitProvider === 'github' ? <PullRequestView /> : null)
+                ? (gitProvider === 'github' ? <PullRequestView /> : gitProvider === 'gitlab' ? <GitLabMrView /> : null)
             : activeTab?.mode === 'notes'
                 ? <ProjectContextPanel />
         : activeTab?.mode === 'plan'
