@@ -367,6 +367,7 @@ export const PullRequestSection: React.FC<{
     }
     return normalizeBranchRef(baseBranch);
   });
+  const [headBranch, setHeadBranch] = React.useState(branch);
   const [mergeMethod, setMergeMethod] = React.useState<MergeMethod>('squash');
 
   const [isGenerating, setIsGenerating] = React.useState(false);
@@ -442,6 +443,37 @@ export const PullRequestSection: React.FC<{
 
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
   }, [baseBranch, remoteBranches, selectedRemote?.name, targetBaseBranch, upstreamBranches, useDetectedUpstream]);
+
+  const availableHeadBranches = React.useMemo(() => {
+    const selectedRemoteName = useDetectedUpstream ? null : (selectedRemote?.name?.trim() || null);
+    const unique = new Set<string>();
+
+    // The current local branch must always be offered, even before the branch list resolves.
+    unique.add(branch);
+
+    for (const remoteBranch of remoteBranches) {
+      const branchName = remoteBranchToName(remoteBranch, selectedRemoteName);
+      if (!branchName || branchName === 'HEAD') {
+        continue;
+      }
+      unique.add(branchName);
+    }
+
+    // When using detected upstream, include all upstream repo branches
+    if (useDetectedUpstream) {
+      for (const b of upstreamBranches) {
+        if (b && b !== 'HEAD') {
+          unique.add(b);
+        }
+      }
+    }
+
+    const sorted = Array.from(unique).sort((a, b) => a.localeCompare(b));
+    if (branch && sorted[0] !== branch) {
+      return [branch, ...sorted.filter((candidate) => candidate !== branch)];
+    }
+    return sorted;
+  }, [branch, remoteBranches, selectedRemote?.name, upstreamBranches, useDetectedUpstream]);
 
   // Update selected remote when remotes change
   React.useEffect(() => {
@@ -1141,6 +1173,7 @@ export const PullRequestSection: React.FC<{
     setBody(snapshot?.body ?? '');
     setDraft(snapshot?.draft ?? false);
     setTargetBaseBranch(snapshot?.targetBaseBranch ? normalizeBranchRef(snapshot.targetBaseBranch) : normalizeBranchRef(baseBranch));
+    setHeadBranch(branch);
     const nextRemote = pickInitialPrRemote(remotes, {
       selectedRemoteName: snapshot?.selectedRemoteName,
       trackingBranch,
@@ -1278,7 +1311,7 @@ export const PullRequestSection: React.FC<{
       toast.error(t('gitView.pr.toast.baseBranchRequired'));
       return;
     }
-    if (!useDetectedUpstream && trimmedBase === branch) {
+    if (!useDetectedUpstream && trimmedBase === headBranch) {
       toast.error(t('gitView.pr.toast.baseMustDifferFromHead'));
       return;
     }
@@ -1292,7 +1325,7 @@ export const PullRequestSection: React.FC<{
       const pr = await github.prCreate({
         directory,
         title: trimmedTitle,
-        head: branch,
+        head: headBranch,
         base: trimmedBase,
         ...(body.trim() ? { body } : {}),
         draft,
@@ -1315,7 +1348,7 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsCreating(false);
     }
-  }, [body, branch, detectedUpstream, directory, draft, github, prStatusKey, refresh, scheduleActionRefresh, selectedRemote, targetBaseBranch, title, trackingBranch, updatePrStatus, useDetectedUpstream, t]);
+  }, [body, detectedUpstream, directory, draft, github, headBranch, prStatusKey, refresh, scheduleActionRefresh, selectedRemote, targetBaseBranch, title, trackingBranch, updatePrStatus, useDetectedUpstream, t]);
 
   const mergePr = React.useCallback(async (pr: GitHubPullRequest) => {
     if (!github?.prMerge) {
@@ -1996,7 +2029,7 @@ export const PullRequestSection: React.FC<{
                   <div className="min-w-0">
                     <div className="typography-ui-label text-foreground">{t('gitView.pr.createTitle')}</div>
                     <div className="typography-micro text-muted-foreground truncate">
-                      {branch} <span className="opacity-60">(local)</span> → {targetBaseBranch} <span className="opacity-60">({useDetectedUpstream && detectedUpstream ? 'upstream' : 'remote'})</span>
+                      {headBranch}{headBranch === branch ? <span className="opacity-60">(local)</span> : null} → {targetBaseBranch} <span className="opacity-60">({useDetectedUpstream && detectedUpstream ? 'upstream' : 'remote'})</span>
                     </div>
                   </div>
                   {repoUrl ? (
@@ -2019,6 +2052,20 @@ export const PullRequestSection: React.FC<{
                     autoCapitalize={hasTouchInput ? "sentences" : "off"}
                     spellCheck={hasTouchInput}
                   />
+                </label>
+
+                <label className="space-y-1">
+                  <div className="typography-micro text-muted-foreground">{t('gitView.pr.field.headBranch')}</div>
+                  <Select value={headBranch} onValueChange={setHeadBranch}>
+                    <SelectTrigger size="lg">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableHeadBranches.map((candidate) => (
+                        <SelectItem key={candidate} value={candidate}>{candidate}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </label>
 
                 <label className="space-y-1">
@@ -2171,7 +2218,7 @@ export const PullRequestSection: React.FC<{
                     size="sm"
                     className="min-w-[7.5rem] justify-center gap-2"
                     onClick={createPr}
-                    disabled={isCreating || !isConnected || !targetBaseBranch.trim() || (!useDetectedUpstream && targetBaseBranch.trim() === branch)}
+                    disabled={isCreating || !isConnected || !targetBaseBranch.trim() || (!useDetectedUpstream && targetBaseBranch.trim() === headBranch)}
                   >
                     <span className="inline-flex size-4 items-center justify-center">
                       {isCreating ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="git-pull-request" className="size-4" />}

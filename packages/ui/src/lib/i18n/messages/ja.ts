@@ -993,6 +993,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.field.baseBranch': 'ベースブランチ',
   'gitView.pr.field.description': '説明',
   'gitView.pr.field.draft': '下書き',
+  'gitView.pr.field.headBranch': 'ソースブランチ',
   'gitView.pr.field.title': 'タイトル',
   'gitView.pr.githubNotConnected': 'GitHubが接続されていません',
   'gitView.pr.history.merged': 'PR #{number} は {base} にマージされました。',

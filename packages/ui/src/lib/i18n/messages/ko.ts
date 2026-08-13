@@ -997,6 +997,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.field.baseBranch': '기본 브랜치',
   'gitView.pr.field.description': '설명',
   'gitView.pr.field.draft': '드래프트',
+  'gitView.pr.field.headBranch': '소스 브랜치',
   'gitView.pr.field.title': '제목',
   'gitView.pr.githubNotConnected': 'GitHub에 연결되지 않음',
   'gitView.pr.history.merged': 'PR #{number}이(가) {base}에 병합되었습니다.',

@@ -816,6 +816,7 @@ export const dict = {
   'gitView.pr.field.baseBranch': 'Branche de base',
   'gitView.pr.field.description': 'Description',
   'gitView.pr.field.draft': 'Brouillon',
+  'gitView.pr.field.headBranch': 'Branche source',
   'gitView.pr.field.title': 'Titre',
   'gitView.pr.githubNotConnected': 'GitHub n\'est pas connecté',
   'gitView.pr.history.merged': 'La PR #{number} a été fusionnée dans {base}.',

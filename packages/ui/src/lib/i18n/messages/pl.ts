@@ -2256,6 +2256,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.field.baseBranch': 'Gałąź bazowa',
   'gitView.pr.field.description': 'Opis',
   'gitView.pr.field.draft': 'Szkic',
+  'gitView.pr.field.headBranch': 'Gałąź źródłowa',
   'gitView.pr.field.title': 'Tytuł',
   'gitView.pr.githubNotConnected': 'GitHub nie jest połączony',
   'gitView.pr.history.merged': 'PR #{number} został scalony do {base}.',

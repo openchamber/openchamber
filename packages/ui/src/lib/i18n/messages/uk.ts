@@ -997,6 +997,7 @@ export const dict: Record<I18nKey, string> = {
   "gitView.pr.field.baseBranch": "Базова гілка",
   "gitView.pr.field.description": "Опис",
   "gitView.pr.field.draft": "Чернетка",
+  "gitView.pr.field.headBranch": "Вихідна гілка",
   "gitView.pr.field.title": "Назва",
   "gitView.pr.githubNotConnected": "GitHub не підключено",
   "gitView.pr.history.merged": "PR #{number} злито в {base}.",

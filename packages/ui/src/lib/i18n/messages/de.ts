@@ -931,6 +931,7 @@ export const dict = {
   'gitView.pr.field.baseBranch': 'Basis-Branch',
   'gitView.pr.field.description': 'Beschreibung',
   'gitView.pr.field.draft': 'Entwurf',
+  'gitView.pr.field.headBranch': 'Quellbranch',
   'gitView.pr.field.title': 'Titel',
   'gitView.pr.githubNotConnected': 'GitHub ist nicht verbunden',
   'gitView.pr.history.merged': 'PR #{number} wurde in {base} gemergt.',
