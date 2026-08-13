@@ -2296,6 +2296,7 @@ export const dict = {
   'chat.chatInput.linked.byAuthor': 'by {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Open issue in browser',
   'chat.chatInput.linked.issue.removeAria': 'Remove linked issue',
+  'chat.chatInput.linked.mr.number': 'MR !{number}',
   'chat.chatInput.linked.pr.number': 'PR #{number}',
   'chat.chatInput.linked.pr.openInBrowserAria': 'Open pull request in browser',
   'chat.chatInput.linked.pr.removeAria': 'Remove linked pull request',

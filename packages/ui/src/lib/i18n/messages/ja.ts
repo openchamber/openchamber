@@ -2292,6 +2292,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.linked.byAuthor': '{author}による',
   'chat.chatInput.linked.issue.openInBrowserAria': 'ブラウザでIssueを開く',
   'chat.chatInput.linked.issue.removeAria': 'リンクされたIssueを削除',
+  'chat.chatInput.linked.mr.number': 'MR !{number}',
   'chat.chatInput.linked.pr.number': 'PR #{number}',
   'chat.chatInput.linked.pr.openInBrowserAria': 'ブラウザでプルリクエストを開く',
   'chat.chatInput.linked.pr.removeAria': 'リンクされたプルリクエストを削除',

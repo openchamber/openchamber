@@ -2262,6 +2262,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.linked.byAuthor': '由 {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': '在浏览器中打开 Issue',
   'chat.chatInput.linked.issue.removeAria': '移除已关联的 Issue',
+  'chat.chatInput.linked.mr.number': 'MR !{number}',
   'chat.chatInput.linked.pr.number': 'PR #{number}',
   'chat.chatInput.linked.pr.openInBrowserAria': '在浏览器中打开 Pull Request',
   'chat.chatInput.linked.pr.removeAria': '移除已关联的 Pull Request',

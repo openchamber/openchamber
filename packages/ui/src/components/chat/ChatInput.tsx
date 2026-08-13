@@ -686,6 +686,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         instructionsText: string;
         contextText: string;
         author?: { login: string; avatarUrl?: string };
+        provider?: 'github' | 'gitlab';
     } | null>(null);
 
     // Message queue
@@ -2565,7 +2566,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 ) : null}
                 {linkedPr && !isVSCode ? (
                     <LinkedReferenceRow
-                        numberLabel={t('chat.chatInput.linked.pr.number', { number: linkedPr.number })}
+                        numberLabel={
+                            linkedPr.provider === 'gitlab'
+                                ? t('chat.chatInput.linked.mr.number', { number: linkedPr.number })
+                                : t('chat.chatInput.linked.pr.number', { number: linkedPr.number })
+                        }
                         title={linkedPr.title}
                         url={linkedPr.url}
                         author={linkedPr.author}
@@ -2905,7 +2910,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             open={gitlabMrPickerOpen}
             onOpenChange={setGitlabMrPickerOpen}
             onSelect={(pr) => {
-                setLinkedPr(pr);
+                setLinkedPr({ ...pr, provider: 'gitlab' as const });
                 setLinkedIssue(null);
             }}
         />

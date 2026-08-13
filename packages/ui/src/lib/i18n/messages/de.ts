@@ -2082,6 +2082,7 @@ export const dict = {
   'chat.chatInput.linked.byAuthor': 'von {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Issue im Browser öffnen',
   'chat.chatInput.linked.issue.removeAria': 'Verknüpftes Issue entfernen',
+  'chat.chatInput.linked.mr.number': 'MR !{number}',
   'chat.chatInput.linked.pr.number': 'PR #{number}',
   'chat.chatInput.linked.pr.openInBrowserAria': 'Pull Request im Browser öffnen',
   'chat.chatInput.linked.pr.removeAria': 'Verknüpften Pull Request entfernen',

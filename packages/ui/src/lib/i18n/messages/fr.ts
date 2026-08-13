@@ -2017,6 +2017,7 @@ export const dict = {
   'chat.chatInput.linked.byAuthor': 'par {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Problème ouvert dans le navigateur',
   'chat.chatInput.linked.issue.removeAria': 'Supprimer le problème lié',
+  'chat.chatInput.linked.mr.number': 'MR !{number}',
   'chat.chatInput.linked.pr.number': 'PR #{number}',
   'chat.chatInput.linked.pr.openInBrowserAria': 'Ouvrir la demande d\'extraction dans le navigateur',
   'chat.chatInput.linked.pr.removeAria': 'Supprimer la demande d\'extraction liée',

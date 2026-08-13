@@ -1222,6 +1222,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.linked.byAuthor': 'by {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Otwórz zgłoszenie w przeglądarce',
   'chat.chatInput.linked.issue.removeAria': 'Usuń powiązane zgłoszenie',
+  'chat.chatInput.linked.mr.number': 'MR !{number}',
   'chat.chatInput.linked.pr.number': 'PR #{number}',
   'chat.chatInput.linked.pr.openInBrowserAria': 'Otwórz pull request w przeglądarce',
   'chat.chatInput.linked.pr.removeAria': 'Usuń powiązany pull request',

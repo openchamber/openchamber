@@ -2274,6 +2274,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.linked.byAuthor": "por {author}",
   "chat.chatInput.linked.issue.openInBrowserAria": "Abrir issue no navegador",
   "chat.chatInput.linked.issue.removeAria": "Excluir issue vinculado",
+  "chat.chatInput.linked.mr.number": "MR !{number}",
   "chat.chatInput.linked.pr.number": "PR #{number}",
   "chat.chatInput.linked.pr.openInBrowserAria": "Abrir PR no navegador",
   "chat.chatInput.linked.pr.removeAria": "Excluir PR vinculada",
