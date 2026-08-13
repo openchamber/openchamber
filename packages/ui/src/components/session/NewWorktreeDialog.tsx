@@ -33,6 +33,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { buildLinkedIssue } from '@/lib/linkedIssues';
+import { useGitProvider } from '@/lib/gitProvider';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { validateWorktreeCreate, createWorktree } from '@/lib/worktrees/worktreeManager';
 import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
@@ -1307,6 +1308,13 @@ export function NewWorktreeDialog({
   // GitLab connection check
   const isGitLabConnected = gitlabAuthChecked && gitlabAuthStatus?.connected === true;
 
+  // Only offer the provider's start-from flow when the repo actually belongs
+  // to that provider: a GitLab repo must not surface the GitHub picker and
+  // vice versa.
+  const gitProvider = useGitProvider(projectDirectory);
+  const showGitHubStartFrom = isGitHubConnected && gitProvider === 'github';
+  const showGitLabStartFrom = isGitLabConnected && gitProvider === 'gitlab';
+
   // Check if form is valid for submission
   const isFormValid = mode === 'existing-branch'
     ? !!existingBranchState.selectedBranch && !!existingBranchState.worktreeName && !validation.branchError && !validation.worktreeError
@@ -1557,9 +1565,9 @@ export function NewWorktreeDialog({
                   <label className="typography-ui-label text-foreground block font-semibold">
                     {t('session.newWorktree.branchName')}
                   </label>
-                  {mode === 'new-branch' && (isGitHubConnected || isGitLabConnected) && (
+                  {mode === 'new-branch' && (showGitHubStartFrom || showGitLabStartFrom) && (
                     <div className="flex items-center gap-2 flex-wrap">
-                      {isGitHubConnected && (
+                      {showGitHubStartFrom && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -1570,7 +1578,7 @@ export function NewWorktreeDialog({
                             {newBranchState.linkedIssue || newBranchState.linkedPr ? t('session.newWorktree.actions.change') : t('session.newWorktree.actions.startFromGitHubIssuePr')}
                         </Button>
                       )}
-                      {isGitLabConnected && (
+                      {showGitLabStartFrom && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -2085,9 +2093,9 @@ export function NewWorktreeDialog({
                     <label className="typography-ui-label text-foreground block font-semibold">
                       {t('session.newWorktree.branchName')}
                     </label>
-                    {mode === 'new-branch' && (isGitHubConnected || isGitLabConnected) && (
+                    {mode === 'new-branch' && (showGitHubStartFrom || showGitLabStartFrom) && (
                       <div className="flex items-center gap-2 flex-wrap">
-                        {isGitHubConnected && (
+                        {showGitHubStartFrom && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -2098,7 +2106,7 @@ export function NewWorktreeDialog({
                           {newBranchState.linkedIssue || newBranchState.linkedPr ? t('session.newWorktree.actions.change') : t('session.newWorktree.actions.startFromGitHubIssuePr')}
                           </Button>
                         )}
-                        {isGitLabConnected && (
+                        {showGitLabStartFrom && (
                           <Button
                             variant="outline"
                             size="sm"

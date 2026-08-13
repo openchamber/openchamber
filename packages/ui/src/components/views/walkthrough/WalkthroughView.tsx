@@ -13,6 +13,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
+import { useGitProvider } from '@/lib/gitProvider';
 import { buildWalkthroughView } from '@/lib/walkthrough/model';
 import type { WalkthroughSource, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
@@ -208,9 +209,10 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
   const ensurePrStatusEntry = useGitHubPrStatusStore((state) => state.ensureEntry);
   const setPrStatusParams = useGitHubPrStatusStore((state) => state.setParams);
   const refreshPrStatusTargets = useGitHubPrStatusStore((state) => state.refreshTargets);
+  const gitProvider = useGitProvider(directory);
 
   useEffect(() => {
-    if (!directory || !currentBranch || !githubAuthChecked || !githubConnected) return;
+    if (!directory || !currentBranch || !githubAuthChecked || !githubConnected || gitProvider !== 'github') return;
     const key = getGitHubPrStatusKey(directory, currentBranch);
     ensurePrStatusEntry(key);
     setPrStatusParams(key, {
@@ -230,6 +232,7 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
     github,
     githubAuthChecked,
     githubConnected,
+    gitProvider,
     refreshPrStatusTargets,
     setPrStatusParams,
   ]);

@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import type { GitProvider } from '@/lib/gitProvider';
 
 type ComposerAttachmentControlsProps = {
     isVSCode: boolean;
@@ -26,6 +27,8 @@ type ComposerAttachmentControlsProps = {
     handlePickLocalFiles: () => void;
     openIssuePicker: () => void;
     openPrPicker: () => void;
+    /** Only shows the GitHub issue/PR attach actions when the repo is GitHub. */
+    gitProvider?: GitProvider | null;
     onOpenSettings?: () => void;
     onMenuOpenChange?: (open: boolean) => void;
     /** Mobile: open the attachment bottom sheet instead of the dropdown menu. */
@@ -41,6 +44,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
         handlePickLocalFiles,
         openIssuePicker,
         openPrPicker,
+        gitProvider,
         onOpenSettings,
     } = props;
 
@@ -98,22 +102,26 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                 <Icon name="attachment-2"/>
                                 {t('chat.chatInput.actions.attachFiles')}
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onSelect={() => {
-                                    requestAnimationFrame(openIssuePicker);
-                                }}
-                            >
-                                <Icon name="github"/>
-                                {t('chat.chatInput.actions.linkGithubIssue')}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onSelect={() => {
-                                    requestAnimationFrame(openPrPicker);
-                                }}
-                            >
-                                <Icon name="git-pull-request"/>
-                                {t('chat.chatInput.actions.linkGithubPr')}
-                            </DropdownMenuItem>
+                            {gitProvider === 'github' ? (
+                                <>
+                                    <DropdownMenuItem
+                                        onSelect={() => {
+                                            requestAnimationFrame(openIssuePicker);
+                                        }}
+                                    >
+                                        <Icon name="github"/>
+                                        {t('chat.chatInput.actions.linkGithubIssue')}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        onSelect={() => {
+                                            requestAnimationFrame(openPrPicker);
+                                        }}
+                                    >
+                                        <Icon name="git-pull-request"/>
+                                        {t('chat.chatInput.actions.linkGithubPr')}
+                                    </DropdownMenuItem>
+                                </>
+                            ) : null}
                         </DropdownMenuContent>
                     </DropdownMenu>
                 )}
@@ -136,6 +144,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
     prev.isVSCode === next.isVSCode
     && prev.footerIconButtonClass === next.footerIconButtonClass
     && prev.iconSizeClass === next.iconSizeClass
+    && prev.gitProvider === next.gitProvider
     && prev.onOpenSettings === next.onOpenSettings
     && prev.onMenuOpenChange === next.onMenuOpenChange
     && prev.onOpenMobileSheet === next.onOpenMobileSheet

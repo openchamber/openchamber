@@ -23,6 +23,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
+import { useGitProvider } from '@/lib/gitProvider';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
@@ -440,6 +441,7 @@ export const ContextPanel: React.FC = () => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
+  const gitProvider = useGitProvider(effectiveDirectory);
 
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
@@ -936,7 +938,7 @@ export const ContextPanel: React.FC = () => {
         : activeTab?.mode === 'git'
             ? <React.Suspense fallback={null}><GitView isActive={isOpen} /></React.Suspense>
             : activeTab?.mode === 'pr'
-                ? <PullRequestView />
+                ? (gitProvider === 'github' ? <PullRequestView /> : null)
             : activeTab?.mode === 'notes'
                 ? <ProjectContextPanel />
         : activeTab?.mode === 'plan'
