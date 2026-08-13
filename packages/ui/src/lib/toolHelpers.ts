@@ -716,6 +716,20 @@ export function isSvgFile(filePath: string): boolean {
   return filePath.toLowerCase().endsWith('.svg');
 }
 
+const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'flac', 'ogg', 'wav', 'wma'];
+
+const VIDEO_EXTENSIONS = ['mp4', 'avi', 'mov', 'mkv', 'webm', 'wmv'];
+
+export function isAudioFile(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  return AUDIO_EXTENSIONS.includes(ext || '');
+}
+
+export function isVideoFile(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  return VIDEO_EXTENSIONS.includes(ext || '');
+}
+
 /** Known non-text extensions that must not be opened or saved as UTF-8 text. */
 const BINARY_FILE_EXTENSIONS = new Set([
   // Documents / office
@@ -726,7 +740,8 @@ const BINARY_FILE_EXTENSIONS = new Set([
   // Images (svg is text and is excluded via isSvgFile)
   ...IMAGE_EXTENSIONS.filter((ext) => ext !== 'svg'),
   // Audio / video
-  'mp3', 'mp4', 'm4a', 'aac', 'flac', 'ogg', 'wav', 'wma', 'avi', 'mov', 'mkv', 'webm', 'wmv',
+  ...AUDIO_EXTENSIONS,
+  ...VIDEO_EXTENSIONS,
   // Fonts
   'ttf', 'otf', 'woff', 'woff2', 'eot',
   // Native / bytecode

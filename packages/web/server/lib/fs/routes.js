@@ -1,4 +1,5 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
+import nodeFs from 'node:fs';
 import nodeFsPromises from 'node:fs/promises';
 import nodePath from 'node:path';
 
@@ -391,6 +392,7 @@ export const registerFsRoutes = (app, dependencies) => {
     os,
     path,
     fsPromises,
+    fs = nodeFs,
     spawn,
     platform = process.platform,
     crypto,
@@ -912,6 +914,19 @@ export const registerFsRoutes = (app, dependencies) => {
         '.bmp': 'image/bmp',
         '.avif': 'image/avif',
         '.pdf': 'application/pdf',
+        '.mp3': 'audio/mpeg',
+        '.m4a': 'audio/mp4',
+        '.aac': 'audio/aac',
+        '.flac': 'audio/flac',
+        '.ogg': 'audio/ogg',
+        '.wav': 'audio/wav',
+        '.wma': 'audio/x-ms-wma',
+        '.mp4': 'video/mp4',
+        '.avi': 'video/x-msvideo',
+        '.mov': 'video/quicktime',
+        '.mkv': 'video/x-matroska',
+        '.webm': 'video/webm',
+        '.wmv': 'video/x-ms-wmv',
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
 
@@ -927,11 +942,60 @@ export const registerFsRoutes = (app, dependencies) => {
         res.setHeader('Content-Disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`);
       }
 
-      const content = await fsPromises.readFile(canonicalPath);
       res.setHeader('Cache-Control', 'no-store');
       if (resolved.granted) {
         res.setHeader('Referrer-Policy', 'no-referrer');
       }
+      if (!download) {
+        res.setHeader('Accept-Ranges', 'bytes');
+      }
+
+      // HTTP Range support (video/audio seeking, resumable media playback).
+      // Downloads keep the full-body path; per RFC 7233 malformed and
+      // multi-range headers are ignored and served as 200.
+      const range = req.headers?.range;
+      if (!download && typeof range === 'string') {
+        const match = /^bytes=(\d*)-(\d*)$/i.exec(range.trim());
+        if (match) {
+          const size = stats.size;
+          let start = match[1] === '' ? undefined : Number(match[1]);
+          let end = match[2] === '' ? undefined : Number(match[2]);
+
+          // Suffix range: bytes=-N means the final N bytes.
+          if (start === undefined) {
+            if (end === undefined) {
+              return res.status(416).json({ error: 'Invalid Range header' });
+            }
+            start = Math.max(0, size - end);
+            end = size - 1;
+          }
+          if (end === undefined || end >= size) {
+            end = size - 1;
+          }
+
+          if (start > end || start >= size) {
+            res.status(416);
+            res.setHeader('Content-Range', `bytes */${size}`);
+            return res.end();
+          }
+
+          res.status(206);
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Content-Length', String(end - start + 1));
+          res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+          const stream = fs.createReadStream(canonicalPath, { start, end });
+          stream.on('error', (error) => {
+            console.error('Failed to stream raw file:', error);
+            res.destroy(error);
+          });
+          // Release the file handle promptly when the client aborts
+          // mid-transfer (seeking, switching files, closing the tab).
+          res.on('close', () => stream.destroy());
+          return stream.pipe(res);
+        }
+      }
+
+      const content = await fsPromises.readFile(canonicalPath);
       return res.type(mimeType).send(content);
     } catch (error) {
       const err = error;
