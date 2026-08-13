@@ -97,6 +97,8 @@ import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
+import { createSessionRunner } from './lib/agent-capabilities/session-runner.js';
+import { createFusionRuntime } from './lib/agent-capabilities/fusion.js';
 import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
@@ -1173,6 +1175,23 @@ const emitSessionCreatedEvent = (event) => {
     }
   }
 };
+const emitFusionChildrenCreated = (event) => {
+  for (const client of uiOpenChamberEventClients) {
+    try {
+      writeSseEvent(client, {
+        type: 'openchamber:fusion-children-created',
+        properties: {
+          sessionId: event.sessionId,
+          directory: event.directory,
+          ...(event.preset ? { preset: event.preset } : {}),
+          children: event.children,
+        },
+      });
+    } catch {
+      uiOpenChamberEventClients.delete(client);
+    }
+  }
+};
 const scheduledTaskService = createScheduledTaskService({
   readSettingsFromDiskMigrated,
   sanitizeProjects,
@@ -1188,6 +1207,15 @@ const openChamberSessionService = createOpenChamberSessionService({
   waitForOpenCodeReady,
   emitSessionCreatedEvent,
 });
+const sessionRunner = createSessionRunner({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  waitForOpenCodeReady,
+});
+const fusionRuntime = createFusionRuntime({
+  runner: sessionRunner,
+  emitChildrenCreated: emitFusionChildrenCreated,
+});
 const openChamberControlService = createOpenChamberControlService({
   readSettingsFromDiskMigrated,
   sanitizeProjects,
@@ -1196,6 +1224,7 @@ const openChamberControlService = createOpenChamberControlService({
   waitForOpenCodeReady,
   sessionService: openChamberSessionService,
   scheduledTaskService,
+  fusionRuntime,
 });
 
 const ensureGlobalWatcherStarted = async () => {

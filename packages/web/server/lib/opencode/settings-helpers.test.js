@@ -465,5 +465,31 @@ describe('settings helpers', () => {
       expect(sanitized.favoriteModels).toEqual(payload.favoriteModels);
       expect(sanitized.recentModels).toEqual(payload.recentModels);
     });
+
+    it('sanitizes fusion presets, keeping only valid 2-4 model presets with safe names', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      const sanitized = helpers.sanitizeSettingsUpdate({
+        fusionPresets: [
+          { name: 'deep-dive', description: 'Cheap panel', models: ['anthropic/claude-sonnet-4', 'openai/gpt-5'] },
+          { name: 'single', models: ['anthropic/claude-sonnet-4'] },
+          { name: '../bad', models: ['a/b', 'c/d'] },
+          { name: 'dupe', models: ['a/b', 'c/d'] },
+          { name: 'dupe', models: ['e/f', 'g/h'] },
+          { name: 'too-many', models: ['a/b', 'c/d', 'e/f', 'g/h', 'i/j'] },
+          { name: 'not-models', models: ['nope', 'alsonope'] },
+        ],
+      });
+
+      expect(sanitized.fusionPresets).toEqual([
+        { name: 'deep-dive', description: 'Cheap panel', models: ['anthropic/claude-sonnet-4', 'openai/gpt-5'] },
+        { name: 'dupe', models: ['a/b', 'c/d'] },
+      ]);
+    });
+
+    it('allows clearing all fusion presets with an empty array', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      expect(helpers.sanitizeSettingsUpdate({ fusionPresets: [] })).toEqual({ fusionPresets: [] });
+      expect(helpers.sanitizeSettingsUpdate({})).not.toHaveProperty('fusionPresets');
+    });
   });
 });

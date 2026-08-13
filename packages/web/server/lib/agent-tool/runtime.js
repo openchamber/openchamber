@@ -14,11 +14,12 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
 const PLUGIN_PARAMETER_PROPERTIES = {
   projectId: { type: 'string', description: 'Configured project ID; do not combine with directory' },
   directory: { type: 'string', description: 'Absolute checkout or session directory; defaults to the current session directory' },
-  sessionId: { type: 'string' },
+  sessionId: { type: 'string', description: 'For session.send, session.fork, session.status, and session.messages. fusion.run ALWAYS uses the calling session — never pass sessionId for it' },
   messageId: { type: 'string', description: 'Optional fork boundary message ID' },
   taskId: { type: 'string' },
   title: { type: 'string' },
-  prompt: { type: 'string' },
+  prompt: { type: 'string', description: 'Required by fusion.run; the single prompt every fused model answers' },
+  preset: { type: 'string', description: 'Required by fusion.run; an exact preset name created by the user in Settings → OpenChamber → Fusion (list them with fusion.list). Fusion runs preset names only — never pass raw model lists' },
   model: { type: 'string', description: 'Model in provider/model format. When the user names no model: for session.create pick a suitable one from models.list favorites or recents (omit if there are none); for send and fork omit it — the session reuses its previous model' },
   agent: { type: 'string', description: 'OpenCode agent name; new sessions default to the build agent and existing sessions keep their previous one. Set only when the user explicitly requests a different agent' },
   variant: { type: 'string', description: 'Model variant; use only when the user explicitly requests it' },
@@ -72,7 +73,7 @@ const createPluginSource = () => String.raw`
 export const OpenChamberPlugin = async () => ({
   tool: {
     openchamber: {
-      description: "Control OpenChamber projects, sessions, and scheduled tasks on the user's behalf. Sessions and scheduled tasks you create are for the user to follow and interact with; never use this tool to delegate parts of your own current task. Use one action per call. Scope with projectId or directory; omit both to use the current session directory. Session dispatches return immediately by default and you receive no notification when a dispatched session finishes, so never promise to report back on it; the user follows it in OpenChamber; a dispatched session needs no follow-up from you. If the user later asks how it went, use session.messages (add wait to block until it is idle, lastAssistant for just the final answer) — session.send always sends a NEW prompt and never just waits. Set wait only when the user asks or the next step requires the completed result. Session and worktree deletion are unavailable.",
+      description: "Control OpenChamber projects, sessions, scheduled tasks, and model fusion on the user's behalf. Sessions and fusion runs you create are for the user to follow and interact with; never use this tool to delegate parts of your own current task. Use one action per call. Scope with projectId or directory; omit both to use the current session directory. fusion.run ALWAYS uses the calling session as parent (never pass sessionId for it), waits until every model completes, and returns the full result — set it only when the user asks for a comparison, review, or multi-step task. IMPORTANT: fusion children are isolated — they receive only the prompt, never the current conversation's context. Session dispatches return immediately by default and you receive no notification when a dispatched session finishes, so never promise to report back on it; the user follows it in OpenChamber; a dispatched session needs no follow-up from you. If the user later asks how it went, use session.messages (add wait to block until it is idle, lastAssistant for just the final answer) — session.send always sends a NEW prompt and never just waits. Set wait only when the user asks or the next step requires the completed result. Session and worktree deletion are unavailable.",
       args: {
         action: { type: "string", enum: ${JSON.stringify(OPENCHAMBER_AGENT_TOOL_ACTIONS)}, oneOf: ${JSON.stringify(OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "OpenChamber action to perform" },
         parameters: { type: "object", properties: ${JSON.stringify(PLUGIN_PARAMETER_PROPERTIES)}, additionalProperties: false, description: "Inputs for the action; use an empty object when none are needed" },
@@ -80,7 +81,11 @@ export const OpenChamberPlugin = async () => ({
       async execute(input, context) {
         const args = { ...(input.parameters ?? {}), action: input.action }
         const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
-        const title = Object.hasOwn(actionTitles, args.action) ? actionTitles[args.action] : args.action
+        let title = Object.hasOwn(actionTitles, args.action) ? actionTitles[args.action] : args.action
+        if (args.action === "fusion.run" && typeof args.prompt === "string" && args.prompt.trim().length > 0) {
+          const prompt = args.prompt.trim()
+          title = "Fusion: " + (prompt.length > 120 ? prompt.slice(0, 117) + "..." : prompt)
+        }
         context.metadata({
           title,
           metadata: {
@@ -109,25 +114,32 @@ export const OpenChamberPlugin = async () => ({
               authorization: "Bearer " + token,
               "content-type": "application/json",
             },
-            body: JSON.stringify({ input: args, contextDirectory: context.directory }),
+            body: JSON.stringify({ input: args, contextDirectory: context.directory, contextSessionId: context.sessionID }),
             signal: context.abort,
           })
           const output = await response.text()
           let result = null
           try { result = JSON.parse(output) } catch {}
           const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
+          const children = valid && Array.isArray(result?.data?.runs)
+            ? result.data.runs
+                .map((run) => ({ model: run?.model, sessionId: run?.sessionId }))
+                .filter((child) => typeof child.model === "string" && typeof child.sessionId === "string")
+            : []
+          const openchamberMetadata = {
+            schemaVersion: ${TOOL_SCHEMA_VERSION},
+            action: args.action,
+            description: title,
+            ok: valid && result.ok === true,
+            ...(children.length > 0 ? { children } : {}),
+          }
           context.metadata({
             title,
             metadata: {
-              openchamber: {
-                schemaVersion: ${TOOL_SCHEMA_VERSION},
-                action: args.action,
-                description: title,
-                ok: valid && result.ok === true,
-              },
+              openchamber: openchamberMetadata,
             },
           })
-          if (valid) return { title, output, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true } } }
+          if (valid) return { title, output, metadata: { openchamber: openchamberMetadata } }
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
         } catch (error) {
           if (context.abort.aborted) throw error
@@ -204,7 +216,10 @@ export const createAgentToolRuntime = (dependencies) => {
       return createResult({ ok: false, action, error: { message: 'OpenChamber control service is unavailable', kind: 'runtime' } });
     }
     try {
-      const data = await executeAction(action, payload.input, payload.contextDirectory, options);
+      const actionOptions = { ...options };
+      const contextSessionId = asNonEmptyString(payload.contextSessionId);
+      if (contextSessionId) actionOptions.contextSessionId = contextSessionId;
+      const data = await executeAction(action, payload.input, payload.contextDirectory, actionOptions);
       return createResult({ ok: true, action, data });
     } catch (error) {
       return createResult({

@@ -108,10 +108,24 @@ describe('managed agent tool runtime', () => {
     expect(hooks.tool.openchamber.args.parameters.properties.wait.description).toBe(
       'Wait for current session activity to become idle. Omit by default; use only when the user asks or the next step requires the completed result',
     );
-    expect(hooks.tool.openchamber.args.parameters.properties.sessionId).toEqual({ type: 'string' });
+    expect(hooks.tool.openchamber.args.parameters.properties.sessionId).toEqual({
+      type: 'string',
+      description: 'For session.send, session.fork, session.status, and session.messages. fusion.run ALWAYS uses the calling session — never pass sessionId for it',
+    });
+    expect(hooks.tool.openchamber.args.parameters.properties.preset).toEqual({
+      type: 'string',
+      description: 'Required by fusion.run; an exact preset name created by the user in Settings → OpenChamber → Fusion (list them with fusion.list). Fusion runs preset names only — never pass raw model lists',
+    });
+    expect(hooks.tool.openchamber.args.parameters.properties.models).toBeUndefined();
+    expect(hooks.tool.openchamber.args.parameters.properties.workflowName).toBeUndefined();
+    expect(hooks.tool.openchamber.args.parameters.properties.steps).toBeUndefined();
+    expect(hooks.tool.openchamber.args.parameters.properties.args).toBeUndefined();
     expect(source).not.toContain('title: "OpenChamber"');
     expect(source).not.toContain('@opencode-ai/plugin');
     expect(source).not.toContain(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN);
+    expect(source).toContain('child.model');
+    expect(source).toContain('child.sessionId');
+    expect(source).toContain('result.data.runs');
   });
 
   it('executes actions through the shared control service', async () => {
@@ -129,6 +143,20 @@ describe('managed agent tool runtime', () => {
       data: { projects: [] },
     });
     expect(executeAction).toHaveBeenCalledWith('projects.list', { action: 'projects.list' }, '/work/project', {});
+  });
+
+  it('threads the calling session ID to the shared control service', async () => {
+    const { runtime, executeAction } = await createRuntime();
+    await runtime.execute(
+      { input: { action: 'fusion.run' }, contextSessionId: 'calling-session-1' },
+      { signal: new AbortController().signal },
+    );
+    expect(executeAction).toHaveBeenCalledWith(
+      'fusion.run',
+      { action: 'fusion.run' },
+      undefined,
+      expect.objectContaining({ contextSessionId: 'calling-session-1' }),
+    );
   });
 
   it('keeps service failures as structured tool results', async () => {

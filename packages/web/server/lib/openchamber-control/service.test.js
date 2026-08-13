@@ -24,12 +24,18 @@ const createService = (overrides = {}) => {
     remove: vi.fn(),
     setEnabled: vi.fn(),
   };
+  const fusionRuntime = {
+    execute: vi.fn(async () => ({ runs: [], allOk: true })),
+  };
   const service = createOpenChamberControlService({
     readSettingsFromDiskMigrated: vi.fn(async () => ({
       projects: [{ id: 'project-1', path: '/repo', label: 'Repo' }],
       defaultModel: 'provider/model',
       favoriteModels: [],
       recentModels: [],
+      fusionPresets: [
+        { name: 'deep-dive', models: ['anthropic/claude-sonnet-4', 'openai/gpt-5'] },
+      ],
     })),
     sanitizeProjects: (projects) => projects,
     buildOpenCodeUrl: () => 'http://127.0.0.1:4096/',
@@ -38,9 +44,10 @@ const createService = (overrides = {}) => {
     createClient: vi.fn(() => client),
     sessionService,
     scheduledTaskService,
+    fusionRuntime,
     ...overrides,
   });
-  return { service, client, sessionService, scheduledTaskService };
+  return { service, client, sessionService, scheduledTaskService, fusionRuntime };
 };
 
 describe('OpenChamber control service', () => {
@@ -259,5 +266,68 @@ describe('OpenChamber control service', () => {
   it('rejects actions outside the fixed contract', async () => {
     const { service } = createService();
     await expect(service.execute('session.delete')).rejects.toThrow('Unsupported OpenChamber action');
+  });
+
+  it('delegates fusion.run with the calling session fallback and abort signal', async () => {
+    const { service, fusionRuntime } = createService();
+    const signal = new AbortController().signal;
+    await expect(service.execute('fusion.run', {
+      prompt: 'Compare',
+      preset: 'deep-dive',
+      timeout: 30,
+    }, '/work', { signal, contextSessionId: 'calling-1' })).resolves.toEqual({ runs: [], allOk: true });
+
+    expect(fusionRuntime.execute).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'calling-1',
+      directory: '/work',
+      prompt: 'Compare',
+      models: ['anthropic/claude-sonnet-4', 'openai/gpt-5'],
+      preset: 'deep-dive',
+      timeoutSeconds: 30,
+      signal,
+    }));
+  });
+
+  it('ignores an explicit sessionId for fusion.run — the calling session is always the parent', async () => {
+    const { service, fusionRuntime } = createService();
+    await service.execute('fusion.run', { sessionId: 'evil-1', prompt: 'P', preset: 'deep-dive' }, '/work', { contextSessionId: 'calling-1' });
+    expect(fusionRuntime.execute).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'calling-1' }));
+  });
+
+  it('lists fusion presets from settings, empty when none exist', async () => {
+    const { service } = createService();
+    await expect(service.execute('fusion.list')).resolves.toEqual({
+      presets: [{ name: 'deep-dive', models: ['anthropic/claude-sonnet-4', 'openai/gpt-5'] }],
+    });
+
+    const { service: emptyService } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+    });
+    await expect(emptyService.execute('fusion.list')).resolves.toEqual({ presets: [] });
+  });
+
+  it('rejects raw model lists for fusion.run — presets only', async () => {
+    const { service, fusionRuntime } = createService();
+    await expect(service.execute('fusion.run', {
+      prompt: 'P',
+      models: ['anthropic/claude-sonnet-4', 'openai/gpt-5'],
+    }, '/work')).rejects.toThrow('preset names only');
+    expect(fusionRuntime.execute).not.toHaveBeenCalled();
+  });
+
+  it('rejects unknown fusion presets before any run', async () => {
+    const { service, fusionRuntime } = createService();
+    await expect(service.execute('fusion.run', { prompt: 'P', preset: 'nope' }, '/work'))
+      .rejects.toThrow("Unknown fusion preset 'nope'");
+    expect(fusionRuntime.execute).not.toHaveBeenCalled();
+  });
+
+  it('rejects workflow actions outside the fixed contract', async () => {
+    const { service, fusionRuntime } = createService();
+    await expect(service.execute('workflow.run', { workflowName: 'wrr' }, '/work'))
+      .rejects.toThrow('Unsupported OpenChamber action');
+    await expect(service.execute('workflow.create', { workflowName: 'x', steps: [] }, '/work'))
+      .rejects.toThrow('Unsupported OpenChamber action');
+    expect(fusionRuntime.execute).not.toHaveBeenCalled();
   });
 });
