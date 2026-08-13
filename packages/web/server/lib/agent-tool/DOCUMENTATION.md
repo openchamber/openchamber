@@ -28,6 +28,61 @@ restart).
    required inputs or one non-obvious behavior, while completed calls use the
    short title in native tool metadata.
 
+## Models that cannot call tools
+
+OpenCode declares every registered tool to the provider regardless of the
+selected model: `capabilities.toolcall` is populated from config but never read in
+the request path. Providers that reject function calling outright therefore fail
+every send. Vertex Gemini image models ("Nano Banana") return
+`Unable to submit request because the model does not support function calling`.
+
+This tool makes the problem unavoidable through configuration alone. Stock agents
+begin with `"*": "allow"`, and a user who denies every tool by name still cannot
+name `openchamber`, because nothing in the UI reveals that it exists. The only
+working user-side workaround is a hand-written agent with `permission: {"*": deny}`.
+
+**There is no safe client-side fix.** The lever OpenCode exposes is the per-send
+`tools` map, which it converts into the session permission ruleset and persists,
+replacing prior contents. Every variant fails:
+
+- `{"openchamber": false}` removes one declaration; the ~11 stock built-ins still
+  reach the provider, so the rejection stands.
+- `{"*": false}` does suppress the whole set, but the deny persists: later sends
+  on a tool-calling model in that session also get no tools.
+- `{"*": true}` to recover is a privilege escalation. A rule is evaluated for
+  approval as well as for filtering, so a wildcard allow turns an agent's
+  `edit: deny` into `allow` and `bash: ask` into `allow`, suppressing the
+  approval prompt. Suppressing tools must never widen permissions.
+- `session.update` accepts `permission` but merges rather than replaces, so it
+  cannot clear a deny either.
+
+The fix belongs upstream, where the capability is already known: return no tools
+when `!model.capabilities.toolcall`. That covers every send path for every client
+with no permission side effects. A client-side fix could not have covered
+`session.command` or `session.shell` regardless — the OpenCode API has no `tools`
+field on either route.
+
+Submitted upstream as anomalyco/opencode#41463 (issue #41464). Once a release
+carrying it is out, image models work with any agent and this section is history
+rather than an active constraint; until then the only user-side workaround is the
+wildcard-deny agent above.
+
+A second, independent OpenCode bug sits behind this one: `SessionProcessor` has no
+`case "file"`, so an image returned as Gemini `inlineData` is discarded and never
+becomes a message part. The two are sequential — the fix above lets the request
+through, and that one makes the result visible. Fixing only the first yields a
+billed request whose image is silently dropped. Submitted for `dev` as
+anomalyco/opencode#41468 (issue #41467); anomalyco/opencode#40126 covers the same
+gap on the `v2` branch, which does not reach `dev` releases.
+
+OpenChamber needs no change for either. The receive path is already type-agnostic:
+`file` is absent from `SKIP_PARTS` in `packages/ui/src/sync/event-reducer.ts`, the
+`message.part.updated` reducer upserts any part type, `filterVisibleParts` never
+drops `file`, and `AssistantMessageBody` already renders `MessageFilesDisplay`,
+which filters on `type === "file"` without checking the message role. That leg is
+a code read rather than an executed test — there is no component-render harness
+for `MessageBody` — so a live generation is the first real check.
+
 ## Agent context budget
 
 - The tool exposes one shared parameter object rather than repeating parameters

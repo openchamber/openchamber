@@ -7,7 +7,7 @@ import express from 'express';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAgentToolRuntime } from './runtime.js';
+import { createAgentToolRuntime, OPENCHAMBER_AGENT_TOOL_NAME } from './runtime.js';
 import { OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS, OPENCHAMBER_CONTROL_ACTION_DEFINITIONS } from '../openchamber-control/actions.js';
 
 const temporaryDirectories = [];
@@ -99,6 +99,9 @@ describe('managed agent tool runtime', () => {
     expect(source).not.toContain('"schedule.status"');
     const pluginModule = await import(`${pathToFileURL(pluginPath).href}?schema=${Date.now()}`);
     const hooks = await pluginModule.OpenChamberPlugin();
+    // Clients gate this tool per send by name, so the exported constant must
+    // stay the tool ID the plugin actually registers.
+    expect(Object.keys(hooks.tool)).toEqual([OPENCHAMBER_AGENT_TOOL_NAME]);
     expect(hooks.tool.openchamber.description).toContain('Session dispatches return immediately by default');
     expect(hooks.tool.openchamber.description).toContain('Set wait only when the user asks or the next step requires the completed result');
     expect(hooks.tool.openchamber.args.action.oneOf).toContainEqual({

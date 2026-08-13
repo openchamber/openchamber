@@ -6,6 +6,8 @@ import {
 } from '../openchamber-control/actions.js';
 
 const TOOL_SCHEMA_VERSION = 1;
+/** OpenCode tool ID for the injected OpenChamber control tool. */
+export const OPENCHAMBER_AGENT_TOOL_NAME = 'openchamber';
 const ACTIONS = new Set(OPENCHAMBER_AGENT_TOOL_ACTIONS);
 const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action, title }) => [action, title]),
@@ -71,7 +73,7 @@ const isLoopbackAddress = (value) => {
 const createPluginSource = () => String.raw`
 export const OpenChamberPlugin = async () => ({
   tool: {
-    openchamber: {
+    ${OPENCHAMBER_AGENT_TOOL_NAME}: {
       description: "Control OpenChamber projects, sessions, and scheduled tasks on the user's behalf. Sessions and scheduled tasks you create are for the user to follow and interact with; never use this tool to delegate parts of your own current task. Use one action per call. Scope with projectId or directory; omit both to use the current session directory. Session dispatches return immediately by default and you receive no notification when a dispatched session finishes, so never promise to report back on it; the user follows it in OpenChamber; a dispatched session needs no follow-up from you. If the user later asks how it went, use session.messages (add wait to block until it is idle, lastAssistant for just the final answer) — session.send always sends a NEW prompt and never just waits. Set wait only when the user asks or the next step requires the completed result. Session and worktree deletion are unavailable.",
       args: {
         action: { type: "string", enum: ${JSON.stringify(OPENCHAMBER_AGENT_TOOL_ACTIONS)}, oneOf: ${JSON.stringify(OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "OpenChamber action to perform" },
