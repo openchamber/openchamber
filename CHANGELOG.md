@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 - **Usage/Claude:** Claude plan limits now work when you are signed in through Claude Code, without also signing into Anthropic in OpenCode; the account is read from Claude Code's own login on macOS, Linux, and WSL. The page shows your session and weekly limits again, adds per-model weekly limits and extra usage spending, and names your plan. Limits are kept on screen instead of disappearing when Anthropic temporarily blocks refreshes.
 - **Settings/Integrations:** a new Integrations settings page lists Claude Code, Command Code, and Cursor plugins with install, update, setup, and remove actions, plus Discord and Telegram Coming soon placeholders.
-- **Stability/Proxy:** the local server now reuses its connection to OpenCode instead of opening a new one for every API request. Under sustained traffic the old behaviour could use up every outgoing network port on the machine, at which point nothing on the computer could open a new connection until it was restarted (thanks to @alohaninja).
+- **Stability/Proxy:** the local server now reuses its connection to OpenCode instead of opening a new one for every API request. Under sustained traffic the old behavior could use up every outgoing network port on the machine, at which point nothing on the computer could open a new connection until it was restarted (thanks to @alohaninja).
 
 ## [1.18.4] - 2026-08-14
 
