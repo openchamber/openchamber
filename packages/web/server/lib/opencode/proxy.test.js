@@ -1,4 +1,5 @@
 import http from 'node:http';
+import https from 'node:https';
 
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { describe, expect, it } from 'vitest';
@@ -159,7 +160,7 @@ const proxyTwoRequests = async (proxyAgent) => {
 
 describe('createOpenCodeProxyAgent', () => {
   it('reuses a single upstream socket across sequential proxied requests', async () => {
-    const seen = await proxyTwoRequests(createOpenCodeProxyAgent());
+    const seen = await proxyTwoRequests(createOpenCodeProxyAgent('http://127.0.0.1'));
 
     expect(seen).toHaveLength(2);
     expect(seen[0].connection).not.toBe('close');
@@ -172,5 +173,29 @@ describe('createOpenCodeProxyAgent', () => {
     expect(seen).toHaveLength(2);
     expect(seen[0].connection).toBe('close');
     expect(seen[1].remotePort).not.toBe(seen[0].remotePort);
+  });
+
+  // http-proxy dispatches through `https.request` when the target protocol is
+  // `https:`, so an http.Agent would open a plaintext socket to a TLS port.
+  // External OpenCode servers can be configured over https via OPENCODE_HOST.
+  it('returns an https agent for https targets', () => {
+    const agent = createOpenCodeProxyAgent('https://opencode.example.com:443');
+
+    expect(agent).toBeInstanceOf(https.Agent);
+    expect(agent.options.keepAlive).toBe(true);
+  });
+
+  it('returns a plain http agent for http targets', () => {
+    const agent = createOpenCodeProxyAgent('http://127.0.0.1:4096');
+
+    // https.Agent extends http.Agent, so the negative assertion is the load-bearing one.
+    expect(agent).toBeInstanceOf(http.Agent);
+    expect(agent).not.toBeInstanceOf(https.Agent);
+    expect(agent.options.keepAlive).toBe(true);
+  });
+
+  it('falls back to an http agent for missing or unparseable targets', () => {
+    expect(createOpenCodeProxyAgent(undefined)).not.toBeInstanceOf(https.Agent);
+    expect(createOpenCodeProxyAgent('not a url')).not.toBeInstanceOf(https.Agent);
   });
 });

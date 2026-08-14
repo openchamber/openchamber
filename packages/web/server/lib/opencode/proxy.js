@@ -1,4 +1,5 @@
 import http from 'node:http';
+import https from 'node:https';
 
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
@@ -16,6 +17,24 @@ const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 const OPENCODE_AGENT_KEEP_ALIVE_MS = 30_000;
 const OPENCODE_AGENT_MAX_FREE_SOCKETS = 32;
 
+const OPENCODE_AGENT_OPTIONS = {
+  keepAlive: true,
+  keepAliveMsecs: OPENCODE_AGENT_KEEP_ALIVE_MS,
+  maxSockets: Infinity,
+  maxFreeSockets: OPENCODE_AGENT_MAX_FREE_SOCKETS,
+};
+
+const isHttpsProxyTarget = (target) => {
+  if (typeof target !== 'string') {
+    return false;
+  }
+  try {
+    return new URL(target).protocol === 'https:';
+  } catch {
+    return /^https:/i.test(target.trim());
+  }
+};
+
 /**
  * Agent for proxied OpenCode API requests.
  *
@@ -26,15 +45,21 @@ const OPENCODE_AGENT_MAX_FREE_SOCKETS = 32;
  * ephemeral port range — after which every process on the machine fails to
  * open outbound connections with EADDRNOTAVAIL.
  *
+ * The agent must match the target scheme: http-proxy dispatches through
+ * `https.request` when `target.protocol === 'https:'`
+ * (http-proxy/lib/http-proxy/passes/web-incoming.js), and an `http.Agent`
+ * would open a plaintext socket to a TLS port. External servers may be
+ * configured over https via `OPENCODE_HOST` (see env-config.js), so derive the
+ * agent class from the resolved target.
+ *
  * `maxSockets: Infinity` preserves the unbounded concurrency of `agent: false`,
  * so this changes connection reuse only, not request throughput.
  */
-export const createOpenCodeProxyAgent = () => new http.Agent({
-  keepAlive: true,
-  keepAliveMsecs: OPENCODE_AGENT_KEEP_ALIVE_MS,
-  maxSockets: Infinity,
-  maxFreeSockets: OPENCODE_AGENT_MAX_FREE_SOCKETS,
-});
+export const createOpenCodeProxyAgent = (target) => (
+  isHttpsProxyTarget(target)
+    ? new https.Agent(OPENCODE_AGENT_OPTIONS)
+    : new http.Agent(OPENCODE_AGENT_OPTIONS)
+);
 
 export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } = {}) => {
   const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
@@ -793,8 +818,10 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   // Generic proxy for non-SSE OpenCode API routes.
   // One shared keep-alive agent backs every proxied request, so the socket pool
-  // is reused across both `apiProxy` and `interactiveOAuthProxy`.
-  const openCodeProxyAgent = createOpenCodeProxyAgent();
+  // is reused across both `apiProxy` and `interactiveOAuthProxy`. The agent
+  // class is derived from the resolved target scheme — external servers may be
+  // configured over https via OPENCODE_HOST.
+  const openCodeProxyAgent = createOpenCodeProxyAgent(resolveProxyTarget());
 
   const createApiProxy = (timeoutMs) => createProxyMiddleware({
     target: resolveProxyTarget(),
