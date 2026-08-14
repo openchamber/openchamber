@@ -654,9 +654,12 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     const unsubscribe = subscribeOpenchamberEvents((event) => {
       if (event.type === 'scheduled-task-ran') {
         needsGlobalRefresh = true;
-      } else {
+      } else if (event.type === 'session-created') {
         sessionDirectories.add(event.directory);
         requestWorktreeDiscovery();
+      } else {
+        // Browser control events carry no session state; nothing to refresh.
+        return;
       }
       if (refreshTimeout) {
         clearTimeout(refreshTimeout);
@@ -1825,6 +1828,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         openNewSessionDraft={openNewSessionDraft}
         setActiveMainTab={setActiveMainTab}
         setSessionSwitcherOpen={setSessionSwitcherOpen}
+        sessionOwnerBySessionId={sessionOwnership.bySessionId}
       />
       <SessionPrefetchEffect
         enabled={isVisible}

@@ -55,6 +55,23 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   HTML is sanitized as defense in depth, with script and style elements
   forbidden, so message content cannot inject active DOM or application-wide
   CSS into any runtime surface.
+- Final assistant Markdown collects HTTP(S), embedded, and workspace-local
+  PNG/JPEG/GIF/WebP image candidates into one 100px thumbnail gallery in the
+  message-completion area after all message text and above the turn's changed
+  files. Each muted filename caption includes the shared image-file icon.
+  HTTP(S) images keep their browser URL. Embedded and workspace-local images
+  are limited to 10 MiB, validated as PNG/JPEG/GIF/WebP, and local paths are
+  fetched through the active runtime before conversion to data URLs. Local
+  Markdown links whose target has one of
+  those image suffixes stay links in the text and open the same existing
+  full-screen image preview as the gallery; image syntax does not insert a
+  large inline image. A
+  completed assistant message hydrates at most 12 unique image candidates,
+  including persisted text parts that omit their optional part-level end time.
+  Thumbnail assets begin loading only when their gallery items approach the
+  viewport, so mounted historical messages do not eagerly read every image.
+  Gallery clicks do not introduce or alter preview chrome: desktop and mobile
+  both reuse the pre-existing attachment image preview overlay.
 - `read` and `skill` are **static navigation tools** and render via `StaticToolRow`.
 - Every other tool, including search/fetch, OpenCode built-ins, custom tools, plugins, and MCP tools, is **expandable** and renders through `ToolPart`.
 - The managed `openchamber` plugin tool uses the expandable path and hides its broad protocol input. The plugin supplies the selected action's human description as the native tool title; the UI renders that metadata without owning an action map. The full versioned result envelope renders through the same neutral JSON summary/tree/raw views as other tools, without a tool-specific output card.

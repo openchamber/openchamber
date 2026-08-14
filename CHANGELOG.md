@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Stability:** a single internal error no longer shuts down the local server, which made the instance unreachable until it was restarted; the error is logged and the server keeps running.
+- Browser: restoring or opening a dev server preview while connected to an instance over a relay or other non-standard address no longer crashes the app; the preview reports the tunnel as unavailable instead.
+
+## [1.18.3] - 2026-08-14
+
+- **Browser panel:** the preview and browser panels are now one panel, backed by a real browser view on the desktop app. Pages that previously refused to load because they were being rewritten now open normally, logins persist, and developer tools are available. Point at an element or drag a region, write a comment, and it goes to chat with a screenshot of what you marked.
+- **Agent browser control:** agents can now open a page and work with it — read what is on screen, click, type, scroll, look at how an element renders, switch between mobile, tablet and desktop layouts, and save a screenshot into the project — so they can check their own work instead of describing what they expect. It is a separate OpenChamber Web tool, turned on or off in the new Settings → General → OpenChamber Tools section.
+- **Chat images:** completed assistant replies now collect Markdown images into a compact gallery with thumbnails and full-screen previews, including workspace-local images and a horizontally scrollable mobile layout (thanks to @ChangeHow).
+- Sessions: switching projects now selects a session owned by the new project, and a message already being prepared stays with the session where it was submitted instead of being rerouted by a later project switch (thanks to @makeittech).
+- Browser: dev servers are listed from what is actually listening, so one is offered no matter how it was started, and a server that is still starting is waited for instead of showing an error to retry by hand. The panel holds several pages at once, shows each page's own icon, suggests addresses already visited in this project, and adds a hard reload, page zoom, device sizes, a light/dark switch for the page, and clearing cookies or cached data for the panel alone.
+- Browser: when OpenChamber runs on another machine, the desktop app opens its dev servers through a local port, so pages load with working hot reload and developer tools; links and redirects to another local port stay on that machine. In a web browser tab, only dev servers on your own machine can be opened.
+- Remote access: pairing QR codes created while the app is open through a public domain (for example behind a reverse proxy) now include that domain as a connection address, so paired phones can reach the server over it instead of relying only on the local network address or the relay.
+- Remote access: messages sent through the private relay no longer fail with a 400 error when request-body frames are lost during a connection drop; incomplete requests are retried instead (thanks to @claymor333).
+- Mobile: a brief network hiccup when opening or returning to the app no longer bounces a working connection to the connect screen — the app retries in the background and reconnects on its own, while an unreachable server shows the connect screen within a few seconds.
+- Mobile: long-pressing the logo on the connect screen (or the instances list) opens a connection log with a copy button, for reporting connection problems.
+- Usage: quota limits enabled for display now refresh every three minutes on desktop, mobile, and VS Code, with a manual refresh action available at any time.
+- Usage: OpenCode Go quota tracking now uses the existing OpenCode API key instead of requiring separate browser cookies and a workspace ID.
+- Scheduled Tasks: when two OpenChamber servers use the same project configuration, a scheduled occurrence now runs only once instead of both servers starting duplicate sessions (thanks to @makeittech).
+- Desktop/Windows/Linux: minimizing the window now always keeps it in the taskbar; the tray background setting, renamed "Close to the system tray", applies when you close the window.
+- Performance: closed context panels no longer keep embedded chats running, and an open panel mounts only its active chat instead of every saved chat tab (thanks to @karimodm).
+- Chat: opening subagent and code-review sessions in the context panel no longer steals focus from the main composer; subagent prompting is available immediately when enabled, and code-review sessions are no longer mistaken for read-only subagent sessions.
+- Chat: typing `!` to enter shell mode no longer inserts the trigger into the command or moves the caret to the wrong side of it (thanks to @RyderAsKing).
+- Chat: line numbers with three or more digits no longer wrap in code blocks (thanks to @ChangeHow).
+- Work status: new-session drafts now show project, MCP, and usage details before a session exists, long subagent lists stay within the panel, and hiding every section leaves controls available to restore them (thanks to @alohaninja).
+- Desktop/Linux: frameless main and Mini Chat windows now use native rounded corners (thanks to @kydorn).
+
+## [1.18.2] - 2026-08-10
+
 - **Observability panel:** a new panel near to the chat brings the active goal, tasks, subagents, pinned context, MCP servers, and context usage into one live view. The session list also shows how long an agent has been working.
 - **Scheduled Tasks:** projects can now define recurring tasks as Markdown files in `.agents/loops`; opening the task list discovers file changes without a restart, and loop tasks can be edited, enabled, disabled, deleted, or run from the app (thanks to @makeittech).
 - **Settings:** OpenCode configuration changes now accumulate behind a single Apply & Restart action instead of restarting OpenCode after every edit; the confirmation warns when active chats will be stopped (thanks to @makeittech).

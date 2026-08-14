@@ -288,9 +288,9 @@ const SortableProviderSection: React.FC<{
 };
 
 const STICKY_HEADER_OFFSET = 32;
-const STICKY_FADE_MAX_SIZE = 48;
-const STICKY_FADE_MIN_SIZE = 32;
-const STICKY_FADE_CLEAR_MAX_SIZE = 24;
+const STICKY_FADE_MAX_SIZE = 52;
+const STICKY_FADE_MIN_SIZE = 36;
+const STICKY_FADE_CLEAR_MAX_SIZE = 28;
 
 const scrollIntoView = (container: HTMLElement | null, node: HTMLElement | null) => {
   if (!node) return;
@@ -420,8 +420,8 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   const selectionStore = selectionStoreRef.current;
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const scrollRef = React.useRef<HTMLElement | null>(null);
-  const sectionHeaderSentinelRefs = React.useRef<Map<string, HTMLDivElement | null>>(new Map());
   const stickyFadeSizeRef = React.useRef(0);
+  const sectionHeaderSentinelRefs = React.useRef<Map<string, HTMLDivElement | null>>(new Map());
   const [stuckSectionHeaders, setStuckSectionHeaders] = React.useState<Set<string>>(new Set());
   const keyboardOwnsSelectionRef = React.useRef(false);
   const lastMousePositionRef = React.useRef<{ x: number; y: number } | null>(null);
@@ -882,8 +882,8 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       <ScrollableOverlay
         ref={scrollRef}
         useScrollShadow={stickyHeaders}
-        hideTopScrollShadow={!stickyHeaders}
-        scrollShadowSize={96}
+        hideBottomScrollShadow
+        scrollShadowSize={12}
         outerClassName={maxHeightClassName}
         className="oc-sticky-fade-scroller overlay-scrollbar-target--no-gutter"
         style={{

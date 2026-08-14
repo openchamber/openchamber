@@ -1,8 +1,16 @@
-## [Unreleased]
+## [1.18.3] - 2026-08-14
+
+- Chat images: completed assistant replies now collect Markdown images into a compact gallery with thumbnails and full-screen previews, including workspace-local images across multi-root workspaces (thanks to @ChangeHow).
+- Sessions: switching projects now selects a session owned by the new workspace, and a message already being prepared stays with the session where it was submitted instead of being rerouted by a later project switch (thanks to @makeittech).
+- Usage: quota limits enabled for display now refresh every three minutes, with a manual refresh action available at any time.
+- Usage: OpenCode Go quota tracking now uses the existing OpenCode API key instead of requiring separate browser cookies and a workspace ID.
+- Chat: the Focus Chat command and Add to Context action now place the cursor in the chat input so typing can continue immediately.
+- Chat: typing `!` to enter shell mode no longer inserts the trigger into the command or moves the caret to the wrong side of it (thanks to @RyderAsKing).
+- Chat: line numbers with three or more digits no longer wrap in code blocks (thanks to @ChangeHow).
+
+## [1.18.2] - 2026-08-10
 
 - **Settings:** OpenCode configuration changes now accumulate behind a single Apply & Restart action instead of restarting OpenCode after every edit; the confirmation warns when active chats will be stopped (thanks to @makeittech).
-- Git/Worktrees: prompts now wait for a new worktree to finish checkout before sending, and sessions resolve to the worktree that owns them instead of occasionally opening or sending against the parent workspace (thanks to @ftzi).
-- Git/Worktrees: setup now runs the repository's `post-checkout` hook after creating a worktree, and deeply nested worktrees no longer fail with “Filename too long” on Windows (thanks to @ftzi, @makeittech).
 - Chat: messages submitted before switching sessions stay with the session and workspace they were sent from, and are cancelled rather than crossing into a different runtime (thanks to @Wsyjq).
 - Chat: queued messages no longer send into a response that is still streaming, and tool cards left running by an interrupted response settle instead of remaining stuck (thanks to @makeittech).
 - Chat: shell command output is expanded by default, and adding a message to context returns focus to the composer (thanks to @pascalandr, @makeittech).
@@ -10,8 +18,6 @@
 - Chat: the composer caret is now easier to see.
 - MCP: authorization now handles browser callbacks more reliably, settings distinguish available and unavailable servers more clearly, and failed connections expose a retry action.
 - Usage: added xAI quota reporting (thanks to @iamhenry).
-- Terminal: default tab names remain unique after tabs are closed, and Escape reaches terminal applications instead of closing the context panel (thanks to @makeittech).
-- UI: overlay scrollbars auto-hide again after scrolling instead of remaining permanently visible.
 - Attachments: removing an attached Office or OpenDocument file also removes the images extracted from that document (thanks to @chiamsun).
 - Notebooks: notebook links now open in the notebook editor when a compatible extension is installed (thanks to @TTTPOB).
 - Settings: rapid edits to notification templates no longer overwrite one another, and the collapsed-user-message preference now persists correctly (thanks to @AmanTahiliani, @pascalandr).

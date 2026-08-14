@@ -152,7 +152,7 @@ export const NATIVE_SELECTION_THEME_SPEC = {
     },
 };
 
-export const composerNativeSelectionTheme = EditorView.theme(NATIVE_SELECTION_THEME_SPEC);
+const composerNativeSelectionTheme = EditorView.theme(NATIVE_SELECTION_THEME_SPEC);
 
 /**
  * The native-selection arrangement, installed on every device: the theme

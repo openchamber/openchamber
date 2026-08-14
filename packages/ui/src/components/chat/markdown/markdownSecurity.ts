@@ -4,3 +4,12 @@ export const escapeRawMarkdownHtml = (value: string): string =>
 
 /** Active elements forbidden again at the final DOMPurify boundary. */
 export const MARKDOWN_FORBIDDEN_TAGS = ['script', 'style'] as const;
+
+export const isLocalFileUrl = (value: string): boolean => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'file:' && (!parsed.hostname || parsed.hostname === 'localhost');
+  } catch {
+    return false;
+  }
+};

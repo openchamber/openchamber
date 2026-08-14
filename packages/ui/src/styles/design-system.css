@@ -209,7 +209,6 @@
      Utilities remain able to opt an individual consumer out. */
   .oc-glass-popover,
 .oc-glass-tooltip,
-.oc-glass-dialog,
 .oc-glass-panel {
   background-color: color-mix(in srgb, var(--oc-glass-color) var(--oc-glass-opacity), transparent);
   -webkit-backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
@@ -224,10 +223,6 @@
 .oc-glass-tooltip {
   --oc-glass-color: var(--surface-elevated);
   --oc-glass-opacity: var(--oc-glass-tooltip-opacity);
-}
-
-.oc-glass-dialog {
-  --oc-glass-color: var(--surface-background);
 }
 
 .oc-glass-panel {
@@ -262,7 +257,6 @@
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .oc-glass-popover,
   .oc-glass-tooltip,
-  .oc-glass-dialog,
   .oc-glass-panel {
     background-color: var(--oc-glass-color);
   }
@@ -271,7 +265,6 @@
 @media (prefers-reduced-transparency: reduce) {
   .oc-glass-popover,
   .oc-glass-tooltip,
-  .oc-glass-dialog,
   .oc-glass-panel,
   .oc-glass-backdrop {
     -webkit-backdrop-filter: none;
@@ -280,7 +273,6 @@
 
   .oc-glass-popover,
   .oc-glass-tooltip,
-  .oc-glass-dialog,
   .oc-glass-panel {
     background-color: var(--oc-glass-color);
   }

@@ -6,14 +6,19 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 type ChatViewProps = {
     active?: boolean;
     readOnly?: boolean;
+    initialAllowPromptingSubagentSessions?: boolean;
 };
 
-export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = false }) => {
+export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = false, initialAllowPromptingSubagentSessions }) => {
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
 
     return (
         <ChatErrorBoundary sessionId={currentSessionId || undefined}>
-            <ChatContainer active={active} readOnly={readOnly} />
+            <ChatContainer
+                active={active}
+                readOnly={readOnly}
+                initialAllowPromptingSubagentSessions={initialAllowPromptingSubagentSessions}
+            />
         </ChatErrorBoundary>
     );
 };

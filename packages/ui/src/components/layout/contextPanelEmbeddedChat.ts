@@ -8,6 +8,10 @@ export type EmbeddedSessionChatThemeBootstrap = {
   currentTheme: Theme;
 };
 
+export type EmbeddedSessionChatSettingsBootstrap = {
+  allowPromptingSubagentSessions: boolean;
+};
+
 export type EmbeddedSessionChatURLCacheEntry = {
   signature: string;
   src: string;
@@ -111,6 +115,7 @@ export const buildEmbeddedSessionChatURL = (
   directory: string | null,
   readOnly: boolean,
   theme: EmbeddedSessionChatThemeBootstrap,
+  settings?: EmbeddedSessionChatSettingsBootstrap,
 ): string => {
   if (typeof window === 'undefined') {
     return '';
@@ -134,6 +139,9 @@ export const buildEmbeddedSessionChatURL = (
   url.searchParams.set('lightThemeId', theme.lightThemeId);
   url.searchParams.set('darkThemeId', theme.darkThemeId);
   url.searchParams.set('themeVariant', theme.currentTheme.metadata.variant === 'dark' ? 'dark' : 'light');
+  if (settings) {
+    url.searchParams.set('allowPromptingSubagentSessions', settings.allowPromptingSubagentSessions ? '1' : '0');
+  }
 
   url.hash = '';
   return url.toString();
@@ -146,6 +154,7 @@ export const getOrCreateEmbeddedSessionChatURL = (
   directory: string | null,
   readOnly: boolean,
   theme: EmbeddedSessionChatThemeBootstrap,
+  settings?: EmbeddedSessionChatSettingsBootstrap,
 ): string => {
   const signature = buildEmbeddedSessionChatURLSignature(sessionID, directory, readOnly);
   const existing = cache.get(tabID);
@@ -153,9 +162,20 @@ export const getOrCreateEmbeddedSessionChatURL = (
     return existing.src;
   }
 
-  const src = buildEmbeddedSessionChatURL(sessionID, directory, readOnly, theme);
+  const src = buildEmbeddedSessionChatURL(sessionID, directory, readOnly, theme, settings);
   cache.set(tabID, { signature, src });
   return src;
+};
+
+export const getActiveEmbeddedSessionChatTab = <T extends { id: string }>(
+  tabs: T[],
+  activeTabID: string | null,
+): T | null => {
+  if (!activeTabID) {
+    return null;
+  }
+
+  return tabs.find((tab) => tab.id === activeTabID) ?? null;
 };
 
 /**

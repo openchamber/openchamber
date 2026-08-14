@@ -217,7 +217,6 @@ Good:
 - `useGitBranches(directory)`
 - `useGitBranchLabel(directory)`
 - `useGitRepoStatusMap(directories)`
-- `usePrVisualSummaryByKeys(keys)`
 
 Bad:
 

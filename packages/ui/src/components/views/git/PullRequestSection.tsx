@@ -1454,19 +1454,17 @@ export const PullRequestSection: React.FC<{
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             {pr ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex size-6 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background/70 hover:bg-interactive-hover/60"
-                    onClick={() => void openExternal(pr.url)}
-                    aria-label={t('gitView.pr.actions.openOnGitHubAria')}
-                  >
-                    <Icon name={prStateIconName} className="size-4 shrink-0" style={{ color: prColorVar }} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent><p>{t('gitView.pr.actions.openOnGitHub')}</p></TooltipContent>
-              </Tooltip>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="shrink-0"
+                onClick={() => void openExternal(pr.url)}
+                aria-label={t('gitView.pr.actions.openOnGitHubAria')}
+              >
+                <Icon name={prStateIconName} className="size-4 shrink-0" style={{ color: prColorVar }} />
+                {t('gitView.pr.actions.openOnGitHub')}
+              </Button>
             ) : (
               <Icon name={prStateIconName} className="size-4 shrink-0" style={{ color: 'var(--surface-muted-foreground)' }} />
             )}

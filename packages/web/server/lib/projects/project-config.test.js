@@ -471,4 +471,299 @@ describe('project-config loop reconciliation', () => {
       await cleanup();
     }
   });
+
+  it('conditionally updates state only when the predicate passes (occurrence claim)', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const created = await runtime.upsertScheduledTask('project-test', {
+        name: 'claim-me',
+        enabled: true,
+        schedule: { kind: 'daily', time: '15:00', timezone: 'UTC' },
+        execution: { prompt: 'Run once', providerID: 'openai', modelID: 'gpt-4.1' },
+      });
+
+      const scheduledFor = Date.UTC(2026, 0, 1, 15, 0, 0);
+      const first = await runtime.updateScheduledTaskStateIf(
+        'project-test',
+        created.task.id,
+        (task) => !Number.isFinite(task.state?.lastScheduledFor),
+        {
+          lastScheduledFor: scheduledFor,
+          lastStatus: 'running',
+          nextRunAt: scheduledFor + 86_400_000,
+        },
+      );
+      expect(first.updated).toBe(true);
+      expect(first.task.state.lastScheduledFor).toBe(scheduledFor);
+
+      const second = await runtime.updateScheduledTaskStateIf(
+        'project-test',
+        created.task.id,
+        (task) => task.state?.lastScheduledFor !== scheduledFor,
+        {
+          lastScheduledFor: scheduledFor,
+          lastStatus: 'running',
+        },
+      );
+      expect(second.updated).toBe(false);
+      expect(second.task.state.lastScheduledFor).toBe(scheduledFor);
+
+      const reloaded = await runtime.listScheduledTasks('project-test');
+      expect(reloaded[0].state.lastScheduledFor).toBe(scheduledFor);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('serializes concurrent writes across two runtimes sharing a projects dir', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-project-lock-contention-'));
+    const fsPromises = await import('fs/promises');
+    try {
+      const runtimeA = createProjectConfigRuntime({
+        fsPromises,
+        path,
+        projectsDirPath: tempRoot,
+        createTaskID: () => 'shared-task',
+      });
+      const runtimeB = createProjectConfigRuntime({
+        fsPromises,
+        path,
+        projectsDirPath: tempRoot,
+        createTaskID: () => 'shared-task',
+      });
+
+      await runtimeA.upsertScheduledTask('project-lock', {
+        name: 'contended',
+        enabled: true,
+        schedule: { kind: 'daily', time: '15:00', timezone: 'UTC' },
+        execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
+      });
+
+      await Promise.all([
+        runtimeA.updateScheduledTaskState('project-lock', 'shared-task', {
+          lastStatus: 'success',
+          lastRunAt: 100,
+        }),
+        runtimeB.updateScheduledTaskState('project-lock', 'shared-task', {
+          lastStatus: 'error',
+          lastRunAt: 200,
+        }),
+      ]);
+
+      const tasks = await runtimeA.listScheduledTasks('project-lock');
+      expect(tasks).toHaveLength(1);
+      expect(['success', 'error']).toContain(tasks[0].state.lastStatus);
+      expect([100, 200]).toContain(tasks[0].state.lastRunAt);
+
+      const lockPath = `${runtimeA.resolveProjectConfigPath('project-lock')}.lock`;
+      await expect(fsPromises.access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers from a stale-by-age project config lock and cleans it up', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    const fsPromises = await import('fs/promises');
+    try {
+      const projectID = 'stale-age';
+      const configPath = runtime.resolveProjectConfigPath(projectID);
+      const lockPath = `${configPath}.lock`;
+      await fsPromises.mkdir(path.dirname(configPath), { recursive: true });
+      await writeFile(lockPath, JSON.stringify({
+        pid: process.pid,
+        at: Date.now() - 120_000,
+      }));
+
+      const created = await runtime.upsertScheduledTask(projectID, {
+        name: 'after-stale',
+        enabled: true,
+        schedule: { kind: 'daily', time: '09:00', timezone: 'UTC' },
+        execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
+      });
+      expect(created.created).toBe(true);
+      await expect(fsPromises.access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('recovers from a stale-by-dead-pid project config lock', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    const fsPromises = await import('fs/promises');
+    try {
+      const projectID = 'stale-pid';
+      const configPath = runtime.resolveProjectConfigPath(projectID);
+      const lockPath = `${configPath}.lock`;
+      await fsPromises.mkdir(path.dirname(configPath), { recursive: true });
+      // PID unlikely to exist; kill(pid, 0) should fail with ESRCH.
+      await writeFile(lockPath, JSON.stringify({
+        pid: 2_147_483_647,
+        at: Date.now(),
+      }));
+
+      const created = await runtime.upsertScheduledTask(projectID, {
+        name: 'after-dead-pid',
+        enabled: true,
+        schedule: { kind: 'daily', time: '09:00', timezone: 'UTC' },
+        execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
+      });
+      expect(created.created).toBe(true);
+      await expect(fsPromises.access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('release does not unlink a lock stolen by another holder', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-project-lock-own-'));
+    const realFs = await import('fs/promises');
+    let enteredCritical;
+    const entered = new Promise((resolve) => {
+      enteredCritical = resolve;
+    });
+    let resumeCritical;
+    const hold = new Promise((resolve) => {
+      resumeCritical = resolve;
+    });
+
+    const fsPromises = {
+      ...realFs,
+      rename: async (from, to) => {
+        if (String(from).includes('.tmp-')) {
+          enteredCritical();
+          await hold;
+        }
+        return realFs.rename(from, to);
+      },
+    };
+
+    try {
+      const runtime = createProjectConfigRuntime({
+        fsPromises,
+        path,
+        projectsDirPath: tempRoot,
+        createTaskID: () => 'owned-task',
+      });
+      const projectID = 'lock-own';
+      const lockPath = `${runtime.resolveProjectConfigPath(projectID)}.lock`;
+      const stolenPid = process.pid + 1;
+
+      const upsertPromise = runtime.upsertScheduledTask(projectID, {
+        name: 'ownership',
+        enabled: true,
+        schedule: { kind: 'daily', time: '10:00', timezone: 'UTC' },
+        execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
+      });
+
+      await entered;
+      await realFs.writeFile(lockPath, JSON.stringify({
+        pid: stolenPid,
+        at: Date.now(),
+      }));
+      resumeCritical();
+      await upsertPromise;
+
+      const raw = await realFs.readFile(lockPath, 'utf8');
+      expect(JSON.parse(raw).pid).toBe(stolenPid);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('times out when a live lock holder never releases', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    const fsPromises = await import('fs/promises');
+    try {
+      const projectID = 'lock-timeout';
+      const configPath = runtime.resolveProjectConfigPath(projectID);
+      const lockPath = `${configPath}.lock`;
+      await fsPromises.mkdir(path.dirname(configPath), { recursive: true });
+      // Current process is alive — acquire must wait then throw.
+      await writeFile(lockPath, JSON.stringify({
+        pid: process.pid,
+        at: Date.now(),
+      }));
+
+      await expect(runtime.upsertScheduledTask(projectID, {
+        name: 'blocked',
+        enabled: true,
+        schedule: { kind: 'daily', time: '11:00', timezone: 'UTC' },
+        execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
+      })).rejects.toThrow(/timeout acquiring project config lock/);
+    } finally {
+      await cleanup();
+    }
+  }, 15_000);
+
+  it('releases the write chain after a lock timeout so a later write can complete', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    const fsPromises = await import('fs/promises');
+    try {
+      const projectID = 'lock-timeout-recover';
+      const configPath = runtime.resolveProjectConfigPath(projectID);
+      const lockPath = `${configPath}.lock`;
+      await fsPromises.mkdir(path.dirname(configPath), { recursive: true });
+      await writeFile(lockPath, JSON.stringify({
+        pid: process.pid,
+        at: Date.now(),
+      }));
+
+      await expect(runtime.upsertScheduledTask(projectID, {
+        name: 'blocked-then-recover',
+        enabled: true,
+        schedule: { kind: 'daily', time: '11:00', timezone: 'UTC' },
+        execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
+      })).rejects.toThrow(/timeout acquiring project config lock/);
+
+      // Remove the hostile lock. A wedged in-process chain would hang forever here.
+      await fsPromises.unlink(lockPath);
+
+      const created = await Promise.race([
+        runtime.upsertScheduledTask(projectID, {
+          name: 'after-timeout',
+          enabled: true,
+          schedule: { kind: 'daily', time: '12:00', timezone: 'UTC' },
+          execution: { prompt: 'Run after timeout', providerID: 'openai', modelID: 'gpt-4.1' },
+        }),
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('second write hung after lock timeout')), 3_000);
+        }),
+      ]);
+
+      expect(created.created).toBe(true);
+      expect(created.task.name).toBe('after-timeout');
+      const listed = await runtime.listScheduledTasks(projectID);
+      expect(listed).toHaveLength(1);
+      expect(listed[0].name).toBe('after-timeout');
+    } finally {
+      await cleanup();
+    }
+  }, 20_000);
+
+  it('recovers from an unparseable lock using mtime age', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    const fsPromises = await import('fs/promises');
+    try {
+      const projectID = 'stale-unparseable';
+      const configPath = runtime.resolveProjectConfigPath(projectID);
+      const lockPath = `${configPath}.lock`;
+      await fsPromises.mkdir(path.dirname(configPath), { recursive: true });
+      // Simulate crash between open(wx) and writeFile / partial payload.
+      await writeFile(lockPath, '{not-json');
+      const staleMtime = new Date(Date.now() - 120_000);
+      await fsPromises.utimes(lockPath, staleMtime, staleMtime);
+
+      const created = await runtime.upsertScheduledTask(projectID, {
+        name: 'after-unparseable',
+        enabled: true,
+        schedule: { kind: 'daily', time: '09:00', timezone: 'UTC' },
+        execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
+      });
+      expect(created.created).toBe(true);
+      await expect(fsPromises.access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await cleanup();
+    }
+  });
 });

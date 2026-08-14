@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
+import { withReviewSessionMarker } from '@/lib/sessionReviewMetadata';
 
 const session = (parentID?: string): Session => ({
     id: 'session',
@@ -26,5 +27,15 @@ describe('resolveChatPromptReadOnly', () => {
     test('preserves the surface read-only state for root sessions', () => {
         expect(resolveChatPromptReadOnly(session(), true, true)).toBe(true);
         expect(resolveChatPromptReadOnly(session(), true, false)).toBe(false);
+    });
+
+    test('treats a marked code review as an independent session even with a stale parent ID', () => {
+        const reviewSession = {
+            ...session('original'),
+            metadata: withReviewSessionMarker({}, 'original'),
+        } as Session;
+
+        expect(resolveChatPromptReadOnly(reviewSession, false, false)).toBe(false);
+        expect(resolveChatPromptReadOnly(reviewSession, true, true)).toBe(true);
     });
 });

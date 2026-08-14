@@ -15,6 +15,8 @@ import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell } from '@/lib/desktop';
 import { useUIStore } from '@/stores/useUIStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
+import { extractAnnouncedUrls, extractProjectActionUrl } from '@/lib/terminalPreview';
+import { setAnnouncedDevServers } from '@/lib/browser/announcedServers';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { openExternalUrl } from '@/lib/url';
@@ -39,6 +41,10 @@ type UrlWatchEntry = {
   openedUrl: boolean;
   tail: string;
   openInPreview: boolean;
+  /** Addresses announced so far by an auto-discovery run, in announcement order. */
+  announced: string[];
+  /** Set once the panel is showing these candidates and wants later ones too. */
+  offering: boolean;
 };
 
 interface ProjectActionsButtonProps {
@@ -49,11 +55,14 @@ interface ProjectActionsButtonProps {
   allowMobile?: boolean;
 }
 
-const ANSI_ESCAPE_PREFIX = String.fromCharCode(27);
-const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE_PREFIX}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
-const URL_GLOBAL_PATTERN = /https?:\/\/[^\s<>'"`]+/gi;
 const AUTO_DISCOVER_ACTION_ID = '__openchamber_auto_discover_preview__';
 const AUTO_DISCOVER_PREVIEW_WAIT_TIMEOUT_MS = 15_000;
+/**
+ * How long to keep listening after the first server announces itself. A project
+ * that starts several at once staggers them by a second or two, and opening the
+ * first to speak would just be a race.
+ */
+const AUTO_DISCOVER_SETTLE_MS = 3_000;
 
 const stripControlChars = (value: string): string => {
   let next = '';
@@ -89,57 +98,6 @@ const normalizeManualOpenUrl = (value: string | undefined): string | null => {
   }
 };
 
-const extractBestUrl = (value: string): string | null => {
-  const cleaned = value.replace(ANSI_ESCAPE_PATTERN, '');
-  const matches = cleaned.match(URL_GLOBAL_PATTERN);
-  if (!matches || matches.length === 0) {
-    return null;
-  }
-
-  const normalized = matches
-    .map((entry) => entry.replace(/[),.;]+$/, ''))
-    .filter(Boolean);
-
-  if (normalized.length === 0) {
-    return null;
-  }
-
-  const portCandidates: Array<{ raw: string; parsed: URL }> = [];
-  for (const candidate of normalized) {
-    try {
-      const parsed = new URL(candidate);
-      if (parsed.port && parsed.port.length > 0) {
-        portCandidates.push({ raw: candidate, parsed });
-      }
-    } catch {
-      // noop
-    }
-  }
-
-  if (portCandidates.length > 0) {
-    const scoreCandidate = (entry: { raw: string; parsed: URL }): number => {
-      const { parsed } = entry;
-      const host = parsed.hostname.toLowerCase();
-      const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
-      const normalizedPath = parsed.pathname || '/';
-      const pathSegments = normalizedPath.split('/').filter(Boolean).length;
-      const hasRootPath = normalizedPath === '/' || normalizedPath === '';
-      const hasQueryOrHash = Boolean(parsed.search || parsed.hash);
-
-      let score = 0;
-      if (isLocalHost) score += 50;
-      if (hasRootPath) score += 30;
-      score -= Math.min(pathSegments * 5, 20);
-      if (hasQueryOrHash) score -= 10;
-      return score;
-    };
-
-    portCandidates.sort((a, b) => scoreCandidate(b) - scoreCandidate(a));
-    return portCandidates[0]?.parsed.origin ?? portCandidates[0]?.raw ?? null;
-  }
-
-  return normalized[0] ?? null;
-};
 
 export const ProjectActionsButton = ({
   projectRef,
@@ -307,6 +265,39 @@ export const ProjectActionsButton = ({
   }, [actions, canUseAutoDiscover, selectedActionId]);
 
   React.useEffect(() => {
+    /**
+     * Decides what an auto-discovery run found, once its servers have had a
+     * moment to announce themselves. One address is opened; several are offered
+     * in the browser panel, because choosing between them would be a guess
+     * dressed up as a feature.
+     */
+    const settleAutoDiscovery = (runKey: string) => {
+      delete previewWaitTimeoutByRunKeyRef.current[runKey];
+      const watch = urlWatchByRunKeyRef.current[runKey];
+      if (!watch || watch.openedUrl) return;
+
+      const store = useTerminalStore.getState();
+      const run = store.projectActionRuns[runKey];
+      if (!run) return;
+
+      const candidates = watch.announced;
+      if (candidates.length === 0) return;
+      watch.openedUrl = true;
+      store.updateProjectActionRunStatus(runKey, 'running');
+
+      if (candidates.length === 1) {
+        setAnnouncedDevServers(run.directory, []);
+        setTabPreviewUrl(run.directory, run.tabId, candidates[0], { locked: false, autoOpened: true });
+        openContextPreview(run.directory, candidates[0]);
+        return;
+      }
+
+      watch.offering = true;
+      setAnnouncedDevServers(run.directory, candidates);
+      useUIStore.getState().openContextSurface(run.directory, 'browser');
+      toast.info(t('projectActions.toast.multipleServers'));
+    };
+
     const monitorRuns = () => {
       const terminalStore = useTerminalStore.getState();
       const terminalSessions = terminalStore.sessions;
@@ -319,7 +310,7 @@ export const ProjectActionsButton = ({
           continue;
         }
 
-        const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: false, tail: '', openInPreview: false };
+        const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: false, tail: '', openInPreview: false, announced: [], offering: false };
         urlWatchByRunKeyRef.current[runKey] = watch;
         const action = displayActions.find((item) => item.id === entry.actionId);
         const bufferChunks = terminalStore.getBuffer(entry.directory, entry.tabId).chunks;
@@ -330,7 +321,34 @@ export const ProjectActionsButton = ({
 
         const combined = nextChunks.map((chunk) => chunk.data).join('');
         const textForScan = `${watch.tail}${combined}`;
-        const maybeUrl = !watch.openedUrl && action.autoOpenUrl === true ? extractBestUrl(textForScan) : null;
+        // Auto-discovery inferred the command; it must not also infer the
+        // address. It collects what the servers announce and decides once they
+        // have had a moment to all speak up.
+        // Keep listening after the panel starts offering candidates: servers in
+        // one project can be seconds apart, and a list that froze at whoever was
+        // ready first would quietly omit the rest.
+        if (watch.openInPreview && (!watch.openedUrl || watch.offering)) {
+          const announced = extractAnnouncedUrls(textForScan);
+          const before = watch.announced.length;
+          for (const url of announced) {
+            if (!watch.announced.includes(url)) watch.announced.push(url);
+          }
+          const added = watch.announced.length - before;
+
+          if (watch.offering && added > 0) {
+            setAnnouncedDevServers(entry.directory, watch.announced);
+          } else if (!watch.openedUrl && before === 0 && watch.announced.length > 0) {
+            window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[runKey]);
+            previewWaitTimeoutByRunKeyRef.current[runKey] = window.setTimeout(
+              () => settleAutoDiscovery(runKey),
+              AUTO_DISCOVER_SETTLE_MS,
+            );
+          }
+        }
+
+        const maybeUrl = !watch.openedUrl && action.autoOpenUrl === true && !watch.openInPreview
+          ? extractProjectActionUrl(textForScan)
+          : null;
         const lastChunkId = nextChunks[nextChunks.length - 1]?.id ?? watch.lastSeenChunkId;
 
         watch.lastSeenChunkId = lastChunkId;
@@ -551,6 +569,8 @@ export const ProjectActionsButton = ({
         openedUrl: Boolean(desktopForwardUrl) || Boolean(manualOpenUrl) || hasCustomOpenUrl,
         tail: '',
         openInPreview: discovered.id === AUTO_DISCOVER_ACTION_ID,
+        announced: [],
+        offering: false,
       };
 
       const normalizedCommand = stripControlChars(discovered.command.trim().replace(/\r\n|\r/g, '\n'));

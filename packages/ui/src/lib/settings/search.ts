@@ -485,9 +485,17 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: 'sessions.agent-control-tool',
     page: 'general',
-    titleKey: 'settings.openchamber.opencodeCli.field.agentControlTool',
-    descriptionKey: 'settings.openchamber.opencodeCli.field.agentControlToolInfo',
+    titleKey: 'settings.openchamber.tools.field.agentControlTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentControlToolInfo',
     keywords: ['agent', 'tool', 'orchestration', 'openchamber', 'sessions', 'schedule', 'control'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.agent-web-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentWebTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentWebToolInfo',
+    keywords: ['agent', 'tool', 'web', 'browser', 'page', 'preview', 'openchamber'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -522,11 +530,11 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['ignored', 'files', 'gitignore'],
   },
   {
-    id: 'usage.header-menu',
+    id: 'usage.work-status-panel',
     page: 'usage',
-    titleKey: 'settings.usage.page.options.showInHeader',
-    descriptionKey: 'settings.usage.page.options.showInHeaderTooltip',
-    keywords: ['quota', 'header', 'dropdown'],
+    titleKey: 'settings.usage.page.options.showInWorkStatus',
+    descriptionKey: 'settings.usage.page.options.showInWorkStatusTooltip',
+    keywords: ['quota', 'work', 'status', 'panel'],
   },
   {
     id: 'usage.model-quotas',

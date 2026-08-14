@@ -236,7 +236,7 @@ function updateLiveSession(session: Session, directory?: string): boolean {
   return false
 }
 
-export function mirrorSessionIntoLiveStores(session: Session, directory?: string): void {
+function mirrorSessionIntoLiveStores(session: Session, directory?: string): void {
   if (directory && updateLiveSession(session, directory)) {
     return
   }

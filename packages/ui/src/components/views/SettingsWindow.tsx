@@ -50,7 +50,7 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
               'relative pointer-events-auto',
               'w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px]',
               'rounded-xl border shadow-none overflow-hidden origin-center',
-              'oc-glass-dialog',
+              'bg-background',
               'transition-all duration-150 ease-out',
               'data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]',
               'data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]',

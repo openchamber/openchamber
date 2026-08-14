@@ -2,6 +2,7 @@ import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
+import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/useUIStore';
 import { WORK_STATUS_PANEL_WIDTH } from './useWorkStatusVisibility';
 import { WorkStatusGoalRow } from './WorkStatusGoalRow';
@@ -13,7 +14,11 @@ import { WorkStatusMcpSection } from './WorkStatusMcpSection';
 import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
 import { WorkStatusContextSection } from './WorkStatusContextSection';
 import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog';
-import { isWorkStatusSectionVisible } from './sections';
+import {
+  areAllWorkStatusSectionsHidden,
+  getWorkStatusPanelPresentation,
+  isWorkStatusSectionVisible,
+} from './sections';
 import { WorkStatusPresenceProvider } from './presence';
 import { Icon } from '@/components/icon/Icon';
 
@@ -82,9 +87,19 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   // out with something in it rather than emptying first, and its subscriptions
   // stop once it is truly gone.
   const [contentMounted, setContentMounted] = React.useState(visible);
-  // Hidden, mid-collapse, or reporting nothing: in each case the card is not
-  // something the user can act on, so it should not be reachable.
-  const interactive = visible && renderedSections > 0;
+  // Hidden or mid-collapse: the card is not something the user can act on.
+  // When `visible` but all sections are hidden, the panel stays interactive so
+  // the settings button remains reachable — otherwise there is no way to
+  // re-enable sections. The previous `renderedSections > 0` guard is preserved
+  // for the transient "no data yet" state so the panel doesn't flash a bare
+  // bordered card on first mount.
+  const allSectionsHidden = areAllWorkStatusSectionsHidden(hiddenSections);
+  const { interactive, showEmptyState } = getWorkStatusPanelPresentation({
+    visible,
+    contentMounted,
+    renderedSections,
+    allSectionsHidden,
+  });
   React.useEffect(() => {
     if (visible) {
       setContentMounted(true);
@@ -180,9 +195,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           // separates the two without going fully opaque.
           'oc-glass-panel',
         ],
-        // An empty card is a border around a settings icon, which reads as a
-        // fault rather than as "nothing to report".
-        renderedSections === 0 && 'border-transparent bg-transparent shadow-none',
+        // When every section is hidden the card keeps its border and background
+        // so the settings button stays discoverable — going transparent made the
+        // only recovery path unreachable.
         'motion-reduce:transition-none',
         'rounded-xl border border-[var(--interactive-border)]',
         !overlay && 'bg-[var(--surface-muted)]/40',
@@ -244,6 +259,20 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         {sectionVisible('contextSources') ? <WorkStatusContextSection sessionId={sessionId} directory={directory} /> : null}
       </ScrollShadow>
       </WorkStatusPresenceProvider>
+      ) : null}
+
+      {showEmptyState ? (
+        <div className="flex flex-col items-center justify-center px-4 py-8 text-center">
+          <span className="text-sm text-muted-foreground">{t('chat.workStatus.sections.allHidden')}</span>
+          <Button
+            variant="link"
+            size="xs"
+            onClick={() => setSectionsDialogOpen(true)}
+            className="mt-2 normal-case text-muted-foreground hover:text-foreground"
+          >
+            {t('chat.workStatus.sections.open')}
+          </Button>
+        </div>
       ) : null}
 
       <WorkStatusSectionsDialog open={sectionsDialogOpen} onOpenChange={setSectionsDialogOpen} />

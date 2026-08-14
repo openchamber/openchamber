@@ -435,6 +435,124 @@ describe('createSession draft lifecycle', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Issues #2222 and #2315 — send target must be snapshotted at submit time so a
+// later sidebar/project selection cannot reroute a pending draft or session
+// send to whichever session happens to be current when the async work resumes.
+// ---------------------------------------------------------------------------
+describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
+  const sendMessageCalls = [];
+  const createSessionCalls = [];
+  let originalSendMessage;
+  let originalCreateSession;
+
+  beforeEach(() => {
+    sendMessageCalls.length = 0;
+    createSessionCalls.length = 0;
+
+    const childStore = {
+      getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
+      setState: () => {},
+    };
+    const childStores = {
+      children: new Map(),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    setActionRefs(opencodeClient, childStores, () => '/projects/alpha');
+    setOptimisticRefs(() => {}, () => {});
+    useConfigStore.setState({ isConnected: true });
+
+    originalSendMessage = opencodeClient.sendMessage;
+    originalCreateSession = opencodeClient.createSession;
+    opencodeClient.sendMessage = async (params) => {
+      sendMessageCalls.push(params);
+      return 'msg';
+    };
+    opencodeClient.createSession = async (_params, directory) => {
+      createSessionCalls.push(directory);
+      return { id: 'session-materialized', directory: directory ?? '/projects/alpha' };
+    };
+  });
+
+  afterEach(() => {
+    opencodeClient.sendMessage = originalSendMessage;
+    opencodeClient.createSession = originalCreateSession;
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      newSessionDraft: { open: false, directoryOverride: null, parentID: null },
+    });
+  });
+
+  test('draft send snapshots the draft; switching to another project mid-flight still targets the materialized session', async () => {
+    const draftSnapshot = {
+      open: true,
+      directoryOverride: '/projects/alpha',
+      parentID: null,
+      title: 'Project A draft',
+    };
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      newSessionDraft: draftSnapshot,
+    });
+
+    const sendPromise = useSessionUIStore.getState().sendMessage(
+      'message for project A',
+      'provider-a',
+      'model-a',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'normal',
+      { draftSnapshot },
+    );
+
+    // A sidebar switch while the send is still in flight must not reroute it.
+    useSessionUIStore.getState().setCurrentSession('session-project-b', '/projects/beta');
+
+    await sendPromise;
+
+    expect(createSessionCalls).toHaveLength(1);
+    expect(createSessionCalls[0]).toBe('/projects/alpha');
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].id).toBe('session-materialized');
+    expect(sendMessageCalls[0].directory).toBe('/projects/alpha');
+  });
+
+  test('existing-session send keeps the submit-time target even when selection changes', async () => {
+    useSessionUIStore.setState({
+      currentSessionId: 'session-project-a',
+      currentSessionDirectory: '/projects/alpha',
+      newSessionDraft: { open: false, directoryOverride: null, parentID: null },
+    });
+
+    const sendPromise = useSessionUIStore.getState().sendMessage(
+      'message for project A',
+      'provider-a',
+      'model-a',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'normal',
+      { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-project-a', directory: '/projects/alpha' } },
+    );
+
+    useSessionUIStore.getState().setCurrentSession('session-project-b', '/projects/beta');
+
+    await sendPromise;
+
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].id).toBe('session-project-a');
+    expect(sendMessageCalls[0].directory).toBe('/projects/alpha');
+  });
+});
+
 describe('routeMessage skill invocation', () => {
   // OpenCode registers every skill as a command (source: "skill"), so a skill
   // selected from the slash menu must be dispatched via session.command so its

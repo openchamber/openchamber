@@ -36,7 +36,7 @@ shape is genuinely missing.
 | Field rows, checkboxes, radios, chips, selects, inputs, numeric steppers, info hints | `references/controls.md` |
 | Adding/moving controls, pages, availability, anchors, or search entries | `references/search.md` |
 
-Load every matching reference before editing.
+Load each reference whose task branch applies; reference loading is complete when layout, control, and search implications are each classified.
 
 ## Quick Primitive Selection
 
@@ -77,7 +77,7 @@ Every stable Settings control addition or move must consider search in the same 
 
 Dynamic entity rows normally are not indexed. Load `references/search.md` for exact rules.
 
-## Review Checklist
+## Completion Criteria
 
 - Built from shared primitives; no ad-hoc page/section/row markup.
 - Explanatory text hidden behind `info`; warnings/syntax/status still visible.

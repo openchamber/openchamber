@@ -37,6 +37,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
     - directory listing
     - file search
     - file read path safety checks
+    - active-directory selection across multi-root workspaces
     - dropped-file parsing and attachment reading
     - models metadata fetch helper
 

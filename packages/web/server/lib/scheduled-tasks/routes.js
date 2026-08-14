@@ -145,6 +145,12 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
 
+    // Whether a client can drive a browser view is a property of that client,
+    // not of this server: a desktop shell and a browser tab can be connected to
+    // the same server at once. Recording it on the connection keeps the answer
+    // current without any enable/disable setting to go stale.
+    res.openchamberBrowserCapable = req.query?.browser === '1';
+
     const clients = getOpenChamberEventClients();
     clients.add(res);
 
