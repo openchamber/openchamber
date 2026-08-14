@@ -75,6 +75,16 @@ const mapGiteaIssueSummary = (item) => ({
   state: typeof item.state === 'string' ? item.state : 'open',
   author: mapGiteaAuthor(item.user) || {},
   labels: mapGiteaLabels(item.labels),
+  assignees: Array.isArray(item.assignees)
+    ? item.assignees.map(mapGiteaAuthor).filter((user) => user?.username)
+    : [],
+  milestone: item.milestone && typeof item.milestone === 'object'
+    ? {
+        title: typeof item.milestone.title === 'string' ? item.milestone.title : '',
+        ...(typeof item.milestone.state === 'string' ? { state: item.milestone.state } : {}),
+      }
+    : null,
+  commentsCount: typeof item.comments === 'number' ? item.comments : undefined,
 });
 
 const mapGiteaPullRequestSummary = (item) => {
@@ -88,6 +98,16 @@ const mapGiteaPullRequestSummary = (item) => {
     draft: Boolean(item.draft),
     author: mapGiteaAuthor(item.user) || {},
     labels: mapGiteaLabels(item.labels),
+    assignees: Array.isArray(item.assignees)
+      ? item.assignees.map(mapGiteaAuthor).filter((user) => user?.username)
+      : [],
+    milestone: item.milestone && typeof item.milestone === 'object'
+      ? {
+          title: typeof item.milestone.title === 'string' ? item.milestone.title : '',
+          ...(typeof item.milestone.state === 'string' ? { state: item.milestone.state } : {}),
+        }
+      : null,
+    commentsCount: typeof item.comments === 'number' ? item.comments : undefined,
     sourceBranch: typeof item.head?.ref === 'string' ? item.head.ref : '',
     targetBranch: typeof item.base?.ref === 'string' ? item.base.ref : '',
   };
@@ -654,6 +674,203 @@ export function registerGiteaRoutes(app, options = {}) {
     } catch (error) {
       console.error('Failed to load Gitea pull request context:', error);
       return res.status(500).json({ error: error.message || 'Failed to load Gitea pull request context' });
+    }
+  });
+
+  // ================= Gitea Pull Request Enrichment APIs =================
+
+  // Gitea commit objects carry a top-level `author` (the GitHub-style user,
+  // with `login`) plus a `commit.author` (git identity: name/email/date).
+  // Prefer the user when present, else fall back to the git identity so the
+  // author chip still renders something useful.
+  const mapGiteaCommitAuthor = (commit) => {
+    const userAuthor = mapGiteaAuthor(commit?.author);
+    if (userAuthor?.username) {
+      return userAuthor;
+    }
+    const gitAuthor = commit?.commit?.author;
+    if (gitAuthor && typeof gitAuthor.name === 'string' && gitAuthor.name) {
+      return {
+        username: gitAuthor.name,
+        ...(typeof gitAuthor.email === 'string' ? { email: gitAuthor.email } : {}),
+      };
+    }
+    return null;
+  };
+
+  app.get('/api/gitea/prs/commits', async (req, res) => {
+    try {
+      const directory = asString(req.query?.directory);
+      const requestedRepo = getRequestedRepo(req);
+      const number = getRequiredNumber(req);
+      if (!directory && !requestedRepo) {
+        return res.status(400).json({ error: 'directory or owner/repo is required' });
+      }
+      if (!number) {
+        return res.status(400).json({ error: 'number is required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false, commits: [] });
+      }
+
+      const { owner, repo, repoRef } = await resolveRepoForRequest(directory, requestedRepo);
+      if (!owner || !repo) {
+        return res.json({ connected: true, repo: null, commits: [] });
+      }
+
+      const resp = await withTimeout(
+        client.pullRequestCommits(owner, repo, number, { limit: 100 }),
+        ROUTE_TIMEOUT_MS,
+        'gitea pr commits',
+      );
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (resp.status === 404) {
+        return res.status(404).json({ error: 'Pull request not found' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'Gitea returned an error while fetching pull request commits' });
+      }
+
+      const commits = (Array.isArray(resp.data) ? resp.data : []).map((commit) => {
+        const message = typeof commit.commit?.message === 'string' ? commit.commit.message : '';
+        return {
+          sha: typeof commit.sha === 'string' ? commit.sha : '',
+          message,
+          ...(message.split('\n')[0] ? { summary: message.split('\n')[0] } : {}),
+          author: mapGiteaCommitAuthor(commit),
+          ...(typeof commit.commit?.author?.date === 'string' ? { committedAt: commit.commit.author.date } : {}),
+          parents: Array.isArray(commit.parents) ? commit.parents.map((parent) => parent.sha) : [],
+        };
+      });
+
+      return res.json({ connected: true, repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl), commits });
+    } catch (error) {
+      console.error('Failed to fetch Gitea pull request commits:', error);
+      return res.status(500).json({ error: error.message || 'Failed to fetch Gitea pull request commits' });
+    }
+  });
+
+  app.get('/api/gitea/prs/reviews', async (req, res) => {
+    try {
+      const directory = asString(req.query?.directory);
+      const requestedRepo = getRequestedRepo(req);
+      const number = getRequiredNumber(req);
+      if (!directory && !requestedRepo) {
+        return res.status(400).json({ error: 'directory or owner/repo is required' });
+      }
+      if (!number) {
+        return res.status(400).json({ error: 'number is required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false, reviews: [] });
+      }
+
+      const { owner, repo, repoRef } = await resolveRepoForRequest(directory, requestedRepo);
+      if (!owner || !repo) {
+        return res.json({ connected: true, repo: null, reviews: [] });
+      }
+
+      const resp = await withTimeout(
+        client.pullRequestReviews(owner, repo, number, { limit: 100 }),
+        ROUTE_TIMEOUT_MS,
+        'gitea pr reviews',
+      );
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (resp.status === 404) {
+        return res.status(404).json({ error: 'Pull request not found' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'Gitea returned an error while fetching pull request reviews' });
+      }
+
+      const reviews = (Array.isArray(resp.data) ? resp.data : []).map((review) => ({
+        id: String(review.id),
+        state: typeof review.state === 'string' ? review.state : 'PENDING',
+        author: mapGiteaAuthor(review.user) || null,
+        ...(typeof review.submitted_at === 'string' ? { submittedAt: review.submitted_at } : {}),
+        body: typeof review.body === 'string' ? review.body : null,
+        ...(typeof review.commit_id === 'string' ? { commitSha: review.commit_id } : null),
+      }));
+
+      return res.json({ connected: true, repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl), reviews });
+    } catch (error) {
+      console.error('Failed to fetch Gitea pull request reviews:', error);
+      return res.status(500).json({ error: error.message || 'Failed to fetch Gitea pull request reviews' });
+    }
+  });
+
+  app.get('/api/gitea/prs/statuses', async (req, res) => {
+    try {
+      const directory = asString(req.query?.directory);
+      const requestedRepo = getRequestedRepo(req);
+      const number = getRequiredNumber(req);
+      if (!directory && !requestedRepo) {
+        return res.status(400).json({ error: 'directory or owner/repo is required' });
+      }
+      if (!number) {
+        return res.status(400).json({ error: 'number is required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false, statuses: [] });
+      }
+
+      const { owner, repo, repoRef } = await resolveRepoForRequest(directory, requestedRepo);
+      if (!owner || !repo) {
+        return res.json({ connected: true, repo: null, statuses: [] });
+      }
+
+      // Resolve the PR head SHA first — Gitea's commit-status endpoint is
+      // keyed by commit SHA, not PR number. The PR payload's `head.sha` is the
+      // head commit (same field family as `head.ref` used elsewhere).
+      const prResp = await withTimeout(client.pullRequest(owner, repo, number), ROUTE_TIMEOUT_MS, 'gitea pr statuses');
+      if (prResp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (prResp.status === 404) {
+        return res.status(404).json({ error: 'Pull request not found' });
+      }
+      if (prResp.status !== 200 || !prResp.data) {
+        return res.status(502).json({ error: 'Gitea returned an error while fetching the pull request' });
+      }
+      const headSha = typeof prResp.data.head?.sha === 'string' ? prResp.data.head.sha : null;
+      if (!headSha) {
+        return res.json({ connected: true, repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl), statuses: [] });
+      }
+
+      const statusesResp = await withTimeout(
+        client.commitStatuses(owner, repo, headSha, { limit: 100 }),
+        ROUTE_TIMEOUT_MS,
+        'gitea commit statuses',
+      );
+      if (statusesResp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (statusesResp.status !== 200) {
+        return res.status(502).json({ error: 'Gitea returned an error while fetching commit statuses' });
+      }
+
+      const statuses = (Array.isArray(statusesResp.data) ? statusesResp.data : []).map((status) => ({
+        state: typeof status.state === 'string' ? status.state.toLowerCase() : 'unknown',
+        name: typeof status.context === 'string' ? status.context : '',
+        ...(typeof status.description === 'string' ? { description: status.description } : null),
+        ...(typeof status.target_url === 'string' ? { url: status.target_url } : null),
+        ...(typeof status.created_at === 'string' ? { createdAt: status.created_at } : {}),
+      }));
+
+      return res.json({ connected: true, repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl), statuses });
+    } catch (error) {
+      console.error('Failed to fetch Gitea pull request statuses:', error);
+      return res.status(500).json({ error: error.message || 'Failed to fetch Gitea pull request statuses' });
     }
   });
 

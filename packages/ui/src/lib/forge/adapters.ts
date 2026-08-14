@@ -17,29 +17,39 @@ import type {
   GitLabAPI,
 } from '@/lib/api/types';
 import type {
+  ForgeChecksResult,
+  ForgeCommitsResult,
   ForgeIssueDetail,
   ForgeIssuesResult,
   ForgeProvider,
   ForgePullRequestContext,
   ForgePullRequestsResult,
+  ForgeTimelineResult,
 } from './provider';
 import type { ForgeProviderCapabilities, ForgeProviderKind } from './types';
 import {
+  mapGiteaCommits,
   mapGiteaComment,
   mapGiteaContext,
   mapGiteaIssue,
   mapGiteaPr,
   mapGiteaRepoRef,
+  mapGiteaReviewsToEvents,
+  mapGiteaStatuses,
+  mapGithubCommits,
   mapGithubContext,
   mapGithubIssue,
   mapGithubIssueComment,
   mapGithubPr,
   mapGithubRepoRef,
+  mapGithubTimelineEvents,
+  mapGitlabCommits,
   mapGitlabContext,
   mapGitlabIssue,
   mapGitlabMr,
   mapGitlabNoteComment,
   mapGitlabRepoRef,
+  mapGitlabTimelineEvents,
 } from './normalize';
 
 const GITHUB_CAPABILITIES: ForgeProviderCapabilities = {
@@ -118,6 +128,16 @@ const EMPTY_ISSUE_DETAIL: ForgeIssueDetail = {
 // Stable, detail-free marker for comment-fetch failures: surfaces the partial
 // result without leaking the underlying error message.
 const COMMENTS_ERROR = 'comments failed to load';
+
+// Stable, detail-free marker for rich-view (commits/timeline/checks) fetch
+// failures; callers distinguish "not attempted" (no error) from "failed".
+const LOAD_ERROR = 'failed to load';
+
+const EMPTY_COMMITS: ForgeCommitsResult = { connected: false, repo: null, commits: [] };
+
+const EMPTY_TIMELINE: ForgeTimelineResult = { connected: false, repo: null, events: [] };
+
+const EMPTY_CHECKS: ForgeChecksResult = { connected: false, repo: null, checks: null };
 
 /**
  * Split a `"owner/repo"` selector into its parts, as used by the
@@ -223,6 +243,43 @@ export const createGithubForgeProvider = (api: GitHubAPI): ForgeProvider => ({
       return EMPTY_ISSUE_DETAIL;
     }
   },
+
+  async getCommits(directory, number, options) {
+    if (!api.prCommits) return EMPTY_COMMITS;
+    try {
+      const result = await api.prCommits(directory, number, {
+        sourceRepo: parseOwnerRepo(options?.sourceRepo),
+      });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGithubRepoRef(result.repo) : null,
+        commits: result.commits ? mapGithubCommits(result.commits) : [],
+      };
+    } catch {
+      return { ...EMPTY_COMMITS, error: LOAD_ERROR };
+    }
+  },
+
+  async getTimeline(directory, number, options) {
+    if (!api.prTimeline) return EMPTY_TIMELINE;
+    try {
+      const result = await api.prTimeline(directory, number, {
+        sourceRepo: parseOwnerRepo(options?.sourceRepo),
+      });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGithubRepoRef(result.repo) : null,
+        events: result.events ? mapGithubTimelineEvents(result.events) : [],
+      };
+    } catch {
+      return { ...EMPTY_TIMELINE, error: LOAD_ERROR };
+    }
+  },
+
+  // GitHub check runs ride on getPullRequestContext().checks.
+  async getChecks() {
+    return null;
+  },
 });
 
 export const createGitlabForgeProvider = (api: GitLabAPI): ForgeProvider => ({
@@ -322,6 +379,47 @@ export const createGitlabForgeProvider = (api: GitLabAPI): ForgeProvider => ({
     } catch {
       return EMPTY_ISSUE_DETAIL;
     }
+  },
+
+  async getCommits(directory, number, options) {
+    if (!api.mrCommits) return EMPTY_COMMITS;
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.mrCommits(directory, number, {
+        namespace: selector?.owner,
+        project: selector?.repo,
+      });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGitlabRepoRef(result.repo) : null,
+        commits: result.commits ? mapGitlabCommits(result.commits) : [],
+      };
+    } catch {
+      return { ...EMPTY_COMMITS, error: LOAD_ERROR };
+    }
+  },
+
+  async getTimeline(directory, number, options) {
+    if (!api.mrTimeline) return EMPTY_TIMELINE;
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.mrTimeline(directory, number, {
+        namespace: selector?.owner,
+        project: selector?.repo,
+      });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGitlabRepoRef(result.repo) : null,
+        events: result.events ? mapGitlabTimelineEvents(result.events) : [],
+      };
+    } catch {
+      return { ...EMPTY_TIMELINE, error: LOAD_ERROR };
+    }
+  },
+
+  // GitLab exposes no checks surface.
+  async getChecks() {
+    return null;
   },
 });
 
@@ -426,6 +524,61 @@ export const createGiteaForgeProvider = (api: GiteaAPI): ForgeProvider => ({
       };
     } catch {
       return EMPTY_ISSUE_DETAIL;
+    }
+  },
+
+  async getCommits(directory, number, options) {
+    if (!api.prCommits) return EMPTY_COMMITS;
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.prCommits(directory, number, {
+        owner: selector?.owner,
+        repo: selector?.repo,
+      });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGiteaRepoRef(result.repo) : null,
+        commits: result.commits ? mapGiteaCommits(result.commits) : [],
+      };
+    } catch {
+      return { ...EMPTY_COMMITS, error: LOAD_ERROR };
+    }
+  },
+
+  // Gitea has no timeline endpoint; synthesize one from its reviews.
+  async getTimeline(directory, number, options) {
+    if (!api.prReviews) return EMPTY_TIMELINE;
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.prReviews(directory, number, {
+        owner: selector?.owner,
+        repo: selector?.repo,
+      });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGiteaRepoRef(result.repo) : null,
+        events: result.reviews ? mapGiteaReviewsToEvents(result.reviews) : [],
+      };
+    } catch {
+      return { ...EMPTY_TIMELINE, error: LOAD_ERROR };
+    }
+  },
+
+  async getChecks(directory, number, options) {
+    if (!api.prStatuses) return EMPTY_CHECKS;
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.prStatuses(directory, number, {
+        owner: selector?.owner,
+        repo: selector?.repo,
+      });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGiteaRepoRef(result.repo) : null,
+        checks: result.statuses ? mapGiteaStatuses(result.statuses) : null,
+      };
+    } catch {
+      return { ...EMPTY_CHECKS, error: LOAD_ERROR };
     }
   },
 });

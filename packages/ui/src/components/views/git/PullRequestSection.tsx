@@ -31,6 +31,9 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { getPrContextKey, usePrContextStore } from '@/stores/usePrContextStore';
 import { summarizeCheckRuns } from '@/lib/githubChecks';
+import { buildForgeProvider, mapGithubPr } from '@/lib/forge';
+import type { ForgeCommit, ForgeFileChange } from '@/lib/forge';
+import { ForgeCommitsSection, ForgeFilesDiffSection, ForgeMetadataChips } from '@/components/views/forge';
 import type {
   GitHubPullRequest,
   GitHubCheckRun,
@@ -41,7 +44,7 @@ import type {
 import { useI18n } from '@/lib/i18n';
 
 type MergeMethod = 'merge' | 'squash' | 'rebase';
-type PrSegment = 'overview' | 'checks' | 'comments';
+type PrSegment = 'overview' | 'checks' | 'comments' | 'commits' | 'files';
 
 const PR_CHECKS_AUTO_REFRESH_MS = 35_000;
 
@@ -545,6 +548,100 @@ export const PullRequestSection: React.FC<{
   // the panel offers creating the next PR instead of a read-only detail view.
   const isHistoricalPr = pr?.state === 'merged' || pr?.state === 'closed';
   const livePr = isHistoricalPr ? null : pr;
+
+  // Forge rich-view tabs (commits / files): the provider facade wraps the raw
+  // GitHub API with normalized result envelopes. `forgePr` is the status PR
+  // projected onto the forge vocabulary (labels/assignees/milestone come from
+  // the enriched summary the server already returns).
+  const forgeProvider = React.useMemo(() => (github ? buildForgeProvider('github', { github }) : null), [github]);
+  const forgePr = React.useMemo(() => (pr ? mapGithubPr(pr) : null), [pr]);
+  const prSourceRepo = React.useMemo(() => {
+    if (!status?.repo) {
+      return null;
+    }
+    return `${status.repo.owner}/${status.repo.repo}`;
+  }, [status?.repo]);
+
+  const [commits, setCommits] = React.useState<ForgeCommit[] | null>(null);
+  const [commitsLoading, setCommitsLoading] = React.useState(false);
+  const [commitsError, setCommitsError] = React.useState<string | null>(null);
+  const [prFiles, setPrFiles] = React.useState<ForgeFileChange[] | null>(null);
+  const [prDiff, setPrDiff] = React.useState<string | null>(null);
+  const [filesLoading, setFilesLoading] = React.useState(false);
+  const [filesError, setFilesError] = React.useState<string | null>(null);
+
+  // Key on the PR number, not the status object: periodic status refreshes
+  // create a new object identity for the same PR, which must not re-trigger a
+  // refetch (and a loading flicker) of an already loaded tab.
+  const prNumber = pr?.number ?? null;
+
+  // Commits and files load lazily per segment and bypass the shared
+  // usePrContextStore flow that Overview/Checks/Comments rely on. Leaving the
+  // segment cancels the in-flight request so a stale result never overwrites
+  // a newer segment's data.
+  React.useEffect(() => {
+    if (activeSegment !== 'commits' || prNumber === null || !forgeProvider?.getCommits) {
+      return;
+    }
+    let cancelled = false;
+    setCommitsLoading(true);
+    setCommitsError(null);
+    void forgeProvider
+      .getCommits(directory, prNumber, { sourceRepo: prSourceRepo })
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setCommits(result.commits);
+        setCommitsError(result.error ?? null);
+      })
+      .catch((e) => {
+        if (cancelled) {
+          return;
+        }
+        setCommitsError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCommitsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSegment, directory, forgeProvider, prNumber, prSourceRepo]);
+
+  React.useEffect(() => {
+    if (activeSegment !== 'files' || prNumber === null || !forgeProvider) {
+      return;
+    }
+    let cancelled = false;
+    setFilesLoading(true);
+    setFilesError(null);
+    void forgeProvider
+      .getPullRequestContext(directory, prNumber, { includeDiff: true, sourceRepo: prSourceRepo })
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setPrFiles(result.files ?? null);
+        setPrDiff(result.diff ?? null);
+      })
+      .catch((e) => {
+        if (cancelled) {
+          return;
+        }
+        setFilesError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setFilesLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSegment, directory, forgeProvider, prNumber, prSourceRepo]);
 
   const prContextKey = livePr ? getPrContextKey(directory, livePr.number) : null;
   const prContextEntry = usePrContextStore((state) => (prContextKey ? state.entries[prContextKey] : undefined));
@@ -1670,6 +1767,14 @@ export const PullRequestSection: React.FC<{
                             ? `${t('gitView.pr.segment.comments')} ${(prContext.issueComments?.length ?? 0) + (prContext.reviewComments?.length ?? 0)}`
                             : t('gitView.pr.segment.comments'),
                         },
+                        {
+                          id: 'commits',
+                          label: t('forge.section.commits'),
+                        },
+                        {
+                          id: 'files',
+                          label: t('forge.section.files'),
+                        },
                       ]}
                       activeId={activeSegment}
                       onSelect={(segmentId) => setActiveSegment(segmentId as PrSegment)}
@@ -1761,6 +1866,8 @@ export const PullRequestSection: React.FC<{
                         </div>
                       ) : null}
                     </div>
+
+                    {forgePr ? <ForgeMetadataChips kind="pull" pr={forgePr} /> : null}
 
                     {isEditingPr ? (
                       <Textarea
@@ -1997,6 +2104,14 @@ export const PullRequestSection: React.FC<{
                       <div className="py-6 text-center typography-micro text-muted-foreground">{t('gitView.pr.comments.empty')}</div>
                     )}
                   </div>
+                ) : null}
+
+                {activeSegment === 'commits' ? (
+                  <ForgeCommitsSection commits={commits} loading={commitsLoading} error={commitsError} />
+                ) : null}
+
+                {activeSegment === 'files' ? (
+                  <ForgeFilesDiffSection files={prFiles} diff={prDiff} loading={filesLoading} error={filesError} />
                 ) : null}
               </div>
             ) : (

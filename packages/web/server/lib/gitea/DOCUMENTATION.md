@@ -33,7 +33,7 @@
 
 ### Client (`client.js`)
 
-- `createGiteaClient({ token, baseUrl })`: raw-fetch REST v1 client with `request(path, { method, query, body, signal, raw })` plus convenience methods `user()`, `repo(owner, repo)`, `issues(owner, repo, params)`, `issue(owner, repo, number)`, `issueComments(owner, repo, number, params)`, `pullRequests(owner, repo, params)`, `pullRequest(owner, repo, number)`, `pullRequestDiff(owner, repo, number)` (raw `.diff` text via the `raw` option), `pullRequestFiles(owner, repo, number, params)`, `createPullRequest(owner, repo, body)`, `updatePullRequest(owner, repo, number, body)` (PATCH), `mergePullRequest(owner, repo, number, body)` (POST), `branches(owner, repo, params)`.
+- `createGiteaClient({ token, baseUrl })`: raw-fetch REST v1 client with `request(path, { method, query, body, signal, raw })` plus convenience methods `user()`, `repo(owner, repo)`, `issues(owner, repo, params)`, `issue(owner, repo, number)`, `issueComments(owner, repo, number, params)`, `pullRequests(owner, repo, params)`, `pullRequest(owner, repo, number)`, `pullRequestDiff(owner, repo, number)` (raw `.diff` text via the `raw` option), `pullRequestFiles(owner, repo, number, params)`, `pullRequestCommits(owner, repo, number, params)`, `pullRequestReviews(owner, repo, number, params)`, `commitStatuses(owner, repo, sha, params)`, `createPullRequest(owner, repo, body)`, `updatePullRequest(owner, repo, number, body)` (PATCH), `mergePullRequest(owner, repo, number, body)` (POST), `branches(owner, repo, params)`.
 - `getGiteaClientOrNull()`: client for the current account, or `null`.
 - `isGiteaRateLimited()` / `noteGiteaRateLimit(error)`: own module-level rate-limit cooldown (not shared with the GitHub/GitLab modules).
 
@@ -72,6 +72,9 @@
 - PR detail: `GET /repos/{owner}/{repo}/pulls/{number}`.
 - PR files: `GET /repos/{owner}/{repo}/pulls/{number}/files?patch=true` (capitalized JSON fields `Filename`/`Status`/`Additions`/`Deletions`/`Patch`; a `404` on older Gitea instances falls back to `files: []`).
 - PR diff: `GET /repos/{owner}/{repo}/pulls/{number}.diff` (raw text; falls back to concatenated per-file patches when it fails).
+- PR commits: `GET /repos/{owner}/{repo}/pulls/{number}/commits?limit=100` (mapped to `{ sha, message, summary, author, committedAt, parents }`).
+- PR reviews: `GET /repos/{owner}/{repo}/pulls/{number}/reviews?limit=100` (mapped to `{ id, state, author, submittedAt, body, commitSha }`; `state` passes through, e.g. `APPROVED`/`REQUEST_CHANGES`).
+- Commit statuses: `GET /repos/{owner}/{repo}/commits/{sha}/statuses?limit=100` (the `prs/statuses` route resolves the PR `head.sha` first, then maps statuses to `{ state, name, description, url, createdAt }` with `state` lowercased).
 - PR create: `POST /repos/{owner}/{repo}/pulls` with `{ title, head, base, body? }` (body omitted when absent).
 - PR update: `PATCH /repos/{owner}/{repo}/pulls/{number}` with `{ title?, body? }` (undefined fields omitted).
 - PR merge: `POST /repos/{owner}/{repo}/pulls/{number}/merge` with `{ Do: true, MergeMethod: 'merge' | 'squash' | 'rebase' }` (`method` defaults to `'merge'`).
@@ -92,6 +95,9 @@
 | GET | `/api/gitea/issues/comments` | `?directory&number&owner&repo` -> `{ connected, repo?, comments[] }` |
 | GET | `/api/gitea/prs/list` | `?directory&page&query&sourceBranch` -> `{ connected, repo?, prs[], page, hasMore }` |
 | GET | `/api/gitea/pr/context` | `?directory&number&includeDiff&owner&repo` -> `{ connected, repo?, pr, comments[], files[], diff? }` |
+| GET | `/api/gitea/prs/commits` | `?directory&number&owner&repo` -> `{ connected, repo?, commits[] }` |
+| GET | `/api/gitea/prs/reviews` | `?directory&number&owner&repo` -> `{ connected, repo?, reviews[] }` |
+| GET | `/api/gitea/prs/statuses` | `?directory&number&owner&repo` -> `{ connected, repo?, statuses[] }` (resolves the PR `head.sha` first, then lists commit statuses for that SHA) |
 | POST | `/api/gitea/pr/create` | body `{ directory, title, sourceBranch, targetBranch, description? }` -> `{ connected, repo?, pr }`; `400` for missing fields or an unresolvable repo |
 | PATCH | `/api/gitea/pr/update` | body `{ directory, number, title?, description? }` -> `{ connected, repo?, pr }`; `404` when the PR does not exist |
 | POST | `/api/gitea/pr/merge` | body `{ directory, number, method? }` -> `{ connected, merged: true }` on success; non-mergeable PRs -> the Gitea status (`405`/`409`/`422`) with `{ connected, merged: false, message }` |

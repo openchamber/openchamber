@@ -271,6 +271,12 @@ export function createGiteaClient({ token, baseUrl }) {
       request(`/repos/${owner}/${repo}/pulls/${number}.diff`, { raw: true }),
     pullRequestFiles: (owner, repo, number, params = {}) =>
       request(`/repos/${owner}/${repo}/pulls/${number}/files`, { query: params }),
+    pullRequestCommits: (owner, repo, number, params = {}) =>
+      request(`/repos/${owner}/${repo}/pulls/${number}/commits`, { query: params }),
+    pullRequestReviews: (owner, repo, number, params = {}) =>
+      request(`/repos/${owner}/${repo}/pulls/${number}/reviews`, { query: params }),
+    commitStatuses: (owner, repo, sha, params = {}) =>
+      request(`/repos/${owner}/${repo}/commits/${sha}/statuses`, { query: params }),
     createPullRequest: (owner, repo, body) =>
       request(`/repos/${owner}/${repo}/pulls`, { method: 'POST', body }),
     updatePullRequest: (owner, repo, number, body) =>

@@ -921,6 +921,131 @@ describe('Gitea data routes', () => {
     expect(response.body).toEqual({ error: 'Your Gitea token needs write:repository scope to merge pull requests' });
   });
 
+  test('prs/commits maps pull request commits with summaries', async () => {
+    scriptedFetch([
+      (url) => (matches(/\/pulls\/9\/commits\?/)(url)
+        ? jsonResponse([
+          {
+            sha: 'abc123def4567890',
+            commit: {
+              message: 'Add the API\n\nAdds the public API',
+              author: { name: 'Alice Example', email: 'alice@example.com', date: '2026-01-01T10:00:00Z' },
+            },
+            author: { id: 42, login: 'alice', full_name: 'Alice Example' },
+            parents: [{ sha: 'parent-one' }, { sha: 'parent-two' }],
+          },
+        ])
+        : null),
+    ]);
+
+    const app = createApp();
+    const response = await request(app).get('/api/gitea/prs/commits?directory=%2Ftmp%2Fwork&number=9');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      repo: { owner: 'owner', repo: 'repo' },
+      commits: [
+        {
+          sha: 'abc123def4567890',
+          message: 'Add the API\n\nAdds the public API',
+          summary: 'Add the API',
+          author: { username: 'alice', id: 42 },
+          committedAt: '2026-01-01T10:00:00Z',
+          parents: ['parent-one', 'parent-two'],
+        },
+      ],
+    });
+  });
+
+  test('prs/reviews passes review state through and maps the author', async () => {
+    scriptedFetch([
+      (url) => (matches(/\/pulls\/9\/reviews\?/)(url)
+        ? jsonResponse([
+          {
+            id: 101,
+            state: 'APPROVED',
+            user: { id: 42, login: 'alice', full_name: 'Alice Example' },
+            submitted_at: '2026-01-02T11:00:00Z',
+            body: 'LGTM',
+            commit_id: 'abc123def4567890',
+          },
+        ])
+        : null),
+    ]);
+
+    const app = createApp();
+    const response = await request(app).get('/api/gitea/prs/reviews?directory=%2Ftmp%2Fwork&number=9');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      reviews: [
+        {
+          id: '101',
+          state: 'APPROVED',
+          author: { username: 'alice', id: 42 },
+          submittedAt: '2026-01-02T11:00:00Z',
+          body: 'LGTM',
+          commitSha: 'abc123def4567890',
+        },
+      ],
+    });
+  });
+
+  test('prs/statuses resolves the PR head SHA then maps commit statuses', async () => {
+    const fetchMock = scriptedFetch([
+      (url) => (matches(/\/pulls\/9$/)(url)
+        ? jsonResponse({
+          number: 9,
+          title: 'Add the API',
+          html_url: 'u',
+          state: 'open',
+          merged: false,
+          user: { login: 'alice' },
+          head: { ref: 'feat/api', sha: 'abc123def4567890' },
+          base: { ref: 'main' },
+        })
+        : null),
+      (url) => (matches(/\/commits\/abc123def4567890\/statuses\?/)(url)
+        ? jsonResponse([
+          { id: 1, state: 'success', context: 'ci/test', description: 'All good', target_url: 'https://ci.example.com/run/1', created_at: '2026-01-02T12:00:00Z' },
+          { id: 2, state: 'error', context: 'lint' },
+          { id: 3, state: 'warning', context: 'docs' },
+        ])
+        : null),
+    ]);
+
+    const app = createApp();
+    const response = await request(app).get('/api/gitea/prs/statuses?directory=%2Ftmp%2Fwork&number=9');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      repo: { owner: 'owner', repo: 'repo' },
+      statuses: [
+        { state: 'success', name: 'ci/test', description: 'All good', url: 'https://ci.example.com/run/1', createdAt: '2026-01-02T12:00:00Z' },
+        { state: 'error', name: 'lint' },
+        { state: 'warning', name: 'docs' },
+      ],
+    });
+
+    const requestedUrls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(requestedUrls.some((url) => url.includes('/pulls/9'))).toBe(true);
+    expect(requestedUrls.some((url) => url.includes('/commits/abc123def4567890/statuses'))).toBe(true);
+  });
+
+  test('prs/commits, prs/reviews, and prs/statuses report connected:false when not authenticated', async () => {
+    clearGiteaAuth();
+    const app = createApp();
+    const commits = await request(app).get('/api/gitea/prs/commits?directory=%2Ftmp%2Fwork&number=9');
+    const reviews = await request(app).get('/api/gitea/prs/reviews?directory=%2Ftmp%2Fwork&number=9');
+    const statuses = await request(app).get('/api/gitea/prs/statuses?directory=%2Ftmp%2Fwork&number=9');
+    expect(commits.body).toMatchObject({ connected: false, commits: [] });
+    expect(reviews.body).toMatchObject({ connected: false, reviews: [] });
+    expect(statuses.body).toMatchObject({ connected: false, statuses: [] });
+  });
+
   test('data routes surface a 503 when Gitea rate limits', async () => {
     scriptedFetch([(url) => (matches(/\/issues\?/)(url) ? jsonResponse({}, { status: 429, headers: { 'retry-after': '30' } }) : null)]);
 

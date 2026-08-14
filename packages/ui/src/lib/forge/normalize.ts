@@ -12,25 +12,32 @@
 
 import type {
   GiteaComment,
+  GiteaCommitStatus,
   GiteaIssue,
   GiteaIssueSummary,
   GiteaPullRequest,
+  GiteaPullRequestCommit,
   GiteaPullRequestContextResult,
+  GiteaReview,
   GiteaUserSummary,
   GitHubCheckRun,
   GitHubChecksSummary,
   GitHubIssue,
   GitHubIssueComment,
   GitHubIssueSummary,
+  GitHubPullRequestCommit,
   GitHubPullRequestContextResult,
   GitHubPullRequestSummary,
+  GitHubTimelineEvent,
   GitHubUserSummary,
   GitLabIssue,
   GitLabIssueComment,
   GitLabIssueSummary,
   GitLabMergeRequest,
+  GitLabMergeRequestCommit,
   GitLabMergeRequestContextResult,
   GitLabRepoRef,
+  GitLabTimelineEvent,
   GitLabUserSummary,
 } from '@/lib/api/types';
 import type { ForgePullRequestContext } from './provider';
@@ -39,11 +46,14 @@ import type {
   ForgeCheckState,
   ForgeChecksSummary,
   ForgeComment,
+  ForgeCommit,
   ForgeEntityState,
   ForgeFileChange,
   ForgeIssue,
   ForgePullRequest,
   ForgeRepoRef,
+  ForgeTimelineEvent,
+  ForgeTimelineEventType,
   ForgeUser,
 } from './types';
 
@@ -123,9 +133,13 @@ export const mapGithubPr = (pr: GitHubPullRequestSummary): ForgePullRequest => (
   headSha: pr.headSha,
   mergeable: pr.mergeable ?? null,
   mergeableState: pr.mergeableState ?? null,
-  labels: [],
-  assignees: [],
-  milestone: null,
+  // The enriched summary fields are optional (older route responses may omit
+  // them), so the projections degrade to empty instead of leaking undefined
+  // into consumers.
+  labels: (pr.labels ?? []).map((label) => ({ name: label.name, color: label.color })),
+  assignees: (pr.assignees ?? []).map(mapGithubUser),
+  milestone: pr.milestone ? { title: pr.milestone.title } : null,
+  commentsCount: pr.commentsCount,
   url: pr.url,
 });
 
@@ -375,6 +389,188 @@ export const mapGiteaContext = (result: GiteaPullRequestContextResult): ForgePul
   files: (result.files ?? []).map(mapFileChange),
   diff: result.diff,
   checks: null,
+});
+
+// ---------------------------------------------------------------------------
+// Commits
+// ---------------------------------------------------------------------------
+
+/** First line of a commit message, used as the row summary when absent. */
+export const firstLine = (message: string): string => message.split('\n')[0] ?? message;
+
+const mapCommit = (
+  c: { sha: string; shortSha?: string; message: string; summary?: string; committedAt?: string; parents?: string[] },
+  author: ForgeUser | undefined,
+): ForgeCommit => ({
+  sha: c.sha,
+  shortSha: c.shortSha ?? c.sha.slice(0, 7),
+  message: c.message,
+  summary: c.summary ?? firstLine(c.message),
+  author,
+  committedAt: c.committedAt,
+  parents: c.parents ?? [],
+});
+
+export const mapGithubCommits = (commits: GitHubPullRequestCommit[]): ForgeCommit[] =>
+  commits.map((c) => mapCommit(c, c.author ? mapGithubUser(c.author) : undefined));
+
+export const mapGitlabCommits = (commits: GitLabMergeRequestCommit[]): ForgeCommit[] =>
+  commits.map((c) => {
+    const author = c.authorName
+      ? { id: c.authorName, login: c.authorName, name: c.authorName }
+      : undefined;
+    return mapCommit(c, author);
+  });
+
+export const mapGiteaCommits = (commits: GiteaPullRequestCommit[]): ForgeCommit[] =>
+  commits.map((c) => mapCommit(c, c.author ? mapGiteaUser(c.author) : undefined));
+
+// ---------------------------------------------------------------------------
+// Timeline
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a provider timeline event type onto the normalized vocabulary.
+ * Provider types are lowercase; anything unrecognized collapses to 'other' so
+ * an unknown marker never crashes the label lookup.
+ */
+export const normalizeEventType = (raw: string): ForgeTimelineEventType => {
+  switch (raw) {
+    case 'cross-referenced':
+      return 'referenced';
+    case 'committed':
+    case 'opened':
+    case 'reopened':
+    case 'closed':
+    case 'merged':
+    case 'reviewed':
+    case 'approved':
+    case 'requested-changes':
+    case 'commented':
+    case 'referenced':
+    case 'labeled':
+    case 'unlabeled':
+    case 'assigned':
+    case 'unassigned':
+    case 'milestoned':
+    case 'demilestoned':
+      return raw;
+    default:
+      return 'other';
+  }
+};
+
+export const mapGithubTimelineEvents = (events: GitHubTimelineEvent[]): ForgeTimelineEvent[] =>
+  events.map((event) => ({
+    id: String(event.id),
+    type: normalizeEventType(event.type),
+    author: event.author ? mapGithubUser(event.author) : undefined,
+    createdAt: event.createdAt,
+    body: event.body ?? undefined,
+    commitSha: event.commitSha ?? undefined,
+    source: 'github-timeline',
+  }));
+
+export const mapGitlabTimelineEvents = (events: GitLabTimelineEvent[]): ForgeTimelineEvent[] =>
+  events.map((event) => ({
+    id: String(event.id),
+    type: normalizeEventType(event.type),
+    author: event.author ? mapGitlabUser(event.author) : undefined,
+    createdAt: event.createdAt,
+    body: event.body ?? undefined,
+    source: 'gitlab-system-note',
+  }));
+
+/**
+ * Gitea has no timeline endpoint; its pull-request reviews are the closest
+ * activity signal, so the adapter synthesizes timeline events from them.
+ */
+export const mapGiteaReviewsToEvents = (reviews: GiteaReview[]): ForgeTimelineEvent[] =>
+  reviews.flatMap((review) => {
+    const type = normalizeReviewState(review.state);
+    if (!type) return [];
+    return [{
+      id: String(review.id),
+      type,
+      author: review.author ? mapGiteaUser(review.author) : undefined,
+      createdAt: review.submittedAt,
+      body: review.body ?? undefined,
+      commitSha: review.commitSha ?? undefined,
+      source: 'gitea-review',
+    }];
+  });
+
+const normalizeReviewState = (state: string): ForgeTimelineEventType | null => {
+  switch (state) {
+    case 'APPROVED':
+      return 'approved';
+    case 'REQUEST_CHANGES':
+      return 'requested-changes';
+    case 'COMMENT':
+      return 'commented';
+    case 'DISMISSED':
+      return 'other';
+    default:
+      // PENDING and anything unknown produce no event.
+      return null;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Checks (commit statuses)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a flat commit-status state onto the normalized check state. 'error'
+ * counts as a failure, 'warning' as still running (pending), and anything
+ * unrecognized collapses to 'unknown'.
+ */
+export const mapStatusState = (state: string): ForgeCheckState => {
+  switch (state) {
+    case 'success':
+      return 'success';
+    case 'failure':
+      return 'failure';
+    case 'error':
+      return 'failure';
+    case 'pending':
+      return 'pending';
+    case 'warning':
+      return 'pending';
+    case 'cancelled':
+      return 'cancelled';
+    case 'skipped':
+      return 'skipped';
+    default:
+      return 'unknown';
+  }
+};
+
+/**
+ * Aggregate a status list into one state: any failure/error wins, else any
+ * pending, else success.
+ */
+export const aggregateStatusState = (statuses: GiteaCommitStatus[]): ForgeCheckState => {
+  if (statuses.some((s) => s.state === 'failure' || s.state === 'error')) return 'failure';
+  if (statuses.some((s) => s.state === 'pending' || s.state === 'warning')) return 'pending';
+  return 'success';
+};
+
+export const mapGiteaStatuses = (statuses: GiteaCommitStatus[]): ForgeChecksSummary => ({
+  state: aggregateStatusState(statuses),
+  total: statuses.length,
+  success: statuses.filter((s) => s.state === 'success').length,
+  failure: statuses.filter((s) => s.state === 'failure' || s.state === 'error').length,
+  pending: statuses.filter((s) => s.state === 'pending' || s.state === 'warning').length,
+  checks: statuses.map((status): ForgeCheck => ({
+    kind: 'commit-status',
+    name: status.name,
+    state: mapStatusState(status.state),
+    url: status.url ?? undefined,
+    description: status.description ?? undefined,
+    startedAt: status.createdAt,
+    completedAt: status.createdAt,
+  })),
 });
 
 // ---------------------------------------------------------------------------

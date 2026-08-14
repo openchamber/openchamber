@@ -77,6 +77,8 @@ Nothing in the client or repo layers assumes the token came from a PAT.
 - MR list: `GET /projects/:id/merge_requests?state=opened&scope=all&per_page=50&page=N&search=<query>&source_branch=<branch>` (the route passes `sourceBranch` through to `source_branch` when present, matching local-branch MR-status UIs).
 - MR detail: `GET /projects/:id/merge_requests/:merge_request_iid`.
 - MR diffs: `GET /projects/:id/merge_requests/:merge_request_iid/diffs?per_page=100&page=N` (paginated; the route caps at 10 pages / 3000 files).
+- MR commits: `GET /projects/:id/merge_requests/:merge_request_iid/commits?per_page=100` (mapped to `{ sha, shortSha, message, summary, authorName, committedAt, parents }`).
+- MR notes: `GET /projects/:id/merge_requests/:merge_request_iid/notes?per_page=100`; the timeline route keeps `system: true` notes only and infers the event `type` from the note body text (best-effort heuristic, falls back to `'other'`).
 - MR notes: `GET /projects/:id/merge_requests/:merge_request_iid/notes?per_page=100`.
 - MR create: `POST /projects/:id/merge_requests` with `{ source_branch, target_branch, title, description?, remove_source_branch }` (description omitted when absent; `remove_source_branch` defaults to `false`).
 - MR update: `PUT /projects/:id/merge_requests/:merge_request_iid` with `{ title?, description? }` (undefined fields omitted).
@@ -98,6 +100,8 @@ Nothing in the client or repo layers assumes the token came from a PAT.
 | GET | `/api/gitlab/issues/comments` | `?directory&number&namespace&project` -> `{ connected, repo?, comments[] }` |
 | GET | `/api/gitlab/mrs/list` | `?directory&page&query&sourceBranch` -> `{ connected, repo?, mrs[], page, hasMore }` |
 | GET | `/api/gitlab/mrs/context` | `?directory&number&diff&namespace&project` -> `{ connected, repo?, mr, comments[], files[], diff? }` |
+| GET | `/api/gitlab/mrs/commits` | `?directory&number&namespace&project` -> `{ connected, repo?, commits[] }` |
+| GET | `/api/gitlab/mrs/timeline` | `?directory&number&namespace&project` -> `{ connected, repo?, events[] }` (system notes only; event `type` inferred from note body text — best-effort heuristic) |
 | POST | `/api/gitlab/mrs/create` | body `{ directory, title, sourceBranch, targetBranch, description?, removeSourceBranch? }` -> `{ connected, repo?, mr }`; `400` for missing fields, unresolvable repo, or a token without the `api` scope |
 | PUT | `/api/gitlab/mrs/update` | body `{ directory, number, title?, description? }` -> `{ connected, repo?, mr }`; `404` when the MR does not exist |
 | PUT | `/api/gitlab/mrs/merge` | body `{ directory, number, squash? }` -> `{ connected, merged: true }` on success; non-mergeable MRs -> the GitLab status (`405`/`406`/`409`/`422`) with `{ connected, merged: false, message }` |

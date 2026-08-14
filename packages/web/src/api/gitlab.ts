@@ -6,12 +6,14 @@ import type {
   GitLabIssueGetResult,
   GitLabIssuesListResult,
   GitLabMergeRequest,
+  GitLabMergeRequestCommitsResult,
   GitLabMergeRequestContextResult,
   GitLabMergeRequestCreateInput,
   GitLabMergeRequestCreateResult,
   GitLabMergeRequestMergeInput,
   GitLabMergeRequestMergeResult,
   GitLabMergeRequestsListResult,
+  GitLabMergeRequestTimelineResult,
   GitLabMergeRequestUpdateInput,
   GitLabMergeRequestUpdateResult,
   GitLabUserSummary,
@@ -178,6 +180,38 @@ export const createWebGitLabAPI = ({ urls }: WebGitLabAPIOptions): GitLabAPI => 
     const payload = await jsonOrNull<GitLabMergeRequestContextResult & { error?: string }>(response);
     if (!response.ok || !payload) {
       throw new Error(payload?.error || response.statusText || 'Failed to load GitLab merge request context');
+    }
+    return payload;
+  },
+
+  async mrCommits(directory: string, number: number, options?: { namespace?: string; project?: string }): Promise<GitLabMergeRequestCommitsResult> {
+    const params = new URLSearchParams({ directory, number: String(number) });
+    if (options?.namespace) {
+      params.set('namespace', options.namespace);
+    }
+    if (options?.project) {
+      params.set('project', options.project);
+    }
+    const response = await runtimeFetch(urls.api('/api/gitlab/mrs/commits', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const payload = await jsonOrNull<GitLabMergeRequestCommitsResult & { error?: string }>(response);
+    if (!response.ok || !payload) {
+      throw new Error(payload?.error || response.statusText || 'Failed to load GitLab merge request commits');
+    }
+    return payload;
+  },
+
+  async mrTimeline(directory: string, number: number, options?: { namespace?: string; project?: string }): Promise<GitLabMergeRequestTimelineResult> {
+    const params = new URLSearchParams({ directory, number: String(number) });
+    if (options?.namespace) {
+      params.set('namespace', options.namespace);
+    }
+    if (options?.project) {
+      params.set('project', options.project);
+    }
+    const response = await runtimeFetch(urls.api('/api/gitlab/mrs/timeline', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const payload = await jsonOrNull<GitLabMergeRequestTimelineResult & { error?: string }>(response);
+    if (!response.ok || !payload) {
+      throw new Error(payload?.error || response.statusText || 'Failed to load GitLab merge request timeline');
     }
     return payload;
   },

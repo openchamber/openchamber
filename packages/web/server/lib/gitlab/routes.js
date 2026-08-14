@@ -80,7 +80,40 @@ const mapMergeRequestSummary = (item) => ({
   author: mapAuthor(item.author) || {},
   sourceBranch: typeof item.source_branch === 'string' ? item.source_branch : '',
   targetBranch: typeof item.target_branch === 'string' ? item.target_branch : '',
+  labels: Array.isArray(item.labels) ? item.labels.filter((label) => typeof label === 'string') : [],
+  assignees: Array.isArray(item.assignees)
+    ? item.assignees.map(mapAuthor).filter(Boolean)
+    : [],
+  milestone: item.milestone && typeof item.milestone === 'object'
+    ? {
+        title: typeof item.milestone.title === 'string' ? item.milestone.title : '',
+        ...(typeof item.milestone.state === 'string' ? { state: item.milestone.state } : {}),
+      }
+    : null,
+  commentsCount: typeof item.user_notes_count === 'number' ? item.user_notes_count : undefined,
 });
+
+// GitLab v4 MR notes expose `system: boolean` but carry no machine-readable
+// action field — the timeline event type must be inferred from the system
+// note's rendered body text. Match the prefixes GitLab produces for known
+// actions and fall back to 'other'. Best-effort heuristic; it may drift across
+// GitLab versions, so the UI must treat unknown types generically.
+const mapGitLabSystemNoteType = (note) => {
+  const body = typeof note?.body === 'string' ? note.body.toLowerCase() : '';
+  if (!body) {
+    return 'other';
+  }
+  if (body.includes('merged')) return 'merged';
+  if (body.includes('closed')) return 'closed';
+  if (body.includes('reopened')) return 'reopened';
+  if (body.includes('approved')) return 'approved';
+  if (body.includes('unassigned')) return 'unassigned';
+  if (body.includes('assigned')) return 'assigned';
+  if (body.includes('label')) return body.includes('removed') ? 'unlabeled' : 'labeled';
+  if (body.includes('milestone')) return body.includes('removed') ? 'demilestoned' : 'milestoned';
+  if (body.includes('merge request') && body.includes('created')) return 'opened';
+  return 'other';
+};
 
 const mapComment = (note, webUrl) => ({
   id: typeof note.id === 'number' ? note.id : Number(note.id),
@@ -458,6 +491,13 @@ export function registerGitLabRoutes(app, options = {}) {
           ? item.assignees.map(mapAuthor).filter(Boolean)
           : [],
         labels: Array.isArray(item.labels) ? item.labels.filter((label) => typeof label === 'string') : [],
+        milestone: item.milestone && typeof item.milestone === 'object'
+          ? {
+              title: typeof item.milestone.title === 'string' ? item.milestone.title : '',
+              ...(typeof item.milestone.state === 'string' ? { state: item.milestone.state } : {}),
+            }
+          : null,
+        commentsCount: typeof item.user_notes_count === 'number' ? item.user_notes_count : undefined,
       };
       return res.json({ connected: true, repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl), issue });
     } catch (error) {
@@ -624,6 +664,17 @@ export function registerGitLabRoutes(app, options = {}) {
         author: mapAuthor(item.author) || {},
         sourceBranch: typeof item.source_branch === 'string' ? item.source_branch : '',
         targetBranch: typeof item.target_branch === 'string' ? item.target_branch : '',
+        labels: Array.isArray(item.labels) ? item.labels.filter((label) => typeof label === 'string') : [],
+        assignees: Array.isArray(item.assignees)
+          ? item.assignees.map(mapAuthor).filter(Boolean)
+          : [],
+        milestone: item.milestone && typeof item.milestone === 'object'
+          ? {
+              title: typeof item.milestone.title === 'string' ? item.milestone.title : '',
+              ...(typeof item.milestone.state === 'string' ? { state: item.milestone.state } : {}),
+            }
+          : null,
+        commentsCount: typeof item.user_notes_count === 'number' ? item.user_notes_count : undefined,
         headSha: typeof item.sha === 'string' ? item.sha : (typeof item.diff_head_sha === 'string' ? item.diff_head_sha : undefined),
       };
 
@@ -681,6 +732,116 @@ export function registerGitLabRoutes(app, options = {}) {
     } catch (error) {
       console.error('Failed to load GitLab merge request context:', error);
       return res.status(500).json({ error: error.message || 'Failed to load GitLab merge request context' });
+    }
+  });
+
+  app.get('/api/gitlab/mrs/commits', async (req, res) => {
+    try {
+      const directory = asString(req.query?.directory);
+      const requestedProject = getRequestedProject(req);
+      const number = getRequiredNumber(req);
+      if (!directory && !requestedProject) {
+        return res.status(400).json({ error: 'directory or namespace/project is required' });
+      }
+      if (!number) {
+        return res.status(400).json({ error: 'number is required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false, commits: [] });
+      }
+
+      const { projectPath, repo } = await resolveProjectForRequest(directory, requestedProject);
+      if (!projectPath) {
+        return res.json({ connected: true, repo: null, commits: [] });
+      }
+
+      const resp = await withTimeout(
+        client.mergeRequestCommits(projectPath, number, { per_page: 100 }),
+        ROUTE_TIMEOUT_MS,
+        'gitlab mr commits',
+      );
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status === 404) {
+        return res.status(404).json({ error: 'Merge request not found' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'GitLab returned an error while fetching merge request commits' });
+      }
+
+      const commits = (Array.isArray(resp.data) ? resp.data : []).map((commit) => ({
+        sha: typeof commit.id === 'string' ? commit.id : '',
+        shortSha: typeof commit.short_id === 'string' ? commit.short_id : '',
+        message: typeof commit.message === 'string' ? commit.message : '',
+        ...(typeof commit.title === 'string' && commit.title ? { summary: commit.title } : {}),
+        ...(typeof commit.author_name === 'string' && commit.author_name ? { authorName: commit.author_name } : {}),
+        ...(typeof commit.committed_date === 'string' ? { committedAt: commit.committed_date } : {}),
+        parents: Array.isArray(commit.parent_ids) ? commit.parent_ids : [],
+      }));
+
+      return res.json({ connected: true, repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl), commits });
+    } catch (error) {
+      console.error('Failed to fetch GitLab merge request commits:', error);
+      return res.status(500).json({ error: error.message || 'Failed to fetch GitLab merge request commits' });
+    }
+  });
+
+  app.get('/api/gitlab/mrs/timeline', async (req, res) => {
+    try {
+      const directory = asString(req.query?.directory);
+      const requestedProject = getRequestedProject(req);
+      const number = getRequiredNumber(req);
+      if (!directory && !requestedProject) {
+        return res.status(400).json({ error: 'directory or namespace/project is required' });
+      }
+      if (!number) {
+        return res.status(400).json({ error: 'number is required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false, events: [] });
+      }
+
+      const { projectPath, repo } = await resolveProjectForRequest(directory, requestedProject);
+      if (!projectPath) {
+        return res.json({ connected: true, repo: null, events: [] });
+      }
+
+      const notesResp = await withTimeout(
+        client.mergeRequestNotes(projectPath, number, { per_page: 100 }),
+        ROUTE_TIMEOUT_MS,
+        'gitlab mr timeline notes',
+      );
+      if (notesResp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (notesResp.status === 404) {
+        return res.status(404).json({ error: 'Merge request not found' });
+      }
+      if (notesResp.status !== 200) {
+        return res.status(502).json({ error: 'GitLab returned an error while fetching merge request timeline' });
+      }
+
+      // Timeline = system notes only (GitLab records state changes as system
+      // notes; human comments are surfaced by mrs/context).
+      const events = (Array.isArray(notesResp.data) ? notesResp.data : [])
+        .filter((note) => note.system === true)
+        .map((note) => ({
+          id: String(note.id),
+          type: mapGitLabSystemNoteType(note),
+          body: typeof note.body === 'string' ? note.body : null,
+          author: mapAuthor(note.author),
+          createdAt: typeof note.created_at === 'string' ? note.created_at : undefined,
+        }));
+
+      return res.json({ connected: true, repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl), events });
+    } catch (error) {
+      console.error('Failed to fetch GitLab merge request timeline:', error);
+      return res.status(500).json({ error: error.message || 'Failed to fetch GitLab merge request timeline' });
     }
   });
 

@@ -11,6 +11,10 @@ let resolvedAuthLoginPromise = null;
 const PR_CONTEXT_CACHE_TTL_MS = 30_000;
 const PR_CONTEXT_CACHE_MAX_ENTRIES = 50;
 const prContextCache = new Map();
+// Route-level budget for single-call enrichment routes (pulls/commits,
+// pulls/timeline). Octokit bounds each request at 8s; this caps the whole
+// route so a slow upstream cannot hold a response (and a client socket) open.
+const ROUTE_TIMEOUT_MS = 15_000;
 
 function invalidatePrContextCache(directory, number) {
   for (const key of prContextCache.keys()) {
@@ -138,6 +142,40 @@ async function resolveRepoForRequest(octokit, directory, requestedRepo) {
     : false;
   return allowed ? requestedRepo : null;
 }
+
+// Shared mappers for PR/issue enrichment fields (labels/assignees/milestone/
+// comments) used by pulls/list, pulls/context, and issues/get.
+const mapGitHubUserSummary = (user) => (
+  user && typeof user === 'object'
+    ? { login: user.login, id: user.id, avatarUrl: user.avatar_url }
+    : null
+);
+
+const mapGitHubLabels = (labels) => (
+  Array.isArray(labels)
+    ? labels
+        .map((label) => {
+          if (typeof label === 'string') return null;
+          const name = typeof label?.name === 'string' ? label.name : '';
+          if (!name) return null;
+          return { name, color: typeof label?.color === 'string' ? label.color : undefined };
+        })
+        .filter(Boolean)
+    : []
+);
+
+const mapGitHubMilestone = (milestone) => (
+  milestone && typeof milestone === 'object'
+    ? {
+        title: typeof milestone.title === 'string' ? milestone.title : '',
+        ...(typeof milestone.state === 'string' ? { state: milestone.state } : {}),
+      }
+    : null
+);
+
+const mapGitHubAssignees = (assignees) => (
+  Array.isArray(assignees) ? assignees.map(mapGitHubUserSummary).filter(Boolean) : []
+);
 
 function setPrStatusCache(key, data, fetchedAt) {
   // Evict oldest entry when cache exceeds max size
@@ -1357,6 +1395,13 @@ export function registerGitHubRoutes(app) {
                 })
                 .filter(Boolean)
             : [],
+          milestone: issue.milestone && typeof issue.milestone === 'object'
+            ? {
+                title: typeof issue.milestone.title === 'string' ? issue.milestone.title : '',
+                ...(typeof issue.milestone.state === 'string' ? { state: issue.milestone.state } : {}),
+              }
+            : null,
+          commentsCount: typeof issue.comments === 'number' ? issue.comments : undefined,
         },
       });
     } catch (error) {
@@ -1460,6 +1505,10 @@ export function registerGitHubRoutes(app) {
           mergeable: pr.mergeable,
           mergeableState: pr.mergeable_state,
           author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
+          labels: mapGitHubLabels(pr.labels),
+          assignees: mapGitHubAssignees(pr.assignees),
+          milestone: mapGitHubMilestone(pr.milestone),
+          commentsCount: typeof pr.comments === 'number' ? pr.comments : undefined,
           headLabel: pr.head?.label,
           headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
             ? headRepo
@@ -1638,6 +1687,10 @@ export function registerGitHubRoutes(app) {
         mergeable: prData.mergeable,
         mergeableState: prData.mergeable_state,
         author: prData.user ? { login: prData.user.login, id: prData.user.id, avatarUrl: prData.user.avatar_url } : null,
+        labels: mapGitHubLabels(prData.labels),
+        assignees: mapGitHubAssignees(prData.assignees),
+        milestone: mapGitHubMilestone(prData.milestone),
+        commentsCount: typeof prData.comments === 'number' ? prData.comments : undefined,
         headLabel: prData.head?.label,
         headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url ? headRepo : null,
         body: prData.body || '',
@@ -1903,6 +1956,117 @@ export function registerGitHubRoutes(app) {
       }
       console.error('Failed to load GitHub PR context:', error);
       return res.status(500).json({ error: error.message || 'Failed to load GitHub PR context' });
+    }
+  });
+
+  // ================= GitHub Pull Request Enrichment APIs =================
+
+  app.get('/api/github/pulls/commits', async (req, res) => {
+    try {
+      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+      const number = typeof req.query?.number === 'string' ? Number(req.query.number) : null;
+      if (!directory || !number) {
+        return res.status(400).json({ error: 'directory and number are required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, commits: [] });
+      }
+
+      const result = await withTimeout(
+        octokit.rest.pulls.listCommits({ owner: repo.owner, repo: repo.repo, pull_number: number, per_page: 100 }),
+        ROUTE_TIMEOUT_MS,
+        'GitHub PR commits',
+      );
+      const commits = (Array.isArray(result?.data) ? result.data : []).map((commit) => {
+        const message = typeof commit.commit?.message === 'string' ? commit.commit.message : '';
+        return {
+          sha: commit.sha,
+          shortSha: typeof commit.sha === 'string' ? commit.sha.slice(0, 7) : commit.sha,
+          message,
+          ...(message.split('\n')[0] ? { summary: message.split('\n')[0] } : {}),
+          author: mapGitHubUserSummary(commit.author),
+          committer: mapGitHubUserSummary(commit.committer),
+          ...(typeof commit.commit?.committer?.date === 'string' ? { committedAt: commit.commit.committer.date } : {}),
+          parents: Array.isArray(commit.parents) ? commit.parents.map((parent) => parent.sha) : [],
+        };
+      });
+
+      return res.json({ connected: true, repo, commits });
+    } catch (error) {
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false });
+      }
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (Number.isInteger(error?.status) && error.status >= 400) {
+        return res.status(502).json({ error: 'GitHub returned an error while fetching pull request commits' });
+      }
+      console.error('Failed to load GitHub pull request commits:', error);
+      return res.status(500).json({ error: error.message || 'Failed to load GitHub pull request commits' });
+    }
+  });
+
+  app.get('/api/github/pulls/timeline', async (req, res) => {
+    try {
+      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+      const number = typeof req.query?.number === 'string' ? Number(req.query.number) : null;
+      if (!directory || !number) {
+        return res.status(400).json({ error: 'directory and number are required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, events: [] });
+      }
+
+      const result = await withTimeout(
+        octokit.rest.issues.listEventsForTimeline({ owner: repo.owner, repo: repo.repo, issue_number: number, per_page: 100 }),
+        ROUTE_TIMEOUT_MS,
+        'GitHub PR timeline',
+      );
+      const events = (Array.isArray(result?.data) ? result.data : []).map((event) => ({
+        id: String(event.id),
+        type: typeof event.event === 'string' ? event.event.toLowerCase() : 'other',
+        author: mapGitHubUserSummary(event.actor),
+        createdAt: event.created_at,
+        body: typeof event.body === 'string' ? event.body : null,
+        commitSha: typeof event.commit_id === 'string' ? event.commit_id : null,
+      }));
+
+      return res.json({ connected: true, repo, events });
+    } catch (error) {
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false });
+      }
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (Number.isInteger(error?.status) && error.status >= 400) {
+        return res.status(502).json({ error: 'GitHub returned an error while fetching the pull request timeline' });
+      }
+      console.error('Failed to load GitHub pull request timeline:', error);
+      return res.status(500).json({ error: error.message || 'Failed to load GitHub pull request timeline' });
     }
   });
 }

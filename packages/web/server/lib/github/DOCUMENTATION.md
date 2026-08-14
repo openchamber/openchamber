@@ -61,6 +61,12 @@
 - The route then enriches that result with checks, mergeability, and permission-related fields.
 - The client caches and shares the result between sidebar and Git view.
 
+## Enrichment read APIs
+
+- `GET /api/github/pulls/commits?directory&number&owner&repo` -> `{ connected, repo?, commits[] }` (via `octokit.rest.pulls.listCommits`, mapped to `{ sha, shortSha, message, summary, author, committer, committedAt, parents }`).
+- `GET /api/github/pulls/timeline?directory&number&owner&repo` -> `{ connected, repo?, events[] }` (via `octokit.rest.issues.listEventsForTimeline`, each event `{ id, type, author, createdAt, body, commitSha }` with the event name lowercased).
+- Both follow the `issues/comments` envelope pattern: unauthenticated -> `connected: false`, unresolvable repo -> `repo: null` with an empty list, `429` -> `503 { error: 'GitHub rate limited' }`, other provider `4xx` -> `502`.
+
 ## Consumers of PR data
 
 - `packages/ui/src/components/session/SessionSidebar.tsx` reads all PR entries and maps them to `directory::branch`.

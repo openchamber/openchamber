@@ -910,6 +910,10 @@ export type GitHubPullRequestSummary = GitHubPullRequest & {
   headLabel?: string;
   headRepo?: GitHubPullRequestHeadRepo | null;
   sourceRepo?: (GitHubRepoSelector & { source: string }) | null;
+  labels?: GitHubIssueLabel[];
+  assignees?: GitHubUserSummary[];
+  milestone?: { title: string; state?: string } | null;
+  commentsCount?: number;
 };
 
 type GitHubPullRequestFile = {
@@ -953,6 +957,38 @@ export type GitHubPullRequestContextResult = {
   diff?: string;
   checks?: GitHubChecksSummary | null;
   checkRuns?: GitHubCheckRun[];
+};
+
+export type GitHubPullRequestCommit = {
+  sha: string;
+  shortSha: string;
+  message: string;
+  summary?: string;
+  author?: GitHubUserSummary | null;
+  committer?: GitHubUserSummary | null;
+  committedAt?: string;
+  parents: string[];
+};
+
+export type GitHubPullRequestCommitsResult = {
+  connected: boolean;
+  repo?: GitHubRepoRef | null;
+  commits: GitHubPullRequestCommit[];
+};
+
+export type GitHubTimelineEvent = {
+  id: string;
+  type: string;
+  author?: GitHubUserSummary | null;
+  createdAt?: string;
+  body?: string | null;
+  commitSha?: string | null;
+};
+
+export type GitHubPullRequestTimelineResult = {
+  connected: boolean;
+  repo?: GitHubRepoRef | null;
+  events: GitHubTimelineEvent[];
 };
 
 export type GitHubPullRequestStatus = {
@@ -1027,6 +1063,9 @@ export type GitHubIssueSummary = {
   state: 'open' | 'closed';
   author?: GitHubUserSummary | null;
   labels?: GitHubIssueLabel[];
+  assignees?: GitHubUserSummary[];
+  milestone?: { title: string; state?: string } | null;
+  commentsCount?: number;
   sourceRepo?: (GitHubRepoSelector & { source: string }) | null;
 };
 
@@ -1132,6 +1171,8 @@ export interface GitHubAPI {
   issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubIssuesListResult>;
   issueGet(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueGetResult>;
   issueComments(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueCommentsResult>;
+  prCommits?(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubPullRequestCommitsResult>;
+  prTimeline?(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubPullRequestTimelineResult>;
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
   repoBranches(owner: string, repo: string): Promise<string[]>;
 }
@@ -1213,6 +1254,10 @@ export type GitLabMergeRequestSummary = {
   author: GitLabUserSummary;
   sourceBranch: string;
   targetBranch: string;
+  labels?: string[];
+  assignees?: GitLabUserSummary[];
+  milestone?: { title: string; state?: string } | null;
+  commentsCount?: number;
 };
 
 export type GitLabMergeRequest = {
@@ -1259,6 +1304,36 @@ export type GitLabMergeRequestContextResult = {
 export type GitLabBranchesResult = {
   branches: string[];
   defaultBranch?: string | null;
+};
+
+export type GitLabMergeRequestCommit = {
+  sha: string;
+  shortSha: string;
+  message: string;
+  summary?: string;
+  authorName?: string;
+  committedAt?: string;
+  parents: string[];
+};
+
+export type GitLabMergeRequestCommitsResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  commits: GitLabMergeRequestCommit[];
+};
+
+export type GitLabTimelineEvent = {
+  id: string;
+  type: string;
+  body?: string | null;
+  author?: GitLabUserSummary | null;
+  createdAt?: string;
+};
+
+export type GitLabMergeRequestTimelineResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  events: GitLabTimelineEvent[];
 };
 
 export type GitLabMergeRequestCreateInput = {
@@ -1340,6 +1415,8 @@ export interface GitLabAPI {
   mrCreate(input: GitLabMergeRequestCreateInput): Promise<GitLabMergeRequest>;
   mrUpdate(input: GitLabMergeRequestUpdateInput): Promise<GitLabMergeRequest>;
   mrMerge(input: GitLabMergeRequestMergeInput): Promise<GitLabMergeRequestMergeResult>;
+  mrCommits?(directory: string, number: number, options?: { namespace?: string; project?: string }): Promise<GitLabMergeRequestCommitsResult>;
+  mrTimeline?(directory: string, number: number, options?: { namespace?: string; project?: string }): Promise<GitLabMergeRequestTimelineResult>;
 
   repoBranches(namespace: string, project: string): Promise<GitLabBranchesResult>;
 }
@@ -1378,6 +1455,9 @@ export type GiteaIssueSummary = {
   state: string;
   author: { username: string; id?: number };
   labels: string[];
+  assignees?: GiteaUserSummary[];
+  milestone?: { title: string; state?: string } | null;
+  commentsCount?: number;
 };
 
 export type GiteaIssue = GiteaIssueSummary & { body?: string; createdAt?: string; updatedAt?: string };
@@ -1398,6 +1478,9 @@ export type GiteaPullRequestSummary = {
   draft?: boolean;
   author: { username: string; id?: number };
   labels: string[];
+  assignees?: GiteaUserSummary[];
+  milestone?: { title: string; state?: string } | null;
+  commentsCount?: number;
   sourceBranch: string;
   targetBranch: string;
 };
@@ -1421,6 +1504,38 @@ export type GiteaPullRequestMergeInput = { directory: string; number: number; me
 export type GiteaPullRequestMergeResult = { connected: boolean; merged: boolean; message?: string };
 export type GiteaBranchesResult = { branches: string[]; defaultBranch?: string | null };
 
+export type GiteaPullRequestCommit = {
+  sha: string;
+  message: string;
+  summary?: string;
+  author?: GiteaUserSummary | null;
+  committedAt?: string;
+  parents: string[];
+};
+
+export type GiteaPullRequestCommitsResult = { connected: boolean; repo?: { owner: string; repo: string; url?: string } | null; commits: GiteaPullRequestCommit[] };
+
+export type GiteaCommitStatus = {
+  state: 'success' | 'failure' | 'pending' | 'error' | 'warning' | 'unknown';
+  name: string;
+  description?: string | null;
+  url?: string | null;
+  createdAt?: string;
+};
+
+export type GiteaPullRequestStatusesResult = { connected: boolean; repo?: { owner: string; repo: string; url?: string } | null; statuses: GiteaCommitStatus[] };
+
+export type GiteaReview = {
+  id: string;
+  state: 'APPROVED' | 'REQUEST_CHANGES' | 'COMMENT' | 'PENDING' | 'DISMISSED' | string;
+  author?: GiteaUserSummary | null;
+  submittedAt?: string;
+  body?: string | null;
+  commitSha?: string | null;
+};
+
+export type GiteaPullRequestReviewsResult = { connected: boolean; repo?: { owner: string; repo: string; url?: string } | null; reviews: GiteaReview[] };
+
 export interface GiteaAPI {
   authStatus(): Promise<GiteaAuthStatus>;
   authConnect(input: { accessToken: string; baseUrl: string }): Promise<GiteaAuthStatus>;
@@ -1441,6 +1556,9 @@ export interface GiteaAPI {
   prCreate(input: GiteaPullRequestCreateInput): Promise<GiteaPullRequest>;
   prUpdate(input: GiteaPullRequestUpdateInput): Promise<GiteaPullRequest>;
   prMerge(input: GiteaPullRequestMergeInput): Promise<GiteaPullRequestMergeResult>;
+  prCommits?(directory: string, number: number, options?: { owner?: string; repo?: string }): Promise<GiteaPullRequestCommitsResult>;
+  prStatuses?(directory: string, number: number, options?: { owner?: string; repo?: string }): Promise<GiteaPullRequestStatusesResult>;
+  prReviews?(directory: string, number: number, options?: { owner?: string; repo?: string }): Promise<GiteaPullRequestReviewsResult>;
 
   repoBranches(owner: string, repo: string): Promise<GiteaBranchesResult>;
 }

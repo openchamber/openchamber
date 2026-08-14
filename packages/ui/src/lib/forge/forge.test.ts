@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type {
   GiteaAPI,
   GiteaComment,
+  GiteaCommitStatus,
   GiteaIssue,
   GiteaPullRequest,
   GiteaUserSummary,
@@ -18,23 +19,34 @@ import type {
   GitLabMergeRequest,
   GitLabUserSummary,
 } from '@/lib/api/types';
-import { buildForgeProvider, createGitlabForgeProvider } from '@/lib/forge/adapters';
+import { buildForgeProvider, createGiteaForgeProvider, createGithubForgeProvider, createGitlabForgeProvider } from '@/lib/forge/adapters';
 import {
+  aggregateStatusState,
+  firstLine,
   mapCheckRunState,
+  mapGiteaCommits,
+  mapGiteaComment,
+  mapGiteaContext,
+  mapGiteaIssue,
+  mapGiteaPr,
+  mapGiteaReviewsToEvents,
+  mapGiteaStatuses,
   mapGithubCheckSummary,
+  mapGithubCommits,
   mapGithubContext,
   mapGithubIssue,
   mapGithubIssueComment,
   mapGithubPr,
   mapGithubReviewComment,
-  mapGiteaComment,
-  mapGiteaContext,
-  mapGiteaIssue,
-  mapGiteaPr,
+  mapGithubTimelineEvents,
+  mapGitlabCommits,
   mapGitlabContext,
   mapGitlabIssue,
   mapGitlabMr,
   mapGitlabNoteComment,
+  mapGitlabTimelineEvents,
+  mapStatusState,
+  normalizeEventType,
   stateOf,
 } from '@/lib/forge/normalize';
 
@@ -231,6 +243,21 @@ describe('github normalization', () => {
     expect(pr.author?.id).toBe('octocat');
     expect(pr.author?.login).toBe('octocat');
     expect(pr.url).toBe('https://github.com/acme/widget/pull/42');
+  });
+
+  test('maps enriched GitHub PR metadata (labels/assignees/milestone/comments)', () => {
+    const pr = mapGithubPr({
+      ...githubPr,
+      labels: [{ name: 'bug', color: 'd73a4a' }],
+      assignees: [githubUser()],
+      milestone: { title: 'v2.0' },
+      commentsCount: 3,
+    });
+    expect(pr.labels).toEqual([{ name: 'bug', color: 'd73a4a' }]);
+    expect(pr.assignees).toHaveLength(1);
+    expect(pr.assignees?.[0]?.id).toBe('octocat');
+    expect(pr.milestone?.title).toBe('v2.0');
+    expect(pr.commentsCount).toBe(3);
   });
 
   test('maps a GitHub issue', () => {
@@ -471,6 +498,194 @@ describe('gitea normalization', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Rich-view normalization (commits / timeline / checks)
+// ---------------------------------------------------------------------------
+
+describe('shared rich-view helpers', () => {
+  test('firstLine extracts the first message line', () => {
+    expect(firstLine('one line')).toBe('one line');
+    expect(firstLine('first\nsecond')).toBe('first');
+    expect(firstLine('')).toBe('');
+  });
+
+  test('normalizeEventType maps provider types onto the vocabulary', () => {
+    expect(normalizeEventType('opened')).toBe('opened');
+    expect(normalizeEventType('merged')).toBe('merged');
+    expect(normalizeEventType('labeled')).toBe('labeled');
+    expect(normalizeEventType('cross-referenced')).toBe('referenced');
+    expect(normalizeEventType('mystery-event')).toBe('other');
+  });
+
+  test('mapStatusState collapses error/warning onto failure/pending', () => {
+    expect(mapStatusState('success')).toBe('success');
+    expect(mapStatusState('failure')).toBe('failure');
+    expect(mapStatusState('error')).toBe('failure');
+    expect(mapStatusState('pending')).toBe('pending');
+    expect(mapStatusState('warning')).toBe('pending');
+    expect(mapStatusState('unknown')).toBe('unknown');
+    expect(mapStatusState('something-else')).toBe('unknown');
+  });
+
+  test('aggregateStatusState is failure > pending > success', () => {
+    expect(aggregateStatusState([])).toBe('success');
+    expect(aggregateStatusState([{ state: 'success', name: 'a' }])).toBe('success');
+    expect(aggregateStatusState([{ state: 'success', name: 'a' }, { state: 'pending', name: 'b' }])).toBe('pending');
+    expect(aggregateStatusState([{ state: 'pending', name: 'a' }, { state: 'error', name: 'b' }])).toBe('failure');
+    expect(aggregateStatusState([{ state: 'failure', name: 'a' }])).toBe('failure');
+  });
+});
+
+describe('commit normalization', () => {
+  test('maps GitHub commits using shortSha and first-line summaries', () => {
+    const commits = mapGithubCommits([{
+      sha: 'abc123',
+      shortSha: 'abc1234',
+      message: 'Summary line\n\nFull body',
+      author: githubUser(),
+      committedAt: '2026-01-02T03:04:05Z',
+      parents: ['parent-1'],
+    }]);
+    expect(commits[0]).toEqual({
+      sha: 'abc123',
+      shortSha: 'abc1234',
+      message: 'Summary line\n\nFull body',
+      summary: 'Summary line',
+      author: { id: 'octocat', login: 'octocat', name: 'Octo Cat', avatarUrl: 'https://avatars.example/octocat' },
+      committedAt: '2026-01-02T03:04:05Z',
+      parents: ['parent-1'],
+    });
+  });
+
+  test('GitHub commits fall back to the first message line when summary is absent', () => {
+    const [commit] = mapGithubCommits([{
+      sha: 'abc123',
+      shortSha: 'abc1234',
+      message: 'Title line\n\nBody',
+      parents: [],
+    }]);
+    expect(commit.summary).toBe('Title line');
+    expect(commit.author).toBeFalsy();
+    expect(commit.parents).toEqual([]);
+  });
+
+  test('maps GitLab commits with an author synthesized from authorName', () => {
+    const commits = mapGitlabCommits([{
+      sha: 'def456',
+      shortSha: 'def4567',
+      message: 'MR commit',
+      authorName: 'GL User',
+      committedAt: '2026-02-01T00:00:00Z',
+      parents: [],
+    }]);
+    expect(commits[0].shortSha).toBe('def4567');
+    expect(commits[0].author).toEqual({ id: 'GL User', login: 'GL User', name: 'GL User' });
+  });
+
+  test('maps Gitea commits, deriving shortSha from the full sha', () => {
+    const commits = mapGiteaCommits([{
+      sha: '0123456789abcdef0123456789abcdef01234567',
+      message: 'gitea commit',
+      author: giteaUser(),
+      committedAt: '2026-03-01T00:00:00Z',
+      parents: [],
+    }]);
+    expect(commits[0].shortSha).toBe('0123456');
+    expect(commits[0].author?.login).toBe('guser');
+  });
+});
+
+describe('timeline normalization', () => {
+  test('maps GitHub timeline events with source provenance', () => {
+    const events = mapGithubTimelineEvents([
+      { id: '1', type: 'opened', author: githubUser(), createdAt: '2026-01-02T03:04:05Z' },
+      { id: '2', type: 'cross-referenced' },
+      { id: '3', type: 'mystery-type', body: 'x' },
+    ]);
+    expect(events[0].type).toBe('opened');
+    expect(events[0].id).toBe('1');
+    expect(events[0].author?.login).toBe('octocat');
+    expect(events[0].source).toBe('github-timeline');
+    expect(events[1].type).toBe('referenced');
+    expect(events[2].type).toBe('other');
+  });
+
+  test('maps GitLab timeline events as system notes', () => {
+    const events = mapGitlabTimelineEvents([
+      { id: '9', type: 'approved', author: gitlabUser(), createdAt: '2026-02-01T00:00:00Z' },
+    ]);
+    expect(events[0].type).toBe('approved');
+    expect(events[0].author?.login).toBe('gluser');
+    expect(events[0].source).toBe('gitlab-system-note');
+  });
+
+  test('synthesizes Gitea timeline events from reviews, skipping PENDING', () => {
+    const events = mapGiteaReviewsToEvents([
+      { id: '1', state: 'APPROVED', author: giteaUser(), submittedAt: '2026-03-01T00:00:00Z', body: 'LGTM', commitSha: 'abc123' },
+      { id: '2', state: 'REQUEST_CHANGES', author: giteaUser() },
+      { id: '3', state: 'COMMENT' },
+      { id: '4', state: 'PENDING' },
+      { id: '5', state: 'DISMISSED' },
+    ]);
+    expect(events).toHaveLength(4);
+    expect(events[0]).toEqual({
+      id: '1',
+      type: 'approved',
+      author: { id: '3', login: 'guser', name: 'G User', avatarUrl: 'https://avatars.example/guser', url: 'https://gitea.example/guser' },
+      createdAt: '2026-03-01T00:00:00Z',
+      body: 'LGTM',
+      commitSha: 'abc123',
+      source: 'gitea-review',
+    });
+    expect(events[1].type).toBe('requested-changes');
+    expect(events[2].type).toBe('commented');
+    expect(events[3].type).toBe('other');
+  });
+});
+
+describe('gitea commit-status normalization', () => {
+  const statuses: GiteaCommitStatus[] = [
+    { state: 'success', name: 'ci' },
+    { state: 'failure', name: 'lint' },
+    { state: 'pending', name: 'test' },
+    { state: 'error', name: 'build' },
+    { state: 'warning', name: 'docs' },
+    { state: 'unknown', name: 'mystery' },
+  ];
+
+  test('maps statuses onto a checks summary with aggregated state', () => {
+    const summary = mapGiteaStatuses(statuses);
+    expect(summary.state).toBe('failure');
+    expect(summary.total).toBe(6);
+    expect(summary.success).toBe(1);
+    expect(summary.failure).toBe(2);
+    expect(summary.pending).toBe(2);
+    expect(summary.checks[0]).toEqual({
+      kind: 'commit-status',
+      name: 'ci',
+      state: 'success',
+      url: undefined,
+      description: undefined,
+      startedAt: undefined,
+      completedAt: undefined,
+    });
+    expect(summary.checks[1].state).toBe('failure');
+    expect(summary.checks[3].state).toBe('failure');
+    expect(summary.checks[4].state).toBe('pending');
+    expect(summary.checks[5].state).toBe('unknown');
+  });
+
+  test('carries url and description onto the normalized checks', () => {
+    const [check] = mapGiteaStatuses([
+      { state: 'pending', name: 'deploy', url: 'https://gitea.example/status/1', description: 'Deploying…', createdAt: '2026-03-01T00:00:00Z' },
+    ]).checks;
+    expect(check.url).toBe('https://gitea.example/status/1');
+    expect(check.description).toBe('Deploying…');
+    expect(check.startedAt).toBe('2026-03-01T00:00:00Z');
+    expect(check.completedAt).toBe('2026-03-01T00:00:00Z');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Adapter factory
 // ---------------------------------------------------------------------------
 
@@ -610,6 +825,121 @@ describe('adapters gracefully degrade', () => {
     expect(detail.connected).toBe(true);
     expect(detail.comments).toHaveLength(1);
     expect(detail.commentsError).toBeNull();
+  });
+});
+
+describe('rich-view adapter wiring', () => {
+  test('github getCommits maps prCommits and passes the sourceRepo selector', async () => {
+    const api = {
+      prCommits: async (_directory: string, _number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }) => {
+        expect(options?.sourceRepo).toEqual({ owner: 'upstream', repo: 'widget' });
+        return {
+          connected: true,
+          repo: { owner: 'acme', repo: 'widget', url: 'https://github.com/acme/widget' },
+          commits: [{ sha: 'abc123', shortSha: 'abc1234', message: 'm', parents: [] }],
+        };
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+    const result = await provider.getCommits!('/repo', 1, { sourceRepo: 'upstream/widget' });
+    expect(result.connected).toBe(true);
+    expect(result.repo?.owner).toBe('acme');
+    expect(result.commits[0]?.shortSha).toBe('abc1234');
+    expect(result.error).toBeFalsy();
+  });
+
+  test('github getTimeline maps prTimeline; getChecks returns null', async () => {
+    const api = {
+      prTimeline: async () => ({
+        connected: true,
+        events: [{ id: '1', type: 'opened', author: githubUser() }],
+      }),
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+    const timeline = await provider.getTimeline!('/repo', 1);
+    expect(timeline.events[0]?.source).toBe('github-timeline');
+    expect(await provider.getChecks!('/repo', 1)).toBeNull();
+  });
+
+  test('gitlab getTimeline maps mrTimeline as system-note events', async () => {
+    const api = {
+      mrTimeline: async () => ({
+        connected: true,
+        events: [{ id: '1', type: 'approved' }],
+      }),
+    } as unknown as GitLabAPI;
+    const provider = createGitlabForgeProvider(api);
+    const timeline = await provider.getTimeline!('/repo', 1);
+    expect(timeline.events[0]?.source).toBe('gitlab-system-note');
+    expect(await provider.getChecks!('/repo', 1)).toBeNull();
+  });
+
+  test('gitea getTimeline synthesizes events from prReviews', async () => {
+    const api = {
+      prReviews: async () => ({
+        connected: true,
+        reviews: [{ id: '1', state: 'APPROVED', author: giteaUser() }],
+      }),
+    } as unknown as GiteaAPI;
+    const provider = createGiteaForgeProvider(api);
+    const timeline = await provider.getTimeline!('/repo', 1);
+    expect(timeline.events[0]?.type).toBe('approved');
+    expect(timeline.events[0]?.source).toBe('gitea-review');
+  });
+
+  test('gitea getChecks maps prStatuses onto a commit-status summary', async () => {
+    const api = {
+      prStatuses: async () => ({
+        connected: true,
+        statuses: [{ state: 'pending', name: 'ci' }],
+      }),
+    } as unknown as GiteaAPI;
+    const provider = createGiteaForgeProvider(api);
+    const result = await provider.getChecks!('/repo', 1);
+    expect(result?.connected).toBe(true);
+    expect(result?.checks?.state).toBe('pending');
+    expect(result?.checks?.checks[0]?.kind).toBe('commit-status');
+    expect(result?.error).toBeFalsy();
+  });
+
+  test('absent runtime methods degrade to disconnected envelopes', async () => {
+    const github = createGithubForgeProvider({} as unknown as GitHubAPI);
+    expect(await github.getCommits!('/repo', 1)).toEqual({ connected: false, repo: null, commits: [] });
+    expect(await github.getTimeline!('/repo', 1)).toEqual({ connected: false, repo: null, events: [] });
+    expect(await github.getChecks!('/repo', 1)).toBeNull();
+
+    const gitea = createGiteaForgeProvider({} as unknown as GiteaAPI);
+    expect(await gitea.getCommits!('/repo', 1)).toEqual({ connected: false, repo: null, commits: [] });
+    expect(await gitea.getTimeline!('/repo', 1)).toEqual({ connected: false, repo: null, events: [] });
+    expect(await gitea.getChecks!('/repo', 1)).toEqual({ connected: false, repo: null, checks: null });
+  });
+
+  test('wire failures set a stable error instead of throwing', async () => {
+    const api = {
+      prCommits: async () => { throw new Error('boom'); },
+      prTimeline: async () => { throw new Error('boom'); },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+    const commits = await provider.getCommits!('/repo', 1);
+    expect(commits.connected).toBe(false);
+    expect(commits.commits).toEqual([]);
+    expect(commits.error).toBe('failed to load');
+
+    const timeline = await provider.getTimeline!('/repo', 1);
+    expect(timeline.connected).toBe(false);
+    expect(timeline.events).toEqual([]);
+    expect(timeline.error).toBe('failed to load');
+  });
+
+  test('gitea getChecks wire failure sets a stable error', async () => {
+    const api = {
+      prStatuses: async () => { throw new Error('boom'); },
+    } as unknown as GiteaAPI;
+    const provider = createGiteaForgeProvider(api);
+    const result = await provider.getChecks!('/repo', 1);
+    expect(result?.connected).toBe(false);
+    expect(result?.checks).toBeNull();
+    expect(result?.error).toBe('failed to load');
   });
 });
 

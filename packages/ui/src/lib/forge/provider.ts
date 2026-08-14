@@ -1,12 +1,14 @@
 import type {
   ForgeChecksSummary,
   ForgeComment,
+  ForgeCommit,
   ForgeFileChange,
   ForgeIssue,
   ForgeProviderCapabilities,
   ForgeProviderKind,
   ForgePullRequest,
   ForgeRepoRef,
+  ForgeTimelineEvent,
 } from './types';
 
 /**
@@ -75,6 +77,31 @@ export interface ForgeIssueDetail {
   commentsError?: string | null;
 }
 
+/** Commits on a PR/MR (see `github prCommits`, `gitlab mrCommits`, `gitea prCommits`). */
+export interface ForgeCommitsResult {
+  connected: boolean;
+  repo?: ForgeRepoRef | null;
+  commits: ForgeCommit[];
+  /** Set when the wire call failed after resolving a repo — never a valid empty success. */
+  error?: string | null;
+}
+
+/** Activity timeline for a PR/MR (see `github prTimeline`, `gitlab mrTimeline`, gitea reviews). */
+export interface ForgeTimelineResult {
+  connected: boolean;
+  repo?: ForgeRepoRef | null;
+  events: ForgeTimelineEvent[];
+  error?: string | null;
+}
+
+/** Rolled-up checks for a PR/MR; only non-null for providers with a dedicated checks surface. */
+export interface ForgeChecksResult {
+  connected: boolean;
+  repo?: ForgeRepoRef | null;
+  checks: ForgeChecksSummary | null;
+  error?: string | null;
+}
+
 /**
  * Provider-agnostic forge operations. Every method resolves the target
  * repository from the working directory (remotes + connected accounts) and
@@ -131,6 +158,28 @@ export interface ForgeProvider {
    */
   getIssue(directory: string, number: number, options?: { sourceRepo?: string | null }): Promise<ForgeIssueDetail>;
 
-  // NOTE: Slice B (next chunk) will add getCommits / getTimeline / checks for
-  // the rich entity view. Do NOT add them here yet.
+  // --- Rich entity view (commits / timeline / checks) ---
+
+  /**
+   * Commits on a pull request. Wraps `github prCommits`, `gitlab mrCommits`,
+   * and `gitea prCommits`. Optional: providers without a commits route do not
+   * implement it, and the UI gates on method presence.
+   */
+  getCommits?(directory: string, number: number, options?: { sourceRepo?: string | null }): Promise<ForgeCommitsResult>;
+
+  /**
+   * Activity timeline for a pull request. Wraps `github prTimeline`,
+   * `gitlab mrTimeline`, and (for gitea, which has no timeline endpoint) a
+   * timeline synthesized from its reviews. Optional like `getCommits`.
+   */
+  getTimeline?(directory: string, number: number, options?: { sourceRepo?: string | null }): Promise<ForgeTimelineResult>;
+
+  /**
+   * Rolled-up checks for a pull request. Only gitea has a dedicated surface
+   * (`gitea prStatuses`); GitHub check runs ride on
+   * `getPullRequestContext().checks` and GitLab has no checks surface, so both
+   * return null here. `null` return means the provider exposes no checks
+   * through this method.
+   */
+  getChecks?(directory: string, number: number, options?: { sourceRepo?: string | null }): Promise<ForgeChecksResult | null>;
 }

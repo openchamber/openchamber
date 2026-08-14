@@ -824,6 +824,78 @@ describe('GitLab data routes', () => {
     expect(response.body).toEqual({ error: 'Your GitLab token needs the api scope to create merge requests' });
   });
 
+  test('mrs/commits maps merge request commits with shortSha and summary', async () => {
+    scriptedFetch([
+      (url) => (matches(/\/merge_requests\/9\/commits\?/)(url)
+        ? jsonResponse([
+          {
+            id: 'abc123def456',
+            short_id: 'abc123d',
+            title: 'Add the API',
+            message: 'Add the API\n\nAdds the public API',
+            author_name: 'Alice Example',
+            author_email: 'alice@example.com',
+            committed_date: '2026-01-01T10:00:00Z',
+            parent_ids: ['parent-one'],
+          },
+        ])
+        : null),
+    ]);
+
+    const app = createApp();
+    const response = await request(app).get('/api/gitlab/mrs/commits?directory=%2Ftmp%2Fwork&number=9');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      repo: { namespace: 'group', project: 'sub' },
+      commits: [
+        {
+          sha: 'abc123def456',
+          shortSha: 'abc123d',
+          message: 'Add the API\n\nAdds the public API',
+          summary: 'Add the API',
+          authorName: 'Alice Example',
+          committedAt: '2026-01-01T10:00:00Z',
+          parents: ['parent-one'],
+        },
+      ],
+    });
+  });
+
+  test('mrs/timeline keeps only system notes and infers event types', async () => {
+    scriptedFetch([
+      (url) => (matches(/\/merge_requests\/9\/notes\?/)(url)
+        ? jsonResponse([
+          { id: 1, body: 'alice merged changes', system: true, author: { id: 42, username: 'alice' }, created_at: '2026-01-02T11:00:00Z' },
+          { id: 2, body: 'Looks good to me', system: false, author: { id: 42, username: 'alice' }, created_at: '2026-01-02T12:00:00Z' },
+          { id: 3, body: 'removed label bug', system: true, author: { id: 1, username: 'system' }, created_at: '2026-01-02T13:00:00Z' },
+        ])
+        : null),
+    ]);
+
+    const app = createApp();
+    const response = await request(app).get('/api/gitlab/mrs/timeline?directory=%2Ftmp%2Fwork&number=9');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      events: [
+        { id: '1', type: 'merged', body: 'alice merged changes', author: { username: 'alice', id: 42 }, createdAt: '2026-01-02T11:00:00Z' },
+        { id: '3', type: 'unlabeled', body: 'removed label bug', createdAt: '2026-01-02T13:00:00Z' },
+      ],
+    });
+  });
+
+  test('mrs/commits and mrs/timeline report connected:false when not authenticated', async () => {
+    clearGitLabAuth();
+    const app = createApp();
+    const commits = await request(app).get('/api/gitlab/mrs/commits?directory=%2Ftmp%2Fwork&number=9');
+    const timeline = await request(app).get('/api/gitlab/mrs/timeline?directory=%2Ftmp%2Fwork&number=9');
+    expect(commits.body).toMatchObject({ connected: false, commits: [] });
+    expect(timeline.body).toMatchObject({ connected: false, events: [] });
+  });
+
   test('data routes surface a 503 when GitLab rate limits', async () => {
     scriptedFetch([(url) => (matches(/\/issues\?/)(url) ? jsonResponse({}, { status: 429, headers: { 'retry-after': '30' } }) : null)]);
 

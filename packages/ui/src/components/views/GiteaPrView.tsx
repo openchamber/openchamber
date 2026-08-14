@@ -4,16 +4,16 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { GiteaIssuesSection } from '@/components/views/git/GiteaIssuesSection';
+import { ForgeEntityDetailView } from '@/components/views/forge';
+import { buildForgeProvider } from '@/lib/forge';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { useGiteaAuthStore } from '@/stores/useGiteaAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { openExternalUrl } from '@/lib/url';
-import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import type { GiteaPullRequestContextResult, GiteaPullRequestSummary } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
@@ -57,7 +57,6 @@ export const GiteaPrView: React.FC = () => {
 
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
-  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
 
   React.useEffect(() => {
     if (!currentDirectory || !git) {
@@ -206,13 +205,11 @@ export const GiteaPrView: React.FC = () => {
   const [contextOpen, setContextOpen] = React.useState(false);
   const [contextResult, setContextResult] = React.useState<GiteaPullRequestContextResult | null>(null);
   const [contextLoading, setContextLoading] = React.useState(false);
-  const [contextError, setContextError] = React.useState<string | null>(null);
 
   // A different branch PR invalidates any previously loaded context.
   React.useEffect(() => {
     setContextOpen(false);
     setContextResult(null);
-    setContextError(null);
   }, [branchPr?.number]);
 
   // A different branch PR invalidates the update/merge transient state so the
@@ -234,25 +231,25 @@ export const GiteaPrView: React.FC = () => {
     if (contextOpen) {
       setContextOpen(false);
       setContextResult(null);
-      setContextError(null);
       return;
     }
     setContextOpen(true);
     setContextLoading(true);
-    setContextError(null);
     try {
       const result = await gitea.prContext(currentDirectory, pr.number, { includeDiff: false });
-      if (result.connected === false) {
-        setContextError(t('contextPanel.giteaPr.error.notConnected'));
-      } else {
-        setContextResult(result);
-      }
-    } catch (error) {
-      setContextError(error instanceof Error ? error.message : String(error));
+      setContextResult(result.connected === false ? null : result);
+    } catch {
+      setContextResult(null);
     } finally {
       setContextLoading(false);
     }
-  }, [contextOpen, currentDirectory, gitea, t]);
+  }, [contextOpen, currentDirectory, gitea]);
+
+  // Shared rich view for the branch PR's detail (title/body/chips/commits/
+  // files/timeline/status strip). Owns its own fetching through the forge
+  // facade; the commit-status capability renders the status strip in the
+  // checks section automatically.
+  const prProvider = React.useMemo(() => (gitea ? buildForgeProvider('gitea', { gitea }) : null), [gitea]);
 
   // ---- Create / update / merge actions -----------------------------------
 
@@ -492,23 +489,6 @@ export const GiteaPrView: React.FC = () => {
     }
   }, [branchPr, currentDirectory, gitea, t]);
 
-  const formatTimestamp = React.useCallback((value?: string) => {
-    if (!value) {
-      return '';
-    }
-    const timestamp = Date.parse(value);
-    if (!Number.isFinite(timestamp)) {
-      return value;
-    }
-    return formatDateTimeForPreference(timestamp, timeFormatPreference, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  }, [timeFormatPreference]);
-
   // ---- Render ------------------------------------------------------------
 
   if (!currentDirectory) {
@@ -550,7 +530,6 @@ export const GiteaPrView: React.FC = () => {
         : t('contextPanel.giteaPr.state.opened')
     : '';
   const branchPrAuthor = branchPr ? prAuthorLabel(branchPr) : '';
-  const prComments = contextResult?.comments ?? [];
 
   return (
     <ScrollableOverlay
@@ -709,55 +688,15 @@ export const GiteaPrView: React.FC = () => {
                 </div>
               ) : null}
 
-              {contextOpen ? (
+              {contextOpen && prProvider ? (
                 <div className="flex min-w-0 flex-col gap-3 border-t border-border/40 pt-3">
-                  {contextLoading ? (
-                    <div className="flex items-center gap-2 typography-micro text-muted-foreground">
-                      <Icon name="loader-4" className="size-4 animate-spin" />
-                      {t('contextPanel.giteaPr.loading')}
-                    </div>
-                  ) : contextError ? (
-                    <div className="typography-micro text-muted-foreground break-words">{contextError}</div>
-                  ) : (
-                    <>
-                      <div className="flex min-w-0 flex-col gap-1">
-                        <div className="typography-micro font-semibold text-foreground">{t('gitView.pr.field.description')}</div>
-                        {contextResult?.pr?.body?.trim() ? (
-                          <SimpleMarkdownRenderer
-                            content={contextResult.pr.body}
-                            className="typography-markdown-body min-w-0 text-muted-foreground break-words"
-                            enableFileReferences={false}
-                          />
-                        ) : (
-                          <div className="typography-micro text-muted-foreground">{t('gitView.pr.noDescription')}</div>
-                        )}
-                      </div>
-                      <div className="flex min-w-0 flex-col gap-2">
-                        <div className="typography-micro font-semibold text-foreground">{t('gitView.pr.segment.comments')}</div>
-                        {prComments.length > 0 ? (
-                          prComments.map((comment) => (
-                            <div key={comment.id} className="flex min-w-0 flex-col gap-1 rounded-lg bg-surface-elevated px-3 py-2">
-                              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 typography-micro text-muted-foreground">
-                                <span className="text-foreground whitespace-nowrap">
-                                  {comment.author?.username || ''}
-                                </span>
-                                {comment.createdAt ? (
-                                  <span className="whitespace-nowrap">{formatTimestamp(comment.createdAt)}</span>
-                                ) : null}
-                              </div>
-                              <SimpleMarkdownRenderer
-                                content={comment.body || ''}
-                                className="typography-markdown-body text-foreground break-words"
-                                enableFileReferences={false}
-                              />
-                            </div>
-                          ))
-                        ) : (
-                          <div className="typography-micro text-muted-foreground">{t('gitView.pr.comments.empty')}</div>
-                        )}
-                      </div>
-                    </>
-                  )}
+                  <ForgeEntityDetailView
+                    provider={prProvider}
+                    directory={currentDirectory}
+                    number={branchPr.number}
+                    options={{ kind: 'pull' }}
+                    onOpenSettings={openGiteaSettings}
+                  />
                 </div>
               ) : null}
             </div>

@@ -4,16 +4,16 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { GitLabIssuesSection } from '@/components/views/git/GitLabIssuesSection';
+import { ForgeEntityDetailView } from '@/components/views/forge';
+import { buildForgeProvider } from '@/lib/forge';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { useGitLabAuthStore } from '@/stores/useGitLabAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { openExternalUrl } from '@/lib/url';
-import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import type { GitLabMergeRequestContextResult, GitLabMergeRequestSummary, GitLabRepoRef } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
@@ -59,7 +59,6 @@ export const GitLabMrView: React.FC = () => {
 
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
-  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
 
   React.useEffect(() => {
     if (!currentDirectory || !git) {
@@ -208,13 +207,11 @@ export const GitLabMrView: React.FC = () => {
   const [contextOpen, setContextOpen] = React.useState(false);
   const [contextResult, setContextResult] = React.useState<GitLabMergeRequestContextResult | null>(null);
   const [contextLoading, setContextLoading] = React.useState(false);
-  const [contextError, setContextError] = React.useState<string | null>(null);
 
   // A different branch MR invalidates any previously loaded context.
   React.useEffect(() => {
     setContextOpen(false);
     setContextResult(null);
-    setContextError(null);
   }, [branchMr?.number]);
 
   // A different branch MR invalidates the update/merge transient state so the
@@ -237,25 +234,23 @@ export const GitLabMrView: React.FC = () => {
     if (contextOpen) {
       setContextOpen(false);
       setContextResult(null);
-      setContextError(null);
       return;
     }
     setContextOpen(true);
     setContextLoading(true);
-    setContextError(null);
     try {
       const result = await gitlab.mrContext(currentDirectory, mr.number, { includeDiff: false });
-      if (result.connected === false) {
-        setContextError(t('contextPanel.gitlabMr.error.notConnected'));
-      } else {
-        setContextResult(result);
-      }
-    } catch (error) {
-      setContextError(error instanceof Error ? error.message : String(error));
+      setContextResult(result.connected === false ? null : result);
+    } catch {
+      setContextResult(null);
     } finally {
       setContextLoading(false);
     }
-  }, [contextOpen, currentDirectory, gitlab, t]);
+  }, [contextOpen, currentDirectory, gitlab]);
+
+  // Shared rich view for the branch MR's detail (title/body/chips/commits/
+  // files/timeline). Owns its own fetching through the forge facade.
+  const mrProvider = React.useMemo(() => (gitlab ? buildForgeProvider('gitlab', { gitlab }) : null), [gitlab]);
 
   // ---- Create / update / merge actions -----------------------------------
 
@@ -495,23 +490,6 @@ export const GitLabMrView: React.FC = () => {
     }
   }, [branchMr, currentDirectory, gitlab, mergeSquash, t]);
 
-  const formatTimestamp = React.useCallback((value?: string) => {
-    if (!value) {
-      return '';
-    }
-    const timestamp = Date.parse(value);
-    if (!Number.isFinite(timestamp)) {
-      return value;
-    }
-    return formatDateTimeForPreference(timestamp, timeFormatPreference, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  }, [timeFormatPreference]);
-
   // ---- Render ------------------------------------------------------------
 
   if (!currentDirectory) {
@@ -553,7 +531,6 @@ export const GitLabMrView: React.FC = () => {
         : t('contextPanel.gitlabMr.state.opened')
     : '';
   const branchMrAuthor = branchMr ? mrAuthorLabel(branchMr) : '';
-  const mrComments = contextResult?.comments ?? [];
 
   return (
     <ScrollableOverlay
@@ -733,55 +710,15 @@ export const GitLabMrView: React.FC = () => {
                 </div>
               ) : null}
 
-              {contextOpen ? (
+              {contextOpen && mrProvider ? (
                 <div className="flex min-w-0 flex-col gap-3 border-t border-border/40 pt-3">
-                  {contextLoading ? (
-                    <div className="flex items-center gap-2 typography-micro text-muted-foreground">
-                      <Icon name="loader-4" className="size-4 animate-spin" />
-                      {t('contextPanel.gitlabMr.loading')}
-                    </div>
-                  ) : contextError ? (
-                    <div className="typography-micro text-muted-foreground break-words">{contextError}</div>
-                  ) : (
-                    <>
-                      <div className="flex min-w-0 flex-col gap-1">
-                        <div className="typography-micro font-semibold text-foreground">{t('gitView.pr.field.description')}</div>
-                        {contextResult?.mr?.body?.trim() ? (
-                          <SimpleMarkdownRenderer
-                            content={contextResult.mr.body}
-                            className="typography-markdown-body min-w-0 text-muted-foreground break-words"
-                            enableFileReferences={false}
-                          />
-                        ) : (
-                          <div className="typography-micro text-muted-foreground">{t('gitView.pr.noDescription')}</div>
-                        )}
-                      </div>
-                      <div className="flex min-w-0 flex-col gap-2">
-                        <div className="typography-micro font-semibold text-foreground">{t('gitView.pr.segment.comments')}</div>
-                        {mrComments.length > 0 ? (
-                          mrComments.map((comment) => (
-                            <div key={comment.id} className="flex min-w-0 flex-col gap-1 rounded-lg bg-surface-elevated px-3 py-2">
-                              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 typography-micro text-muted-foreground">
-                                <span className="text-foreground whitespace-nowrap">
-                                  {comment.author?.name?.trim() || comment.author?.username || ''}
-                                </span>
-                                {comment.createdAt ? (
-                                  <span className="whitespace-nowrap">{formatTimestamp(comment.createdAt)}</span>
-                                ) : null}
-                              </div>
-                              <SimpleMarkdownRenderer
-                                content={comment.body || ''}
-                                className="typography-markdown-body text-foreground break-words"
-                                enableFileReferences={false}
-                              />
-                            </div>
-                          ))
-                        ) : (
-                          <div className="typography-micro text-muted-foreground">{t('gitView.pr.comments.empty')}</div>
-                        )}
-                      </div>
-                    </>
-                  )}
+                  <ForgeEntityDetailView
+                    provider={mrProvider}
+                    directory={currentDirectory}
+                    number={branchMr.number}
+                    options={{ kind: 'pull' }}
+                    onOpenSettings={openGitLabSettings}
+                  />
                 </div>
               ) : null}
             </div>

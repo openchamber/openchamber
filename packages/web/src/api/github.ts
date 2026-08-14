@@ -5,6 +5,8 @@ import type {
   GitHubIssueGetResult,
   GitHubIssuesListResult,
   GitHubPullRequestContextResult,
+  GitHubPullRequestCommitsResult,
+  GitHubPullRequestTimelineResult,
   GitHubPullRequestsListResult,
   GitHubPullRequest,
   GitHubPullRequestCreateInput,
@@ -292,6 +294,34 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
     const payload = await jsonOrNull<GitHubIssueCommentsResult & { error?: string }>(response);
     if (!response.ok || !payload) {
       throw new Error(payload?.error || response.statusText || 'Failed to load issue comments');
+    }
+    return payload;
+  },
+
+  async prCommits(directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }): Promise<GitHubPullRequestCommitsResult> {
+    const params = new URLSearchParams({ directory, number: String(number) });
+    if (options?.sourceRepo?.owner && options.sourceRepo.repo) {
+      params.set('owner', options.sourceRepo.owner);
+      params.set('repo', options.sourceRepo.repo);
+    }
+    const response = await runtimeFetch(urls.api('/api/github/pulls/commits', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const payload = await jsonOrNull<GitHubPullRequestCommitsResult & { error?: string }>(response);
+    if (!response.ok || !payload) {
+      throw new Error(payload?.error || response.statusText || 'Failed to load pull request commits');
+    }
+    return payload;
+  },
+
+  async prTimeline(directory: string, number: number, options?: { sourceRepo?: { owner: string; repo: string } | null }): Promise<GitHubPullRequestTimelineResult> {
+    const params = new URLSearchParams({ directory, number: String(number) });
+    if (options?.sourceRepo?.owner && options.sourceRepo.repo) {
+      params.set('owner', options.sourceRepo.owner);
+      params.set('repo', options.sourceRepo.repo);
+    }
+    const response = await runtimeFetch(urls.api('/api/github/pulls/timeline', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const payload = await jsonOrNull<GitHubPullRequestTimelineResult & { error?: string }>(response);
+    if (!response.ok || !payload) {
+      throw new Error(payload?.error || response.statusText || 'Failed to load pull request timeline');
     }
     return payload;
   },

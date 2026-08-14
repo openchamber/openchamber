@@ -6,11 +6,14 @@ import type {
   GiteaIssueGetResult,
   GiteaIssuesListResult,
   GiteaPullRequest,
+  GiteaPullRequestCommitsResult,
   GiteaPullRequestContextResult,
   GiteaPullRequestCreateInput,
   GiteaPullRequestMergeInput,
   GiteaPullRequestMergeResult,
+  GiteaPullRequestReviewsResult,
   GiteaPullRequestsListResult,
+  GiteaPullRequestStatusesResult,
   GiteaPullRequestUpdateInput,
   GiteaUserSummary,
 } from '@openchamber/ui/lib/api/types';
@@ -182,6 +185,54 @@ export const createWebGiteaAPI = ({ urls }: WebGiteaAPIOptions): GiteaAPI => ({
     const payload = await jsonOrNull<GiteaPullRequestContextResult & { error?: string }>(response);
     if (!response.ok || !payload) {
       throw new Error(payload?.error || response.statusText || 'Failed to load Gitea pull request context');
+    }
+    return payload;
+  },
+
+  async prCommits(directory: string, number: number, options?: { owner?: string; repo?: string }): Promise<GiteaPullRequestCommitsResult> {
+    const params = new URLSearchParams({ directory, number: String(number) });
+    if (options?.owner) {
+      params.set('owner', options.owner);
+    }
+    if (options?.repo) {
+      params.set('repo', options.repo);
+    }
+    const response = await runtimeFetch(urls.api('/api/gitea/prs/commits', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const payload = await jsonOrNull<GiteaPullRequestCommitsResult & { error?: string }>(response);
+    if (!response.ok || !payload) {
+      throw new Error(payload?.error || response.statusText || 'Failed to load Gitea pull request commits');
+    }
+    return payload;
+  },
+
+  async prStatuses(directory: string, number: number, options?: { owner?: string; repo?: string }): Promise<GiteaPullRequestStatusesResult> {
+    const params = new URLSearchParams({ directory, number: String(number) });
+    if (options?.owner) {
+      params.set('owner', options.owner);
+    }
+    if (options?.repo) {
+      params.set('repo', options.repo);
+    }
+    const response = await runtimeFetch(urls.api('/api/gitea/prs/statuses', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const payload = await jsonOrNull<GiteaPullRequestStatusesResult & { error?: string }>(response);
+    if (!response.ok || !payload) {
+      throw new Error(payload?.error || response.statusText || 'Failed to load Gitea pull request statuses');
+    }
+    return payload;
+  },
+
+  async prReviews(directory: string, number: number, options?: { owner?: string; repo?: string }): Promise<GiteaPullRequestReviewsResult> {
+    const params = new URLSearchParams({ directory, number: String(number) });
+    if (options?.owner) {
+      params.set('owner', options.owner);
+    }
+    if (options?.repo) {
+      params.set('repo', options.repo);
+    }
+    const response = await runtimeFetch(urls.api('/api/gitea/prs/reviews', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const payload = await jsonOrNull<GiteaPullRequestReviewsResult & { error?: string }>(response);
+    if (!response.ok || !payload) {
+      throw new Error(payload?.error || response.statusText || 'Failed to load Gitea pull request reviews');
     }
     return payload;
   },
