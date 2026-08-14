@@ -58,6 +58,31 @@ describe('detectGitProvider', () => {
     expect(detectGitProvider(['git@codeberg.org:owner/repo.git'], hosts)).toBe('gitea');
   });
 
+  test('classifies a bare scp remote (no user) through configured gitea hosts', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['codeberg.org'] };
+    expect(detectGitProvider(['codeberg.org:owner/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('classifies an ssh URL with a non-default port through configured gitea hosts', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['codeberg.org'] };
+    expect(detectGitProvider(['ssh://git@codeberg.org:2222/owner/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('matches a custom domain entered as an scp remote against an ssh URL remote', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['git@ssh.example.com:org/repo.git'] };
+    expect(detectGitProvider(['ssh://git@ssh.example.com/org/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('matches a custom domain entered bare against an scp remote', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['codeberg.org:owner/repo.git'] };
+    expect(detectGitProvider(['git@codeberg.org:owner/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('classifies an IPv6 remote through a configured gitea host', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['2001:db8::1'] };
+    expect(detectGitProvider(['ssh://git@[2001:db8::1]/owner/repo.git'], hosts)).toBe('gitea');
+  });
+
   test('does not classify codeberg.org as gitea without a configured host', () => {
     expect(detectGitProvider(['git@codeberg.org:owner/repo.git'], EMPTY_HOSTS)).toBe('other');
   });

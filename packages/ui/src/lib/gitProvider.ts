@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { parseGitHost } from '@/lib/gitHost';
 import { getRemotes } from '@/lib/gitApi';
 import { useGitLabAuthStore } from '@/stores/useGitLabAuthStore';
 import { useGiteaAuthStore } from '@/stores/useGiteaAuthStore';
@@ -16,28 +17,6 @@ export type GitProviderHosts = {
   github: string[];
   gitlab: string[];
   gitea: string[];
-};
-
-const parseGitRemoteHost = (value: string): string | null => {
-  const url = value.trim();
-  if (!url) {
-    return null;
-  }
-  // scp-like form: git@host:owner/repo.git
-  const at = url.indexOf('@');
-  if (at >= 0) {
-    const rest = url.slice(at + 1);
-    const colon = rest.indexOf(':');
-    if (colon > 0 && !rest.slice(0, colon).includes('/')) {
-      return rest.slice(0, colon).toLowerCase();
-    }
-  }
-  try {
-    const parsed = new URL(url.includes('://') ? url : `ssh://${url}`);
-    return parsed.hostname.toLowerCase();
-  } catch {
-    return null;
-  }
 };
 
 const normalizeHostList = (hosts: string[] | undefined): string[] => {
@@ -64,7 +43,7 @@ const normalizeHostList = (hosts: string[] | undefined): string[] => {
 export const detectGitProvider = (fetchUrls: string[], hosts: GitProviderHosts): GitProvider | null => {
   const remoteHosts = new Set<string>();
   for (const url of fetchUrls) {
-    const host = parseGitRemoteHost(url);
+    const host = parseGitHost(url);
     if (host) {
       remoteHosts.add(host);
     }

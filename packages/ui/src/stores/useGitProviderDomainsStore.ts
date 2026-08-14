@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { parseGitHost } from '@/lib/gitHost';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
 export type GitProviderName = 'github' | 'gitlab' | 'gitea';
@@ -20,30 +21,11 @@ const EMPTY_DOMAINS: GitProviderDomains = { github: [], gitlab: [], gitea: [] };
 
 /**
  * Normalize a raw user-supplied domain into a bare hostname. Accepts plain
- * hostnames, URLs (scheme/port/path stripped), and scp-like git remotes
- * (`git@host:owner/repo.git`). Returns null for empty or unparseable input.
+ * hostnames, URLs (scheme/port/path stripped), and scp-like git remotes with
+ * or without a user prefix (`git@host:owner/repo.git`, `host:owner/repo.git`).
+ * Returns null for empty or unparseable input.
  */
-export const normalizeProviderDomain = (raw: string): string | null => {
-  const value = (raw ?? '').trim();
-  if (!value) {
-    return null;
-  }
-  // scp-like form: git@host:owner/repo.git
-  const at = value.indexOf('@');
-  if (at >= 0) {
-    const rest = value.slice(at + 1);
-    const colon = rest.indexOf(':');
-    if (colon > 0 && !rest.slice(0, colon).includes('/')) {
-      return rest.slice(0, colon).toLowerCase().replace(/\.$/, '');
-    }
-  }
-  try {
-    const parsed = new URL(value.includes('://') ? value : `ssh://${value}`);
-    return parsed.hostname.toLowerCase().replace(/\.$/, '');
-  } catch {
-    return null;
-  }
-};
+export const normalizeProviderDomain = (raw: string): string | null => parseGitHost(raw);
 
 const normalizeDomainList = (entries: unknown): string[] => {
   if (!Array.isArray(entries)) {
