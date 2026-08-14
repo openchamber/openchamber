@@ -31,6 +31,11 @@ import {
 import { isValidTheme } from './theme-validation';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import {
+  getThemePreferencesStorageKey,
+  readThemePreferencesForRuntime,
+  writeThemePreferencesForRuntime,
+} from './theme-storage';
 
 type ThemePreferences = {
   themeMode: ThemeMode;
@@ -87,9 +92,10 @@ const buildInitialPreferences = (defaultThemeId?: string): ThemePreferences => {
     const embeddedMode = embeddedParams?.get('themeMode');
     const embeddedLightId = embeddedParams?.get('lightThemeId');
     const embeddedDarkId = embeddedParams?.get('darkThemeId');
-    const storedMode = localStorage.getItem('themeMode');
-    const storedLightId = localStorage.getItem('lightThemeId');
-    const storedDarkId = localStorage.getItem('darkThemeId');
+    const storedPreferences = readThemePreferencesForRuntime(getRuntimeKey());
+    const storedMode = storedPreferences?.themeMode ?? null;
+    const storedLightId = storedPreferences?.lightThemeId ?? null;
+    const storedDarkId = storedPreferences?.darkThemeId ?? null;
     const legacyUseSystem = localStorage.getItem('useSystemTheme');
     const legacyThemeId = localStorage.getItem('selectedThemeId');
     const legacyVariant = localStorage.getItem('selectedThemeVariant');
@@ -314,6 +320,9 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     customThemesRequestRef.current += 1;
     setCustomThemes([]);
     setCustomThemesLoading(false);
+    // Adopt the new instance's last-known theme immediately; the incoming
+    // settings sync refines it with the server's authoritative value.
+    setPreferences((prev) => readThemePreferencesForRuntime(detail.runtimeKey) ?? prev);
     void reloadCustomThemes();
   }), [isVSCode, reloadCustomThemes]);
 
@@ -424,6 +433,12 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
+    writeThemePreferencesForRuntime(getRuntimeKey(), {
+      themeMode: preferences.themeMode,
+      lightThemeId: preferences.lightThemeId,
+      darkThemeId: preferences.darkThemeId,
+    });
+
     localStorage.setItem('themeMode', preferences.themeMode);
     localStorage.setItem('lightThemeId', preferences.lightThemeId);
     localStorage.setItem('darkThemeId', preferences.darkThemeId);
@@ -459,35 +474,26 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         return;
       }
 
-      if (event.key !== 'themeMode' && event.key !== 'lightThemeId' && event.key !== 'darkThemeId') {
+      // Only same-runtime windows share the scoped key; windows pointing at a
+      // different instance write their own runtime's key and are ignored.
+      if (event.key !== getThemePreferencesStorageKey(getRuntimeKey())) {
+        return;
+      }
+
+      const stored = readThemePreferencesForRuntime(getRuntimeKey());
+      if (!stored) {
         return;
       }
 
       setPreferences((prev) => {
-        const nextModeRaw = localStorage.getItem('themeMode');
-        const nextMode: ThemeMode =
-          nextModeRaw === 'light' || nextModeRaw === 'dark' || nextModeRaw === 'system'
-            ? nextModeRaw
-            : prev.themeMode;
-
-        const nextLightRaw = localStorage.getItem('lightThemeId');
-        const nextLight = typeof nextLightRaw === 'string' && nextLightRaw.trim().length > 0
-          ? nextLightRaw.trim()
-          : prev.lightThemeId;
-
-        const nextDarkRaw = localStorage.getItem('darkThemeId');
-        const nextDark = typeof nextDarkRaw === 'string' && nextDarkRaw.trim().length > 0
-          ? nextDarkRaw.trim()
-          : prev.darkThemeId;
-
-        if (nextMode === prev.themeMode && nextLight === prev.lightThemeId && nextDark === prev.darkThemeId) {
+        if (prev.themeMode === stored.themeMode && prev.lightThemeId === stored.lightThemeId && prev.darkThemeId === stored.darkThemeId) {
           return prev;
         }
 
         return {
-          themeMode: nextMode,
-          lightThemeId: nextLight,
-          darkThemeId: nextDark,
+          themeMode: stored.themeMode,
+          lightThemeId: stored.lightThemeId,
+          darkThemeId: stored.darkThemeId,
         };
       });
     };
