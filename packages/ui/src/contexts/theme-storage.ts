@@ -1,4 +1,5 @@
 import type { ThemeMode } from '@/types/theme';
+import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, getThemeById } from '@/lib/theme/themes';
 
 type StoredThemePreferences = {
   themeMode: ThemeMode;
@@ -118,4 +119,67 @@ export const resolveThemePreferencesFromStorageEvent = (
     return null;
   }
   return stored;
+};
+
+// One-time migration seed: pre-scoped builds persisted theme state in these
+// global keys. They are resolved only while no scoped entry exists — the
+// persist effect then seeds the scoped key from the returned preferences and
+// writeThemePreferencesForRuntime removes the global keys — so no client-only
+// theme state is discarded before the authoritative server sync lands.
+const readLegacyThemePreferences = (): StoredThemePreferences => {
+  let themeMode: ThemeMode = 'system';
+  let lightThemeId: string = DEFAULT_LIGHT_THEME_ID;
+  let darkThemeId: string = DEFAULT_DARK_THEME_ID;
+
+  if (typeof window === 'undefined') {
+    return { themeMode, lightThemeId, darkThemeId };
+  }
+
+  const legacyMode = localStorage.getItem('themeMode');
+  const legacyUseSystem = localStorage.getItem('useSystemTheme');
+  const legacyThemeId = localStorage.getItem('selectedThemeId');
+  const legacyVariant = localStorage.getItem('selectedThemeVariant');
+
+  if (legacyMode === 'light' || legacyMode === 'dark' || legacyMode === 'system') {
+    themeMode = legacyMode;
+  } else if (legacyUseSystem !== null) {
+    const useSystem = legacyUseSystem === 'true';
+    if (useSystem) {
+      themeMode = 'system';
+    } else if (legacyThemeId) {
+      const legacyTheme = getThemeById(legacyThemeId);
+      if (legacyTheme) {
+        themeMode = legacyTheme.metadata.variant === 'dark' ? 'dark' : 'light';
+        if (legacyTheme.metadata.variant === 'dark') {
+          darkThemeId = legacyTheme.metadata.id;
+        } else {
+          lightThemeId = legacyTheme.metadata.id;
+        }
+      }
+    }
+  } else if (legacyVariant === 'light' || legacyVariant === 'dark') {
+    themeMode = legacyVariant;
+  }
+
+  const legacyLightId = localStorage.getItem('lightThemeId');
+  const legacyDarkId = localStorage.getItem('darkThemeId');
+  if (typeof legacyLightId === 'string' && legacyLightId.trim().length > 0) {
+    lightThemeId = legacyLightId.trim();
+  }
+  if (typeof legacyDarkId === 'string' && legacyDarkId.trim().length > 0) {
+    darkThemeId = legacyDarkId.trim();
+  }
+
+  return { themeMode, lightThemeId, darkThemeId };
+};
+
+/**
+ * Resolve the preferences for a runtime at boot: the scoped entry when one
+ * exists, otherwise a one-time seed from the superseded global keys, otherwise
+ * defaults. The seed guarantees the first scoped write carries the last-known
+ * theme instead of defaults.
+ */
+export const resolveThemePreferencesForRuntime = (runtimeKey: string): StoredThemePreferences => {
+  const stored = readThemePreferencesForRuntime(runtimeKey);
+  return stored ?? readLegacyThemePreferences();
 };

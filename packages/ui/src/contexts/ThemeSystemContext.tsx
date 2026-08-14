@@ -33,6 +33,7 @@ import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-p
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import {
   readThemePreferencesForRuntime,
+  resolveThemePreferencesForRuntime,
   resolveThemePreferencesFromStorageEvent,
   writeThemePreferencesForRuntime,
 } from './theme-storage';
@@ -92,62 +93,27 @@ const buildInitialPreferences = (defaultThemeId?: string): ThemePreferences => {
     const embeddedMode = embeddedParams?.get('themeMode');
     const embeddedLightId = embeddedParams?.get('lightThemeId');
     const embeddedDarkId = embeddedParams?.get('darkThemeId');
-    const storedPreferences = readThemePreferencesForRuntime(getRuntimeKey());
-    const storedMode = storedPreferences?.themeMode ?? null;
-    const storedLightId = storedPreferences?.lightThemeId ?? null;
-    const storedDarkId = storedPreferences?.darkThemeId ?? null;
-    // One-time migration seed: pre-scoped builds persisted theme state in
-    // these global keys. They are read only while no scoped entry exists —
-    // the persist effect then seeds the scoped key from these preferences and
-    // writeThemePreferencesForRuntime removes the global keys — so no
-    // client-only theme state is discarded before the authoritative server
-    // sync lands.
-    const legacyMode = localStorage.getItem('themeMode');
-    const legacyLightId = localStorage.getItem('lightThemeId');
-    const legacyDarkId = localStorage.getItem('darkThemeId');
-    const legacyUseSystem = localStorage.getItem('useSystemTheme');
-    const legacyThemeId = localStorage.getItem('selectedThemeId');
-    const legacyVariant = localStorage.getItem('selectedThemeVariant');
+    // Scoped entry when present; otherwise a one-time seed from the superseded
+    // global keys (see resolveThemePreferencesForRuntime), so the first scoped
+    // write carries the last-known theme instead of defaults.
+    const resolvedPreferences = resolveThemePreferencesForRuntime(getRuntimeKey());
 
     if (embeddedMode === 'light' || embeddedMode === 'dark' || embeddedMode === 'system') {
       themeMode = embeddedMode;
-    } else if (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') {
-      themeMode = storedMode;
-    } else if (legacyMode === 'light' || legacyMode === 'dark' || legacyMode === 'system') {
-      themeMode = legacyMode;
-    } else if (legacyUseSystem !== null) {
-      const useSystem = legacyUseSystem === 'true';
-      if (useSystem) {
-        themeMode = 'system';
-      } else if (legacyThemeId) {
-        const legacyTheme = getThemeById(legacyThemeId);
-        if (legacyTheme) {
-          themeMode = legacyTheme.metadata.variant === 'dark' ? 'dark' : 'light';
-          if (legacyTheme.metadata.variant === 'dark') {
-            darkThemeId = legacyTheme.metadata.id;
-          } else {
-            lightThemeId = legacyTheme.metadata.id;
-          }
-        }
-      }
-    } else if (legacyVariant === 'light' || legacyVariant === 'dark') {
-      themeMode = legacyVariant;
+    } else {
+      themeMode = resolvedPreferences.themeMode;
     }
 
     if (typeof embeddedLightId === 'string' && embeddedLightId.trim().length > 0) {
       lightThemeId = embeddedLightId.trim();
-    } else if (typeof storedLightId === 'string' && storedLightId.trim().length > 0) {
-      lightThemeId = storedLightId.trim();
-    } else if (typeof legacyLightId === 'string' && legacyLightId.trim().length > 0) {
-      lightThemeId = legacyLightId.trim();
+    } else {
+      lightThemeId = resolvedPreferences.lightThemeId;
     }
 
     if (typeof embeddedDarkId === 'string' && embeddedDarkId.trim().length > 0) {
       darkThemeId = embeddedDarkId.trim();
-    } else if (typeof storedDarkId === 'string' && storedDarkId.trim().length > 0) {
-      darkThemeId = storedDarkId.trim();
-    } else if (typeof legacyDarkId === 'string' && legacyDarkId.trim().length > 0) {
-      darkThemeId = legacyDarkId.trim();
+    } else {
+      darkThemeId = resolvedPreferences.darkThemeId;
     }
   }
 

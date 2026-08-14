@@ -1,8 +1,11 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 
+import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
+
 import {
   getThemePreferencesStorageKey,
   readThemePreferencesForRuntime,
+  resolveThemePreferencesForRuntime,
   resolveThemePreferencesFromStorageEvent,
   writeThemePreferencesForRuntime,
 } from './theme-storage';
@@ -126,6 +129,62 @@ describe('theme preference runtime scoping', () => {
     expect(localStorage.getItem('splashBgDark')).toBeNull();
     expect(localStorage.getItem('splashFgDark')).toBeNull();
     expect(readThemePreferencesForRuntime('runtime-a')).toEqual(preferences);
+  });
+});
+
+describe('theme preference resolution chain', () => {
+  test('uses the scoped entry when present', () => {
+    writeThemePreferencesForRuntime('runtime-a', preferences);
+
+    expect(resolveThemePreferencesForRuntime('runtime-a')).toEqual(preferences);
+  });
+
+  test('seeds from the legacy mode and theme ids when no scoped entry exists', () => {
+    localStorage.setItem('themeMode', 'dark');
+    localStorage.setItem('lightThemeId', 'legacy-light');
+    localStorage.setItem('darkThemeId', 'legacy-dark');
+
+    expect(resolveThemePreferencesForRuntime('runtime-a')).toEqual({
+      themeMode: 'dark',
+      lightThemeId: 'legacy-light',
+      darkThemeId: 'legacy-dark',
+    });
+  });
+
+  test('seeds from the useSystemTheme/selectedThemeId legacy chain', () => {
+    localStorage.setItem('useSystemTheme', 'false');
+    localStorage.setItem('selectedThemeId', DEFAULT_DARK_THEME_ID);
+
+    expect(resolveThemePreferencesForRuntime('runtime-a')).toEqual({
+      themeMode: 'dark',
+      lightThemeId: DEFAULT_LIGHT_THEME_ID,
+      darkThemeId: DEFAULT_DARK_THEME_ID,
+    });
+  });
+
+  test('falls back to defaults when nothing is stored', () => {
+    expect(resolveThemePreferencesForRuntime('runtime-a')).toEqual({
+      themeMode: 'system',
+      lightThemeId: DEFAULT_LIGHT_THEME_ID,
+      darkThemeId: DEFAULT_DARK_THEME_ID,
+    });
+  });
+
+  test('the migrated seed survives into the scoped key with legacy keys removed', () => {
+    localStorage.setItem('themeMode', 'dark');
+    localStorage.setItem('lightThemeId', 'legacy-light');
+    localStorage.setItem('darkThemeId', 'legacy-dark');
+
+    writeThemePreferencesForRuntime('runtime-a', resolveThemePreferencesForRuntime('runtime-a'));
+
+    expect(readThemePreferencesForRuntime('runtime-a')).toEqual({
+      themeMode: 'dark',
+      lightThemeId: 'legacy-light',
+      darkThemeId: 'legacy-dark',
+    });
+    expect(localStorage.getItem('themeMode')).toBeNull();
+    expect(localStorage.getItem('lightThemeId')).toBeNull();
+    expect(localStorage.getItem('darkThemeId')).toBeNull();
   });
 });
 
