@@ -752,6 +752,14 @@ export const registerFsRoutes = (app, dependencies) => {
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
+        // An `optional` stat is a graceful probe — the caller only wants to
+        // know whether a path resolves to a readable file, and treats both
+        // "missing" and "outside the active workspace" as absent. Without this,
+        // boot-time probes of config/backup paths outside the workspace 400 and
+        // surface as console errors for a check that was never mandatory.
+        if (optional && resolved.error === 'Path is outside of active workspace') {
+          return res.json({ path: filePath, exists: false });
+        }
         if (req.query?.allowOutsideWorkspace === 'true') {
           console.warn(`Rejected outside-workspace stat: ${resolved.error}`);
         }
