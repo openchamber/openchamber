@@ -34,6 +34,12 @@ import { summarizeCheckRuns } from '@/lib/githubChecks';
 import { buildForgeProvider, mapGithubPr } from '@/lib/forge';
 import type { ForgeCommit, ForgeFileChange } from '@/lib/forge';
 import { ForgeCommitsSection, ForgeFilesDiffSection, ForgeMetadataChips } from '@/components/views/forge';
+import {
+  ForgeCommentComposer,
+  ForgeDraftToggle,
+  ForgeReviewActions,
+  ForgeStateActions,
+} from '@/components/views/forge/actions';
 import type {
   GitHubPullRequest,
   GitHubCheckRun,
@@ -1182,6 +1188,19 @@ export const PullRequestSection: React.FC<{
     }, delayMs));
   }, [refresh]);
 
+  // Forge write actions in the Overview refresh the status store so chips,
+  // checks, and the header stay coherent after a state/draft/review change.
+  const refreshPr = React.useCallback(() => {
+    void refresh({ force: true });
+  }, [refresh]);
+
+  // A posted comment lives in the context store (Comments tab), so refresh it
+  // in place; the status store is unaffected by comments.
+  const refreshPrContext = React.useCallback(() => {
+    if (!github?.prContext || !pr) return;
+    void ensurePrContext(github, directory, pr.number, { force: true, sourceRepo: status?.repo ?? null });
+  }, [directory, ensurePrContext, github, pr, status?.repo]);
+
   React.useEffect(() => {
     if (!github?.prStatus || !canShow || remotes.length <= 1) {
       return;
@@ -1869,6 +1888,31 @@ export const PullRequestSection: React.FC<{
 
                     {forgePr ? <ForgeMetadataChips kind="pull" pr={forgePr} /> : null}
 
+                    {forgeProvider && forgePr && forgePr.state === 'open' ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <ForgeDraftToggle
+                          provider={forgeProvider}
+                          directory={directory}
+                          ref={{ kind: 'pull', number: pr.number }}
+                          draft={!!forgePr.draft}
+                          onChanged={refreshPr}
+                        />
+                        <ForgeStateActions
+                          provider={forgeProvider}
+                          directory={directory}
+                          ref={{ kind: 'pull', number: pr.number }}
+                          state={forgePr.state}
+                          onChanged={refreshPr}
+                        />
+                        <ForgeReviewActions
+                          provider={forgeProvider}
+                          directory={directory}
+                          ref={{ kind: 'pull', number: pr.number }}
+                          onReviewed={refreshPr}
+                        />
+                      </div>
+                    ) : null}
+
                     {isEditingPr ? (
                       <Textarea
                         value={editBody}
@@ -1893,6 +1937,15 @@ export const PullRequestSection: React.FC<{
                           {isHydratingCurrentPrBody ? t('gitView.pr.loadingDescription') : t('gitView.pr.noDescription')}
                         </div>
                       )
+                    ) : null}
+
+                    {forgeProvider && forgePr && forgePr.state === 'open' ? (
+                      <ForgeCommentComposer
+                        provider={forgeProvider}
+                        directory={directory}
+                        ref={{ kind: 'pull', number: pr.number }}
+                        onPosted={refreshPrContext}
+                      />
                     ) : null}
                   </div>
                 ) : null}

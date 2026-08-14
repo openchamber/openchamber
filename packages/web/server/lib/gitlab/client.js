@@ -261,6 +261,10 @@ export function createGitLabClient({ token, baseUrl }) {
       request(`/projects/${encodeProject(pathWithNamespace)}/issues/${iid}`),
     issueNotes: (pathWithNamespace, iid, params = {}) =>
       request(`/projects/${encodeProject(pathWithNamespace)}/issues/${iid}/notes`, { query: params }),
+    createIssueNote: (pathWithNamespace, iid, body) =>
+      request(`/projects/${encodeProject(pathWithNamespace)}/issues/${iid}/notes`, { method: 'POST', body: { body } }),
+    updateIssue: (pathWithNamespace, iid, params) =>
+      request(`/projects/${encodeProject(pathWithNamespace)}/issues/${iid}`, { method: 'PUT', body: params }),
     mergeRequests: (pathWithNamespace, params = {}) =>
       request(`/projects/${encodeProject(pathWithNamespace)}/merge_requests`, { query: params }),
     mergeRequest: (pathWithNamespace, iid) =>
@@ -271,6 +275,12 @@ export function createGitLabClient({ token, baseUrl }) {
       request(`/projects/${encodeProject(pathWithNamespace)}/merge_requests/${iid}/commits`, { query: params }),
     mergeRequestNotes: (pathWithNamespace, iid, params = {}) =>
       request(`/projects/${encodeProject(pathWithNamespace)}/merge_requests/${iid}/notes`, { query: params }),
+    createMrNote: (pathWithNamespace, iid, body) =>
+      request(`/projects/${encodeProject(pathWithNamespace)}/merge_requests/${iid}/notes`, { method: 'POST', body: { body } }),
+    approveMr: (pathWithNamespace, iid) =>
+      request(`/projects/${encodeProject(pathWithNamespace)}/merge_requests/${iid}/approve`, { method: 'POST' }),
+    milestones: (pathWithNamespace, params = {}) =>
+      request(`/projects/${encodeProject(pathWithNamespace)}/milestones`, { query: params }),
     createMergeRequest: (pathWithNamespace, body) =>
       request(`/projects/${encodeProject(pathWithNamespace)}/merge_requests`, { method: 'POST', body }),
     updateMergeRequest: (pathWithNamespace, iid, body) =>

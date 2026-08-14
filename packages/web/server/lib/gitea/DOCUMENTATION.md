@@ -33,7 +33,7 @@
 
 ### Client (`client.js`)
 
-- `createGiteaClient({ token, baseUrl })`: raw-fetch REST v1 client with `request(path, { method, query, body, signal, raw })` plus convenience methods `user()`, `repo(owner, repo)`, `issues(owner, repo, params)`, `issue(owner, repo, number)`, `issueComments(owner, repo, number, params)`, `pullRequests(owner, repo, params)`, `pullRequest(owner, repo, number)`, `pullRequestDiff(owner, repo, number)` (raw `.diff` text via the `raw` option), `pullRequestFiles(owner, repo, number, params)`, `pullRequestCommits(owner, repo, number, params)`, `pullRequestReviews(owner, repo, number, params)`, `commitStatuses(owner, repo, sha, params)`, `createPullRequest(owner, repo, body)`, `updatePullRequest(owner, repo, number, body)` (PATCH), `mergePullRequest(owner, repo, number, body)` (POST), `branches(owner, repo, params)`.
+- `createGiteaClient({ token, baseUrl })`: raw-fetch REST v1 client with `request(path, { method, query, body, signal, raw })` plus convenience methods `user()`, `repo(owner, repo)`, `issues(owner, repo, params)`, `issue(owner, repo, number)`, `issueComments(owner, repo, number, params)`, `createIssueComment(owner, repo, number, body)`, `updateIssue(owner, repo, number, params)` (PATCH), `milestones(owner, repo, params)`, `repoLabels(owner, repo, params)`, `pullRequests(owner, repo, params)`, `pullRequest(owner, repo, number)`, `pullRequestDiff(owner, repo, number)` (raw `.diff` text via the `raw` option), `pullRequestFiles(owner, repo, number, params)`, `pullRequestCommits(owner, repo, number, params)`, `pullRequestReviews(owner, repo, number, params)`, `createPullReview(owner, repo, number, params)` (POST), `commitStatuses(owner, repo, sha, params)`, `createPullRequest(owner, repo, body)`, `updatePullRequest(owner, repo, number, body)` (PATCH), `mergePullRequest(owner, repo, number, body)` (POST), `branches(owner, repo, params)`.
 - `getGiteaClientOrNull()`: client for the current account, or `null`.
 - `isGiteaRateLimited()` / `noteGiteaRateLimit(error)`: own module-level rate-limit cooldown (not shared with the GitHub/GitLab modules).
 
@@ -76,8 +76,13 @@
 - PR reviews: `GET /repos/{owner}/{repo}/pulls/{number}/reviews?limit=100` (mapped to `{ id, state, author, submittedAt, body, commitSha }`; `state` passes through, e.g. `APPROVED`/`REQUEST_CHANGES`).
 - Commit statuses: `GET /repos/{owner}/{repo}/commits/{sha}/statuses?limit=100` (the `prs/statuses` route resolves the PR `head.sha` first, then maps statuses to `{ state, name, description, url, createdAt }` with `state` lowercased).
 - PR create: `POST /repos/{owner}/{repo}/pulls` with `{ title, head, base, body? }` (body omitted when absent).
-- PR update: `PATCH /repos/{owner}/{repo}/pulls/{number}` with `{ title?, body? }` (undefined fields omitted).
+- PR update: `PATCH /repos/{owner}/{repo}/pulls/{number}` with `{ title?, body?, state? }` (undefined fields omitted; the PR number IS the issue index, so the edit-issue `state` transition applies directly).
 - PR merge: `POST /repos/{owner}/{repo}/pulls/{number}/merge` with `{ Do: true, MergeMethod: 'merge' | 'squash' | 'rebase' }` (`method` defaults to `'merge'`).
+- Issue comment write: `POST /repos/{owner}/{repo}/issues/{number}/comments` with `{ body }` (PRs are issues at the API level, so `prs/comment` uses the same endpoint with the PR number as the index).
+- Issue update: `PATCH /repos/{owner}/{repo}/issues/{number}` with `{ title?, body?, state?, labels?, assignees?, milestone?, unset_milestone? }` (labels are label **names**, assignees are logins; `milestone` is resolved from a title to a milestone id and `null` sets `unset_milestone: true`).
+- Pull review write: `POST /repos/{owner}/{repo}/pulls/{number}/reviews` with `{ event, body? }` (`event` is `APPROVED`/`REQUEST_CHANGES`/`COMMENT`).
+- Milestones: `GET /repos/{owner}/{repo}/milestones?state=all&limit=50` (first page) for title-to-id resolution on issue updates.
+- Repo labels: `GET /repos/{owner}/{repo}/labels?limit=100` (first page) so metadata editors can offer existing labels.
 - Branches: `GET /repos/{owner}/{repo}/branches?limit=50&page=N` mapped to names, plus `GET /repos/{owner}/{repo}` for `default_branch` (Gitea branch objects carry no default flag).
 - There is **no ready-for-review endpoint** in this module (Gitea has no GitLab-style ready_for_review action).
 
@@ -99,8 +104,13 @@
 | GET | `/api/gitea/prs/reviews` | `?directory&number&owner&repo` -> `{ connected, repo?, reviews[] }` |
 | GET | `/api/gitea/prs/statuses` | `?directory&number&owner&repo` -> `{ connected, repo?, statuses[] }` (resolves the PR `head.sha` first, then lists commit statuses for that SHA) |
 | POST | `/api/gitea/pr/create` | body `{ directory, title, sourceBranch, targetBranch, description? }` -> `{ connected, repo?, pr }`; `400` for missing fields or an unresolvable repo |
-| PATCH | `/api/gitea/pr/update` | body `{ directory, number, title?, description? }` -> `{ connected, repo?, pr }`; `404` when the PR does not exist |
+| PATCH | `/api/gitea/pr/update` | body `{ directory, number, title?, description?, state? }` -> `{ connected, repo?, pr }`; `404` when the PR does not exist |
 | POST | `/api/gitea/pr/merge` | body `{ directory, number, method? }` -> `{ connected, merged: true }` on success; non-mergeable PRs -> the Gitea status (`405`/`409`/`422`) with `{ connected, merged: false, message }` |
+| POST | `/api/gitea/issues/comment` | body `{ directory, number, body, owner?, repo? }` -> `{ connected, repo?, comment }` |
+| PATCH | `/api/gitea/issues/update` | body `{ directory, number, title?, body?, state?, labels?, assignees?, milestone?, owner?, repo? }` -> `{ connected, repo?, issue }`; `400 'Milestone not found'` when a milestone title does not match |
+| POST | `/api/gitea/prs/comment` | body `{ directory, number, body, owner?, repo? }` -> `{ connected, repo?, comment }` (PRs are issues at the API level, so the PR number is the issue index) |
+| POST | `/api/gitea/prs/review` | body `{ directory, number, event, body?, owner?, repo? }` -> `{ connected, repo?, review }`; `400` when `event` is not `APPROVED`/`REQUEST_CHANGES`/`COMMENT` |
+| GET | `/api/gitea/repo/labels` | `?directory&owner&repo` -> `{ connected, repo?, labels[] }` |
 | GET | `/api/gitea/repo/branches` | `?owner&repo` -> `{ branches[], defaultBranch? }` (`defaultBranch` is `null` when Gitea is disconnected or the repo has no default) |
 
 Conventions mirror `github/routes.js` and `gitlab/routes.js`:
@@ -110,8 +120,8 @@ Conventions mirror `github/routes.js` and `gitlab/routes.js`:
 - Hard failures -> `4xx`/`5xx` with `{ error }`.
 - A Gitea `429` -> `503 { error: 'Gitea rate limited' }`.
 - Lazy-import pattern: route handlers import `./index.js` on first use, so the module never loads unless Gitea endpoints are hit.
-- Composite routes run under a 15 s route-level budget on top of the client's 8 s per-request timeout.
-- Repo targeting: `owner`/`repo` query params override the directory-local git remote.
+- Composite routes run under a 15 s route-level budget on top of the client's 8 s per-request timeout. Write routes deliberately skip the route-level timeout (a timeout can orphan a write); the client's per-request timeout still bounds them.
+- Repo targeting: `owner`/`repo` query params override the directory-local git remote; write routes also accept them in the JSON body.
 
 ## Consumers
 
@@ -124,6 +134,7 @@ Conventions mirror `github/routes.js` and `gitlab/routes.js`:
 - A repo that does not resolve from the local git remote yields `repo: null` with empty lists, matching GitHub/GitLab behavior. Write routes reject an unresolvable repo with `400 { error: 'Unable to resolve Gitea repo from directory' }`.
 - Invalid/expired tokens are cleared on `401`/`403` and reported as disconnected.
 - Gitea `403` on write routes means the token lacks repository write scope; they respond `400 { error: 'Your Gitea token needs write:repository scope to ...' }`.
+- Milestone titles on issue updates are resolved against `GET /repos/{owner}/{repo}/milestones`; an unmatched title yields `400 { error: 'Milestone not found' }` and `null` sets `unset_milestone: true`.
 - PR merge rejections (`405`/`409`/`422` from Gitea) are surfaced as `{ connected, merged: false, message }` with the Gitea status so clients can show the message without treating it as a transport error (mirrors `github/pr/merge`).
 - The pull-files endpoint returning `404` (older Gitea) yields `files: []` instead of failing the whole PR context; a missing `.diff` falls back to concatenated patches.
 - Rate-limit and timeout failures surface explicit `503` responses so clients keep last-known state rather than clearing UI.
@@ -134,4 +145,4 @@ Conventions mirror `github/routes.js` and `gitlab/routes.js`:
 - Never log tokens. Error messages must not include the access token.
 - The ETag cache and rate-limit cooldown are module-level and per-instance — they are NOT shared with the GitHub or GitLab modules.
 - Gitea `GET /user` returns `login`/`full_name`/`html_url`; the route mappers accept the GitHub-style `username`/`name`/`web_url` variants too, so Forgejo versions that differ still map.
-- To add further Gitea write operations (comment, assign, issue writes), add the endpoint in `routes.js`, add a convenience method in `client.js`, and extend the shared types — mirror the existing PR write routes and the GitHub PR write routes.
+- To add further Gitea write operations, add the endpoint in `routes.js`, add a convenience method in `client.js`, and extend the shared types — mirror the existing issue/PR write routes and the GitHub PR write routes.

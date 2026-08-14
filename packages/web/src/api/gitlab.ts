@@ -2,9 +2,13 @@ import type {
   GitLabAPI,
   GitLabAuthStatus,
   GitLabBranchesResult,
+  GitLabIssueCommentResult,
   GitLabIssueCommentsResult,
+  GitLabIssueCommentInput,
   GitLabIssueGetResult,
   GitLabIssuesListResult,
+  GitLabIssueUpdateInput,
+  GitLabIssueUpdateResult,
   GitLabMergeRequest,
   GitLabMergeRequestCommitsResult,
   GitLabMergeRequestContextResult,
@@ -16,6 +20,10 @@ import type {
   GitLabMergeRequestTimelineResult,
   GitLabMergeRequestUpdateInput,
   GitLabMergeRequestUpdateResult,
+  GitLabMrApproveInput,
+  GitLabMrApproveResult,
+  GitLabMrNoteInput,
+  GitLabMrNoteResult,
   GitLabUserSummary,
 } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
@@ -264,6 +272,58 @@ export const createWebGitLabAPI = ({ urls }: WebGitLabAPIOptions): GitLabAPI => 
       merged: Boolean(payload.merged),
       ...(payload.message ? { message: payload.message } : {}),
     };
+  },
+
+  async issueComment(input: GitLabIssueCommentInput): Promise<GitLabIssueCommentResult> {
+    const response = await runtimeFetch('/api/gitlab/issues/comment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GitLabIssueCommentResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to post GitLab issue comment');
+    }
+    return body;
+  },
+
+  async issueUpdate(input: GitLabIssueUpdateInput): Promise<GitLabIssueUpdateResult> {
+    const response = await runtimeFetch('/api/gitlab/issues/update', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GitLabIssueUpdateResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to update GitLab issue');
+    }
+    return body;
+  },
+
+  async mrComment(input: GitLabMrNoteInput): Promise<GitLabMrNoteResult> {
+    const response = await runtimeFetch('/api/gitlab/mrs/comment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GitLabMrNoteResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to post GitLab merge request comment');
+    }
+    return body;
+  },
+
+  async mrApprove(input: GitLabMrApproveInput): Promise<GitLabMrApproveResult> {
+    const response = await runtimeFetch('/api/gitlab/mrs/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GitLabMrApproveResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to approve GitLab merge request');
+    }
+    return body;
   },
 
   async repoBranches(namespace: string, project: string): Promise<GitLabBranchesResult> {

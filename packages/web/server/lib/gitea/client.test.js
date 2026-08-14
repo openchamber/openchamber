@@ -266,6 +266,70 @@ describe('pull request write methods', () => {
   });
 });
 
+describe('issue, review, and repo write methods', () => {
+  test('createIssueComment POSTs a body to the issue comments endpoint', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: 5, body: 'hi' }, { status: 201 }));
+    globalThis.fetch = fetchMock;
+
+    const client = createGiteaClient({ token: 't', baseUrl: 'https://gitea.example.com' });
+    const result = await client.createIssueComment('owner', 'repo', 7, 'Nice catch');
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitea.example.com/api/v1/repos/owner/repo/issues/7/comments');
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ body: 'Nice catch' });
+    expect(result.status).toBe(201);
+  });
+
+  test('updateIssue PATCHes params to the issue endpoint', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ number: 7, title: 'Updated' }));
+    globalThis.fetch = fetchMock;
+
+    const client = createGiteaClient({ token: 't', baseUrl: 'https://gitea.example.com' });
+    await client.updateIssue('owner', 'repo', 7, { state: 'closed', labels: ['bug'], milestone: 33 });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitea.example.com/api/v1/repos/owner/repo/issues/7');
+    expect(options.method).toBe('PATCH');
+    expect(JSON.parse(options.body)).toEqual({ state: 'closed', labels: ['bug'], milestone: 33 });
+  });
+
+  test('createPullReview POSTs event/body to the reviews endpoint', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: 101, state: 'APPROVED' }, { status: 201 }));
+    globalThis.fetch = fetchMock;
+
+    const client = createGiteaClient({ token: 't', baseUrl: 'https://gitea.example.com' });
+    await client.createPullReview('owner', 'repo', 12, { event: 'APPROVED', body: 'LGTM' });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitea.example.com/api/v1/repos/owner/repo/pulls/12/reviews');
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ event: 'APPROVED', body: 'LGTM' });
+  });
+
+  test('milestones GETs the repo milestones list', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse([{ id: 33, title: 'v1.0' }]));
+    globalThis.fetch = fetchMock;
+
+    const client = createGiteaClient({ token: 't', baseUrl: 'https://gitea.example.com' });
+    await client.milestones('owner', 'repo', { state: 'all', limit: 50 });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitea.example.com/api/v1/repos/owner/repo/milestones?state=all&limit=50');
+  });
+
+  test('repoLabels GETs the repo labels list', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse([{ id: 1, name: 'bug', color: 'd73a4a' }]));
+    globalThis.fetch = fetchMock;
+
+    const client = createGiteaClient({ token: 't', baseUrl: 'https://gitea.example.com' });
+    await client.repoLabels('owner', 'repo', { limit: 100 });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitea.example.com/api/v1/repos/owner/repo/labels?limit=100');
+  });
+});
+
 describe('rate limiting', () => {
   // NOTE: these tests run last in this file. The rate-limit cooldown is
   // module-level and has no reset export, so earlier tests must not set one.

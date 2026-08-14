@@ -1024,6 +1024,11 @@ export type GitHubPullRequestUpdateInput = {
   number: number;
   title: string;
   body?: string;
+  state?: 'open' | 'closed';
+  draft?: boolean;
+  labels?: string[];
+  assignees?: string[];
+  milestone?: string | null;
 };
 
 export type GitHubPullRequestMergeInput = {
@@ -1111,6 +1116,82 @@ export type GitHubIssueCommentsResult = {
   comments?: GitHubIssueComment[];
 };
 
+export type GitHubPullRequestReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+
+export type GitHubPullRequestReview = {
+  id: string;
+  state: string;
+  author?: GitHubUserSummary | null;
+  submittedAt?: string;
+  body?: string | null;
+  commitSha?: string | null;
+};
+
+export type GitHubIssueCommentInput = {
+  directory: string;
+  number: number;
+  body: string;
+  owner?: string;
+  repo?: string;
+};
+
+export type GitHubIssueCommentResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  comment?: GitHubIssueComment | null;
+};
+
+export type GitHubIssueUpdateInput = {
+  directory: string;
+  number: number;
+  title?: string;
+  body?: string;
+  state?: 'open' | 'closed';
+  labels?: string[];
+  assignees?: string[];
+  milestone?: string | null;
+  owner?: string;
+  repo?: string;
+};
+
+export type GitHubIssueUpdateResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  issue?: GitHubIssue | null;
+};
+
+export type GitHubReviewCommentInput = {
+  directory: string;
+  number: number;
+  body: string;
+  inReplyToId?: number;
+  path?: string;
+  line?: number;
+  owner?: string;
+  repo?: string;
+};
+
+export type GitHubPullRequestReviewInput = {
+  directory: string;
+  number: number;
+  event: GitHubPullRequestReviewEvent;
+  body?: string;
+  owner?: string;
+  repo?: string;
+};
+
+export type GitHubPullRequestReviewResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  review?: GitHubPullRequestReview | null;
+};
+
+export type GitHubReviewCommentResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  comment?: GitHubPullRequestReviewComment | null;
+};
+
 export type GitHubAuthStatus = {
   connected: boolean;
   user?: GitHubUserSummary | null;
@@ -1175,6 +1256,11 @@ export interface GitHubAPI {
   prTimeline?(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubPullRequestTimelineResult>;
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
   repoBranches(owner: string, repo: string): Promise<string[]>;
+  issueComment?(input: GitHubIssueCommentInput): Promise<GitHubIssueCommentResult>;
+  issueUpdate?(input: GitHubIssueUpdateInput): Promise<GitHubIssueUpdateResult>;
+  prComment?(input: GitHubIssueCommentInput): Promise<GitHubIssueCommentResult>;
+  prReviewComment?(input: GitHubReviewCommentInput): Promise<GitHubReviewCommentResult>;
+  prSubmitReview?(input: GitHubPullRequestReviewInput): Promise<GitHubPullRequestReviewResult>;
 }
 
 export type GitLabUserSummary = {
@@ -1350,6 +1436,10 @@ export type GitLabMergeRequestUpdateInput = {
   number: number;
   title?: string;
   description?: string;
+  state?: 'open' | 'closed';
+  labels?: string[];
+  assigneeIds?: number[];
+  milestone?: string | null;
 };
 
 export type GitLabMergeRequestMergeInput = {
@@ -1374,6 +1464,66 @@ export type GitLabMergeRequestMergeResult = {
   connected: boolean;
   merged: boolean;
   message?: string;
+};
+
+export type GitLabIssueCommentInput = {
+  directory: string;
+  number: number;
+  body: string;
+  namespace?: string;
+  project?: string;
+};
+
+export type GitLabIssueCommentResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  comment?: GitLabIssueComment | null;
+};
+
+export type GitLabIssueUpdateInput = {
+  directory: string;
+  number: number;
+  title?: string;
+  body?: string;
+  state?: 'open' | 'closed';
+  labels?: string[];
+  assigneeIds?: number[];
+  milestone?: string | null;
+  namespace?: string;
+  project?: string;
+};
+
+export type GitLabIssueUpdateResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  issue?: GitLabIssue | null;
+};
+
+export type GitLabMrNoteInput = {
+  directory: string;
+  number: number;
+  body: string;
+  namespace?: string;
+  project?: string;
+};
+
+export type GitLabMrNoteResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  comment?: GitLabIssueComment | null;
+};
+
+export type GitLabMrApproveInput = {
+  directory: string;
+  number: number;
+  namespace?: string;
+  project?: string;
+};
+
+export type GitLabMrApproveResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  approved: boolean;
 };
 
 type GitLabAuthAccount = {
@@ -1417,6 +1567,11 @@ export interface GitLabAPI {
   mrMerge(input: GitLabMergeRequestMergeInput): Promise<GitLabMergeRequestMergeResult>;
   mrCommits?(directory: string, number: number, options?: { namespace?: string; project?: string }): Promise<GitLabMergeRequestCommitsResult>;
   mrTimeline?(directory: string, number: number, options?: { namespace?: string; project?: string }): Promise<GitLabMergeRequestTimelineResult>;
+
+  issueComment?(input: GitLabIssueCommentInput): Promise<GitLabIssueCommentResult>;
+  issueUpdate?(input: GitLabIssueUpdateInput): Promise<GitLabIssueUpdateResult>;
+  mrComment?(input: GitLabMrNoteInput): Promise<GitLabMrNoteResult>;
+  mrApprove?(input: GitLabMrApproveInput): Promise<GitLabMrApproveResult>;
 
   repoBranches(namespace: string, project: string): Promise<GitLabBranchesResult>;
 }
@@ -1499,7 +1654,7 @@ export type GiteaIssueCommentsResult = { connected: boolean; repo?: { owner: str
 export type GiteaPullRequestsListResult = { connected: boolean; repo?: { owner: string; repo: string; url?: string } | null; prs: GiteaPullRequestSummary[]; page: number; hasMore: boolean };
 export type GiteaPullRequestContextResult = { connected: boolean; repo?: { owner: string; repo: string; url?: string } | null; pr?: GiteaPullRequest | null; comments: GiteaComment[]; files: Array<{ filename: string; status?: string; additions?: number; deletions?: number; patch?: string }>; diff?: string };
 export type GiteaPullRequestCreateInput = { directory: string; title: string; sourceBranch: string; targetBranch: string; description?: string };
-export type GiteaPullRequestUpdateInput = { directory: string; number: number; title?: string; description?: string };
+export type GiteaPullRequestUpdateInput = { directory: string; number: number; title?: string; description?: string; state?: 'open' | 'closed' };
 export type GiteaPullRequestMergeInput = { directory: string; number: number; method?: 'merge' | 'squash' | 'rebase' };
 export type GiteaPullRequestMergeResult = { connected: boolean; merged: boolean; message?: string };
 export type GiteaBranchesResult = { branches: string[]; defaultBranch?: string | null };
@@ -1536,6 +1691,67 @@ export type GiteaReview = {
 
 export type GiteaPullRequestReviewsResult = { connected: boolean; repo?: { owner: string; repo: string; url?: string } | null; reviews: GiteaReview[] };
 
+export type GiteaIssueCommentInput = {
+  directory: string;
+  number: number;
+  body: string;
+  owner?: string;
+  repo?: string;
+};
+
+export type GiteaIssueCommentResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  comment?: GiteaComment | null;
+};
+
+export type GiteaIssueUpdateInput = {
+  directory: string;
+  number: number;
+  title?: string;
+  body?: string;
+  state?: 'open' | 'closed';
+  labels?: string[];
+  assignees?: string[];
+  milestone?: string | null;
+  owner?: string;
+  repo?: string;
+};
+
+export type GiteaIssueUpdateResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  issue?: GiteaIssue | null;
+};
+
+export type GiteaPullReviewInput = {
+  directory: string;
+  number: number;
+  event: 'APPROVED' | 'REQUEST_CHANGES' | 'COMMENT';
+  body?: string;
+  owner?: string;
+  repo?: string;
+};
+
+export type GiteaPullReviewResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  review?: GiteaReview | null;
+};
+
+export type GiteaRepoLabel = {
+  id?: number;
+  name: string;
+  color?: string;
+  description?: string;
+};
+
+export type GiteaRepoLabelsResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  labels: GiteaRepoLabel[];
+};
+
 export interface GiteaAPI {
   authStatus(): Promise<GiteaAuthStatus>;
   authConnect(input: { accessToken: string; baseUrl: string }): Promise<GiteaAuthStatus>;
@@ -1559,6 +1775,12 @@ export interface GiteaAPI {
   prCommits?(directory: string, number: number, options?: { owner?: string; repo?: string }): Promise<GiteaPullRequestCommitsResult>;
   prStatuses?(directory: string, number: number, options?: { owner?: string; repo?: string }): Promise<GiteaPullRequestStatusesResult>;
   prReviews?(directory: string, number: number, options?: { owner?: string; repo?: string }): Promise<GiteaPullRequestReviewsResult>;
+
+  issueComment?(input: GiteaIssueCommentInput): Promise<GiteaIssueCommentResult>;
+  issueUpdate?(input: GiteaIssueUpdateInput): Promise<GiteaIssueUpdateResult>;
+  prComment?(input: GiteaIssueCommentInput): Promise<GiteaIssueCommentResult>;
+  prSubmitReview?(input: GiteaPullReviewInput): Promise<GiteaPullReviewResult>;
+  repoLabels?(directory: string, options?: { owner?: string; repo?: string }): Promise<GiteaRepoLabelsResult>;
 
   repoBranches(owner: string, repo: string): Promise<GiteaBranchesResult>;
 }

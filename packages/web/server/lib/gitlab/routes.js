@@ -23,9 +23,12 @@ function withTimeout(promise, timeoutMs, label) {
 
 const asString = (value) => (typeof value === 'string' ? value.trim() : '');
 
+// Resolve the requested project from the query (read routes) or the JSON body
+// (write routes). `namespace`/`project` override the directory-local git
+// remote for repos checked out from non-GitLab remotes.
 const getRequestedProject = (req) => {
-  const namespace = asString(req.query?.namespace);
-  const project = asString(req.query?.project);
+  const namespace = asString(req.query?.namespace) || asString(req.body?.namespace);
+  const project = asString(req.query?.project) || asString(req.body?.project);
   return namespace && project ? `${namespace}/${project}` : null;
 };
 
@@ -69,6 +72,23 @@ const mapIssueSummary = (item) => ({
   state: typeof item.state === 'string' ? item.state : 'opened',
   author: mapAuthor(item.author) || {},
   labels: Array.isArray(item.labels) ? item.labels.filter((label) => typeof label === 'string') : [],
+});
+
+const mapIssue = (item) => ({
+  ...mapIssueSummary(item),
+  body: typeof item.description === 'string' ? item.description : '',
+  createdAt: typeof item.created_at === 'string' ? item.created_at : undefined,
+  updatedAt: typeof item.updated_at === 'string' ? item.updated_at : undefined,
+  assignees: Array.isArray(item.assignees)
+    ? item.assignees.map(mapAuthor).filter(Boolean)
+    : [],
+  milestone: item.milestone && typeof item.milestone === 'object'
+    ? {
+        title: typeof item.milestone.title === 'string' ? item.milestone.title : '',
+        ...(typeof item.milestone.state === 'string' ? { state: item.milestone.state } : {}),
+      }
+    : null,
+  commentsCount: typeof item.user_notes_count === 'number' ? item.user_notes_count : undefined,
 });
 
 const mapMergeRequestSummary = (item) => ({
@@ -150,6 +170,24 @@ const gitLabErrorMessage = (data) => {
     return data.error;
   }
   return null;
+};
+
+// GitLab update endpoints take `milestone_id` (numeric), not the title. Resolve
+// a title via the project milestones list (first page is enough for title-based
+// lookups); unmatched titles yield `milestoneId: null` so routes can surface
+// `400 { error: 'Milestone not found' }`.
+const resolveMilestoneId = async (client, projectPath, title) => {
+  const resp = await client.milestones(projectPath, { state: 'all', per_page: 100 });
+  if (resp.status === 429) {
+    return { milestoneId: null, rateLimited: true };
+  }
+  if (resp.status !== 200 || !Array.isArray(resp.data)) {
+    return { milestoneId: null, rateLimited: false };
+  }
+  const match = resp.data.find(
+    (item) => typeof item?.title === 'string' && item.title.toLowerCase() === title.toLowerCase(),
+  );
+  return { milestoneId: typeof match?.id === 'number' ? match.id : null, rateLimited: false };
 };
 
 const countDiffLines = (diffText) => {
@@ -478,27 +516,7 @@ export function registerGitLabRoutes(app, options = {}) {
       }
 
       const item = resp.data;
-      const issue = {
-        number: typeof item.iid === 'number' ? item.iid : Number(item.iid),
-        title: typeof item.title === 'string' ? item.title : '',
-        url: typeof item.web_url === 'string' ? item.web_url : '',
-        state: typeof item.state === 'string' ? item.state : 'opened',
-        body: typeof item.description === 'string' ? item.description : '',
-        createdAt: typeof item.created_at === 'string' ? item.created_at : undefined,
-        updatedAt: typeof item.updated_at === 'string' ? item.updated_at : undefined,
-        author: mapAuthor(item.author) || {},
-        assignees: Array.isArray(item.assignees)
-          ? item.assignees.map(mapAuthor).filter(Boolean)
-          : [],
-        labels: Array.isArray(item.labels) ? item.labels.filter((label) => typeof label === 'string') : [],
-        milestone: item.milestone && typeof item.milestone === 'object'
-          ? {
-              title: typeof item.milestone.title === 'string' ? item.milestone.title : '',
-              ...(typeof item.milestone.state === 'string' ? { state: item.milestone.state } : {}),
-            }
-          : null,
-        commentsCount: typeof item.user_notes_count === 'number' ? item.user_notes_count : undefined,
-      };
+      const issue = mapIssue(item);
       return res.json({ connected: true, repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl), issue });
     } catch (error) {
       console.error('Failed to fetch GitLab issue:', error);
@@ -561,6 +579,146 @@ export function registerGitLabRoutes(app, options = {}) {
     } catch (error) {
       console.error('Failed to fetch GitLab issue comments:', error);
       return res.status(500).json({ error: error.message || 'Failed to fetch GitLab issue comments' });
+    }
+  });
+
+  app.post('/api/gitlab/issues/comment', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+      if (!directory || !number || !body) {
+        return res.status(400).json({ error: 'directory, number, body are required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedProject = getRequestedProject(req);
+      const { projectPath, repo } = await resolveProjectForRequest(directory, requestedProject);
+      if (!projectPath) {
+        return res.status(400).json({ error: 'Unable to resolve GitLab repo from directory' });
+      }
+
+      // GitLab notes carry no web URL; resolve the issue web_url first so the
+      // note links as `{issue_web_url}#note_{id}` (mirrors issues/comments).
+      const issueResp = await client.issue(projectPath, number);
+      if (issueResp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (issueResp.status === 404) {
+        return res.status(404).json({ error: 'Issue not found' });
+      }
+      if (issueResp.status !== 200 || !issueResp.data) {
+        return res.status(502).json({ error: 'GitLab returned an error while fetching the issue' });
+      }
+      const webUrl = typeof issueResp.data.web_url === 'string' ? issueResp.data.web_url : '';
+
+      const resp = await client.createIssueNote(projectPath, number, body);
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your GitLab token needs the api scope to create issue comments' });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: gitLabErrorMessage(resp.data) || 'GitLab returned an error while creating the comment' });
+      }
+      if (!resp.data) {
+        return res.status(500).json({ error: 'GitLab returned an empty response while creating the comment' });
+      }
+
+      return res.json({
+        connected: true,
+        repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl),
+        comment: mapComment(resp.data, webUrl),
+      });
+    } catch (error) {
+      console.error('Failed to create GitLab issue comment:', error);
+      return res.status(500).json({ error: error.message || 'Failed to create GitLab issue comment' });
+    }
+  });
+
+  app.put('/api/gitlab/issues/update', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      if (!directory || !number) {
+        return res.status(400).json({ error: 'directory and number are required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedProject = getRequestedProject(req);
+      const { projectPath, repo } = await resolveProjectForRequest(directory, requestedProject);
+      if (!projectPath) {
+        return res.status(400).json({ error: 'Unable to resolve GitLab repo from directory' });
+      }
+
+      const body = {};
+      if (typeof req.body?.title === 'string') {
+        body.title = req.body.title.trim();
+      }
+      if (typeof req.body?.body === 'string') {
+        body.description = req.body.body;
+      }
+      // GitLab maps state transitions through `state_event` ('close'/'reopen').
+      if (req.body?.state === 'open' || req.body?.state === 'closed') {
+        body.state_event = req.body.state === 'closed' ? 'close' : 'reopen';
+      }
+      if (Array.isArray(req.body?.labels)) {
+        body.labels = req.body.labels.filter((label) => typeof label === 'string');
+      }
+      if (Array.isArray(req.body?.assigneeIds)) {
+        body.assignee_ids = req.body.assigneeIds.filter((id) => typeof id === 'number');
+      }
+      if (req.body?.milestone !== undefined) {
+        if (req.body.milestone === null) {
+          body.milestone_id = null;
+        } else if (typeof req.body.milestone === 'string' && req.body.milestone.trim()) {
+          const { milestoneId, rateLimited } = await resolveMilestoneId(client, projectPath, req.body.milestone.trim());
+          if (rateLimited) {
+            return res.status(503).json({ error: 'GitLab rate limited' });
+          }
+          if (milestoneId === null) {
+            return res.status(400).json({ error: 'Milestone not found' });
+          }
+          body.milestone_id = milestoneId;
+        }
+      }
+
+      const resp = await client.updateIssue(projectPath, number, body);
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your GitLab token needs the api scope to update issues' });
+      }
+      if (resp.status === 404) {
+        return res.status(404).json({ error: 'Issue not found' });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: gitLabErrorMessage(resp.data) || 'GitLab returned an error while updating the issue' });
+      }
+      if (!resp.data) {
+        return res.status(500).json({ error: 'GitLab returned an empty response while updating the issue' });
+      }
+
+      return res.json({
+        connected: true,
+        repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl),
+        issue: mapIssue(resp.data),
+      });
+    } catch (error) {
+      console.error('Failed to update GitLab issue:', error);
+      return res.status(500).json({ error: error.message || 'Failed to update GitLab issue' });
     }
   });
 
@@ -938,6 +1096,30 @@ export function registerGitLabRoutes(app, options = {}) {
       if (description !== undefined) {
         body.description = description;
       }
+      // GitLab maps state transitions through `state_event` ('close'/'reopen').
+      if (req.body?.state === 'open' || req.body?.state === 'closed') {
+        body.state_event = req.body.state === 'closed' ? 'close' : 'reopen';
+      }
+      if (Array.isArray(req.body?.labels)) {
+        body.labels = req.body.labels.filter((label) => typeof label === 'string');
+      }
+      if (Array.isArray(req.body?.assigneeIds)) {
+        body.assignee_ids = req.body.assigneeIds.filter((id) => typeof id === 'number');
+      }
+      if (req.body?.milestone !== undefined) {
+        if (req.body.milestone === null) {
+          body.milestone_id = null;
+        } else if (typeof req.body.milestone === 'string' && req.body.milestone.trim()) {
+          const { milestoneId, rateLimited } = await resolveMilestoneId(client, projectPath, req.body.milestone.trim());
+          if (rateLimited) {
+            return res.status(503).json({ error: 'GitLab rate limited' });
+          }
+          if (milestoneId === null) {
+            return res.status(400).json({ error: 'Milestone not found' });
+          }
+          body.milestone_id = milestoneId;
+        }
+      }
 
       const resp = await withTimeout(client.updateMergeRequest(projectPath, number, body), ROUTE_TIMEOUT_MS, 'gitlab mr update');
       if (resp.status === 429) {
@@ -1022,6 +1204,111 @@ export function registerGitLabRoutes(app, options = {}) {
     } catch (error) {
       console.error('Failed to merge GitLab merge request:', error);
       return res.status(500).json({ error: error.message || 'Failed to merge GitLab merge request' });
+    }
+  });
+
+  app.post('/api/gitlab/mrs/comment', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+      if (!directory || !number || !body) {
+        return res.status(400).json({ error: 'directory, number, body are required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedProject = getRequestedProject(req);
+      const { projectPath, repo } = await resolveProjectForRequest(directory, requestedProject);
+      if (!projectPath) {
+        return res.status(400).json({ error: 'Unable to resolve GitLab repo from directory' });
+      }
+
+      // MR notes carry no web URL; resolve the MR web_url first so the note
+      // links as `{mr_web_url}#note_{id}` (mirrors mrs/context).
+      const mrResp = await client.mergeRequest(projectPath, number);
+      if (mrResp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (mrResp.status === 404) {
+        return res.status(404).json({ error: 'Merge request not found' });
+      }
+      if (mrResp.status !== 200 || !mrResp.data) {
+        return res.status(502).json({ error: 'GitLab returned an error while fetching the merge request' });
+      }
+      const webUrl = typeof mrResp.data.web_url === 'string' ? mrResp.data.web_url : '';
+
+      const resp = await client.createMrNote(projectPath, number, body);
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your GitLab token needs the api scope to comment on merge requests' });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: gitLabErrorMessage(resp.data) || 'GitLab returned an error while creating the comment' });
+      }
+      if (!resp.data) {
+        return res.status(500).json({ error: 'GitLab returned an empty response while creating the comment' });
+      }
+
+      return res.json({
+        connected: true,
+        repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl),
+        comment: mapComment(resp.data, webUrl),
+      });
+    } catch (error) {
+      console.error('Failed to create GitLab merge request comment:', error);
+      return res.status(500).json({ error: error.message || 'Failed to create GitLab merge request comment' });
+    }
+  });
+
+  app.post('/api/gitlab/mrs/approve', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      if (!directory || !number) {
+        return res.status(400).json({ error: 'directory and number are required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedProject = getRequestedProject(req);
+      const { projectPath, repo } = await resolveProjectForRequest(directory, requestedProject);
+      if (!projectPath) {
+        return res.status(400).json({ error: 'Unable to resolve GitLab repo from directory' });
+      }
+
+      const resp = await client.approveMr(projectPath, number);
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your GitLab token needs the api scope to approve merge requests' });
+      }
+      if (resp.status === 404) {
+        return res.status(404).json({ error: 'Merge request not found' });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: gitLabErrorMessage(resp.data) || 'GitLab returned an error while approving the merge request' });
+      }
+
+      return res.json({
+        connected: true,
+        repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl),
+        approved: true,
+      });
+    } catch (error) {
+      console.error('Failed to approve GitLab merge request:', error);
+      return res.status(500).json({ error: error.message || 'Failed to approve GitLab merge request' });
     }
   });
 

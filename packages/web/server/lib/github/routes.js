@@ -120,8 +120,14 @@ function withTimeout(promise, timeoutMs, label) {
 }
 
 function getRequestedRepo(req) {
-  const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
-  const repo = typeof req.query?.repo === 'string' ? req.query.repo.trim() : '';
+  // GET routes carry owner/repo in the query string; write routes (POST/PATCH)
+  // carry them in the body. Accept both so the same resolver guards every route.
+  const owner = typeof req.body?.owner === 'string' && req.body.owner.trim()
+    ? req.body.owner.trim()
+    : (typeof req.query?.owner === 'string' ? req.query.owner.trim() : '');
+  const repo = typeof req.body?.repo === 'string' && req.body.repo.trim()
+    ? req.body.repo.trim()
+    : (typeof req.query?.repo === 'string' ? req.query.repo.trim() : '');
   return owner && repo ? { owner, repo } : null;
 }
 
@@ -976,15 +982,74 @@ export function registerGitHubRoutes(app) {
         return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
       }
 
+      const state = req.body?.state === 'open' || req.body?.state === 'closed' ? req.body.state : undefined;
+      const draft = typeof req.body?.draft === 'boolean' ? req.body.draft : undefined;
+      const labels = Array.isArray(req.body?.labels) ? req.body.labels : undefined;
+      const assignees = Array.isArray(req.body?.assignees) ? req.body.assignees : undefined;
+      const milestoneProvided = req.body?.milestone !== undefined;
+      const hasExtendedFields = state !== undefined
+        || draft !== undefined
+        || labels !== undefined
+        || assignees !== undefined
+        || milestoneProvided;
+
       let updated;
       try {
-        updated = await octokit.rest.pulls.update({
-          owner: repo.owner,
-          repo: repo.repo,
-          pull_number: number,
-          title,
-          ...(typeof body === 'string' ? { body } : {}),
-        });
+        if (hasExtendedFields) {
+          // PRs are issues: issues.update carries state/labels/assignees/milestone
+          // (plus title/body) and works on pull requests. draft is not an
+          // issues.update field, so it is applied through pulls.update instead.
+          const issuesParams = {
+            owner: repo.owner,
+            repo: repo.repo,
+            issue_number: number,
+            title,
+            ...(typeof body === 'string' ? { body } : {}),
+            ...(state !== undefined ? { state } : {}),
+            ...(labels !== undefined ? { labels } : {}),
+            ...(assignees !== undefined ? { assignees } : {}),
+          };
+          if (milestoneProvided) {
+            if (req.body.milestone === null) {
+              issuesParams.milestone = null;
+            } else if (typeof req.body.milestone === 'string' && req.body.milestone.trim()) {
+              // issues.update accepts the milestone number, not the title — resolve it.
+              const milestoneTitle = req.body.milestone.trim();
+              const milestones = await octokit.rest.issues.listMilestonesForRepo({
+                owner: repo.owner,
+                repo: repo.repo,
+                state: 'all',
+                per_page: 100,
+              });
+              const milestone = (Array.isArray(milestones?.data) ? milestones.data : []).find(
+                (item) => typeof item?.title === 'string' && item.title.toLowerCase() === milestoneTitle.toLowerCase()
+              );
+              if (!milestone) {
+                return res.status(400).json({ error: 'Milestone not found' });
+              }
+              issuesParams.milestone = milestone.number;
+            }
+          }
+          updated = await octokit.rest.issues.update(issuesParams);
+          if (draft !== undefined) {
+            const draftUpdated = await octokit.rest.pulls.update({
+              owner: repo.owner,
+              repo: repo.repo,
+              pull_number: number,
+              draft,
+            });
+            // The draft write returns the freshest full PR payload.
+            updated = draftUpdated;
+          }
+        } else {
+          updated = await octokit.rest.pulls.update({
+            owner: repo.owner,
+            repo: repo.repo,
+            pull_number: number,
+            title,
+            ...(typeof body === 'string' ? { body } : {}),
+          });
+        }
       } catch (error) {
         if (error?.status === 401) {
           return res.status(401).json({ error: 'GitHub not connected' });
@@ -1012,6 +1077,8 @@ export function registerGitHubRoutes(app) {
       }
 
       invalidatePrContextCache(directory, number);
+      const { invalidateRepoPullsCache } = await import('./pr-status.js');
+      invalidateRepoPullsCache(repo.owner, repo.repo);
       return res.json({
         number: pr.number,
         title: pr.title,
@@ -1129,6 +1196,214 @@ export function registerGitHubRoutes(app) {
     } catch (error) {
       console.error('Failed to mark PR ready:', error);
       return res.status(500).json({ error: error.message || 'Failed to mark PR ready' });
+    }
+  });
+
+  // PRs are issues at the API level, so issues.createComment posts a PR
+  // "comment" (the issue-thread comment, not a review comment).
+  app.post('/api/github/pulls/comment', async (req, res) => {
+    try {
+      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+      if (!directory || !number || !body) {
+        return res.status(400).json({ error: 'directory, number, body are required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, comment: null });
+      }
+
+      const result = await octokit.rest.issues.createComment({
+        owner: repo.owner,
+        repo: repo.repo,
+        issue_number: number,
+        body,
+      });
+      const comment = result?.data;
+      if (!comment) {
+        return res.status(500).json({ error: 'GitHub returned an error while creating the comment' });
+      }
+
+      invalidatePrContextCache(directory, number);
+
+      return res.json({
+        connected: true,
+        repo,
+        comment: {
+          id: comment.id,
+          url: comment.html_url,
+          body: comment.body || '',
+          createdAt: comment.created_at,
+          updatedAt: comment.updated_at,
+          author: comment.user ? { login: comment.user.login, id: comment.user.id, avatarUrl: comment.user.avatar_url } : null,
+        },
+      });
+    } catch (error) {
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false });
+      }
+      console.error('Failed to create GitHub PR comment:', error);
+      return res.status(500).json({ error: 'GitHub returned an error' });
+    }
+  });
+
+  app.post('/api/github/pulls/review-comment', async (req, res) => {
+    try {
+      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+      const inReplyToId = typeof req.body?.inReplyToId === 'number' ? req.body.inReplyToId : undefined;
+      if (!directory || !number || !body) {
+        return res.status(400).json({ error: 'directory, number, body are required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, comment: null });
+      }
+
+      const createParams = {
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: number,
+        body,
+      };
+      if (inReplyToId !== undefined) {
+        createParams.in_reply_to_id = inReplyToId;
+      } else {
+        // New inline comment: requires a path/line anchor and the PR head commit.
+        const path = typeof req.body?.path === 'string' ? req.body.path.trim() : '';
+        const line = typeof req.body?.line === 'number' ? req.body.line : null;
+        if (!path || !line) {
+          return res.status(400).json({ error: 'path and line are required for a new review comment' });
+        }
+        const prResp = await octokit.rest.pulls.get({ owner: repo.owner, repo: repo.repo, pull_number: number });
+        const headSha = prResp?.data?.head?.sha;
+        if (!headSha) {
+          return res.status(500).json({ error: 'GitHub returned an error while resolving the PR head commit' });
+        }
+        createParams.commit_id = headSha;
+        createParams.path = path;
+        createParams.line = line;
+      }
+
+      const result = await octokit.rest.pulls.createReviewComment(createParams);
+      const comment = result?.data;
+      if (!comment) {
+        return res.status(500).json({ error: 'GitHub returned an error while creating the review comment' });
+      }
+
+      invalidatePrContextCache(directory, number);
+
+      return res.json({
+        connected: true,
+        repo,
+        comment: {
+          id: comment.id,
+          url: comment.html_url,
+          body: comment.body || '',
+          createdAt: comment.created_at,
+          updatedAt: comment.updated_at,
+          path: comment.path,
+          line: typeof comment.line === 'number' ? comment.line : null,
+          position: typeof comment.position === 'number' ? comment.position : null,
+          author: comment.user ? { login: comment.user.login, id: comment.user.id, avatarUrl: comment.user.avatar_url } : null,
+        },
+      });
+    } catch (error) {
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false });
+      }
+      console.error('Failed to create GitHub review comment:', error);
+      return res.status(500).json({ error: 'GitHub returned an error' });
+    }
+  });
+
+  app.post('/api/github/pulls/review', async (req, res) => {
+    try {
+      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      const event = typeof req.body?.event === 'string' ? req.body.event : '';
+      const body = typeof req.body?.body === 'string' ? req.body.body : undefined;
+      if (!directory || !number || !event) {
+        return res.status(400).json({ error: 'directory, number, event are required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, review: null });
+      }
+
+      const result = await octokit.rest.pulls.createReview({
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: number,
+        event,
+        ...(typeof body === 'string' ? { body } : {}),
+      });
+      const review = result?.data;
+      if (!review) {
+        return res.status(500).json({ error: 'GitHub returned an error while submitting the review' });
+      }
+
+      invalidatePrContextCache(directory, number);
+
+      return res.json({
+        connected: true,
+        repo,
+        review: {
+          id: String(review.id),
+          state: typeof review.state === 'string' ? review.state : '',
+          author: mapGitHubUserSummary(review.user),
+          submittedAt: review.submitted_at,
+          body: typeof review.body === 'string' ? review.body : null,
+          commitSha: typeof review.commit_id === 'string' ? review.commit_id : null,
+        },
+      });
+    } catch (error) {
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false });
+      }
+      console.error('Failed to submit GitHub review:', error);
+      return res.status(500).json({ error: 'GitHub returned an error' });
     }
   });
 
@@ -1450,6 +1725,182 @@ export function registerGitHubRoutes(app) {
     } catch (error) {
       console.error('Failed to fetch GitHub issue comments:', error);
       return res.status(500).json({ error: error.message || 'Failed to fetch GitHub issue comments' });
+    }
+  });
+
+  app.post('/api/github/issues/comment', async (req, res) => {
+    try {
+      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+      if (!directory || !number || !body) {
+        return res.status(400).json({ error: 'directory, number, body are required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, comment: null });
+      }
+
+      const result = await octokit.rest.issues.createComment({
+        owner: repo.owner,
+        repo: repo.repo,
+        issue_number: number,
+        body,
+      });
+      const comment = result?.data;
+      if (!comment) {
+        return res.status(500).json({ error: 'GitHub returned an error while creating the comment' });
+      }
+
+      return res.json({
+        connected: true,
+        repo,
+        comment: {
+          id: comment.id,
+          url: comment.html_url,
+          body: comment.body || '',
+          createdAt: comment.created_at,
+          updatedAt: comment.updated_at,
+          author: comment.user ? { login: comment.user.login, id: comment.user.id, avatarUrl: comment.user.avatar_url } : null,
+        },
+      });
+    } catch (error) {
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false });
+      }
+      console.error('Failed to create GitHub issue comment:', error);
+      return res.status(500).json({ error: 'GitHub returned an error' });
+    }
+  });
+
+  app.patch('/api/github/issues/update', async (req, res) => {
+    try {
+      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      if (!directory || !number) {
+        return res.status(400).json({ error: 'directory and number are required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, issue: null });
+      }
+
+      const params = {
+        owner: repo.owner,
+        repo: repo.repo,
+        issue_number: number,
+      };
+      if (typeof req.body?.title === 'string') {
+        params.title = req.body.title.trim();
+      }
+      if (typeof req.body?.body === 'string') {
+        params.body = req.body.body;
+      }
+      if (req.body?.state === 'open' || req.body?.state === 'closed') {
+        params.state = req.body.state;
+      }
+      if (Array.isArray(req.body?.labels)) {
+        params.labels = req.body.labels;
+      }
+      if (Array.isArray(req.body?.assignees)) {
+        params.assignees = req.body.assignees;
+      }
+      if (req.body?.milestone !== undefined) {
+        if (req.body.milestone === null) {
+          params.milestone = null;
+        } else if (typeof req.body.milestone === 'string' && req.body.milestone.trim()) {
+          // issues.update accepts the milestone number, not the title — resolve it.
+          const milestoneTitle = req.body.milestone.trim();
+          const milestones = await octokit.rest.issues.listMilestonesForRepo({
+            owner: repo.owner,
+            repo: repo.repo,
+            state: 'all',
+            per_page: 100,
+          });
+          const milestone = (Array.isArray(milestones?.data) ? milestones.data : []).find(
+            (item) => typeof item?.title === 'string' && item.title.toLowerCase() === milestoneTitle.toLowerCase()
+          );
+          if (!milestone) {
+            return res.status(400).json({ error: 'Milestone not found' });
+          }
+          params.milestone = milestone.number;
+        }
+      }
+
+      const result = await octokit.rest.issues.update(params);
+      const issue = result?.data;
+      if (!issue) {
+        return res.status(500).json({ error: 'GitHub returned an error while updating the issue' });
+      }
+
+      return res.json({
+        connected: true,
+        repo,
+        issue: {
+          number: issue.number,
+          title: issue.title,
+          url: issue.html_url,
+          state: issue.state === 'closed' ? 'closed' : 'open',
+          body: issue.body || '',
+          createdAt: issue.created_at,
+          updatedAt: issue.updated_at,
+          author: issue.user ? { login: issue.user.login, id: issue.user.id, avatarUrl: issue.user.avatar_url } : null,
+          assignees: Array.isArray(issue.assignees)
+            ? issue.assignees
+                .map((u) => (u ? { login: u.login, id: u.id, avatarUrl: u.avatar_url } : null))
+                .filter(Boolean)
+            : [],
+          labels: Array.isArray(issue.labels)
+            ? issue.labels
+                .map((label) => {
+                  if (typeof label === 'string') return null;
+                  const name = typeof label?.name === 'string' ? label.name : '';
+                  if (!name) return null;
+                  return { name, color: typeof label?.color === 'string' ? label.color : undefined };
+                })
+                .filter(Boolean)
+            : [],
+          milestone: issue.milestone && typeof issue.milestone === 'object'
+            ? {
+                title: typeof issue.milestone.title === 'string' ? issue.milestone.title : '',
+                ...(typeof issue.milestone.state === 'string' ? { state: issue.milestone.state } : {}),
+              }
+            : null,
+          commentsCount: typeof issue.comments === 'number' ? issue.comments : undefined,
+        },
+      });
+    } catch (error) {
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false });
+      }
+      console.error('Failed to update GitHub issue:', error);
+      return res.status(500).json({ error: 'GitHub returned an error' });
     }
   });
 

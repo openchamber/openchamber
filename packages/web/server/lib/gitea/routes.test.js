@@ -1046,6 +1046,301 @@ describe('Gitea data routes', () => {
     expect(statuses.body).toMatchObject({ connected: false, statuses: [] });
   });
 
+  test('issues/comment POSTs a comment and maps it', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/issues\/7\/comments$/)(url) && options.method === 'POST') {
+          return jsonResponse({
+            id: 5,
+            body: 'Nice catch',
+            html_url: 'https://gitea.example.com/owner/repo/issues/7#issuecomment-5',
+            user: { id: 42, login: 'alice', full_name: 'Alice Example' },
+            created_at: '2026-01-02T11:00:00Z',
+          }, { status: 201 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitea/issues/comment')
+      .send({ directory: '/tmp/work', number: 7, body: 'Nice catch' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      repo: { owner: 'owner', repo: 'repo', host: 'gitea.example.com' },
+      comment: {
+        id: 5,
+        body: 'Nice catch',
+        url: 'https://gitea.example.com/owner/repo/issues/7#issuecomment-5',
+        author: { username: 'alice', id: 42 },
+        createdAt: '2026-01-02T11:00:00Z',
+      },
+    });
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ body: 'Nice catch' });
+  });
+
+  test('issues/comment reports connected:false when not authenticated', async () => {
+    clearGiteaAuth();
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitea/issues/comment')
+      .send({ directory: '/tmp/work', number: 7, body: 'hello' });
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ connected: false });
+  });
+
+  test('issues/update maps labels, assignees, state, and resolves the milestone title', async () => {
+    const fetchMock = scriptedFetch([
+      (url) => (matches(/\/milestones\?/)(url)
+        ? jsonResponse([{ id: 33, title: 'v1.0', state: 'open' }])
+        : null),
+      (url, options) => {
+        if (matches(/\/issues\/7$/)(url) && options.method === 'PATCH') {
+          return jsonResponse({
+            number: 7,
+            title: 'Updated issue',
+            html_url: 'https://gitea.example.com/owner/repo/issues/7',
+            state: 'closed',
+            body: 'New body',
+            user: { id: 42, login: 'alice' },
+            labels: [{ id: 1, name: 'bug' }],
+            assignees: [{ id: 43, login: 'bob' }],
+            milestone: { id: 33, title: 'v1.0', state: 'open' },
+          });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .patch('/api/gitea/issues/update')
+      .send({
+        directory: '/tmp/work',
+        number: 7,
+        title: 'Updated issue',
+        body: 'New body',
+        state: 'closed',
+        labels: ['bug'],
+        assignees: ['bob'],
+        milestone: 'v1.0',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      issue: {
+        number: 7,
+        title: 'Updated issue',
+        state: 'closed',
+        body: 'New body',
+        labels: ['bug'],
+        assignees: [{ username: 'bob', id: 43 }],
+        milestone: { title: 'v1.0', state: 'open' },
+      },
+    });
+    const [, options] = fetchMock.mock.calls[1];
+    expect(options.method).toBe('PATCH');
+    expect(JSON.parse(options.body)).toEqual({
+      title: 'Updated issue',
+      body: 'New body',
+      state: 'closed',
+      labels: ['bug'],
+      assignees: ['bob'],
+      milestone: 33,
+    });
+  });
+
+  test('issues/update clears the milestone with unset_milestone', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/issues\/7$/)(url) && options.method === 'PATCH') {
+          return jsonResponse({ number: 7, title: 'T', html_url: 'u', state: 'open', user: { login: 'alice' } });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    await request(app)
+      .patch('/api/gitea/issues/update')
+      .send({ directory: '/tmp/work', number: 7, milestone: null });
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({ unset_milestone: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('issues/update returns 400 when the milestone title does not match', async () => {
+    scriptedFetch([
+      (url) => (matches(/\/milestones\?/)(url)
+        ? jsonResponse([{ id: 33, title: 'v1.0' }])
+        : null),
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .patch('/api/gitea/issues/update')
+      .send({ directory: '/tmp/work', number: 7, milestone: 'v2.0' });
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Milestone not found' });
+  });
+
+  test('prs/comment POSTs a comment on the PR index and maps it', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/issues\/12\/comments$/)(url) && options.method === 'POST') {
+          return jsonResponse({
+            id: 8,
+            body: 'LGTM',
+            html_url: 'https://gitea.example.com/owner/repo/pulls/12#issuecomment-8',
+            user: { id: 43, login: 'bob' },
+          }, { status: 201 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitea/prs/comment')
+      .send({ directory: '/tmp/work', number: 12, body: 'LGTM' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      comment: {
+        id: 8,
+        body: 'LGTM',
+        url: 'https://gitea.example.com/owner/repo/pulls/12#issuecomment-8',
+        author: { username: 'bob', id: 43 },
+      },
+    });
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ body: 'LGTM' });
+  });
+
+  test('prs/review POSTs event/body and maps the review', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/pulls\/12\/reviews$/)(url) && options.method === 'POST') {
+          return jsonResponse({
+            id: 101,
+            state: 'APPROVED',
+            user: { id: 42, login: 'alice', full_name: 'Alice Example' },
+            submitted_at: '2026-01-02T11:00:00Z',
+            body: 'LGTM',
+            commit_id: 'abc123def4567890',
+          }, { status: 201 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitea/prs/review')
+      .send({ directory: '/tmp/work', number: 12, event: 'APPROVED', body: 'LGTM' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      review: {
+        id: '101',
+        state: 'APPROVED',
+        author: { username: 'alice', id: 42 },
+        submittedAt: '2026-01-02T11:00:00Z',
+        body: 'LGTM',
+        commitSha: 'abc123def4567890',
+      },
+    });
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ event: 'APPROVED', body: 'LGTM' });
+  });
+
+  test('prs/review rejects an unsupported event with 400', async () => {
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitea/prs/review')
+      .send({ directory: '/tmp/work', number: 12, event: 'PENDING' });
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'event must be APPROVED, REQUEST_CHANGES, or COMMENT' });
+  });
+
+  test('repo/labels returns mapped labels', async () => {
+    scriptedFetch([
+      (url) => (matches(/\/labels\?/)(url)
+        ? jsonResponse([
+          { id: 1, name: 'bug', color: 'd73a4a', description: 'A bug' },
+          { id: 2, name: 'enhancement', color: 'a2eeef' },
+        ])
+        : null),
+    ]);
+
+    const app = createApp();
+    const response = await request(app).get('/api/gitea/repo/labels?directory=%2Ftmp%2Fwork');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      repo: { owner: 'owner', repo: 'repo', host: 'gitea.example.com' },
+      labels: [
+        { id: 1, name: 'bug', color: 'd73a4a', description: 'A bug' },
+        { id: 2, name: 'enhancement', color: 'a2eeef' },
+      ],
+    });
+  });
+
+  test('repo/labels requires directory or owner/repo', async () => {
+    const app = createApp();
+    const response = await request(app).get('/api/gitea/repo/labels');
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'directory or owner/repo is required' });
+  });
+
+  test('pr/update passes state through to the PATCH payload', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/pulls\/12$/)(url) && options.method === 'PATCH') {
+          return jsonResponse({
+            number: 12,
+            title: 'T',
+            html_url: 'u',
+            state: 'closed',
+            merged: false,
+            draft: false,
+            user: { login: 'alice' },
+            head: { ref: 'feat/add' },
+            base: { ref: 'main' },
+          });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .patch('/api/gitea/pr/update')
+      .send({ directory: '/tmp/work', number: 12, state: 'closed' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      pr: { number: 12, state: 'closed' },
+    });
+    const [, options] = fetchMock.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({ state: 'closed' });
+  });
+
+  // NOTE: keep this test last in the file. The rate-limit cooldown is
+  // module-level and has no reset export, so tests after it would short-circuit.
   test('data routes surface a 503 when Gitea rate limits', async () => {
     scriptedFetch([(url) => (matches(/\/issues\?/)(url) ? jsonResponse({}, { status: 429, headers: { 'retry-after': '30' } }) : null)]);
 

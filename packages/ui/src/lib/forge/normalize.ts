@@ -27,6 +27,7 @@ import type {
   GitHubIssueSummary,
   GitHubPullRequestCommit,
   GitHubPullRequestContextResult,
+  GitHubPullRequestReview,
   GitHubPullRequestSummary,
   GitHubTimelineEvent,
   GitHubUserSummary,
@@ -52,6 +53,7 @@ import type {
   ForgeIssue,
   ForgePullRequest,
   ForgeRepoRef,
+  ForgeReview,
   ForgeTimelineEvent,
   ForgeTimelineEventType,
   ForgeUser,
@@ -281,6 +283,61 @@ export const mapGiteaComment = (comment: GiteaComment): ForgeComment => ({
   author: mapGiteaUser(comment.author),
   createdAt: comment.createdAt,
   url: comment.url,
+});
+
+/**
+ * GitHub review-comment replies carry the same wire shape as review comments,
+ * so the reply maps through the review-comment projection. Kept as a distinct
+ * export so the adapter's reply path is self-documenting.
+ */
+export const mapGithubReviewCommentReply = (comment: GithubReviewComment): ForgeComment => ({
+  ...mapGithubReviewComment(comment),
+});
+
+// ---------------------------------------------------------------------------
+// Reviews
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a provider review state onto the normalized vocabulary. GitHub uses
+ * 'CHANGES_REQUESTED' where Gitea uses 'REQUEST_CHANGES'; both collapse to
+ * 'requested-changes'. Anything unrecognized collapses to 'pending' so an
+ * unknown marker never renders as a completed review.
+ */
+export const mapReviewState = (state: string): ForgeReview['state'] => {
+  switch (state.toLowerCase()) {
+    case 'approved':
+      return 'approved';
+    case 'changes_requested':
+    case 'request_changes':
+    case 'requested-changes':
+      return 'requested-changes';
+    case 'commented':
+    case 'comment':
+      return 'commented';
+    case 'dismissed':
+      return 'dismissed';
+    default:
+      return 'pending';
+  }
+};
+
+export const mapGithubReview = (review: GitHubPullRequestReview): ForgeReview => ({
+  id: review.id,
+  state: mapReviewState(review.state),
+  author: review.author ? mapGithubUser(review.author) : undefined,
+  submittedAt: review.submittedAt,
+  body: review.body ?? undefined,
+  commitSha: review.commitSha ?? undefined,
+});
+
+export const mapGiteaReview = (review: GiteaReview): ForgeReview => ({
+  id: review.id,
+  state: mapReviewState(review.state),
+  author: review.author ? mapGiteaUser(review.author) : undefined,
+  submittedAt: review.submittedAt,
+  body: review.body ?? undefined,
+  commitSha: review.commitSha ?? undefined,
 });
 
 // ---------------------------------------------------------------------------

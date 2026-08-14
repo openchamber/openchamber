@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Icon } from '@/components/icon/Icon';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useI18n } from '@/lib/i18n';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
@@ -13,6 +14,10 @@ interface ForgeTimelineSectionProps {
   comments: ForgeComment[];
   loading?: boolean;
   error?: string | null;
+  /** Optional: asked when the user hits Reply on an inline-comment thread (its root comment). */
+  onReply?: (comment: ForgeComment) => void;
+  /** Optional: rendered under a thread card the parent is replying to. */
+  renderReply?: (comment: ForgeComment) => React.ReactNode;
 }
 
 const EVENT_ICONS: Record<ForgeTimelineEventType, IconName> = {
@@ -83,7 +88,7 @@ type TimelineItem =
  * by `inReplyToId` chains or (path, line) buckets; a thread renders as one
  * card with its comments stacked. Pure presentation.
  */
-export const ForgeTimelineSection = React.memo<ForgeTimelineSectionProps>(function ForgeTimelineSection({ events, comments, loading, error }) {
+export const ForgeTimelineSection = React.memo<ForgeTimelineSectionProps>(function ForgeTimelineSection({ events, comments, loading, error, onReply, renderReply }) {
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
 
@@ -252,6 +257,19 @@ export const ForgeTimelineSection = React.memo<ForgeTimelineSectionProps>(functi
                     </div>
                   ))}
                 </div>
+                {root.path && onReply ? (
+                  <div className="flex items-center gap-1.5 pt-2">
+                    <Button
+                      variant="link"
+                      size="xs"
+                      onClick={() => onReply(root)}
+                      aria-label={t('forge.actions.reply')}
+                    >
+                      {t('forge.actions.reply')}
+                    </Button>
+                  </div>
+                ) : null}
+                {renderReply ? renderReply(root) : null}
               </div>
             </div>
           );

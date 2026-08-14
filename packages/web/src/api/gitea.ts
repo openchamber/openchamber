@@ -2,9 +2,13 @@ import type {
   GiteaAPI,
   GiteaAuthStatus,
   GiteaBranchesResult,
+  GiteaIssueCommentInput,
+  GiteaIssueCommentResult,
   GiteaIssueCommentsResult,
   GiteaIssueGetResult,
   GiteaIssuesListResult,
+  GiteaIssueUpdateInput,
+  GiteaIssueUpdateResult,
   GiteaPullRequest,
   GiteaPullRequestCommitsResult,
   GiteaPullRequestContextResult,
@@ -15,6 +19,9 @@ import type {
   GiteaPullRequestsListResult,
   GiteaPullRequestStatusesResult,
   GiteaPullRequestUpdateInput,
+  GiteaPullReviewInput,
+  GiteaPullReviewResult,
+  GiteaRepoLabelsResult,
   GiteaUserSummary,
 } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
@@ -285,6 +292,77 @@ export const createWebGiteaAPI = ({ urls }: WebGiteaAPIOptions): GiteaAPI => ({
       merged: Boolean(payload.merged),
       ...(payload.message ? { message: payload.message } : {}),
     };
+  },
+
+  async issueComment(input: GiteaIssueCommentInput): Promise<GiteaIssueCommentResult> {
+    const response = await runtimeFetch('/api/gitea/issues/comment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GiteaIssueCommentResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to post Gitea issue comment');
+    }
+    return body;
+  },
+
+  async issueUpdate(input: GiteaIssueUpdateInput): Promise<GiteaIssueUpdateResult> {
+    const response = await runtimeFetch('/api/gitea/issues/update', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GiteaIssueUpdateResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to update Gitea issue');
+    }
+    return body;
+  },
+
+  async prComment(input: GiteaIssueCommentInput): Promise<GiteaIssueCommentResult> {
+    const response = await runtimeFetch('/api/gitea/prs/comment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GiteaIssueCommentResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to post Gitea pull request comment');
+    }
+    return body;
+  },
+
+  async prSubmitReview(input: GiteaPullReviewInput): Promise<GiteaPullReviewResult> {
+    const response = await runtimeFetch('/api/gitea/prs/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GiteaPullReviewResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to submit Gitea pull request review');
+    }
+    return body;
+  },
+
+  async repoLabels(directory: string, options?: { owner?: string; repo?: string }): Promise<GiteaRepoLabelsResult> {
+    const params = new URLSearchParams({ directory });
+    if (options?.owner) {
+      params.set('owner', options.owner);
+    }
+    if (options?.repo) {
+      params.set('repo', options.repo);
+    }
+    const response = await runtimeFetch(
+      `/api/gitea/repo/labels?${params.toString()}`,
+      { method: 'GET', headers: { Accept: 'application/json' } }
+    );
+    const body = await jsonOrNull<GiteaRepoLabelsResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to fetch Gitea repo labels');
+    }
+    return body;
   },
 
   async repoBranches(owner: string, repo: string): Promise<GiteaBranchesResult> {

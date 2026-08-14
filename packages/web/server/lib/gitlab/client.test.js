@@ -273,6 +273,71 @@ describe('merge request write methods', () => {
   });
 });
 
+describe('issue and review write methods', () => {
+  test('createIssueNote POSTs a body to the issue notes endpoint', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: 5, body: 'hi' }, { status: 201 }));
+    globalThis.fetch = fetchMock;
+
+    const client = createGitLabClient({ token: 't', baseUrl: 'https://gitlab.com' });
+    const result = await client.createIssueNote('group/sub', 7, 'Nice catch');
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitlab.com/api/v4/projects/group%2Fsub/issues/7/notes');
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ body: 'Nice catch' });
+    expect(result.status).toBe(201);
+  });
+
+  test('createMrNote POSTs a body to the MR notes endpoint', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: 8, body: 'LGTM' }, { status: 201 }));
+    globalThis.fetch = fetchMock;
+
+    const client = createGitLabClient({ token: 't', baseUrl: 'https://gitlab.com' });
+    await client.createMrNote('group/sub', 12, 'LGTM');
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitlab.com/api/v4/projects/group%2Fsub/merge_requests/12/notes');
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ body: 'LGTM' });
+  });
+
+  test('updateIssue PUTs params to the issue endpoint', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ iid: 7, title: 'Updated' }));
+    globalThis.fetch = fetchMock;
+
+    const client = createGitLabClient({ token: 't', baseUrl: 'https://gitlab.com' });
+    await client.updateIssue('group/sub', 7, { state_event: 'close', labels: ['bug'], milestone_id: 33 });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitlab.com/api/v4/projects/group%2Fsub/issues/7');
+    expect(options.method).toBe('PUT');
+    expect(JSON.parse(options.body)).toEqual({ state_event: 'close', labels: ['bug'], milestone_id: 33 });
+  });
+
+  test('approveMr POSTs to the approve endpoint', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ id: 1, state: 'approved' }));
+    globalThis.fetch = fetchMock;
+
+    const client = createGitLabClient({ token: 't', baseUrl: 'https://gitlab.com' });
+    await client.approveMr('group/sub', 12);
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitlab.com/api/v4/projects/group%2Fsub/merge_requests/12/approve');
+    expect(options.method).toBe('POST');
+  });
+
+  test('milestones GETs the project milestones list', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse([{ id: 33, title: 'v1.0' }]));
+    globalThis.fetch = fetchMock;
+
+    const client = createGitLabClient({ token: 't', baseUrl: 'https://gitlab.com' });
+    await client.milestones('group/sub', { state: 'all', per_page: 100 });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://gitlab.com/api/v4/projects/group%2Fsub/milestones?state=all&per_page=100');
+  });
+});
+
 describe('rate limiting', () => {
   // NOTE: these tests run last in this file. The rate-limit cooldown is
   // module-level and has no reset export, so earlier tests must not set one.

@@ -67,6 +67,17 @@
 - `GET /api/github/pulls/timeline?directory&number&owner&repo` -> `{ connected, repo?, events[] }` (via `octokit.rest.issues.listEventsForTimeline`, each event `{ id, type, author, createdAt, body, commitSha }` with the event name lowercased).
 - Both follow the `issues/comments` envelope pattern: unauthenticated -> `connected: false`, unresolvable repo -> `repo: null` with an empty list, `429` -> `503 { error: 'GitHub rate limited' }`, other provider `4xx` -> `502`.
 
+## Write APIs
+
+All write routes accept an optional `owner`/`repo` in the body to target a fork-network repo; otherwise the repo is resolved from `directory`. Unauthenticated -> `{ connected: false }`; `429` -> `503 { error: 'GitHub rate limited' }`; generic failures -> `500` with a generic error (raw upstream text is never leaked).
+
+- `POST /api/github/issues/comment` — body `{ directory, number, body, owner?, repo? }` -> `{ connected, repo?, comment? }` (via `octokit.rest.issues.createComment`, mapped to `GitHubIssueComment`).
+- `PATCH /api/github/issues/update` — body `{ directory, number, title?, body?, state?, labels?, assignees?, milestone?, owner?, repo? }` -> `{ connected, repo?, issue? }` (via `octokit.rest.issues.update`; `labels`/`assignees` replace the full set, `milestone` is a title resolved to a milestone number — `400 { error: 'Milestone not found' }` when it matches nothing, `null` clears it). Also works for pull requests (PRs are issues), so it serves PR metadata/state changes too.
+- `POST /api/github/pulls/comment` — same input/result shape as `issues/comment`; posts to the PR's issue thread via `octokit.rest.issues.createComment`. Invalidates the PR context cache.
+- `POST /api/github/pulls/review-comment` — body `{ directory, number, body, inReplyToId?, path?, line?, owner?, repo? }` -> `{ connected, repo?, comment? }` (via `octokit.rest.pulls.createReviewComment`). With `inReplyToId` it is a reply; otherwise `path` + `line` are required and the PR head commit is resolved first. Invalidates the PR context cache.
+- `POST /api/github/pulls/review` — body `{ directory, number, event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT', body?, owner?, repo? }` -> `{ connected, repo?, review? }` (via `octokit.rest.pulls.createReview`, mapped to `{ id, state, author, submittedAt, body, commitSha }`). Invalidates the PR context cache.
+- `POST /api/github/pr/update` — existing route extended with optional `state`, `draft`, `labels`, `assignees`, `milestone`. When any extended field is present it branches to `octokit.rest.issues.update` (milestone title -> number; `draft` applied separately via `octokit.rest.pulls.update`); title/body-only updates keep using `pulls.update`. Invalidates the PR context cache and the repo pulls cache.
+
 ## Consumers of PR data
 
 - `packages/ui/src/components/session/SessionSidebar.tsx` reads all PR entries and maps them to `directory::branch`.

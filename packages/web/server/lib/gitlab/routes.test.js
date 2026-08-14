@@ -896,6 +896,332 @@ describe('GitLab data routes', () => {
     expect(timeline.body).toMatchObject({ connected: false, events: [] });
   });
 
+  test('issues/comment POSTs a note and links it to the issue URL', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/issues\/7$/)(url) && (!options.method || options.method === 'GET')) {
+          return jsonResponse({ iid: 7, web_url: 'https://gitlab.com/group/sub/-/issues/7' });
+        }
+        if (matches(/\/issues\/7\/notes$/)(url) && options.method === 'POST') {
+          return jsonResponse({ id: 5, body: 'Nice catch', author: { id: 42, username: 'alice', name: 'Alice Example' } }, { status: 201 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/issues/comment')
+      .send({ directory: '/tmp/work', number: 7, body: 'Nice catch' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      repo: { namespace: 'group', project: 'sub', host: 'gitlab.com' },
+      comment: {
+        id: 5,
+        url: 'https://gitlab.com/group/sub/-/issues/7#note_5',
+        body: 'Nice catch',
+        author: { username: 'alice', name: 'Alice Example', id: 42 },
+      },
+    });
+    const [, options] = fetchMock.mock.calls[1];
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ body: 'Nice catch' });
+  });
+
+  test('issues/comment reports connected:false when not authenticated', async () => {
+    clearGitLabAuth();
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/issues/comment')
+      .send({ directory: '/tmp/work', number: 7, body: 'hello' });
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ connected: false });
+  });
+
+  test('issues/comment surfaces a 403 as an api-scope error', async () => {
+    scriptedFetch([
+      (url, options) => {
+        if (matches(/\/issues\/7$/)(url)) {
+          return jsonResponse({ iid: 7, web_url: 'https://gitlab.com/group/sub/-/issues/7' });
+        }
+        if (matches(/\/issues\/7\/notes$/)(url) && options.method === 'POST') {
+          return jsonResponse({ message: '403 Forbidden' }, { status: 403 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/issues/comment')
+      .send({ directory: '/tmp/work', number: 7, body: 'hello' });
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Your GitLab token needs the api scope to create issue comments' });
+  });
+
+  test('issues/update maps state_event, labels, assignee_ids, and resolves the milestone title', async () => {
+    const fetchMock = scriptedFetch([
+      (url) => (matches(/\/milestones\?/)(url)
+        ? jsonResponse([{ id: 33, title: 'v1.0', state: 'active' }])
+        : null),
+      (url, options) => {
+        if (matches(/\/issues\/7$/)(url) && options.method === 'PUT') {
+          return jsonResponse({
+            iid: 7,
+            title: 'Updated issue',
+            web_url: 'https://gitlab.com/group/sub/-/issues/7',
+            state: 'closed',
+            description: 'New body',
+            author: { id: 42, username: 'alice', name: 'Alice Example' },
+            labels: ['bug'],
+            assignees: [{ id: 43, username: 'bob' }],
+            milestone: { id: 33, title: 'v1.0', state: 'active' },
+          });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .put('/api/gitlab/issues/update')
+      .send({
+        directory: '/tmp/work',
+        number: 7,
+        title: 'Updated issue',
+        body: 'New body',
+        state: 'closed',
+        labels: ['bug'],
+        assigneeIds: [43],
+        milestone: 'v1.0',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      issue: {
+        number: 7,
+        title: 'Updated issue',
+        state: 'closed',
+        body: 'New body',
+        labels: ['bug'],
+        assignees: [{ username: 'bob', id: 43 }],
+        milestone: { title: 'v1.0', state: 'active' },
+      },
+    });
+    const [, options] = fetchMock.mock.calls[1];
+    expect(options.method).toBe('PUT');
+    expect(JSON.parse(options.body)).toEqual({
+      title: 'Updated issue',
+      description: 'New body',
+      state_event: 'close',
+      labels: ['bug'],
+      assignee_ids: [43],
+      milestone_id: 33,
+    });
+  });
+
+  test('issues/update maps state open to state_event reopen', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/issues\/7$/)(url) && options.method === 'PUT') {
+          return jsonResponse({ iid: 7, title: 'T', web_url: 'u', state: 'opened', author: {} });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    await request(app)
+      .put('/api/gitlab/issues/update')
+      .send({ directory: '/tmp/work', number: 7, state: 'open' });
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({ state_event: 'reopen' });
+  });
+
+  test('issues/update clears the milestone when null is sent', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/issues\/7$/)(url) && options.method === 'PUT') {
+          return jsonResponse({ iid: 7, title: 'T', web_url: 'u', state: 'opened', author: {} });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    await request(app)
+      .put('/api/gitlab/issues/update')
+      .send({ directory: '/tmp/work', number: 7, milestone: null });
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({ milestone_id: null });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('issues/update returns 400 when the milestone title does not match', async () => {
+    scriptedFetch([
+      (url) => (matches(/\/milestones\?/)(url)
+        ? jsonResponse([{ id: 33, title: 'v1.0' }])
+        : null),
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .put('/api/gitlab/issues/update')
+      .send({ directory: '/tmp/work', number: 7, milestone: 'v2.0' });
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Milestone not found' });
+  });
+
+  test('mrs/comment POSTs an MR note and links it to the MR URL', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests\/12$/)(url) && (!options.method || options.method === 'GET')) {
+          return jsonResponse({ iid: 12, web_url: 'https://gitlab.com/group/sub/-/merge_requests/12' });
+        }
+        if (matches(/\/merge_requests\/12\/notes$/)(url) && options.method === 'POST') {
+          return jsonResponse({ id: 8, body: 'LGTM', author: { id: 43, username: 'bob' } }, { status: 201 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/mrs/comment')
+      .send({ directory: '/tmp/work', number: 12, body: 'LGTM' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      comment: {
+        id: 8,
+        url: 'https://gitlab.com/group/sub/-/merge_requests/12#note_8',
+        body: 'LGTM',
+        author: { username: 'bob', id: 43 },
+      },
+    });
+    const [, options] = fetchMock.mock.calls[1];
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ body: 'LGTM' });
+  });
+
+  test('mrs/approve POSTs the approve request and reports approved:true', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests\/12\/approve$/)(url) && options.method === 'POST') {
+          return jsonResponse({ id: 1, state: 'approved' });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/mrs/approve')
+      .send({ directory: '/tmp/work', number: 12 });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      repo: { namespace: 'group', project: 'sub', host: 'gitlab.com' },
+      approved: true,
+    });
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.method).toBe('POST');
+  });
+
+  test('mrs/approve returns 404 for a missing merge request', async () => {
+    scriptedFetch([
+      (url, options) => {
+        if (matches(/\/merge_requests\/999\/approve$/)(url) && options.method === 'POST') {
+          return jsonResponse({ message: '404 Not Found' }, { status: 404 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/mrs/approve')
+      .send({ directory: '/tmp/work', number: 999 });
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'Merge request not found' });
+  });
+
+  test('mrs/update maps state, labels, assignee_ids, and resolves the milestone title', async () => {
+    const fetchMock = scriptedFetch([
+      (url) => (matches(/\/milestones\?/)(url)
+        ? jsonResponse([{ id: 33, title: 'v1.0', state: 'active' }])
+        : null),
+      (url, options) => {
+        if (matches(/\/merge_requests\/12$/)(url) && options.method === 'PUT') {
+          return jsonResponse({
+            iid: 12,
+            title: 'Updated title',
+            web_url: 'https://gitlab.com/group/sub/-/merge_requests/12',
+            state: 'opened',
+            draft: false,
+            work_in_progress: false,
+            author: { id: 42, username: 'alice', name: 'Alice Example', avatar_url: 'https://gitlab.com/alice.png' },
+            source_branch: 'feat/add',
+            target_branch: 'main',
+          });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .put('/api/gitlab/mrs/update')
+      .send({
+        directory: '/tmp/work',
+        number: 12,
+        title: 'Updated title',
+        state: 'open',
+        labels: ['ready'],
+        assigneeIds: [43],
+        milestone: 'v1.0',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      mr: { number: 12, title: 'Updated title', state: 'opened' },
+    });
+    const [, options] = fetchMock.mock.calls[1];
+    expect(options.method).toBe('PUT');
+    expect(JSON.parse(options.body)).toEqual({
+      title: 'Updated title',
+      state_event: 'reopen',
+      labels: ['ready'],
+      assignee_ids: [43],
+      milestone_id: 33,
+    });
+  });
+
+  test('mrs/update returns 400 when the milestone title does not match', async () => {
+    scriptedFetch([
+      (url) => (matches(/\/milestones\?/)(url)
+        ? jsonResponse([{ id: 33, title: 'v1.0' }])
+        : null),
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .put('/api/gitlab/mrs/update')
+      .send({ directory: '/tmp/work', number: 12, milestone: 'nope' });
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Milestone not found' });
+  });
+
+  // NOTE: keep this test last in the file. The rate-limit cooldown is
+  // module-level and has no reset export, so tests after it would short-circuit.
   test('data routes surface a 503 when GitLab rate limits', async () => {
     scriptedFetch([(url) => (matches(/\/issues\?/)(url) ? jsonResponse({}, { status: 429, headers: { 'retry-after': '30' } }) : null)]);
 

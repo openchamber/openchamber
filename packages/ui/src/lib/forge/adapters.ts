@@ -12,7 +12,9 @@
 
 import type {
   GiteaAPI,
+  GiteaPullReviewInput,
   GitHubAPI,
+  GitHubPullRequestReviewEvent,
   GitHubRepoSelector,
   GitLabAPI,
 } from '@/lib/api/types';
@@ -24,7 +26,9 @@ import type {
   ForgeProvider,
   ForgePullRequestContext,
   ForgePullRequestsResult,
+  ForgeReviewEvent,
   ForgeTimelineResult,
+  ForgeUpdateResult,
 } from './provider';
 import type { ForgeProviderCapabilities, ForgeProviderKind } from './types';
 import {
@@ -35,6 +39,7 @@ import {
   mapGiteaPr,
   mapGiteaRepoRef,
   mapGiteaReviewsToEvents,
+  mapGiteaReview,
   mapGiteaStatuses,
   mapGithubCommits,
   mapGithubContext,
@@ -42,6 +47,8 @@ import {
   mapGithubIssueComment,
   mapGithubPr,
   mapGithubRepoRef,
+  mapGithubReview,
+  mapGithubReviewCommentReply,
   mapGithubTimelineEvents,
   mapGitlabCommits,
   mapGitlabContext,
@@ -150,6 +157,59 @@ const parseOwnerRepo = (sourceRepo?: string | null): GitHubRepoSelector | null =
   if (!owner || !repo) return null;
   return { owner, repo };
 };
+
+/**
+ * Split a GitLab `"group/sub/project"` selector into namespace + project: the
+ * last segment is the project, everything before it the (possibly multi-segment)
+ * namespace. Returns an empty object for anything without both parts.
+ */
+const parseGitlabNamespace = (sourceRepo?: string | null): { namespace?: string; project?: string } => {
+  if (!sourceRepo) return {};
+  const segments = sourceRepo.split('/').filter((segment) => segment.length > 0);
+  if (segments.length < 2) return {};
+  const project = segments.pop() as string;
+  return { namespace: segments.join('/'), project };
+};
+
+// Stable, detail-free marker for write failures: surfaces the failure without
+// leaking the underlying error message, mirroring LOAD_ERROR for rich views.
+const WRITE_ERROR = 'failed to load';
+
+/**
+ * Fetch the current PR title so a write that omits it can still satisfy the
+ * provider's title-required update route (GitHub). Returns null when the title
+ * cannot be resolved (missing API or wire failure) so callers degrade.
+ */
+const resolvePrTitle = async (
+  api: Pick<GitHubAPI, 'prContext'>,
+  directory: string,
+  number: number,
+): Promise<string | null> => {
+  if (!api.prContext) return null;
+  try {
+    const context = await api.prContext(directory, number);
+    return context.pr?.title ?? null;
+  } catch {
+    return null;
+  }
+};
+
+// Normalized review events → provider wire events. Explicit maps, because a
+// simple toUpperCase() would mangle 'request-changes' (hyphen) into
+// 'REQUEST-CHANGES' while GitHub/Gitea expect 'REQUEST_CHANGES' (underscore).
+const GITHUB_REVIEW_EVENTS: Record<ForgeReviewEvent, GitHubPullRequestReviewEvent> = {
+  approve: 'APPROVE',
+  'request-changes': 'REQUEST_CHANGES',
+  comment: 'COMMENT',
+};
+
+const GITEA_REVIEW_EVENTS: Record<ForgeReviewEvent, GiteaPullReviewInput['event']> = {
+  approve: 'APPROVED',
+  'request-changes': 'REQUEST_CHANGES',
+  comment: 'COMMENT',
+};
+
+const WRITE_NOT_SUPPORTED: ForgeUpdateResult = { ok: false, error: 'not supported' };
 
 export const createGithubForgeProvider = (api: GitHubAPI): ForgeProvider => ({
   kind: 'github',
@@ -279,6 +339,175 @@ export const createGithubForgeProvider = (api: GitHubAPI): ForgeProvider => ({
   // GitHub check runs ride on getPullRequestContext().checks.
   async getChecks() {
     return null;
+  },
+
+  async addComment(directory, ref, input, options) {
+    const selector = parseOwnerRepo(options?.sourceRepo);
+    const owner = selector?.owner;
+    const repo = selector?.repo;
+    if (ref.kind === 'issue') {
+      if (!api.issueComment) return { ok: false, error: WRITE_ERROR };
+      try {
+        const result = await api.issueComment({ directory, number: ref.number, body: input.body, owner, repo });
+        if (!result.connected) return { ok: false, error: WRITE_ERROR };
+        return { ok: true, comment: result.comment ? mapGithubIssueComment(result.comment) : null };
+      } catch {
+        return { ok: false, error: WRITE_ERROR };
+      }
+    }
+    if (!api.prComment) return { ok: false, error: WRITE_ERROR };
+    try {
+      const result = await api.prComment({ directory, number: ref.number, body: input.body, owner, repo });
+      if (!result.connected) return { ok: false, error: WRITE_ERROR };
+      return { ok: true, comment: result.comment ? mapGithubIssueComment(result.comment) : null };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async replyToThread(directory, ref, input, options) {
+    if (ref.kind !== 'pull') {
+      // Issues have no inline review comments; reply as a flat thread comment.
+      return this.addComment!(directory, ref, { body: input.body }, options);
+    }
+    if (!api.prReviewComment) return { ok: false, error: WRITE_ERROR };
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.prReviewComment({
+        directory,
+        number: ref.number,
+        body: input.body,
+        inReplyToId: input.inReplyToId != null ? Number(input.inReplyToId) : undefined,
+        path: input.path ?? undefined,
+        line: input.line ?? undefined,
+        owner: selector?.owner,
+        repo: selector?.repo,
+      });
+      if (!result.connected) return { ok: false, error: WRITE_ERROR };
+      return { ok: true, comment: result.comment ? mapGithubReviewCommentReply(result.comment) : null };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async updateEntity(directory, ref, input, options) {
+    const selector = parseOwnerRepo(options?.sourceRepo);
+    const owner = selector?.owner;
+    const repo = selector?.repo;
+    if (ref.kind === 'issue') {
+      if (!api.issueUpdate) return { ok: false, error: WRITE_ERROR };
+      try {
+        const result = await api.issueUpdate({
+          directory,
+          number: ref.number,
+          title: input.title,
+          body: input.body,
+          state: input.state,
+          owner,
+          repo,
+        });
+        if (!result.connected) return { ok: false, error: WRITE_ERROR };
+        return { ok: true, entity: result.issue ? mapGithubIssue(result.issue) : null };
+      } catch {
+        return { ok: false, error: WRITE_ERROR };
+      }
+    }
+    if (!api.prUpdate) return { ok: false, error: WRITE_ERROR };
+    try {
+      // GitHub's PR update route requires a title and resolves the repo from
+      // the directory (no sourceRepo override), so resolve the current title
+      // when the caller only changes state/metadata.
+      const title = input.title ?? await resolvePrTitle(api, directory, ref.number);
+      if (!title) return { ok: false, error: WRITE_ERROR };
+      const pr = await api.prUpdate({
+        directory,
+        number: ref.number,
+        title,
+        body: input.body,
+        state: input.state,
+      });
+      return { ok: true, entity: mapGithubPr(pr) };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async submitReview(directory, ref, input, options) {
+    if (ref.kind !== 'pull') return WRITE_NOT_SUPPORTED;
+    if (!api.prSubmitReview) return { ok: false, error: WRITE_ERROR };
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.prSubmitReview({
+        directory,
+        number: ref.number,
+        event: GITHUB_REVIEW_EVENTS[input.event],
+        body: input.body,
+        owner: selector?.owner,
+        repo: selector?.repo,
+      });
+      if (!result.connected) return { ok: false, error: WRITE_ERROR };
+      return { ok: true, review: result.review ? mapGithubReview(result.review) : null };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async toggleDraft(directory, ref, draft) {
+    if (ref.kind !== 'pull') return WRITE_NOT_SUPPORTED;
+    if (!api.prUpdate) return { ok: false, error: WRITE_ERROR };
+    try {
+      const title = await resolvePrTitle(api, directory, ref.number);
+      if (!title) return { ok: false, error: WRITE_ERROR };
+      const pr = await api.prUpdate({
+        directory,
+        number: ref.number,
+        title,
+        draft,
+      });
+      return { ok: true, entity: mapGithubPr(pr) };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async updateMetadata(directory, ref, input, options) {
+    const selector = parseOwnerRepo(options?.sourceRepo);
+    const owner = selector?.owner;
+    const repo = selector?.repo;
+    if (ref.kind === 'issue') {
+      if (!api.issueUpdate) return { ok: false, error: WRITE_ERROR };
+      try {
+        const result = await api.issueUpdate({
+          directory,
+          number: ref.number,
+          labels: input.labels,
+          assignees: input.assignees,
+          milestone: input.milestone,
+          owner,
+          repo,
+        });
+        if (!result.connected) return { ok: false, error: WRITE_ERROR };
+        return { ok: true, entity: result.issue ? mapGithubIssue(result.issue) : null };
+      } catch {
+        return { ok: false, error: WRITE_ERROR };
+      }
+    }
+    if (!api.prUpdate) return { ok: false, error: WRITE_ERROR };
+    try {
+      const title = await resolvePrTitle(api, directory, ref.number);
+      if (!title) return { ok: false, error: WRITE_ERROR };
+      const pr = await api.prUpdate({
+        directory,
+        number: ref.number,
+        title,
+        labels: input.labels,
+        assignees: input.assignees,
+        milestone: input.milestone,
+      });
+      return { ok: true, entity: mapGithubPr(pr) };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
   },
 });
 
@@ -420,6 +649,139 @@ export const createGitlabForgeProvider = (api: GitLabAPI): ForgeProvider => ({
   // GitLab exposes no checks surface.
   async getChecks() {
     return null;
+  },
+
+  async addComment(directory, ref, input, options) {
+    const { namespace, project } = parseGitlabNamespace(options?.sourceRepo);
+    if (ref.kind === 'issue') {
+      if (!api.issueComment) return { ok: false, error: WRITE_ERROR };
+      try {
+        const result = await api.issueComment({ directory, number: ref.number, body: input.body, namespace, project });
+        if (!result.connected) return { ok: false, error: WRITE_ERROR };
+        return { ok: true, comment: result.comment ? mapGitlabNoteComment(result.comment) : null };
+      } catch {
+        return { ok: false, error: WRITE_ERROR };
+      }
+    }
+    if (!api.mrComment) return { ok: false, error: WRITE_ERROR };
+    try {
+      const result = await api.mrComment({ directory, number: ref.number, body: input.body, namespace, project });
+      if (!result.connected) return { ok: false, error: WRITE_ERROR };
+      return { ok: true, comment: result.comment ? mapGitlabNoteComment(result.comment) : null };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async replyToThread(directory, ref, input, options) {
+    // GitLab's note-reply API is not wired up yet; reply as a flat comment.
+    return this.addComment!(directory, ref, { body: input.body }, options);
+  },
+
+  async updateEntity(directory, ref, input, options) {
+    const { namespace, project } = parseGitlabNamespace(options?.sourceRepo);
+    if (ref.kind === 'issue') {
+      if (!api.issueUpdate) return { ok: false, error: WRITE_ERROR };
+      try {
+        const result = await api.issueUpdate({
+          directory,
+          number: ref.number,
+          title: input.title,
+          body: input.body,
+          state: input.state,
+          namespace,
+          project,
+        });
+        if (!result.connected) return { ok: false, error: WRITE_ERROR };
+        return { ok: true, entity: result.issue ? mapGitlabIssue(result.issue) : null };
+      } catch {
+        return { ok: false, error: WRITE_ERROR };
+      }
+    }
+    if (!api.mrUpdate) return { ok: false, error: WRITE_ERROR };
+    try {
+      // The MR update route takes `description` (not `body`) and has no
+      // namespace/project override fields.
+      const mr = await api.mrUpdate({
+        directory,
+        number: ref.number,
+        title: input.title,
+        description: input.body,
+        state: input.state,
+      });
+      return { ok: true, entity: mapGitlabMr(mr) };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async submitReview(directory, ref, input, options) {
+    if (ref.kind !== 'pull') return { ok: false, error: 'not supported' };
+    // GitLab exposes approvals only; request-changes/comment have no MR review
+    // events on the wire API.
+    if (input.event !== 'approve') return { ok: false, error: 'not supported' };
+    if (!api.mrApprove) return { ok: false, error: WRITE_ERROR };
+    try {
+      const { namespace, project } = parseGitlabNamespace(options?.sourceRepo);
+      const result = await api.mrApprove({ directory, number: ref.number, namespace, project });
+      if (!result.connected || !result.approved) return { ok: false, error: WRITE_ERROR };
+      // GitLab approvals return no review object; synthesize a minimal marker.
+      return { ok: true, review: { id: '', state: 'approved' } };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async toggleDraft(directory, ref, draft, options) {
+    if (ref.kind !== 'pull') return WRITE_NOT_SUPPORTED;
+    if (!api.mrUpdate) return { ok: false, error: WRITE_ERROR };
+    try {
+      const context = await this.getPullRequestContext(directory, ref.number, options);
+      const title = context.pr?.title;
+      if (!title) return { ok: false, error: WRITE_ERROR };
+      const nextTitle = draft
+        ? (/^Draft:\s*/.test(title) ? title : `Draft: ${title}`)
+        : title.replace(/^Draft:\s*/, '');
+      const mr = await api.mrUpdate({ directory, number: ref.number, title: nextTitle });
+      return { ok: true, entity: mapGitlabMr(mr) };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async updateMetadata(directory, ref, input, options) {
+    const { namespace, project } = parseGitlabNamespace(options?.sourceRepo);
+    if (ref.kind === 'issue') {
+      if (!api.issueUpdate) return { ok: false, error: WRITE_ERROR };
+      try {
+        // GitLab assigns by user ID, not login; the facade takes logins, so
+        // assignees are left unset until an id lookup exists.
+        const result = await api.issueUpdate({
+          directory,
+          number: ref.number,
+          labels: input.labels,
+          milestone: input.milestone,
+          namespace,
+          project,
+        });
+        if (!result.connected) return { ok: false, error: WRITE_ERROR };
+        return { ok: true, entity: result.issue ? mapGitlabIssue(result.issue) : null };
+      } catch {
+        return { ok: false, error: WRITE_ERROR };
+      }
+    }
+    if (!api.mrUpdate) return { ok: false, error: WRITE_ERROR };
+    try {
+      const mr = await api.mrUpdate({
+        directory,
+        number: ref.number,
+        labels: input.labels,
+        milestone: input.milestone,
+      });
+      return { ok: true, entity: mapGitlabMr(mr) };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
   },
 });
 
@@ -580,6 +942,120 @@ export const createGiteaForgeProvider = (api: GiteaAPI): ForgeProvider => ({
     } catch {
       return { ...EMPTY_CHECKS, error: LOAD_ERROR };
     }
+  },
+
+  async addComment(directory, ref, input, options) {
+    const selector = parseOwnerRepo(options?.sourceRepo);
+    const owner = selector?.owner;
+    const repo = selector?.repo;
+    if (ref.kind === 'issue') {
+      if (!api.issueComment) return { ok: false, error: WRITE_ERROR };
+      try {
+        const result = await api.issueComment({ directory, number: ref.number, body: input.body, owner, repo });
+        if (!result.connected) return { ok: false, error: WRITE_ERROR };
+        return { ok: true, comment: result.comment ? mapGiteaComment(result.comment) : null };
+      } catch {
+        return { ok: false, error: WRITE_ERROR };
+      }
+    }
+    if (!api.prComment) return { ok: false, error: WRITE_ERROR };
+    try {
+      const result = await api.prComment({ directory, number: ref.number, body: input.body, owner, repo });
+      if (!result.connected) return { ok: false, error: WRITE_ERROR };
+      return { ok: true, comment: result.comment ? mapGiteaComment(result.comment) : null };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async replyToThread(directory, ref, input, options) {
+    // Gitea's thread-reply API is not wired up yet; reply as a flat comment.
+    return this.addComment!(directory, ref, { body: input.body }, options);
+  },
+
+  async updateEntity(directory, ref, input, options) {
+    const selector = parseOwnerRepo(options?.sourceRepo);
+    if (ref.kind === 'issue') {
+      if (!api.issueUpdate) return { ok: false, error: WRITE_ERROR };
+      try {
+        const result = await api.issueUpdate({
+          directory,
+          number: ref.number,
+          title: input.title,
+          body: input.body,
+          state: input.state,
+          owner: selector?.owner,
+          repo: selector?.repo,
+        });
+        if (!result.connected) return { ok: false, error: WRITE_ERROR };
+        return { ok: true, entity: result.issue ? mapGiteaIssue(result.issue) : null };
+      } catch {
+        return { ok: false, error: WRITE_ERROR };
+      }
+    }
+    if (!api.prUpdate) return { ok: false, error: WRITE_ERROR };
+    try {
+      // The Gitea PR update route takes `description` (not `body`) and carries
+      // no owner/repo override fields.
+      const pr = await api.prUpdate({
+        directory,
+        number: ref.number,
+        title: input.title,
+        description: input.body,
+        state: input.state,
+      });
+      return { ok: true, entity: mapGiteaPr(pr) };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async submitReview(directory, ref, input, options) {
+    if (ref.kind !== 'pull') return { ok: false, error: 'not supported' };
+    if (!api.prSubmitReview) return { ok: false, error: WRITE_ERROR };
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.prSubmitReview({
+        directory,
+        number: ref.number,
+        event: GITEA_REVIEW_EVENTS[input.event],
+        body: input.body,
+        owner: selector?.owner,
+        repo: selector?.repo,
+      });
+      if (!result.connected) return { ok: false, error: WRITE_ERROR };
+      return { ok: true, review: result.review ? mapGiteaReview(result.review) : null };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  // Gitea has no draft concept (`capabilities.draft: false`); toggleDraft is
+  // intentionally left undefined so the UI gates on method presence.
+
+  async updateMetadata(directory, ref, input, options) {
+    const selector = parseOwnerRepo(options?.sourceRepo);
+    if (ref.kind === 'issue') {
+      if (!api.issueUpdate) return { ok: false, error: WRITE_ERROR };
+      try {
+        const result = await api.issueUpdate({
+          directory,
+          number: ref.number,
+          labels: input.labels,
+          assignees: input.assignees,
+          milestone: input.milestone,
+          owner: selector?.owner,
+          repo: selector?.repo,
+        });
+        if (!result.connected) return { ok: false, error: WRITE_ERROR };
+        return { ok: true, entity: result.issue ? mapGiteaIssue(result.issue) : null };
+      } catch {
+        return { ok: false, error: WRITE_ERROR };
+      }
+    }
+    // Gitea's PR update route carries only title/description/state — no
+    // labels/assignees/milestone — so PR metadata writes are unsupported.
+    return WRITE_NOT_SUPPORTED;
   },
 });
 

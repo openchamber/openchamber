@@ -30,6 +30,7 @@ import {
   mapGiteaIssue,
   mapGiteaPr,
   mapGiteaReviewsToEvents,
+  mapGiteaReview,
   mapGiteaStatuses,
   mapGithubCheckSummary,
   mapGithubCommits,
@@ -37,6 +38,7 @@ import {
   mapGithubIssue,
   mapGithubIssueComment,
   mapGithubPr,
+  mapGithubReview,
   mapGithubReviewComment,
   mapGithubTimelineEvents,
   mapGitlabCommits,
@@ -45,6 +47,7 @@ import {
   mapGitlabMr,
   mapGitlabNoteComment,
   mapGitlabTimelineEvents,
+  mapReviewState,
   mapStatusState,
   normalizeEventType,
   stateOf,
@@ -682,6 +685,540 @@ describe('gitea commit-status normalization', () => {
     expect(check.description).toBe('Deploying…');
     expect(check.startedAt).toBe('2026-03-01T00:00:00Z');
     expect(check.completedAt).toBe('2026-03-01T00:00:00Z');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review normalization
+// ---------------------------------------------------------------------------
+
+describe('review normalization', () => {
+  test('mapReviewState maps provider states onto the normalized vocabulary', () => {
+    expect(mapReviewState('APPROVED')).toBe('approved');
+    expect(mapReviewState('approved')).toBe('approved');
+    expect(mapReviewState('CHANGES_REQUESTED')).toBe('requested-changes');
+    expect(mapReviewState('REQUEST_CHANGES')).toBe('requested-changes');
+    expect(mapReviewState('request_changes')).toBe('requested-changes');
+    expect(mapReviewState('COMMENTED')).toBe('commented');
+    expect(mapReviewState('COMMENT')).toBe('commented');
+    expect(mapReviewState('DISMISSED')).toBe('dismissed');
+    expect(mapReviewState('mystery')).toBe('pending');
+  });
+
+  test('maps a GitHub review', () => {
+    const review = mapGithubReview({
+      id: 'r1',
+      state: 'APPROVED',
+      author: githubUser(),
+      submittedAt: '2026-01-01T00:00:00Z',
+      body: 'LGTM',
+      commitSha: 'abc123',
+    });
+    expect(review).toEqual({
+      id: 'r1',
+      state: 'approved',
+      author: { id: 'octocat', login: 'octocat', name: 'Octo Cat', avatarUrl: 'https://avatars.example/octocat' },
+      submittedAt: '2026-01-01T00:00:00Z',
+      body: 'LGTM',
+      commitSha: 'abc123',
+    });
+  });
+
+  test('maps a Gitea review, collapsing REQUEST_CHANGES', () => {
+    const review = mapGiteaReview({ id: 'r2', state: 'REQUEST_CHANGES', author: giteaUser(), body: 'fix it' });
+    expect(review.state).toBe('requested-changes');
+    expect(review.author?.login).toBe('guser');
+    expect(review.submittedAt).toBe(undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Write operations
+// ---------------------------------------------------------------------------
+
+describe('write operations: addComment', () => {
+  test('github routes issue/pull and parses sourceRepo', async () => {
+    let issueArgs: Record<string, unknown> = {};
+    let prArgs: Record<string, unknown> = {};
+    const api = {
+      issueComment: async (input: Record<string, unknown>) => {
+        issueArgs = input;
+        return { connected: true, comment: githubIssueComment };
+      },
+      prComment: async (input: Record<string, unknown>) => {
+        prArgs = input;
+        return { connected: true, comment: githubIssueComment };
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const issueResult = await provider.addComment!(
+      '/repo', { kind: 'issue', number: 7 }, { body: 'hi' }, { sourceRepo: 'upstream/widget' },
+    );
+    expect(issueResult.ok).toBe(true);
+    expect(issueResult.comment?.id).toBe('1001');
+    expect(issueResult.comment?.body).toBe('First!');
+    expect(issueArgs).toEqual({ directory: '/repo', number: 7, body: 'hi', owner: 'upstream', repo: 'widget' });
+
+    const prResult = await provider.addComment!('/repo', { kind: 'pull', number: 42 }, { body: 'yo' });
+    expect(prResult.ok).toBe(true);
+    expect(prArgs).toEqual({ directory: '/repo', number: 42, body: 'yo', owner: undefined, repo: undefined });
+  });
+
+  test('gitlab routes issue/pull and parses multi-segment namespaces', async () => {
+    let issueArgs: Record<string, unknown> = {};
+    let mrArgs: Record<string, unknown> = {};
+    const api = {
+      issueComment: async (input: Record<string, unknown>) => {
+        issueArgs = input;
+        return { connected: true, comment: gitlabNote };
+      },
+      mrComment: async (input: Record<string, unknown>) => {
+        mrArgs = input;
+        return { connected: true, comment: gitlabNote };
+      },
+    } as unknown as GitLabAPI;
+    const provider = createGitlabForgeProvider(api);
+
+    const issueResult = await provider.addComment!(
+      '/repo', { kind: 'issue', number: 8 }, { body: 'hi' }, { sourceRepo: 'group/sub/proj' },
+    );
+    expect(issueResult.ok).toBe(true);
+    expect(issueResult.comment?.author?.login).toBe('gluser');
+    expect(issueArgs).toEqual({ directory: '/repo', number: 8, body: 'hi', namespace: 'group/sub', project: 'proj' });
+
+    const mrResult = await provider.addComment!('/repo', { kind: 'pull', number: 99 }, { body: 'yo' });
+    expect(mrResult.ok).toBe(true);
+    expect(mrArgs).toEqual({ directory: '/repo', number: 99, body: 'yo', namespace: undefined, project: undefined });
+  });
+
+  test('gitea routes issue/pull and parses sourceRepo', async () => {
+    let issueArgs: Record<string, unknown> = {};
+    let prArgs: Record<string, unknown> = {};
+    const api = {
+      issueComment: async (input: Record<string, unknown>) => {
+        issueArgs = input;
+        return { connected: true, comment: giteaComment };
+      },
+      prComment: async (input: Record<string, unknown>) => {
+        prArgs = input;
+        return { connected: true, comment: giteaComment };
+      },
+    } as unknown as GiteaAPI;
+    const provider = createGiteaForgeProvider(api);
+
+    const issueResult = await provider.addComment!(
+      '/repo', { kind: 'issue', number: 12 }, { body: 'hi' }, { sourceRepo: 'acme/widget' },
+    );
+    expect(issueResult.ok).toBe(true);
+    expect(issueResult.comment?.id).toBe('4004');
+    expect(issueArgs).toEqual({ directory: '/repo', number: 12, body: 'hi', owner: 'acme', repo: 'widget' });
+
+    const prResult = await provider.addComment!('/repo', { kind: 'pull', number: 11 }, { body: 'yo' });
+    expect(prResult.ok).toBe(true);
+    expect(prArgs).toEqual({ directory: '/repo', number: 11, body: 'yo', owner: undefined, repo: undefined });
+  });
+});
+
+describe('write operations: replyToThread', () => {
+  test('github posts a review-comment reply on pulls with the numeric inReplyToId', async () => {
+    let reviewArgs: Record<string, unknown> = {};
+    const api = {
+      prReviewComment: async (input: Record<string, unknown>) => {
+        reviewArgs = input;
+        return {
+          connected: true,
+          comment: {
+            id: 2002,
+            body: 'reply',
+            url: 'u',
+            author: githubUser(),
+            path: 'src/a.ts',
+            line: 5,
+            createdAt: '2026-01-01T00:00:00Z',
+          },
+        };
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const result = await provider.replyToThread!(
+      '/repo', { kind: 'pull', number: 42 },
+      { body: 'reply', inReplyToId: '2002', path: 'src/a.ts', line: 5 },
+    );
+    expect(result.ok).toBe(true);
+    expect(reviewArgs.inReplyToId).toBe(2002);
+    expect(reviewArgs.path).toBe('src/a.ts');
+    expect(reviewArgs.line).toBe(5);
+    expect(result.comment?.id).toBe('2002');
+    expect(result.comment?.path).toBe('src/a.ts');
+  });
+
+  test('github falls back to a flat comment on issues', async () => {
+    let issueArgs: Record<string, unknown> = {};
+    const api = {
+      issueComment: async (input: Record<string, unknown>) => {
+        issueArgs = input;
+        return { connected: true, comment: githubIssueComment };
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const result = await provider.replyToThread!(
+      '/repo', { kind: 'issue', number: 7 }, { body: 'thread reply', inReplyToId: '1001' },
+    );
+    expect(result.ok).toBe(true);
+    expect(issueArgs.body).toBe('thread reply');
+  });
+
+  test('gitlab and gitea reply as flat comments, ignoring the thread anchor', async () => {
+    let mrArgs: Record<string, unknown> = {};
+    const gitlab = createGitlabForgeProvider({
+      mrComment: async (input: Record<string, unknown>) => {
+        mrArgs = input;
+        return { connected: true, comment: gitlabNote };
+      },
+    } as unknown as GitLabAPI);
+    const glResult = await gitlab.replyToThread!(
+      '/repo', { kind: 'pull', number: 99 }, { body: 'gl reply', inReplyToId: '3003' },
+    );
+    expect(glResult.ok).toBe(true);
+    expect(mrArgs.body).toBe('gl reply');
+    expect(mrArgs.inReplyToId).toBe(undefined);
+
+    let giteaArgs: Record<string, unknown> = {};
+    const gitea = createGiteaForgeProvider({
+      prComment: async (input: Record<string, unknown>) => {
+        giteaArgs = input;
+        return { connected: true, comment: giteaComment };
+      },
+    } as unknown as GiteaAPI);
+    const gtResult = await gitea.replyToThread!(
+      '/repo', { kind: 'pull', number: 11 }, { body: 'gt reply', inReplyToId: '4004' },
+    );
+    expect(gtResult.ok).toBe(true);
+    expect(giteaArgs.body).toBe('gt reply');
+    expect(giteaArgs.inReplyToId).toBe(undefined);
+  });
+});
+
+describe('write operations: updateEntity', () => {
+  test('github resolves the current title and passes state through on pulls', async () => {
+    let updateArgs: Record<string, unknown> = {};
+    const api = {
+      prContext: async () => ({ connected: true, pr: { ...githubPr, title: 'Add forge facade' } }),
+      prUpdate: async (input: Record<string, unknown>) => {
+        updateArgs = input;
+        return { number: 42, title: 'Add forge facade', url: 'u', state: 'closed', draft: false, base: 'main', head: 'feat' };
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const result = await provider.updateEntity!('/repo', { kind: 'pull', number: 42 }, { state: 'closed' });
+    expect(result.ok).toBe(true);
+    expect(updateArgs).toEqual({ directory: '/repo', number: 42, title: 'Add forge facade', state: 'closed' });
+    expect(result.entity?.number).toBe(42);
+    expect(result.entity?.state).toBe('closed');
+  });
+
+  test('github issue updates pass title/body/state straight through', async () => {
+    let updateArgs: Record<string, unknown> = {};
+    const api = {
+      issueUpdate: async (input: Record<string, unknown>) => {
+        updateArgs = input;
+        return { connected: true, issue: { ...githubIssue, state: 'open', title: 'Renamed' } };
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const result = await provider.updateEntity!(
+      '/repo', { kind: 'issue', number: 7 }, { title: 'Renamed', body: 'New body', state: 'open' },
+    );
+    expect(result.ok).toBe(true);
+    expect(updateArgs).toEqual({
+      directory: '/repo', number: 7, title: 'Renamed', body: 'New body', state: 'open', owner: undefined, repo: undefined,
+    });
+    expect(result.entity?.title).toBe('Renamed');
+    expect(result.entity?.state).toBe('open');
+  });
+
+  test('gitlab passes state and the parsed namespace through on issues', async () => {
+    let issueArgs: Record<string, unknown> = {};
+    const api = {
+      issueUpdate: async (input: Record<string, unknown>) => {
+        issueArgs = input;
+        return { connected: true, issue: { ...gitlabIssue, state: 'closed' } };
+      },
+    } as unknown as GitLabAPI;
+    const provider = createGitlabForgeProvider(api);
+
+    const result = await provider.updateEntity!(
+      '/repo', { kind: 'issue', number: 8 }, { state: 'closed' }, { sourceRepo: 'acme/widget' },
+    );
+    expect(result.ok).toBe(true);
+    expect(issueArgs.state).toBe('closed');
+    expect(issueArgs.namespace).toBe('acme');
+    expect(issueArgs.project).toBe('widget');
+    expect(result.entity?.state).toBe('closed');
+  });
+
+  test('gitlab maps the MR body onto the description field', async () => {
+    let mrArgs: Record<string, unknown> = {};
+    const api = {
+      mrUpdate: async (input: Record<string, unknown>) => {
+        mrArgs = input;
+        return { ...gitlabMr, title: 'New MR title' };
+      },
+    } as unknown as GitLabAPI;
+    const provider = createGitlabForgeProvider(api);
+
+    const result = await provider.updateEntity!(
+      '/repo', { kind: 'pull', number: 99 }, { title: 'New MR title', body: 'MR body 2', state: 'closed' },
+    );
+    expect(result.ok).toBe(true);
+    expect(mrArgs.description).toBe('MR body 2');
+    expect(mrArgs.state).toBe('closed');
+    expect(result.entity?.title).toBe('New MR title');
+  });
+
+  test('gitea passes state through on pulls', async () => {
+    let prArgs: Record<string, unknown> = {};
+    const api = {
+      prUpdate: async (input: Record<string, unknown>) => {
+        prArgs = input;
+        return { number: 11, title: 't', url: 'u', state: 'closed', labels: [], sourceBranch: 'feat/gitea', targetBranch: 'main', author: giteaUser() };
+      },
+    } as unknown as GiteaAPI;
+    const provider = createGiteaForgeProvider(api);
+
+    const result = await provider.updateEntity!('/repo', { kind: 'pull', number: 11 }, { state: 'closed' });
+    expect(result.ok).toBe(true);
+    expect(prArgs.state).toBe('closed');
+    expect(result.entity?.state).toBe('closed');
+  });
+});
+
+describe('write operations: submitReview', () => {
+  test('github maps normalized events onto the wire events', async () => {
+    const events: Record<string, unknown>[] = [];
+    const api = {
+      prSubmitReview: async (input: Record<string, unknown>) => {
+        events.push(input);
+        return { connected: true, review: { id: 'r1', state: 'APPROVED', author: githubUser(), submittedAt: '2026-01-01T00:00:00Z', body: 'LGTM', commitSha: 'abc123' } };
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const result = await provider.submitReview!('/repo', { kind: 'pull', number: 42 }, { event: 'approve', body: 'LGTM' });
+    expect(result.ok).toBe(true);
+    expect(result.review?.state).toBe('approved');
+    expect(result.review?.author?.login).toBe('octocat');
+    expect(result.review?.commitSha).toBe('abc123');
+
+    await provider.submitReview!('/repo', { kind: 'pull', number: 42 }, { event: 'request-changes' });
+    await provider.submitReview!('/repo', { kind: 'pull', number: 42 }, { event: 'comment' });
+    expect(events.map((e) => e.event)).toEqual(['APPROVE', 'REQUEST_CHANGES', 'COMMENT']);
+  });
+
+  test('gitea maps events onto APPROVED/REQUEST_CHANGES/COMMENT', async () => {
+    const events: Record<string, unknown>[] = [];
+    const api = {
+      prSubmitReview: async (input: Record<string, unknown>) => {
+        events.push(input);
+        return { connected: true, review: { id: 'r2', state: 'APPROVED', author: giteaUser() } };
+      },
+    } as unknown as GiteaAPI;
+    const provider = createGiteaForgeProvider(api);
+
+    await provider.submitReview!('/repo', { kind: 'pull', number: 11 }, { event: 'approve' });
+    await provider.submitReview!('/repo', { kind: 'pull', number: 11 }, { event: 'request-changes' });
+    await provider.submitReview!('/repo', { kind: 'pull', number: 11 }, { event: 'comment' });
+    expect(events.map((e) => e.event)).toEqual(['APPROVED', 'REQUEST_CHANGES', 'COMMENT']);
+  });
+
+  test('gitlab approves only; request-changes and comment are unsupported', async () => {
+    let approveArgs: Record<string, unknown> = {};
+    const api = {
+      mrApprove: async (input: Record<string, unknown>) => {
+        approveArgs = input;
+        return { connected: true, approved: true };
+      },
+    } as unknown as GitLabAPI;
+    const provider = createGitlabForgeProvider(api);
+
+    const okResult = await provider.submitReview!('/repo', { kind: 'pull', number: 99 }, { event: 'approve' });
+    expect(okResult.ok).toBe(true);
+    expect(okResult.review).toEqual({ id: '', state: 'approved' });
+    expect(approveArgs).toEqual({ directory: '/repo', number: 99, namespace: undefined, project: undefined });
+
+    expect(await provider.submitReview!('/repo', { kind: 'pull', number: 99 }, { event: 'request-changes' }))
+      .toEqual({ ok: false, error: 'not supported' });
+    expect(await provider.submitReview!('/repo', { kind: 'pull', number: 99 }, { event: 'comment' }))
+      .toEqual({ ok: false, error: 'not supported' });
+  });
+});
+
+describe('write operations: toggleDraft', () => {
+  test('github passes the draft flag along with the current title', async () => {
+    let updateArgs: Record<string, unknown> = {};
+    const api = {
+      prContext: async () => ({ connected: true, pr: { ...githubPr, title: 'Add forge facade' } }),
+      prUpdate: async (input: Record<string, unknown>) => {
+        updateArgs = input;
+        return { number: 42, title: 'Add forge facade', url: 'u', state: 'open', draft: true, base: 'main', head: 'feat' };
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const result = await provider.toggleDraft!('/repo', { kind: 'pull', number: 42 }, true);
+    expect(result.ok).toBe(true);
+    expect(updateArgs.draft).toBe(true);
+    expect(updateArgs.title).toBe('Add forge facade');
+    expect((result.entity as { draft?: boolean } | null)?.draft).toBe(true);
+  });
+
+  test('gitlab prepends and strips the Draft: prefix idempotently', async () => {
+    let currentTitle = 'Add MR support';
+    const updatedTitles: string[] = [];
+    const api = {
+      mrContext: async () => ({ connected: true, mr: { ...gitlabMr, title: currentTitle } }),
+      mrUpdate: async (input: Record<string, unknown>) => {
+        currentTitle = input.title as string;
+        updatedTitles.push(currentTitle);
+        return { ...gitlabMr, title: currentTitle };
+      },
+    } as unknown as GitLabAPI;
+    const provider = createGitlabForgeProvider(api);
+
+    await provider.toggleDraft!('/repo', { kind: 'pull', number: 99 }, true);
+    expect(updatedTitles.at(-1)).toBe('Draft: Add MR support');
+
+    await provider.toggleDraft!('/repo', { kind: 'pull', number: 99 }, true);
+    expect(updatedTitles.at(-1)).toBe('Draft: Add MR support');
+
+    await provider.toggleDraft!('/repo', { kind: 'pull', number: 99 }, false);
+    expect(updatedTitles.at(-1)).toBe('Add MR support');
+  });
+
+  test('gitea does not implement toggleDraft (capability draft:false)', () => {
+    const provider = createGiteaForgeProvider({} as unknown as GiteaAPI);
+    expect(provider.toggleDraft).toBe(undefined);
+  });
+});
+
+describe('write operations: updateMetadata', () => {
+  test('github passes labels/assignees/milestone through', async () => {
+    let issueArgs: Record<string, unknown> = {};
+    const api = {
+      issueUpdate: async (input: Record<string, unknown>) => {
+        issueArgs = input;
+        return { connected: true, issue: githubIssue };
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const result = await provider.updateMetadata!(
+      '/repo', { kind: 'issue', number: 7 }, { labels: ['bug'], assignees: ['octocat'], milestone: 'v2.0' },
+    );
+    expect(result.ok).toBe(true);
+    expect(issueArgs.labels).toEqual(['bug']);
+    expect(issueArgs.assignees).toEqual(['octocat']);
+    expect(issueArgs.milestone).toBe('v2.0');
+  });
+
+  test('gitlab sends labels/milestone but never assignees (id-based)', async () => {
+    let issueArgs: Record<string, unknown> = {};
+    const api = {
+      issueUpdate: async (input: Record<string, unknown>) => {
+        issueArgs = input;
+        return { connected: true, issue: gitlabIssue };
+      },
+    } as unknown as GitLabAPI;
+    const provider = createGitlabForgeProvider(api);
+
+    const result = await provider.updateMetadata!(
+      '/repo', { kind: 'issue', number: 8 }, { labels: ['frontend'], assignees: ['gluser'], milestone: null },
+    );
+    expect(result.ok).toBe(true);
+    expect(issueArgs.labels).toEqual(['frontend']);
+    expect(issueArgs.milestone).toBeNull();
+    expect(issueArgs.assignees).toBe(undefined);
+  });
+
+  test('gitea issue metadata passes through; PR metadata is unsupported', async () => {
+    let issueArgs: Record<string, unknown> = {};
+    const api = {
+      issueUpdate: async (input: Record<string, unknown>) => {
+        issueArgs = input;
+        return { connected: true, issue: giteaIssue };
+      },
+    } as unknown as GiteaAPI;
+    const provider = createGiteaForgeProvider(api);
+
+    const issueResult = await provider.updateMetadata!(
+      '/repo', { kind: 'issue', number: 12 }, { labels: ['bug'], assignees: ['guser'] },
+    );
+    expect(issueResult.ok).toBe(true);
+    expect(issueArgs.labels).toEqual(['bug']);
+    expect(issueArgs.assignees).toEqual(['guser']);
+
+    const prResult = await provider.updateMetadata!('/repo', { kind: 'pull', number: 11 }, { labels: ['backend'] });
+    expect(prResult).toEqual({ ok: false, error: 'not supported' });
+  });
+});
+
+describe('write operations degrade gracefully', () => {
+  test('absent runtime methods return {ok:false} without throwing', async () => {
+    const github = createGithubForgeProvider({} as unknown as GitHubAPI);
+    expect(await github.addComment!('/repo', { kind: 'issue', number: 1 }, { body: 'x' }))
+      .toEqual({ ok: false, error: 'failed to load' });
+    expect(await github.replyToThread!('/repo', { kind: 'pull', number: 1 }, { body: 'x' }))
+      .toEqual({ ok: false, error: 'failed to load' });
+    expect(await github.updateEntity!('/repo', { kind: 'issue', number: 1 }, { state: 'closed' }))
+      .toEqual({ ok: false, error: 'failed to load' });
+    expect(await github.submitReview!('/repo', { kind: 'pull', number: 1 }, { event: 'approve' }))
+      .toEqual({ ok: false, error: 'failed to load' });
+    expect(await github.toggleDraft!('/repo', { kind: 'pull', number: 1 }, true))
+      .toEqual({ ok: false, error: 'failed to load' });
+    expect(await github.updateMetadata!('/repo', { kind: 'issue', number: 1 }, {}))
+      .toEqual({ ok: false, error: 'failed to load' });
+
+    const gitlab = createGitlabForgeProvider({} as unknown as GitLabAPI);
+    expect(await gitlab.submitReview!('/repo', { kind: 'pull', number: 1 }, { event: 'approve' }))
+      .toEqual({ ok: false, error: 'failed to load' });
+    expect(await gitlab.toggleDraft!('/repo', { kind: 'pull', number: 1 }, true))
+      .toEqual({ ok: false, error: 'failed to load' });
+
+    const gitea = createGiteaForgeProvider({} as unknown as GiteaAPI);
+    expect(await gitea.submitReview!('/repo', { kind: 'pull', number: 1 }, { event: 'approve' }))
+      .toEqual({ ok: false, error: 'failed to load' });
+  });
+
+  test('github updateEntity/toggleDraft degrade when the title cannot be resolved', async () => {
+    const github = createGithubForgeProvider({} as unknown as GitHubAPI);
+    // prContext absent → resolvePrTitle returns null → no title, graceful failure.
+    expect(await github.updateEntity!('/repo', { kind: 'pull', number: 42 }, { state: 'closed' }))
+      .toEqual({ ok: false, error: 'failed to load' });
+    expect(await github.toggleDraft!('/repo', { kind: 'pull', number: 42 }, true))
+      .toEqual({ ok: false, error: 'failed to load' });
+  });
+
+  test('wire failures degrade to {ok:false} instead of throwing', async () => {
+    const api = {
+      issueComment: async () => {
+        throw new Error('boom');
+      },
+      mrApprove: async () => {
+        throw new Error('boom');
+      },
+    } as unknown as GitHubAPI;
+    const github = createGithubForgeProvider(api);
+    expect(await github.addComment!('/repo', { kind: 'issue', number: 1 }, { body: 'x' }))
+      .toEqual({ ok: false, error: 'failed to load' });
+
+    const gitlab = createGitlabForgeProvider(api as unknown as GitLabAPI);
+    expect(await gitlab.submitReview!('/repo', { kind: 'pull', number: 1 }, { event: 'approve' }))
+      .toEqual({ ok: false, error: 'failed to load' });
   });
 });
 

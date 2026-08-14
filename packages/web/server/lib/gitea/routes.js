@@ -23,9 +23,12 @@ function withTimeout(promise, timeoutMs, label) {
 
 const asString = (value) => (typeof value === 'string' ? value.trim() : '');
 
+// Resolve the requested repo from the query (read routes) or the JSON body
+// (write routes). `owner`/`repo` override the directory-local git remote for
+// repos checked out from non-Gitea remotes.
 const getRequestedRepo = (req) => {
-  const owner = asString(req.query?.owner);
-  const repo = asString(req.query?.repo);
+  const owner = asString(req.query?.owner) || asString(req.body?.owner);
+  const repo = asString(req.query?.repo) || asString(req.body?.repo);
   return owner && repo ? { owner, repo } : null;
 };
 
@@ -130,6 +133,13 @@ const mapGiteaComment = (comment) => ({
   createdAt: typeof comment.created_at === 'string' ? comment.created_at : undefined,
 });
 
+const mapGiteaIssue = (item) => ({
+  ...mapGiteaIssueSummary(item),
+  body: typeof item.body === 'string' ? item.body : '',
+  createdAt: typeof item.created_at === 'string' ? item.created_at : undefined,
+  updatedAt: typeof item.updated_at === 'string' ? item.updated_at : undefined,
+});
+
 // Gitea's pull-files endpoint returns capitalized JSON fields
 // (Filename/Status/Additions/Deletions/Patch); tolerate the lowercase GitHub
 // style too for Forgejo versions that match GitHub output.
@@ -154,6 +164,24 @@ const giteaErrorMessage = (data) => {
     return data.error;
   }
   return null;
+};
+
+// Gitea issue/PR update endpoints take `milestone` (numeric), not the title.
+// Resolve a title via the repo milestones list (first page is enough for
+// title-based lookups); unmatched titles yield `milestoneId: null` so routes
+// can surface `400 { error: 'Milestone not found' }`.
+const resolveMilestoneId = async (client, owner, repo, title) => {
+  const resp = await client.milestones(owner, repo, { state: 'all', limit: 50 });
+  if (resp.status === 429) {
+    return { milestoneId: null, rateLimited: true };
+  }
+  if (resp.status !== 200 || !Array.isArray(resp.data)) {
+    return { milestoneId: null, rateLimited: false };
+  }
+  const match = resp.data.find(
+    (item) => typeof item?.title === 'string' && item.title.toLowerCase() === title.toLowerCase(),
+  );
+  return { milestoneId: typeof match?.id === 'number' ? match.id : null, rateLimited: false };
 };
 
 const repoRefFromOwnerRepo = (owner, repo, baseUrl) => {
@@ -442,12 +470,7 @@ export function registerGiteaRoutes(app, options = {}) {
       }
 
       const item = resp.data;
-      const issue = {
-        ...mapGiteaIssueSummary(item),
-        body: typeof item.body === 'string' ? item.body : '',
-        createdAt: typeof item.created_at === 'string' ? item.created_at : undefined,
-        updatedAt: typeof item.updated_at === 'string' ? item.updated_at : undefined,
-      };
+      const issue = mapGiteaIssue(item);
       return res.json({ connected: true, repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl), issue });
     } catch (error) {
       console.error('Failed to fetch Gitea issue:', error);
@@ -494,6 +517,135 @@ export function registerGiteaRoutes(app, options = {}) {
     } catch (error) {
       console.error('Failed to fetch Gitea issue comments:', error);
       return res.status(500).json({ error: error.message || 'Failed to fetch Gitea issue comments' });
+    }
+  });
+
+  app.post('/api/gitea/issues/comment', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+      if (!directory || !number || !body) {
+        return res.status(400).json({ error: 'directory, number, body are required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const { owner, repo, repoRef } = await resolveRepoForRequest(directory, requestedRepo);
+      if (!owner || !repo) {
+        return res.status(400).json({ error: 'Unable to resolve Gitea repo from directory' });
+      }
+
+      const resp = await client.createIssueComment(owner, repo, number, body);
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your Gitea token needs write:repository scope to comment on issues' });
+      }
+      if (resp.status === 404) {
+        return res.status(404).json({ error: 'Issue not found' });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: giteaErrorMessage(resp.data) || 'Gitea returned an error while creating the comment' });
+      }
+      if (!resp.data) {
+        return res.status(500).json({ error: 'Gitea returned an empty response while creating the comment' });
+      }
+
+      return res.json({
+        connected: true,
+        repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl),
+        comment: mapGiteaComment(resp.data),
+      });
+    } catch (error) {
+      console.error('Failed to create Gitea issue comment:', error);
+      return res.status(500).json({ error: error.message || 'Failed to create Gitea issue comment' });
+    }
+  });
+
+  app.patch('/api/gitea/issues/update', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      if (!directory || !number) {
+        return res.status(400).json({ error: 'directory and number are required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const { owner, repo, repoRef } = await resolveRepoForRequest(directory, requestedRepo);
+      if (!owner || !repo) {
+        return res.status(400).json({ error: 'Unable to resolve Gitea repo from directory' });
+      }
+
+      const body = {};
+      if (typeof req.body?.title === 'string') {
+        body.title = req.body.title.trim();
+      }
+      if (typeof req.body?.body === 'string') {
+        body.body = req.body.body;
+      }
+      if (req.body?.state === 'open' || req.body?.state === 'closed') {
+        body.state = req.body.state;
+      }
+      // Gitea accepts label names (not ids) in the edit-issue payload.
+      if (Array.isArray(req.body?.labels)) {
+        body.labels = req.body.labels.filter((label) => typeof label === 'string');
+      }
+      if (Array.isArray(req.body?.assignees)) {
+        body.assignees = req.body.assignees.filter((login) => typeof login === 'string');
+      }
+      if (req.body?.milestone !== undefined) {
+        if (req.body.milestone === null) {
+          body.unset_milestone = true;
+        } else if (typeof req.body.milestone === 'string' && req.body.milestone.trim()) {
+          const { milestoneId, rateLimited } = await resolveMilestoneId(client, owner, repo, req.body.milestone.trim());
+          if (rateLimited) {
+            return res.status(503).json({ error: 'Gitea rate limited' });
+          }
+          if (milestoneId === null) {
+            return res.status(400).json({ error: 'Milestone not found' });
+          }
+          body.milestone = milestoneId;
+        }
+      }
+
+      const resp = await client.updateIssue(owner, repo, number, body);
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your Gitea token needs write:repository scope to update issues' });
+      }
+      if (resp.status === 404) {
+        return res.status(404).json({ error: 'Issue not found' });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: giteaErrorMessage(resp.data) || 'Gitea returned an error while updating the issue' });
+      }
+      if (!resp.data) {
+        return res.status(500).json({ error: 'Gitea returned an empty response while updating the issue' });
+      }
+
+      return res.json({
+        connected: true,
+        repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl),
+        issue: mapGiteaIssue(resp.data),
+      });
+    } catch (error) {
+      console.error('Failed to update Gitea issue:', error);
+      return res.status(500).json({ error: error.message || 'Failed to update Gitea issue' });
     }
   });
 
@@ -963,6 +1115,11 @@ export function registerGiteaRoutes(app, options = {}) {
       if (description !== undefined) {
         body.body = description;
       }
+      // PRs are issues at the API level in Gitea (the PR number IS the issue
+      // index), so the edit-issue `state` transition applies directly.
+      if (req.body?.state === 'open' || req.body?.state === 'closed') {
+        body.state = req.body.state;
+      }
 
       const resp = await withTimeout(client.updatePullRequest(owner, repo, number, body), ROUTE_TIMEOUT_MS, 'gitea pr update');
       if (resp.status === 429) {
@@ -1047,6 +1204,122 @@ export function registerGiteaRoutes(app, options = {}) {
     }
   });
 
+  // PRs are issues at the API level in Gitea, so a PR comment is an issue
+  // comment addressed by the PR number (which IS the issue index).
+  app.post('/api/gitea/prs/comment', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+      if (!directory || !number || !body) {
+        return res.status(400).json({ error: 'directory, number, body are required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const { owner, repo, repoRef } = await resolveRepoForRequest(directory, requestedRepo);
+      if (!owner || !repo) {
+        return res.status(400).json({ error: 'Unable to resolve Gitea repo from directory' });
+      }
+
+      const resp = await client.createIssueComment(owner, repo, number, body);
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your Gitea token needs write:repository scope to comment on pull requests' });
+      }
+      if (resp.status === 404) {
+        return res.status(404).json({ error: 'Pull request not found' });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: giteaErrorMessage(resp.data) || 'Gitea returned an error while creating the comment' });
+      }
+      if (!resp.data) {
+        return res.status(500).json({ error: 'Gitea returned an empty response while creating the comment' });
+      }
+
+      return res.json({
+        connected: true,
+        repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl),
+        comment: mapGiteaComment(resp.data),
+      });
+    } catch (error) {
+      console.error('Failed to create Gitea pull request comment:', error);
+      return res.status(500).json({ error: error.message || 'Failed to create Gitea pull request comment' });
+    }
+  });
+
+  app.post('/api/gitea/prs/review', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      const event = typeof req.body?.event === 'string' ? req.body.event : '';
+      if (!directory || !number || !event) {
+        return res.status(400).json({ error: 'directory, number, event are required' });
+      }
+      if (event !== 'APPROVED' && event !== 'REQUEST_CHANGES' && event !== 'COMMENT') {
+        return res.status(400).json({ error: 'event must be APPROVED, REQUEST_CHANGES, or COMMENT' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const { owner, repo, repoRef } = await resolveRepoForRequest(directory, requestedRepo);
+      if (!owner || !repo) {
+        return res.status(400).json({ error: 'Unable to resolve Gitea repo from directory' });
+      }
+
+      const params = { event };
+      if (typeof req.body?.body === 'string' && req.body.body) {
+        params.body = req.body.body;
+      }
+
+      const resp = await client.createPullReview(owner, repo, number, params);
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your Gitea token needs write:repository scope to review pull requests' });
+      }
+      if (resp.status === 404) {
+        return res.status(404).json({ error: 'Pull request not found' });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: giteaErrorMessage(resp.data) || 'Gitea returned an error while submitting the review' });
+      }
+      if (!resp.data) {
+        return res.status(500).json({ error: 'Gitea returned an empty response while submitting the review' });
+      }
+
+      const review = resp.data;
+      return res.json({
+        connected: true,
+        repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl),
+        review: {
+          id: String(review.id),
+          state: typeof review.state === 'string' ? review.state : event,
+          author: mapGiteaAuthor(review.user) || null,
+          ...(typeof review.submitted_at === 'string' ? { submittedAt: review.submitted_at } : {}),
+          body: typeof review.body === 'string' ? review.body : null,
+          ...(typeof review.commit_id === 'string' ? { commitSha: review.commit_id } : null),
+        },
+      });
+    } catch (error) {
+      console.error('Failed to submit Gitea pull request review:', error);
+      return res.status(500).json({ error: error.message || 'Failed to submit Gitea pull request review' });
+    }
+  });
+
   // ================= Gitea Repo APIs =================
 
   app.get('/api/gitea/repo/branches', async (req, res) => {
@@ -1099,6 +1372,50 @@ export function registerGiteaRoutes(app, options = {}) {
     } catch (error) {
       console.error('Failed to fetch Gitea repo branches:', error);
       return res.status(500).json({ error: error.message || 'Failed to fetch Gitea repo branches' });
+    }
+  });
+
+  app.get('/api/gitea/repo/labels', async (req, res) => {
+    try {
+      const directory = asString(req.query?.directory);
+      const requestedRepo = getRequestedRepo(req);
+      if (!directory && !requestedRepo) {
+        return res.status(400).json({ error: 'directory or owner/repo is required' });
+      }
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false, labels: [] });
+      }
+
+      const { owner, repo, repoRef } = await resolveRepoForRequest(directory, requestedRepo);
+      if (!owner || !repo) {
+        return res.json({ connected: true, repo: null, labels: [] });
+      }
+
+      const resp = await withTimeout(
+        client.repoLabels(owner, repo, { limit: 100 }),
+        ROUTE_TIMEOUT_MS,
+        'gitea repo labels',
+      );
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'Gitea returned an error while fetching repo labels' });
+      }
+
+      const labels = (Array.isArray(resp.data) ? resp.data : []).map((label) => ({
+        ...(typeof label.id === 'number' ? { id: label.id } : {}),
+        name: typeof label.name === 'string' ? label.name : '',
+        ...(typeof label.color === 'string' ? { color: label.color } : {}),
+        ...(typeof label.description === 'string' ? { description: label.description } : {}),
+      }));
+
+      return res.json({ connected: true, repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl), labels });
+    } catch (error) {
+      console.error('Failed to fetch Gitea repo labels:', error);
+      return res.status(500).json({ error: error.message || 'Failed to fetch Gitea repo labels' });
     }
   });
 }

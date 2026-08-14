@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -7,6 +7,7 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import type {
   ForgeChecksResult,
   ForgeCommitsResult,
+  ForgeEntityRef,
   ForgeIssueDetail,
   ForgeProvider,
   ForgePullRequestContext,
@@ -18,6 +19,12 @@ import { ForgeCommitsSection } from './ForgeCommitsSection';
 import { ForgeFilesDiffSection } from './ForgeFilesDiffSection';
 import { ForgeTimelineSection } from './ForgeTimelineSection';
 import { ForgeChecksSection } from './ForgeChecksSection';
+import {
+  ForgeCommentComposer,
+  ForgeEntityActions,
+  ForgeMetadataEditor,
+  ForgeThreadReply,
+} from './actions';
 
 interface ForgeEntityDetailViewProps {
   provider: ForgeProvider;
@@ -95,11 +102,32 @@ export const ForgeEntityDetailView: React.FC<ForgeEntityDetailViewProps> = ({ pr
   const [pull, setPull] = useState<PullData | null>(null);
   const [issueDetail, setIssueDetail] = useState<ForgeIssueDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Bumped after a successful write so the owning load effect re-runs; never
+  // bumped on render, so writes are the only trigger.
+  const [reloadToken, setReloadToken] = useState(0);
+  // Comments posted through this view are appended locally so they appear
+  // immediately; a later context refresh reconciles them with authoritative
+  // server data (and the load effect clears the local list).
+  const [localComments, setLocalComments] = useState<ForgeComment[]>([]);
+  // Id of the thread root the user is replying to (renders ForgeThreadReply
+  // under that thread card).
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+
+  const reload = useCallback(() => {
+    setReloadToken((value) => value + 1);
+  }, []);
+
+  const ref = useMemo<ForgeEntityRef>(() => ({ kind: isIssue ? 'issue' : 'pull', number }), [isIssue, number]);
+
+  const appendComment = useCallback((comment: ForgeComment) => {
+    setLocalComments((previous) => [...previous, comment]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     setPull(null);
     setIssueDetail(null);
+    setLocalComments([]);
     setIsLoading(true);
 
     if (isIssue) {
@@ -147,13 +175,14 @@ export const ForgeEntityDetailView: React.FC<ForgeEntityDetailViewProps> = ({ pr
     return () => {
       cancelled = true;
     };
-  }, [directory, isIssue, number, provider, sourceRepo]);
+  }, [directory, isIssue, number, provider, reloadToken, sourceRepo]);
 
   const mergedComments = useMemo<ForgeComment[]>(() => {
-    if (isIssue) return issueDetail?.comments ?? [];
-    const context = pull?.context;
-    return [...(context?.issueComments ?? []), ...(context?.reviewComments ?? [])];
-  }, [isIssue, issueDetail?.comments, pull?.context]);
+    const derived = isIssue
+      ? issueDetail?.comments ?? []
+      : [...(pull?.context?.issueComments ?? []), ...(pull?.context?.reviewComments ?? [])];
+    return [...localComments, ...derived];
+  }, [isIssue, issueDetail?.comments, localComments, pull?.context]);
 
   const timelineEvents = useMemo<ForgeTimelineEvent[]>(() => pull?.timeline?.events ?? [], [pull?.timeline]);
 
@@ -169,6 +198,32 @@ export const ForgeEntityDetailView: React.FC<ForgeEntityDetailViewProps> = ({ pr
     }
     return null;
   }, [pull?.context, provider.capabilities.checks, pull?.checks]);
+
+  const canReply = typeof provider.replyToThread === 'function';
+
+  const handleReply = useCallback((comment: ForgeComment) => {
+    setReplyingTo(comment.id);
+  }, []);
+
+  const renderThreadReply = useCallback(
+    (comment: ForgeComment): React.ReactNode => {
+      if (comment.id !== replyingTo) return null;
+      return (
+        <ForgeThreadReply
+          provider={provider}
+          directory={directory}
+          ref={ref}
+          thread={{ inReplyToId: comment.id, path: comment.path ?? null, line: comment.line ?? null }}
+          onPosted={(created) => {
+            appendComment(created);
+            setReplyingTo(null);
+          }}
+          onCancel={() => setReplyingTo(null)}
+        />
+      );
+    },
+    [appendComment, directory, provider, ref, replyingTo],
+  );
 
   if (isLoading) {
     return <LoadingBlock label={t('forge.loading')} />;
@@ -194,7 +249,17 @@ export const ForgeEntityDetailView: React.FC<ForgeEntityDetailViewProps> = ({ pr
             {t(`forge.state.${issueState}`)}
           </span>
         </div>
+        <ForgeEntityActions provider={provider} directory={directory} ref={ref} issue={issue} onChanged={reload} />
         <ForgeMetadataChips kind="issue" issue={issue} />
+        <ForgeMetadataEditor
+          provider={provider}
+          directory={directory}
+          ref={ref}
+          labels={issue.labels ?? []}
+          assignees={issue.assignees ?? []}
+          milestone={issue.milestone}
+          onChanged={reload}
+        />
         {issue.body ? (
           <SimpleMarkdownRenderer content={issue.body} className={markdownClassName} enableFileReferences={false} />
         ) : null}
@@ -202,10 +267,13 @@ export const ForgeEntityDetailView: React.FC<ForgeEntityDetailViewProps> = ({ pr
           <SectionTitle>{t('forge.section.timeline')}</SectionTitle>
           <ForgeTimelineSection
             events={[]}
-            comments={issueDetail.comments ?? []}
+            comments={mergedComments}
             error={issueDetail.commentsError ?? null}
+            onReply={canReply ? handleReply : undefined}
+            renderReply={canReply ? renderThreadReply : undefined}
           />
         </section>
+        <ForgeCommentComposer provider={provider} directory={directory} ref={ref} onPosted={appendComment} />
       </div>
     );
   }
@@ -242,6 +310,8 @@ export const ForgeEntityDetailView: React.FC<ForgeEntityDetailViewProps> = ({ pr
         ) : null}
       </div>
 
+      <ForgeEntityActions provider={provider} directory={directory} ref={ref} pr={pr} onChanged={reload} />
+
       <ForgeMetadataChips kind="pull" pr={pr} />
 
       {checksForPull ? (
@@ -273,8 +343,11 @@ export const ForgeEntityDetailView: React.FC<ForgeEntityDetailViewProps> = ({ pr
           events={timelineEvents}
           comments={mergedComments}
           error={pull.timeline?.error ?? null}
+          onReply={canReply ? handleReply : undefined}
+          renderReply={canReply ? renderThreadReply : undefined}
         />
       </section>
+      <ForgeCommentComposer provider={provider} directory={directory} ref={ref} onPosted={appendComment} />
     </div>
   );
 };

@@ -32,7 +32,7 @@
 
 ### Client (`client.js`)
 
-- `createGitLabClient({ token, baseUrl })`: raw-fetch REST v4 client with `request(path, { method, query, body })` plus convenience methods `user()`, `project(path)`, `issues(path, params)`, `issue(path, iid)`, `issueNotes(path, iid, params)`, `mergeRequests(path, params)`, `mergeRequest(path, iid)`, `mergeRequestDiffs(path, iid, params)`, `createMergeRequest(path, body)`, `updateMergeRequest(path, iid, body)`, `mergeMergeRequest(path, iid, body)`, `branches(path, params)`.
+- `createGitLabClient({ token, baseUrl })`: raw-fetch REST v4 client with `request(path, { method, query, body })` plus convenience methods `user()`, `project(path)`, `issues(path, params)`, `issue(path, iid)`, `issueNotes(path, iid, params)`, `createIssueNote(path, iid, body)`, `updateIssue(path, iid, params)`, `mergeRequests(path, params)`, `mergeRequest(path, iid)`, `mergeRequestDiffs(path, iid, params)`, `createMergeRequest(path, body)`, `updateMergeRequest(path, iid, body)`, `mergeMergeRequest(path, iid, body)`, `createMrNote(path, iid, body)`, `approveMr(path, iid)`, `milestones(path, params)`, `branches(path, params)`.
 - `getGitLabClientOrNull()`: client for the current account, or `null`.
 - `isGitLabRateLimited()` / `noteGitLabRateLimit(error)`: own module-level rate-limit cooldown (not shared with the GitHub module's `rate-limit.js`).
 
@@ -81,8 +81,13 @@ Nothing in the client or repo layers assumes the token came from a PAT.
 - MR notes: `GET /projects/:id/merge_requests/:merge_request_iid/notes?per_page=100`; the timeline route keeps `system: true` notes only and infers the event `type` from the note body text (best-effort heuristic, falls back to `'other'`).
 - MR notes: `GET /projects/:id/merge_requests/:merge_request_iid/notes?per_page=100`.
 - MR create: `POST /projects/:id/merge_requests` with `{ source_branch, target_branch, title, description?, remove_source_branch }` (description omitted when absent; `remove_source_branch` defaults to `false`).
-- MR update: `PUT /projects/:id/merge_requests/:merge_request_iid` with `{ title?, description? }` (undefined fields omitted).
+- MR update: `PUT /projects/:id/merge_requests/:merge_request_iid` with `{ title?, description?, state_event?, labels?, assignee_ids?, milestone_id? }` (undefined fields omitted; `state_event` is derived from `state`, milestone titles are resolved to ids).
 - MR merge: `PUT /projects/:id/merge_requests/:merge_request_iid/merge` with `{ squash? }`.
+- Issue comment write: `POST /projects/:id/issues/:issue_iid/notes` with `{ body }` (the route resolves the issue `web_url` first so the note links as `{issue_web_url}#note_{id}`).
+- Issue update: `PUT /projects/:id/issues/:issue_iid` with `{ title?, description?, state_event?, labels?, assignee_ids?, milestone_id? }` (`state: 'open'|'closed'` maps to `state_event: 'reopen'|'close'`; labels/assignees are full-set replaces per GitLab semantics; `milestone` titles are resolved to ids and `null` clears).
+- MR comment write: `POST /projects/:id/merge_requests/:merge_request_iid/notes` with `{ body }`.
+- MR approve: `POST /projects/:id/merge_requests/:merge_request_iid/approve` (approve-only; GitLab has no request-changes event via this API — the facade capability reflects that).
+- Milestones: `GET /projects/:id/milestones?state=all&per_page=100` (first page) for title-to-id resolution on issue/MR updates.
 - Branches: `GET /projects/:id/repository/branches?per_page=100&page=N`.
 - User: `GET /user` -> `{ id, username, name, state, avatar_url, web_url, email, ... }`.
 
@@ -103,8 +108,12 @@ Nothing in the client or repo layers assumes the token came from a PAT.
 | GET | `/api/gitlab/mrs/commits` | `?directory&number&namespace&project` -> `{ connected, repo?, commits[] }` |
 | GET | `/api/gitlab/mrs/timeline` | `?directory&number&namespace&project` -> `{ connected, repo?, events[] }` (system notes only; event `type` inferred from note body text — best-effort heuristic) |
 | POST | `/api/gitlab/mrs/create` | body `{ directory, title, sourceBranch, targetBranch, description?, removeSourceBranch? }` -> `{ connected, repo?, mr }`; `400` for missing fields, unresolvable repo, or a token without the `api` scope |
-| PUT | `/api/gitlab/mrs/update` | body `{ directory, number, title?, description? }` -> `{ connected, repo?, mr }`; `404` when the MR does not exist |
+| PUT | `/api/gitlab/mrs/update` | body `{ directory, number, title?, description?, state?, labels?, assigneeIds?, milestone? }` -> `{ connected, repo?, mr }`; `404` when the MR does not exist; `400 'Milestone not found'` when a milestone title does not match |
 | PUT | `/api/gitlab/mrs/merge` | body `{ directory, number, squash? }` -> `{ connected, merged: true }` on success; non-mergeable MRs -> the GitLab status (`405`/`406`/`409`/`422`) with `{ connected, merged: false, message }` |
+| POST | `/api/gitlab/issues/comment` | body `{ directory, number, body, namespace?, project? }` -> `{ connected, repo?, comment }` |
+| PUT | `/api/gitlab/issues/update` | body `{ directory, number, title?, body?, state?, labels?, assigneeIds?, milestone?, namespace?, project? }` -> `{ connected, repo?, issue }`; `400 'Milestone not found'` when a milestone title does not match |
+| POST | `/api/gitlab/mrs/comment` | body `{ directory, number, body, namespace?, project? }` -> `{ connected, repo?, comment }` |
+| POST | `/api/gitlab/mrs/approve` | body `{ directory, number, namespace?, project? }` -> `{ connected, repo?, approved: true }` |
 | GET | `/api/gitlab/repo/branches` | `?namespace&project` -> `{ branches[], defaultBranch? }` (`defaultBranch` is `null` when the repo has no marked default branch or GitLab is disconnected) |
 
 Conventions mirror `github/routes.js`:
@@ -114,7 +123,7 @@ Conventions mirror `github/routes.js`:
 - Hard failures -> `4xx`/`5xx` with `{ error }`.
 - A GitLab `429` -> `503 { error: 'GitLab rate limited' }`.
 - Lazy-import pattern: route handlers import `./index.js` on first use, so the module never loads unless GitLab endpoints are hit.
-- Composite routes run under a 15 s route-level budget on top of the client's 8 s per-request timeout.
+- Composite routes run under a 15 s route-level budget on top of the client's 8 s per-request timeout. Write routes deliberately skip the route-level timeout (a timeout can orphan a write); the client's per-request timeout still bounds them.
 
 ## Consumers
 
@@ -127,6 +136,7 @@ Conventions mirror `github/routes.js`:
 - A repo that does not resolve from the local git remote yields `repo: null` with empty lists, matching the GitHub behavior. Write routes reject an unresolvable repo with `400 { error: 'Unable to resolve GitLab repo from directory' }`.
 - Invalid/expired tokens are cleared on `401`/`403` and reported as disconnected.
 - GitLab `403` on write routes means the token lacks the `api` scope; they respond `400 { error: 'Your GitLab token needs the api scope to ...' }`.
+- Milestone titles on issue/MR updates are resolved against `GET /projects/:id/milestones`; an unmatched title yields `400 { error: 'Milestone not found' }` and `null` clears the milestone (`milestone_id: null`).
 - MR merge rejections (`405`/`406`/`409`/`422` from GitLab) are surfaced as `{ connected, merged: false, message }` with the GitLab status so clients can show the message without treating it as a transport error (mirrors `github/pr/merge`).
 - Rate-limit and timeout failures surface explicit `503` responses so clients keep last-known state rather than clearing UI.
 
@@ -136,4 +146,4 @@ Conventions mirror `github/routes.js`:
 - Never log tokens. Error messages must not include the access token.
 - Do not double-encode project paths; convenience methods already call `encodeURIComponent` on the `pathWithNamespace`.
 - The ETag cache and rate-limit cooldown are module-level and per-instance — they are NOT shared with the GitHub module.
-- To add further GitLab write operations (comment, assign, issue writes), add the endpoint in `routes.js`, add a convenience method in `client.js`, and extend the shared types — mirror the existing MR write routes and the GitHub PR write routes.
+- To add further GitLab write operations, add the endpoint in `routes.js`, add a convenience method in `client.js`, and extend the shared types — mirror the existing issue/MR write routes and the GitHub PR write routes.

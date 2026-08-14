@@ -2,7 +2,11 @@ import type {
   GitHubAPI,
   GitHubAuthStatus,
   GitHubIssueCommentsResult,
+  GitHubIssueCommentInput,
+  GitHubIssueCommentResult,
   GitHubIssueGetResult,
+  GitHubIssueUpdateInput,
+  GitHubIssueUpdateResult,
   GitHubIssuesListResult,
   GitHubPullRequestContextResult,
   GitHubPullRequestCommitsResult,
@@ -16,7 +20,11 @@ import type {
   GitHubPullRequestReadyResult,
   GitHubPullRequestUpdateInput,
   GitHubPullRequestStatus,
+  GitHubPullRequestReviewInput,
+  GitHubPullRequestReviewResult,
   GitHubRepoUpstreamResult,
+  GitHubReviewCommentInput,
+  GitHubReviewCommentResult,
   GitHubDeviceFlowComplete,
   GitHubDeviceFlowStart,
   GitHubUserSummary,
@@ -324,5 +332,70 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
       throw new Error(payload?.error || response.statusText || 'Failed to load pull request timeline');
     }
     return payload;
+  },
+
+  async issueComment(input: GitHubIssueCommentInput): Promise<GitHubIssueCommentResult> {
+    const response = await runtimeFetch('/api/github/issues/comment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GitHubIssueCommentResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to post GitHub comment');
+    }
+    return body;
+  },
+
+  async issueUpdate(input: GitHubIssueUpdateInput): Promise<GitHubIssueUpdateResult> {
+    const response = await runtimeFetch('/api/github/issues/update', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GitHubIssueUpdateResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to update GitHub issue');
+    }
+    return body;
+  },
+
+  async prComment(input: GitHubIssueCommentInput): Promise<GitHubIssueCommentResult> {
+    const response = await runtimeFetch('/api/github/pulls/comment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GitHubIssueCommentResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to post GitHub PR comment');
+    }
+    return body;
+  },
+
+  async prReviewComment(input: GitHubReviewCommentInput): Promise<GitHubReviewCommentResult> {
+    const response = await runtimeFetch('/api/github/pulls/review-comment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GitHubReviewCommentResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to post GitHub review comment');
+    }
+    return body;
+  },
+
+  async prSubmitReview(input: GitHubPullRequestReviewInput): Promise<GitHubPullRequestReviewResult> {
+    const response = await runtimeFetch('/api/github/pulls/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GitHubPullRequestReviewResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to submit GitHub review');
+    }
+    return body;
   },
 });

@@ -263,6 +263,14 @@ export function createGiteaClient({ token, baseUrl }) {
       request(`/repos/${owner}/${repo}/issues/${number}`),
     issueComments: (owner, repo, number, params = {}) =>
       request(`/repos/${owner}/${repo}/issues/${number}/comments`, { query: params }),
+    createIssueComment: (owner, repo, number, body) =>
+      request(`/repos/${owner}/${repo}/issues/${number}/comments`, { method: 'POST', body: { body } }),
+    updateIssue: (owner, repo, number, params) =>
+      request(`/repos/${owner}/${repo}/issues/${number}`, { method: 'PATCH', body: params }),
+    milestones: (owner, repo, params = {}) =>
+      request(`/repos/${owner}/${repo}/milestones`, { query: params }),
+    repoLabels: (owner, repo, params = {}) =>
+      request(`/repos/${owner}/${repo}/labels`, { query: params }),
     pullRequests: (owner, repo, params = {}) =>
       request(`/repos/${owner}/${repo}/pulls`, { query: params }),
     pullRequest: (owner, repo, number) =>
@@ -275,6 +283,8 @@ export function createGiteaClient({ token, baseUrl }) {
       request(`/repos/${owner}/${repo}/pulls/${number}/commits`, { query: params }),
     pullRequestReviews: (owner, repo, number, params = {}) =>
       request(`/repos/${owner}/${repo}/pulls/${number}/reviews`, { query: params }),
+    createPullReview: (owner, repo, number, params) =>
+      request(`/repos/${owner}/${repo}/pulls/${number}/reviews`, { method: 'POST', body: params }),
     commitStatuses: (owner, repo, sha, params = {}) =>
       request(`/repos/${owner}/${repo}/commits/${sha}/statuses`, { query: params }),
     createPullRequest: (owner, repo, body) =>
