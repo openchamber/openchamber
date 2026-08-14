@@ -102,8 +102,12 @@ describe('normalizeForwardedDirectoryHeaders', () => {
   });
 });
 
-const listen = (server) => new Promise((resolve) => {
-  server.listen(0, '127.0.0.1', () => resolve(server.address().port));
+const listen = (server) => new Promise((resolve, reject) => {
+  server.once('error', reject);
+  server.listen(0, '127.0.0.1', () => {
+    server.removeListener('error', reject);
+    resolve(server.address().port);
+  });
 });
 
 const closeServer = (server) => new Promise((resolve) => {
@@ -126,15 +130,10 @@ const request = (port, agent) => new Promise((resolve, reject) => {
  */
 const proxyTwoRequests = async (proxyAgent) => {
   const seen = [];
+  let middleware;
   const upstream = http.createServer((req, res) => {
     seen.push({ connection: req.headers.connection, remotePort: req.socket.remotePort });
     res.end('ok');
-  });
-  const upstreamPort = await listen(upstream);
-
-  const middleware = createProxyMiddleware({
-    target: `http://127.0.0.1:${upstreamPort}`,
-    ...(proxyAgent ? { agent: proxyAgent } : {}),
   });
   const front = http.createServer((req, res) => {
     middleware(req, res, () => {
@@ -142,10 +141,16 @@ const proxyTwoRequests = async (proxyAgent) => {
       res.end();
     });
   });
-  const frontPort = await listen(front);
   const clientAgent = new http.Agent({ keepAlive: true });
 
   try {
+    const upstreamPort = await listen(upstream);
+    middleware = createProxyMiddleware({
+      target: `http://127.0.0.1:${upstreamPort}`,
+      ...(proxyAgent ? { agent: proxyAgent } : {}),
+    });
+
+    const frontPort = await listen(front);
     await request(frontPort, clientAgent);
     await request(frontPort, clientAgent);
   } finally {
@@ -179,7 +184,7 @@ describe('createOpenCodeProxyAgent', () => {
   // `https:`, so an http.Agent would open a plaintext socket to a TLS port.
   // External OpenCode servers can be configured over https via OPENCODE_HOST.
   it('returns an https agent for https targets', () => {
-    const agent = createOpenCodeProxyAgent('https://opencode.example.com:443');
+    const agent = createOpenCodeProxyAgent('https://opencode.example.com:4096');
 
     expect(agent).toBeInstanceOf(https.Agent);
     expect(agent.options.keepAlive).toBe(true);
@@ -206,36 +211,42 @@ describe('createOpenCodeProxyAgent', () => {
   // would silently regress — so pin the behavior here against the real library.
   it('http-proxy-middleware re-reads the agent option on every proxied request', async () => {
     let reads = 0;
+    let middleware;
     const agent = createOpenCodeProxyAgent('http://127.0.0.1');
     const upstream = http.createServer((_req, res) => res.end('ok'));
-    const upstreamPort = await listen(upstream);
-
-    const middleware = createProxyMiddleware({
-      target: `http://127.0.0.1:${upstreamPort}`,
-      get agent() {
-        reads += 1;
-        return agent;
-      },
-    });
     const front = http.createServer((req, res) => {
       middleware(req, res, () => {
         res.statusCode = 502;
         res.end();
       });
     });
-    const frontPort = await listen(front);
     const clientAgent = new http.Agent({ keepAlive: true });
 
     try {
+      const upstreamPort = await listen(upstream);
+      middleware = createProxyMiddleware({
+        target: `http://127.0.0.1:${upstreamPort}`,
+        get agent() {
+          reads += 1;
+          return agent;
+        },
+      });
+
+      // Construction itself must not read the getter — otherwise the assertion
+      // below could be satisfied without any per-request resolution happening.
+      expect(reads).toBe(0);
+
+      const frontPort = await listen(front);
       await request(frontPort, clientAgent);
+      expect(reads).toBe(1);
+
       await request(frontPort, clientAgent);
+      expect(reads).toBe(2);
     } finally {
       clientAgent.destroy();
       agent.destroy();
       await closeServer(front);
       await closeServer(upstream);
     }
-
-    expect(reads).toBeGreaterThanOrEqual(2);
   });
 });

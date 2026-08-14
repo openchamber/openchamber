@@ -15,13 +15,22 @@ import { recordStartupPerformance } from './startup-performance.js';
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 
 const OPENCODE_AGENT_KEEP_ALIVE_MS = 30_000;
-const OPENCODE_AGENT_MAX_FREE_SOCKETS = 32;
+// Node's own default. A lower cap evicts pooled sockets under concurrency,
+// which reintroduces exactly the per-request connection churn this agent
+// exists to prevent (measured: at 64 concurrent requests, a cap of 32 left
+// 303 sockets in TIME_WAIT versus 0 at 256).
+const OPENCODE_AGENT_MAX_FREE_SOCKETS = 256;
+// Evicts idle free sockets from our side. Without it the only thing that
+// retires an idle pooled socket is the upstream closing it. Note this is
+// distinct from `keepAliveMsecs`, which is the TCP keep-alive probe delay.
+const OPENCODE_AGENT_IDLE_TIMEOUT_MS = 60_000;
 
 const OPENCODE_AGENT_OPTIONS = {
   keepAlive: true,
   keepAliveMsecs: OPENCODE_AGENT_KEEP_ALIVE_MS,
   maxSockets: Infinity,
   maxFreeSockets: OPENCODE_AGENT_MAX_FREE_SOCKETS,
+  timeout: OPENCODE_AGENT_IDLE_TIMEOUT_MS,
 };
 
 const isHttpsProxyTarget = (target) => {
@@ -82,12 +91,13 @@ const createOpenCodeProxyAgentResolver = (resolveTarget) => {
   const agents = new Map();
 
   return () => {
-    const scheme = isHttpsProxyTarget(resolveTarget()) ? 'https:' : 'http:';
+    const target = resolveTarget();
+    const scheme = isHttpsProxyTarget(target) ? 'https:' : 'http:';
     let agent = agents.get(scheme);
     if (!agent) {
-      agent = scheme === 'https:'
-        ? new https.Agent(OPENCODE_AGENT_OPTIONS)
-        : new http.Agent(OPENCODE_AGENT_OPTIONS);
+      // Construct through the shared factory rather than inline, so both
+      // schemes are built from OPENCODE_AGENT_OPTIONS by the same code path.
+      agent = createOpenCodeProxyAgent(target);
       agents.set(scheme, agent);
     }
     return agent;
@@ -368,15 +378,22 @@ export const registerOpenCodeProxy = (app, deps) => {
   // and direct fetch helpers use. This avoids split-brain state where /health
   // succeeds against an external host but /api/* still proxies to 127.0.0.1.
   const resolveProxyTarget = () => {
-    try {
-      const resolved = normalizeProxyTarget(buildOpenCodeUrl('/', ''));
-      if (resolved) {
-        return resolved;
+    const runtimeState = getRuntime();
+
+    // `buildOpenCodeUrl` throws while the port is unknown, and the port is
+    // nulled on several runtime paths (health-check failure, failed restart),
+    // not just cold start. Checking first keeps a degraded OpenCode from
+    // making every proxied request pay for a thrown-and-caught exception.
+    if (runtimeState.openCodePort) {
+      try {
+        const resolved = normalizeProxyTarget(buildOpenCodeUrl('/', ''));
+        if (resolved) {
+          return resolved;
+        }
+      } catch {
       }
-    } catch {
     }
 
-    const runtimeState = getRuntime();
     const externalBase = normalizeProxyTarget(runtimeState.openCodeBaseUrl);
     if (externalBase) {
       return externalBase;

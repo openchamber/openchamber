@@ -112,10 +112,14 @@ describe('OpenCode API proxy agent wiring', () => {
     }
 
     // Bootstrap completes against an external https server.
-    state.baseUrl = 'https://opencode.example.com:443';
+    state.baseUrl = 'https://opencode.example.com:4096';
 
     for (const agent of agentsFromCalls()) {
       expect(agent).toBeInstanceOf(https.Agent);
+      // Asserted on the live resolver path, not just the exported factory:
+      // the https branch is the one a mutation could silently strip.
+      expect(agent.options?.keepAlive).toBe(true);
+      expect(agent.options?.maxFreeSockets).toBe(256);
     }
   });
 
@@ -135,7 +139,7 @@ describe('OpenCode API proxy agent wiring', () => {
   it('derives an https agent when the target is already https at registration', () => {
     registerOpenCodeProxy(
       createStubApp(),
-      createStubDeps({ port: 443, baseUrl: 'https://opencode.example.com:443' }),
+      createStubDeps({ port: 4096, baseUrl: 'https://opencode.example.com:4096' }),
     );
 
     const agents = agentsFromCalls();
