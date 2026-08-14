@@ -2,13 +2,18 @@ import type {
   GiteaAPI,
   GiteaAuthStatus,
   GiteaBranchesResult,
+  GiteaBranchesSearchResult,
   GiteaIssueCommentInput,
   GiteaIssueCommentResult,
   GiteaIssueCommentsResult,
+  GiteaIssueCreateInput,
+  GiteaIssueCreateResult,
   GiteaIssueGetResult,
   GiteaIssuesListResult,
   GiteaIssueUpdateInput,
   GiteaIssueUpdateResult,
+  GiteaLabelsSearchResult,
+  GiteaMilestonesSearchResult,
   GiteaPullRequest,
   GiteaPullRequestCommitsResult,
   GiteaPullRequestContextResult,
@@ -22,7 +27,9 @@ import type {
   GiteaPullReviewInput,
   GiteaPullReviewResult,
   GiteaRepoLabelsResult,
+  GiteaTagsSearchResult,
   GiteaUserSummary,
+  GiteaUsersSearchResult,
 } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
@@ -96,6 +103,66 @@ export const createWebGiteaAPI = ({ urls }: WebGiteaAPIOptions): GiteaAPI => ({
       throw new Error(payload?.error || response.statusText || 'Failed to fetch Gitea user');
     }
     return payload;
+  },
+
+  async searchUsers(directory, query, options): Promise<GiteaUsersSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.owner) params.set('owner', options.owner);
+    if (options?.repo) params.set('repo', options.repo);
+    const response = await runtimeFetch(urls.api('/api/gitea/users/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GiteaUsersSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search Gitea users');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, users: body.users ?? [] };
+  },
+
+  async searchLabels(directory, query, options): Promise<GiteaLabelsSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.owner) params.set('owner', options.owner);
+    if (options?.repo) params.set('repo', options.repo);
+    const response = await runtimeFetch(urls.api('/api/gitea/labels/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GiteaLabelsSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search Gitea labels');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, labels: body.labels ?? [] };
+  },
+
+  async searchMilestones(directory, query, options): Promise<GiteaMilestonesSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.owner) params.set('owner', options.owner);
+    if (options?.repo) params.set('repo', options.repo);
+    const response = await runtimeFetch(urls.api('/api/gitea/milestones/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GiteaMilestonesSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search Gitea milestones');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, milestones: body.milestones ?? [] };
+  },
+
+  async searchBranches(directory, query, options): Promise<GiteaBranchesSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.owner) params.set('owner', options.owner);
+    if (options?.repo) params.set('repo', options.repo);
+    const response = await runtimeFetch(urls.api('/api/gitea/branches/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GiteaBranchesSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search Gitea branches');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, branches: body.branches ?? [] };
+  },
+
+  async searchTags(directory, query, options): Promise<GiteaTagsSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.owner) params.set('owner', options.owner);
+    if (options?.repo) params.set('repo', options.repo);
+    const response = await runtimeFetch(urls.api('/api/gitea/tags/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GiteaTagsSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search Gitea tags');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, tags: body.tags ?? [] };
   },
 
   async issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GiteaIssuesListResult> {
@@ -303,6 +370,19 @@ export const createWebGiteaAPI = ({ urls }: WebGiteaAPIOptions): GiteaAPI => ({
     const body = await jsonOrNull<GiteaIssueCommentResult & { error?: string }>(response);
     if (!response.ok || !body) {
       throw new Error(body?.error || response.statusText || 'Failed to post Gitea issue comment');
+    }
+    return body;
+  },
+
+  async issueCreate(input: GiteaIssueCreateInput): Promise<GiteaIssueCreateResult> {
+    const response = await runtimeFetch('/api/gitea/issues/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GiteaIssueCreateResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to create Gitea issue');
     }
     return body;
   },

@@ -2,10 +2,12 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { ForgeEntityDetailView } from '@/components/views/forge';
+import { ForgeCreateIssueDialog } from '@/components/views/forge/actions';
 import { buildForgeProvider } from '@/lib/forge';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useUIStore } from '@/stores/useUIStore';
 import type { GitHubIssueSummary, GitHubRepoSelector } from '@/lib/api/types';
+import type { ForgeIssue } from '@/lib/forge';
 import { useI18n } from '@/lib/i18n';
 
 const issueLabelBadgeClass =
@@ -46,6 +48,8 @@ export const GitHubIssuesSection: React.FC<{ directory: string }> = ({ directory
   >(null);
   const [selectedUrl, setSelectedUrl] = React.useState<string | null>(null);
 
+  const [createOpen, setCreateOpen] = React.useState(false);
+
   const issueProvider = React.useMemo(() => (github ? buildForgeProvider('github', { github }) : null), [github]);
 
   const retry = React.useCallback(() => setRetryToken((value) => value + 1), []);
@@ -54,6 +58,16 @@ export const GitHubIssuesSection: React.FC<{ directory: string }> = ({ directory
     setSettingsPage('git');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
+
+  const handleIssueCreated = React.useCallback(
+    (issue: ForgeIssue) => {
+      // Open the freshly created issue's detail and refresh the list behind it.
+      setSelectedNumber(issue.number);
+      setSelectedUrl(issue.url ?? null);
+      setRetryToken((value) => value + 1);
+    },
+    [],
+  );
 
   // A different repository invalidates the previously loaded list and detail so
   // a stale repository's issues never leak into the new one.
@@ -180,8 +194,14 @@ export const GitHubIssuesSection: React.FC<{ directory: string }> = ({ directory
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex flex-col gap-0.5">
+      <div className="flex min-w-0 items-center justify-between gap-2">
         <div className="typography-ui-header font-semibold text-foreground">{t('gitView.pullRequest.issues.listSectionTitle')}</div>
+        {issueProvider?.createIssue ? (
+          <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2" onClick={() => setCreateOpen(true)}>
+            <Icon name="add" className="size-4" />
+            {t('forge.actions.newIssue')}
+          </Button>
+        ) : null}
       </div>
 
       {!github?.issuesList ? (
@@ -255,6 +275,16 @@ export const GitHubIssuesSection: React.FC<{ directory: string }> = ({ directory
           ) : null}
         </div>
       )}
+
+      {issueProvider?.createIssue ? (
+        <ForgeCreateIssueDialog
+          provider={issueProvider}
+          directory={directory}
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          onCreated={handleIssueCreated}
+        />
+      ) : null}
     </div>
   );
 };

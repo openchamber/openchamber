@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast';
 import { useI18n } from '@/lib/i18n';
 import type { ForgeEntityRef, ForgeProvider } from '@/lib/forge/provider';
 import type { ForgeComment } from '@/lib/forge/types';
+import { ForgeMentionTextarea } from './ForgeMentionTextarea';
 
 interface ForgeCommentComposerProps {
   provider: ForgeProvider;
@@ -47,12 +47,14 @@ export const ForgeCommentComposer: React.FC<ForgeCommentComposerProps> = ({ prov
 
   return (
     <div className="flex flex-col gap-2">
-      <Textarea
+      <ForgeMentionTextarea
+        provider={provider}
+        directory={directory}
         value={body}
-        onChange={(event) => setBody(event.target.value)}
+        onChange={setBody}
         placeholder={t('forge.actions.commentPlaceholder')}
         disabled={submitting}
-        aria-label={t('forge.actions.commentPlaceholder')}
+        ariaLabel={t('forge.actions.commentPlaceholder')}
         className="min-h-[72px]"
       />
       <div className="flex justify-end">

@@ -45,6 +45,16 @@ export interface ForgeProviderCapabilities {
   inlineComments: boolean;
   /** Comment threads that can be replied to. */
   threads: boolean;
+  /** Repo-scoped user search (assignable users) for mentions/assignees. */
+  userSearch: boolean;
+  /** Repo-scoped label search for the label picker. */
+  labelSearch: boolean;
+  /** Repo-scoped milestone search for the milestone picker. */
+  milestoneSearch: boolean;
+  /** Repo-scoped branch search. */
+  branchSearch: boolean;
+  /** Repo-scoped tag search. */
+  tagSearch: boolean;
 }
 
 /** A person as surfaced by the forge (issue author, reviewer, commit author, ...). */

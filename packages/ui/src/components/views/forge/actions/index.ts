@@ -16,3 +16,4 @@ export { ForgeDraftToggle } from './ForgeDraftToggle';
 export { ForgeMetadataEditor } from './ForgeMetadataEditor';
 export { ForgeEditForm } from './ForgeEditForm';
 export { ForgeEntityActions } from './ForgeEntityActions';
+export { ForgeCreateIssueDialog } from './ForgeCreateIssueDialog';

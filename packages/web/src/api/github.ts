@@ -1,13 +1,18 @@
 import type {
   GitHubAPI,
   GitHubAuthStatus,
+  GitHubBranchesSearchResult,
   GitHubIssueCommentsResult,
   GitHubIssueCommentInput,
   GitHubIssueCommentResult,
+  GitHubIssueCreateInput,
+  GitHubIssueCreateResult,
   GitHubIssueGetResult,
   GitHubIssueUpdateInput,
   GitHubIssueUpdateResult,
   GitHubIssuesListResult,
+  GitHubLabelsSearchResult,
+  GitHubMilestonesSearchResult,
   GitHubPullRequestContextResult,
   GitHubPullRequestCommitsResult,
   GitHubPullRequestTimelineResult,
@@ -27,7 +32,9 @@ import type {
   GitHubReviewCommentResult,
   GitHubDeviceFlowComplete,
   GitHubDeviceFlowStart,
+  GitHubTagsSearchResult,
   GitHubUserSummary,
+  GitHubUsersSearchResult,
 } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
@@ -118,6 +125,76 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
       throw new Error(payload?.error || response.statusText || 'Failed to fetch GitHub user');
     }
     return payload;
+  },
+
+  async searchUsers(directory, query, options): Promise<GitHubUsersSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.sourceRepo?.owner && options.sourceRepo.repo) {
+      params.set('owner', options.sourceRepo.owner);
+      params.set('repo', options.sourceRepo.repo);
+    }
+    const response = await runtimeFetch(urls.api('/api/github/users/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GitHubUsersSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search GitHub users');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, users: body.users ?? [] };
+  },
+
+  async searchLabels(directory, query, options): Promise<GitHubLabelsSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.sourceRepo?.owner && options.sourceRepo.repo) {
+      params.set('owner', options.sourceRepo.owner);
+      params.set('repo', options.sourceRepo.repo);
+    }
+    const response = await runtimeFetch(urls.api('/api/github/labels/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GitHubLabelsSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search GitHub labels');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, labels: body.labels ?? [] };
+  },
+
+  async searchMilestones(directory, query, options): Promise<GitHubMilestonesSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.sourceRepo?.owner && options.sourceRepo.repo) {
+      params.set('owner', options.sourceRepo.owner);
+      params.set('repo', options.sourceRepo.repo);
+    }
+    const response = await runtimeFetch(urls.api('/api/github/milestones/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GitHubMilestonesSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search GitHub milestones');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, milestones: body.milestones ?? [] };
+  },
+
+  async searchBranches(directory, query, options): Promise<GitHubBranchesSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.sourceRepo?.owner && options.sourceRepo.repo) {
+      params.set('owner', options.sourceRepo.owner);
+      params.set('repo', options.sourceRepo.repo);
+    }
+    const response = await runtimeFetch(urls.api('/api/github/branches/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GitHubBranchesSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search GitHub branches');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, branches: body.branches ?? [] };
+  },
+
+  async searchTags(directory, query, options): Promise<GitHubTagsSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.sourceRepo?.owner && options.sourceRepo.repo) {
+      params.set('owner', options.sourceRepo.owner);
+      params.set('repo', options.sourceRepo.repo);
+    }
+    const response = await runtimeFetch(urls.api('/api/github/tags/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GitHubTagsSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search GitHub tags');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, tags: body.tags ?? [] };
   },
 
   async prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus> {
@@ -343,6 +420,19 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
     const body = await jsonOrNull<GitHubIssueCommentResult & { error?: string }>(response);
     if (!response.ok || !body) {
       throw new Error(body?.error || response.statusText || 'Failed to post GitHub comment');
+    }
+    return body;
+  },
+
+  async issueCreate(input: GitHubIssueCreateInput): Promise<GitHubIssueCreateResult> {
+    const response = await runtimeFetch('/api/github/issues/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GitHubIssueCreateResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to create GitHub issue');
     }
     return body;
   },

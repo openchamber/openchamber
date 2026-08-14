@@ -22,9 +22,16 @@ const mockState = vi.hoisted(() => ({
       issues: {
         listEventsForTimeline: vi.fn(),
         createComment: vi.fn(),
+        create: vi.fn(),
         update: vi.fn(),
         listMilestonesForRepo: vi.fn(),
         listComments: vi.fn(),
+        listAssignees: vi.fn(),
+        listLabelsForRepo: vi.fn(),
+      },
+      repos: {
+        listBranches: vi.fn(),
+        listTags: vi.fn(),
       },
     },
   },
@@ -59,9 +66,14 @@ beforeEach(() => {
   mockState.octokit.rest.pulls.listFiles.mockReset();
   mockState.octokit.rest.issues.listEventsForTimeline.mockReset();
   mockState.octokit.rest.issues.createComment.mockReset();
+  mockState.octokit.rest.issues.create.mockReset();
   mockState.octokit.rest.issues.update.mockReset();
   mockState.octokit.rest.issues.listMilestonesForRepo.mockReset();
   mockState.octokit.rest.issues.listComments.mockReset();
+  mockState.octokit.rest.issues.listAssignees.mockReset();
+  mockState.octokit.rest.issues.listLabelsForRepo.mockReset();
+  mockState.octokit.rest.repos.listBranches.mockReset();
+  mockState.octokit.rest.repos.listTags.mockReset();
   mockState.getOctokitOrNull.mockImplementation(() => mockState.octokit);
 });
 
@@ -626,5 +638,237 @@ describe('GitHub write routes', () => {
     expect(response.status).toBe(400);
     expect(response.body).toEqual({ error: 'Milestone not found' });
     expect(mockState.octokit.rest.issues.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('GitHub issues/create route', () => {
+  test('issues/create calls issues.create and returns the created issue', async () => {
+    mockState.octokit.rest.issues.create.mockResolvedValue({
+      data: {
+        number: 12,
+        title: 'Add feature',
+        html_url: 'https://github.com/owner/repo/issues/12',
+        state: 'open',
+        body: 'The body',
+        created_at: '2026-01-01T10:00:00Z',
+        updated_at: '2026-01-01T10:00:00Z',
+        user: { login: 'alice', id: 42, avatar_url: 'https://avatars.githubusercontent.com/u/42' },
+        labels: [{ name: 'bug', color: 'd73a4a' }],
+      },
+    });
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/github/issues/create')
+      .send({ directory: '/tmp/work', title: 'Add feature', body: 'The body', labels: ['bug'] });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      repo: { owner: 'owner', repo: 'repo' },
+      issue: {
+        number: 12,
+        title: 'Add feature',
+        url: 'https://github.com/owner/repo/issues/12',
+        state: 'open',
+        body: 'The body',
+        author: { login: 'alice', id: 42, avatarUrl: 'https://avatars.githubusercontent.com/u/42' },
+        labels: [{ name: 'bug', color: 'd73a4a' }],
+      },
+    });
+    expect(mockState.octokit.rest.issues.create).toHaveBeenCalledWith({
+      owner: 'owner',
+      repo: 'repo',
+      title: 'Add feature',
+      body: 'The body',
+      labels: ['bug'],
+    });
+  });
+
+  test('issues/create omits body and labels when not provided', async () => {
+    mockState.octokit.rest.issues.create.mockResolvedValue({
+      data: {
+        number: 13,
+        title: 'Title only',
+        html_url: 'https://github.com/owner/repo/issues/13',
+        state: 'open',
+        user: null,
+      },
+    });
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/github/issues/create')
+      .send({ directory: '/tmp/work', title: 'Title only' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.issue.title).toBe('Title only');
+    expect(mockState.octokit.rest.issues.create).toHaveBeenCalledWith({
+      owner: 'owner',
+      repo: 'repo',
+      title: 'Title only',
+    });
+  });
+
+  test('issues/create returns connected:false when not authenticated', async () => {
+    mockState.getOctokitOrNull.mockImplementation(() => null);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/github/issues/create')
+      .send({ directory: '/tmp/work', title: 'Hi' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ connected: false });
+    expect(mockState.octokit.rest.issues.create).not.toHaveBeenCalled();
+  });
+
+  test('issues/create requires directory and title', async () => {
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/github/issues/create')
+      .send({ directory: '/tmp/work' });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'directory and title are required' });
+  });
+});
+
+describe('GitHub rich lookup routes', () => {
+  describe('users/search', () => {
+    test('maps assignable users and filters by query', async () => {
+      mockState.octokit.rest.issues.listAssignees.mockResolvedValue({
+        data: [
+          { login: 'alice', id: 42, avatar_url: 'https://avatars.githubusercontent.com/u/42' },
+          { login: 'bob', id: 43, avatar_url: 'https://avatars.githubusercontent.com/u/43' },
+          { login: 'carol', id: 44, avatar_url: null, name: 'Carol Coder' },
+        ],
+      });
+
+      const app = createApp();
+      const response = await request(app).get('/api/github/users/search?directory=%2Ftmp%2Fwork&query=al');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        connected: true,
+        repo: { owner: 'owner', repo: 'repo', url: 'https://github.com/owner/repo' },
+        users: [{ login: 'alice', id: 42, avatarUrl: 'https://avatars.githubusercontent.com/u/42' }],
+      });
+      expect(mockState.octokit.rest.issues.listAssignees).toHaveBeenCalledWith({
+        owner: 'owner',
+        repo: 'repo',
+        per_page: 100,
+      });
+    });
+
+    test('returns connected:false when not authenticated', async () => {
+      mockState.getOctokitOrNull.mockImplementation(() => null);
+
+      const app = createApp();
+      const response = await request(app).get('/api/github/users/search?directory=%2Ftmp%2Fwork&query=al');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ connected: false, users: [] });
+    });
+  });
+
+  describe('labels/search', () => {
+    test('maps repo labels and filters by query', async () => {
+      mockState.octokit.rest.issues.listLabelsForRepo.mockResolvedValue({
+        data: [
+          { name: 'bug', color: 'd73a4a' },
+          { name: 'feature', color: '0e8a16' },
+        ],
+      });
+
+      const app = createApp();
+      const response = await request(app).get('/api/github/labels/search?directory=%2Ftmp%2Fwork&query=bug');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        connected: true,
+        repo: { owner: 'owner', repo: 'repo', url: 'https://github.com/owner/repo' },
+        labels: [{ name: 'bug', color: 'd73a4a' }],
+      });
+      expect(mockState.octokit.rest.issues.listLabelsForRepo).toHaveBeenCalledWith({
+        owner: 'owner',
+        repo: 'repo',
+        per_page: 100,
+      });
+    });
+  });
+
+  describe('milestones/search', () => {
+    test('maps milestone titles and states', async () => {
+      mockState.octokit.rest.issues.listMilestonesForRepo.mockResolvedValue({
+        data: [
+          { title: 'v1.0', state: 'open' },
+          { title: 'v2.0', state: 'closed' },
+        ],
+      });
+
+      const app = createApp();
+      const response = await request(app).get('/api/github/milestones/search?directory=%2Ftmp%2Fwork&query=v1');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        connected: true,
+        repo: { owner: 'owner', repo: 'repo', url: 'https://github.com/owner/repo' },
+        milestones: [{ title: 'v1.0', state: 'open' }],
+      });
+      expect(mockState.octokit.rest.issues.listMilestonesForRepo).toHaveBeenCalledWith({
+        owner: 'owner',
+        repo: 'repo',
+        state: 'all',
+        per_page: 100,
+      });
+    });
+  });
+
+  describe('branches/search', () => {
+    test('aggregates branch names across pages and filters by query', async () => {
+      mockState.octokit.rest.repos.listBranches
+        .mockResolvedValueOnce({ data: [{ name: 'main' }, { name: 'feat/x' }] })
+        .mockResolvedValueOnce({ data: [] });
+
+      const app = createApp();
+      const response = await request(app).get('/api/github/branches/search?directory=%2Ftmp%2Fwork&query=main');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        connected: true,
+        repo: { owner: 'owner', repo: 'repo', url: 'https://github.com/owner/repo' },
+        branches: ['main'],
+      });
+      expect(mockState.octokit.rest.repos.listBranches).toHaveBeenCalledWith({
+        owner: 'owner',
+        repo: 'repo',
+        per_page: 100,
+        page: 1,
+      });
+    });
+  });
+
+  describe('tags/search', () => {
+    test('maps tag names and filters by query', async () => {
+      mockState.octokit.rest.repos.listTags.mockResolvedValue({
+        data: [{ name: 'v1.0.0' }, { name: 'v1.1.0' }],
+      });
+
+      const app = createApp();
+      const response = await request(app).get('/api/github/tags/search?directory=%2Ftmp%2Fwork&query=v1.0');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        connected: true,
+        repo: { owner: 'owner', repo: 'repo', url: 'https://github.com/owner/repo' },
+        tags: ['v1.0.0'],
+      });
+      expect(mockState.octokit.rest.repos.listTags).toHaveBeenCalledWith({
+        owner: 'owner',
+        repo: 'repo',
+        per_page: 100,
+      });
+    });
   });
 });

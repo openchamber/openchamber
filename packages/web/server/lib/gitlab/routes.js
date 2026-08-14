@@ -232,6 +232,32 @@ const mapDiffItem = (item) => {
   };
 };
 
+// GitLab assigns by numeric user ID, while the facade deals in logins. Resolve
+// a set of assignee logins to IDs via the project members list; unmatched
+// logins yield `{ unknown: login }` so update routes can surface a precise
+// `400 { error: 'Unknown assignee: ...' }` instead of silently dropping a user.
+const resolveAssigneeIds = async (client, projectPath, logins) => {
+  const uniqueLogins = [...new Set(logins)];
+  const ids = [];
+  for (const login of uniqueLogins) {
+    const resp = await client.members(projectPath, { per_page: 100, query: login });
+    if (resp.status === 429) {
+      return { ids: null, rateLimited: true, unknown: null };
+    }
+    if (resp.status !== 200 || !Array.isArray(resp.data)) {
+      return { ids: null, rateLimited: false, unknown: null };
+    }
+    const match = resp.data.find(
+      (item) => typeof item?.username === 'string' && item.username.toLowerCase() === login.toLowerCase(),
+    );
+    if (typeof match?.id !== 'number') {
+      return { ids: null, rateLimited: false, unknown: login };
+    }
+    ids.push(match.id);
+  }
+  return { ids, rateLimited: false, unknown: null };
+};
+
 const repoRefFromProjectPath = (projectPath, baseUrl) => {
   const segments = projectPath.split('/');
   const project = segments[segments.length - 1] || '';
@@ -642,6 +668,60 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
+  app.post('/api/gitlab/issues/create', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+      if (!directory || !title) {
+        return res.status(400).json({ error: 'directory and title are required' });
+      }
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : undefined;
+      const labels = Array.isArray(req.body?.labels)
+        ? req.body.labels.filter((label) => typeof label === 'string' && label.length > 0)
+        : undefined;
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedProject = getRequestedProject(req);
+      const { projectPath, repo } = await resolveProjectForRequest(directory, requestedProject);
+      if (!projectPath) {
+        return res.status(400).json({ error: 'Unable to resolve GitLab repo from directory' });
+      }
+
+      const params = {
+        title,
+        ...(body !== undefined ? { description: body } : {}),
+        ...(labels !== undefined ? { labels } : {}),
+      };
+      const resp = await client.createIssue(projectPath, params);
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your GitLab token needs the api scope to create issues' });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: gitLabErrorMessage(resp.data) || 'GitLab returned an error while creating the issue' });
+      }
+      if (!resp.data) {
+        return res.status(500).json({ error: 'GitLab returned an empty response while creating the issue' });
+      }
+
+      return res.json({
+        connected: true,
+        repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl),
+        issue: mapIssue(resp.data),
+      });
+    } catch (error) {
+      console.error('Failed to create GitLab issue:', error);
+      return res.status(500).json({ error: error.message || 'Failed to create GitLab issue' });
+    }
+  });
+
   app.put('/api/gitlab/issues/update', async (req, res) => {
     try {
       const directory = asString(req.body?.directory);
@@ -674,6 +754,16 @@ export function registerGitLabRoutes(app, options = {}) {
       }
       if (Array.isArray(req.body?.labels)) {
         body.labels = req.body.labels.filter((label) => typeof label === 'string');
+      }
+      if (Array.isArray(req.body?.assignees)) {
+        const { ids, rateLimited, unknown } = await resolveAssigneeIds(client, projectPath, req.body.assignees.filter((login) => typeof login === 'string'));
+        if (rateLimited) {
+          return res.status(503).json({ error: 'GitLab rate limited' });
+        }
+        if (unknown !== null) {
+          return res.status(400).json({ error: `Unknown assignee: ${unknown}` });
+        }
+        body.assignee_ids = ids;
       }
       if (Array.isArray(req.body?.assigneeIds)) {
         body.assignee_ids = req.body.assigneeIds.filter((id) => typeof id === 'number');
@@ -1103,6 +1193,16 @@ export function registerGitLabRoutes(app, options = {}) {
       if (Array.isArray(req.body?.labels)) {
         body.labels = req.body.labels.filter((label) => typeof label === 'string');
       }
+      if (Array.isArray(req.body?.assignees)) {
+        const { ids, rateLimited, unknown } = await resolveAssigneeIds(client, projectPath, req.body.assignees.filter((login) => typeof login === 'string'));
+        if (rateLimited) {
+          return res.status(503).json({ error: 'GitLab rate limited' });
+        }
+        if (unknown !== null) {
+          return res.status(400).json({ error: `Unknown assignee: ${unknown}` });
+        }
+        body.assignee_ids = ids;
+      }
       if (Array.isArray(req.body?.assigneeIds)) {
         body.assignee_ids = req.body.assigneeIds.filter((id) => typeof id === 'number');
       }
@@ -1309,6 +1409,211 @@ export function registerGitLabRoutes(app, options = {}) {
     } catch (error) {
       console.error('Failed to approve GitLab merge request:', error);
       return res.status(500).json({ error: error.message || 'Failed to approve GitLab merge request' });
+    }
+  });
+
+  // ================= GitLab Rich Lookup APIs =================
+
+  // Repo-scoped lookups for pickers/mentions. Each resolves the target project
+  // (directory remote + namespace/project override) and hits a GitLab endpoint
+  // that supports server-side `query` filtering where available. `connected:
+  // false` means the lookup could not be performed — never an authoritative
+  // empty list.
+
+  const lookupProject = async (req) => {
+    const directory = asString(req.query?.directory);
+    const requestedProject = getRequestedProject(req);
+    if (!directory && !requestedProject) {
+      return { error: 'directory or namespace/project is required' };
+    }
+    const client = await getClient();
+    if (!client) {
+      return { client: null };
+    }
+    const { projectPath, repo } = await resolveProjectForRequest(directory, requestedProject);
+    return { client, projectPath, repo };
+  };
+
+  app.get('/api/gitlab/users/search', async (req, res) => {
+    try {
+      const query = asString(req.query?.query);
+      const resolved = await lookupProject(req);
+      if (resolved.error) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      if (!resolved.client) {
+        return res.json({ connected: false, users: [] });
+      }
+      const { client, projectPath, repo } = resolved;
+      if (!projectPath) {
+        return res.json({ connected: true, repo: null, users: [] });
+      }
+
+      const resp = await withTimeout(
+        client.members(projectPath, { per_page: 100, ...(query ? { query } : {}) }),
+        ROUTE_TIMEOUT_MS,
+        'gitlab users search',
+      );
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'GitLab returned an error while searching users' });
+      }
+      const users = (Array.isArray(resp.data) ? resp.data : [])
+        .map(mapGitLabUser)
+        .filter((user) => user && user.username);
+      return res.json({ connected: true, repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl), users });
+    } catch (error) {
+      console.error('Failed to search GitLab users:', error);
+      return res.status(500).json({ error: error.message || 'Failed to search GitLab users' });
+    }
+  });
+
+  app.get('/api/gitlab/labels/search', async (req, res) => {
+    try {
+      const query = asString(req.query?.query);
+      const resolved = await lookupProject(req);
+      if (resolved.error) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      if (!resolved.client) {
+        return res.json({ connected: false, labels: [] });
+      }
+      const { client, projectPath, repo } = resolved;
+      if (!projectPath) {
+        return res.json({ connected: true, repo: null, labels: [] });
+      }
+
+      const resp = await withTimeout(
+        client.labels(projectPath, { per_page: 100, ...(query ? { search: query } : {}) }),
+        ROUTE_TIMEOUT_MS,
+        'gitlab labels search',
+      );
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'GitLab returned an error while searching labels' });
+      }
+      const labels = (Array.isArray(resp.data) ? resp.data : [])
+        .map((label) => (typeof label?.name === 'string' ? label.name : ''))
+        .filter(Boolean);
+      return res.json({ connected: true, repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl), labels });
+    } catch (error) {
+      console.error('Failed to search GitLab labels:', error);
+      return res.status(500).json({ error: error.message || 'Failed to search GitLab labels' });
+    }
+  });
+
+  app.get('/api/gitlab/milestones/search', async (req, res) => {
+    try {
+      const query = asString(req.query?.query);
+      const resolved = await lookupProject(req);
+      if (resolved.error) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      if (!resolved.client) {
+        return res.json({ connected: false, milestones: [] });
+      }
+      const { client, projectPath, repo } = resolved;
+      if (!projectPath) {
+        return res.json({ connected: true, repo: null, milestones: [] });
+      }
+
+      const resp = await withTimeout(
+        client.milestones(projectPath, { state: 'all', per_page: 100, ...(query ? { search: query } : {}) }),
+        ROUTE_TIMEOUT_MS,
+        'gitlab milestones search',
+      );
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'GitLab returned an error while searching milestones' });
+      }
+      const milestones = (Array.isArray(resp.data) ? resp.data : [])
+        .map((item) => ({
+          title: typeof item?.title === 'string' ? item.title : '',
+          ...(typeof item?.state === 'string' ? { state: item.state } : {}),
+        }))
+        .filter((item) => item.title);
+      return res.json({ connected: true, repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl), milestones });
+    } catch (error) {
+      console.error('Failed to search GitLab milestones:', error);
+      return res.status(500).json({ error: error.message || 'Failed to search GitLab milestones' });
+    }
+  });
+
+  app.get('/api/gitlab/branches/search', async (req, res) => {
+    try {
+      const query = asString(req.query?.query);
+      const resolved = await lookupProject(req);
+      if (resolved.error) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      if (!resolved.client) {
+        return res.json({ connected: false, branches: [] });
+      }
+      const { client, projectPath, repo } = resolved;
+      if (!projectPath) {
+        return res.json({ connected: true, repo: null, branches: [] });
+      }
+
+      const resp = await withTimeout(
+        client.branches(projectPath, { per_page: 100, ...(query ? { search: query } : {}) }),
+        ROUTE_TIMEOUT_MS,
+        'gitlab branches search',
+      );
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'GitLab returned an error while searching branches' });
+      }
+      const branches = (Array.isArray(resp.data) ? resp.data : [])
+        .map((branch) => (typeof branch?.name === 'string' ? branch.name : ''))
+        .filter(Boolean);
+      return res.json({ connected: true, repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl), branches });
+    } catch (error) {
+      console.error('Failed to search GitLab branches:', error);
+      return res.status(500).json({ error: error.message || 'Failed to search GitLab branches' });
+    }
+  });
+
+  app.get('/api/gitlab/tags/search', async (req, res) => {
+    try {
+      const query = asString(req.query?.query);
+      const resolved = await lookupProject(req);
+      if (resolved.error) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      if (!resolved.client) {
+        return res.json({ connected: false, tags: [] });
+      }
+      const { client, projectPath, repo } = resolved;
+      if (!projectPath) {
+        return res.json({ connected: true, repo: null, tags: [] });
+      }
+
+      const resp = await withTimeout(
+        client.tags(projectPath, { per_page: 100, ...(query ? { search: query } : {}) }),
+        ROUTE_TIMEOUT_MS,
+        'gitlab tags search',
+      );
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'GitLab rate limited' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'GitLab returned an error while searching tags' });
+      }
+      const tags = (Array.isArray(resp.data) ? resp.data : [])
+        .map((tag) => (typeof tag?.name === 'string' ? tag.name : ''))
+        .filter(Boolean);
+      return res.json({ connected: true, repo: repo || repoRefFromProjectPath(projectPath, client.baseUrl), tags });
+    } catch (error) {
+      console.error('Failed to search GitLab tags:', error);
+      return res.status(500).json({ error: error.message || 'Failed to search GitLab tags' });
     }
   });
 

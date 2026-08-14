@@ -263,6 +263,8 @@ export function createGitLabClient({ token, baseUrl }) {
       request(`/projects/${encodeProject(pathWithNamespace)}/issues/${iid}/notes`, { query: params }),
     createIssueNote: (pathWithNamespace, iid, body) =>
       request(`/projects/${encodeProject(pathWithNamespace)}/issues/${iid}/notes`, { method: 'POST', body: { body } }),
+    createIssue: (pathWithNamespace, params) =>
+      request(`/projects/${encodeProject(pathWithNamespace)}/issues`, { method: 'POST', body: params }),
     updateIssue: (pathWithNamespace, iid, params) =>
       request(`/projects/${encodeProject(pathWithNamespace)}/issues/${iid}`, { method: 'PUT', body: params }),
     mergeRequests: (pathWithNamespace, params = {}) =>
@@ -289,6 +291,15 @@ export function createGitLabClient({ token, baseUrl }) {
       request(`/projects/${encodeProject(pathWithNamespace)}/merge_requests/${iid}/merge`, { method: 'PUT', body }),
     branches: (pathWithNamespace, params = {}) =>
       request(`/projects/${encodeProject(pathWithNamespace)}/repository/branches`, { query: params }),
+    // Project members (direct + inherited) are the assignable/mentionable user
+    // set. `members/all` includes inherited group members; `query` filters
+    // server-side by username/name/email.
+    members: (pathWithNamespace, params = {}) =>
+      request(`/projects/${encodeProject(pathWithNamespace)}/members/all`, { query: params }),
+    labels: (pathWithNamespace, params = {}) =>
+      request(`/projects/${encodeProject(pathWithNamespace)}/labels`, { query: params }),
+    tags: (pathWithNamespace, params = {}) =>
+      request(`/projects/${encodeProject(pathWithNamespace)}/repository/tags`, { query: params }),
   };
 }
 

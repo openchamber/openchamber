@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/toast';
 import { useI18n } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n';
 import type { ForgeEntityRef, ForgeProvider } from '@/lib/forge/provider';
 import type { ForgeLabel, ForgeMilestone, ForgeUser } from '@/lib/forge/types';
+import { ForgeLookupCombobox } from './ForgeLookupCombobox';
+import type { ForgeLookupOption } from './useForgeLookup';
 
 interface ForgeMetadataEditorProps {
   provider: ForgeProvider;
@@ -88,6 +89,11 @@ export const ForgeMetadataEditor: React.FC<ForgeMetadataEditorProps> = ({
     setLabelInput('');
   };
 
+  const addLabelOption = async (option: ForgeLookupOption): Promise<void> => {
+    setLabelInput(option.label);
+    await addLabel();
+  };
+
   const removeLabel = async (name: string): Promise<void> => {
     await runMetadata({ labels: labels.filter((label) => label.name !== name).map((label) => label.name) }, 'forge.actions.removed');
   };
@@ -99,6 +105,11 @@ export const ForgeMetadataEditor: React.FC<ForgeMetadataEditorProps> = ({
     setAssigneeInput('');
   };
 
+  const addAssigneeOption = async (option: ForgeLookupOption): Promise<void> => {
+    setAssigneeInput(option.label);
+    await addAssignee();
+  };
+
   const removeAssignee = async (id: string): Promise<void> => {
     await runMetadata({ assignees: assignees.filter((assignee) => assignee.id !== id).map((assignee) => assignee.login) }, 'forge.actions.removed');
   };
@@ -108,6 +119,11 @@ export const ForgeMetadataEditor: React.FC<ForgeMetadataEditorProps> = ({
     if (!title) return;
     await runMetadata({ milestone: title }, 'forge.actions.metadataChanged');
     setMilestoneInput('');
+  };
+
+  const addMilestoneOption = async (option: ForgeLookupOption): Promise<void> => {
+    setMilestoneInput(option.label);
+    await addMilestone();
   };
 
   const removeMilestone = async (): Promise<void> => {
@@ -188,15 +204,16 @@ export const ForgeMetadataEditor: React.FC<ForgeMetadataEditorProps> = ({
       <div className="flex flex-wrap items-center gap-1.5">
         {canLabels ? (
           <span className="flex items-center gap-1">
-            <Input
+            <ForgeLookupCombobox
+              provider={provider}
+              directory={directory}
+              kind="labels"
               value={labelInput}
-              onChange={(event) => setLabelInput(event.target.value)}
+              onChange={setLabelInput}
+              onSelect={(option) => void addLabelOption(option)}
               placeholder={t('forge.actions.addLabel')}
               aria-label={t('forge.actions.addLabel')}
               className="h-6 w-36"
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') void addLabel();
-              }}
             />
             <Button variant="ghost" size="xs" onClick={() => void addLabel()} disabled={submitting || !labelInput.trim()}>
               {t('forge.actions.addLabel')}
@@ -206,15 +223,16 @@ export const ForgeMetadataEditor: React.FC<ForgeMetadataEditorProps> = ({
 
         {canAssignees ? (
           <span className="flex items-center gap-1">
-            <Input
+            <ForgeLookupCombobox
+              provider={provider}
+              directory={directory}
+              kind="users"
               value={assigneeInput}
-              onChange={(event) => setAssigneeInput(event.target.value)}
+              onChange={setAssigneeInput}
+              onSelect={(option) => void addAssigneeOption(option)}
               placeholder={t('forge.actions.addAssignee')}
               aria-label={t('forge.actions.addAssignee')}
               className="h-6 w-36"
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') void addAssignee();
-              }}
             />
             <Button variant="ghost" size="xs" onClick={() => void addAssignee()} disabled={submitting || !assigneeInput.trim()}>
               {t('forge.actions.addAssignee')}
@@ -224,15 +242,16 @@ export const ForgeMetadataEditor: React.FC<ForgeMetadataEditorProps> = ({
 
         {canMilestones ? (
           <span className="flex items-center gap-1">
-            <Input
+            <ForgeLookupCombobox
+              provider={provider}
+              directory={directory}
+              kind="milestones"
               value={milestoneInput}
-              onChange={(event) => setMilestoneInput(event.target.value)}
+              onChange={setMilestoneInput}
+              onSelect={(option) => void addMilestoneOption(option)}
               placeholder={t('forge.actions.setMilestone')}
               aria-label={t('forge.actions.setMilestone')}
               className="h-6 w-36"
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') void addMilestone();
-              }}
             />
             <Button variant="ghost" size="xs" onClick={() => void addMilestone()} disabled={submitting || !milestoneInput.trim()}>
               {t('forge.actions.setMilestone')}

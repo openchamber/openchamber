@@ -265,6 +265,8 @@ export function createGiteaClient({ token, baseUrl }) {
       request(`/repos/${owner}/${repo}/issues/${number}/comments`, { query: params }),
     createIssueComment: (owner, repo, number, body) =>
       request(`/repos/${owner}/${repo}/issues/${number}/comments`, { method: 'POST', body: { body } }),
+    createIssue: (owner, repo, params) =>
+      request(`/repos/${owner}/${repo}/issues`, { method: 'POST', body: params }),
     updateIssue: (owner, repo, number, params) =>
       request(`/repos/${owner}/${repo}/issues/${number}`, { method: 'PATCH', body: params }),
     milestones: (owner, repo, params = {}) =>
@@ -295,6 +297,12 @@ export function createGiteaClient({ token, baseUrl }) {
       request(`/repos/${owner}/${repo}/pulls/${number}/merge`, { method: 'POST', body }),
     branches: (owner, repo, params = {}) =>
       request(`/repos/${owner}/${repo}/branches`, { query: params }),
+    // Assignable users (collaborators with role access + org members) are the
+    // mention/assign candidate set; Gitea mirrors the GitHub assignees route.
+    assignees: (owner, repo, params = {}) =>
+      request(`/repos/${owner}/${repo}/assignees`, { query: params }),
+    tags: (owner, repo, params = {}) =>
+      request(`/repos/${owner}/${repo}/tags`, { query: params }),
   };
 }
 

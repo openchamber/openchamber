@@ -817,6 +817,42 @@ export type GitHubUserSummary = {
   email?: string;
 };
 
+// ---- Rich lookup results (repo-scoped search for pickers/mentions) ----
+// Each result carries the connected repo so the facade can surface cross-repo /
+// fork contexts, and the items are always arrays (empty on success with no
+// matches). `connected: false` means the lookup could not be performed and
+// must not be treated as an authoritative empty list.
+
+export type GitHubUsersSearchResult = {
+  connected: boolean;
+  repo?: GitHubRepoRef | null;
+  users: GitHubUserSummary[];
+};
+
+export type GitHubLabelsSearchResult = {
+  connected: boolean;
+  repo?: GitHubRepoRef | null;
+  labels: GitHubIssueLabel[];
+};
+
+export type GitHubMilestonesSearchResult = {
+  connected: boolean;
+  repo?: GitHubRepoRef | null;
+  milestones: Array<{ title: string; state?: string }>;
+};
+
+export type GitHubBranchesSearchResult = {
+  connected: boolean;
+  repo?: GitHubRepoRef | null;
+  branches: string[];
+};
+
+export type GitHubTagsSearchResult = {
+  connected: boolean;
+  repo?: GitHubRepoRef | null;
+  tags: string[];
+};
+
 type GitHubRepoRef = {
   owner: string;
   repo: string;
@@ -1141,6 +1177,21 @@ export type GitHubIssueCommentResult = {
   comment?: GitHubIssueComment | null;
 };
 
+export type GitHubIssueCreateInput = {
+  directory: string;
+  title: string;
+  body?: string;
+  labels?: string[];
+  owner?: string;
+  repo?: string;
+};
+
+export type GitHubIssueCreateResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  issue?: GitHubIssue | null;
+};
+
 export type GitHubIssueUpdateInput = {
   directory: string;
   number: number;
@@ -1236,6 +1287,12 @@ export interface GitHubAPI {
   authSetGhCliDisabled(disabled: boolean): Promise<{ disabled: boolean }>;
   me?(): Promise<GitHubUserSummary>;
 
+  searchUsers?(directory: string, query: string, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubUsersSearchResult>;
+  searchLabels?(directory: string, query: string, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubLabelsSearchResult>;
+  searchMilestones?(directory: string, query: string, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubMilestonesSearchResult>;
+  searchBranches?(directory: string, query: string, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubBranchesSearchResult>;
+  searchTags?(directory: string, query: string, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubTagsSearchResult>;
+
   prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus>;
   prCreate(payload: GitHubPullRequestCreateInput): Promise<GitHubPullRequest>;
   prUpdate(payload: GitHubPullRequestUpdateInput): Promise<GitHubPullRequest>;
@@ -1257,6 +1314,7 @@ export interface GitHubAPI {
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
   repoBranches(owner: string, repo: string): Promise<string[]>;
   issueComment?(input: GitHubIssueCommentInput): Promise<GitHubIssueCommentResult>;
+  issueCreate?(input: GitHubIssueCreateInput): Promise<GitHubIssueCreateResult>;
   issueUpdate?(input: GitHubIssueUpdateInput): Promise<GitHubIssueUpdateResult>;
   prComment?(input: GitHubIssueCommentInput): Promise<GitHubIssueCommentResult>;
   prReviewComment?(input: GitHubReviewCommentInput): Promise<GitHubReviewCommentResult>;
@@ -1392,6 +1450,40 @@ export type GitLabBranchesResult = {
   defaultBranch?: string | null;
 };
 
+// ---- Rich lookup results (repo-scoped search for pickers/mentions) ----
+// `connected: false` means the lookup could not be performed and must not be
+// treated as an authoritative empty list.
+
+export type GitLabUsersSearchResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  users: GitLabUserSummary[];
+};
+
+export type GitLabLabelsSearchResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  labels: string[];
+};
+
+export type GitLabMilestonesSearchResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  milestones: Array<{ title: string; state?: string }>;
+};
+
+export type GitLabBranchesSearchResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  branches: string[];
+};
+
+export type GitLabTagsSearchResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  tags: string[];
+};
+
 export type GitLabMergeRequestCommit = {
   sha: string;
   shortSha: string;
@@ -1438,6 +1530,8 @@ export type GitLabMergeRequestUpdateInput = {
   description?: string;
   state?: 'open' | 'closed';
   labels?: string[];
+  /** Assignee logins; the server resolves them to user IDs via project members. */
+  assignees?: string[];
   assigneeIds?: number[];
   milestone?: string | null;
 };
@@ -1480,6 +1574,21 @@ export type GitLabIssueCommentResult = {
   comment?: GitLabIssueComment | null;
 };
 
+export type GitLabIssueCreateInput = {
+  directory: string;
+  title: string;
+  body?: string;
+  labels?: string[];
+  namespace?: string;
+  project?: string;
+};
+
+export type GitLabIssueCreateResult = {
+  connected: boolean;
+  repo?: GitLabRepoRef | null;
+  issue?: GitLabIssue | null;
+};
+
 export type GitLabIssueUpdateInput = {
   directory: string;
   number: number;
@@ -1487,6 +1596,8 @@ export type GitLabIssueUpdateInput = {
   body?: string;
   state?: 'open' | 'closed';
   labels?: string[];
+  /** Assignee logins; the server resolves them to user IDs via project members. */
+  assignees?: string[];
   assigneeIds?: number[];
   milestone?: string | null;
   namespace?: string;
@@ -1569,9 +1680,16 @@ export interface GitLabAPI {
   mrTimeline?(directory: string, number: number, options?: { namespace?: string; project?: string }): Promise<GitLabMergeRequestTimelineResult>;
 
   issueComment?(input: GitLabIssueCommentInput): Promise<GitLabIssueCommentResult>;
+  issueCreate?(input: GitLabIssueCreateInput): Promise<GitLabIssueCreateResult>;
   issueUpdate?(input: GitLabIssueUpdateInput): Promise<GitLabIssueUpdateResult>;
   mrComment?(input: GitLabMrNoteInput): Promise<GitLabMrNoteResult>;
   mrApprove?(input: GitLabMrApproveInput): Promise<GitLabMrApproveResult>;
+
+  searchUsers?(directory: string, query: string, options?: { namespace?: string; project?: string }): Promise<GitLabUsersSearchResult>;
+  searchLabels?(directory: string, query: string, options?: { namespace?: string; project?: string }): Promise<GitLabLabelsSearchResult>;
+  searchMilestones?(directory: string, query: string, options?: { namespace?: string; project?: string }): Promise<GitLabMilestonesSearchResult>;
+  searchBranches?(directory: string, query: string, options?: { namespace?: string; project?: string }): Promise<GitLabBranchesSearchResult>;
+  searchTags?(directory: string, query: string, options?: { namespace?: string; project?: string }): Promise<GitLabTagsSearchResult>;
 
   repoBranches(namespace: string, project: string): Promise<GitLabBranchesResult>;
 }
@@ -1705,6 +1823,21 @@ export type GiteaIssueCommentResult = {
   comment?: GiteaComment | null;
 };
 
+export type GiteaIssueCreateInput = {
+  directory: string;
+  title: string;
+  body?: string;
+  labels?: string[];
+  owner?: string;
+  repo?: string;
+};
+
+export type GiteaIssueCreateResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  issue?: GiteaIssue | null;
+};
+
 export type GiteaIssueUpdateInput = {
   directory: string;
   number: number;
@@ -1752,6 +1885,40 @@ export type GiteaRepoLabelsResult = {
   labels: GiteaRepoLabel[];
 };
 
+// ---- Rich lookup results (repo-scoped search for pickers/mentions) ----
+// `connected: false` means the lookup could not be performed and must not be
+// treated as an authoritative empty list.
+
+export type GiteaUsersSearchResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  users: GiteaUserSummary[];
+};
+
+export type GiteaLabelsSearchResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  labels: GiteaRepoLabel[];
+};
+
+export type GiteaMilestonesSearchResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  milestones: Array<{ title: string; state?: string }>;
+};
+
+export type GiteaBranchesSearchResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  branches: string[];
+};
+
+export type GiteaTagsSearchResult = {
+  connected: boolean;
+  repo?: { owner: string; repo: string; url?: string } | null;
+  tags: string[];
+};
+
 export interface GiteaAPI {
   authStatus(): Promise<GiteaAuthStatus>;
   authConnect(input: { accessToken: string; baseUrl: string }): Promise<GiteaAuthStatus>;
@@ -1777,10 +1944,17 @@ export interface GiteaAPI {
   prReviews?(directory: string, number: number, options?: { owner?: string; repo?: string }): Promise<GiteaPullRequestReviewsResult>;
 
   issueComment?(input: GiteaIssueCommentInput): Promise<GiteaIssueCommentResult>;
+  issueCreate?(input: GiteaIssueCreateInput): Promise<GiteaIssueCreateResult>;
   issueUpdate?(input: GiteaIssueUpdateInput): Promise<GiteaIssueUpdateResult>;
   prComment?(input: GiteaIssueCommentInput): Promise<GiteaIssueCommentResult>;
   prSubmitReview?(input: GiteaPullReviewInput): Promise<GiteaPullReviewResult>;
   repoLabels?(directory: string, options?: { owner?: string; repo?: string }): Promise<GiteaRepoLabelsResult>;
+
+  searchUsers?(directory: string, query: string, options?: { owner?: string; repo?: string }): Promise<GiteaUsersSearchResult>;
+  searchLabels?(directory: string, query: string, options?: { owner?: string; repo?: string }): Promise<GiteaLabelsSearchResult>;
+  searchMilestones?(directory: string, query: string, options?: { owner?: string; repo?: string }): Promise<GiteaMilestonesSearchResult>;
+  searchBranches?(directory: string, query: string, options?: { owner?: string; repo?: string }): Promise<GiteaBranchesSearchResult>;
+  searchTags?(directory: string, query: string, options?: { owner?: string; repo?: string }): Promise<GiteaTagsSearchResult>;
 
   repoBranches(owner: string, repo: string): Promise<GiteaBranchesResult>;
 }

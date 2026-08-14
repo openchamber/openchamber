@@ -2,13 +2,17 @@ import type {
   GitLabAPI,
   GitLabAuthStatus,
   GitLabBranchesResult,
+  GitLabBranchesSearchResult,
   GitLabIssueCommentResult,
   GitLabIssueCommentsResult,
   GitLabIssueCommentInput,
+  GitLabIssueCreateInput,
+  GitLabIssueCreateResult,
   GitLabIssueGetResult,
   GitLabIssuesListResult,
   GitLabIssueUpdateInput,
   GitLabIssueUpdateResult,
+  GitLabLabelsSearchResult,
   GitLabMergeRequest,
   GitLabMergeRequestCommitsResult,
   GitLabMergeRequestContextResult,
@@ -20,11 +24,14 @@ import type {
   GitLabMergeRequestTimelineResult,
   GitLabMergeRequestUpdateInput,
   GitLabMergeRequestUpdateResult,
+  GitLabMilestonesSearchResult,
   GitLabMrApproveInput,
   GitLabMrApproveResult,
   GitLabMrNoteInput,
   GitLabMrNoteResult,
+  GitLabTagsSearchResult,
   GitLabUserSummary,
+  GitLabUsersSearchResult,
 } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
@@ -92,6 +99,66 @@ export const createWebGitLabAPI = ({ urls }: WebGitLabAPIOptions): GitLabAPI => 
       throw new Error(payload?.error || response.statusText || 'Failed to fetch GitLab user');
     }
     return payload;
+  },
+
+  async searchUsers(directory, query, options): Promise<GitLabUsersSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.namespace) params.set('namespace', options.namespace);
+    if (options?.project) params.set('project', options.project);
+    const response = await runtimeFetch(urls.api('/api/gitlab/users/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GitLabUsersSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search GitLab users');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, users: body.users ?? [] };
+  },
+
+  async searchLabels(directory, query, options): Promise<GitLabLabelsSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.namespace) params.set('namespace', options.namespace);
+    if (options?.project) params.set('project', options.project);
+    const response = await runtimeFetch(urls.api('/api/gitlab/labels/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GitLabLabelsSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search GitLab labels');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, labels: body.labels ?? [] };
+  },
+
+  async searchMilestones(directory, query, options): Promise<GitLabMilestonesSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.namespace) params.set('namespace', options.namespace);
+    if (options?.project) params.set('project', options.project);
+    const response = await runtimeFetch(urls.api('/api/gitlab/milestones/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GitLabMilestonesSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search GitLab milestones');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, milestones: body.milestones ?? [] };
+  },
+
+  async searchBranches(directory, query, options): Promise<GitLabBranchesSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.namespace) params.set('namespace', options.namespace);
+    if (options?.project) params.set('project', options.project);
+    const response = await runtimeFetch(urls.api('/api/gitlab/branches/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GitLabBranchesSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search GitLab branches');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, branches: body.branches ?? [] };
+  },
+
+  async searchTags(directory, query, options): Promise<GitLabTagsSearchResult> {
+    const params = new URLSearchParams({ directory, query });
+    if (options?.namespace) params.set('namespace', options.namespace);
+    if (options?.project) params.set('project', options.project);
+    const response = await runtimeFetch(urls.api('/api/gitlab/tags/search', params), { method: 'GET', headers: { Accept: 'application/json' } });
+    const body = await jsonOrNull<GitLabTagsSearchResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to search GitLab tags');
+    }
+    return { connected: body.connected, repo: body.repo ?? null, tags: body.tags ?? [] };
   },
 
   async issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GitLabIssuesListResult> {
@@ -283,6 +350,19 @@ export const createWebGitLabAPI = ({ urls }: WebGitLabAPIOptions): GitLabAPI => 
     const body = await jsonOrNull<GitLabIssueCommentResult & { error?: string }>(response);
     if (!response.ok || !body) {
       throw new Error(body?.error || response.statusText || 'Failed to post GitLab issue comment');
+    }
+    return body;
+  },
+
+  async issueCreate(input: GitLabIssueCreateInput): Promise<GitLabIssueCreateResult> {
+    const response = await runtimeFetch('/api/gitlab/issues/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = await jsonOrNull<GitLabIssueCreateResult & { error?: string }>(response);
+    if (!response.ok || !body) {
+      throw new Error(body?.error || response.statusText || 'Failed to create GitLab issue');
     }
     return body;
   },

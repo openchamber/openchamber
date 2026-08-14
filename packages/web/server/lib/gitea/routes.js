@@ -569,6 +569,60 @@ export function registerGiteaRoutes(app, options = {}) {
     }
   });
 
+  app.post('/api/gitea/issues/create', async (req, res) => {
+    try {
+      const directory = asString(req.body?.directory);
+      const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+      if (!directory || !title) {
+        return res.status(400).json({ error: 'directory and title are required' });
+      }
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : undefined;
+      const labels = Array.isArray(req.body?.labels)
+        ? req.body.labels.filter((label) => typeof label === 'string' && label.length > 0)
+        : undefined;
+
+      const client = await getClient();
+      if (!client) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const { owner, repo, repoRef } = await resolveRepoForRequest(directory, requestedRepo);
+      if (!owner || !repo) {
+        return res.status(400).json({ error: 'Unable to resolve Gitea repo from directory' });
+      }
+
+      const params = {
+        title,
+        ...(body !== undefined ? { body } : {}),
+        ...(labels !== undefined ? { labels } : {}),
+      };
+      const resp = await client.createIssue(owner, repo, params);
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (resp.status === 403) {
+        return res.status(400).json({ error: 'Your Gitea token needs write:repository scope to create issues' });
+      }
+      if (resp.status !== 200 && resp.status !== 201) {
+        const status = resp.status >= 500 ? 500 : 400;
+        return res.status(status).json({ error: giteaErrorMessage(resp.data) || 'Gitea returned an error while creating the issue' });
+      }
+      if (!resp.data) {
+        return res.status(500).json({ error: 'Gitea returned an empty response while creating the issue' });
+      }
+
+      return res.json({
+        connected: true,
+        repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl),
+        issue: mapGiteaIssue(resp.data),
+      });
+    } catch (error) {
+      console.error('Failed to create Gitea issue:', error);
+      return res.status(500).json({ error: error.message || 'Failed to create Gitea issue' });
+    }
+  });
+
   app.patch('/api/gitea/issues/update', async (req, res) => {
     try {
       const directory = asString(req.body?.directory);
@@ -1416,6 +1470,219 @@ export function registerGiteaRoutes(app, options = {}) {
     } catch (error) {
       console.error('Failed to fetch Gitea repo labels:', error);
       return res.status(500).json({ error: error.message || 'Failed to fetch Gitea repo labels' });
+    }
+  });
+
+  // ================= Gitea Rich Lookup APIs =================
+
+  // Repo-scoped lookups for pickers/mentions. Each resolves the target repo
+  // (directory remote + owner/repo override) and hits a Gitea endpoint that
+  // does not support server-side search, then filters client-side
+  // (case-insensitive substring on the primary field). `connected: false`
+  // means the lookup could not be performed — never an authoritative empty list.
+
+  const lookupRepo = async (req) => {
+    const directory = asString(req.query?.directory);
+    const requestedRepo = getRequestedRepo(req);
+    if (!directory && !requestedRepo) {
+      return { error: 'directory or owner/repo is required' };
+    }
+    const client = await getClient();
+    if (!client) {
+      return { client: null };
+    }
+    const { owner, repo, repoRef } = await resolveRepoForRequest(directory, requestedRepo);
+    return { client, owner, repo, repoRef };
+  };
+
+  app.get('/api/gitea/users/search', async (req, res) => {
+    try {
+      const query = asString(req.query?.query);
+      const resolved = await lookupRepo(req);
+      if (resolved.error) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      if (!resolved.client) {
+        return res.json({ connected: false, users: [] });
+      }
+      const { client, owner, repo, repoRef } = resolved;
+      if (!owner || !repo) {
+        return res.json({ connected: true, repo: null, users: [] });
+      }
+
+      const resp = await withTimeout(client.assignees(owner, repo, { limit: 100 }), ROUTE_TIMEOUT_MS, 'gitea users search');
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'Gitea returned an error while searching users' });
+      }
+      const needle = query.toLowerCase();
+      const users = (Array.isArray(resp.data) ? resp.data : [])
+        .map(mapGiteaUser)
+        .filter((user) => user && user.username)
+        .filter((user) => !needle || user.username.toLowerCase().includes(needle) || (user.name || '').toLowerCase().includes(needle));
+
+      return res.json({ connected: true, repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl), users });
+    } catch (error) {
+      console.error('Failed to search Gitea users:', error);
+      return res.status(500).json({ error: error.message || 'Failed to search Gitea users' });
+    }
+  });
+
+  app.get('/api/gitea/labels/search', async (req, res) => {
+    try {
+      const query = asString(req.query?.query);
+      const resolved = await lookupRepo(req);
+      if (resolved.error) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      if (!resolved.client) {
+        return res.json({ connected: false, labels: [] });
+      }
+      const { client, owner, repo, repoRef } = resolved;
+      if (!owner || !repo) {
+        return res.json({ connected: true, repo: null, labels: [] });
+      }
+
+      const resp = await withTimeout(client.repoLabels(owner, repo, { limit: 100 }), ROUTE_TIMEOUT_MS, 'gitea labels search');
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'Gitea returned an error while searching labels' });
+      }
+      const needle = query.toLowerCase();
+      const labels = (Array.isArray(resp.data) ? resp.data : [])
+        .map((label) => ({
+          ...(typeof label.id === 'number' ? { id: label.id } : {}),
+          name: typeof label.name === 'string' ? label.name : '',
+          ...(typeof label.color === 'string' ? { color: label.color } : {}),
+          ...(typeof label.description === 'string' ? { description: label.description } : {}),
+        }))
+        .filter((label) => label.name && (!needle || label.name.toLowerCase().includes(needle)));
+
+      return res.json({ connected: true, repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl), labels });
+    } catch (error) {
+      console.error('Failed to search Gitea labels:', error);
+      return res.status(500).json({ error: error.message || 'Failed to search Gitea labels' });
+    }
+  });
+
+  app.get('/api/gitea/milestones/search', async (req, res) => {
+    try {
+      const query = asString(req.query?.query);
+      const resolved = await lookupRepo(req);
+      if (resolved.error) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      if (!resolved.client) {
+        return res.json({ connected: false, milestones: [] });
+      }
+      const { client, owner, repo, repoRef } = resolved;
+      if (!owner || !repo) {
+        return res.json({ connected: true, repo: null, milestones: [] });
+      }
+
+      const resp = await withTimeout(client.milestones(owner, repo, { state: 'all', limit: 100 }), ROUTE_TIMEOUT_MS, 'gitea milestones search');
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'Gitea returned an error while searching milestones' });
+      }
+      const needle = query.toLowerCase();
+      const milestones = (Array.isArray(resp.data) ? resp.data : [])
+        .map((item) => ({
+          title: typeof item?.title === 'string' ? item.title : '',
+          ...(typeof item?.state === 'string' ? { state: item.state } : {}),
+        }))
+        .filter((item) => item.title && (!needle || item.title.toLowerCase().includes(needle)));
+
+      return res.json({ connected: true, repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl), milestones });
+    } catch (error) {
+      console.error('Failed to search Gitea milestones:', error);
+      return res.status(500).json({ error: error.message || 'Failed to search Gitea milestones' });
+    }
+  });
+
+  app.get('/api/gitea/branches/search', async (req, res) => {
+    try {
+      const query = asString(req.query?.query);
+      const resolved = await lookupRepo(req);
+      if (resolved.error) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      if (!resolved.client) {
+        return res.json({ connected: false, branches: [] });
+      }
+      const { client, owner, repo, repoRef } = resolved;
+      if (!owner || !repo) {
+        return res.json({ connected: true, repo: null, branches: [] });
+      }
+
+      const branches = [];
+      const needle = query.toLowerCase();
+      let page = 1;
+      while (page <= 10) {
+        const resp = await withTimeout(client.branches(owner, repo, { limit: 50, page }), ROUTE_TIMEOUT_MS, 'gitea branches search');
+        if (resp.status === 429) {
+          return res.status(503).json({ error: 'Gitea rate limited' });
+        }
+        if (resp.status !== 200 || !Array.isArray(resp.data)) {
+          break;
+        }
+        const chunk = resp.data;
+        for (const branch of chunk) {
+          const name = typeof branch?.name === 'string' ? branch.name : '';
+          if (!name) continue;
+          if (!needle || name.toLowerCase().includes(needle)) branches.push(name);
+        }
+        if (chunk.length < 50 || !resp.page?.hasMore) {
+          break;
+        }
+        page += 1;
+      }
+
+      return res.json({ connected: true, repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl), branches });
+    } catch (error) {
+      console.error('Failed to search Gitea branches:', error);
+      return res.status(500).json({ error: error.message || 'Failed to search Gitea branches' });
+    }
+  });
+
+  app.get('/api/gitea/tags/search', async (req, res) => {
+    try {
+      const query = asString(req.query?.query);
+      const resolved = await lookupRepo(req);
+      if (resolved.error) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      if (!resolved.client) {
+        return res.json({ connected: false, tags: [] });
+      }
+      const { client, owner, repo, repoRef } = resolved;
+      if (!owner || !repo) {
+        return res.json({ connected: true, repo: null, tags: [] });
+      }
+
+      const resp = await withTimeout(client.tags(owner, repo, { limit: 100 }), ROUTE_TIMEOUT_MS, 'gitea tags search');
+      if (resp.status === 429) {
+        return res.status(503).json({ error: 'Gitea rate limited' });
+      }
+      if (resp.status !== 200) {
+        return res.status(502).json({ error: 'Gitea returned an error while searching tags' });
+      }
+      const needle = query.toLowerCase();
+      const tags = (Array.isArray(resp.data) ? resp.data : [])
+        .map((tag) => (typeof tag?.name === 'string' ? tag.name : ''))
+        .filter(Boolean)
+        .filter((name) => !needle || name.toLowerCase().includes(needle));
+
+      return res.json({ connected: true, repo: repoRef || repoRefFromOwnerRepo(owner, repo, client.baseUrl), tags });
+    } catch (error) {
+      console.error('Failed to search Gitea tags:', error);
+      return res.status(500).json({ error: error.message || 'Failed to search Gitea tags' });
     }
   });
 }

@@ -306,4 +306,98 @@ describe('createWebGiteaAPI', () => {
     const api = await createAPI();
     await expect(api.issuesList('/workspace')).rejects.toThrow('Internal Server Error');
   });
+
+  it('passes directory/query/owner/repo to searchUsers and maps the response', async () => {
+    const result = {
+      connected: true,
+      repo: null,
+      users: [{ username: 'octocat', id: 1, name: 'Octo Cat', avatarUrl: 'https://gitea.example/octocat.png' }],
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(result));
+
+    const api = await createAPI();
+    await expect(api.searchUsers!('/workspace', 'octo', { owner: 'group', repo: 'repo' })).resolves.toEqual(result);
+
+    const params = new URLSearchParams({ directory: '/workspace', query: 'octo', owner: 'group', repo: 'repo' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitea/users/search?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('omits owner/repo from searchUsers when not provided', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, repo: null, users: [] }));
+
+    const api = await createAPI();
+    await expect(api.searchUsers!('/workspace', 'octo')).resolves.toEqual({ connected: true, repo: null, users: [] });
+
+    const params = new URLSearchParams({ directory: '/workspace', query: 'octo' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitea/users/search?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('throws the server error message when searchUsers fails', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'Gitea rate limited' }, { status: 503 }));
+
+    const api = await createAPI();
+    await expect(api.searchUsers!('/workspace', 'octo')).rejects.toThrow('Gitea rate limited');
+  });
+
+  it('passes directory/query to searchLabels and maps the response', async () => {
+    const result = { connected: true, repo: null, labels: [{ name: 'bug', color: 'd73a4a' }] };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(result));
+
+    const api = await createAPI();
+    await expect(api.searchLabels!('/workspace', 'feat', { owner: 'group', repo: 'repo' })).resolves.toEqual(result);
+
+    const params = new URLSearchParams({ directory: '/workspace', query: 'feat', owner: 'group', repo: 'repo' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitea/labels/search?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('passes directory/query to searchMilestones and maps the response', async () => {
+    const result = { connected: true, repo: null, milestones: [{ title: 'v2.0', state: 'open' }] };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(result));
+
+    const api = await createAPI();
+    await expect(api.searchMilestones!('/workspace', 'v2', { owner: 'group', repo: 'repo' })).resolves.toEqual(result);
+
+    const params = new URLSearchParams({ directory: '/workspace', query: 'v2', owner: 'group', repo: 'repo' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitea/milestones/search?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('passes directory/query to searchBranches and maps the response', async () => {
+    const result = { connected: true, repo: null, branches: ['main', 'feat/api'] };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(result));
+
+    const api = await createAPI();
+    await expect(api.searchBranches!('/workspace', 'feat', { owner: 'group', repo: 'repo' })).resolves.toEqual(result);
+
+    const params = new URLSearchParams({ directory: '/workspace', query: 'feat', owner: 'group', repo: 'repo' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitea/branches/search?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('passes directory/query to searchTags and maps the response', async () => {
+    const result = { connected: true, repo: null, tags: ['v1.0', 'v1.1'] };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(result));
+
+    const api = await createAPI();
+    await expect(api.searchTags!('/workspace', 'v1', { owner: 'group', repo: 'repo' })).resolves.toEqual(result);
+
+    const params = new URLSearchParams({ directory: '/workspace', query: 'v1', owner: 'group', repo: 'repo' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitea/tags/search?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
 });

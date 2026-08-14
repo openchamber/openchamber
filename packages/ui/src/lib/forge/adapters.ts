@@ -35,12 +35,14 @@ import {
   mapGiteaCommits,
   mapGiteaComment,
   mapGiteaContext,
+  mapGiteaAssignee,
   mapGiteaIssue,
   mapGiteaPr,
   mapGiteaRepoRef,
   mapGiteaReviewsToEvents,
   mapGiteaReview,
   mapGiteaStatuses,
+  mapGithubAssignee,
   mapGithubCommits,
   mapGithubContext,
   mapGithubIssue,
@@ -53,6 +55,7 @@ import {
   mapGitlabCommits,
   mapGitlabContext,
   mapGitlabIssue,
+  mapGitlabMember,
   mapGitlabMr,
   mapGitlabNoteComment,
   mapGitlabRepoRef,
@@ -69,6 +72,11 @@ const GITHUB_CAPABILITIES: ForgeProviderCapabilities = {
   timelineEvents: true,
   inlineComments: true,
   threads: true,
+  userSearch: true,
+  labelSearch: true,
+  milestoneSearch: true,
+  branchSearch: true,
+  tagSearch: true,
 };
 
 const GITLAB_CAPABILITIES: ForgeProviderCapabilities = {
@@ -81,6 +89,11 @@ const GITLAB_CAPABILITIES: ForgeProviderCapabilities = {
   timelineEvents: true,
   inlineComments: false,
   threads: true,
+  userSearch: true,
+  labelSearch: true,
+  milestoneSearch: true,
+  branchSearch: true,
+  tagSearch: true,
 };
 
 const GITEA_CAPABILITIES: ForgeProviderCapabilities = {
@@ -93,6 +106,11 @@ const GITEA_CAPABILITIES: ForgeProviderCapabilities = {
   timelineEvents: true,
   inlineComments: true,
   threads: true,
+  userSearch: true,
+  labelSearch: true,
+  milestoneSearch: true,
+  branchSearch: true,
+  tagSearch: true,
 };
 
 // Gitea's 'commit-statuses' checks and inline comments land once Slice B adds
@@ -341,6 +359,79 @@ export const createGithubForgeProvider = (api: GitHubAPI): ForgeProvider => ({
     return null;
   },
 
+  async searchUsers(directory, query, options) {
+    if (!api.searchUsers) return { connected: false, repo: null, users: [], error: LOAD_ERROR };
+    try {
+      const result = await api.searchUsers(directory, query, { sourceRepo: parseOwnerRepo(options?.sourceRepo) });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGithubRepoRef(result.repo) : null,
+        users: (result.users ?? []).map(mapGithubAssignee),
+      };
+    } catch {
+      return { connected: false, repo: null, users: [], error: LOAD_ERROR };
+    }
+  },
+
+  async searchLabels(directory, query, options) {
+    if (!api.searchLabels) return { connected: false, repo: null, labels: [], error: LOAD_ERROR };
+    try {
+      const result = await api.searchLabels(directory, query, { sourceRepo: parseOwnerRepo(options?.sourceRepo) });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGithubRepoRef(result.repo) : null,
+        labels: (result.labels ?? []).map((label) => ({ name: label.name, color: label.color })),
+      };
+    } catch {
+      return { connected: false, repo: null, labels: [], error: LOAD_ERROR };
+    }
+  },
+
+  async searchMilestones(directory, query, options) {
+    if (!api.searchMilestones) return { connected: false, repo: null, milestones: [], error: LOAD_ERROR };
+    try {
+      const result = await api.searchMilestones(directory, query, { sourceRepo: parseOwnerRepo(options?.sourceRepo) });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGithubRepoRef(result.repo) : null,
+        milestones: (result.milestones ?? []).map((milestone) => ({
+          title: milestone.title,
+          ...(milestone.state === 'open' || milestone.state === 'closed' || milestone.state === 'active' ? { state: milestone.state } : {}),
+        })),
+      };
+    } catch {
+      return { connected: false, repo: null, milestones: [], error: LOAD_ERROR };
+    }
+  },
+
+  async searchBranches(directory, query, options) {
+    if (!api.searchBranches) return { connected: false, repo: null, branches: [], error: LOAD_ERROR };
+    try {
+      const result = await api.searchBranches(directory, query, { sourceRepo: parseOwnerRepo(options?.sourceRepo) });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGithubRepoRef(result.repo) : null,
+        branches: result.branches ?? [],
+      };
+    } catch {
+      return { connected: false, repo: null, branches: [], error: LOAD_ERROR };
+    }
+  },
+
+  async searchTags(directory, query, options) {
+    if (!api.searchTags) return { connected: false, repo: null, tags: [], error: LOAD_ERROR };
+    try {
+      const result = await api.searchTags(directory, query, { sourceRepo: parseOwnerRepo(options?.sourceRepo) });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGithubRepoRef(result.repo) : null,
+        tags: result.tags ?? [],
+      };
+    } catch {
+      return { connected: false, repo: null, tags: [], error: LOAD_ERROR };
+    }
+  },
+
   async addComment(directory, ref, input, options) {
     const selector = parseOwnerRepo(options?.sourceRepo);
     const owner = selector?.owner;
@@ -360,6 +451,25 @@ export const createGithubForgeProvider = (api: GitHubAPI): ForgeProvider => ({
       const result = await api.prComment({ directory, number: ref.number, body: input.body, owner, repo });
       if (!result.connected) return { ok: false, error: WRITE_ERROR };
       return { ok: true, comment: result.comment ? mapGithubIssueComment(result.comment) : null };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async createIssue(directory, input, options) {
+    if (!api.issueCreate) return { ok: false, error: WRITE_ERROR };
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.issueCreate({
+        directory,
+        title: input.title,
+        ...(input.body !== undefined ? { body: input.body } : {}),
+        ...(input.labels !== undefined ? { labels: input.labels } : {}),
+        owner: selector?.owner,
+        repo: selector?.repo,
+      });
+      if (!result.connected) return { ok: false, error: WRITE_ERROR };
+      return { ok: true, issue: result.issue ? mapGithubIssue(result.issue) : null };
     } catch {
       return { ok: false, error: WRITE_ERROR };
     }
@@ -651,6 +761,84 @@ export const createGitlabForgeProvider = (api: GitLabAPI): ForgeProvider => ({
     return null;
   },
 
+  async searchUsers(directory, query, options) {
+    if (!api.searchUsers) return { connected: false, repo: null, users: [], error: LOAD_ERROR };
+    try {
+      const { namespace, project } = parseGitlabNamespace(options?.sourceRepo);
+      const result = await api.searchUsers(directory, query, { namespace, project });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGitlabRepoRef(result.repo) : null,
+        users: (result.users ?? []).map(mapGitlabMember),
+      };
+    } catch {
+      return { connected: false, repo: null, users: [], error: LOAD_ERROR };
+    }
+  },
+
+  async searchLabels(directory, query, options) {
+    if (!api.searchLabels) return { connected: false, repo: null, labels: [], error: LOAD_ERROR };
+    try {
+      const { namespace, project } = parseGitlabNamespace(options?.sourceRepo);
+      const result = await api.searchLabels(directory, query, { namespace, project });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGitlabRepoRef(result.repo) : null,
+        labels: (result.labels ?? []).map((name) => ({ name })),
+      };
+    } catch {
+      return { connected: false, repo: null, labels: [], error: LOAD_ERROR };
+    }
+  },
+
+  async searchMilestones(directory, query, options) {
+    if (!api.searchMilestones) return { connected: false, repo: null, milestones: [], error: LOAD_ERROR };
+    try {
+      const { namespace, project } = parseGitlabNamespace(options?.sourceRepo);
+      const result = await api.searchMilestones(directory, query, { namespace, project });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGitlabRepoRef(result.repo) : null,
+        milestones: (result.milestones ?? []).map((milestone) => ({
+          title: milestone.title,
+          ...(milestone.state === 'open' || milestone.state === 'closed' || milestone.state === 'active' ? { state: milestone.state } : {}),
+        })),
+      };
+    } catch {
+      return { connected: false, repo: null, milestones: [], error: LOAD_ERROR };
+    }
+  },
+
+  async searchBranches(directory, query, options) {
+    if (!api.searchBranches) return { connected: false, repo: null, branches: [], error: LOAD_ERROR };
+    try {
+      const { namespace, project } = parseGitlabNamespace(options?.sourceRepo);
+      const result = await api.searchBranches(directory, query, { namespace, project });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGitlabRepoRef(result.repo) : null,
+        branches: result.branches ?? [],
+      };
+    } catch {
+      return { connected: false, repo: null, branches: [], error: LOAD_ERROR };
+    }
+  },
+
+  async searchTags(directory, query, options) {
+    if (!api.searchTags) return { connected: false, repo: null, tags: [], error: LOAD_ERROR };
+    try {
+      const { namespace, project } = parseGitlabNamespace(options?.sourceRepo);
+      const result = await api.searchTags(directory, query, { namespace, project });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGitlabRepoRef(result.repo) : null,
+        tags: result.tags ?? [],
+      };
+    } catch {
+      return { connected: false, repo: null, tags: [], error: LOAD_ERROR };
+    }
+  },
+
   async addComment(directory, ref, input, options) {
     const { namespace, project } = parseGitlabNamespace(options?.sourceRepo);
     if (ref.kind === 'issue') {
@@ -668,6 +856,25 @@ export const createGitlabForgeProvider = (api: GitLabAPI): ForgeProvider => ({
       const result = await api.mrComment({ directory, number: ref.number, body: input.body, namespace, project });
       if (!result.connected) return { ok: false, error: WRITE_ERROR };
       return { ok: true, comment: result.comment ? mapGitlabNoteComment(result.comment) : null };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async createIssue(directory, input, options) {
+    if (!api.issueCreate) return { ok: false, error: WRITE_ERROR };
+    try {
+      const { namespace, project } = parseGitlabNamespace(options?.sourceRepo);
+      const result = await api.issueCreate({
+        directory,
+        title: input.title,
+        ...(input.body !== undefined ? { body: input.body } : {}),
+        ...(input.labels !== undefined ? { labels: input.labels } : {}),
+        namespace,
+        project,
+      });
+      if (!result.connected) return { ok: false, error: WRITE_ERROR };
+      return { ok: true, issue: result.issue ? mapGitlabIssue(result.issue) : null };
     } catch {
       return { ok: false, error: WRITE_ERROR };
     }
@@ -754,12 +961,13 @@ export const createGitlabForgeProvider = (api: GitLabAPI): ForgeProvider => ({
     if (ref.kind === 'issue') {
       if (!api.issueUpdate) return { ok: false, error: WRITE_ERROR };
       try {
-        // GitLab assigns by user ID, not login; the facade takes logins, so
-        // assignees are left unset until an id lookup exists.
+        // GitLab assigns by user ID; the server resolves the facade's login
+        // list to IDs via project members (see gitlab routes resolveAssigneeIds).
         const result = await api.issueUpdate({
           directory,
           number: ref.number,
           labels: input.labels,
+          assignees: input.assignees,
           milestone: input.milestone,
           namespace,
           project,
@@ -776,6 +984,7 @@ export const createGitlabForgeProvider = (api: GitLabAPI): ForgeProvider => ({
         directory,
         number: ref.number,
         labels: input.labels,
+        assignees: input.assignees,
         milestone: input.milestone,
       });
       return { ok: true, entity: mapGitlabMr(mr) };
@@ -926,6 +1135,84 @@ export const createGiteaForgeProvider = (api: GiteaAPI): ForgeProvider => ({
     }
   },
 
+  async searchUsers(directory, query, options) {
+    if (!api.searchUsers) return { connected: false, repo: null, users: [], error: LOAD_ERROR };
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.searchUsers(directory, query, { owner: selector?.owner, repo: selector?.repo });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGiteaRepoRef(result.repo) : null,
+        users: (result.users ?? []).map(mapGiteaAssignee),
+      };
+    } catch {
+      return { connected: false, repo: null, users: [], error: LOAD_ERROR };
+    }
+  },
+
+  async searchLabels(directory, query, options) {
+    if (!api.searchLabels) return { connected: false, repo: null, labels: [], error: LOAD_ERROR };
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.searchLabels(directory, query, { owner: selector?.owner, repo: selector?.repo });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGiteaRepoRef(result.repo) : null,
+        labels: (result.labels ?? []).map((label) => ({ name: label.name, color: label.color })),
+      };
+    } catch {
+      return { connected: false, repo: null, labels: [], error: LOAD_ERROR };
+    }
+  },
+
+  async searchMilestones(directory, query, options) {
+    if (!api.searchMilestones) return { connected: false, repo: null, milestones: [], error: LOAD_ERROR };
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.searchMilestones(directory, query, { owner: selector?.owner, repo: selector?.repo });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGiteaRepoRef(result.repo) : null,
+        milestones: (result.milestones ?? []).map((milestone) => ({
+          title: milestone.title,
+          ...(milestone.state === 'open' || milestone.state === 'closed' || milestone.state === 'active' ? { state: milestone.state } : {}),
+        })),
+      };
+    } catch {
+      return { connected: false, repo: null, milestones: [], error: LOAD_ERROR };
+    }
+  },
+
+  async searchBranches(directory, query, options) {
+    if (!api.searchBranches) return { connected: false, repo: null, branches: [], error: LOAD_ERROR };
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.searchBranches(directory, query, { owner: selector?.owner, repo: selector?.repo });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGiteaRepoRef(result.repo) : null,
+        branches: result.branches ?? [],
+      };
+    } catch {
+      return { connected: false, repo: null, branches: [], error: LOAD_ERROR };
+    }
+  },
+
+  async searchTags(directory, query, options) {
+    if (!api.searchTags) return { connected: false, repo: null, tags: [], error: LOAD_ERROR };
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.searchTags(directory, query, { owner: selector?.owner, repo: selector?.repo });
+      return {
+        connected: result.connected,
+        repo: result.repo ? mapGiteaRepoRef(result.repo) : null,
+        tags: result.tags ?? [],
+      };
+    } catch {
+      return { connected: false, repo: null, tags: [], error: LOAD_ERROR };
+    }
+  },
+
   async getChecks(directory, number, options) {
     if (!api.prStatuses) return EMPTY_CHECKS;
     try {
@@ -963,6 +1250,25 @@ export const createGiteaForgeProvider = (api: GiteaAPI): ForgeProvider => ({
       const result = await api.prComment({ directory, number: ref.number, body: input.body, owner, repo });
       if (!result.connected) return { ok: false, error: WRITE_ERROR };
       return { ok: true, comment: result.comment ? mapGiteaComment(result.comment) : null };
+    } catch {
+      return { ok: false, error: WRITE_ERROR };
+    }
+  },
+
+  async createIssue(directory, input, options) {
+    if (!api.issueCreate) return { ok: false, error: WRITE_ERROR };
+    try {
+      const selector = parseOwnerRepo(options?.sourceRepo);
+      const result = await api.issueCreate({
+        directory,
+        title: input.title,
+        ...(input.body !== undefined ? { body: input.body } : {}),
+        ...(input.labels !== undefined ? { labels: input.labels } : {}),
+        owner: selector?.owner,
+        repo: selector?.repo,
+      });
+      if (!result.connected) return { ok: false, error: WRITE_ERROR };
+      return { ok: true, issue: result.issue ? mapGiteaIssue(result.issue) : null };
     } catch {
       return { ok: false, error: WRITE_ERROR };
     }

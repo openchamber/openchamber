@@ -309,4 +309,98 @@ describe('createWebGitLabAPI', () => {
     const api = await createAPI();
     await expect(api.issuesList('/workspace')).rejects.toThrow('Internal Server Error');
   });
+
+  it('passes directory/query/namespace/project to searchUsers and maps the response', async () => {
+    const result = {
+      connected: true,
+      repo: null,
+      users: [{ username: 'octocat', id: 1, name: 'Octo Cat', avatarUrl: 'https://gitlab.example/octocat.png' }],
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(result));
+
+    const api = await createAPI();
+    await expect(api.searchUsers!('/workspace', 'octo', { namespace: 'group', project: 'repo' })).resolves.toEqual(result);
+
+    const params = new URLSearchParams({ directory: '/workspace', query: 'octo', namespace: 'group', project: 'repo' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitlab/users/search?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('omits namespace/project from searchUsers when not provided', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, repo: null, users: [] }));
+
+    const api = await createAPI();
+    await expect(api.searchUsers!('/workspace', 'octo')).resolves.toEqual({ connected: true, repo: null, users: [] });
+
+    const params = new URLSearchParams({ directory: '/workspace', query: 'octo' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitlab/users/search?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('throws the server error message when searchUsers fails', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'GitLab rate limited' }, { status: 503 }));
+
+    const api = await createAPI();
+    await expect(api.searchUsers!('/workspace', 'octo')).rejects.toThrow('GitLab rate limited');
+  });
+
+  it('passes directory/query to searchLabels and maps the response', async () => {
+    const result = { connected: true, repo: null, labels: ['bug', 'frontend'] };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(result));
+
+    const api = await createAPI();
+    await expect(api.searchLabels!('/workspace', 'feat', { namespace: 'group', project: 'repo' })).resolves.toEqual(result);
+
+    const params = new URLSearchParams({ directory: '/workspace', query: 'feat', namespace: 'group', project: 'repo' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitlab/labels/search?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('passes directory/query to searchMilestones and maps the response', async () => {
+    const result = { connected: true, repo: null, milestones: [{ title: 'v2.0', state: 'active' }] };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(result));
+
+    const api = await createAPI();
+    await expect(api.searchMilestones!('/workspace', 'v2', { namespace: 'group', project: 'repo' })).resolves.toEqual(result);
+
+    const params = new URLSearchParams({ directory: '/workspace', query: 'v2', namespace: 'group', project: 'repo' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitlab/milestones/search?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('passes directory/query to searchBranches and maps the response', async () => {
+    const result = { connected: true, repo: null, branches: ['main', 'feat/api'] };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(result));
+
+    const api = await createAPI();
+    await expect(api.searchBranches!('/workspace', 'feat', { namespace: 'group', project: 'repo' })).resolves.toEqual(result);
+
+    const params = new URLSearchParams({ directory: '/workspace', query: 'feat', namespace: 'group', project: 'repo' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitlab/branches/search?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('passes directory/query to searchTags and maps the response', async () => {
+    const result = { connected: true, repo: null, tags: ['v1.0', 'v1.1'] };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(result));
+
+    const api = await createAPI();
+    await expect(api.searchTags!('/workspace', 'v1', { namespace: 'group', project: 'repo' })).resolves.toEqual(result);
+
+    const params = new URLSearchParams({ directory: '/workspace', query: 'v1', namespace: 'group', project: 'repo' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith(`/api/gitlab/tags/search?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  });
 });

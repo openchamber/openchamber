@@ -111,6 +111,7 @@ Nothing in the client or repo layers assumes the token came from a PAT.
 | PUT | `/api/gitlab/mrs/update` | body `{ directory, number, title?, description?, state?, labels?, assigneeIds?, milestone? }` -> `{ connected, repo?, mr }`; `404` when the MR does not exist; `400 'Milestone not found'` when a milestone title does not match |
 | PUT | `/api/gitlab/mrs/merge` | body `{ directory, number, squash? }` -> `{ connected, merged: true }` on success; non-mergeable MRs -> the GitLab status (`405`/`406`/`409`/`422`) with `{ connected, merged: false, message }` |
 | POST | `/api/gitlab/issues/comment` | body `{ directory, number, body, namespace?, project? }` -> `{ connected, repo?, comment }` |
+| POST | `/api/gitlab/issues/create` | body `{ directory, title, body?, labels?, namespace?, project? }` -> `{ connected, repo?, issue }` |
 | PUT | `/api/gitlab/issues/update` | body `{ directory, number, title?, body?, state?, labels?, assigneeIds?, milestone?, namespace?, project? }` -> `{ connected, repo?, issue }`; `400 'Milestone not found'` when a milestone title does not match |
 | POST | `/api/gitlab/mrs/comment` | body `{ directory, number, body, namespace?, project? }` -> `{ connected, repo?, comment }` |
 | POST | `/api/gitlab/mrs/approve` | body `{ directory, number, namespace?, project? }` -> `{ connected, repo?, approved: true }` |

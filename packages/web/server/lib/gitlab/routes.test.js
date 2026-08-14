@@ -1220,6 +1220,234 @@ describe('GitLab data routes', () => {
     expect(response.body).toEqual({ error: 'Milestone not found' });
   });
 
+  test('issues/create POSTs an issue and maps it', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/issues$/)(url) && options.method === 'POST') {
+          return jsonResponse(
+            {
+              iid: 8,
+              title: 'New issue',
+              web_url: 'https://gitlab.com/group/sub/-/issues/8',
+              state: 'opened',
+              description: 'The body',
+              labels: ['bug'],
+              author: { id: 42, username: 'alice', name: 'Alice Example' },
+              created_at: '2026-01-01T10:00:00Z',
+              updated_at: '2026-01-01T10:00:00Z',
+            },
+            { status: 201 },
+          );
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/issues/create')
+      .send({ directory: '/tmp/work', title: 'New issue', body: 'The body', labels: ['bug'] });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      repo: { namespace: 'group', project: 'sub', host: 'gitlab.com' },
+      issue: {
+        number: 8,
+        title: 'New issue',
+        url: 'https://gitlab.com/group/sub/-/issues/8',
+        state: 'opened',
+        body: 'The body',
+        labels: ['bug'],
+        author: { username: 'alice', name: 'Alice Example', id: 42 },
+      },
+    });
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ title: 'New issue', description: 'The body', labels: ['bug'] });
+  });
+
+  test('issues/create requires directory and title', async () => {
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/issues/create')
+      .send({ directory: '/tmp/work' });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'directory and title are required' });
+  });
+
+  test('issues/create reports connected:false when not authenticated', async () => {
+    clearGitLabAuth();
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitlab/issues/create')
+      .send({ directory: '/tmp/work', title: 'Hi' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ connected: false });
+  });
+
+  describe('GitLab rich lookup routes', () => {
+    beforeEach(() => {
+      setGitLabAuth({ accessToken: 'gitlab-secret', baseUrl: 'https://gitlab.com', user: aliceUser });
+    });
+
+    test('users/search maps project members and passes the query', async () => {
+      const fetchMock = scriptedFetch([
+        (url) => (matches(/\/members\/all\?/)(url)
+          ? jsonResponse([
+            { id: 42, username: 'alice', name: 'Alice Example', avatar_url: 'https://gitlab.com/alice.png', web_url: 'https://gitlab.com/alice' },
+            { id: 43, username: 'bob', name: 'Bob', avatar_url: 'https://gitlab.com/bob.png', web_url: 'https://gitlab.com/bob' },
+          ])
+          : null),
+      ]);
+
+      const app = createApp();
+      const response = await request(app).get('/api/gitlab/users/search?directory=%2Ftmp%2Fwork&query=ali');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        connected: true,
+        repo: { namespace: 'group', project: 'sub' },
+        users: [
+          { username: 'alice', id: 42, name: 'Alice Example', avatarUrl: 'https://gitlab.com/alice.png' },
+          { username: 'bob', id: 43, name: 'Bob' },
+        ],
+      });
+      const requestedUrl = String(fetchMock.mock.calls[0][0]);
+      expect(requestedUrl).toContain('query=ali');
+    });
+
+    test('users/search reports connected:false when not authenticated', async () => {
+      clearGitLabAuth();
+      const app = createApp();
+      const response = await request(app).get('/api/gitlab/users/search?directory=%2Ftmp%2Fwork&query=ali');
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ connected: false, users: [] });
+    });
+
+    test('labels/search returns label names and passes the search param', async () => {
+      const fetchMock = scriptedFetch([
+        (url) => (matches(/\/labels\?/)(url)
+          ? jsonResponse([
+            { id: 1, name: 'bug', color: '#d73a4a' },
+            { id: 2, name: 'feature', color: '#0e8a16' },
+          ])
+          : null),
+      ]);
+
+      const app = createApp();
+      const response = await request(app).get('/api/gitlab/labels/search?directory=%2Ftmp%2Fwork&query=bug');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ connected: true, labels: ['bug', 'feature'] });
+      const requestedUrl = String(fetchMock.mock.calls[0][0]);
+      expect(requestedUrl).toContain('search=bug');
+    });
+
+    test('milestones/search maps milestone titles and states', async () => {
+      scriptedFetch([
+        (url) => (matches(/\/milestones\?/)(url)
+          ? jsonResponse([
+            { id: 1, title: 'v1.0', state: 'active' },
+            { id: 2, title: 'v2.0', state: 'closed' },
+          ])
+          : null),
+      ]);
+
+      const app = createApp();
+      const response = await request(app).get('/api/gitlab/milestones/search?directory=%2Ftmp%2Fwork&query=v');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        connected: true,
+        milestones: [
+          { title: 'v1.0', state: 'active' },
+          { title: 'v2.0', state: 'closed' },
+        ],
+      });
+    });
+
+    test('branches/search returns branch names', async () => {
+      scriptedFetch([
+        (url) => (matches(/\/repository\/branches\?/)(url)
+          ? jsonResponse([
+            { name: 'main', default: true },
+            { name: 'feat/x', default: false },
+          ])
+          : null),
+      ]);
+
+      const app = createApp();
+      const response = await request(app).get('/api/gitlab/branches/search?directory=%2Ftmp%2Fwork&query=main');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ connected: true, branches: ['main', 'feat/x'] });
+    });
+
+    test('tags/search returns tag names', async () => {
+      scriptedFetch([
+        (url) => (matches(/\/repository\/tags\?/)(url)
+          ? jsonResponse([
+            { name: 'v1.0.0' },
+            { name: 'v1.1.0' },
+          ])
+          : null),
+      ]);
+
+      const app = createApp();
+      const response = await request(app).get('/api/gitlab/tags/search?directory=%2Ftmp%2Fwork&query=v1');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ connected: true, tags: ['v1.0.0', 'v1.1.0'] });
+    });
+
+    test('issues/update resolves assignee logins to IDs via project members', async () => {
+      const fetchMock = scriptedFetch([
+        (url) => (matches(/\/members\/all\?/)(url) && url.includes('query=alice')
+          ? jsonResponse([{ id: 42, username: 'alice', name: 'Alice Example' }])
+          : null),
+        (url, options) => (matches(/\/issues\/7$/)(url) && options?.method === 'PUT'
+          ? jsonResponse({
+            iid: 7,
+            title: 'Broken import',
+            web_url: 'https://gitlab.com/group/sub/-/issues/7',
+            state: 'opened',
+            author: { id: 42, username: 'alice', name: 'Alice Example' },
+          }, { status: 200 })
+          : null),
+      ]);
+
+      const app = createApp();
+      const response = await request(app)
+        .put('/api/gitlab/issues/update')
+        .send({ directory: '/tmp/work', number: 7, assignees: ['alice'] });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ connected: true });
+      const patchCall = fetchMock.mock.calls.find(([url, options]) => String(url).includes('/issues/7') && options.method === 'PUT');
+      expect(patchCall).toBeTruthy();
+      expect(JSON.parse(patchCall[1].body)).toEqual({ assignee_ids: [42] });
+    });
+
+    test('issues/update rejects an unknown assignee login with a precise error', async () => {
+      scriptedFetch([
+        (url) => (matches(/\/members\/all\?/)(url)
+          ? jsonResponse([{ id: 42, username: 'alice', name: 'Alice Example' }])
+          : null),
+      ]);
+
+      const app = createApp();
+      const response = await request(app)
+        .put('/api/gitlab/issues/update')
+        .send({ directory: '/tmp/work', number: 7, assignees: ['nobody'] });
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ error: 'Unknown assignee: nobody' });
+    });
+  });
+
   // NOTE: keep this test last in the file. The rate-limit cooldown is
   // module-level and has no reset export, so tests after it would short-circuit.
   test('data routes surface a 503 when GitLab rate limits', async () => {

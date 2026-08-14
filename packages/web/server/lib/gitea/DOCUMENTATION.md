@@ -107,6 +107,7 @@
 | PATCH | `/api/gitea/pr/update` | body `{ directory, number, title?, description?, state? }` -> `{ connected, repo?, pr }`; `404` when the PR does not exist |
 | POST | `/api/gitea/pr/merge` | body `{ directory, number, method? }` -> `{ connected, merged: true }` on success; non-mergeable PRs -> the Gitea status (`405`/`409`/`422`) with `{ connected, merged: false, message }` |
 | POST | `/api/gitea/issues/comment` | body `{ directory, number, body, owner?, repo? }` -> `{ connected, repo?, comment }` |
+| POST | `/api/gitea/issues/create` | body `{ directory, title, body?, labels?, owner?, repo? }` -> `{ connected, repo?, issue }` |
 | PATCH | `/api/gitea/issues/update` | body `{ directory, number, title?, body?, state?, labels?, assignees?, milestone?, owner?, repo? }` -> `{ connected, repo?, issue }`; `400 'Milestone not found'` when a milestone title does not match |
 | POST | `/api/gitea/prs/comment` | body `{ directory, number, body, owner?, repo? }` -> `{ connected, repo?, comment }` (PRs are issues at the API level, so the PR number is the issue index) |
 | POST | `/api/gitea/prs/review` | body `{ directory, number, event, body?, owner?, repo? }` -> `{ connected, repo?, review }`; `400` when `event` is not `APPROVED`/`REQUEST_CHANGES`/`COMMENT` |

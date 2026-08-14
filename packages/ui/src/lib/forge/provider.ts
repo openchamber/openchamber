@@ -4,12 +4,15 @@ import type {
   ForgeCommit,
   ForgeFileChange,
   ForgeIssue,
+  ForgeLabel,
+  ForgeMilestone,
   ForgeProviderCapabilities,
   ForgeProviderKind,
   ForgePullRequest,
   ForgeRepoRef,
   ForgeReview,
   ForgeTimelineEvent,
+  ForgeUser,
 } from './types';
 
 /**
@@ -95,6 +98,51 @@ export interface ForgeTimelineResult {
   error?: string | null;
 }
 
+/**
+ * Repo-scoped user lookup for mentions/assignees. Wraps the per-provider
+ * assignable-user endpoints (github `issues.listAssignees`, gitlab project
+ * members, gitea repo assignees). `connected: false` means the lookup failed —
+ * never treat it as an authoritative empty list.
+ */
+export interface ForgeUsersResult {
+  connected: boolean;
+  repo?: ForgeRepoRef | null;
+  users: ForgeUser[];
+  error?: string | null;
+}
+
+/** Repo-scoped label lookup for pickers. */
+export interface ForgeLabelsResult {
+  connected: boolean;
+  repo?: ForgeRepoRef | null;
+  labels: ForgeLabel[];
+  error?: string | null;
+}
+
+/** Repo-scoped milestone lookup for pickers. */
+export interface ForgeMilestonesResult {
+  connected: boolean;
+  repo?: ForgeRepoRef | null;
+  milestones: ForgeMilestone[];
+  error?: string | null;
+}
+
+/** Repo-scoped branch lookup. */
+export interface ForgeBranchesResult {
+  connected: boolean;
+  repo?: ForgeRepoRef | null;
+  branches: string[];
+  error?: string | null;
+}
+
+/** Repo-scoped tag lookup. */
+export interface ForgeTagsResult {
+  connected: boolean;
+  repo?: ForgeRepoRef | null;
+  tags: string[];
+  error?: string | null;
+}
+
 /** Rolled-up checks for a PR/MR; only non-null for providers with a dedicated checks surface. */
 export interface ForgeChecksResult {
   connected: boolean;
@@ -133,6 +181,20 @@ export interface ForgeCommentResult {
   ok: boolean;
   error?: string | null;
   comment?: ForgeComment | null;
+}
+
+/** Input for creating an issue; `labels` is a full-set list of label names. */
+export interface ForgeIssueCreateInput {
+  title: string;
+  body?: string;
+  labels?: string[];
+}
+
+/** Result of creating an issue; `issue` is the created entity when `ok`. */
+export interface ForgeIssueCreateResult {
+  ok: boolean;
+  error?: string | null;
+  issue?: ForgeIssue | null;
 }
 
 /** Result of an entity update; `entity` is the refreshed issue/PR when `ok`. */
@@ -230,6 +292,43 @@ export interface ForgeProvider {
    */
   getChecks?(directory: string, number: number, options?: { sourceRepo?: string | null }): Promise<ForgeChecksResult | null>;
 
+// --- Rich lookups (pickers / mentions) ---
+  //
+  // Repo-scoped searches for the fields the UI offers as pickers. Every method
+  // resolves the target repo from the working directory (remotes + connected
+  // accounts) and takes a directory argument, matching the per-provider APIs.
+  // All are optional and capability-flagged (`capabilities.userSearch`,
+  // `.labelSearch`, `.milestoneSearch`, `.branchSearch`, `.tagSearch`); the UI
+  // gates on method presence plus the flag before enabling an affordance.
+  // Results return `{ connected: false }` — never throw — when the runtime API
+  // is missing, the wire call fails, or the provider cannot resolve the repo.
+
+  /**
+   * Search the repo's assignable users (matches for assignees and mentions).
+   * Wraps github `issues.listAssignees`, gitlab project members, and gitea repo
+   * assignees; `query` is a free-text substring (case-insensitive). `sourceRepo`
+   * selects a cross-repo (fork) repository.
+   */
+  searchUsers?(directory: string, query: string, options?: { sourceRepo?: string | null }): Promise<ForgeUsersResult>;
+
+  /**
+   * Search the repo's labels. Wraps github `issues.listLabelsForRepo`, gitlab
+   * project labels, and gitea repo labels.
+   */
+  searchLabels?(directory: string, query: string, options?: { sourceRepo?: string | null }): Promise<ForgeLabelsResult>;
+
+  /**
+   * Search the repo's milestones. Wraps github `issues.listMilestonesForRepo`,
+   * gitlab project milestones, and gitea repo milestones.
+   */
+  searchMilestones?(directory: string, query: string, options?: { sourceRepo?: string | null }): Promise<ForgeMilestonesResult>;
+
+  /** Search the repo's branches. */
+  searchBranches?(directory: string, query: string, options?: { sourceRepo?: string | null }): Promise<ForgeBranchesResult>;
+
+  /** Search the repo's tags. */
+  searchTags?(directory: string, query: string, options?: { sourceRepo?: string | null }): Promise<ForgeTagsResult>;
+
   // --- Write operations ---
   //
   // Every write method is optional and capability-flagged: the UI gates on
@@ -251,6 +350,17 @@ export interface ForgeProvider {
     input: { body: string },
     options?: { sourceRepo?: string | null },
   ): Promise<ForgeCommentResult>;
+
+  /**
+   * Create a new issue in the repository. Wraps `github issueCreate`, `gitlab
+   * issueCreate`, and `gitea issueCreate`; labels are a full-set list of names
+   * on the create payload (provider-dependent support).
+   */
+  createIssue?(
+    directory: string,
+    input: ForgeIssueCreateInput,
+    options?: { sourceRepo?: string | null },
+  ): Promise<ForgeIssueCreateResult>;
 
   /**
    * Reply to a comment thread. On GitHub this posts a proper inline

@@ -118,6 +118,36 @@ export const mapGiteaUser = (user: GiteaUserSummary): ForgeUser => ({
 });
 
 // ---------------------------------------------------------------------------
+// Repo-scoped lookup results
+// ---------------------------------------------------------------------------
+
+/** Map a GitHub repo assignee item onto `ForgeUser` (same shape as GitHubUserSummary). */
+export const mapGithubAssignee = (assignee: GitHubUserSummary): ForgeUser => ({
+  id: assignee.login,
+  login: assignee.login,
+  name: assignee.name,
+  avatarUrl: assignee.avatarUrl,
+});
+
+/** Map a GitLab project member (wire `members/all` item) onto `ForgeUser`. */
+export const mapGitlabMember = (member: GitLabUserSummary): ForgeUser => ({
+  id: String(member.id ?? member.username),
+  login: member.username,
+  name: member.name,
+  avatarUrl: member.avatarUrl,
+  url: member.webUrl,
+});
+
+/** Map a Gitea repo-assignee item onto `ForgeUser` (same shape as GiteaUserSummary). */
+export const mapGiteaAssignee = (assignee: GiteaUserSummary): ForgeUser => ({
+  id: String(assignee.id ?? assignee.username),
+  login: assignee.username,
+  name: assignee.name,
+  avatarUrl: assignee.avatarUrl,
+  url: assignee.webUrl,
+});
+
+// ---------------------------------------------------------------------------
 // Pull requests / merge requests
 // ---------------------------------------------------------------------------
 

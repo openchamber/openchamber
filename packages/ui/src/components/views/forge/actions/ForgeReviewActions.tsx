@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast';
 import { useI18n } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n';
 import type { ForgeEntityRef, ForgeProvider, ForgeReviewEvent } from '@/lib/forge/provider';
+import { ForgeMentionTextarea } from './ForgeMentionTextarea';
 
 interface ForgeReviewActionsProps {
   provider: ForgeProvider;
@@ -94,12 +94,14 @@ export const ForgeReviewActions: React.FC<ForgeReviewActionsProps> = ({ provider
           <DialogHeader>
             <DialogTitle>{t('forge.actions.reviewDialogTitle')}</DialogTitle>
           </DialogHeader>
-          <Textarea
+          <ForgeMentionTextarea
+            provider={provider}
+            directory={directory}
             value={body}
-            onChange={(event) => setBody(event.target.value)}
+            onChange={setBody}
             placeholder={t('forge.actions.reviewBodyPlaceholder')}
             disabled={submitting}
-            aria-label={t('forge.actions.reviewBodyPlaceholder')}
+            ariaLabel={t('forge.actions.reviewBodyPlaceholder')}
             className="min-h-[96px]"
           />
           <DialogFooter>

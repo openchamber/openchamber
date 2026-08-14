@@ -2,11 +2,13 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { ForgeEntityDetailView } from '@/components/views/forge';
+import { ForgeCreateIssueDialog } from '@/components/views/forge/actions';
 import { buildForgeProvider } from '@/lib/forge';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGiteaAuthStore } from '@/stores/useGiteaAuthStore';
 import type { GiteaIssueSummary } from '@/lib/api/types';
+import type { ForgeIssue } from '@/lib/forge';
 import { useI18n } from '@/lib/i18n';
 
 const issueLabelBadgeClass =
@@ -44,12 +46,20 @@ export const GiteaIssuesSection: React.FC<{ directory: string }> = ({ directory 
 
   const issueProvider = React.useMemo(() => (gitea ? buildForgeProvider('gitea', { gitea }) : null), [gitea]);
 
+  const [createOpen, setCreateOpen] = React.useState(false);
+
   const retry = React.useCallback(() => setRetryToken((value) => value + 1), []);
 
   const openGiteaSettings = React.useCallback(() => {
     setSettingsPage('git');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
+
+  const handleIssueCreated = React.useCallback((issue: ForgeIssue) => {
+    setSelectedNumber(issue.number);
+    setSelectedUrl(issue.url ?? null);
+    setRetryToken((value) => value + 1);
+  }, []);
 
   // The parent PR view already gates on connection, but the auth store is the
   // authoritative signal when the list API reports connected without having
@@ -171,8 +181,14 @@ export const GiteaIssuesSection: React.FC<{ directory: string }> = ({ directory 
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex flex-col gap-0.5">
+      <div className="flex min-w-0 items-center justify-between gap-2">
         <div className="typography-ui-header font-semibold text-foreground">{t('contextPanel.giteaPr.issues.listSectionTitle')}</div>
+        {issueProvider?.createIssue ? (
+          <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2" onClick={() => setCreateOpen(true)}>
+            <Icon name="add" className="size-4" />
+            {t('forge.actions.newIssue')}
+          </Button>
+        ) : null}
       </div>
 
       {!gitea?.issuesList ? (
@@ -246,6 +262,16 @@ export const GiteaIssuesSection: React.FC<{ directory: string }> = ({ directory 
           ) : null}
         </div>
       )}
+
+      {issueProvider?.createIssue ? (
+        <ForgeCreateIssueDialog
+          provider={issueProvider}
+          directory={directory}
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          onCreated={handleIssueCreated}
+        />
+      ) : null}
     </div>
   );
 };

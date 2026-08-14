@@ -1508,6 +1508,251 @@ export function registerGitHubRoutes(app) {
     }
   });
 
+  // ================= GitHub Rich Lookup APIs =================
+
+  // Repo-scoped lookups for pickers/mentions. Each resolves the target repo
+  // (directory remote + owner/repo override), hits a GitHub endpoint that does
+  // not support server-side search, then filters client-side (case-insensitive
+  // substring on the primary field). `connected: false` means the lookup could
+  // not be performed — never an authoritative empty list.
+
+  app.get('/api/github/users/search', async (req, res) => {
+    try {
+      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+      const query = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
+      if (!directory) {
+        return res.status(400).json({ error: 'directory is required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false, users: [] });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, users: [] });
+      }
+
+      const list = await withTimeout(
+        octokit.rest.issues.listAssignees({ owner: repo.owner, repo: repo.repo, per_page: 100 }),
+        ROUTE_TIMEOUT_MS,
+        'github users search',
+      );
+      const needle = query.toLowerCase();
+      const users = (Array.isArray(list?.data) ? list.data : [])
+        .map(mapGitHubUserSummary)
+        .filter(Boolean)
+        .filter((user) => !needle || user.login.toLowerCase().includes(needle) || (user.name || '').toLowerCase().includes(needle));
+
+      return res.json({ connected: true, repo, users });
+    } catch (error) {
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false, users: [] });
+      }
+      console.error('Failed to search GitHub users:', error);
+      return res.json({ connected: false, users: [] });
+    }
+  });
+
+  app.get('/api/github/labels/search', async (req, res) => {
+    try {
+      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+      const query = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
+      if (!directory) {
+        return res.status(400).json({ error: 'directory is required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false, labels: [] });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, labels: [] });
+      }
+
+      const list = await withTimeout(
+        octokit.rest.issues.listLabelsForRepo({ owner: repo.owner, repo: repo.repo, per_page: 100 }),
+        ROUTE_TIMEOUT_MS,
+        'github labels search',
+      );
+      const needle = query.toLowerCase();
+      const labels = mapGitHubLabels(list?.data).filter(
+        (label) => !needle || label.name.toLowerCase().includes(needle),
+      );
+
+      return res.json({ connected: true, repo, labels });
+    } catch (error) {
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false, labels: [] });
+      }
+      console.error('Failed to search GitHub labels:', error);
+      return res.json({ connected: false, labels: [] });
+    }
+  });
+
+  app.get('/api/github/milestones/search', async (req, res) => {
+    try {
+      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+      const query = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
+      if (!directory) {
+        return res.status(400).json({ error: 'directory is required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false, milestones: [] });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, milestones: [] });
+      }
+
+      const list = await withTimeout(
+        octokit.rest.issues.listMilestonesForRepo({ owner: repo.owner, repo: repo.repo, state: 'all', per_page: 100 }),
+        ROUTE_TIMEOUT_MS,
+        'github milestones search',
+      );
+      const needle = query.toLowerCase();
+      const milestones = (Array.isArray(list?.data) ? list.data : [])
+        .map(mapGitHubMilestone)
+        .filter(Boolean)
+        .filter((milestone) => !needle || milestone.title.toLowerCase().includes(needle));
+
+      return res.json({ connected: true, repo, milestones });
+    } catch (error) {
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false, milestones: [] });
+      }
+      console.error('Failed to search GitHub milestones:', error);
+      return res.json({ connected: false, milestones: [] });
+    }
+  });
+
+  app.get('/api/github/branches/search', async (req, res) => {
+    try {
+      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+      const query = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
+      if (!directory) {
+        return res.status(400).json({ error: 'directory is required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false, branches: [] });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, branches: [] });
+      }
+
+      const branches = [];
+      const needle = query.toLowerCase();
+      let page = 1;
+      while (true) {
+        const response = await withTimeout(
+          octokit.rest.repos.listBranches({ owner: repo.owner, repo: repo.repo, per_page: 100, page }),
+          ROUTE_TIMEOUT_MS,
+          'github branches search',
+        );
+        if (!response.data || response.data.length === 0) break;
+        for (const branch of response.data) {
+          const name = typeof branch?.name === 'string' ? branch.name : '';
+          if (!name) continue;
+          if (!needle || name.toLowerCase().includes(needle)) branches.push(name);
+        }
+        if (response.data.length < 100) break;
+        page++;
+      }
+
+      return res.json({ connected: true, repo, branches });
+    } catch (error) {
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false, branches: [] });
+      }
+      console.error('Failed to search GitHub branches:', error);
+      return res.json({ connected: false, branches: [] });
+    }
+  });
+
+  app.get('/api/github/tags/search', async (req, res) => {
+    try {
+      const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+      const query = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
+      if (!directory) {
+        return res.status(400).json({ error: 'directory is required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false, tags: [] });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, tags: [] });
+      }
+
+      const list = await withTimeout(
+        octokit.rest.repos.listTags({ owner: repo.owner, repo: repo.repo, per_page: 100 }),
+        ROUTE_TIMEOUT_MS,
+        'github tags search',
+      );
+      const needle = query.toLowerCase();
+      const tags = (Array.isArray(list?.data) ? list.data : [])
+        .map((tag) => (typeof tag?.name === 'string' ? tag.name : ''))
+        .filter(Boolean)
+        .filter((name) => !needle || name.toLowerCase().includes(needle));
+
+      return res.json({ connected: true, repo, tags });
+    } catch (error) {
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false, tags: [] });
+      }
+      console.error('Failed to search GitHub tags:', error);
+      return res.json({ connected: false, tags: [] });
+    }
+  });
+
   // ================= GitHub Issue APIs =================
 
   app.get('/api/github/issues/list', async (req, res) => {
@@ -1782,6 +2027,80 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: false });
       }
       console.error('Failed to create GitHub issue comment:', error);
+      return res.status(500).json({ error: 'GitHub returned an error' });
+    }
+  });
+
+  app.post('/api/github/issues/create', async (req, res) => {
+    try {
+      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
+      const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+      if (!directory || !title) {
+        return res.status(400).json({ error: 'directory and title are required' });
+      }
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : undefined;
+      const labels = Array.isArray(req.body?.labels)
+        ? req.body.labels.filter((label) => typeof label === 'string' && label.length > 0)
+        : undefined;
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.json({ connected: false });
+      }
+
+      const requestedRepo = getRequestedRepo(req);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
+      if (!repo) {
+        return res.json({ connected: true, repo: null, issue: null });
+      }
+
+      const result = await octokit.rest.issues.create({
+        owner: repo.owner,
+        repo: repo.repo,
+        title,
+        ...(body !== undefined ? { body } : {}),
+        ...(labels !== undefined ? { labels } : {}),
+      });
+      const item = result?.data;
+      if (!item) {
+        return res.status(500).json({ error: 'GitHub returned an error while creating the issue' });
+      }
+
+      return res.json({
+        connected: true,
+        repo,
+        issue: {
+          number: item.number,
+          title: typeof item.title === 'string' ? item.title : title,
+          url: typeof item.html_url === 'string' ? item.html_url : '',
+          state: item.state === 'closed' ? 'closed' : 'open',
+          author: item.user ? { login: item.user.login, id: item.user.id, avatarUrl: item.user.avatar_url } : null,
+          body: typeof item.body === 'string' ? item.body : '',
+          createdAt: item.created_at,
+          updatedAt: item.updated_at,
+          labels: Array.isArray(item.labels)
+            ? item.labels
+                .map((label) => {
+                  if (typeof label === 'string') return null;
+                  const name = typeof label?.name === 'string' ? label.name : '';
+                  if (!name) return null;
+                  return { name, color: typeof label?.color === 'string' ? label.color : undefined };
+                })
+                .filter(Boolean)
+            : [],
+        },
+      });
+    } catch (error) {
+      if (error?.status === 429) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.json({ connected: false });
+      }
+      console.error('Failed to create GitHub issue:', error);
       return res.status(500).json({ error: 'GitHub returned an error' });
     }
   });

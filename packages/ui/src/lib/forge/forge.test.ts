@@ -24,6 +24,7 @@ import {
   aggregateStatusState,
   firstLine,
   mapCheckRunState,
+  mapGiteaAssignee,
   mapGiteaCommits,
   mapGiteaComment,
   mapGiteaContext,
@@ -32,6 +33,7 @@ import {
   mapGiteaReviewsToEvents,
   mapGiteaReview,
   mapGiteaStatuses,
+  mapGithubAssignee,
   mapGithubCheckSummary,
   mapGithubCommits,
   mapGithubContext,
@@ -44,6 +46,7 @@ import {
   mapGitlabCommits,
   mapGitlabContext,
   mapGitlabIssue,
+  mapGitlabMember,
   mapGitlabMr,
   mapGitlabNoteComment,
   mapGitlabTimelineEvents,
@@ -497,6 +500,37 @@ describe('gitea normalization', () => {
     expect(context.reviewComments).toEqual([]);
     expect(context.files[0]?.additions).toBe(3);
     expect(context.checks).toBeNull();
+  });
+});
+
+describe('repo-scoped lookup normalization', () => {
+  test('maps a GitHub repo assignee', () => {
+    expect(mapGithubAssignee(githubUser())).toEqual({
+      id: 'octocat',
+      login: 'octocat',
+      name: 'Octo Cat',
+      avatarUrl: 'https://avatars.example/octocat',
+    });
+  });
+
+  test('maps a GitLab project member', () => {
+    expect(mapGitlabMember(gitlabUser())).toEqual({
+      id: '5',
+      login: 'gluser',
+      name: 'GL User',
+      avatarUrl: 'https://avatars.example/gluser',
+      url: 'https://gitlab.example/gluser',
+    });
+  });
+
+  test('maps a Gitea repo assignee', () => {
+    expect(mapGiteaAssignee(giteaUser())).toEqual({
+      id: '3',
+      login: 'guser',
+      name: 'G User',
+      avatarUrl: 'https://avatars.example/guser',
+      url: 'https://gitea.example/guser',
+    });
   });
 });
 
@@ -1126,7 +1160,7 @@ describe('write operations: updateMetadata', () => {
     expect(issueArgs.milestone).toBe('v2.0');
   });
 
-  test('gitlab sends labels/milestone but never assignees (id-based)', async () => {
+  test('gitlab sends labels/assignee logins/milestone; the server resolves logins to IDs', async () => {
     let issueArgs: Record<string, unknown> = {};
     const api = {
       issueUpdate: async (input: Record<string, unknown>) => {
@@ -1142,7 +1176,7 @@ describe('write operations: updateMetadata', () => {
     expect(result.ok).toBe(true);
     expect(issueArgs.labels).toEqual(['frontend']);
     expect(issueArgs.milestone).toBeNull();
-    expect(issueArgs.assignees).toBe(undefined);
+    expect(issueArgs.assignees).toEqual(['gluser']);
   });
 
   test('gitea issue metadata passes through; PR metadata is unsupported', async () => {
@@ -1246,6 +1280,11 @@ describe('buildForgeProvider', () => {
       timelineEvents: true,
       inlineComments: true,
       threads: true,
+      userSearch: true,
+      labelSearch: true,
+      milestoneSearch: true,
+      branchSearch: true,
+      tagSearch: true,
     });
   });
 
@@ -1262,6 +1301,11 @@ describe('buildForgeProvider', () => {
       timelineEvents: true,
       inlineComments: false,
       threads: true,
+      userSearch: true,
+      labelSearch: true,
+      milestoneSearch: true,
+      branchSearch: true,
+      tagSearch: true,
     });
   });
 
@@ -1278,6 +1322,11 @@ describe('buildForgeProvider', () => {
       timelineEvents: true,
       inlineComments: true,
       threads: true,
+      userSearch: true,
+      labelSearch: true,
+      milestoneSearch: true,
+      branchSearch: true,
+      tagSearch: true,
     });
   });
 });
@@ -1575,5 +1624,312 @@ describe('getForgeProviderForDirectory', () => {
   test('returns null when the API for the detected kind is absent', async () => {
     gitProviderKind = 'gitlab';
     expect(await getForgeProviderForDirectory('/repo')).toBeNull();
+  });
+});
+
+describe('write operations: createIssue', () => {
+  test('github passes title/body/labels and parses sourceRepo', async () => {
+    let args: Record<string, unknown> = {};
+    const api = {
+      issueCreate: async (input: Record<string, unknown>) => {
+        args = input;
+        return { connected: true, issue: githubIssue };
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const result = await provider.createIssue!(
+      '/repo',
+      { title: 'Add feature', body: 'The body', labels: ['bug'] },
+      { sourceRepo: 'upstream/widget' },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.issue?.number).toBe(7);
+    expect(args).toEqual({
+      directory: '/repo',
+      title: 'Add feature',
+      body: 'The body',
+      labels: ['bug'],
+      owner: 'upstream',
+      repo: 'widget',
+    });
+  });
+
+  test('github omits optional fields and fails closed when the api is absent', async () => {
+    let called = false;
+    const api = {
+      issueCreate: async () => {
+        called = true;
+        return { connected: true, issue: githubIssue };
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const result = await provider.createIssue!('/repo', { title: 'T' });
+    expect(result.ok).toBe(true);
+    expect(called).toBe(true);
+
+    const empty = createGithubForgeProvider({} as unknown as GitHubAPI);
+    const failed = await empty.createIssue!('/repo', { title: 'T' });
+    expect(failed.ok).toBe(false);
+  });
+
+  test('gitlab passes namespace/project from a multi-segment sourceRepo', async () => {
+    let args: Record<string, unknown> = {};
+    const api = {
+      issueCreate: async (input: Record<string, unknown>) => {
+        args = input;
+        return { connected: true, issue: gitlabIssue };
+      },
+    } as unknown as GitLabAPI;
+    const provider = createGitlabForgeProvider(api);
+
+    const result = await provider.createIssue!(
+      '/repo',
+      { title: 'Add feature', body: 'The body' },
+      { sourceRepo: 'group/sub/proj' },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.issue?.number).toBe(8);
+    expect(args).toEqual({
+      directory: '/repo',
+      title: 'Add feature',
+      body: 'The body',
+      namespace: 'group/sub',
+      project: 'proj',
+    });
+  });
+
+  test('gitea passes owner/repo and maps the created issue', async () => {
+    let args: Record<string, unknown> = {};
+    const api = {
+      issueCreate: async (input: Record<string, unknown>) => {
+        args = input;
+        return { connected: true, issue: giteaIssue };
+      },
+    } as unknown as GiteaAPI;
+    const provider = createGiteaForgeProvider(api);
+
+    const result = await provider.createIssue!('/repo', { title: 'Add feature', labels: ['bug'] });
+    expect(result.ok).toBe(true);
+    expect(result.issue?.number).toBe(12);
+    expect(args).toEqual({
+      directory: '/repo',
+      title: 'Add feature',
+      labels: ['bug'],
+      owner: undefined,
+      repo: undefined,
+    });
+  });
+
+  test('createIssue degrades to ok:false without throwing on wire failure', async () => {
+    const api = {
+      issueCreate: async () => {
+        throw new Error('boom');
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const result = await provider.createIssue!('/repo', { title: 'T' });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
+  });
+});
+
+describe('repo-scoped user search (searchUsers)', () => {
+  test('github parses sourceRepo and maps assignees by login', async () => {
+    let receivedDirectory = '';
+    let receivedQuery = '';
+    let receivedOptions: { sourceRepo?: { owner: string; repo: string } | null } | undefined;
+    const api = {
+      searchUsers: async (
+        directory: string,
+        query: string,
+        options?: { sourceRepo?: { owner: string; repo: string } | null },
+      ) => {
+        receivedDirectory = directory;
+        receivedQuery = query;
+        receivedOptions = options;
+        return {
+          connected: true,
+          repo: { owner: 'acme', repo: 'widget', url: 'https://github.com/acme/widget' },
+          users: [githubUser()],
+        };
+      },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const result = await provider.searchUsers!('/repo', 'octo', { sourceRepo: 'upstream/widget' });
+    expect(receivedDirectory).toBe('/repo');
+    expect(receivedQuery).toBe('octo');
+    expect(receivedOptions).toEqual({ sourceRepo: { owner: 'upstream', repo: 'widget' } });
+    expect(result.connected).toBe(true);
+    expect(result.repo?.owner).toBe('acme');
+    expect(result.users).toEqual([{
+      id: 'octocat',
+      login: 'octocat',
+      name: 'Octo Cat',
+      avatarUrl: 'https://avatars.example/octocat',
+    }]);
+  });
+
+  test('github passes connected:false through without an authoritative list', async () => {
+    const api = {
+      searchUsers: async () => ({ connected: false, repo: null, users: [] }),
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    const result = await provider.searchUsers!('/repo', 'octo');
+    expect(result.connected).toBe(false);
+    expect(result.users).toEqual([]);
+    expect(result.error).toBeFalsy();
+  });
+
+  test('github fails closed with an error when searchUsers is missing', async () => {
+    const provider = createGithubForgeProvider({} as unknown as GitHubAPI);
+    expect(await provider.searchUsers!('/repo', 'octo')).toEqual({
+      connected: false,
+      repo: null,
+      users: [],
+      error: 'failed to load',
+    });
+  });
+
+  test('github fails closed with an error when the wire call throws', async () => {
+    const api = {
+      searchUsers: async () => { throw new Error('boom'); },
+    } as unknown as GitHubAPI;
+    const provider = createGithubForgeProvider(api);
+
+    expect(await provider.searchUsers!('/repo', 'octo')).toEqual({
+      connected: false,
+      repo: null,
+      users: [],
+      error: 'failed to load',
+    });
+  });
+
+  test('gitlab parses namespace/project from a multi-segment sourceRepo and maps members', async () => {
+    let receivedOptions: { namespace?: string; project?: string } | undefined;
+    const api = {
+      searchUsers: async (
+        _directory: string,
+        _query: string,
+        options?: { namespace?: string; project?: string },
+      ) => {
+        receivedOptions = options;
+        return { connected: true, repo: null, users: [gitlabUser()] };
+      },
+    } as unknown as GitLabAPI;
+    const provider = createGitlabForgeProvider(api);
+
+    const result = await provider.searchUsers!('/repo', 'gl', { sourceRepo: 'group/sub/proj' });
+    expect(receivedOptions).toEqual({ namespace: 'group/sub', project: 'proj' });
+    expect(result.connected).toBe(true);
+    expect(result.users).toEqual([{
+      id: '5',
+      login: 'gluser',
+      name: 'GL User',
+      avatarUrl: 'https://avatars.example/gluser',
+      url: 'https://gitlab.example/gluser',
+    }]);
+  });
+
+  test('gitlab passes connected:false through without an authoritative list', async () => {
+    const api = {
+      searchUsers: async () => ({ connected: false, repo: null, users: [] }),
+    } as unknown as GitLabAPI;
+    const provider = createGitlabForgeProvider(api);
+
+    const result = await provider.searchUsers!('/repo', 'gl');
+    expect(result.connected).toBe(false);
+    expect(result.users).toEqual([]);
+    expect(result.error).toBeFalsy();
+  });
+
+  test('gitlab fails closed with an error when searchUsers is missing', async () => {
+    const provider = createGitlabForgeProvider({} as unknown as GitLabAPI);
+    expect(await provider.searchUsers!('/repo', 'gl')).toEqual({
+      connected: false,
+      repo: null,
+      users: [],
+      error: 'failed to load',
+    });
+  });
+
+  test('gitlab fails closed with an error when the wire call throws', async () => {
+    const api = {
+      searchUsers: async () => { throw new Error('boom'); },
+    } as unknown as GitLabAPI;
+    const provider = createGitlabForgeProvider(api);
+
+    expect(await provider.searchUsers!('/repo', 'gl')).toEqual({
+      connected: false,
+      repo: null,
+      users: [],
+      error: 'failed to load',
+    });
+  });
+
+  test('gitea parses owner/repo and maps repo assignees', async () => {
+    let receivedOptions: { owner?: string; repo?: string } | undefined;
+    const api = {
+      searchUsers: async (
+        _directory: string,
+        _query: string,
+        options?: { owner?: string; repo?: string },
+      ) => {
+        receivedOptions = options;
+        return { connected: true, repo: null, users: [giteaUser()] };
+      },
+    } as unknown as GiteaAPI;
+    const provider = createGiteaForgeProvider(api);
+
+    const result = await provider.searchUsers!('/repo', 'g', { sourceRepo: 'acme/widget' });
+    expect(receivedOptions).toEqual({ owner: 'acme', repo: 'widget' });
+    expect(result.connected).toBe(true);
+    expect(result.users).toEqual([{
+      id: '3',
+      login: 'guser',
+      name: 'G User',
+      avatarUrl: 'https://avatars.example/guser',
+      url: 'https://gitea.example/guser',
+    }]);
+  });
+
+  test('gitea passes connected:false through without an authoritative list', async () => {
+    const api = {
+      searchUsers: async () => ({ connected: false, repo: null, users: [] }),
+    } as unknown as GiteaAPI;
+    const provider = createGiteaForgeProvider(api);
+
+    const result = await provider.searchUsers!('/repo', 'g');
+    expect(result.connected).toBe(false);
+    expect(result.users).toEqual([]);
+    expect(result.error).toBeFalsy();
+  });
+
+  test('gitea fails closed with an error when searchUsers is missing', async () => {
+    const provider = createGiteaForgeProvider({} as unknown as GiteaAPI);
+    expect(await provider.searchUsers!('/repo', 'g')).toEqual({
+      connected: false,
+      repo: null,
+      users: [],
+      error: 'failed to load',
+    });
+  });
+
+  test('gitea fails closed with an error when the wire call throws', async () => {
+    const api = {
+      searchUsers: async () => { throw new Error('boom'); },
+    } as unknown as GiteaAPI;
+    const provider = createGiteaForgeProvider(api);
+
+    expect(await provider.searchUsers!('/repo', 'g')).toEqual({
+      connected: false,
+      repo: null,
+      users: [],
+      error: 'failed to load',
+    });
   });
 });

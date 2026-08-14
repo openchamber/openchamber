@@ -1339,6 +1339,174 @@ describe('Gitea data routes', () => {
     expect(JSON.parse(options.body)).toEqual({ state: 'closed' });
   });
 
+  test('issues/create POSTs an issue and maps it', async () => {
+    const fetchMock = scriptedFetch([
+      (url, options) => {
+        if (matches(/\/issues$/)(url) && options.method === 'POST') {
+          return jsonResponse({
+            number: 9,
+            title: 'New issue',
+            html_url: 'https://gitea.example.com/owner/repo/issues/9',
+            state: 'open',
+            body: 'The body',
+            labels: [{ id: 1, name: 'bug', color: 'd73a4a' }],
+            user: { id: 42, login: 'alice', full_name: 'Alice Example' },
+            created_at: '2026-01-02T11:00:00Z',
+            updated_at: '2026-01-02T11:00:00Z',
+          }, { status: 201 });
+        }
+        return null;
+      },
+    ]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitea/issues/create')
+      .send({ directory: '/tmp/work', title: 'New issue', body: 'The body', labels: ['bug'] });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      repo: { owner: 'owner', repo: 'repo', host: 'gitea.example.com' },
+      issue: {
+        number: 9,
+        title: 'New issue',
+        url: 'https://gitea.example.com/owner/repo/issues/9',
+        state: 'open',
+        body: 'The body',
+        labels: ['bug'],
+        author: { username: 'alice', id: 42 },
+      },
+    });
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options.method).toBe('POST');
+    expect(JSON.parse(options.body)).toEqual({ title: 'New issue', body: 'The body', labels: ['bug'] });
+  });
+
+  test('issues/create requires directory and title', async () => {
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitea/issues/create')
+      .send({ directory: '/tmp/work' });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'directory and title are required' });
+  });
+
+  test('issues/create reports connected:false when not authenticated', async () => {
+    clearGiteaAuth();
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitea/issues/create')
+      .send({ directory: '/tmp/work', title: 'Hi' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ connected: false });
+  });
+
+  describe('Gitea rich lookup routes', () => {
+    beforeEach(() => {
+      setGiteaAuth({ accessToken: 'gitea-secret', baseUrl: 'https://gitea.example.com', user: aliceUser });
+    });
+
+    test('users/search maps repo assignees and filters by query', async () => {
+      scriptedFetch([
+        (url) => (matches(/\/repos\/owner\/repo\/assignees\?/)(url)
+          ? jsonResponse([
+            { id: 42, login: 'alice', full_name: 'Alice Example', avatar_url: 'https://gitea.example.com/alice.png', html_url: 'https://gitea.example.com/alice' },
+            { id: 43, login: 'bob', full_name: 'Bob', avatar_url: 'https://gitea.example.com/bob.png', html_url: 'https://gitea.example.com/bob' },
+          ])
+          : null),
+      ]);
+
+      const app = createApp();
+      const response = await request(app).get('/api/gitea/users/search?directory=%2Ftmp%2Fwork&query=ali');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        connected: true,
+        repo: { owner: 'owner', repo: 'repo' },
+        users: [{ username: 'alice', id: 42, name: 'Alice Example', avatarUrl: 'https://gitea.example.com/alice.png' }],
+      });
+    });
+
+    test('users/search reports connected:false when not authenticated', async () => {
+      clearGiteaAuth();
+      const app = createApp();
+      const response = await request(app).get('/api/gitea/users/search?directory=%2Ftmp%2Fwork&query=ali');
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ connected: false, users: [] });
+    });
+
+    test('labels/search returns labeled objects filtered by name', async () => {
+      scriptedFetch([
+        (url) => (matches(/\/repos\/owner\/repo\/labels\?/)(url)
+          ? jsonResponse([
+            { id: 1, name: 'bug', color: 'd73a4a', description: 'a bug' },
+            { id: 2, name: 'feature', color: '0e8a16' },
+          ])
+          : null),
+      ]);
+
+      const app = createApp();
+      const response = await request(app).get('/api/gitea/labels/search?directory=%2Ftmp%2Fwork&query=bug');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        connected: true,
+        labels: [{ name: 'bug', color: 'd73a4a', description: 'a bug' }],
+      });
+    });
+
+    test('milestones/search maps milestone titles and states', async () => {
+      scriptedFetch([
+        (url) => (matches(/\/repos\/owner\/repo\/milestones\?/)(url)
+          ? jsonResponse([
+            { id: 1, title: 'v1.0', state: 'open' },
+            { id: 2, title: 'v2.0', state: 'closed' },
+          ])
+          : null),
+      ]);
+
+      const app = createApp();
+      const response = await request(app).get('/api/gitea/milestones/search?directory=%2Ftmp%2Fwork&query=v1');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        connected: true,
+        milestones: [{ title: 'v1.0', state: 'open' }],
+      });
+    });
+
+    test('branches/search returns branch names', async () => {
+      scriptedFetch([
+        (url) => (matches(/\/repos\/owner\/repo\/branches\?/)(url)
+          ? jsonResponse([{ name: 'main' }, { name: 'feat/x' }])
+          : null),
+      ]);
+
+      const app = createApp();
+      const response = await request(app).get('/api/gitea/branches/search?directory=%2Ftmp%2Fwork&query=main');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ connected: true, branches: ['main'] });
+    });
+
+    test('tags/search returns tag names', async () => {
+      scriptedFetch([
+        (url) => (matches(/\/repos\/owner\/repo\/tags\?/)(url)
+          ? jsonResponse([{ name: 'v1.0.0' }, { name: 'v1.1.0' }])
+          : null),
+      ]);
+
+      const app = createApp();
+      const response = await request(app).get('/api/gitea/tags/search?directory=%2Ftmp%2Fwork&query=v1.0');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ connected: true, tags: ['v1.0.0'] });
+    });
+  });
+
   // NOTE: keep this test last in the file. The rate-limit cooldown is
   // module-level and has no reset export, so tests after it would short-circuit.
   test('data routes surface a 503 when Gitea rate limits', async () => {
