@@ -8,6 +8,7 @@ import { dict as jaDict } from './messages/ja';
 import { dict as koDict } from './messages/ko';
 import { dict as plDict } from './messages/pl';
 import { dict as ptBrDict } from './messages/pt-BR';
+import { dict as ruDict } from './messages/ru';
 import { dict as ukDict } from './messages/uk';
 import { dict as zhCnDict } from './messages/zh-CN';
 import { dict as zhTwDict } from './messages/zh-TW';
@@ -19,6 +20,7 @@ const localeDictionaries = {
   es: esDict,
   ja: jaDict,
   'pt-BR': ptBrDict,
+  ru: ruDict,
   uk: ukDict,
   ko: koDict,
   pl: plDict,
@@ -40,6 +42,13 @@ describe('i18n dictionaries', () => {
       expect(dictionary['common.language.german']).toBeTruthy();
       expect(dictionary['common.language.french']).toBeTruthy();
       expect(dictionary['common.language.japanese']).toBeTruthy();
+      expect(dictionary['common.language.russian']).toBeTruthy();
+    }
+  });
+
+  test('Russian dictionary preserves English interpolation placeholders', () => {
+    for (const key of Object.keys(enDict) as Array<keyof typeof enDict>) {
+      expect((ruDict[key].match(/\{[^}]+\}/g) ?? []).sort()).toEqual((enDict[key].match(/\{[^}]+\}/g) ?? []).sort());
     }
   });
 });
