@@ -1,6 +1,13 @@
+import http from 'node:http';
+
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import { describe, expect, it } from 'vitest';
 
-import { createDirectoryQueryCanonicalizer, normalizeForwardedDirectoryHeaders } from './proxy.js';
+import {
+  createDirectoryQueryCanonicalizer,
+  createOpenCodeProxyAgent,
+  normalizeForwardedDirectoryHeaders,
+} from './proxy.js';
 
 describe('createDirectoryQueryCanonicalizer', () => {
   it('canonicalizes directory query params and preserves other params', async () => {
@@ -91,5 +98,79 @@ describe('normalizeForwardedDirectoryHeaders', () => {
     expect(headers).toEqual({
       'x-opencode-directory': '/Users/example/project%20literal',
     });
+  });
+});
+
+const listen = (server) => new Promise((resolve) => {
+  server.listen(0, '127.0.0.1', () => resolve(server.address().port));
+});
+
+const closeServer = (server) => new Promise((resolve) => {
+  server.close(resolve);
+});
+
+const request = (port, agent) => new Promise((resolve, reject) => {
+  const req = http.request({ host: '127.0.0.1', port, path: '/', method: 'GET', agent }, (res) => {
+    res.resume();
+    res.on('end', resolve);
+    res.on('error', reject);
+  });
+  req.on('error', reject);
+  req.end();
+});
+
+/**
+ * Proxies two sequential requests through `createProxyMiddleware` and reports
+ * what the upstream server observed for each one.
+ */
+const proxyTwoRequests = async (proxyAgent) => {
+  const seen = [];
+  const upstream = http.createServer((req, res) => {
+    seen.push({ connection: req.headers.connection, remotePort: req.socket.remotePort });
+    res.end('ok');
+  });
+  const upstreamPort = await listen(upstream);
+
+  const middleware = createProxyMiddleware({
+    target: `http://127.0.0.1:${upstreamPort}`,
+    ...(proxyAgent ? { agent: proxyAgent } : {}),
+  });
+  const front = http.createServer((req, res) => {
+    middleware(req, res, () => {
+      res.statusCode = 502;
+      res.end();
+    });
+  });
+  const frontPort = await listen(front);
+  const clientAgent = new http.Agent({ keepAlive: true });
+
+  try {
+    await request(frontPort, clientAgent);
+    await request(frontPort, clientAgent);
+  } finally {
+    clientAgent.destroy();
+    proxyAgent?.destroy();
+    await closeServer(front);
+    await closeServer(upstream);
+  }
+
+  return seen;
+};
+
+describe('createOpenCodeProxyAgent', () => {
+  it('reuses a single upstream socket across sequential proxied requests', async () => {
+    const seen = await proxyTwoRequests(createOpenCodeProxyAgent());
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0].connection).not.toBe('close');
+    expect(seen[1].remotePort).toBe(seen[0].remotePort);
+  });
+
+  it('without an agent, http-proxy forces Connection: close and a new socket per request', async () => {
+    const seen = await proxyTwoRequests(null);
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0].connection).toBe('close');
+    expect(seen[1].remotePort).not.toBe(seen[0].remotePort);
   });
 });

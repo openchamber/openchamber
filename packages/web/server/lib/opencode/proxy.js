@@ -1,3 +1,5 @@
+import http from 'node:http';
+
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 import {
@@ -10,6 +12,29 @@ import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-read
 import { recordStartupPerformance } from './startup-performance.js';
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
+
+const OPENCODE_AGENT_KEEP_ALIVE_MS = 30_000;
+const OPENCODE_AGENT_MAX_FREE_SOCKETS = 32;
+
+/**
+ * Agent for proxied OpenCode API requests.
+ *
+ * When no agent is supplied, `http-proxy` falls back to `agent: false`, which
+ * both disables connection pooling and forces `Connection: close` on every
+ * proxied request (http-proxy/lib/http-proxy/common.js). That consumes one
+ * ephemeral port per request, and sustained traffic can exhaust the host's
+ * ephemeral port range — after which every process on the machine fails to
+ * open outbound connections with EADDRNOTAVAIL.
+ *
+ * `maxSockets: Infinity` preserves the unbounded concurrency of `agent: false`,
+ * so this changes connection reuse only, not request throughput.
+ */
+export const createOpenCodeProxyAgent = () => new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: OPENCODE_AGENT_KEEP_ALIVE_MS,
+  maxSockets: Infinity,
+  maxFreeSockets: OPENCODE_AGENT_MAX_FREE_SOCKETS,
+});
 
 export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } = {}) => {
   const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
@@ -767,8 +792,13 @@ export const registerOpenCodeProxy = (app, deps) => {
   });
 
   // Generic proxy for non-SSE OpenCode API routes.
+  // One shared keep-alive agent backs every proxied request, so the socket pool
+  // is reused across both `apiProxy` and `interactiveOAuthProxy`.
+  const openCodeProxyAgent = createOpenCodeProxyAgent();
+
   const createApiProxy = (timeoutMs) => createProxyMiddleware({
     target: resolveProxyTarget(),
+    agent: openCodeProxyAgent,
     changeOrigin: true,
     pathRewrite: { '^/api': '' },
     timeout: timeoutMs,
