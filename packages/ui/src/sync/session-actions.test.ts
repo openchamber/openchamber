@@ -944,12 +944,22 @@ describe("optimisticSend target directory", () => {
   })
 
   test("commits the new branch locally and discards its optimistic shadow when sending after a revert", async () => {
-    const retainedMessage = { id: "msg_1", role: "user", sessionID: "session-reverted" } as Message
-    const revertedMessage = { id: "msg_2", role: "user", sessionID: "session-reverted" } as Message
+    const retainedMessage = {
+      id: "msg_fffffffff0010000000000000A",
+      role: "user",
+      sessionID: "session-reverted",
+      time: { created: 1_786_706_395_135 },
+    } as Message
+    const revertedMessage = {
+      id: "msg_0000000000010000000000000A",
+      role: "user",
+      sessionID: "session-reverted",
+      time: { created: 1_786_706_395_136 },
+    } as Message
     const targetStore = createStore({}, {
-      session: [{ id: "session-reverted", revert: { messageID: "msg_2" } } as Session],
+      session: [{ id: "session-reverted", revert: { messageID: revertedMessage.id } } as Session],
       message: { "session-reverted": [retainedMessage, revertedMessage] },
-      part: { msg_2: [{ id: "part_2", type: "text", text: "old branch" } as Part] },
+      part: { [revertedMessage.id]: [{ id: "part_2", type: "text", text: "old branch" } as Part] },
     })
     const childStores = createChildStores([["/target/project", targetStore]])
     let optimisticMessage: Message | null = null
@@ -981,22 +991,32 @@ describe("optimisticSend target directory", () => {
 
     expect(targetStore.getState().session[0].revert).toBe(undefined)
     expect(targetStore.getState().message["session-reverted"].map((message) => message.id)).toEqual([
-      "msg_1",
+      retainedMessage.id,
       (optimisticMessage as unknown as Message).id,
     ])
-    expect(targetStore.getState().part.msg_2).toBe(undefined)
+    expect(targetStore.getState().part[revertedMessage.id]).toBe(undefined)
     expect(optimisticShadow.has(revertedMessage.id)).toBe(false)
     expect(optimisticShadow.has((optimisticMessage as unknown as Message).id)).toBe(true)
   })
 
   test("restores the reverted branch when sending fails", async () => {
-    const retainedMessage = { id: "msg_1", role: "user", sessionID: "session-reverted" } as Message
-    const revertedMessage = { id: "msg_2", role: "user", sessionID: "session-reverted" } as Message
+    const retainedMessage = {
+      id: "msg_fffffffff0010000000000000A",
+      role: "user",
+      sessionID: "session-reverted",
+      time: { created: 1_786_706_395_135 },
+    } as Message
+    const revertedMessage = {
+      id: "msg_0000000000010000000000000A",
+      role: "user",
+      sessionID: "session-reverted",
+      time: { created: 1_786_706_395_136 },
+    } as Message
     const revertedPart = { id: "part_2", type: "text", text: "old branch" } as Part
     const targetStore = createStore({}, {
-      session: [{ id: "session-reverted", revert: { messageID: "msg_2" } } as Session],
+      session: [{ id: "session-reverted", revert: { messageID: revertedMessage.id } } as Session],
       message: { "session-reverted": [retainedMessage, revertedMessage] },
-      part: { msg_2: [revertedPart] },
+      part: { [revertedMessage.id]: [revertedPart] },
     })
     const childStores = createChildStores([["/target/project", targetStore]])
 
@@ -1022,9 +1042,9 @@ describe("optimisticSend target directory", () => {
       send: async () => { throw new Error("rejected") },
     })).rejects.toThrow("rejected")
 
-    expect(targetStore.getState().session[0].revert?.messageID).toBe("msg_2")
+    expect(targetStore.getState().session[0].revert?.messageID).toBe(revertedMessage.id)
     expect(targetStore.getState().message["session-reverted"]).toEqual([retainedMessage, revertedMessage])
-    expect(targetStore.getState().part.msg_2).toEqual([revertedPart])
+    expect(targetStore.getState().part[revertedMessage.id]).toEqual([revertedPart])
   })
 
   test("rolls back a captured send when the runtime changes after optimistic insert", async () => {

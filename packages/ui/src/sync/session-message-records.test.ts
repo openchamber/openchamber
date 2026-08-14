@@ -4,12 +4,12 @@ import type { Message, Part } from '@opencode-ai/sdk/v2/client';
 import { buildSessionMessageRecordsSnapshot } from './sync-context';
 import { INITIAL_STATE, type State } from './types';
 
-const message = (id: string, role: 'user' | 'assistant', parentID?: string): Message => ({
+const message = (id: string, role: 'user' | 'assistant', parentID?: string, created = 1): Message => ({
   id,
   role,
   sessionID: 'ses_1',
   ...(parentID ? { parentID } : {}),
-  time: { created: 1 },
+  time: { created },
 } as Message);
 
 const textPart = (id: string, text: string): Part => ({
@@ -34,6 +34,21 @@ const state = (partial: Partial<State>): State => ({
 });
 
 describe('buildSessionMessageRecordsSnapshot', () => {
+  test('uses message sequence rather than id order for reverted visibility', () => {
+    const beforeWrap = message('msg_fffffffff0010000000000000A', 'user', undefined, 1_786_706_395_135);
+    const reverted = message('msg_0000000000010000000000000A', 'user', undefined, 1_786_706_395_136);
+
+    const snapshot = buildSessionMessageRecordsSnapshot(
+      state({
+        session: [{ id: 'ses_1', revert: { messageID: reverted.id }, time: { created: 1 } } as State['session'][number]],
+        message: { ses_1: [beforeWrap, reverted] },
+      }),
+      'ses_1',
+    );
+
+    expect(snapshot.list.map((record) => record.info)).toEqual([beforeWrap]);
+  });
+
   test('only suspends part updates for the active streaming message', () => {
     const user = message('user_1', 'user');
     const assistant1 = message('assistant_1', 'assistant', 'user_1');

@@ -4,11 +4,11 @@ import type { State } from './types';
 
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot } from './user-message-history';
 
-const message = (id: string, role: 'user' | 'assistant'): Message => ({
+const message = (id: string, role: 'user' | 'assistant', created = 1): Message => ({
   id,
   role,
   sessionID: 'ses_1',
-  time: { created: 1 },
+  time: { created },
 } as Message);
 
 const textPart = (id: string, text: string): Part => ({
@@ -88,6 +88,25 @@ describe('buildUserMessageHistorySnapshot', () => {
         part: {
           user_1: [textPart('part_user_1', 'kept')],
           user_2: [textPart('part_user_2', 'reverted')],
+        },
+      }),
+      'ses_1',
+    );
+
+    expect(snapshot.history).toEqual(['kept']);
+  });
+
+  test('uses message sequence rather than id order for revert filtering', () => {
+    const beforeWrap = message('msg_fffffffff0010000000000000A', 'user', 1_786_706_395_135);
+    const reverted = message('msg_0000000000010000000000000A', 'user', 1_786_706_395_136);
+
+    const snapshot = buildUserMessageHistorySnapshot(
+      state({
+        session: [{ id: 'ses_1', revert: { messageID: reverted.id } } as State['session'][number]],
+        message: { ses_1: [beforeWrap, reverted] },
+        part: {
+          [beforeWrap.id]: [textPart('part_before', 'kept')],
+          [reverted.id]: [textPart('part_reverted', 'reverted')],
         },
       }),
       'ses_1',

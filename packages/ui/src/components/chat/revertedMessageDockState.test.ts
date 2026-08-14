@@ -4,11 +4,11 @@ import type { State } from '@/sync/types';
 
 import { EMPTY_REVERTED_MESSAGE_DOCK_STATE, buildRevertedMessageDockState } from './revertedMessageDockState';
 
-const message = (id: string, role: 'user' | 'assistant'): Message => ({
+const message = (id: string, role: 'user' | 'assistant', created = 1): Message => ({
     id,
     role,
     sessionID: 'ses_1',
-    time: { created: 1 },
+    time: { created },
 } as Message);
 
 const textPart = (id: string, text: string): Part => ({
@@ -85,5 +85,24 @@ describe('buildRevertedMessageDockState', () => {
 
         expect(second).not.toBe(first);
         expect(second.records).toHaveLength(1);
+    });
+
+    test('uses message sequence rather than id order after an id clock wrap', () => {
+        const beforeWrap = message('msg_fffffffff0010000000000000A', 'user', 1_786_706_395_135);
+        const reverted = message('msg_0000000000010000000000000A', 'user', 1_786_706_395_136);
+
+        const result = buildRevertedMessageDockState(
+            state({
+                session: [{ id: 'ses_1', revert: { messageID: reverted.id } } as State['session'][number]],
+                message: { ses_1: [beforeWrap, reverted] },
+                part: {
+                    [beforeWrap.id]: [textPart('part_before', 'kept')],
+                    [reverted.id]: [textPart('part_reverted', 'reverted')],
+                },
+            }),
+            'ses_1',
+        );
+
+        expect(result.records.map((record) => record.message)).toEqual([reverted]);
     });
 });

@@ -15,6 +15,7 @@ import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
 import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
+import { compareMessages } from "./message-ordering"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
@@ -180,7 +181,8 @@ function hasMessage(draft: State, sessionID: string | undefined, messageID: stri
   if (!sessionID) return false
   const messages = draft.message[sessionID]
   if (!messages) return false
-  return Binary.search(messages, messageID, (message) => message.id).found
+  if (messages.at(-1)?.id === messageID) return true
+  return messages.some((message) => message.id === messageID)
 }
 
 export function reduceGlobalEvent(event: Event): GlobalEventResult {
@@ -353,21 +355,20 @@ export function applyDirectoryEvent(
         draft.message[info.sessionID] = [info]
         return true
       }
-      const result = Binary.search(messages, info.id, (m) => m.id)
-      if (result.found) {
+      const messageIndex = messages.findIndex((message) => message.id === info.id)
+      if (messageIndex >= 0) {
         // Skip message replacement if unchanged — preserves reference, avoids re-render
-        const existing = messages[result.index]
+        const existing = messages[messageIndex]
         const unchanged = areMessageUpdateFieldsEqual(existing, info)
         if (unchanged) {
           syncDebug.reducer.messageUpdatedUnchanged(info.sessionID, info.id, info.role, (info as { finish?: unknown }).finish, (info.time as { completed?: number })?.completed)
           return false
         }
         const next = [...messages]
-        next[result.index] = info
+        next[messageIndex] = info
         draft.message[info.sessionID] = next
       } else {
-        const next = [...messages]
-        next.splice(result.index, 0, info)
+        const next = [...messages, info].sort(compareMessages)
         draft.message[info.sessionID] = next
       }
       return true
@@ -377,10 +378,10 @@ export function applyDirectoryEvent(
       const props = event.properties as { sessionID: string; messageID: string }
       const messages = draft.message[props.sessionID]
       if (messages) {
-        const next = [...messages]
-        const result = Binary.search(next, props.messageID, (m) => m.id)
-        if (result.found) {
-          next.splice(result.index, 1)
+        const messageIndex = messages.findIndex((message) => message.id === props.messageID)
+        if (messageIndex >= 0) {
+          const next = [...messages]
+          next.splice(messageIndex, 1)
           draft.message[props.sessionID] = next
         }
       }

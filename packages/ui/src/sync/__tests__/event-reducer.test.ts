@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Session } from "@opencode-ai/sdk/v2"
-import type { Event, Part, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Event, Message, Part, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { applyDirectoryEvent } from "../event-reducer"
 import { INITIAL_STATE, type State } from "../types"
 
@@ -160,6 +160,54 @@ describe("applyDirectoryEvent", () => {
 
     expect(draft.part.msg_1.map((item) => item.id)).toEqual(["prt_1"])
     expect(result).toBe(true)
+  })
+
+  test("inserts message updates chronologically across an id clock wrap", () => {
+    const beforeWrap = {
+      id: "msg_fffffffff0010000000000000A",
+      sessionID: "ses_1",
+      role: "user",
+      time: { created: 1_786_706_395_135 },
+    } as Message
+    const afterWrap = {
+      id: "msg_0000000000010000000000000A",
+      sessionID: "ses_1",
+      role: "user",
+      time: { created: 1_786_706_395_136 },
+    } as Message
+    const draft = state({ message: { ses_1: [beforeWrap] } })
+
+    const result = applyDirectoryEvent(draft, {
+      type: "message.updated",
+      properties: { info: afterWrap },
+    } as Event)
+
+    expect(result).toBe(true)
+    expect(draft.message.ses_1).toEqual([beforeWrap, afterWrap])
+  })
+
+  test("removes a post-wrap message from a chronologically sorted array", () => {
+    const beforeWrap = {
+      id: "msg_fffffffff0010000000000000A",
+      sessionID: "ses_1",
+      role: "user",
+      time: { created: 1_786_706_395_135 },
+    } as Message
+    const afterWrap = {
+      id: "msg_0000000000010000000000000A",
+      sessionID: "ses_1",
+      role: "user",
+      time: { created: 1_786_706_395_136 },
+    } as Message
+    const draft = state({ message: { ses_1: [beforeWrap, afterWrap] } })
+
+    const result = applyDirectoryEvent(draft, {
+      type: "message.removed",
+      properties: { sessionID: "ses_1", messageID: afterWrap.id },
+    } as Event)
+
+    expect(result).toBe(true)
+    expect(draft.message.ses_1).toEqual([beforeWrap])
   })
 
   test("skips duplicate session status events", () => {

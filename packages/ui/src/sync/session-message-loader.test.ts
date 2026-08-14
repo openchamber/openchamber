@@ -7,10 +7,19 @@ import {
   startSessionLoadPerformanceEvent,
 } from "./session-load-performance"
 
-const createRecord = (sessionID: string, id = "msg_1") => ({
-  info: { id, sessionID, role: "user", time: { created: 1 } } as Message,
+const createRecord = (sessionID: string, id = "msg_1", created = 1) => ({
+  info: { id, sessionID, role: "user", time: { created } } as Message,
   parts: [{ id: `part_${id}`, messageID: id, sessionID, type: "text", text: "hello" }] as Part[],
 })
+
+const idAt = (timestamp: number, counter = 1) => {
+  const value = BigInt(timestamp) * BigInt(0x1000) + BigInt(counter)
+  const bytes = Buffer.alloc(6)
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number((value >> BigInt(40 - 8 * index)) & BigInt(0xff))
+  }
+  return `msg_${bytes.toString("hex")}0000000000000A`
+}
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void
@@ -38,6 +47,23 @@ const createLoader = (messages: (input: {
 }
 
 describe("SessionMessageLoader", () => {
+  test("preserves chronological message order across an id clock wrap", async () => {
+    const wrap = 1_786_706_395_136
+    const beforeWrap = createRecord("session-a", idAt(wrap - 1), wrap - 1)
+    const afterWrap = createRecord("session-a", idAt(wrap), wrap)
+    const { childStores, loader } = createLoader(async () => response([beforeWrap, afterWrap]))
+    const target = { directory: "/repo", sessionID: "session-a" }
+
+    expect(afterWrap.info.id < beforeWrap.info.id).toBe(true)
+
+    await loader.ensure(target)
+
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID])
+      .toEqual([beforeWrap.info, afterWrap.info])
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("deduplicates navigation and reactive loading for the same target", async () => {
     const pending = deferred<ReturnType<typeof response>>()
     let calls = 0

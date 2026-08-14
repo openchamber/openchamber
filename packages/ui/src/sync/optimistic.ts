@@ -1,5 +1,6 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
+import { compareMessages } from "./message-ordering"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -42,13 +43,18 @@ export function mergeOptimisticPage(page: MessagePage, items: OptimisticItem[]) 
   if (items.length === 0) return { ...page, confirmed: [] as string[] }
 
   const session = [...page.session]
+  const messageIDs = new Set(session.map((message) => message.id))
+  let messageAdded = false
   const part = new Map(page.part.map((item) => [item.id, sortParts(item.part)]))
   const confirmed: string[] = []
 
   for (const item of items) {
-    const result = Binary.search(session, item.message.id, (message) => message.id)
-    const found = result.found
-    if (!found) session.splice(result.index, 0, item.message)
+    const found = messageIDs.has(item.message.id)
+    if (!found) {
+      session.push(item.message)
+      messageIDs.add(item.message.id)
+      messageAdded = true
+    }
 
     const current = part.get(item.message.id)
     if (found && hasParts(current, item.parts)) {
@@ -58,6 +64,8 @@ export function mergeOptimisticPage(page: MessagePage, items: OptimisticItem[]) 
 
     part.set(item.message.id, mergeParts(current, item.parts))
   }
+
+  if (messageAdded) session.sort(compareMessages)
 
   return {
     cursor: page.cursor,
@@ -70,10 +78,10 @@ export function mergeOptimisticPage(page: MessagePage, items: OptimisticItem[]) 
   }
 }
 
-/** Merge two sorted message arrays by id, deduplicating.
+/** Merge two chronologically sorted message arrays, deduplicating by id.
  *  Preserves references from `a` for items that already exist — avoids
  *  unnecessary React re-renders when prepending older history. */
-export function mergeMessages<T extends { id: string }>(a: readonly T[], b: readonly T[]) {
+export function mergeMessages<T extends { id: string; time: { created: number } }>(a: readonly T[], b: readonly T[]) {
   const existing = new Map(a.map((item) => [item.id, item] as const))
   let changed = false
   for (const item of b) {
@@ -83,5 +91,5 @@ export function mergeMessages<T extends { id: string }>(a: readonly T[], b: read
     }
   }
   if (!changed) return a as T[]
-  return [...existing.values()].sort((x, y) => cmp(x.id, y.id))
+  return [...existing.values()].sort(compareMessages)
 }

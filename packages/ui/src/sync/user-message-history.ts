@@ -61,13 +61,14 @@ export const buildUserMessageHistorySnapshot = (
   const messages = state.message[sessionID] ?? [];
   const session = state.session.find((candidate) => candidate.id === sessionID);
   const revertMessageID = (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID;
+  const revertMessageIndex = revertMessageID
+    ? messages.findIndex((message) => message.id === revertMessageID)
+    : -1;
+  const visibleMessageCount = revertMessageIndex >= 0 ? revertMessageIndex : messages.length;
   const records: UserMessageHistoryRecord[] = [];
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
+  for (let index = visibleMessageCount - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role !== 'user') {
-      continue;
-    }
-    if (revertMessageID && message.id >= revertMessageID) {
       continue;
     }
     records.push({
