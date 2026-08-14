@@ -415,9 +415,9 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     </Tooltip>
   ) : null;
 
-  // Gitea pull request chip, mirroring the GitLab MR chip above. There is no
-  // Gitea brand icon in the sprite, so the neutral pull-request icon carries
-  // the state colour.
+  // Gitea pull request chip, mirroring the GitLab MR chip above. Gitea states
+  // are surfaced with the same PR state palette so merged/closed/open read
+  // identically across providers.
   const giteaPrVisualState = giteaPr
     ? giteaPr.state === 'merged'
       ? 'merged'
@@ -438,7 +438,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
           className="h-8 gap-1.5 px-2 typography-micro"
         >
           <Icon
-            name="git-pull-request"
+            name="gitea"
             className="size-3.5"
             style={{ color: `var(--pr-${giteaPrVisualState})` }}
           />

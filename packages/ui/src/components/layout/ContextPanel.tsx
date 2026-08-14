@@ -215,7 +215,7 @@ const getTabIcon = (
   }
 
   if (tab.mode === 'pr') {
-    return <Icon name={gitProvider === 'gitlab' ? 'gitlab' : gitProvider === 'gitea' ? 'git-branch' : 'github'} className="h-3.5 w-3.5" />;
+    return <Icon name={gitProvider === 'gitlab' ? 'gitlab' : gitProvider === 'gitea' ? 'gitea' : 'github'} className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'notes') {

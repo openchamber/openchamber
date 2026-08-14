@@ -300,8 +300,7 @@ export const ContextPanelRail: React.FC = () => {
             // The 'pr' surface renders the GitLab MR view in GitLab repos, so
             // it borrows GitLab's merge-request branding instead of GitHub's.
             // Gitea keeps the generic pull-request branding but swaps the
-            // GitHub brand icon for a neutral git icon (there is no Gitea
-            // brand icon in the sprite).
+            // GitHub brand icon for the Gitea mark.
             const providerPrSurface: ContextSurfaceDescriptor = surface.id === 'pr'
               ? gitProvider === 'gitlab'
                 ? {
@@ -313,7 +312,7 @@ export const ContextPanelRail: React.FC = () => {
                 : gitProvider === 'gitea'
                   ? {
                       ...surface,
-                      icon: 'git-branch' as IconName,
+                      icon: 'gitea' as IconName,
                       labelKey: 'contextPanel.mode.pr',
                       descriptionKey: 'contextRail.surface.pr.description',
                     }

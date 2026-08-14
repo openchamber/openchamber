@@ -334,7 +334,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
 
           {hasGiteaPr && giteaPr ? (
             <WorkStatusRow
-              icon="git-pull-request"
+              icon="gitea"
               onClick={directory ? () => openSurface('pr') : undefined}
               ariaLabel={t('chat.workStatus.action.openPr')}
               iconColor={`var(--pr-${giteaPrVisualState})`}
