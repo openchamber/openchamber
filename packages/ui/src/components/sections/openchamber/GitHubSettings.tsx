@@ -11,6 +11,7 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { Icon } from "@/components/icon/Icon";
 import { SettingsSection, SettingsGroupTitle } from '@/components/sections/shared/SettingsSection';
+import { CustomDomainsInput } from '@/components/sections/shared/CustomDomainsInput';
 
 type GitHubUser = {
   login: string;
@@ -444,6 +445,8 @@ export const GitHubSettings: React.FC = () => {
           </div>
         </div>
       )}
+
+      <CustomDomainsInput provider="github" />
 
       </SettingsSection>
 

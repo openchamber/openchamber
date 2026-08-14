@@ -193,7 +193,7 @@ type VisibleRailSurfacesOptions = {
    * request / GitLab merge request view; it is hidden for repositories on
    * any other provider. null (unknown, still resolving) keeps it visible.
    */
-  gitProvider?: 'github' | 'gitlab' | 'other' | null;
+  gitProvider?: 'github' | 'gitlab' | 'gitea' | 'other' | null;
 };
 
 /**

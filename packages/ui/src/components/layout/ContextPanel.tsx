@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { PullRequestView } from '@/components/views/PullRequestView';
 import { GitLabMrView } from '@/components/views/GitLabMrView';
+import { GiteaPrView } from '@/components/views/GiteaPrView';
 import { TerminalView } from '@/components/views/TerminalView';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
@@ -214,7 +215,7 @@ const getTabIcon = (
   }
 
   if (tab.mode === 'pr') {
-    return <Icon name={gitProvider === 'gitlab' ? 'gitlab' : 'github'} className="h-3.5 w-3.5" />;
+    return <Icon name={gitProvider === 'gitlab' ? 'gitlab' : gitProvider === 'gitea' ? 'git-branch' : 'github'} className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'notes') {
@@ -942,7 +943,7 @@ export const ContextPanel: React.FC = () => {
         : activeTab?.mode === 'git'
             ? <React.Suspense fallback={null}><GitView isActive={isOpen} /></React.Suspense>
             : activeTab?.mode === 'pr'
-                ? (gitProvider === 'github' ? <PullRequestView /> : gitProvider === 'gitlab' ? <GitLabMrView /> : null)
+                ? (gitProvider === 'github' ? <PullRequestView /> : gitProvider === 'gitlab' ? <GitLabMrView /> : gitProvider === 'gitea' ? <GiteaPrView /> : null)
             : activeTab?.mode === 'notes'
                 ? <ProjectContextPanel />
         : activeTab?.mode === 'plan'

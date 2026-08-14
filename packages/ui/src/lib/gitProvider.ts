@@ -1,8 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getRemotes } from '@/lib/gitApi';
 import { useGitLabAuthStore } from '@/stores/useGitLabAuthStore';
+import { useGiteaAuthStore } from '@/stores/useGiteaAuthStore';
+import { useGitProviderDomainsStore, normalizeProviderDomain } from '@/stores/useGitProviderDomainsStore';
 
-export type GitProvider = 'github' | 'gitlab' | 'other';
+export type GitProvider = 'github' | 'gitlab' | 'gitea' | 'other';
+
+/**
+ * Per-provider hostname sets used for detection: custom user-configured
+ * domains (from the domains store) plus account-derived base-URL hostnames.
+ * Built-in defaults (github.com, gitlab.com) are applied inside the detection
+ * logic and never need to be present here.
+ */
+export type GitProviderHosts = {
+  github: string[];
+  gitlab: string[];
+  gitea: string[];
+};
 
 const parseGitRemoteHost = (value: string): string | null => {
   const url = value.trim();
@@ -26,45 +40,56 @@ const parseGitRemoteHost = (value: string): string | null => {
   }
 };
 
-const normalizeGitLabHost = (baseUrl: string | undefined): string | null => {
-  if (!baseUrl) {
-    return null;
+const normalizeHostList = (hosts: string[] | undefined): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const host of hosts ?? []) {
+    const normalized = normalizeProviderDomain(host);
+    if (normalized && !seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(normalized);
+    }
   }
-  try {
-    return new URL(baseUrl).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
+  return result;
 };
 
 /**
  * Classify a repository by the hosts of its remotes. Returns null when there
- * are no remotes to inspect. GitHub wins on `github.com`; a remote is treated
- * as GitLab when it is `gitlab.com` or matches a connected GitLab instance
- * base URL (self-hosted). Anything else resolves to 'other' so GitHub-branded
- * UI is not offered for non-GitHub repositories.
+ * are no remotes to inspect. Built-in defaults apply always: `github.com` is
+ * GitHub and `gitlab.com` is GitLab (there is no built-in Gitea host). Custom
+ * hosts from `hosts.{github,gitlab,gitea}` are then matched in precedence
+ * order github -> gitlab -> gitea (first match wins). Anything else resolves
+ * to 'other' so GitHub-branded UI is never offered for a non-GitHub repo.
  */
-export const detectGitProvider = (fetchUrls: string[], gitlabHosts: string[]): GitProvider | null => {
-  const hosts = new Set<string>();
+export const detectGitProvider = (fetchUrls: string[], hosts: GitProviderHosts): GitProvider | null => {
+  const remoteHosts = new Set<string>();
   for (const url of fetchUrls) {
     const host = parseGitRemoteHost(url);
     if (host) {
-      hosts.add(host);
+      remoteHosts.add(host);
     }
   }
-  if (hosts.size === 0) {
+  if (remoteHosts.size === 0) {
     return null;
   }
-  if (hosts.has('github.com')) {
-    return 'github';
+
+  const githubHosts = new Set(['github.com', ...normalizeHostList(hosts.github)]);
+  const gitlabHosts = new Set(['gitlab.com', ...normalizeHostList(hosts.gitlab)]);
+  const giteaHosts = new Set(normalizeHostList(hosts.gitea));
+
+  for (const host of remoteHosts) {
+    if (githubHosts.has(host)) {
+      return 'github';
+    }
   }
-  const gitlabHostsSet = new Set([
-    'gitlab.com',
-    ...gitlabHosts.map(normalizeGitLabHost).filter((host): host is string => Boolean(host)),
-  ]);
-  for (const host of hosts) {
-    if (gitlabHostsSet.has(host)) {
+  for (const host of remoteHosts) {
+    if (gitlabHosts.has(host)) {
       return 'gitlab';
+    }
+  }
+  for (const host of remoteHosts) {
+    if (giteaHosts.has(host)) {
+      return 'gitea';
     }
   }
   return 'other';
@@ -73,7 +98,7 @@ export const detectGitProvider = (fetchUrls: string[], gitlabHosts: string[]): G
 const RESOLVE_CACHE_TTL_MS = 60_000;
 const resolveCache = new Map<string, { at: number; provider: GitProvider | null }>();
 
-export const resolveGitProvider = async (directory: string, gitlabHosts: string[]): Promise<GitProvider | null> => {
+export const resolveGitProvider = async (directory: string, hosts: GitProviderHosts): Promise<GitProvider | null> => {
   const cached = resolveCache.get(directory);
   if (cached && Date.now() - cached.at < RESOLVE_CACHE_TTL_MS) {
     return cached.provider;
@@ -81,7 +106,7 @@ export const resolveGitProvider = async (directory: string, gitlabHosts: string[
   let provider: GitProvider | null = null;
   try {
     const remotes = await getRemotes(directory);
-    provider = detectGitProvider(remotes.map((remote) => remote.fetchUrl), gitlabHosts);
+    provider = detectGitProvider(remotes.map((remote) => remote.fetchUrl), hosts);
   } catch {
     provider = null;
   }
@@ -90,17 +115,23 @@ export const resolveGitProvider = async (directory: string, gitlabHosts: string[
 };
 
 /**
- * Resolve the git provider (github | gitlab | other) of a working directory.
- * Self-hosted GitLab instances are recognized through the connected GitLab
- * accounts' base URLs, so the classification stays null/'other' (never
- * 'github') when no account is known yet — GitHub UI must not leak into a
- * GitLab repo regardless of auth state.
+ * Resolve the git provider (github | gitlab | gitea | other) of a working
+ * directory. Self-hosted instances are recognized through the connected
+ * accounts' base URLs and the user-configured custom domains, so the
+ * classification stays null/'other' (never 'github') when no host is known —
+ * GitHub UI must not leak into a non-GitHub repo regardless of auth state.
  */
 export const useGitProvider = (directory: string | null | undefined): GitProvider | null => {
   const gitlabAccounts = useGitLabAuthStore((state) => state.status?.accounts);
-  const gitlabHosts = useMemo(
-    () => (gitlabAccounts ?? []).map((account) => account.baseUrl),
-    [gitlabAccounts],
+  const giteaAccounts = useGiteaAuthStore((state) => state.status?.accounts);
+  const domains = useGitProviderDomainsStore((state) => state.domains);
+  const hosts = useMemo<GitProviderHosts>(
+    () => ({
+      github: domains.github,
+      gitlab: [...(gitlabAccounts ?? []).map((account) => account.baseUrl), ...domains.gitlab],
+      gitea: [...(giteaAccounts ?? []).map((account) => account.baseUrl), ...domains.gitea],
+    }),
+    [domains, gitlabAccounts, giteaAccounts],
   );
   const [provider, setProvider] = useState<GitProvider | null>(null);
 
@@ -110,7 +141,7 @@ export const useGitProvider = (directory: string | null | undefined): GitProvide
       return;
     }
     let cancelled = false;
-    void resolveGitProvider(directory, gitlabHosts).then((resolved) => {
+    void resolveGitProvider(directory, hosts).then((resolved) => {
       if (!cancelled) {
         setProvider(resolved);
       }
@@ -118,7 +149,7 @@ export const useGitProvider = (directory: string | null | undefined): GitProvide
     return () => {
       cancelled = true;
     };
-  }, [directory, gitlabHosts]);
+  }, [directory, hosts]);
 
   return provider;
 };

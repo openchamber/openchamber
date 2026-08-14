@@ -15,6 +15,7 @@ import { useI18n, type Locale } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { useGitProvider } from '@/lib/gitProvider';
 import { useGitLabMrForBranch } from '@/lib/gitlabMrStatus';
+import { useGiteaPrForBranch } from '@/lib/giteaPrStatus';
 import { buildWalkthroughView } from '@/lib/walkthrough/model';
 import type { WalkthroughSource, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
@@ -212,6 +213,7 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
   const refreshPrStatusTargets = useGitHubPrStatusStore((state) => state.refreshTargets);
   const gitProvider = useGitProvider(directory);
   const gitLabMr = useGitLabMrForBranch(directory, currentBranch);
+  const giteaPr = useGiteaPrForBranch(directory, currentBranch);
 
   useEffect(() => {
     if (!directory || !currentBranch || !githubAuthChecked || !githubConnected || gitProvider !== 'github') return;
@@ -254,16 +256,21 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
 
   // Offer whichever pull request or merge request we know about: the one
   // already selected, or the one this branch has. GitLab repos get their MR
-  // number from the branch lookup; everything else falls back to the GitHub PR
-  // status store, which the polling effect above only fills for GitHub repos.
+  // number from the branch lookup and Gitea repos their PR number the same
+  // way; everything else falls back to the GitHub PR status store, which the
+  // polling effect above only fills for GitHub repos.
   const prSource = useMemo<Extract<WalkthroughSource, { kind: 'pr' }> | null>(() => {
     if (source.kind === 'pr') return source;
     if (gitProvider === 'gitlab') {
       const number = gitLabMr.mr?.number;
       return number ? { kind: 'pr', number } : null;
     }
+    if (gitProvider === 'gitea') {
+      const number = giteaPr.pr?.number;
+      return number ? { kind: 'pr', number } : null;
+    }
     return branchPrNumber ? { kind: 'pr', number: branchPrNumber } : null;
-  }, [branchPrNumber, gitLabMr.mr, gitProvider, source]);
+  }, [branchPrNumber, giteaPr.pr, gitLabMr.mr, gitProvider, source]);
 
   const selectWorkingTree = useCallback(
     (value: WalkthroughWorkingTreeScope) => {

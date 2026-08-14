@@ -1344,6 +1344,107 @@ export interface GitLabAPI {
   repoBranches(namespace: string, project: string): Promise<GitLabBranchesResult>;
 }
 
+// ============== Gitea / Forgejo Provider ==============
+// Gitea and Forgejo share the same REST v1 API (GitHub-style). Repos are flat
+// `owner/repo` (no multi-segment namespaces) and remote work is called
+// "pull requests" (PR), matching GitHub terminology.
+
+type GiteaAuthAccount = {
+  id: string;
+  user: { username: string; name?: string; avatarUrl?: string; webUrl?: string };
+  baseUrl: string;
+  current: boolean;
+};
+
+export type GiteaAuthStatus = {
+  connected: boolean;
+  user?: GiteaUserSummary;
+  accounts: GiteaAuthAccount[];
+};
+
+export type GiteaUserSummary = {
+  username: string;
+  id?: number;
+  name?: string;
+  avatarUrl?: string;
+  webUrl?: string;
+  email?: string;
+};
+
+export type GiteaIssueSummary = {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  author: { username: string; id?: number };
+  labels: string[];
+};
+
+export type GiteaIssue = GiteaIssueSummary & { body?: string; createdAt?: string; updatedAt?: string };
+
+export type GiteaComment = {
+  id: number;
+  body: string;
+  url?: string;
+  author: { username: string; id?: number };
+  createdAt?: string;
+};
+
+export type GiteaPullRequestSummary = {
+  number: number;
+  title: string;
+  url: string;
+  state: 'open' | 'closed' | 'merged';
+  draft?: boolean;
+  author: { username: string; id?: number };
+  labels: string[];
+  sourceBranch: string;
+  targetBranch: string;
+};
+
+export type GiteaPullRequest = GiteaPullRequestSummary & {
+  body?: string;
+  mergeable?: boolean;
+  merged?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type GiteaIssuesListResult = { connected: boolean; repo?: { owner: string; repo: string; url?: string } | null; issues: GiteaIssueSummary[]; page: number; hasMore: boolean };
+export type GiteaIssueGetResult = { connected: boolean; repo?: { owner: string; repo: string; url?: string } | null; issue?: GiteaIssue | null };
+export type GiteaIssueCommentsResult = { connected: boolean; repo?: { owner: string; repo: string; url?: string } | null; comments: GiteaComment[] };
+export type GiteaPullRequestsListResult = { connected: boolean; repo?: { owner: string; repo: string; url?: string } | null; prs: GiteaPullRequestSummary[]; page: number; hasMore: boolean };
+export type GiteaPullRequestContextResult = { connected: boolean; repo?: { owner: string; repo: string; url?: string } | null; pr?: GiteaPullRequest | null; comments: GiteaComment[]; files: Array<{ filename: string; status?: string; additions?: number; deletions?: number; patch?: string }>; diff?: string };
+export type GiteaPullRequestCreateInput = { directory: string; title: string; sourceBranch: string; targetBranch: string; description?: string };
+export type GiteaPullRequestUpdateInput = { directory: string; number: number; title?: string; description?: string };
+export type GiteaPullRequestMergeInput = { directory: string; number: number; method?: 'merge' | 'squash' | 'rebase' };
+export type GiteaPullRequestMergeResult = { connected: boolean; merged: boolean; message?: string };
+export type GiteaBranchesResult = { branches: string[]; defaultBranch?: string | null };
+
+export interface GiteaAPI {
+  authStatus(): Promise<GiteaAuthStatus>;
+  authConnect(input: { accessToken: string; baseUrl: string }): Promise<GiteaAuthStatus>;
+  authActivate(accountId: string): Promise<GiteaAuthStatus>;
+  authDisconnect(): Promise<{ removed: boolean }>;
+  me(): Promise<GiteaUserSummary>;
+
+  issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GiteaIssuesListResult>;
+  issueGet(directory: string, number: number, options?: { owner?: string; repo?: string }): Promise<GiteaIssueGetResult>;
+  issueComments(directory: string, number: number, options?: { owner?: string; repo?: string }): Promise<GiteaIssueCommentsResult>;
+
+  prsList(directory: string, options?: { page?: number; query?: string; sourceBranch?: string }): Promise<GiteaPullRequestsListResult>;
+  prContext(
+    directory: string,
+    number: number,
+    options?: { includeDiff?: boolean; owner?: string; repo?: string }
+  ): Promise<GiteaPullRequestContextResult>;
+  prCreate(input: GiteaPullRequestCreateInput): Promise<GiteaPullRequest>;
+  prUpdate(input: GiteaPullRequestUpdateInput): Promise<GiteaPullRequest>;
+  prMerge(input: GiteaPullRequestMergeInput): Promise<GiteaPullRequestMergeResult>;
+
+  repoBranches(owner: string, repo: string): Promise<GiteaBranchesResult>;
+}
+
 export interface RemoteClientRecord {
   id: string;
   label: string;
@@ -1440,6 +1541,7 @@ export interface RuntimeAPIs {
   notifications: NotificationsAPI;
   github?: GitHubAPI;
   gitlab?: GitLabAPI;
+  gitea?: GiteaAPI;
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;

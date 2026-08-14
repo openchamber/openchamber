@@ -11,6 +11,7 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { CustomDomainsInput } from '@/components/sections/shared/CustomDomainsInput';
 
 const getBaseUrlHost = (baseUrl?: string | null): string => {
   if (!baseUrl) return '';
@@ -288,6 +289,8 @@ export const GitLabSettings: React.FC = () => {
           </div>
         )}
       </div>
+
+      <CustomDomainsInput provider="gitlab" />
     </SettingsSection>
   );
 };

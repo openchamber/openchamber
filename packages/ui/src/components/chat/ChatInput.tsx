@@ -63,6 +63,8 @@ import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerD
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
 import { GitLabIssuePickerDialog } from '@/components/session/GitLabIssuePickerDialog';
 import { GitLabMrPickerDialog } from '@/components/session/GitLabMrPickerDialog';
+import { GiteaIssuePickerDialog } from '@/components/session/GiteaIssuePickerDialog';
+import { GiteaPrPickerDialog } from '@/components/session/GiteaPrPickerDialog';
 import { useGitProvider } from '@/lib/gitProvider';
 import { Icon } from "@/components/icon/Icon";
 import { DraftPresetChips } from './DraftPresetChips';
@@ -669,6 +671,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [prPickerOpen, setPrPickerOpen] = React.useState(false);
     const [gitlabIssuePickerOpen, setGitlabIssuePickerOpen] = React.useState(false);
     const [gitlabMrPickerOpen, setGitlabMrPickerOpen] = React.useState(false);
+    const [giteaIssuePickerOpen, setGiteaIssuePickerOpen] = React.useState(false);
+    const [giteaPrPickerOpen, setGiteaPrPickerOpen] = React.useState(false);
     const [linkedIssue, setLinkedIssue] = React.useState<{ 
         number: number; 
         title: string; 
@@ -686,7 +690,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         instructionsText: string;
         contextText: string;
         author?: { login: string; avatarUrl?: string };
-        provider?: 'github' | 'gitlab';
+        provider?: 'github' | 'gitlab' | 'gitea';
     } | null>(null);
 
     // Message queue
@@ -954,6 +958,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const openIssuePicker = React.useCallback(() => {
         if (gitProvider === 'gitlab') {
             setGitlabIssuePickerOpen(true);
+        } else if (gitProvider === 'gitea') {
+            setGiteaIssuePickerOpen(true);
         } else {
             setIssuePickerOpen(true);
         }
@@ -962,6 +968,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const openPrPicker = React.useCallback(() => {
         if (gitProvider === 'gitlab') {
             setGitlabMrPickerOpen(true);
+        } else if (gitProvider === 'gitea') {
+            setGiteaPrPickerOpen(true);
         } else {
             setPrPickerOpen(true);
         }
@@ -2914,6 +2922,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 setLinkedIssue(null);
             }}
         />
+        <GiteaIssuePickerDialog
+            open={giteaIssuePickerOpen}
+            onOpenChange={setGiteaIssuePickerOpen}
+            mode="select"
+            onSelect={(issue) => {
+                setLinkedIssue(issue);
+                setLinkedPr(null);
+            }}
+        />
+        <GiteaPrPickerDialog
+            open={giteaPrPickerOpen}
+            onOpenChange={setGiteaPrPickerOpen}
+            onSelect={(pr) => {
+                setLinkedPr({ ...pr, provider: 'gitea' as const });
+                setLinkedIssue(null);
+            }}
+        />
         <ReviewFlowDialog
             open={reviewDialogOpen}
             onOpenChange={setReviewDialogOpen}
@@ -2980,8 +3005,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             requestAnimationFrame(openIssuePicker);
                         }}
                     >
-                        <Icon name={gitProvider === 'gitlab' ? 'gitlab' : 'github'} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {gitProvider === 'gitlab' ? t('chat.chatInput.actions.linkGitlabIssue') : t('chat.chatInput.actions.linkGithubIssue')}
+                        <Icon name={gitProvider === 'gitlab' ? 'gitlab' : gitProvider === 'gitea' ? 'git-branch' : 'github'} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {gitProvider === 'gitlab' ? t('chat.chatInput.actions.linkGitlabIssue') : gitProvider === 'gitea' ? t('chat.chatInput.actions.linkGiteaIssue') : t('chat.chatInput.actions.linkGithubIssue')}
                     </button>
                     <button
                         type="button"
@@ -2993,7 +3018,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         }}
                     >
                         <Icon name={gitProvider === 'gitlab' ? 'gitlab' : 'git-pull-request'} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {gitProvider === 'gitlab' ? t('chat.chatInput.actions.linkGitlabMr') : t('chat.chatInput.actions.linkGithubPr')}
+                        {gitProvider === 'gitlab' ? t('chat.chatInput.actions.linkGitlabMr') : gitProvider === 'gitea' ? t('chat.chatInput.actions.linkGiteaPr') : t('chat.chatInput.actions.linkGithubPr')}
                     </button>
                 </div>
             </MobileOverlayPanel>

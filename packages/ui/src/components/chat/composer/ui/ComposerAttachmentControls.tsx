@@ -140,6 +140,25 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                         {t('chat.chatInput.actions.linkGitlabMr')}
                                     </DropdownMenuItem>
                                 </>
+                            ) : gitProvider === 'gitea' ? (
+                                <>
+                                    <DropdownMenuItem
+                                        onSelect={() => {
+                                            requestAnimationFrame(openIssuePicker);
+                                        }}
+                                    >
+                                        <Icon name="git-branch"/>
+                                        {t('chat.chatInput.actions.linkGiteaIssue')}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        onSelect={() => {
+                                            requestAnimationFrame(openPrPicker);
+                                        }}
+                                    >
+                                        <Icon name="git-pull-request"/>
+                                        {t('chat.chatInput.actions.linkGiteaPr')}
+                                    </DropdownMenuItem>
+                                </>
                             ) : null}
                         </DropdownMenuContent>
                     </DropdownMenu>

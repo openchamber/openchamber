@@ -299,15 +299,27 @@ export const ContextPanelRail: React.FC = () => {
           {surfaces.map((surface, index) => {
             // The 'pr' surface renders the GitLab MR view in GitLab repos, so
             // it borrows GitLab's merge-request branding instead of GitHub's.
-            const gitlabMrSurface: ContextSurfaceDescriptor = surface.id === 'pr' && gitProvider === 'gitlab'
-              ? {
-                  ...surface,
-                  icon: 'gitlab' as IconName,
-                  labelKey: 'contextPanel.mode.mr',
-                  descriptionKey: 'contextRail.surface.mr.description',
-                }
+            // Gitea keeps the generic pull-request branding but swaps the
+            // GitHub brand icon for a neutral git icon (there is no Gitea
+            // brand icon in the sprite).
+            const providerPrSurface: ContextSurfaceDescriptor = surface.id === 'pr'
+              ? gitProvider === 'gitlab'
+                ? {
+                    ...surface,
+                    icon: 'gitlab' as IconName,
+                    labelKey: 'contextPanel.mode.mr',
+                    descriptionKey: 'contextRail.surface.mr.description',
+                  }
+                : gitProvider === 'gitea'
+                  ? {
+                      ...surface,
+                      icon: 'git-branch' as IconName,
+                      labelKey: 'contextPanel.mode.pr',
+                      descriptionKey: 'contextRail.surface.pr.description',
+                    }
+                  : surface
               : surface;
-            const label = t(gitlabMrSurface.labelKey);
+            const label = t(providerPrSurface.labelKey);
             // Git shows a numeric badge instead of the old activity dot.
             // Other surfaces never inherit git's changed-files signal.
             // The work-status panel reports the same count in words a few
@@ -317,11 +329,11 @@ export const ContextPanelRail: React.FC = () => {
             return (
               <ContextPanelRailItem
                 key={surface.id}
-                surface={gitlabMrSurface}
+                surface={providerPrSurface}
                 isActive={activeMode === surface.mode}
                 showActivityDot={false}
                 label={label}
-                description={t(gitlabMrSurface.descriptionKey)}
+                description={t(providerPrSurface.descriptionKey)}
                 badgeCount={badgeCount}
                 badgeAriaLabel={badgeCount !== null
                   ? t(

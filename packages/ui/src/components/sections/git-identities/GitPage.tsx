@@ -21,6 +21,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { GitSettings } from '@/components/sections/openchamber/GitSettings';
 import { GitHubSettings } from '@/components/sections/openchamber/GitHubSettings';
 import { GitLabSettings } from '@/components/sections/openchamber/GitLabSettings';
+import { GiteaSettings } from '@/components/sections/openchamber/GiteaSettings';
 import { GitIdentityEditorDialog } from './GitIdentityEditorDialog';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
@@ -124,6 +125,7 @@ export const GitPage: React.FC = () => {
       >
         <GitHubSettings />
         <GitLabSettings />
+        <GiteaSettings />
 
         <SettingsSection
           title={t('settings.gitIdentities.page.section.title')}

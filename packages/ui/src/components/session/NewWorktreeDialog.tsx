@@ -28,6 +28,7 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useGitLabAuthStore } from '@/stores/useGitLabAuthStore';
+import { useGiteaAuthStore } from '@/stores/useGiteaAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -53,6 +54,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { GitHubIntegrationDialog } from './GitHubIntegrationDialog';
 import { GitLabIntegrationDialog } from './GitLabIntegrationDialog';
+import { GiteaIntegrationDialog } from './GiteaIntegrationDialog';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
@@ -66,6 +68,10 @@ import type {
   GitLabIssueComment,
   GitLabIssuesListResult,
   GitLabMergeRequestContextResult,
+  GiteaComment,
+  GiteaIssue,
+  GiteaIssuesListResult,
+  GiteaPullRequestContextResult,
 } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useI18n } from '@/lib/i18n';
@@ -91,6 +97,9 @@ interface NewBranchState {
   linkedGitLabIssue: { number: number; title: string; url: string } | null;
   linkedGitLabMr: { number: number; title: string; url: string; sourceBranch: string } | null;
   includeGitLabMrDiff: boolean;
+  linkedGiteaIssue: { number: number; title: string; url: string } | null;
+  linkedGiteaPr: { number: number; title: string; url: string; sourceBranch: string } | null;
+  includeGiteaPrDiff: boolean;
 }
 
 // State for Existing Branch mode
@@ -232,19 +241,39 @@ const buildGitLabMrContextText = (payload: GitLabMergeRequestContextResult) => {
   return `GitLab merge request context (JSON)\n${JSON.stringify(payload, null, 2)}`;
 };
 
+const buildGiteaIssueContextText = (args: {
+  repo: GiteaIssuesListResult['repo'] | undefined;
+  issue: GiteaIssue;
+  comments: GiteaComment[];
+}) => {
+  const payload = {
+    repo: args.repo ?? null,
+    issue: args.issue,
+    comments: args.comments,
+  };
+  return `Gitea issue context (JSON)\n${JSON.stringify(payload, null, 2)}`;
+};
+
+const buildGiteaPrContextText = (payload: GiteaPullRequestContextResult) => {
+  return `Gitea pull request context (JSON)\n${JSON.stringify(payload, null, 2)}`;
+};
+
 export function NewWorktreeDialog({
   open,
   onOpenChange,
   onWorktreeCreated,
 }: NewWorktreeDialogProps) {
   const { t } = useI18n();
-  const { github, git, gitlab } = useRuntimeAPIs();
+  const { github, git, gitlab, gitea } = useRuntimeAPIs();
   const isMobile = useUIStore((state) => state.isMobile);
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const gitlabAuthStatus = useGitLabAuthStore((state) => state.status);
   const gitlabAuthChecked = useGitLabAuthStore((state) => state.hasChecked);
   const refreshGitLabAuth = useGitLabAuthStore((state) => state.refreshStatus);
+  const giteaAuthStatus = useGiteaAuthStore((state) => state.status);
+  const giteaAuthChecked = useGiteaAuthStore((state) => state.hasChecked);
+  const refreshGiteaAuth = useGiteaAuthStore((state) => state.refreshStatus);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   
   const projectDirectory = activeProject?.path ?? null;
@@ -270,6 +299,9 @@ export function NewWorktreeDialog({
     linkedGitLabIssue: null,
     linkedGitLabMr: null,
     includeGitLabMrDiff: false,
+    linkedGiteaIssue: null,
+    linkedGiteaPr: null,
+    includeGiteaPrDiff: false,
   });
   
   const [existingBranchState, setExistingBranchState] = React.useState<ExistingBranchState>({
@@ -320,6 +352,7 @@ export function NewWorktreeDialog({
   
   const [githubDialogOpen, setGithubDialogOpen] = React.useState(false);
   const [gitlabDialogOpen, setGitlabDialogOpen] = React.useState(false);
+  const [giteaDialogOpen, setGiteaDialogOpen] = React.useState(false);
 
   // Populate the GitLab auth status on mount so the "Start from GitLab issue/MR"
   // action is available without first visiting Settings. refreshStatus dedupes
@@ -327,6 +360,13 @@ export function NewWorktreeDialog({
   // is unavailable.
   React.useEffect(() => {
     void refreshGitLabAuth(gitlab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Same for Gitea: the "Start from Gitea issue/PR" action needs the auth
+  // state without a settings visit.
+  React.useEffect(() => {
+    void refreshGiteaAuth(gitea);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   
@@ -523,6 +563,9 @@ export function NewWorktreeDialog({
     gitLabIssue: { number: number; title: string; url: string } | null;
     gitLabMr: { number: number; title: string; url: string; sourceBranch: string } | null;
     includeGitLabMrDiff: boolean;
+    giteaIssue: { number: number; title: string; url: string } | null;
+    giteaPr: { number: number; title: string; url: string; sourceBranch: string } | null;
+    includeGiteaPrDiff: boolean;
   }) => {
     if (!projectDirectory) {
       return;
@@ -771,9 +814,126 @@ export function NewWorktreeDialog({
 
       toast.success(t('session.newWorktree.toast.sessionFromMr'));
     }
+
+    if (args.giteaIssue) {
+      if (!gitea || !gitea.issueGet || !gitea.issueComments) {
+        return;
+      }
+
+      const issueRes = await gitea.issueGet(projectDirectory, args.giteaIssue.number);
+      if (issueRes.connected === false || !issueRes.issue) {
+        throw new Error('Failed to load issue context');
+      }
+
+      const commentsRes = await gitea.issueComments(projectDirectory, args.giteaIssue.number);
+      if (commentsRes.connected === false) {
+        throw new Error('Failed to load issue comments');
+      }
+
+      const visiblePromptText = await renderMagicPrompt('gitea.issue.review.visible', {
+        issue_number: String(args.giteaIssue.number),
+      });
+      const instructionsText = await renderMagicPrompt('gitea.issue.review.instructions');
+      const contextText = buildGiteaIssueContextText({
+        repo: issueRes.repo,
+        issue: issueRes.issue,
+        comments: commentsRes.comments ?? [],
+      });
+
+      await useSessionUIStore.getState().sendMessage(
+        visiblePromptText,
+        providerID,
+        modelID,
+        agentName,
+        undefined,
+        undefined,
+        [
+          { text: instructionsText, synthetic: true },
+          { text: contextText, synthetic: true },
+        ],
+        variant,
+        undefined,
+        { sessionId: args.sessionId },
+      );
+
+      // Record the thread this worktree session was created for, so it stays
+      // visible as a context source after the opening message scrolls away.
+      void sessionActions.setLinkedIssue(
+        args.sessionId,
+        args.directory,
+        buildLinkedIssue({
+          url: issueRes.issue.url,
+          number: issueRes.issue.number,
+          title: issueRes.issue.title,
+          kind: 'issue',
+          author: issueRes.issue.author
+            ? { login: issueRes.issue.author.username }
+            : null,
+          linkedAt: Date.now(),
+        }),
+        true,
+      ).catch(() => undefined);
+
+      toast.success(t('session.newWorktree.toast.sessionFromIssue'));
+      return;
+    }
+
+    if (args.giteaPr) {
+      if (!gitea || !gitea.prContext) {
+        return;
+      }
+
+      const prContext = await gitea.prContext(projectDirectory, args.giteaPr.number, {
+        includeDiff: args.includeGiteaPrDiff,
+      });
+      if (prContext.connected === false || !prContext.pr) {
+        throw new Error('Failed to load PR context');
+      }
+
+      const visiblePromptText = await renderMagicPrompt('gitea.pr.review.visible', {
+        pr_number: String(args.giteaPr.number),
+      });
+      const instructionsText = await renderMagicPrompt('gitea.pr.review.instructions');
+      const contextText = buildGiteaPrContextText(prContext);
+
+      await useSessionUIStore.getState().sendMessage(
+        visiblePromptText,
+        providerID,
+        modelID,
+        agentName,
+        undefined,
+        undefined,
+        [
+          { text: instructionsText, synthetic: true },
+          { text: contextText, synthetic: true },
+        ],
+        variant,
+        undefined,
+        { sessionId: args.sessionId },
+      );
+
+      void sessionActions.setLinkedIssue(
+        args.sessionId,
+        args.directory,
+        buildLinkedIssue({
+          url: prContext.pr.url,
+          number: prContext.pr.number,
+          title: prContext.pr.title,
+          kind: 'pull',
+          author: prContext.pr.author
+            ? { login: prContext.pr.author.username }
+            : null,
+          linkedAt: Date.now(),
+        }),
+        true,
+      ).catch(() => undefined);
+
+      toast.success(t('session.newWorktree.toast.sessionFromPr'));
+    }
   }, [
     github,
     gitlab,
+    gitea,
     projectDirectory,
     resolveDefaultAgentName,
     resolveDefaultModelSelection,
@@ -865,6 +1025,9 @@ export function NewWorktreeDialog({
       linkedGitLabIssue: null,
       linkedGitLabMr: null,
       includeGitLabMrDiff: false,
+      linkedGiteaIssue: null,
+      linkedGiteaPr: null,
+      includeGiteaPrDiff: false,
     });
   }, [open, generateUniqueSlug]);
 
@@ -914,11 +1077,13 @@ export function NewWorktreeDialog({
         const prConfig = linkedPr ? resolvePrWorktreeConfig(linkedPr, localBranches, remoteBranches) : null;
         const linkedGitLabMr = mode === 'new-branch' ? newBranchState.linkedGitLabMr : null;
         const gitLabMrBranch = linkedGitLabMr ? normalizeBranchName(linkedGitLabMr.sourceBranch || '') : '';
+        const linkedGiteaPr = mode === 'new-branch' ? newBranchState.linkedGiteaPr : null;
+        const giteaPrBranch = linkedGiteaPr ? normalizeBranchName(linkedGiteaPr.sourceBranch || '') : '';
         const result = await validateWorktreeCreate(projectRef, {
-          mode: mode === 'existing-branch' || prConfig || gitLabMrBranch ? 'existing' : 'new',
+          mode: mode === 'existing-branch' || prConfig || gitLabMrBranch || giteaPrBranch ? 'existing' : 'new',
           branchName: normalizedBranch,
           worktreeName: normalizedWorktree,
-          existingBranch: prConfig?.existingBranch ?? (gitLabMrBranch || (mode === 'existing-branch' ? normalizedBranch : undefined)),
+          existingBranch: prConfig?.existingBranch ?? (gitLabMrBranch || giteaPrBranch || (mode === 'existing-branch' ? normalizedBranch : undefined)),
           ...(prConfig?.ensureRemoteName ? { ensureRemoteName: prConfig.ensureRemoteName } : {}),
           ...(prConfig?.ensureRemoteUrl ? { ensureRemoteUrl: prConfig.ensureRemoteUrl } : {}),
         });
@@ -961,6 +1126,7 @@ export function NewWorktreeDialog({
     newBranchState.branchName,
     newBranchState.linkedPr,
     newBranchState.linkedGitLabMr,
+    newBranchState.linkedGiteaPr,
     existingBranchState.selectedBranch,
     currentState.worktreeName,
     localBranches,
@@ -1032,7 +1198,10 @@ export function NewWorktreeDialog({
       const linkedGitLabIssue = mode === 'new-branch' ? newBranchState.linkedGitLabIssue : null;
       const linkedGitLabMr = mode === 'new-branch' ? newBranchState.linkedGitLabMr : null;
       const includeGitLabMrDiff = mode === 'new-branch' ? newBranchState.includeGitLabMrDiff : false;
-      const shouldCreateSession = Boolean(linkedIssue || linkedPrState || linkedGitLabIssue || linkedGitLabMr);
+      const linkedGiteaIssue = mode === 'new-branch' ? newBranchState.linkedGiteaIssue : null;
+      const linkedGiteaPr = mode === 'new-branch' ? newBranchState.linkedGiteaPr : null;
+      const includeGiteaPrDiff = mode === 'new-branch' ? newBranchState.includeGiteaPrDiff : false;
+      const shouldCreateSession = Boolean(linkedIssue || linkedPrState || linkedGitLabIssue || linkedGitLabMr || linkedGiteaIssue || linkedGiteaPr);
 
       const setupCommands = await getWorktreeSetupCommands(projectRef);
       const sourceBranch = newBranchState.sourceBranch;
@@ -1075,6 +1244,23 @@ export function NewWorktreeDialog({
           };
         }
 
+        if (linkedGiteaPr) {
+          const prBranch = normalizeBranchName(linkedGiteaPr.sourceBranch || '');
+          if (!prBranch) {
+            throw new Error('PR source branch is missing');
+          }
+          sourceLabel = prBranch;
+          return {
+            preferredName: normalizedBranch || normalizedWorktree,
+            mode: 'existing' as const,
+            branchName: normalizedBranch,
+            worktreeName: normalizedWorktree,
+            existingBranch: prBranch,
+            setupCommands,
+            returnAfterDirectoryCreated: true,
+          };
+        }
+
         sourceLabel = mode === 'new-branch' ? sourceBranch : '';
         return {
           preferredName: normalizedBranch || normalizedWorktree,
@@ -1107,7 +1293,11 @@ export function NewWorktreeDialog({
               ? `#${linkedGitLabIssue.number} ${linkedGitLabIssue.title}`.trim()
               : linkedGitLabMr
                 ? `!${linkedGitLabMr.number} ${linkedGitLabMr.title}`.trim()
-                : t('session.newWorktree.newSessionTitle');
+                : linkedGiteaIssue
+                  ? `#${linkedGiteaIssue.number} ${linkedGiteaIssue.title}`.trim()
+                  : linkedGiteaPr
+                    ? `#${linkedGiteaPr.number} ${linkedGiteaPr.title}`.trim()
+                    : t('session.newWorktree.newSessionTitle');
 
         const session = await sessionActions.createSession(sessionTitle, metadata.path, null);
         if (!session?.id) {
@@ -1159,7 +1349,12 @@ export function NewWorktreeDialog({
           gitLabIssue: linkedGitLabIssue,
           gitLabMr: linkedGitLabMr,
           includeGitLabMrDiff: includeGitLabMrDiff,
+          giteaIssue: linkedGiteaIssue,
+          giteaPr: linkedGiteaPr,
+          includeGiteaPrDiff: includeGiteaPrDiff,
         }).catch((error) => {
+          // There is no Gitea-branded send-context error key in the frozen
+          // catalogs; the gitea path reuses the generic GitHub wording.
           const isGitLabLink = Boolean(linkedGitLabIssue || linkedGitLabMr);
           const errorKey = isGitLabLink
             ? 'session.newWorktree.error.sendGitLabContextFailed'
@@ -1199,6 +1394,9 @@ export function NewWorktreeDialog({
         linkedGitLabIssue: null,
         linkedGitLabMr: null,
         includeGitLabMrDiff: false,
+        linkedGiteaIssue: null,
+        linkedGiteaPr: null,
+        includeGiteaPrDiff: false,
         branchName: '',
       }));
       return;
@@ -1215,6 +1413,9 @@ export function NewWorktreeDialog({
         linkedGitLabIssue: null,
         linkedGitLabMr: null,
         includeGitLabMrDiff: false,
+        linkedGiteaIssue: null,
+        linkedGiteaPr: null,
+        includeGiteaPrDiff: false,
         branchName: newBranchName,
         worktreeName: slugifyWorktreeName(newBranchName),
         isSyncingWorktreeName: true,
@@ -1229,6 +1430,9 @@ export function NewWorktreeDialog({
         linkedGitLabIssue: null,
         linkedGitLabMr: null,
         includeGitLabMrDiff: false,
+        linkedGiteaIssue: null,
+        linkedGiteaPr: null,
+        includeGiteaPrDiff: false,
         branchName: pr.head,
         worktreeName: slugifyWorktreeName(pr.head),
         isSyncingWorktreeName: true,
@@ -1259,6 +1463,9 @@ export function NewWorktreeDialog({
         linkedIssue: null,
         linkedPr: null,
         includePrDiff: false,
+        linkedGiteaIssue: null,
+        linkedGiteaPr: null,
+        includeGiteaPrDiff: false,
         branchName: '',
       }));
       return;
@@ -1278,6 +1485,9 @@ export function NewWorktreeDialog({
         linkedIssue: null,
         linkedPr: null,
         includePrDiff: false,
+        linkedGiteaIssue: null,
+        linkedGiteaPr: null,
+        includeGiteaPrDiff: false,
         branchName: newBranchName,
         worktreeName: slugifyWorktreeName(newBranchName),
         isSyncingWorktreeName: true,
@@ -1296,6 +1506,85 @@ export function NewWorktreeDialog({
         linkedIssue: null,
         linkedPr: null,
         includePrDiff: false,
+        linkedGiteaIssue: null,
+        linkedGiteaPr: null,
+        includeGiteaPrDiff: false,
+        branchName: result.sourceBranch,
+        worktreeName: slugifyWorktreeName(result.sourceBranch),
+        isSyncingWorktreeName: true,
+      }));
+    }
+  };
+
+  // Handle Gitea selection
+  const handleGiteaSelect = (result: {
+    type: 'issue';
+    number: number;
+    title: string;
+    url: string;
+  } | {
+    type: 'pr';
+    number: number;
+    title: string;
+    url: string;
+    sourceBranch: string;
+    includeDiff: boolean;
+  } | null) => {
+    if (!result) {
+      setNewBranchState(prev => ({
+        ...prev,
+        linkedGiteaIssue: null,
+        linkedGiteaPr: null,
+        includeGiteaPrDiff: false,
+        linkedIssue: null,
+        linkedPr: null,
+        includePrDiff: false,
+        linkedGitLabIssue: null,
+        linkedGitLabMr: null,
+        includeGitLabMrDiff: false,
+        branchName: '',
+      }));
+      return;
+    }
+
+    if (result.type === 'issue') {
+      const newBranchName = `issue-${result.number}-${generateBranchSlug()}`;
+      setNewBranchState(prev => ({
+        ...prev,
+        linkedGiteaIssue: {
+          number: result.number,
+          title: result.title,
+          url: result.url,
+        },
+        linkedGiteaPr: null,
+        includeGiteaPrDiff: false,
+        linkedIssue: null,
+        linkedPr: null,
+        includePrDiff: false,
+        linkedGitLabIssue: null,
+        linkedGitLabMr: null,
+        includeGitLabMrDiff: false,
+        branchName: newBranchName,
+        worktreeName: slugifyWorktreeName(newBranchName),
+        isSyncingWorktreeName: true,
+      }));
+    } else if (result.type === 'pr') {
+      setNewBranchState(prev => ({
+        ...prev,
+        linkedGiteaPr: {
+          number: result.number,
+          title: result.title,
+          url: result.url,
+          sourceBranch: result.sourceBranch,
+        },
+        linkedGiteaIssue: null,
+        includeGiteaPrDiff: result.includeDiff,
+        linkedIssue: null,
+        linkedPr: null,
+        includePrDiff: false,
+        linkedGitLabIssue: null,
+        linkedGitLabMr: null,
+        includeGitLabMrDiff: false,
         branchName: result.sourceBranch,
         worktreeName: slugifyWorktreeName(result.sourceBranch),
         isSyncingWorktreeName: true,
@@ -1307,6 +1596,8 @@ export function NewWorktreeDialog({
   const isGitHubConnected = githubAuthChecked && githubAuthStatus?.connected === true;
   // GitLab connection check
   const isGitLabConnected = gitlabAuthChecked && gitlabAuthStatus?.connected === true;
+  // Gitea connection check
+  const isGiteaConnected = giteaAuthChecked && giteaAuthStatus?.connected === true;
 
   // Only offer the provider's start-from flow when the repo actually belongs
   // to that provider: a GitLab repo must not surface the GitHub picker and
@@ -1314,6 +1605,7 @@ export function NewWorktreeDialog({
   const gitProvider = useGitProvider(projectDirectory);
   const showGitHubStartFrom = isGitHubConnected && gitProvider === 'github';
   const showGitLabStartFrom = isGitLabConnected && gitProvider === 'gitlab';
+  const showGiteaStartFrom = isGiteaConnected && gitProvider === 'gitea';
 
   // Check if form is valid for submission
   const isFormValid = mode === 'existing-branch'
@@ -1329,9 +1621,12 @@ export function NewWorktreeDialog({
       linkedPr: null,
       linkedGitLabIssue: null,
       linkedGitLabMr: null,
+      linkedGiteaIssue: null,
+      linkedGiteaPr: null,
       branchName: '',
       includePrDiff: false,
       includeGitLabMrDiff: false,
+      includeGiteaPrDiff: false,
       isSyncingWorktreeName: true,
     }));
   };
@@ -1565,7 +1860,7 @@ export function NewWorktreeDialog({
                   <label className="typography-ui-label text-foreground block font-semibold">
                     {t('session.newWorktree.branchName')}
                   </label>
-                  {mode === 'new-branch' && (showGitHubStartFrom || showGitLabStartFrom) && (
+                  {mode === 'new-branch' && (showGitHubStartFrom || showGitLabStartFrom || showGiteaStartFrom) && (
                     <div className="flex items-center gap-2 flex-wrap">
                       {showGitHubStartFrom && (
                         <Button
@@ -1589,6 +1884,17 @@ export function NewWorktreeDialog({
                             {newBranchState.linkedGitLabIssue || newBranchState.linkedGitLabMr ? t('session.newWorktree.actions.change') : t('session.newWorktree.actions.startFromGitLabIssueMr')}
                         </Button>
                       )}
+                      {showGiteaStartFrom && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setGiteaDialogOpen(true)}
+                          className="gap-1.5 h-7"
+                        >
+                          <Icon name="git-pull-request" className="size-4 text-status-success" />
+                            {newBranchState.linkedGiteaIssue || newBranchState.linkedGiteaPr ? t('session.newWorktree.actions.change') : t('session.giteaIntegration.title')}
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1603,15 +1909,17 @@ export function NewWorktreeDialog({
                       linkedPr: null,
                       linkedGitLabIssue: null,
                       linkedGitLabMr: null,
+                      linkedGiteaIssue: null,
+                      linkedGiteaPr: null,
                     }));
                   }}
                   onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
                   placeholder={t('session.newWorktree.branchNamePlaceholder')}
-                  disabled={!!newBranchState.linkedPr || !!newBranchState.linkedGitLabMr}
+                  disabled={!!newBranchState.linkedPr || !!newBranchState.linkedGitLabMr || !!newBranchState.linkedGiteaPr}
                   className={cn(
                     'h-8',
                     validation.touched && validation.branchError && 'border-destructive',
-                    (newBranchState.linkedPr || newBranchState.linkedGitLabMr) && 'bg-muted text-muted-foreground'
+                    (newBranchState.linkedPr || newBranchState.linkedGitLabMr || newBranchState.linkedGiteaPr) && 'bg-muted text-muted-foreground'
                   )}
                 />
                 {newBranchState.linkedPr && (
@@ -1630,6 +1938,14 @@ export function NewWorktreeDialog({
                     </span>
                   </div>
                 )}
+                {newBranchState.linkedGiteaPr && (
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Icon name="check" className="h-3.5 w-3.5 text-status-success" />
+                    <span className="typography-micro">
+                      {t('session.newWorktree.usingPrBranch', { branch: newBranchState.linkedGiteaPr.sourceBranch })}
+                    </span>
+                  </div>
+                )}
                 {newBranchState.linkedIssue && !newBranchState.linkedPr && (
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Icon name="check" className="h-3.5 w-3.5 text-status-success" />
@@ -1643,6 +1959,14 @@ export function NewWorktreeDialog({
                     <Icon name="check" className="h-3.5 w-3.5 text-status-success" />
                     <span className="typography-micro">
                       {t('session.newWorktree.fromIssue', { number: newBranchState.linkedGitLabIssue.number, title: newBranchState.linkedGitLabIssue.title })}
+                    </span>
+                  </div>
+                )}
+                {newBranchState.linkedGiteaIssue && !newBranchState.linkedGiteaPr && (
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Icon name="check" className="h-3.5 w-3.5 text-status-success" />
+                    <span className="typography-micro">
+                      {t('session.newWorktree.fromIssue', { number: newBranchState.linkedGiteaIssue.number, title: newBranchState.linkedGiteaIssue.title })}
                     </span>
                   </div>
                 )}
@@ -1705,7 +2029,7 @@ export function NewWorktreeDialog({
             </div>
 
             {/* Source Branch - Only for New Branch mode, hide when a linked PR/MR is selected */}
-            {mode === 'new-branch' && !newBranchState.linkedPr && !newBranchState.linkedGitLabMr && (
+            {mode === 'new-branch' && !newBranchState.linkedPr && !newBranchState.linkedGitLabMr && !newBranchState.linkedGiteaPr && (
               <div className="space-y-1.5">
                 <label className="typography-ui-label text-foreground block font-semibold">
                   {t('session.newWorktree.sourceBranch')}
@@ -1844,14 +2168,16 @@ export function NewWorktreeDialog({
             )}
 
             {/* Linked Item Preview - Two row minimal display */}
-            {(newBranchState.linkedIssue || newBranchState.linkedPr || newBranchState.linkedGitLabIssue || newBranchState.linkedGitLabMr) && mode === 'new-branch' && (
+            {(newBranchState.linkedIssue || newBranchState.linkedPr || newBranchState.linkedGitLabIssue || newBranchState.linkedGitLabMr || newBranchState.linkedGiteaIssue || newBranchState.linkedGiteaPr) && mode === 'new-branch' && (
               <div className="mt-2 px-2 py-1.5 rounded bg-muted/30">
                 {/* Row 1: Type, number, title, actions */}
                 <div className="flex items-center gap-2">
                   {newBranchState.linkedIssue || newBranchState.linkedPr ? (
                     <Icon name="github" className="h-3.5 w-3.5 text-status-success shrink-0" />
-                  ) : (
+                  ) : newBranchState.linkedGitLabIssue || newBranchState.linkedGitLabMr ? (
                     <Icon name="gitlab" className="h-3.5 w-3.5 text-status-success shrink-0" />
+                  ) : (
+                    <Icon name="git-pull-request" className="h-3.5 w-3.5 text-status-success shrink-0" />
                   )}
                   
                     {newBranchState.linkedIssue && (
@@ -1874,13 +2200,23 @@ export function NewWorktreeDialog({
                         {t('session.newWorktree.mrNumber', { number: newBranchState.linkedGitLabMr.number })}
                       </span>
                     )}
+                    {newBranchState.linkedGiteaIssue && (
+                      <span className="typography-micro text-muted-foreground shrink-0">
+                        {t('session.newWorktree.issueNumber', { number: newBranchState.linkedGiteaIssue.number })}
+                      </span>
+                    )}
+                    {newBranchState.linkedGiteaPr && (
+                      <span className="typography-micro text-muted-foreground shrink-0">
+                        {t('session.newWorktree.prNumber', { number: newBranchState.linkedGiteaPr.number })}
+                      </span>
+                    )}
                   
                   <span className="typography-micro text-foreground truncate flex-1">
-                    {newBranchState.linkedIssue?.title || newBranchState.linkedPr?.title || newBranchState.linkedGitLabIssue?.title || newBranchState.linkedGitLabMr?.title}
+                    {newBranchState.linkedIssue?.title || newBranchState.linkedPr?.title || newBranchState.linkedGitLabIssue?.title || newBranchState.linkedGitLabMr?.title || newBranchState.linkedGiteaIssue?.title || newBranchState.linkedGiteaPr?.title}
                   </span>
                   
                   <a
-                    href={newBranchState.linkedIssue?.url || newBranchState.linkedPr?.url || newBranchState.linkedGitLabIssue?.url || newBranchState.linkedGitLabMr?.url}
+                    href={newBranchState.linkedIssue?.url || newBranchState.linkedPr?.url || newBranchState.linkedGitLabIssue?.url || newBranchState.linkedGitLabMr?.url || newBranchState.linkedGiteaIssue?.url || newBranchState.linkedGiteaPr?.url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-muted-foreground hover:text-foreground shrink-0"
@@ -1916,6 +2252,18 @@ export function NewWorktreeDialog({
                       {newBranchState.linkedGitLabMr.sourceBranch}
                     </span>
                       {newBranchState.includeGitLabMrDiff && (
+                        <span className="typography-micro px-1 py-0.5 rounded bg-status-success/10 text-status-success">
+                          {t('session.newWorktree.includeDiffBadge')}
+                        </span>
+                      )}
+                  </div>
+                )}
+                {newBranchState.linkedGiteaPr && (
+                  <div className="flex items-center gap-2 mt-0.5 pl-5">
+                    <span className="typography-micro text-muted-foreground">
+                      {newBranchState.linkedGiteaPr.sourceBranch}
+                    </span>
+                      {newBranchState.includeGiteaPrDiff && (
                         <span className="typography-micro px-1 py-0.5 rounded bg-status-success/10 text-status-success">
                           {t('session.newWorktree.includeDiffBadge')}
                         </span>
@@ -2093,7 +2441,7 @@ export function NewWorktreeDialog({
                     <label className="typography-ui-label text-foreground block font-semibold">
                       {t('session.newWorktree.branchName')}
                     </label>
-                    {mode === 'new-branch' && (showGitHubStartFrom || showGitLabStartFrom) && (
+                    {mode === 'new-branch' && (showGitHubStartFrom || showGitLabStartFrom || showGiteaStartFrom) && (
                       <div className="flex items-center gap-2 flex-wrap">
                         {showGitHubStartFrom && (
                           <Button
@@ -2117,6 +2465,17 @@ export function NewWorktreeDialog({
                           {newBranchState.linkedGitLabIssue || newBranchState.linkedGitLabMr ? t('session.newWorktree.actions.change') : t('session.newWorktree.actions.startFromGitLabIssueMr')}
                           </Button>
                         )}
+                        {showGiteaStartFrom && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setGiteaDialogOpen(true)}
+                            className="gap-1.5 h-7"
+                          >
+                            <Icon name="git-pull-request" className="size-4 text-status-success" />
+                          {newBranchState.linkedGiteaIssue || newBranchState.linkedGiteaPr ? t('session.newWorktree.actions.change') : t('session.giteaIntegration.title')}
+                          </Button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2131,15 +2490,17 @@ export function NewWorktreeDialog({
                         linkedPr: null,
                         linkedGitLabIssue: null,
                         linkedGitLabMr: null,
+                        linkedGiteaIssue: null,
+                        linkedGiteaPr: null,
                       }));
                     }}
                     onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
                     placeholder={t('session.newWorktree.branchNamePlaceholder')}
-                    disabled={!!newBranchState.linkedPr || !!newBranchState.linkedGitLabMr}
+                    disabled={!!newBranchState.linkedPr || !!newBranchState.linkedGitLabMr || !!newBranchState.linkedGiteaPr}
                     className={cn(
                       'h-8',
                       validation.touched && validation.branchError && 'border-destructive',
-                      (newBranchState.linkedPr || newBranchState.linkedGitLabMr) && 'bg-muted text-muted-foreground'
+                      (newBranchState.linkedPr || newBranchState.linkedGitLabMr || newBranchState.linkedGiteaPr) && 'bg-muted text-muted-foreground'
                     )}
                   />
                   {newBranchState.linkedPr && (
@@ -2158,6 +2519,14 @@ export function NewWorktreeDialog({
                       </span>
                     </div>
                   )}
+                  {newBranchState.linkedGiteaPr && (
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <Icon name="check" className="h-3.5 w-3.5 text-status-success" />
+                      <span className="typography-micro">
+                        {t('session.newWorktree.usingPrBranch', { branch: newBranchState.linkedGiteaPr.sourceBranch })}
+                      </span>
+                    </div>
+                  )}
                   {newBranchState.linkedIssue && !newBranchState.linkedPr && (
                     <div className="flex items-center gap-1.5 text-muted-foreground">
                       <Icon name="check" className="h-3.5 w-3.5 text-status-success" />
@@ -2171,6 +2540,14 @@ export function NewWorktreeDialog({
                       <Icon name="check" className="h-3.5 w-3.5 text-status-success" />
                       <span className="typography-micro">
                         {t('session.newWorktree.fromIssue', { number: newBranchState.linkedGitLabIssue.number, title: newBranchState.linkedGitLabIssue.title })}
+                      </span>
+                    </div>
+                  )}
+                  {newBranchState.linkedGiteaIssue && !newBranchState.linkedGiteaPr && (
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <Icon name="check" className="h-3.5 w-3.5 text-status-success" />
+                      <span className="typography-micro">
+                        {t('session.newWorktree.fromIssue', { number: newBranchState.linkedGiteaIssue.number, title: newBranchState.linkedGiteaIssue.title })}
                       </span>
                     </div>
                   )}
@@ -2233,7 +2610,7 @@ export function NewWorktreeDialog({
               </div>
 
               {/* Source Branch - Only for New Branch mode, hide when a linked PR/MR is selected */}
-              {mode === 'new-branch' && !newBranchState.linkedPr && !newBranchState.linkedGitLabMr && (
+              {mode === 'new-branch' && !newBranchState.linkedPr && !newBranchState.linkedGitLabMr && !newBranchState.linkedGiteaPr && (
                 <div className="space-y-1.5">
                 <label className="typography-ui-label text-foreground block font-semibold">
                   {t('session.newWorktree.sourceBranch')}
@@ -2346,14 +2723,16 @@ export function NewWorktreeDialog({
               )}
 
               {/* Linked Item Preview - Two row minimal display */}
-              {(newBranchState.linkedIssue || newBranchState.linkedPr || newBranchState.linkedGitLabIssue || newBranchState.linkedGitLabMr) && mode === 'new-branch' && (
+              {(newBranchState.linkedIssue || newBranchState.linkedPr || newBranchState.linkedGitLabIssue || newBranchState.linkedGitLabMr || newBranchState.linkedGiteaIssue || newBranchState.linkedGiteaPr) && mode === 'new-branch' && (
                 <div className="mt-2 px-2 py-1.5 rounded bg-muted/30">
                   {/* Row 1: Type, number, title, actions */}
                   <div className="flex items-center gap-2">
                     {newBranchState.linkedIssue || newBranchState.linkedPr ? (
                       <Icon name="github" className="h-3.5 w-3.5 text-status-success shrink-0" />
-                    ) : (
+                    ) : newBranchState.linkedGitLabIssue || newBranchState.linkedGitLabMr ? (
                       <Icon name="gitlab" className="h-3.5 w-3.5 text-status-success shrink-0" />
+                    ) : (
+                      <Icon name="git-pull-request" className="h-3.5 w-3.5 text-status-success shrink-0" />
                     )}
                     
                     {newBranchState.linkedIssue && (
@@ -2376,13 +2755,23 @@ export function NewWorktreeDialog({
                         {t('session.newWorktree.mrNumber', { number: newBranchState.linkedGitLabMr.number })}
                       </span>
                     )}
+                    {newBranchState.linkedGiteaIssue && (
+                      <span className="typography-micro text-muted-foreground shrink-0">
+                        {t('session.newWorktree.issueNumber', { number: newBranchState.linkedGiteaIssue.number })}
+                      </span>
+                    )}
+                    {newBranchState.linkedGiteaPr && (
+                      <span className="typography-micro text-muted-foreground shrink-0">
+                        {t('session.newWorktree.prNumber', { number: newBranchState.linkedGiteaPr.number })}
+                      </span>
+                    )}
                     
                     <span className="typography-micro text-foreground truncate flex-1">
-                      {newBranchState.linkedIssue?.title || newBranchState.linkedPr?.title || newBranchState.linkedGitLabIssue?.title || newBranchState.linkedGitLabMr?.title}
+                      {newBranchState.linkedIssue?.title || newBranchState.linkedPr?.title || newBranchState.linkedGitLabIssue?.title || newBranchState.linkedGitLabMr?.title || newBranchState.linkedGiteaIssue?.title || newBranchState.linkedGiteaPr?.title}
                     </span>
                     
                     <a
-                      href={newBranchState.linkedIssue?.url || newBranchState.linkedPr?.url || newBranchState.linkedGitLabIssue?.url || newBranchState.linkedGitLabMr?.url}
+                      href={newBranchState.linkedIssue?.url || newBranchState.linkedPr?.url || newBranchState.linkedGitLabIssue?.url || newBranchState.linkedGitLabMr?.url || newBranchState.linkedGiteaIssue?.url || newBranchState.linkedGiteaPr?.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-muted-foreground hover:text-foreground shrink-0"
@@ -2418,6 +2807,18 @@ export function NewWorktreeDialog({
                         {newBranchState.linkedGitLabMr.sourceBranch}
                       </span>
                       {newBranchState.includeGitLabMrDiff && (
+                        <span className="typography-micro px-1 py-0.5 rounded bg-status-success/10 text-status-success">
+                          {t('session.newWorktree.includeDiffBadge')}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {newBranchState.linkedGiteaPr && (
+                    <div className="flex items-center gap-2 mt-0.5 pl-5">
+                      <span className="typography-micro text-muted-foreground">
+                        {newBranchState.linkedGiteaPr.sourceBranch}
+                      </span>
+                      {newBranchState.includeGiteaPrDiff && (
                         <span className="typography-micro px-1 py-0.5 rounded bg-status-success/10 text-status-success">
                           {t('session.newWorktree.includeDiffBadge')}
                         </span>
@@ -2476,6 +2877,12 @@ export function NewWorktreeDialog({
         open={gitlabDialogOpen}
         onOpenChange={setGitlabDialogOpen}
         onSelect={handleGitLabSelect}
+      />
+
+      <GiteaIntegrationDialog
+        open={giteaDialogOpen}
+        onOpenChange={setGiteaDialogOpen}
+        onSelect={handleGiteaSelect}
       />
     </>
   );

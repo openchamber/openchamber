@@ -20,6 +20,7 @@ import type {
   GitHubPullRequest,
   GitHubChecksSummary,
   GitLabMergeRequestSummary,
+  GiteaPullRequestSummary,
 } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 
@@ -54,6 +55,8 @@ interface GitHeaderProps {
   onOpenPullRequest?: () => void;
   gitLabMr?: GitLabMergeRequestSummary | null;
   onOpenGitLabMr?: () => void;
+  giteaPr?: GiteaPullRequestSummary | null;
+  onOpenGiteaPr?: () => void;
 }
 
 const IDENTITY_ICON_MAP: Record<string, IconName> = {
@@ -263,6 +266,8 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   onOpenPullRequest,
   gitLabMr,
   onOpenGitLabMr,
+  giteaPr,
+  onOpenGiteaPr,
 }) => {
   const { t } = useI18n();
   if (!status) {
@@ -410,6 +415,40 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     </Tooltip>
   ) : null;
 
+  // Gitea pull request chip, mirroring the GitLab MR chip above. There is no
+  // Gitea brand icon in the sprite, so the neutral pull-request icon carries
+  // the state colour.
+  const giteaPrVisualState = giteaPr
+    ? giteaPr.state === 'merged'
+      ? 'merged'
+      : giteaPr.state === 'closed'
+        ? 'closed'
+        : giteaPr.draft
+          ? 'draft'
+          : 'open'
+    : null;
+
+  const giteaPrChip = giteaPr && onOpenGiteaPr ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenGiteaPr}
+          className="h-8 gap-1.5 px-2 typography-micro"
+        >
+          <Icon
+            name="git-pull-request"
+            className="size-3.5"
+            style={{ color: `var(--pr-${giteaPrVisualState})` }}
+          />
+          <span className="tabular-nums text-foreground/80">#{giteaPr.number}</span>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={8}>{t('gitView.header.openPullRequest')}</TooltipContent>
+    </Tooltip>
+  ) : null;
+
   const syncButtons = (
     <SyncActions
       syncAction={syncAction}
@@ -475,6 +514,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
       <div className="mt-3 flex h-8 min-w-0 items-center gap-2">
         {prChip ? <div className="shrink-0">{prChip}</div> : null}
         {gitLabMrChip ? <div className="shrink-0">{gitLabMrChip}</div> : null}
+        {giteaPrChip ? <div className="shrink-0">{giteaPrChip}</div> : null}
         <div className="min-w-0 flex-1" />
         {upstreamStatusPill ? (
           <div className="min-w-0 shrink">{upstreamStatusPill}</div>
