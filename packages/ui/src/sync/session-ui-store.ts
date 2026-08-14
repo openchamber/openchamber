@@ -921,7 +921,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       permissionAutoAcceptEnabled: options?.permissionAutoAcceptEnabled === true,
       pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
       bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? null),
-      preserveDirectoryOverride: options?.preserveDirectoryOverride === true,
+      // A caller that supplies a directory is making a deliberate routing
+      // choice (for example, opening a specific worktree). Do not later
+      // reinterpret that target as the persisted default directory.
+      preserveDirectoryOverride: options?.preserveDirectoryOverride === true || explicitDirectory !== null,
       parentID: options?.parentID ?? null,
       title: options?.title,
       initialPrompt: options?.initialPrompt,
@@ -1416,14 +1419,42 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const targetFolderId = draft.targetFolderId
 
     try {
-      const dir = directoryOverride ?? opencodeClient.getDirectory()
+      let dir = directoryOverride ?? opencodeClient.getDirectory()
+      const isDefaultDraftDirectory =
+        draft.open
+        && !draft.preserveDirectoryOverride
+        && normalizePath(draft.directoryOverride) === normalizePath(dir ?? null)
+      const projectsState = useProjectsStore.getState()
+      const activeProjectDirectory = projectsState.getActiveProject()?.path
+        ?? (draft.selectedProjectId
+          ? projectsState.projects.find((project) => project.id === draft.selectedProjectId)?.path
+          : null)
+      const runtimeKey = getRuntimeKey()
+      const draftDirectory = draft.directoryOverride
+
+      if (isDefaultDraftDirectory && dir && activeProjectDirectory && normalizePath(dir) !== normalizePath(activeProjectDirectory)) {
+        const availability = await opencodeClient.getDirectoryAvailability(dir)
+        const currentDraft = get().newSessionDraft
+        const draftChanged = !currentDraft.open
+          || currentDraft.preserveDirectoryOverride !== draft.preserveDirectoryOverride
+          || normalizePath(currentDraft.directoryOverride) !== normalizePath(draftDirectory)
+
+        if (getRuntimeKey() !== runtimeKey || draftChanged) {
+          return null
+        }
+
+        if (availability === 'missing') {
+          dir = activeProjectDirectory
+        }
+      }
+
       const session = await createSessionAction(title, dir, parentID ?? null, metadata)
       if (!session) return null
 
       get().closeNewSessionDraft()
 
       if (targetFolderId) {
-        const scopeKey = directoryOverride || get().lastLoadedDirectory || session.directory
+        const scopeKey = dir || get().lastLoadedDirectory || session.directory
         if (scopeKey) {
           useSessionFoldersStore.getState().addSessionToFolder(scopeKey, targetFolderId, session.id)
         }

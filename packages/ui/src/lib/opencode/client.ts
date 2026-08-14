@@ -68,6 +68,21 @@ type SdkResult<T> = {
   response?: { status?: number };
 };
 
+type DirectoryAvailability = 'available' | 'missing' | 'unknown';
+
+const isMissingDirectoryError = (error: unknown): boolean => {
+  if (error instanceof FilesystemError) {
+    return error.reason === 'not-found' || error.reason === 'not-directory';
+  }
+  if (error && typeof error === 'object') {
+    const code = (error as { code?: unknown }).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return true;
+    }
+  }
+  return /\bENOENT\b|\bENOTDIR\b|no such file or directory/i.test(formatSdkError(error));
+};
+
 function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
   if (result.error) {
     const status = result.response?.status;
@@ -517,6 +532,27 @@ class OpencodeService {
       return Boolean(returned && returned.trim().length > 0);
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Determines whether OpenCode can resolve a directory without treating an
+   * unavailable runtime as proof that the directory is missing.
+   */
+  async getDirectoryAvailability(directory: string): Promise<DirectoryAvailability> {
+    const normalized = this.normalizeCandidatePath(directory);
+    if (!normalized) {
+      return 'unknown';
+    }
+    try {
+      const response = await this.client.path.get({ directory: normalized }) as SdkResult<{ directory?: unknown }>;
+      if (response.error) {
+        return isMissingDirectoryError(response.error) ? 'missing' : 'unknown';
+      }
+      const returned = typeof response.data?.directory === 'string' ? response.data.directory.trim() : '';
+      return returned ? 'available' : 'unknown';
+    } catch (error) {
+      return isMissingDirectoryError(error) ? 'missing' : 'unknown';
     }
   }
 
