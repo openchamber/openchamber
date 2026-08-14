@@ -25,6 +25,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   const displayMode = useQuotaStore((state) => state.displayMode);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const displayPercent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
+  const hasPercent = typeof displayPercent === 'number' && Number.isFinite(displayPercent);
   const barLabel = displayMode === 'remaining' ? 'remaining' : 'used';
   const percentLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
   const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
@@ -53,21 +54,27 @@ export const UsageCard: React.FC<UsageCardProps> = ({
         </div>
       </div>
 
-      <div className="mt-2.5">
-        <UsageProgressBar
-          percent={displayPercent}
-          tonePercent={window.usedPercent}
-          className="h-1.5"
-        />
-        <div className="mt-1 flex items-center justify-between">
-          <span className="typography-micro text-muted-foreground">
-            {resetLabel ? `Resets ${resetLabel}` : ''}
-          </span>
-          <span className="typography-micro text-muted-foreground">
-            {barLabel}
-          </span>
+      {hasPercent ? (
+        <div className="mt-2.5">
+          <UsageProgressBar
+            percent={displayPercent}
+            tonePercent={window.usedPercent}
+            className="h-1.5"
+          />
+          <div className="mt-1 flex items-center justify-between">
+            <span className="typography-micro text-muted-foreground">
+              {resetLabel ? `Resets ${resetLabel}` : ''}
+            </span>
+            <span className="typography-micro text-muted-foreground">
+              {barLabel}
+            </span>
+          </div>
         </div>
-      </div>
+      ) : resetLabel ? (
+        <div className="mt-1 typography-micro text-muted-foreground">
+          {`Resets ${resetLabel}`}
+        </div>
+      ) : null}
 
     </div>
   );

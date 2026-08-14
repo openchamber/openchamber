@@ -1275,6 +1275,11 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
       (entry): entry is string => typeof entry === 'string' && entry.length > 0
     );
   }
+  if (Array.isArray(candidate.usageHiddenProviders)) {
+    result.usageHiddenProviders = candidate.usageHiddenProviders.filter(
+      (entry): entry is string => typeof entry === 'string' && entry.length > 0
+    );
+  }
 
   // Parse usageSelectedModels (Record<string, string[]>)
   if (candidate.usageSelectedModels && typeof candidate.usageSelectedModels === 'object') {

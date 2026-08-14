@@ -521,11 +521,31 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['ignored', 'files', 'gitignore'],
   },
   {
+    id: 'usage.overview',
+    page: 'usage',
+    titleKey: 'settings.usage.overview.title',
+    descriptionKey: 'settings.usage.overview.description',
+    keywords: ['overview', 'dashboard', 'spend', 'cost', 'chart', 'tokens'],
+  },
+  {
+    id: 'usage.add-provider',
+    page: 'usage',
+    titleKey: 'settings.usage.overview.actions.addProvider',
+    descriptionKey: 'settings.usage.overview.actions.addProviderDescription',
+    keywords: ['add', 'connect', 'provider', 'credentials'],
+  },
+  {
     id: 'usage.work-status-panel',
     page: 'usage',
     titleKey: 'settings.usage.page.options.showInWorkStatus',
     descriptionKey: 'settings.usage.page.options.showInWorkStatusTooltip',
     keywords: ['quota', 'work', 'status', 'panel'],
+  },
+  {
+    id: 'usage.period-stats',
+    page: 'usage',
+    titleKey: 'settings.usage.page.section.periodUsage',
+    keywords: ['period', 'chart', 'cost', 'tokens', 'requests'],
   },
   {
     id: 'usage.model-quotas',

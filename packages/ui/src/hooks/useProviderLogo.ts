@@ -21,6 +21,7 @@ const LOGO_ALIAS = new Map<string, string>([
     ['chatgpt', 'openai'],
     ['claude', 'anthropic'],
     ['gemini', 'google'],
+    ['github-copilot-addon', 'github-copilot'],
     ['evroc-ai', 'evroc'],
     ['evrocai', 'evroc'],
     ['ollama-cloud', 'ollama'],

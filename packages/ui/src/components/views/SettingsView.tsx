@@ -29,6 +29,8 @@ import { ProvidersSidebar } from '@/components/sections/providers/ProvidersSideb
 import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
 import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
 import { UsagePage } from '@/components/sections/usage/UsagePage';
+import { useQuotaStore } from '@/stores/useQuotaStore';
+import { USAGE_ADD_PROVIDER_ID } from '@/lib/quota';
 import { MagicPromptsSidebar } from '@/components/sections/magic-prompts/MagicPromptsSidebar';
 import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromptsPage';
 import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar';
@@ -437,6 +439,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
     if (result.id === 'providers.connect') {
       useConfigStore.getState().setSelectedProvider(ADD_PROVIDER_SETTINGS_ID);
+    }
+
+    if (result.id === 'usage.add-provider') {
+      useQuotaStore.getState().setSelectedProvider(USAGE_ADD_PROVIDER_ID);
+    }
+
+    if (result.id === 'usage.overview') {
+      useQuotaStore.getState().setSelectedProvider(null);
+    }
+
+    if (result.id === 'usage.work-status-panel' || result.id === 'usage.model-quotas' || result.id === 'usage.period-stats') {
+      const quota = useQuotaStore.getState();
+      const hidden = new Set(quota.hiddenProviderIds);
+      const active = quota.results.find((entry) => entry.configured && !hidden.has(entry.providerId));
+      if (active) {
+        quota.setSelectedProvider(active.providerId);
+      } else {
+        quota.setSelectedProvider(null);
+        return 'usage.overview';
+      }
     }
 
     if (result.id === 'plugins.create') {

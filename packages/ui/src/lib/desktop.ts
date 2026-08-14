@@ -99,6 +99,8 @@ export type DesktopSettings = {
 
   usageDisplayMode?: 'usage' | 'remaining';
   usageDropdownProviders?: string[];
+  /** Configured quota providers intentionally hidden from the Usage sidebar/overview. */
+  usageHiddenProviders?: string[];
   usageSelectedModels?: Record<string, string[]>;  // Map of providerId -> selected model names
   usageCollapsedFamilies?: Record<string, string[]>;  // Map of providerId -> collapsed family IDs (UsagePage)
   usageExpandedFamilies?: Record<string, string[]>;  // Map of providerId -> EXPANDED family IDs (header dropdown - inverted)
