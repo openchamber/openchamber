@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
+import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
+import { GitLabIssuesSection } from '@/components/views/git/GitLabIssuesSection';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useGitStatus, useGitStore } from '@/stores/useGitStore';
@@ -82,6 +84,10 @@ export const GitLabMrView: React.FC = () => {
     setSettingsPage('git');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
+
+  // Local tab selection between the merge-request and issues surfaces. Not
+  // persisted: reopening the panel always lands on merge requests.
+  const [activeTab, setActiveTab] = React.useState<'mr' | 'issues'>('mr');
 
   // ---- Current-branch merge request --------------------------------------
 
@@ -558,6 +564,23 @@ export const GitLabMrView: React.FC = () => {
       preventOverscroll
     >
       <div className="flex flex-col gap-4">
+        <div className="flex h-8 min-w-0">
+          <SortableTabsStrip
+            className="h-full"
+            items={[
+              { id: 'mr', label: t('contextPanel.gitlabMr.tabs.mergeRequests') },
+              { id: 'issues', label: t('contextPanel.gitlabMr.tabs.issues') },
+            ]}
+            activeId={activeTab}
+            onSelect={(tabId) => setActiveTab(tabId as 'mr' | 'issues')}
+            layoutMode="fit"
+            variant="active-pill"
+            activePillButtonClassName="h-7"
+          />
+        </div>
+
+        {activeTab === 'mr' ? (
+          <>
         <div className="flex flex-col gap-0.5">
           <div className="typography-ui-header font-semibold text-foreground">{t('contextPanel.gitlabMr.title')}</div>
           <div className="typography-micro text-muted-foreground">{t('contextPanel.gitlabMr.listSectionTitle')}</div>
@@ -921,6 +944,10 @@ export const GitLabMrView: React.FC = () => {
             </div>
           )}
         </section>
+          </>
+        ) : (
+          <GitLabIssuesSection directory={currentDirectory} />
+        )}
       </div>
     </ScrollableOverlay>
   );
