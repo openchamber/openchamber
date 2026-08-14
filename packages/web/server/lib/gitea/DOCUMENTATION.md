@@ -2,7 +2,7 @@
 
 ## Purpose
 
-- This module owns Gitea/Forgejo auth (Personal Access Token), raw REST v1 client access, remote-URL repo resolution, and Gitea issue / pull-request (PR) APIs for OpenChamber, including PR create/update/merge writes.
+- This module owns Gitea/Forgejo auth (Personal Access Token), raw REST v1 client access, remote-URL repo resolution, and Gitea issue / pull-request (PR) APIs for OpenChamber, including issue create/update and PR create/update/merge writes.
 - From a user perspective, this is the layer that lets the app show Gitea issues and pull requests for a local project, including comments and per-file diffs, and create, edit, and merge pull requests.
 - Gitea and Forgejo share the same GitHub-style REST v1 API, so this module serves both. Gitea calls remote work **pull requests** (PR), not merge requests. Gitea repos are flat `owner/repo` — there are no multi-segment namespaces.
 - The module mirrors `packages/web/server/lib/gitlab/` (PAT auth + raw-fetch client) but uses a **Personal Access Token** against the `Authorization: token <pat>` header and a **user-supplied base URL** (Gitea is self-hosted; there is no default instance).
@@ -33,7 +33,7 @@
 
 ### Client (`client.js`)
 
-- `createGiteaClient({ token, baseUrl })`: raw-fetch REST v1 client with `request(path, { method, query, body, signal, raw })` plus convenience methods `user()`, `repo(owner, repo)`, `issues(owner, repo, params)`, `issue(owner, repo, number)`, `issueComments(owner, repo, number, params)`, `createIssueComment(owner, repo, number, body)`, `updateIssue(owner, repo, number, params)` (PATCH), `milestones(owner, repo, params)`, `repoLabels(owner, repo, params)`, `pullRequests(owner, repo, params)`, `pullRequest(owner, repo, number)`, `pullRequestDiff(owner, repo, number)` (raw `.diff` text via the `raw` option), `pullRequestFiles(owner, repo, number, params)`, `pullRequestCommits(owner, repo, number, params)`, `pullRequestReviews(owner, repo, number, params)`, `createPullReview(owner, repo, number, params)` (POST), `commitStatuses(owner, repo, sha, params)`, `createPullRequest(owner, repo, body)`, `updatePullRequest(owner, repo, number, body)` (PATCH), `mergePullRequest(owner, repo, number, body)` (POST), `branches(owner, repo, params)`.
+- `createGiteaClient({ token, baseUrl })`: raw-fetch REST v1 client with `request(path, { method, query, body, signal, raw })` plus convenience methods `user()`, `repo(owner, repo)`, `issues(owner, repo, params)`, `issue(owner, repo, number)`, `issueComments(owner, repo, number, params)`, `createIssueComment(owner, repo, number, body)`, `createIssue(owner, repo, params)` (POST), `updateIssue(owner, repo, number, params)` (PATCH), `milestones(owner, repo, params)`, `repoLabels(owner, repo, params)`, `pullRequests(owner, repo, params)`, `pullRequest(owner, repo, number)`, `pullRequestDiff(owner, repo, number)` (raw `.diff` text via the `raw` option), `pullRequestFiles(owner, repo, number, params)`, `pullRequestCommits(owner, repo, number, params)`, `pullRequestReviews(owner, repo, number, params)`, `createPullReview(owner, repo, number, params)` (POST), `commitStatuses(owner, repo, sha, params)`, `createPullRequest(owner, repo, body)`, `updatePullRequest(owner, repo, number, body)` (PATCH), `mergePullRequest(owner, repo, number, body)` (POST), `branches(owner, repo, params)`.
 - `getGiteaClientOrNull()`: client for the current account, or `null`.
 - `isGiteaRateLimited()` / `noteGiteaRateLimit(error)`: own module-level rate-limit cooldown (not shared with the GitHub/GitLab modules).
 
@@ -67,6 +67,7 @@
 - User: `GET /user` -> `{ id, login, full_name, avatar_url, html_url, email, ... }`.
 - Issue list: `GET /repos/{owner}/{repo}/issues?type=issues&state=open&limit=50&page=N&q=<query>` (`type=issues` excludes pull requests; entries carrying a `pull_request` field are skipped client-side as a backstop).
 - Issue detail: `GET /repos/{owner}/{repo}/issues/{number}`.
+- Issue create: `POST /repos/{owner}/{repo}/issues` with `{ title, body?, labels? }` (labels are label **names**; `body` omitted when absent).
 - Issue/PR comments: `GET /repos/{owner}/{repo}/issues/{number}/comments`.
 - PR list: `GET /repos/{owner}/{repo}/pulls?state=open&limit=50&page=N&q=<query>`. Gitea has no server-side source-branch filter, so when `sourceBranch` is requested the route scans `state=all` pages (cap 10 pages) and filters by `head.ref === sourceBranch` client-side, returning all matching states (open and merged).
 - PR detail: `GET /repos/{owner}/{repo}/pulls/{number}`.

@@ -18,7 +18,9 @@ const issueLabelBadgeClass =
  * Open Gitea issues for the context panel's PR view. The list is fetched
  * lazily (the parent only mounts this component while the Issues tab is
  * active); selecting a row mounts the shared `ForgeEntityDetailView` for the
- * issue detail. Read-only by design — no create, update, or close actions.
+ * issue detail. Issue creation is supported here via the "new issue" button
+ * and `ForgeCreateIssueDialog`; the detail view also offers edit, close/reopen,
+ * comments, and metadata editing through the Gitea provider's write methods.
  */
 export const GiteaIssuesSection: React.FC<{ directory: string }> = ({ directory }) => {
   const { t } = useI18n();

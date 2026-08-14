@@ -260,6 +260,83 @@ describe('createWebGiteaAPI', () => {
     await expect(api.prMerge({ directory: '/workspace', number: 12 })).rejects.toThrow('Bad Gateway');
   });
 
+  it('posts to /api/gitea/issues/create with the input body and returns the created issue', async () => {
+    const created = {
+      connected: true,
+      repo: null,
+      issue: {
+        number: 42,
+        title: 'Broken build',
+        url: 'https://gitea.example/owner/repo/issues/42',
+        state: 'open',
+        author: { username: 'octocat', id: 1 },
+        labels: ['bug'],
+      },
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(created));
+
+    const api = await createAPI();
+    await expect(api.issueCreate!({
+      directory: '/workspace',
+      title: 'Broken build',
+      body: 'The build is failing',
+      labels: ['bug'],
+      owner: 'group',
+      repo: 'repo',
+    })).resolves.toEqual(created);
+
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/gitea/issues/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        directory: '/workspace',
+        title: 'Broken build',
+        body: 'The build is failing',
+        labels: ['bug'],
+        owner: 'group',
+        repo: 'repo',
+      }),
+    });
+  });
+
+  it('omits optional body/labels/owner/repo from the issueCreate body when absent', async () => {
+    const created = {
+      connected: true,
+      repo: null,
+      issue: {
+        number: 43,
+        title: 'Title only',
+        url: 'https://gitea.example/owner/repo/issues/43',
+        state: 'open',
+        author: { username: 'octocat', id: 1 },
+        labels: [],
+      },
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(created));
+
+    const api = await createAPI();
+    await expect(api.issueCreate!({ directory: '/workspace', title: 'Title only' })).resolves.toEqual(created);
+
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/gitea/issues/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ directory: '/workspace', title: 'Title only' }),
+    });
+  });
+
+  it('throws the server error when issueCreate fails', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(
+      { error: 'Your Gitea token needs write:repository scope to create issues' },
+      { status: 400 },
+    ));
+
+    const api = await createAPI();
+    await expect(api.issueCreate!({
+      directory: '/workspace',
+      title: 'Broken build',
+    })).rejects.toThrow('Your Gitea token needs write:repository scope to create issues');
+  });
+
   it('parses branches and the default branch from repoBranches', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ branches: ['main', 'feat/api'], defaultBranch: 'main' }));
 
