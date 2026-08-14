@@ -198,4 +198,44 @@ describe('createOpenCodeProxyAgent', () => {
     expect(createOpenCodeProxyAgent(undefined)).not.toBeInstanceOf(https.Agent);
     expect(createOpenCodeProxyAgent('not a url')).not.toBeInstanceOf(https.Agent);
   });
+
+  // The cold-start fix relies on http-proxy-middleware rebuilding its per-request
+  // options via `Object.assign({}, this.proxyOptions)` in prepareProxyRequest,
+  // which invokes getters. If that ever changes to a cached or shallow-reference
+  // copy, the agent would freeze at its registration-time value and https targets
+  // would silently regress — so pin the behavior here against the real library.
+  it('http-proxy-middleware re-reads the agent option on every proxied request', async () => {
+    let reads = 0;
+    const agent = createOpenCodeProxyAgent('http://127.0.0.1');
+    const upstream = http.createServer((_req, res) => res.end('ok'));
+    const upstreamPort = await listen(upstream);
+
+    const middleware = createProxyMiddleware({
+      target: `http://127.0.0.1:${upstreamPort}`,
+      get agent() {
+        reads += 1;
+        return agent;
+      },
+    });
+    const front = http.createServer((req, res) => {
+      middleware(req, res, () => {
+        res.statusCode = 502;
+        res.end();
+      });
+    });
+    const frontPort = await listen(front);
+    const clientAgent = new http.Agent({ keepAlive: true });
+
+    try {
+      await request(frontPort, clientAgent);
+      await request(frontPort, clientAgent);
+    } finally {
+      clientAgent.destroy();
+      agent.destroy();
+      await closeServer(front);
+      await closeServer(upstream);
+    }
+
+    expect(reads).toBeGreaterThanOrEqual(2);
+  });
 });

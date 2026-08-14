@@ -61,6 +61,39 @@ export const createOpenCodeProxyAgent = (target) => (
     : new http.Agent(OPENCODE_AGENT_OPTIONS)
 );
 
+/**
+ * Lazily resolves the proxy agent, memoized per scheme.
+ *
+ * The scheme cannot be decided at registration time: `setupProxy()` runs before
+ * `bootstrapOpenCodeAtStartup()` (startup-pipeline-runtime.js), so on a cold
+ * start `state.openCodePort` is still null, `buildOpenCodeUrl()` throws
+ * (network-runtime.js) and `resolveProxyTarget()` falls back to the http
+ * loopback default. An external server configured over https via
+ * `OPENCODE_HOST` only becomes visible on `state.openCodeBaseUrl` after
+ * bootstrap completes.
+ *
+ * http-proxy-middleware rebuilds its per-request options with
+ * `Object.assign({}, this.proxyOptions)` inside `prepareProxyRequest`, which
+ * invokes getters, so exposing `agent` as a getter defers resolution to request
+ * time. Memoizing per scheme keeps a single shared pool per scheme rather than
+ * allocating an agent per request.
+ */
+const createOpenCodeProxyAgentResolver = (resolveTarget) => {
+  const agents = new Map();
+
+  return () => {
+    const scheme = isHttpsProxyTarget(resolveTarget()) ? 'https:' : 'http:';
+    let agent = agents.get(scheme);
+    if (!agent) {
+      agent = scheme === 'https:'
+        ? new https.Agent(OPENCODE_AGENT_OPTIONS)
+        : new http.Agent(OPENCODE_AGENT_OPTIONS);
+      agents.set(scheme, agent);
+    }
+    return agent;
+  };
+};
+
 export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } = {}) => {
   const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
 
@@ -817,15 +850,18 @@ export const registerOpenCodeProxy = (app, deps) => {
   });
 
   // Generic proxy for non-SSE OpenCode API routes.
-  // One shared keep-alive agent backs every proxied request, so the socket pool
-  // is reused across both `apiProxy` and `interactiveOAuthProxy`. The agent
-  // class is derived from the resolved target scheme — external servers may be
-  // configured over https via OPENCODE_HOST.
-  const openCodeProxyAgent = createOpenCodeProxyAgent(resolveProxyTarget());
+  // The agent is exposed as a getter so its class is resolved per request, not
+  // at registration: the proxy is registered before OpenCode bootstraps, so an
+  // https target configured via OPENCODE_HOST is not yet visible here. Agents
+  // are memoized per scheme, so this is still one shared pool per scheme across
+  // `apiProxy` and `interactiveOAuthProxy`.
+  const resolveOpenCodeProxyAgent = createOpenCodeProxyAgentResolver(resolveProxyTarget);
 
   const createApiProxy = (timeoutMs) => createProxyMiddleware({
     target: resolveProxyTarget(),
-    agent: openCodeProxyAgent,
+    get agent() {
+      return resolveOpenCodeProxyAgent();
+    },
     changeOrigin: true,
     pathRewrite: { '^/api': '' },
     timeout: timeoutMs,
