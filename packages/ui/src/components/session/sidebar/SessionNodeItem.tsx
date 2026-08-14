@@ -29,7 +29,7 @@ import { DraggableSessionRow } from './sessionFolderDnd';
 import { nodeContainsSessionId, nodeHasPinnedMembershipChange, selectQuestionBadgeSessionScopes } from './sessionNodeItemUtils';
 import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
-import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
+import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
@@ -355,7 +355,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     }, [projectId, secondaryMeta?.projectLabel]),
   );
   const tooltipProjectLabel = secondaryMeta?.projectLabel
-    ?? (projectLabelFromStore ? formatProjectLabel(projectLabelFromStore) : null);
+    ?? projectLabelFromStore;
   const tooltipBranchLabel = secondaryMeta?.branchLabel ?? node.worktree?.branch ?? null;
   const prLookupKey = React.useMemo(() => {
     if (isVSCode) return null;

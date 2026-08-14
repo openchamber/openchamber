@@ -156,12 +156,6 @@ export const resolveArchivedFolderName = (session: Session, projectRoot: string 
   return segments[segments.length - 1] ?? 'unassigned';
 };
 
-export const formatProjectLabel = (label: string): string => {
-  return label
-    .replace(/[-_]/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-};
-
 export const renderHighlightedText = (text: string, query: string): React.ReactNode => {
   if (!query) {
     return text;

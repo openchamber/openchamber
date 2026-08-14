@@ -14,7 +14,6 @@ import { formatDirectoryName, formatPathForDisplay, cn } from '@/lib/utils';
 import type { SessionGroup } from './types';
 import type { SortableDragHandleProps } from './sortableItems';
 import { ProjectHeaderIdentity, SortableGroupItem, SortableProjectItem } from './sortableItems';
-import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
 import type { MainTab } from '@/stores/useUIStore';
 import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
@@ -39,11 +38,9 @@ const TOP_FADE_MIN_SIZE = 32;
 const TOP_FADE_CLEAR_MAX_SIZE = 24;
 
 const getProjectLabel = (project: ProjectSection['project'], homeDirectory: string | null): string => (
-  formatProjectLabel(
-    project.label?.trim()
-    || formatDirectoryName(project.normalizedPath, homeDirectory)
-    || project.normalizedPath,
-  )
+  project.label?.trim()
+  || formatDirectoryName(project.normalizedPath, homeDirectory)
+  || project.normalizedPath
 );
 
 type Props = {

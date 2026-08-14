@@ -71,7 +71,6 @@ import {
 } from './sidebar/activitySections';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import {
-  formatProjectLabel,
   normalizePath,
   selectExpandedParentKeysForContext,
   toggleExpandedParentKey,
@@ -773,7 +772,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   );
 
   const handleSaveProjectEdit = React.useCallback((data: {
-    label: string;
+    label: string | null;
     icon: string | null;
     color: string | null;
     iconBackground: string | null;
@@ -1325,11 +1324,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     const projectPathLengthBySessionId = new Map<string, number>();
 
     projectSections.forEach((section) => {
-      const projectLabel = formatProjectLabel(
-        section.project.label?.trim()
+      const projectLabel = section.project.label?.trim()
         || formatDirectoryName(section.project.normalizedPath, homeDirectory)
-        || section.project.normalizedPath,
-      );
+        || section.project.normalizedPath;
       section.groups.forEach((group) => {
         const branchCandidate = group.branch && group.branch !== 'HEAD' && group.branch !== projectLabel
           ? group.branch
