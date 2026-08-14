@@ -269,6 +269,10 @@ Rows that name something the app can already show are buttons:
 | MCP status | the state doubles as the button that reconnects |
 | Pinned (pin icon) | unpins the message |
 | Pinned (text) | jumps the transcript to that message |
+| Linked (title) | opens the issue/PR in the browser |
+| Linked (refresh) | refetches that entity's live state (cache-busting) |
+| Linked (unlink) | removes the link from the session, after confirm |
+| Link (section header) | opens the paste-a-URL link dialog |
 
 The goal icon reproduces the **composer target button's** colour mapping, not
 the goal strip's. The two disagree today — the strip paints `paused` muted and
@@ -296,18 +300,31 @@ something other than "tools available".
 
 ### Linked issues and pull requests
 
-Written by the flows that already attach a thread — the composer's issue/PR
-pickers, and session creation from an issue or PR in `NewWorktreeDialog` and
-`GitHubIssuePickerDialog`. There is no manual "link this" control: attaching a
-thread to the work *is* the act of linking it.
+Written by the flows that attach a thread — the composer's issue/PR pickers,
+session creation from an issue or PR in `NewWorktreeDialog` and
+`GitHubIssuePickerDialog` — **and** by the section's own Link control, which
+accepts a pasted issue/PR URL (validated against the forge before recording)
+and per-row Unlink. Attaching a thread and pasting a URL are the same act of
+linking; the row always knows how to unlink itself.
 
 Stored in session metadata as a **snapshot** (`lib/linkedIssues.ts`, namespace
 `openchamber.linked_issues`), riding the same `patchSessionMetadata` channel as
 pinned messages. Number, title, url, author and avatar only — the body,
-comments and state belong to GitHub, and mirroring them would mean owning their
-staleness. The stored title can drift; that is the price of a store that never
-needs refreshing. The row opens the real thread, which is where current state
-lives.
+comments and state belong to the forge, and mirroring them would mean owning
+their staleness.
+
+Each row renders as a **live card** (`lib/linkedEntityLive.ts`) when the entry
+resolves to a forge entity and the runtime carries that provider's API: the
+current open/merged/closed state, the draft marker and the freshest title are
+fetched on mount and on the row's refresh button — never on an interval. The
+snapshot stays the fallback for whatever the fetch has not answered yet
+(initial loading shows a spinner; a failed fetch shows a muted "live
+unavailable" marker rather than silently looking stale). Fetches go through the
+forge facade (`lib/forge/adapters.ts`) addressed to the session's directory, so
+the repo resolves from the session's remotes; a cross-repo entity reports live
+state as unavailable instead of guessing. Results are cached per entity for
+60s in a module-level TTL cache, read synchronously for the initial render so
+an already-resolved entity never flashes back to the snapshot.
 
 Writes happen **after** the send promise resolves and are deliberately
 swallowed on failure: the message went out, and a missing bookkeeping entry

@@ -1,9 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useI18n } from '@/lib/i18n';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
+import { normalizePath } from '@/lib/pathNormalization';
+import { useUIStore } from '@/stores/useUIStore';
+import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { findLinkedSessionsForEntity, linkedEntityCandidateIds } from '@/lib/linkedSessionMatches';
 import type {
   ForgeChecksResult,
   ForgeCommitsResult,
@@ -19,6 +25,7 @@ import { ForgeCommitsSection } from './ForgeCommitsSection';
 import { ForgeFilesDiffSection } from './ForgeFilesDiffSection';
 import { ForgeTimelineSection } from './ForgeTimelineSection';
 import { ForgeChecksSection } from './ForgeChecksSection';
+import { LinkedSessionsSection } from './LinkedSessionsSection';
 import {
   ForgeCommentComposer,
   ForgeEntityActions,
@@ -112,6 +119,34 @@ export const ForgeEntityDetailView: React.FC<ForgeEntityDetailViewProps> = ({ pr
   // Id of the thread root the user is replying to (renders ForgeThreadReply
   // under that thread card).
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
+
+  // Sessions in the same project as this view, from the same authoritative
+  // store the sidebar consumes. Derived client-side: no extra fetching.
+  const allSessions = useGlobalSessionsStore(useShallow((state) => state.activeSessions));
+  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+
+  // The repo this entity lives on, resolved from the loaded context/issue.
+  const repoRef = isIssue ? (issueDetail?.repo ?? null) : (pull?.context?.repo ?? null);
+
+  const projectSessions = useMemo(() => {
+    const base = normalizePath(directory);
+    if (!base) return allSessions;
+    return allSessions.filter((session) => {
+      const sessionDirectory = resolveGlobalSessionDirectory(session);
+      return sessionDirectory === base || (sessionDirectory !== null && sessionDirectory.startsWith(`${base}/`));
+    });
+  }, [allSessions, directory]);
+
+  const linkedSessions = useMemo(() => {
+    if (!repoRef) return [];
+    const candidateIds = linkedEntityCandidateIds(repoRef, number);
+    return findLinkedSessionsForEntity(projectSessions, provider.kind, candidateIds);
+  }, [number, projectSessions, provider.kind, repoRef]);
+
+  const openSession = useCallback((sessionId: string) => {
+    useUIStore.getState().closeMainSurfaces();
+    setCurrentSession(sessionId);
+  }, [setCurrentSession]);
 
   const reload = useCallback(() => {
     setReloadToken((value) => value + 1);
@@ -251,6 +286,7 @@ export const ForgeEntityDetailView: React.FC<ForgeEntityDetailViewProps> = ({ pr
         </div>
         <ForgeEntityActions provider={provider} directory={directory} ref={ref} issue={issue} onChanged={reload} />
         <ForgeMetadataChips kind="issue" issue={issue} />
+        <LinkedSessionsSection sessions={linkedSessions} onOpenSession={openSession} />
         <ForgeMetadataEditor
           provider={provider}
           directory={directory}
@@ -313,6 +349,8 @@ export const ForgeEntityDetailView: React.FC<ForgeEntityDetailViewProps> = ({ pr
       <ForgeEntityActions provider={provider} directory={directory} ref={ref} pr={pr} onChanged={reload} />
 
       <ForgeMetadataChips kind="pull" pr={pr} />
+
+      <LinkedSessionsSection sessions={linkedSessions} onOpenSession={openSession} />
 
       {checksForPull ? (
         <section aria-label={t('forge.section.checks')}>
