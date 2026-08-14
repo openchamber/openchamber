@@ -10,6 +10,7 @@ import type {
   Todo,
 } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
+import { compareMessages } from "./messageOrder"
 import type { FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
@@ -180,7 +181,10 @@ function hasMessage(draft: State, sessionID: string | undefined, messageID: stri
   if (!sessionID) return false
   const messages = draft.message[sessionID]
   if (!messages) return false
-  return Binary.search(messages, messageID, (message) => message.id).found
+  // Messages are ordered chronologically (time.created, then id), so an
+  // id-only lookup cannot binary search. This runs on part.updated events
+  // (not per text delta), and the list is bounded, so a linear scan is fine.
+  return messages.some((message) => message.id === messageID)
 }
 
 export function reduceGlobalEvent(event: Event): GlobalEventResult {
@@ -353,7 +357,11 @@ export function applyDirectoryEvent(
         draft.message[info.sessionID] = [info]
         return true
       }
-      const result = Binary.search(messages, info.id, (m) => m.id)
+      // Search by chronological order (time.created, then id). A raw id
+      // search would break after the OpenCode ID wrap boundary and a
+      // time-only search could duplicate the optimistic echo when client and
+      // server clocks differ, so fall back to an id dedupe before inserting.
+      const result = Binary.searchBy(messages, info, compareMessages)
       if (result.found) {
         // Skip message replacement if unchanged — preserves reference, avoids re-render
         const existing = messages[result.index]
@@ -367,7 +375,12 @@ export function applyDirectoryEvent(
         draft.message[info.sessionID] = next
       } else {
         const next = [...messages]
-        next.splice(result.index, 0, info)
+        const duplicateIndex = next.findIndex((message) => message.id === info.id)
+        if (duplicateIndex >= 0) {
+          next[duplicateIndex] = info
+        } else {
+          next.splice(result.index, 0, info)
+        }
         draft.message[info.sessionID] = next
       }
       return true
@@ -378,9 +391,9 @@ export function applyDirectoryEvent(
       const messages = draft.message[props.sessionID]
       if (messages) {
         const next = [...messages]
-        const result = Binary.search(next, props.messageID, (m) => m.id)
-        if (result.found) {
-          next.splice(result.index, 1)
+        const index = next.findIndex((message) => message.id === props.messageID)
+        if (index >= 0) {
+          next.splice(index, 1)
           draft.message[props.sessionID] = next
         }
       }

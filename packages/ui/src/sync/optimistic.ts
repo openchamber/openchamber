@@ -1,5 +1,6 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
+import { compareMessages } from "./messageOrder"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -46,7 +47,10 @@ export function mergeOptimisticPage(page: MessagePage, items: OptimisticItem[]) 
   const confirmed: string[] = []
 
   for (const item of items) {
-    const result = Binary.search(session, item.message.id, (message) => message.id)
+    // Messages are ordered chronologically (time.created, then id) — see
+    // compareMessages. A raw id search would place messages created after the
+    // OpenCode ID wrap boundary (2026-08-14) before all older ones.
+    const result = Binary.searchBy(session, item.message, compareMessages)
     const found = result.found
     if (!found) session.splice(result.index, 0, item.message)
 
@@ -83,5 +87,5 @@ export function mergeMessages<T extends { id: string }>(a: readonly T[], b: read
     }
   }
   if (!changed) return a as T[]
-  return [...existing.values()].sort((x, y) => cmp(x.id, y.id))
+  return [...existing.values()].sort(compareMessages)
 }

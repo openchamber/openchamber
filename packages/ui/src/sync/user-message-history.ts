@@ -1,4 +1,5 @@
 import type { Message, Part } from '@opencode-ai/sdk/v2/client';
+import { findMessageByID, isBeforeMessage } from './messageOrder';
 import type { State } from './types';
 
 type UserMessageHistoryRecord = {
@@ -61,13 +62,14 @@ export const buildUserMessageHistorySnapshot = (
   const messages = state.message[sessionID] ?? [];
   const session = state.session.find((candidate) => candidate.id === sessionID);
   const revertMessageID = (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID;
+  const revertAnchor = revertMessageID ? findMessageByID(messages, revertMessageID) : undefined;
   const records: UserMessageHistoryRecord[] = [];
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role !== 'user') {
       continue;
     }
-    if (revertMessageID && message.id >= revertMessageID) {
+    if (revertMessageID && !isBeforeMessage(message, revertAnchor, revertMessageID)) {
       continue;
     }
     records.push({

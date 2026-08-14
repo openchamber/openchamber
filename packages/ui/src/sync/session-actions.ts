@@ -5,6 +5,7 @@
 
 import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
+import { findMessageByID, isAtOrAfterMessage, isBeforeMessage, compareMessages } from "./messageOrder"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
@@ -1308,8 +1309,13 @@ export async function optimisticSend(input: {
   const stateBeforeSend = store.getState()
   const sessionBeforeSend = stateBeforeSend.session.find((session) => session.id === input.sessionId)
   const revertMessageID = sessionBeforeSend?.revert?.messageID
+  const storeMessages = stateBeforeSend.message[input.sessionId] ?? []
+  // Messages are ordered chronologically (time.created, then id), so the
+  // revert point must be compared by time — raw id comparison breaks across
+  // the OpenCode ID wrap boundary. The anchor is present at apply time.
+  const revertAnchor = revertMessageID ? findMessageByID(storeMessages, revertMessageID) : undefined
   const revertedMessages = revertMessageID
-    ? (stateBeforeSend.message[input.sessionId] ?? []).filter((message) => message.id >= revertMessageID)
+    ? storeMessages.filter((message) => isAtOrAfterMessage(message, revertAnchor, revertMessageID))
     : []
   const revertedParts = new Map(
     revertedMessages.map((message) => [message.id, stateBeforeSend.part[message.id] ?? []] as const),
@@ -1321,7 +1327,7 @@ export async function optimisticSend(input: {
     ))
     const message = {
       ...stateBeforeSend.message,
-      [input.sessionId]: (stateBeforeSend.message[input.sessionId] ?? []).filter((candidate) => candidate.id < revertMessageID),
+      [input.sessionId]: storeMessages.filter((candidate) => isBeforeMessage(candidate, revertAnchor, revertMessageID)),
     }
     const part = { ...stateBeforeSend.part }
     for (const revertedMessage of revertedMessages) delete part[revertedMessage.id]
@@ -1440,7 +1446,7 @@ export async function optimisticSend(input: {
       message = {
         ...rollbackState.message,
         [input.sessionId]: [...(rollbackState.message[input.sessionId] ?? []), ...revertedMessages]
-          .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+          .sort(compareMessages),
       }
       part = { ...rollbackState.part }
       for (const [revertedMessageID, parts] of revertedParts) {

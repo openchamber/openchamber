@@ -50,6 +50,7 @@ import {
 } from "./session-directory-resolution"
 import { markSessionViewed } from "./notification-store"
 import { setActiveSession } from "./sync-context"
+import { isBeforeMessage, isAfterMessage } from "./messageOrder"
 import {
   createSession as createSessionAction,
   deleteSession as deleteSessionAction,
@@ -1488,9 +1489,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (userMessages.length === 0) return
 
     const revertToId = currentSession?.revert?.messageID
+    const revertAnchor = revertToId ? messages.find((m) => m.id === revertToId) : undefined
     let targetMessage: typeof messages[number] | undefined
     if (revertToId) {
-      targetMessage = [...userMessages].reverse().find((m) => m.id < revertToId)
+      targetMessage = [...userMessages].reverse().find((m) => isBeforeMessage(m, revertAnchor, revertToId))
     } else {
       targetMessage = userMessages[userMessages.length - 1]
     }
@@ -1537,7 +1539,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     await refetchSessionMessages(sessionId)
     const messages = getSyncMessages(sessionId)
     const userMessages = messages.filter((m) => m.role === "user")
-    const targetMessage = userMessages.find((m) => m.id > revertToId)
+    const revertAnchor = messages.find((m) => m.id === revertToId)
+    const targetMessage = userMessages.find((m) => isAfterMessage(m, revertAnchor, revertToId))
 
     if (targetMessage) {
       await get().revertToMessage(sessionId, targetMessage.id, { skipRedoPush: true })

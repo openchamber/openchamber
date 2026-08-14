@@ -1,5 +1,6 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { mergeMessages } from "./optimistic"
+import { compareMessages } from "./messageOrder"
 import type { SessionMaterializationReason } from "./event-reducer"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
@@ -264,7 +265,7 @@ export function materializeSessionSnapshots(
   const skipPartTypes = options.skipPartTypes ?? new Set<string>()
   const snapshots = records
     .filter((record) => !!record?.info?.id)
-    .sort((left, right) => cmp(left.info.id, right.info.id))
+    .sort((left, right) => compareMessages(left.info, right.info))
   const nextMessages = snapshots.map((record) => record.info)
   const existingMessages = state.message[sessionID]
   const currentMessages = existingMessages ?? []

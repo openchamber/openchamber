@@ -3,6 +3,7 @@ import type { ChildStoreManager, DirectoryStore } from "./child-store"
 import { Binary } from "./binary"
 import { retry } from "./retry"
 import { mergeOptimisticPage, type OptimisticItem } from "./optimistic"
+import { compareMessages } from "./messageOrder"
 import { stripMessageDiffSnapshots } from "./sanitize"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import {
@@ -345,7 +346,9 @@ export class SessionMessageLoader {
     const store = this.childStores.ensureChild(target.directory, { bootstrap: false })
     const current = store.getState()
     const messages = current.message[target.sessionID] ? [...current.message[target.sessionID]] : []
-    const result = Binary.search(messages, input.message.id, (message) => message.id)
+    // Messages are ordered chronologically (time.created, then id); searching
+    // by raw id would misplace messages across the OpenCode ID wrap boundary.
+    const result = Binary.searchBy(messages, input.message, compareMessages)
     if (!result.found) messages.splice(result.index, 0, input.message)
     store.setState({
       message: { ...current.message, [target.sessionID]: messages },
@@ -603,7 +606,7 @@ export class SessionMessageLoader {
       if (performance) performance.recordCount += recordCount
       const session = records
         .map((record: { info: Message }) => stripMessageDiffSnapshots(record.info))
-        .sort((left: Message, right: Message) => cmp(left.id, right.id))
+        .sort(compareMessages)
       const partsByMessageID = new Map<string, Part[]>()
       for (const record of records as Array<{ info: { id: string }; parts?: Part[] }>) {
         partsByMessageID.set(record.info.id, sortParts(record.parts ?? []))

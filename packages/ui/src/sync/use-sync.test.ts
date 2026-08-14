@@ -83,8 +83,9 @@ describe('incremental materialization of superset pages (#2084)', () => {
     // Simulate expansion: commit 50 (assistant-only), then 100 (with user), then 150.
     // Pages are supersets: the 100-page includes all 50 from the first page,
     // the 150-page includes all 100 from the second.
-    // Messages are sorted by id in the store (mergeMessages uses cmp by id),
-    // so look them up by id rather than positional index.
+    // Messages are sorted chronologically in the store (time.created, then
+    // id — see sync/messageOrder.ts), so look them up by id rather than
+    // positional index.
     const a1 = assistantMessage('a_1')
     const a2 = assistantMessage('a_2')
     const u1 = userMessage('u_1')

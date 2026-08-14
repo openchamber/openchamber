@@ -31,6 +31,7 @@ import {
 import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
 import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingState } from "./streaming"
+import { findMessageByID, isBeforeMessage } from "./messageOrder"
 import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { setActionRefs } from "./session-actions"
@@ -2995,7 +2996,13 @@ function getVisibleMessagesForSession(state: State, sessionID: string, previous?
 
   return {
     sourceMessages,
-    visibleMessages: revertMessageID ? sourceMessages.filter((message) => message.id < revertMessageID) : sourceMessages,
+    visibleMessages: revertMessageID
+      ? sourceMessages.filter((message) => isBeforeMessage(
+          message,
+          findMessageByID(sourceMessages, revertMessageID),
+          revertMessageID,
+        ))
+      : sourceMessages,
     revertMessageID,
   }
 }
