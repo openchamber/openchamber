@@ -17,6 +17,22 @@ type StoredThemePreferences = {
 // trivial space.
 const THEME_PREFERENCES_KEY_PREFIX = 'openchamber.theme.v2:';
 
+// Superseded by the per-runtime key. Removed once the scoped key is written so
+// theme persistence has a single owner; the pre-React HTML shells that read
+// them (splash theme class and colors) have their own fallbacks.
+const LEGACY_THEME_KEYS = [
+  'themeMode',
+  'lightThemeId',
+  'darkThemeId',
+  'useSystemTheme',
+  'selectedThemeId',
+  'selectedThemeVariant',
+  'splashBgLight',
+  'splashFgLight',
+  'splashBgDark',
+  'splashFgDark',
+] as const;
+
 export const getThemePreferencesStorageKey = (runtimeKey: string): string =>
   `${THEME_PREFERENCES_KEY_PREFIX}${encodeURIComponent(runtimeKey)}`;
 
@@ -65,6 +81,17 @@ export const writeThemePreferencesForRuntime = (runtimeKey: string, preferences:
   } catch {
     // localStorage unavailable (e.g. read-only contextBridge) — the server
     // settings sync remains authoritative and the app still works.
+    return;
+  }
+  // One-time migration: keep the legacy keys only if the scoped write failed,
+  // otherwise remove them (removal is best-effort; a stale key only affects
+  // the pre-React splash, which falls back to system preference and defaults).
+  for (const key of LEGACY_THEME_KEYS) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // ignore — best-effort cleanup
+    }
   }
 };
 

@@ -104,6 +104,29 @@ describe('theme preference runtime scoping', () => {
     );
     expect(readThemePreferencesForRuntime('runtime-a')).toBeNull();
   });
+
+  test('removes superseded global theme keys once the scoped key is written', () => {
+    localStorage.setItem('themeMode', 'dark');
+    localStorage.setItem('lightThemeId', 'light-theme');
+    localStorage.setItem('darkThemeId', 'dark-theme');
+    localStorage.setItem('useSystemTheme', 'false');
+    localStorage.setItem('selectedThemeId', 'dark-theme');
+    localStorage.setItem('selectedThemeVariant', 'dark');
+    localStorage.setItem('splashBgDark', '#0c0a09');
+    localStorage.setItem('splashFgDark', '#fafaf9');
+
+    writeThemePreferencesForRuntime('runtime-a', preferences);
+
+    expect(localStorage.getItem('themeMode')).toBeNull();
+    expect(localStorage.getItem('lightThemeId')).toBeNull();
+    expect(localStorage.getItem('darkThemeId')).toBeNull();
+    expect(localStorage.getItem('useSystemTheme')).toBeNull();
+    expect(localStorage.getItem('selectedThemeId')).toBeNull();
+    expect(localStorage.getItem('selectedThemeVariant')).toBeNull();
+    expect(localStorage.getItem('splashBgDark')).toBeNull();
+    expect(localStorage.getItem('splashFgDark')).toBeNull();
+    expect(readThemePreferencesForRuntime('runtime-a')).toEqual(preferences);
+  });
 });
 
 describe('theme storage event resolution', () => {

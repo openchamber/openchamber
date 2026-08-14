@@ -96,31 +96,11 @@ const buildInitialPreferences = (defaultThemeId?: string): ThemePreferences => {
     const storedMode = storedPreferences?.themeMode ?? null;
     const storedLightId = storedPreferences?.lightThemeId ?? null;
     const storedDarkId = storedPreferences?.darkThemeId ?? null;
-    const legacyUseSystem = localStorage.getItem('useSystemTheme');
-    const legacyThemeId = localStorage.getItem('selectedThemeId');
-    const legacyVariant = localStorage.getItem('selectedThemeVariant');
 
     if (embeddedMode === 'light' || embeddedMode === 'dark' || embeddedMode === 'system') {
       themeMode = embeddedMode;
     } else if (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') {
       themeMode = storedMode;
-    } else if (legacyUseSystem !== null) {
-      const useSystem = legacyUseSystem === 'true';
-      if (useSystem) {
-        themeMode = 'system';
-      } else if (legacyThemeId) {
-        const legacyTheme = getThemeById(legacyThemeId);
-        if (legacyTheme) {
-          themeMode = legacyTheme.metadata.variant === 'dark' ? 'dark' : 'light';
-          if (legacyTheme.metadata.variant === 'dark') {
-            darkThemeId = legacyTheme.metadata.id;
-          } else {
-            lightThemeId = legacyTheme.metadata.id;
-          }
-        }
-      }
-    } else if (legacyVariant === 'light' || legacyVariant === 'dark') {
-      themeMode = legacyVariant;
     }
 
     if (typeof embeddedLightId === 'string' && embeddedLightId.trim().length > 0) {
@@ -438,27 +418,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       lightThemeId: preferences.lightThemeId,
       darkThemeId: preferences.darkThemeId,
     });
-
-    localStorage.setItem('themeMode', preferences.themeMode);
-    localStorage.setItem('lightThemeId', preferences.lightThemeId);
-    localStorage.setItem('darkThemeId', preferences.darkThemeId);
-    localStorage.setItem('useSystemTheme', String(preferences.themeMode === 'system'));
-    localStorage.setItem('selectedThemeId', currentTheme.metadata.id);
-    localStorage.setItem(
-      'selectedThemeVariant',
-      currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
-    );
-
-    // Splash screen (packages/web/index.html) runs before the theme CSS vars load.
-    // Persist just enough to theme it on next boot.
-    const lightTheme = ensureThemeById(preferences.lightThemeId, 'light');
-    const darkTheme = ensureThemeById(preferences.darkThemeId, 'dark');
-
-    localStorage.setItem('splashBgLight', lightTheme.colors.surface.background);
-    localStorage.setItem('splashFgLight', lightTheme.colors.surface.foreground);
-    localStorage.setItem('splashBgDark', darkTheme.colors.surface.background);
-    localStorage.setItem('splashFgDark', darkTheme.colors.surface.foreground);
-  }, [preferences, currentTheme, ensureThemeById, receivesParentThemeSync]);
+  }, [preferences, receivesParentThemeSync]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
