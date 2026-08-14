@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import {
   getThemePreferencesStorageKey,
   readThemePreferencesForRuntime,
+  resolveThemePreferencesFromStorageEvent,
   writeThemePreferencesForRuntime,
 } from './theme-storage';
 
@@ -102,5 +103,44 @@ describe('theme preference runtime scoping', () => {
       JSON.stringify({ themeMode: 'dark', lightThemeId: '', darkThemeId: 'dark-theme' }),
     );
     expect(readThemePreferencesForRuntime('runtime-a')).toBeNull();
+  });
+});
+
+describe('theme storage event resolution', () => {
+  const current = { themeMode: 'system' as const, lightThemeId: 'light-theme', darkThemeId: 'dark-theme' };
+
+  test('adopts a storage event for the current runtime', () => {
+    writeThemePreferencesForRuntime('runtime-a', preferences);
+
+    expect(resolveThemePreferencesFromStorageEvent(getThemePreferencesStorageKey('runtime-a'), 'runtime-a', current)).toEqual(preferences);
+  });
+
+  test('ignores a storage event from another runtime', () => {
+    writeThemePreferencesForRuntime('runtime-b', preferences);
+
+    expect(resolveThemePreferencesFromStorageEvent(getThemePreferencesStorageKey('runtime-b'), 'runtime-a', current)).toBeNull();
+  });
+
+  test('ignores legacy global theme keys (revert-to-globals regression guard)', () => {
+    localStorage.setItem('themeMode', 'dark');
+    localStorage.setItem('lightThemeId', 'light-theme');
+    localStorage.setItem('darkThemeId', 'dark-theme');
+
+    expect(resolveThemePreferencesFromStorageEvent('themeMode', 'runtime-a', current)).toBeNull();
+    expect(resolveThemePreferencesFromStorageEvent('lightThemeId', 'runtime-a', current)).toBeNull();
+    expect(resolveThemePreferencesFromStorageEvent('darkThemeId', 'runtime-a', current)).toBeNull();
+  });
+
+  test('resolves to no change when stored preferences already match', () => {
+    writeThemePreferencesForRuntime('runtime-a', preferences);
+
+    expect(resolveThemePreferencesFromStorageEvent(getThemePreferencesStorageKey('runtime-a'), 'runtime-a', preferences)).toBeNull();
+  });
+
+  test('resolves to no change when nothing valid is stored', () => {
+    expect(resolveThemePreferencesFromStorageEvent(getThemePreferencesStorageKey('runtime-a'), 'runtime-a', current)).toBeNull();
+
+    localStorage.setItem(getThemePreferencesStorageKey('runtime-a'), 'not-json');
+    expect(resolveThemePreferencesFromStorageEvent(getThemePreferencesStorageKey('runtime-a'), 'runtime-a', current)).toBeNull();
   });
 });

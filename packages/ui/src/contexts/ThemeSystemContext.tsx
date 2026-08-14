@@ -32,8 +32,8 @@ import { isValidTheme } from './theme-validation';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import {
-  getThemePreferencesStorageKey,
   readThemePreferencesForRuntime,
+  resolveThemePreferencesFromStorageEvent,
   writeThemePreferencesForRuntime,
 } from './theme-storage';
 
@@ -474,28 +474,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         return;
       }
 
-      // Only same-runtime windows share the scoped key; windows pointing at a
-      // different instance write their own runtime's key and are ignored.
-      if (event.key !== getThemePreferencesStorageKey(getRuntimeKey())) {
-        return;
-      }
-
-      const stored = readThemePreferencesForRuntime(getRuntimeKey());
-      if (!stored) {
-        return;
-      }
-
-      setPreferences((prev) => {
-        if (prev.themeMode === stored.themeMode && prev.lightThemeId === stored.lightThemeId && prev.darkThemeId === stored.darkThemeId) {
-          return prev;
-        }
-
-        return {
-          themeMode: stored.themeMode,
-          lightThemeId: stored.lightThemeId,
-          darkThemeId: stored.darkThemeId,
-        };
-      });
+      setPreferences((prev) => resolveThemePreferencesFromStorageEvent(event.key, getRuntimeKey(), prev) ?? prev);
     };
 
     window.addEventListener('storage', handleStorage);
