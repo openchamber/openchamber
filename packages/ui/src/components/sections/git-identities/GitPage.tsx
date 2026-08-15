@@ -29,6 +29,8 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
+import { providerTabForSettingsItem, type GitProviderTabId } from './providerTabs';
 
 const ICON_MAP: Record<string, IconName> = {
   branch: 'git-branch',
@@ -47,7 +49,11 @@ const COLOR_MAP: Record<string, string> = {
   type: 'var(--syntax-type)',
 };
 
-export const GitPage: React.FC = () => {
+export interface GitPageProps {
+  revealItemId?: string | null;
+}
+
+export const GitPage: React.FC<GitPageProps> = (props) => {
   const { t } = useI18n();
   const {
     profiles,
@@ -78,6 +84,44 @@ export const GitPage: React.FC = () => {
   const [editorImportData, setEditorImportData] = React.useState<{ host: string; username: string } | null>(null);
   const [deleteDialogProfile, setDeleteDialogProfile] = React.useState<GitIdentityProfile | null>(null);
   const [isDeletePending, setIsDeletePending] = React.useState(false);
+
+  const [activeProviderTab, setActiveProviderTab] = React.useState<GitProviderTabId>('github');
+
+  const providerTabs = React.useMemo<SortableTabsStripItem[]>(() => [
+    {
+      id: 'github',
+      label: t('settings.git.tabs.github'),
+      icon: <Icon name="github-fill" className="h-3.5 w-3.5" />,
+    },
+    {
+      id: 'gitlab',
+      label: t('settings.git.tabs.gitlab'),
+      icon: <Icon name="gitlab" className="h-3.5 w-3.5" />,
+    },
+    {
+      id: 'gitea',
+      label: t('settings.git.tabs.gitea'),
+      icon: <Icon name="gitea" className="h-3.5 w-3.5" />,
+    },
+  ], [t]);
+
+  const revealItemId = props.revealItemId;
+  const lastHandledRevealRef = React.useRef<string | null>(null);
+
+  React.useLayoutEffect(() => {
+    if (revealItemId == null) {
+      lastHandledRevealRef.current = null;
+      return;
+    }
+    if (lastHandledRevealRef.current === revealItemId) {
+      return;
+    }
+    lastHandledRevealRef.current = revealItemId;
+    const tab = providerTabForSettingsItem(revealItemId);
+    if (tab) {
+      setActiveProviderTab(tab);
+    }
+  }, [revealItemId]);
 
   React.useEffect(() => {
     loadProfiles();
@@ -123,9 +167,26 @@ export const GitPage: React.FC = () => {
         title={t('settings.page.git.title')}
         showSaveStatus
       >
-        <GitHubSettings />
-        <GitLabSettings />
-        <GiteaSettings />
+        <div className="flex h-8 min-w-0">
+          <SortableTabsStrip
+            items={providerTabs}
+            activeId={activeProviderTab}
+            onSelect={(tabId) => setActiveProviderTab(tabId as GitProviderTabId)}
+            layoutMode="fit"
+            variant="active-pill"
+            activePillButtonClassName="h-7"
+          />
+        </div>
+
+        <div role="tabpanel" aria-label={t('settings.git.tabs.github')} hidden={activeProviderTab !== 'github'}>
+          <GitHubSettings />
+        </div>
+        <div role="tabpanel" aria-label={t('settings.git.tabs.gitlab')} hidden={activeProviderTab !== 'gitlab'}>
+          <GitLabSettings />
+        </div>
+        <div role="tabpanel" aria-label={t('settings.git.tabs.gitea')} hidden={activeProviderTab !== 'gitea'}>
+          <GiteaSettings />
+        </div>
 
         <SettingsSection
           title={t('settings.gitIdentities.page.section.title')}

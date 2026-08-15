@@ -667,7 +667,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'snippets':
         return <SnippetsPage />;
       case 'git':
-        return <GitPage />;
+        return <GitPage revealItemId={pendingSearchItemId} />;
       case 'integrations':
         return (
           <IntegrationsPage
@@ -690,7 +690,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       default:
         return null;
     }
-  }, [openChamberSectionBySlug, openPage, openThirdPartyProviderSetup, renderUnavailable, runtimeCtx, t]);
+  }, [openChamberSectionBySlug, openPage, openThirdPartyProviderSetup, pendingSearchItemId, renderUnavailable, runtimeCtx, t]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {
