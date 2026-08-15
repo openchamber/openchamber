@@ -2,6 +2,7 @@ import React from 'react';
 import type { Message, Part, ReasoningPart, TextPart, ToolPart } from '@opencode-ai/sdk/v2';
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
+import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessages, useSessionPermissions, useSessionQuestions, useSessionStatus } from '@/sync/sync-context';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
@@ -257,9 +258,53 @@ const getToolDisplayName = (part: ToolPart): string => {
     return typeof candidate.name === 'string' ? candidate.name : 'tool';
 };
 
-export const getActiveAssistantContext = (messages: Message[]): ActiveAssistantContext => {
+const parseModelString = (value: string): ActiveAssistantModel | null => {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const slashIndex = trimmed.indexOf('/');
+    if (slashIndex <= 0 || slashIndex >= trimmed.length - 1) return null;
+
+    return {
+        providerId: trimmed.slice(0, slashIndex),
+        modelId: trimmed.slice(slashIndex + 1),
+    };
+};
+
+const extractModel = (message: Message): ActiveAssistantModel | null => {
+    const modelField = (message as Message & { model?: unknown }).model;
+
+    if (typeof modelField === 'string' && modelField.trim().length > 0) {
+        return parseModelString(modelField);
+    }
+
+    if (modelField && typeof modelField === 'object') {
+        const candidate = modelField as { providerID?: unknown; modelID?: unknown };
+        const providerId = typeof candidate.providerID === 'string' ? candidate.providerID.trim() : '';
+        const modelId = typeof candidate.modelID === 'string' ? candidate.modelID.trim() : '';
+        if (providerId && modelId) {
+            return { providerId, modelId };
+        }
+    }
+
+    const messageModel = message as Message & { providerID?: unknown; modelID?: unknown };
+    const providerId = typeof messageModel.providerID === 'string' ? messageModel.providerID.trim() : '';
+    const modelId = typeof messageModel.modelID === 'string' ? messageModel.modelID.trim() : '';
+    if (providerId && modelId) {
+        return { providerId, modelId };
+    }
+
+    return null;
+};
+
+export const getActiveAssistantContext = (
+    messages: Message[],
+    fallbackModel?: ActiveAssistantModel | null,
+): ActiveAssistantContext => {
     let assistantId: string | null = null;
     let parentId: string | null = null;
+    let assistantCompleted = false;
+    let assistantModel: ActiveAssistantModel | null = null;
 
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
@@ -270,39 +315,56 @@ export const getActiveAssistantContext = (messages: Message[]): ActiveAssistantC
         parentId = typeof candidate.parentID === 'string' && candidate.parentID.trim().length > 0
             ? candidate.parentID
             : null;
+        assistantCompleted = typeof (message as { time?: { completed?: number } }).time?.completed === 'number';
+        assistantModel = extractModel(message);
         break;
     }
 
-    if (!assistantId || !parentId) {
+    if (!assistantId) {
         return { assistantId, model: null };
     }
 
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const message = messages[index];
-        if (message?.role !== 'user' || message.id !== parentId) continue;
+    if (assistantCompleted) {
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+            const message = messages[index];
+            if (message?.role !== 'user') continue;
+            if (message.id === parentId) break;
 
-        const candidate = message as Message & {
-            model?: { providerID?: unknown; modelID?: unknown };
-        };
-        const providerId = typeof candidate.model?.providerID === 'string'
-            ? candidate.model.providerID.trim()
-            : '';
-        const modelId = typeof candidate.model?.modelID === 'string'
-            ? candidate.model.modelID.trim()
-            : '';
-
-        return {
-            assistantId,
-            model: providerId && modelId ? { providerId, modelId } : null,
-        };
+            const userModel = extractModel(message);
+            if (userModel) {
+                return { assistantId, model: userModel };
+            }
+            if (fallbackModel) {
+                return { assistantId, model: fallbackModel };
+            }
+        }
     }
 
-    return { assistantId, model: null };
+    if (parentId) {
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+            const message = messages[index];
+            if (message?.role !== 'user' || message.id !== parentId) continue;
+
+            const userModel = extractModel(message);
+            if (userModel) {
+                return { assistantId, model: userModel };
+            }
+            break;
+        }
+    }
+
+    return { assistantId, model: assistantModel };
 };
 
 export function useAssistantStatus(): AssistantStatusSnapshot {
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+    const selectedSessionModel = useSelectionStore(
+        React.useCallback(
+            (state) => (currentSessionId ? state.sessionModelSelections.get(currentSessionId) ?? null : null),
+            [currentSessionId],
+        ),
+    );
 
     const rawSessionMessages = useSessionMessages(
         currentSessionId ?? '',
@@ -310,8 +372,8 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     );
 
     const activeAssistant = React.useMemo(
-        () => getActiveAssistantContext(rawSessionMessages),
-        [rawSessionMessages],
+        () => getActiveAssistantContext(rawSessionMessages, selectedSessionModel),
+        [rawSessionMessages, selectedSessionModel],
     );
     const lastAssistantId = activeAssistant.assistantId;
 
