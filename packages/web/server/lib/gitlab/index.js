@@ -7,6 +7,7 @@ export {
   normalizeBaseUrl,
   GITLAB_AUTH_FILE,
   DEFAULT_GITLAB_BASE_URL,
+  getGitLabDefaultBaseUrl,
 } from './auth.js';
 
 export {

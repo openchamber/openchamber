@@ -11,7 +11,8 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { Icon } from "@/components/icon/Icon";
 import { SettingsSection, SettingsGroupTitle } from '@/components/sections/shared/SettingsSection';
-import { CustomDomainsInput } from '@/components/sections/shared/CustomDomainsInput';
+import { ProviderApiBaseUrlInput } from '@/components/sections/shared/ProviderApiBaseUrlInput';
+import { ProviderDetectUrlsInput } from '@/components/sections/shared/ProviderDetectUrlsInput';
 
 type GitHubUser = {
   login: string;
@@ -446,7 +447,10 @@ export const GitHubSettings: React.FC = () => {
         </div>
       )}
 
-      <CustomDomainsInput provider="github" />
+      <div className="flex flex-col gap-4 pt-4">
+        <ProviderApiBaseUrlInput provider="github" />
+        <ProviderDetectUrlsInput provider="github" />
+      </div>
 
       </SettingsSection>
 

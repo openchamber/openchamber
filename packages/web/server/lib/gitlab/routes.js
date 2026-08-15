@@ -314,11 +314,12 @@ export function registerGitLabRoutes(app, options = {}) {
 
   app.get('/api/gitlab/auth/status', async (_req, res) => {
     try {
-      const { getGitLabAuth, getGitLabAuthAccounts, clearGitLabAuth, DEFAULT_GITLAB_BASE_URL } = await getGitLabLibraries();
+      const { getGitLabAuth, getGitLabAuthAccounts, clearGitLabAuth, getGitLabDefaultBaseUrl } = await getGitLabLibraries();
       const auth = getGitLabAuth();
       const accounts = getGitLabAuthAccounts();
+      const defaultBaseUrl = getGitLabDefaultBaseUrl();
       if (!auth?.accessToken) {
-        return res.json({ connected: false, accounts, defaultBaseUrl: DEFAULT_GITLAB_BASE_URL });
+        return res.json({ connected: false, accounts, defaultBaseUrl });
       }
 
       const client = await getClient();
@@ -327,7 +328,7 @@ export function registerGitLabRoutes(app, options = {}) {
         const resp = await client.user();
         if (resp.status === 401 || resp.status === 403) {
           clearGitLabAuth();
-          return res.json({ connected: false, accounts: getGitLabAuthAccounts(), defaultBaseUrl: DEFAULT_GITLAB_BASE_URL });
+          return res.json({ connected: false, accounts: getGitLabAuthAccounts(), defaultBaseUrl });
         }
         if (resp.status === 200 && resp.data) {
           user = mapGitLabUser(resp.data);
@@ -338,7 +339,7 @@ export function registerGitLabRoutes(app, options = {}) {
         connected: true,
         ...(user ? { user } : {}),
         accounts,
-        defaultBaseUrl: DEFAULT_GITLAB_BASE_URL,
+        defaultBaseUrl,
       });
     } catch (error) {
       console.error('Failed to get GitLab auth status:', error);
@@ -353,8 +354,8 @@ export function registerGitLabRoutes(app, options = {}) {
         return res.status(400).json({ error: 'accessToken is required' });
       }
 
-      const { normalizeBaseUrl, DEFAULT_GITLAB_BASE_URL, setGitLabAuth, getGitLabAuthAccounts } = await getGitLabLibraries();
-      const baseUrl = normalizeBaseUrl(req.body?.baseUrl) || DEFAULT_GITLAB_BASE_URL;
+      const { normalizeBaseUrl, getGitLabDefaultBaseUrl, setGitLabAuth, getGitLabAuthAccounts } = await getGitLabLibraries();
+      const baseUrl = normalizeBaseUrl(req.body?.baseUrl) || getGitLabDefaultBaseUrl();
 
       const { createGitLabClient } = await getGitLabLibraries();
       const client = createGitLabClient({ token: accessToken, baseUrl });
@@ -371,7 +372,7 @@ export function registerGitLabRoutes(app, options = {}) {
         connected: true,
         user: mapGitLabUser(resp.data),
         accounts: getGitLabAuthAccounts(),
-        defaultBaseUrl: DEFAULT_GITLAB_BASE_URL,
+        defaultBaseUrl: getGitLabDefaultBaseUrl(),
       });
     } catch (error) {
       console.error('Failed to connect GitLab:', error);
@@ -386,7 +387,7 @@ export function registerGitLabRoutes(app, options = {}) {
         return res.status(400).json({ error: 'accountId is required' });
       }
 
-      const { activateGitLabAuth, getGitLabAuth, getGitLabAuthAccounts, DEFAULT_GITLAB_BASE_URL } = await getGitLabLibraries();
+      const { activateGitLabAuth, getGitLabAuth, getGitLabAuthAccounts, getGitLabDefaultBaseUrl } = await getGitLabLibraries();
       const activated = activateGitLabAuth(accountId);
       if (!activated) {
         return res.status(404).json({ error: 'GitLab account not found' });
@@ -394,8 +395,9 @@ export function registerGitLabRoutes(app, options = {}) {
 
       const auth = getGitLabAuth();
       const accounts = getGitLabAuthAccounts();
+      const defaultBaseUrl = getGitLabDefaultBaseUrl();
       if (!auth?.accessToken) {
-        return res.json({ connected: false, accounts, defaultBaseUrl: DEFAULT_GITLAB_BASE_URL });
+        return res.json({ connected: false, accounts, defaultBaseUrl });
       }
 
       let user = auth.username
@@ -416,7 +418,7 @@ export function registerGitLabRoutes(app, options = {}) {
         }
       }
 
-      return res.json({ connected: true, user, accounts, defaultBaseUrl: DEFAULT_GITLAB_BASE_URL });
+      return res.json({ connected: true, user, accounts, defaultBaseUrl });
     } catch (error) {
       console.error('Failed to activate GitLab account:', error);
       return res.status(500).json({ error: error.message || 'Failed to activate GitLab account' });

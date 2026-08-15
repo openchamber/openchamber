@@ -32,17 +32,25 @@
 
 ### Device flow
 
-- `startDeviceFlow({ clientId, scope })`: request device code.
-- `exchangeDeviceCode({ clientId, deviceCode })`: poll for access token.
+- `startDeviceFlow({ clientId, scope, webOrigin? })`: request device code.
+- `exchangeDeviceCode({ clientId, deviceCode, webOrigin? })`: poll for access token.
 
 ### Octokit
 
 - `getOctokitOrNull()`: current Octokit or `null`.
+- `createOctokit(token, baseUrl?)`: Octokit factory; the optional `baseUrl` (GitHub Enterprise API base) is passed to the Octokit constructor.
 
 ### Repo
 
-- `parseGitHubRemoteUrl(raw)`: parse SSH or HTTPS remote URL into `{ owner, repo, url }`.
+- `parseGitHubRemoteUrl(raw, options?)`: parse SSH or HTTPS remote URL into `{ owner, repo, url }`; `options.host` / `options.webOrigin` default to `github.com` / `https://github.com` and are used for self-hosted (Enterprise) remotes.
 - `resolveGitHubRepoFromDirectory(directory, remoteName)`: resolve GitHub repo from a local git remote.
+
+## Git provider configuration
+
+Per-provider settings come from `~/.config/openchamber/settings.json` under `gitProviders` (validated in `packages/web/server/lib/git-providers/config.js`, persisted via the settings GET/PUT routes). GitHub resolution:
+
+- API base URL: configured `gitProviders.github.apiBaseUrl` -> default `https://api.github.com`. The configured value drives the Octokit `baseUrl` (`getOctokitOrNull`, device-flow account activation).
+- Device flow web origin: derived from the API base via `githubWebOriginFromApiBase` — the public host maps to `https://github.com`; an Enterprise base (`https://host/api/v3` or `https://host/api`) maps to `https://host`.
 
 ## Auth storage and config
 

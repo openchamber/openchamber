@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
@@ -201,7 +201,6 @@ describe('Gitea auth routes', () => {
   test('me returns the connected user', async () => {
     setGiteaAuth({ accessToken: 'gitea-a', baseUrl: 'gitea.example.com', user: aliceUser });
     scriptedFetch([(url) => (matches(/\/api\/v1\/user$/)(url) ? jsonResponse(aliceUser) : null)]);
-
     const app = createApp();
     const response = await request(app).get('/api/gitea/me');
     expect(response.status).toBe(200);
@@ -213,6 +212,47 @@ describe('Gitea auth routes', () => {
       webUrl: 'https://gitea.example.com/alice',
       email: 'alice@example.com',
     });
+  });
+});
+
+describe('Gitea configured default base URL', () => {
+  const SETTINGS_FILE = path.join(TEMP_DATA_DIR, 'settings.json');
+
+  afterEach(() => {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      fs.unlinkSync(SETTINGS_FILE);
+    }
+  });
+
+  test('auth/status reports the configured defaultBaseUrl', async () => {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify({
+      gitProviders: { gitea: { apiBaseUrl: 'https://gitea.example.com' } },
+    }));
+    setGiteaAuth({ accessToken: 'gitea-a', baseUrl: 'https://gitea.example.com', user: aliceUser });
+    scriptedFetch([(url) => (matches(/\/api\/v1\/user$/)(url) ? jsonResponse(aliceUser) : null)]);
+
+    const app = createApp();
+    const response = await request(app).get('/api/gitea/auth/status');
+    expect(response.status).toBe(200);
+    expect(response.body.connected).toBe(true);
+    expect(response.body.defaultBaseUrl).toBe('https://gitea.example.com');
+  });
+
+  test('auth/connect falls back to the configured default base URL when baseUrl is blank', async () => {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify({
+      gitProviders: { gitea: { apiBaseUrl: 'https://gitea.example.com' } },
+    }));
+    const fetchMock = scriptedFetch([(url) => (matches(/\/api\/v1\/user$/)(url) ? jsonResponse(aliceUser) : null)]);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/gitea/auth/connect')
+      .send({ accessToken: 'gitea-valid' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ connected: true });
+    expect(fetchMock.mock.calls[0][0]).toBe('https://gitea.example.com/api/v1/user');
+    expect(getGiteaAuth()?.baseUrl).toBe('https://gitea.example.com');
   });
 });
 

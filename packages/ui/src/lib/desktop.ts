@@ -217,6 +217,14 @@ export type DesktopSettings = {
   sttModel?: string;
   sttLocalModel?: string;
   sttLanguage?: string;
+  // Per-provider git forge configuration (server-side settings.json): the API
+  // base URL for provider API calls and the bare hosts that auto-detect the
+  // provider. Server-authoritative; the client stores only a localStorage cache.
+  gitProviders?: {
+    github?: { apiBaseUrl?: string; detectUrls?: string[] };
+    gitlab?: { apiBaseUrl?: string; detectUrls?: string[] };
+    gitea?: { apiBaseUrl?: string; detectUrls?: string[] };
+  };
   // Global draft welcome starters (pinned commands/skills), persisted to settings.json
   draftStarters?: DraftStarterRef[];
   draftStartersVisible?: boolean;

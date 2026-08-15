@@ -321,7 +321,7 @@ export function registerGitHubRoutes(app) {
 
   app.post('/api/github/auth/start', async (_req, res) => {
     try {
-      const { getGitHubClientId, getGitHubScopes, startDeviceFlow } = await getGitHubLibraries();
+      const { getGitHubClientId, getGitHubScopes, startDeviceFlow, githubWebOriginFromApiBase, getProviderApiBaseUrl } = await getGitHubLibraries();
       const clientId = getGitHubClientId();
       if (!clientId) {
         return res.status(400).json({
@@ -330,10 +330,12 @@ export function registerGitHubRoutes(app) {
       }
 
       const scope = getGitHubScopes();
+      const webOrigin = githubWebOriginFromApiBase(getProviderApiBaseUrl('github'));
 
       const payload = await startDeviceFlow({
         clientId,
         scope,
+        webOrigin,
       });
 
       return res.json({
@@ -353,7 +355,7 @@ export function registerGitHubRoutes(app) {
 
   app.post('/api/github/auth/complete', async (req, res) => {
     try {
-      const { getGitHubClientId, exchangeDeviceCode, setGitHubAuth, getGitHubAuthAccounts } = await getGitHubLibraries();
+      const { getGitHubClientId, exchangeDeviceCode, setGitHubAuth, getGitHubAuthAccounts, githubWebOriginFromApiBase, getProviderApiBaseUrl } = await getGitHubLibraries();
       const clientId = getGitHubClientId();
       if (!clientId) {
         return res.status(400).json({
@@ -369,7 +371,10 @@ export function registerGitHubRoutes(app) {
         return res.status(400).json({ error: 'deviceCode is required' });
       }
 
-      const payload = await exchangeDeviceCode({ clientId, deviceCode });
+      const apiBase = getProviderApiBaseUrl('github');
+      const webOrigin = githubWebOriginFromApiBase(apiBase);
+
+      const payload = await exchangeDeviceCode({ clientId, deviceCode, webOrigin });
 
       if (payload?.error) {
         return res.json({
@@ -385,7 +390,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { createOctokit } = await import('./octokit.js');
-      const octokit = createOctokit(accessToken);
+      const octokit = createOctokit(accessToken, apiBase);
       const user = await getGitHubUserSummary(octokit);
 
       setGitHubAuth({
@@ -1773,6 +1778,9 @@ export function registerGitHubRoutes(app) {
       const { resolveGitHubRepoFromDirectory } = await import('./index.js');
       const { resolveRepoNetwork } = await import('./repo/fork-detection.js');
 
+      const { getProviderApiBaseUrl } = await getGitHubLibraries();
+      const apiBase = getProviderApiBaseUrl('github');
+
       const repoNetwork = await resolveRepoNetwork(octokit, directory);
       const { repo } = await resolveGitHubRepoFromDirectory(directory);
       if (!repo) {
@@ -1817,7 +1825,7 @@ export function registerGitHubRoutes(app) {
           const issues = items
             .filter((item) => !item?.pull_request)
             .map((item) => {
-              const repoFullName = (item.repository_url || '').replace('https://api.github.com/repos/', '');
+              const repoFullName = (item.repository_url || '').replace(`${apiBase}/repos/`, '');
               const matched = reposToQuery.find((r) => `${r.owner}/${r.repo}` === repoFullName);
               return mapIssueSummary(item, matched || reposToQuery[0]);
             });

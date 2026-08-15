@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { resolveGitProvider, useGitProvider } from '@/lib/gitProvider';
+import { resolveGitProvider, useGitProvider, buildGitProviderHosts } from '@/lib/gitProvider';
 import type { GitProviderHosts } from '@/lib/gitProvider';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
@@ -10,20 +10,16 @@ import { useGitLabAuthStore } from '@/stores/useGitLabAuthStore';
 import { useGitProviderDomainsStore } from '@/stores/useGitProviderDomainsStore';
 
 /**
- * Provider-host sets derived from the connected accounts and the
- * user-configured custom domains, mirroring the `hosts` memo inside
- * `useGitProvider` so the imperative resolver classifies directories the same
- * way the hook does.
+ * Provider-host sets derived from the connected accounts, the configured api
+ * base urls and the user-configured custom domains, mirroring the `hosts` memo
+ * inside `useGitProvider` so the imperative resolver classifies directories the
+ * same way the hook does.
  */
 const buildProviderHosts = (): GitProviderHosts => {
   const gitlabAccounts = useGitLabAuthStore.getState().status?.accounts;
   const giteaAccounts = useGiteaAuthStore.getState().status?.accounts;
-  const domains = useGitProviderDomainsStore.getState().domains;
-  return {
-    github: domains.github,
-    gitlab: [...(gitlabAccounts ?? []).map((account) => account.baseUrl), ...domains.gitlab],
-    gitea: [...(giteaAccounts ?? []).map((account) => account.baseUrl), ...domains.gitea],
-  };
+  const { domains, apiBaseUrls } = useGitProviderDomainsStore.getState();
+  return buildGitProviderHosts({ domains, apiBaseUrls, gitlabAccounts, giteaAccounts });
 };
 
 /**

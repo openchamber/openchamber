@@ -1,6 +1,7 @@
 import { Octokit } from '@octokit/rest';
 import { getGitHubAuth, isGhCliActive, isGhCliDisabled } from './auth.js';
 import { getGhCliToken } from './gh-cli-credential.js';
+import { getProviderApiBaseUrl } from '../git-providers/config.js';
 
 // Per-request timeout for every GitHub call. Octokit v22 uses native fetch,
 // which has no built-in timeout — without this, a stuck connection hangs until
@@ -69,8 +70,12 @@ const createConditionalFetch = (token) => async (url, options = {}) => {
 };
 
 /** Create an Octokit instance with per-request timeout + ETag revalidation. */
-export function createOctokit(token) {
-  return new Octokit({ auth: token, request: { fetch: createConditionalFetch(token) } });
+export function createOctokit(token, baseUrl) {
+  return new Octokit({
+    auth: token,
+    ...(baseUrl ? { baseUrl } : {}),
+    request: { fetch: createConditionalFetch(token) },
+  });
 }
 
 export function getOctokitOrNull() {
@@ -80,5 +85,5 @@ export function getOctokitOrNull() {
   if (!token) {
     return null;
   }
-  return createOctokit(token);
+  return createOctokit(token, getProviderApiBaseUrl('github'));
 }

@@ -1,9 +1,10 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { ForgeProviderKind } from '@/lib/forge/types';
 import { parseGitHost } from '@/lib/gitHost';
+import { buildGitProviderHosts } from '@/lib/gitProvider';
 import { useGiteaAuthStore } from '@/stores/useGiteaAuthStore';
 import { useGitLabAuthStore } from '@/stores/useGitLabAuthStore';
-import { normalizeProviderDomain, useGitProviderDomainsStore } from '@/stores/useGitProviderDomainsStore';
+import { useGitProviderDomainsStore } from '@/stores/useGitProviderDomainsStore';
 import { getSessionMetadata, type SessionMetadataRecord } from './sessionReviewMetadata';
 
 /**
@@ -119,10 +120,11 @@ const getIssueUrlHost = (url: string): string | null => {
 /**
  * Which forge a link url belongs to. Well-known hosts resolve without any
  * state; self-hosted hosts resolve through the connected auth accounts' base
- * urls and the user-configured domains, in precedence order github -> gitlab ->
- * gitea. Returns null when nothing is known — never a guess, so github-branded
- * UI is not offered for an unknown host. github.com is matched first so it can
- * never be mistaken for a gitea host.
+ * urls, the configured api base urls and the user-configured domains, in
+ * precedence order github -> gitlab -> gitea. Returns null when nothing is
+ * known — never a guess, so github-branded UI is not offered for an unknown
+ * host. github.com is matched first so it can never be mistaken for a gitea
+ * host.
  */
 export const deriveLinkedIssueProvider = (url: string): ForgeProviderKind | null => {
   const host = getIssueUrlHost(url);
@@ -132,23 +134,18 @@ export const deriveLinkedIssueProvider = (url: string): ForgeProviderKind | null
   if (host === 'gitlab.com') return 'gitlab';
   if (host === 'gitea.com') return 'gitea';
 
-  const giteaAccountHosts = (useGiteaAuthStore.getState().status?.accounts ?? [])
-    .map((account) => normalizeProviderDomain(account.baseUrl))
-    .filter((candidate): candidate is string => candidate !== null);
-  if (giteaAccountHosts.includes(host)) return 'gitea';
+  const { domains, apiBaseUrls } = useGitProviderDomainsStore.getState();
+  const gitlabAccounts = useGitLabAuthStore.getState().status?.accounts;
+  const giteaAccounts = useGiteaAuthStore.getState().status?.accounts;
+  // github.com is covered by the built-in match above; the configured GitHub
+  // api base host (GitHub Enterprise) is auto-added here via
+  // `buildGitProviderHosts`, so a GitHub link on a self-hosted instance
+  // resolves without any separate chip or account entry.
+  const hosts = buildGitProviderHosts({ domains, apiBaseUrls, gitlabAccounts, giteaAccounts });
 
-  const gitlabAccountHosts = (useGitLabAuthStore.getState().status?.accounts ?? [])
-    .map((account) => normalizeProviderDomain(account.baseUrl))
-    .filter((candidate): candidate is string => candidate !== null);
-  if (gitlabAccountHosts.includes(host)) return 'gitlab';
-
-  // GitHub accounts carry no base URL (they are github.com-only, which the
-  // built-in match above already handles), so there is no host to consult.
-
-  const { domains } = useGitProviderDomainsStore.getState();
-  if (domains.github.includes(host)) return 'github';
-  if (domains.gitlab.includes(host)) return 'gitlab';
-  if (domains.gitea.includes(host)) return 'gitea';
+  if (hosts.github.includes(host)) return 'github';
+  if (hosts.gitlab.includes(host)) return 'gitlab';
+  if (hosts.gitea.includes(host)) return 'gitea';
 
   return null;
 };

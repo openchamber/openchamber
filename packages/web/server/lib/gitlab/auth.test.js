@@ -15,7 +15,10 @@ const {
   normalizeBaseUrl,
   GITLAB_AUTH_FILE,
   DEFAULT_GITLAB_BASE_URL,
+  getGitLabDefaultBaseUrl,
 } = await import('./auth.js');
+
+const SETTINGS_FILE = path.join(TEMP_DATA_DIR, 'settings.json');
 
 afterAll(() => {
   fs.rmSync(TEMP_DATA_DIR, { recursive: true, force: true });
@@ -24,6 +27,9 @@ afterAll(() => {
 afterEach(() => {
   if (fs.existsSync(GITLAB_AUTH_FILE)) {
     fs.unlinkSync(GITLAB_AUTH_FILE);
+  }
+  if (fs.existsSync(SETTINGS_FILE)) {
+    fs.unlinkSync(SETTINGS_FILE);
   }
 });
 
@@ -132,6 +138,19 @@ describe('multi-account switching', () => {
     expect(activateGitLabAuth('gitlab.com:nobody')).toBe(false);
     expect(activateGitLabAuth('')).toBe(false);
     expect(activateGitLabAuth(undefined)).toBe(false);
+  });
+});
+
+describe('getGitLabDefaultBaseUrl', () => {
+  test('falls back to the built-in default when nothing is configured', () => {
+    expect(getGitLabDefaultBaseUrl()).toBe(DEFAULT_GITLAB_BASE_URL);
+  });
+
+  test('returns the configured settings.json default when present', () => {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify({
+      gitProviders: { gitlab: { apiBaseUrl: 'https://gitlab.example.com' } },
+    }));
+    expect(getGitLabDefaultBaseUrl()).toBe('https://gitlab.example.com');
   });
 });
 

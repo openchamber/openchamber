@@ -6,6 +6,7 @@ export {
   clearGiteaAuth,
   normalizeBaseUrl,
   GITEA_AUTH_FILE,
+  getGiteaDefaultBaseUrl,
 } from './auth.js';
 
 export {

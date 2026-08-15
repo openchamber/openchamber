@@ -11,7 +11,10 @@ import {
 } from './linkedSessionMatches';
 
 const resetStores = () => {
-  useGitProviderDomainsStore.setState({ domains: { github: [], gitlab: [], gitea: [] } });
+  useGitProviderDomainsStore.setState({
+    domains: { github: [], gitlab: [], gitea: [] },
+    apiBaseUrls: { github: '', gitlab: '', gitea: '' },
+  });
   useGiteaAuthStore.setState({ status: null });
   useGitLabAuthStore.setState({ status: null });
 };

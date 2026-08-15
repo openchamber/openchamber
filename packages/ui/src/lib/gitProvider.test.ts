@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { detectGitProvider, type GitProviderHosts } from './gitProvider';
+import { buildGitProviderHosts, detectGitProvider, type GitProviderHosts } from './gitProvider';
 
 const EMPTY_HOSTS: GitProviderHosts = { github: [], gitlab: [], gitea: [] };
+
+const emptyInput = {
+  domains: { github: [], gitlab: [], gitea: [] },
+  apiBaseUrls: { github: '', gitlab: '', gitea: '' },
+};
 
 describe('detectGitProvider', () => {
   test('returns null with no remotes', () => {
@@ -133,5 +138,70 @@ describe('detectGitProvider', () => {
 
   test('normalizes github.com built-in case-insensitively', () => {
     expect(detectGitProvider(['https://GITHUB.com/owner/repo.git'], EMPTY_HOSTS)).toBe('github');
+  });
+});
+
+describe('buildGitProviderHosts', () => {
+  test('adds no hosts when nothing is configured', () => {
+    expect(buildGitProviderHosts(emptyInput)).toEqual(EMPTY_HOSTS);
+  });
+
+  test('auto-adds the github api base host so the provider is detected', () => {
+    const hosts = buildGitProviderHosts({
+      ...emptyInput,
+      apiBaseUrls: { github: 'https://github.example.com/api/v3', gitlab: '', gitea: '' },
+    });
+    expect(hosts.github).toEqual(['github.example.com']);
+    expect(detectGitProvider(['git@github.example.com:owner/repo.git'], hosts)).toBe('github');
+  });
+
+  test('a github api base of api.github.com maps to github.com and changes nothing', () => {
+    const hosts = buildGitProviderHosts({
+      ...emptyInput,
+      apiBaseUrls: { github: 'https://api.github.com', gitlab: '', gitea: '' },
+    });
+    // github.com is already a built-in detection host; no behavior change.
+    expect(hosts.github).toEqual(['github.com']);
+    expect(detectGitProvider(['git@github.com:owner/repo.git'], hosts)).toBe('github');
+    // The api host itself is not a web/remote host.
+    expect(detectGitProvider(['git@api.github.com:owner/repo.git'], hosts)).toBe('other');
+  });
+
+  test('auto-adds the gitlab api base host so the provider is detected', () => {
+    const hosts = buildGitProviderHosts({
+      ...emptyInput,
+      apiBaseUrls: { github: '', gitlab: 'https://gitlab.example.com', gitea: '' },
+    });
+    expect(hosts.gitlab).toEqual(['gitlab.example.com']);
+    expect(detectGitProvider(['git@gitlab.example.com:group/project.git'], hosts)).toBe('gitlab');
+  });
+
+  test('auto-adds the gitea api base host so the provider is detected', () => {
+    const hosts = buildGitProviderHosts({
+      ...emptyInput,
+      apiBaseUrls: { github: '', gitlab: '', gitea: 'https://gitea.example.com' },
+    });
+    expect(hosts.gitea).toEqual(['gitea.example.com']);
+    expect(detectGitProvider(['git@gitea.example.com:owner/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('combines account base urls, api base host and custom domains, normalized and deduped', () => {
+    const hosts = buildGitProviderHosts({
+      domains: { github: [], gitlab: ['https://gitlab.example.com', 'gitlab.internal'], gitea: ['codeberg.org'] },
+      apiBaseUrls: { github: '', gitlab: 'https://gitlab.example.com/', gitea: '' },
+      gitlabAccounts: [{ baseUrl: 'https://gitlab.example.com' }, { baseUrl: 'ssh://git@gl.other.example.com/x' }],
+      giteaAccounts: [{ baseUrl: 'https://gitea.example.com' }],
+    });
+    expect(hosts.gitlab).toEqual(['gitlab.example.com', 'gl.other.example.com', 'gitlab.internal']);
+    expect(hosts.gitea).toEqual(['gitea.example.com', 'codeberg.org']);
+    expect(hosts.github).toEqual([]);
+  });
+
+  test('dedupes the api base host against configured domains', () => {
+    const hosts = buildGitProviderHosts({
+      domains: { github: ['github.example.com'], gitlab: [], gitea: [] },
+      apiBaseUrls: { github: 'https://github.example.com/api/v3', gitlab: '', gitea: '' },
+    });
+    expect(hosts.github).toEqual(['github.example.com']);
   });
 });

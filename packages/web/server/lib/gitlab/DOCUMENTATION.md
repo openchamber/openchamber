@@ -28,7 +28,8 @@
 - `clearGitLabAuth()`: remove the current account.
 - `normalizeBaseUrl(raw)`: add `https://` when a scheme is missing, strip trailing slash, return `null` for invalid input.
 - `GITLAB_AUTH_FILE`: auth file path.
-- `DEFAULT_GITLAB_BASE_URL`: `https://gitlab.com`.
+- `DEFAULT_GITLAB_BASE_URL`: `https://gitlab.com` (compatibility constant).
+- `getGitLabDefaultBaseUrl()`: effective default base URL — configured `gitProviders.gitlab.apiBaseUrl` from `settings.json` if present, else `https://gitlab.com`. Used for stored-account fallback and the auth status/connect `defaultBaseUrl` fields.
 
 ### Client (`client.js`)
 
@@ -45,7 +46,7 @@
 
 - Auth storage: `~/.config/openchamber/gitlab-auth.json` (override with `OPENCHAMBER_DATA_DIR`).
 - Writes are atomic (tmp file + rename) and file mode is `0o600`.
-- Base URL resolution: caller-supplied `baseUrl` (normalized) -> `DEFAULT_GITLAB_BASE_URL`.
+- Base URL resolution: caller-supplied `baseUrl` (normalized) -> effective default via `getGitLabDefaultBaseUrl()` (configured `settings.json` `gitProviders.gitlab.apiBaseUrl`, else `https://gitlab.com`).
 - Account id: `` `${host}:${username}` `` (e.g. `gitlab.com:alice`), falling back to `token:<first8>` when the username is missing.
 - Auth header on every request: `PRIVATE-TOKEN: <pat>`.
 

@@ -12,6 +12,7 @@ import { useSessionUIStore } from "@/sync/session-ui-store";
 import { useSelectionStore } from "@/sync/selection-store";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { updateDesktopSettings } from "@/lib/persistence";
+import { useGitProviderDomainsStore } from "@/stores/useGitProviderDomainsStore";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution";
@@ -65,6 +66,8 @@ interface OpenChamberDefaults {
     sttModel?: string;
     sttLocalModel?: string;
     sttLanguage?: string;
+    /** Raw `gitProviders` section of server settings (per-provider apiBaseUrl/detectUrls). */
+    gitProviders?: unknown;
 }
 
 const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
@@ -103,6 +106,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                     const sttModel = typeof data?.sttModel === 'string' ? data.sttModel.trim() : undefined;
                     const sttLocalModel = typeof data?.sttLocalModel === 'string' ? data.sttLocalModel.trim() : undefined;
                     const sttLanguage = typeof data?.sttLanguage === 'string' ? data.sttLanguage.trim() : undefined;
+                    const gitProviders = data?.gitProviders;
 
                     return finish('runtime-settings', {
                         defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
@@ -118,6 +122,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                         sttModel,
                         sttLocalModel,
                         sttLanguage,
+                        gitProviders,
                     });
                 }
             } catch {
@@ -149,6 +154,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
         const sttModel = typeof data?.sttModel === 'string' ? data.sttModel.trim() : undefined;
         const sttLocalModel = typeof data?.sttLocalModel === 'string' ? data.sttLocalModel.trim() : undefined;
         const sttLanguage = typeof data?.sttLanguage === 'string' ? data.sttLanguage.trim() : undefined;
+        const gitProviders = data?.gitProviders;
 
         return finish('settings-route', {
             defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
@@ -164,6 +170,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
             sttModel,
             sttLocalModel,
             sttLanguage,
+            gitProviders,
         });
     } catch (error) {
         markStartupTrace('config.defaults:error', { error: error instanceof Error ? error.message : String(error) });
@@ -2007,6 +2014,18 @@ export const useConfigStore = create<ConfigStore>()(
                             ]);
 
                             const safeAgents = Array.isArray(agents) ? agents : [];
+
+                            // Seed the git provider domains store from the server
+                            // `gitProviders` settings (authoritative); the runtime
+                            // settings path or the fetch path above provided them.
+                            // Failure here must not break the agent load.
+                            if (openChamberDefaults.gitProviders !== undefined) {
+                                try {
+                                    useGitProviderDomainsStore.getState().hydrateFromServer(openChamberDefaults.gitProviders);
+                                } catch {
+                                    // Ignore — non-authoritative state stays as-is.
+                                }
+                            }
 
                             const providerLoad = _inFlightProviders.get(directoryKey);
                             if (providerLoad) {

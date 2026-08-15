@@ -30,7 +30,10 @@ const sessionWith = (linked: unknown): Session =>
   ({ metadata: { openchamber: { linked_issues: linked } } } as unknown as Session);
 
 const resetStores = () => {
-  useGitProviderDomainsStore.setState({ domains: { github: [], gitlab: [], gitea: [] } });
+  useGitProviderDomainsStore.setState({
+    domains: { github: [], gitlab: [], gitea: [] },
+    apiBaseUrls: { github: '', gitlab: '', gitea: '' },
+  });
   useGiteaAuthStore.setState({ status: null });
   useGitLabAuthStore.setState({ status: null });
 };
@@ -272,6 +275,14 @@ describe('deriveLinkedIssueProvider', () => {
       domains: { github: [], gitlab: [], gitea: ['git.example.com'] },
     });
     expect(deriveLinkedIssueProvider('https://git.example.com/owner/repo/pulls/5')).toBe('gitea');
+  });
+
+  test('derives a self-hosted github host from the configured api base url', () => {
+    useGitProviderDomainsStore.setState({
+      domains: { github: [], gitlab: [], gitea: [] },
+      apiBaseUrls: { github: 'https://github.example.com/api/v3', gitlab: '', gitea: '' },
+    });
+    expect(deriveLinkedIssueProvider('https://github.example.com/owner/repo/issues/1')).toBe('github');
   });
 
   test('derives a self-hosted gitlab host from the domains store', () => {

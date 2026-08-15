@@ -11,7 +11,9 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
-import { CustomDomainsInput } from '@/components/sections/shared/CustomDomainsInput';
+import { ProviderApiBaseUrlInput } from '@/components/sections/shared/ProviderApiBaseUrlInput';
+import { ProviderDetectUrlsInput } from '@/components/sections/shared/ProviderDetectUrlsInput';
+import { useGitProviderDomainsStore } from '@/stores/useGitProviderDomainsStore';
 
 const getBaseUrlHost = (baseUrl?: string | null): string => {
   if (!baseUrl) return '';
@@ -34,7 +36,11 @@ export const GiteaSettings: React.FC = () => {
 
   const [isBusy, setIsBusy] = React.useState(false);
   const [accessToken, setAccessToken] = React.useState('');
-  const [baseUrl, setBaseUrl] = React.useState('');
+  // Prefill the connect form with the server-side default API base URL when the
+  // user has not typed one yet; the per-account base URL still wins on connect.
+  const [baseUrl, setBaseUrl] = React.useState(
+    useGitProviderDomainsStore((state) => state.apiBaseUrls.gitea),
+  );
 
   React.useEffect(() => {
     (async () => {
@@ -300,7 +306,10 @@ export const GiteaSettings: React.FC = () => {
         )}
       </div>
 
-      <CustomDomainsInput provider="gitea" />
+      <div className="flex flex-col gap-4 pt-4">
+        <ProviderApiBaseUrlInput provider="gitea" />
+        <ProviderDetectUrlsInput provider="gitea" />
+      </div>
     </SettingsSection>
   );
 };

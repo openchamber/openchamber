@@ -1,3 +1,5 @@
+import { sanitizeGitProviders } from '../git-providers/config.js';
+
 export const createSettingsHelpers = (dependencies) => {
   const {
     normalizePathForPersistence,
@@ -480,6 +482,10 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.gitModelId === 'string') {
       const trimmed = candidate.gitModelId.trim();
       result.gitModelId = trimmed.length > 0 ? trimmed : undefined;
+    }
+    const gitProviders = sanitizeGitProviders(candidate.gitProviders);
+    if (gitProviders) {
+      result.gitProviders = gitProviders;
     }
     if (typeof candidate.pwaAppName === 'string') {
       result.pwaAppName = normalizePwaAppName(candidate.pwaAppName, undefined);

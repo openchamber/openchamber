@@ -3,15 +3,20 @@ import { parseGitHost } from '@/lib/gitHost';
 import { getRemotes } from '@/lib/gitApi';
 import { useGitLabAuthStore } from '@/stores/useGitLabAuthStore';
 import { useGiteaAuthStore } from '@/stores/useGiteaAuthStore';
-import { useGitProviderDomainsStore, normalizeProviderDomain } from '@/stores/useGitProviderDomainsStore';
+import {
+  useGitProviderDomainsStore,
+  normalizeProviderDomain,
+  type GitProviderApiBaseUrls,
+  type GitProviderDomains,
+} from '@/stores/useGitProviderDomainsStore';
 
 export type GitProvider = 'github' | 'gitlab' | 'gitea' | 'other';
 
 /**
  * Per-provider hostname sets used for detection: custom user-configured
- * domains (from the domains store) plus account-derived base-URL hostnames.
- * Built-in defaults (github.com, gitlab.com) are applied inside the detection
- * logic and never need to be present here.
+ * domains (from the domains store), account-derived base-URL hostnames, and the
+ * configured api base host. Built-in defaults (github.com, gitlab.com) are
+ * applied inside the detection logic and never need to be present here.
  */
 export type GitProviderHosts = {
   github: string[];
@@ -30,6 +35,57 @@ const normalizeHostList = (hosts: string[] | undefined): string[] => {
     }
   }
   return result;
+};
+
+const GITHUB_API_HOST = 'api.github.com';
+
+/**
+ * Hostname of a configured api base URL, or null when unset/unparseable.
+ * GitHub Enterprise remotes point at the web host, not the api subdomain, so an
+ * `api.github.com` api base maps back to `github.com` (the built-in web host).
+ */
+const apiBaseHost = (apiBaseUrl: string | undefined): string | null => {
+  const host = normalizeProviderDomain(apiBaseUrl ?? '');
+  if (!host) return null;
+  return host === GITHUB_API_HOST ? 'github.com' : host;
+};
+
+/**
+ * Build the per-provider detection host sets. Each provider gets its configured
+ * api base host (auto-added; github's `api.github.com` maps to `github.com`),
+ * plus the account-derived base-URL hosts (gitlab/gitea) and the custom domains
+ * from the domains store. All entries are normalized and deduped.
+ */
+export const buildGitProviderHosts = (input: {
+  domains: GitProviderDomains;
+  apiBaseUrls: GitProviderApiBaseUrls;
+  gitlabAccounts?: Array<{ baseUrl?: string }>;
+  giteaAccounts?: Array<{ baseUrl?: string }>;
+}): GitProviderHosts => {
+  const githubApiHost = apiBaseHost(input.apiBaseUrls.github);
+  const gitlabApiHost = apiBaseHost(input.apiBaseUrls.gitlab);
+  const giteaApiHost = apiBaseHost(input.apiBaseUrls.gitea);
+
+  return {
+    github: normalizeHostList([
+      ...(githubApiHost ? [githubApiHost] : []),
+      ...input.domains.github,
+    ]),
+    gitlab: normalizeHostList([
+      ...(input.gitlabAccounts ?? [])
+        .map((account) => account.baseUrl)
+        .filter((url): url is string => Boolean(url)),
+      ...(gitlabApiHost ? [gitlabApiHost] : []),
+      ...input.domains.gitlab,
+    ]),
+    gitea: normalizeHostList([
+      ...(input.giteaAccounts ?? [])
+        .map((account) => account.baseUrl)
+        .filter((url): url is string => Boolean(url)),
+      ...(giteaApiHost ? [giteaApiHost] : []),
+      ...input.domains.gitea,
+    ]),
+  };
 };
 
 /**
@@ -104,13 +160,10 @@ export const useGitProvider = (directory: string | null | undefined): GitProvide
   const gitlabAccounts = useGitLabAuthStore((state) => state.status?.accounts);
   const giteaAccounts = useGiteaAuthStore((state) => state.status?.accounts);
   const domains = useGitProviderDomainsStore((state) => state.domains);
+  const apiBaseUrls = useGitProviderDomainsStore((state) => state.apiBaseUrls);
   const hosts = useMemo<GitProviderHosts>(
-    () => ({
-      github: domains.github,
-      gitlab: [...(gitlabAccounts ?? []).map((account) => account.baseUrl), ...domains.gitlab],
-      gitea: [...(giteaAccounts ?? []).map((account) => account.baseUrl), ...domains.gitea],
-    }),
-    [domains, gitlabAccounts, giteaAccounts],
+    () => buildGitProviderHosts({ domains, apiBaseUrls, gitlabAccounts, giteaAccounts }),
+    [domains, apiBaseUrls, gitlabAccounts, giteaAccounts],
   );
   const [provider, setProvider] = useState<GitProvider | null>(null);
 

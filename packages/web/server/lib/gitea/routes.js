@@ -237,7 +237,7 @@ export function registerGiteaRoutes(app, options = {}) {
 
   app.get('/api/gitea/auth/status', async (_req, res) => {
     try {
-      const { getGiteaAuth, getGiteaAuthAccounts, clearGiteaAuth } = await getGiteaLibraries();
+      const { getGiteaAuth, getGiteaAuthAccounts, clearGiteaAuth, getGiteaDefaultBaseUrl } = await getGiteaLibraries();
       const auth = getGiteaAuth();
       const accounts = getGiteaAuthAccounts();
       if (!auth?.accessToken) {
@@ -261,6 +261,7 @@ export function registerGiteaRoutes(app, options = {}) {
         connected: true,
         ...(user ? { user } : {}),
         accounts,
+        defaultBaseUrl: getGiteaDefaultBaseUrl(),
       });
     } catch (error) {
       console.error('Failed to get Gitea auth status:', error);
@@ -275,8 +276,8 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'accessToken is required' });
       }
 
-      const { normalizeBaseUrl, setGiteaAuth, getGiteaAuthAccounts } = await getGiteaLibraries();
-      const baseUrl = normalizeBaseUrl(req.body?.baseUrl);
+      const { normalizeBaseUrl, setGiteaAuth, getGiteaAuthAccounts, getGiteaDefaultBaseUrl } = await getGiteaLibraries();
+      const baseUrl = normalizeBaseUrl(req.body?.baseUrl) || getGiteaDefaultBaseUrl();
       if (!baseUrl) {
         return res.status(400).json({ error: 'baseUrl is required and must be a valid URL' });
       }

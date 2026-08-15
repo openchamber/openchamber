@@ -1,4 +1,4 @@
-import { getGitLabAuth, DEFAULT_GITLAB_BASE_URL } from './auth.js';
+import { getGitLabAuth, getGitLabDefaultBaseUrl } from './auth.js';
 
 // Per-request timeout for every GitLab call. GitLab REST can hang under load
 // (especially self-hosted instances); bounding each request lets the caller
@@ -113,7 +113,7 @@ export function isGitLabRateLimited() {
 // ---- Response helpers ----
 
 const joinApiUrl = (baseUrl, path) => {
-  const base = String(baseUrl || DEFAULT_GITLAB_BASE_URL).replace(/\/+$/, '');
+  const base = String(baseUrl || getGitLabDefaultBaseUrl()).replace(/\/+$/, '');
   const p = typeof path === 'string' && path ? (path.startsWith('/') ? path : `/${path}`) : '';
   return `${base}/api/v4${p}`;
 };
@@ -305,7 +305,7 @@ export function createGitLabClient({ token, baseUrl }) {
 
 function normalizeBaseForClient(baseUrl) {
   if (typeof baseUrl !== 'string' || !baseUrl.trim()) {
-    return DEFAULT_GITLAB_BASE_URL;
+    return getGitLabDefaultBaseUrl();
   }
   return baseUrl.trim().replace(/\/+$/, '');
 }

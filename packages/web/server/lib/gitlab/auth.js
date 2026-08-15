@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { getProviderApiBaseUrl } from '../git-providers/config.js';
 
 const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -9,7 +10,14 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
 const STORAGE_DIR = OPENCHAMBER_DATA_DIR;
 const STORAGE_FILE = path.join(STORAGE_DIR, 'gitlab-auth.json');
 
+// Kept for compatibility with existing consumers/tests; the effective fallback
+// lives in the git-providers defaults (GIT_PROVIDER_DEFAULTS.gitlab).
 export const DEFAULT_GITLAB_BASE_URL = 'https://gitlab.com';
+
+/** Effective default GitLab base URL: configured settings.json value, else the built-in default. */
+export function getGitLabDefaultBaseUrl() {
+  return getProviderApiBaseUrl('gitlab');
+}
 
 function ensureStorageDir() {
   if (!fs.existsSync(STORAGE_DIR)) {
@@ -119,7 +127,7 @@ function normalizeAuthEntry(entry) {
   if (!entry || typeof entry !== 'object') return null;
   const accessToken = typeof entry.accessToken === 'string' ? entry.accessToken : '';
   if (!accessToken) return null;
-  const baseUrl = normalizeBaseUrl(entry.baseUrl) || DEFAULT_GITLAB_BASE_URL;
+  const baseUrl = normalizeBaseUrl(entry.baseUrl) || getGitLabDefaultBaseUrl();
   const username = typeof entry.username === 'string' ? entry.username : '';
 
   const accountId = resolveAccountId({
@@ -218,7 +226,7 @@ export function getGitLabAuthAccounts() {
         avatarUrl: entry.avatarUrl || null,
         webUrl: entry.webUrl || null,
       },
-      baseUrl: entry.baseUrl || DEFAULT_GITLAB_BASE_URL,
+      baseUrl: entry.baseUrl || getGitLabDefaultBaseUrl(),
       current: Boolean(entry.current),
     }));
 }
@@ -227,7 +235,7 @@ export function setGitLabAuth({ accessToken, baseUrl, user }) {
   if (!accessToken || typeof accessToken !== 'string') {
     throw new Error('accessToken is required');
   }
-  const normalizedBaseUrl = normalizeBaseUrl(baseUrl) || DEFAULT_GITLAB_BASE_URL;
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl) || getGitLabDefaultBaseUrl();
   const normalizedUser = user && typeof user === 'object'
     ? {
       username: typeof user.username === 'string' ? user.username : undefined,
