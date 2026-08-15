@@ -21,6 +21,7 @@ const group = (providerId: string, rows: Array<{ key: string; label: string; sub
   rows: rows.map((row) => ({
     key: row.key,
     label: row.label,
+    windowKey: row.key,
     subtitle: row.subtitle,
     window: window(row.seconds),
   })),

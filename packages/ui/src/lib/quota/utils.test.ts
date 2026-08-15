@@ -28,6 +28,14 @@ describe('calculatePace', () => {
     expect(pace?.totalSeconds).toBe(7 * 86400);
   });
 
+  test('accepts resetAt as an ISO string like the opencode-go provider sends', () => {
+    const resetAt = new Date(Date.now() + 12 * 3600 * 1000).toISOString();
+    const pace = calculatePace(50, resetAt as unknown as number, 24 * 3600, '24h');
+    expect(pace).not.toBeNull();
+    expect(pace?.paceRateText).not.toBe('-');
+    expect(pace?.status).toBe('on-track');
+  });
+
   test('classifies on-track when usage is at or below the elapsed ratio', () => {
     // Half the window elapsed (12h of 24h), half the quota used.
     const resetAt = Date.now() + 12 * 3600 * 1000;

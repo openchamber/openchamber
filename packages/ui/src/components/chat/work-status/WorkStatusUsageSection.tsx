@@ -204,7 +204,7 @@ export const WorkStatusUsageSection: React.FC = () => {
                     {metricLabel === '-' ? null : (
                       <WorkStatusValue tone={windowTone(row.window)}>{metricLabel}</WorkStatusValue>
                     )}
-                    {showPredValues ? <WorkStatusPace window={row.window} label={row.label} /> : null}
+                    {showPredValues ? <WorkStatusPace window={row.window} label={row.windowKey} /> : null}
                   </>
                 )}
               />

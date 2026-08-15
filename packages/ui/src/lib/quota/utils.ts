@@ -177,8 +177,12 @@ export const calculatePace = (
     return null;
   }
 
+  // Providers report resetAt as either an epoch ms number or an ISO string.
+  const resetAtTime = typeof resetAt === 'number' ? resetAt : new Date(resetAt).getTime();
+  if (!Number.isFinite(resetAtTime)) return null;
+
   const now = Date.now();
-  const remainingSeconds = Math.max(0, (resetAt - now) / 1000);
+  const remainingSeconds = Math.max(0, (resetAtTime - now) / 1000);
   const elapsedSeconds = Math.max(0, Math.min(effectiveWindowSeconds, effectiveWindowSeconds - remainingSeconds));
   const elapsedRatio = Math.max(0, Math.min(1, elapsedSeconds / effectiveWindowSeconds));
   const usageRatio = usedPercent / 100;
