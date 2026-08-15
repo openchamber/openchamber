@@ -1189,6 +1189,7 @@ export const settingsDict = {
   'settings.usage.sidebar.field.displayModePlaceholder': '表示モード',
   'settings.usage.sidebar.field.displayModeUsage': '使用量',
   'settings.usage.sidebar.field.displayModeRemaining': '残り割り当て',
+  'settings.usage.sidebar.field.showPredictions': '予測を表示',
   'settings.usage.sidebar.status.notSet': '未設定',
   'settings.usage.page.empty.selectProvider': '使用量の詳細を表示する Provider を選択してください。',
   'settings.usage.page.header.providerUsage': '{provider} の使用量',

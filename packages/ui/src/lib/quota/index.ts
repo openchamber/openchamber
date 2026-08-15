@@ -5,4 +5,9 @@ export {
   formatQuotaResetLabel,
   resolveUsageTone,
   formatWindowLabel,
+  calculatePace,
+  getPaceStatusColor,
+  formatRemainingTime,
+  calculateExpectedUsagePercent,
 } from './utils';
+export type { PaceInfo, PaceStatus } from './utils';

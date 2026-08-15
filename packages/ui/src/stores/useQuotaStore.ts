@@ -15,6 +15,7 @@ let quotaAutoRefreshInterval: number | null = null;
 
 interface QuotaSettingsState {
   displayMode: 'usage' | 'remaining';
+  showPredValues: boolean;
   dropdownProviderIds: QuotaProviderId[];
   selectedModels: Record<string, string[]>;  // Map of providerId -> selected model names
   expandedFamilies: Record<string, string[]>;  // Map of providerId -> EXPANDED family IDs (header dropdown - inverted)
@@ -34,6 +35,7 @@ interface QuotaStore extends QuotaSettingsState {
   fetchProviderQuota: (providerId: QuotaProviderId) => Promise<void>;
   setSelectedProvider: (providerId: QuotaProviderId | null) => void;
   setDisplayMode: (mode: 'usage' | 'remaining') => void;
+  setShowPredValues: (enabled: boolean) => void;
   setDropdownProviderIds: (providerIds: QuotaProviderId[]) => void;
   setSelectedModels: (providerId: string, modelNames: string[]) => void;
   toggleModelSelected: (providerId: string, modelName: string) => void;
@@ -45,6 +47,9 @@ interface QuotaStore extends QuotaSettingsState {
 const parseSettings = (data: Record<string, unknown> | null): QuotaSettingsState => {
   const allProviderIds = QUOTA_PROVIDERS.map((provider) => provider.id);
   const displayMode = data?.usageDisplayMode === 'remaining' ? 'remaining' : 'usage';
+  const showPredValues = typeof data?.usageShowPredValues === 'boolean'
+    ? data.usageShowPredValues
+    : false;
   const rawDropdownProviders = Array.isArray(data?.usageDropdownProviders)
     ? data?.usageDropdownProviders
     : null;
@@ -78,6 +83,7 @@ const parseSettings = (data: Record<string, unknown> | null): QuotaSettingsState
 
   return {
     displayMode,
+    showPredValues,
     dropdownProviderIds,
     selectedModels,
     expandedFamilies,
@@ -109,6 +115,7 @@ const loadSettingsFromRuntime = async (): Promise<QuotaSettingsState> => {
 
   return {
     displayMode: 'usage',
+    showPredValues: false,
     dropdownProviderIds: QUOTA_PROVIDERS.map((provider) => provider.id),
     selectedModels: {},
     expandedFamilies: {},
@@ -125,6 +132,7 @@ export const useQuotaStore = create<QuotaStore>()(
       lastUpdated: null,
       error: null,
       displayMode: 'usage',
+      showPredValues: false,
       dropdownProviderIds: QUOTA_PROVIDERS.map((provider) => provider.id),
       selectedModels: {},
       expandedFamilies: {},
@@ -200,6 +208,7 @@ export const useQuotaStore = create<QuotaStore>()(
 
       setSelectedProvider: (providerId) => set({ selectedProviderId: providerId }),
       setDisplayMode: (mode) => set({ displayMode: mode }),
+      setShowPredValues: (enabled) => set({ showPredValues: enabled }),
       setDropdownProviderIds: (providerIds) => set({ dropdownProviderIds: providerIds }),
 
       setSelectedModels: (providerId, modelNames) => {

@@ -1126,6 +1126,7 @@ export const settingsDict = {
   'settings.usage.sidebar.field.displayModePlaceholder': 'Anzeigemodus',
   'settings.usage.sidebar.field.displayModeUsage': 'Nutzung',
   'settings.usage.sidebar.field.displayModeRemaining': 'Verbleibendes Kontingent',
+  'settings.usage.sidebar.field.showPredictions': 'Vorhersagen anzeigen',
   'settings.usage.sidebar.status.notSet': 'Nicht festgelegt',
   'settings.usage.page.empty.selectProvider': 'Wählen Sie einen Anbieter aus, um Nutzungsdetails anzuzeigen.',
   'settings.usage.page.header.providerUsage': '{provider} Nutzung',

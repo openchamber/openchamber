@@ -1063,6 +1063,7 @@ export const settingsDict = {
   'settings.usage.sidebar.field.displayModePlaceholder': '顯示模式',
   'settings.usage.sidebar.field.displayModeUsage': '用量',
   'settings.usage.sidebar.field.displayModeRemaining': '剩餘配額',
+  'settings.usage.sidebar.field.showPredictions': '顯示預測',
   'settings.usage.sidebar.status.notSet': '未設定',
   'settings.usage.page.empty.selectProvider': '選擇一個供應商以查看用量詳情。',
   'settings.usage.page.header.providerUsage': '{provider} 用量',

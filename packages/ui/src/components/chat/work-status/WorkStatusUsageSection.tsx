@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { preloadProviderLogos } from '@/hooks/useProviderLogo';
-import { formatQuotaResetLabel, formatQuotaValueLabel } from '@/lib/quota';
+import { formatQuotaResetLabel, formatQuotaValueLabel, calculatePace, getPaceStatusColor, formatRemainingTime, type PaceStatus } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUsageProviderGroups } from '@/components/usage/usageGroups';
@@ -15,6 +15,7 @@ import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { WorkStatusRow, WorkStatusCollapsibleSection, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import type { UsageWindow } from '@/types';
+import type { I18nKey } from '@/lib/i18n/messages/en';
 
 /**
  * Provider rate limits.
@@ -38,10 +39,55 @@ const windowTone = (window: UsageWindow): 'default' | 'warning' | 'error' => {
   return 'default';
 };
 
+const PACE_STATUS_LABEL_KEYS: Record<PaceStatus, I18nKey> = {
+  'on-track': 'settings.usage.pace.status.onTrack',
+  'slightly-fast': 'settings.usage.pace.status.slightlyFast',
+  'too-fast': 'settings.usage.pace.status.tooFast',
+  exhausted: 'settings.usage.pace.status.usedUp',
+};
+
+/**
+ * Compact pace readout for one quota window: status dot plus predicted final
+ * usage, or the remaining wait when the window is exhausted. Same vocabulary
+ * as the row's other values — a dot and a number, no card chrome.
+ */
+const WorkStatusPace: React.FC<{
+  window: UsageWindow;
+  label: string;
+}> = ({ window, label }) => {
+  const { t } = useI18n();
+  const paceInfo = React.useMemo(
+    () => calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label),
+    [window.usedPercent, window.resetAt, window.windowSeconds, label],
+  );
+  if (!paceInfo) return null;
+
+  const statusColor = getPaceStatusColor(paceInfo.status);
+  const predictionTooltip = t('settings.usage.pace.predictionTooltip', { prediction: paceInfo.predictText });
+
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5" title={paceInfo.isExhausted ? undefined : predictionTooltip}>
+      <span
+        className="size-1.5 rounded-full"
+        style={{ backgroundColor: statusColor }}
+        title={t(PACE_STATUS_LABEL_KEYS[paceInfo.status])}
+      />
+      <span className="text-[11px] tabular-nums" style={{ color: statusColor }}>
+        {paceInfo.isExhausted ? (
+          <>{t('settings.usage.pace.wait', { duration: formatRemainingTime(paceInfo.remainingSeconds) })}</>
+        ) : (
+          <>{t('settings.usage.pace.prediction', { prediction: paceInfo.predictText })}</>
+        )}
+      </span>
+    </span>
+  );
+};
+
 export const WorkStatusUsageSection: React.FC = () => {
   const { t } = useI18n();
   const groups = useUsageProviderGroups();
   const displayMode = useQuotaStore((state) => state.displayMode);
+  const showPredValues = useQuotaStore((state) => state.showPredValues);
   const isLoading = useQuotaStore((state) => state.isLoading);
   const quotaResults = useQuotaStore((state) => state.results);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
@@ -153,8 +199,13 @@ export const WorkStatusUsageSection: React.FC = () => {
                     ) : null}
                   </span>
                 )}
-                value={metricLabel === '-' ? undefined : (
-                  <WorkStatusValue tone={windowTone(row.window)}>{metricLabel}</WorkStatusValue>
+                value={(
+                  <>
+                    {metricLabel === '-' ? null : (
+                      <WorkStatusValue tone={windowTone(row.window)}>{metricLabel}</WorkStatusValue>
+                    )}
+                    {showPredValues ? <WorkStatusPace window={row.window} label={row.label} /> : null}
+                  </>
                 )}
               />
             );
