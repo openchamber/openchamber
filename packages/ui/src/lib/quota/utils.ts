@@ -135,14 +135,12 @@ export interface PaceInfo {
 const inferWindowSeconds = (label: string): number | null => {
   const normalized = label.toLowerCase().trim();
 
-  // Exact matches
   if (normalized === '5h') return 5 * 3600;
   if (normalized === '7d' || normalized === 'weekly' || normalized === '7d-sonnet' || normalized === '7d-opus') return 7 * 86400;
   if (normalized === 'monthly') return 30 * 86400;
   if (normalized === '24h' || normalized === 'daily') return 86400;
   if (normalized === '1h') return 3600;
 
-  // Pattern matches
   const hourMatch = normalized.match(/^(\d+)h$/);
   if (hourMatch) return parseInt(hourMatch[1], 10) * 3600;
 
@@ -167,7 +165,6 @@ export const calculatePace = (
   windowSeconds: number | null,
   windowLabel?: string
 ): PaceInfo | null => {
-  // Try to infer windowSeconds from label if not provided
   let effectiveWindowSeconds = windowSeconds;
   if (effectiveWindowSeconds === null && windowLabel) {
     effectiveWindowSeconds = inferWindowSeconds(windowLabel);
@@ -177,7 +174,6 @@ export const calculatePace = (
     return null;
   }
 
-  // Providers report resetAt as either an epoch ms number or an ISO string.
   const resetAtTime = typeof resetAt === 'number' ? resetAt : new Date(resetAt).getTime();
   if (!Number.isFinite(resetAtTime)) return null;
 
@@ -188,7 +184,6 @@ export const calculatePace = (
   const usageRatio = usedPercent / 100;
   const isExhausted = usedPercent >= 100 && remainingSeconds > 0;
 
-  // Calculate predicted final usage
   let predictedFinalPercent: number;
   if (elapsedRatio > 0.01) {
     predictedFinalPercent = Math.min(999, (usageRatio / elapsedRatio) * 100);
@@ -196,7 +191,6 @@ export const calculatePace = (
     predictedFinalPercent = usedPercent;
   }
 
-  // Determine pace status
   let status: PaceStatus;
   if (isExhausted) {
     status = 'exhausted';
@@ -208,7 +202,6 @@ export const calculatePace = (
     status = 'too-fast';
   }
 
-  // Calculate pace rate text (per hour for < 5 days, per day otherwise)
   const usePerDay = effectiveWindowSeconds >= 5 * 24 * 3600;
   const unitSeconds = usePerDay ? 86400 : 3600;
   const unitSuffix = usePerDay ? 'd' : 'h';
@@ -219,18 +212,13 @@ export const calculatePace = (
     ? `${Math.min(999.9, Math.max(0, pacePercentPerUnit)).toFixed(1)}%/${unitSuffix}`
     : '-';
 
-  // Calculate predict text
   const predictText = predictedFinalPercent > 100
     ? `+${Math.round(predictedFinalPercent)}%`
     : `${Math.round(predictedFinalPercent)}%`;
 
-  // Calculate daily allocation for weekly quotas (7 days = 604800 seconds)
-  // Also include monthly quotas (roughly 30 days)
   let dailyAllocationPercent: number | null = null;
   const windowDays = effectiveWindowSeconds / 86400;
   if (windowDays >= 7) {
-    // For a 7-day window, each day should use ~14.3% (100/7)
-    // For monthly, each day should use ~3.3% (100/30)
     dailyAllocationPercent = 100 / windowDays;
   }
 

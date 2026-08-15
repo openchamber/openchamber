@@ -37,14 +37,12 @@ describe('calculatePace', () => {
   });
 
   test('classifies on-track when usage is at or below the elapsed ratio', () => {
-    // Half the window elapsed (12h of 24h), half the quota used.
     const resetAt = Date.now() + 12 * 3600 * 1000;
     const pace = calculatePace(50, resetAt, 24 * 3600, '24h');
     expect(pace?.status).toBe('on-track');
   });
 
   test('classifies slightly-fast when the projection stays under 130%', () => {
-    // Quarter of the window elapsed but 50% used -> projected 200%... too fast.
     const resetAt = Date.now() + 18 * 3600 * 1000;
     const pace = calculatePace(50, resetAt, 24 * 3600, '24h');
     expect(pace?.status).toBe('too-fast');
@@ -66,7 +64,6 @@ describe('calculatePace', () => {
   });
 
   test('clamps absurd projections at 999%', () => {
-    // ~1.25% of the window elapsed, 50% used -> projected ~4000% -> clamped.
     const resetAt = Date.now() + 23.7 * 3600 * 1000;
     const pace = calculatePace(50, resetAt, 24 * 3600, '24h');
     expect(pace?.predictedFinalPercent).toBe(999);
