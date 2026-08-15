@@ -121,9 +121,10 @@ export const useForgeLookup = ({
   sourceRepo?: string | null;
   kind: ForgeLookupKind;
   query: string;
-}): { options: ForgeLookupOption[]; loading: boolean } => {
+}): { options: ForgeLookupOption[]; loading: boolean; initialized: boolean } => {
   const [options, setOptions] = useState<ForgeLookupOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
     const key = cacheKey(kind, directory, sourceRepo, query);
@@ -133,6 +134,7 @@ export const useForgeLookup = ({
       // Fresh enough: serve without the network call or the debounce timer.
       setOptions(cached.options);
       setLoading(false);
+      setInitialized(true);
       return;
     }
     if (cached) lookupCache.delete(key);
@@ -191,7 +193,10 @@ export const useForgeLookup = ({
         } catch {
           if (!cancelled) setOptions([]);
         } finally {
-          if (!cancelled) setLoading(false);
+          if (!cancelled) {
+            setLoading(false);
+            setInitialized(true);
+          }
         }
       })();
     }, 250);
@@ -202,5 +207,5 @@ export const useForgeLookup = ({
     };
   }, [directory, kind, provider, query, sourceRepo]);
 
-  return { options, loading };
+  return { options, loading, initialized };
 };
