@@ -11,12 +11,14 @@
 
 ## Public exports
 
-- `GIT_PROVIDER_DEFAULTS`: `{ github: 'https://api.github.com', gitlab: 'https://gitlab.com', gitea: null }`. Built-in defaults are **not persisted**; they are applied at read time by getters.
+- `GIT_PROVIDER_DEFAULTS`: `{ github: 'https://api.github.com', gitlab: 'https://gitlab.com', gitea: 'https://codeberg.org' }`. Built-in defaults are **not persisted**; they are applied at read time by getters.
+- `GIT_PROVIDER_DEFAULT_DETECT_URLS`: `{ github: ['github.com'], gitlab: ['gitlab.com'], gitea: ['codeberg.org'] }`. Built-in detection hostnames; remotes on these hosts classify as the provider with no configuration (mirrors the client-side built-ins in `packages/ui/src/lib/gitProvider.ts`).
 - `normalizeBaseUrl(raw)`: normalize an API base URL (add `https://` when the scheme is missing, strip trailing slashes, preserve subpaths like `/gitlab`), `null` for empty/unparseable input.
 - `normalizeDetectionHost(raw)`: extract the bare lowercase hostname from any git remote/URL form (`https://`, `ssh://`, scp-like `git@host:path`, IPv6); mirrors `packages/ui/src/lib/gitHost.ts` `parseGitHost`.
 - `sanitizeGitProviders(payload)`: validate/normalize the `gitProviders` shape — only `github|gitlab|gitea` keys survive; `apiBaseUrl` via `normalizeBaseUrl`, `detectUrls` deduped bare hostnames; empty/absent values dropped; returns `undefined` when nothing valid remains.
 - `readGitProvidersConfig()`: read the `gitProviders` section from `settings.json` (`OPENCHAMBER_DATA_DIR` env override, else `~/.config/openchamber`); never throws, returns `{}` on missing/invalid data.
-- `getProviderApiBaseUrl(provider)`: configured value -> `GIT_PROVIDER_DEFAULTS[provider]` -> `null` (gitea).
+- `getProviderApiBaseUrl(provider)`: configured value -> `GIT_PROVIDER_DEFAULTS[provider]` -> `null`.
+- `getProviderDetectUrls(provider)`: effective detection hostnames — built-in default hosts plus configured `detectUrls`, deduped (the built-ins always apply).
 - `githubWebOriginFromApiBase(apiBase)`: GitHub web origin from an API base — `https://api.github.com` -> `https://github.com`; Enterprise `https://host/api[/v3]` -> `https://host` (trailing `/api`/`/api/v3` stripped, subpath prefixes kept); otherwise the URL origin; never throws, falls back to `https://github.com`.
 
 ## Settings shape

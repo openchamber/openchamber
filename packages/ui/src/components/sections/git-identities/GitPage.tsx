@@ -167,26 +167,30 @@ export const GitPage: React.FC<GitPageProps> = (props) => {
         title={t('settings.page.git.title')}
         showSaveStatus
       >
-        <div className="flex h-8 min-w-0">
-          <SortableTabsStrip
-            items={providerTabs}
-            activeId={activeProviderTab}
-            onSelect={(tabId) => setActiveProviderTab(tabId as GitProviderTabId)}
-            layoutMode="fit"
-            variant="active-pill"
-            activePillButtonClassName="h-7"
-          />
-        </div>
+        <section className="overflow-hidden rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
+          <div className="border-b border-[var(--surface-subtle)] px-3 py-2">
+            <div className="flex h-8 min-w-0">
+              <SortableTabsStrip
+                items={providerTabs}
+                activeId={activeProviderTab}
+                onSelect={(tabId) => setActiveProviderTab(tabId as GitProviderTabId)}
+                layoutMode="fit"
+                variant="active-pill"
+                activePillButtonClassName="h-7"
+              />
+            </div>
+          </div>
 
-        <div role="tabpanel" aria-label={t('settings.git.tabs.github')} hidden={activeProviderTab !== 'github'}>
-          <GitHubSettings />
-        </div>
-        <div role="tabpanel" aria-label={t('settings.git.tabs.gitlab')} hidden={activeProviderTab !== 'gitlab'}>
-          <GitLabSettings />
-        </div>
-        <div role="tabpanel" aria-label={t('settings.git.tabs.gitea')} hidden={activeProviderTab !== 'gitea'}>
-          <GiteaSettings />
-        </div>
+          <div role="tabpanel" aria-label={t('settings.git.tabs.github')} hidden={activeProviderTab !== 'github'}>
+            <GitHubSettings embedded />
+          </div>
+          <div role="tabpanel" aria-label={t('settings.git.tabs.gitlab')} hidden={activeProviderTab !== 'gitlab'}>
+            <GitLabSettings embedded />
+          </div>
+          <div role="tabpanel" aria-label={t('settings.git.tabs.gitea')} hidden={activeProviderTab !== 'gitea'}>
+            <GiteaSettings embedded />
+          </div>
+        </section>
 
         <SettingsSection
           title={t('settings.gitIdentities.page.section.title')}

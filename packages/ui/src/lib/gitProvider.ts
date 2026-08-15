@@ -15,8 +15,9 @@ export type GitProvider = 'github' | 'gitlab' | 'gitea' | 'other';
 /**
  * Per-provider hostname sets used for detection: custom user-configured
  * domains (from the domains store), account-derived base-URL hostnames, and the
- * configured api base host. Built-in defaults (github.com, gitlab.com) are
- * applied inside the detection logic and never need to be present here.
+ * configured api base host. Built-in defaults (github.com, gitlab.com,
+ * codeberg.org) are applied inside the detection logic and never need to be
+ * present here.
  */
 export type GitProviderHosts = {
   github: string[];
@@ -91,10 +92,10 @@ export const buildGitProviderHosts = (input: {
 /**
  * Classify a repository by the hosts of its remotes. Returns null when there
  * are no remotes to inspect. Built-in defaults apply always: `github.com` is
- * GitHub and `gitlab.com` is GitLab (there is no built-in Gitea host). Custom
- * hosts from `hosts.{github,gitlab,gitea}` are then matched in precedence
- * order github -> gitlab -> gitea (first match wins). Anything else resolves
- * to 'other' so GitHub-branded UI is never offered for a non-GitHub repo.
+ * GitHub, `gitlab.com` is GitLab, and `codeberg.org` is Gitea. Custom hosts
+ * from `hosts.{github,gitlab,gitea}` are then matched in precedence order
+ * github -> gitlab -> gitea (first match wins). Anything else resolves to
+ * 'other' so GitHub-branded UI is never offered for a non-GitHub repo.
  */
 export const detectGitProvider = (fetchUrls: string[], hosts: GitProviderHosts): GitProvider | null => {
   const remoteHosts = new Set<string>();
@@ -110,7 +111,7 @@ export const detectGitProvider = (fetchUrls: string[], hosts: GitProviderHosts):
 
   const githubHosts = new Set(['github.com', ...normalizeHostList(hosts.github)]);
   const gitlabHosts = new Set(['gitlab.com', ...normalizeHostList(hosts.gitlab)]);
-  const giteaHosts = new Set(normalizeHostList(hosts.gitea));
+  const giteaHosts = new Set(['codeberg.org', ...normalizeHostList(hosts.gitea)]);
 
   for (const host of remoteHosts) {
     if (githubHosts.has(host)) {

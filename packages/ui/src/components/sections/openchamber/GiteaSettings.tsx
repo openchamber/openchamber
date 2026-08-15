@@ -24,7 +24,7 @@ const getBaseUrlHost = (baseUrl?: string | null): string => {
   }
 };
 
-export const GiteaSettings: React.FC = () => {
+export const GiteaSettings: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const runtimeGitea = getRegisteredRuntimeAPIs()?.gitea;
@@ -159,13 +159,8 @@ export const GiteaSettings: React.FC = () => {
   const currentAccount = accounts.find((account) => account.current) ?? (accounts.length > 0 ? accounts[0] : null);
   const currentBaseUrlHost = getBaseUrlHost(currentAccount?.baseUrl);
 
-  return (
-    <SettingsSection
-      title={t('settings.gitea.page.title')}
-      description={t('settings.gitea.page.description')}
-      info={t('settings.gitea.page.tooltip.connectAccount')}
-      settingsItem="git.gitea-account"
-    >
+  const sectionContent = (
+    <>
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
         {connected ? (
           <div className={cn('px-4 py-3', isMobile ? 'flex flex-col gap-3' : 'flex items-center justify-between gap-4')}>
@@ -306,10 +301,29 @@ export const GiteaSettings: React.FC = () => {
         )}
       </div>
 
-      <div className="flex flex-col gap-4 pt-4">
+      <div className={cn('flex flex-col gap-4', embedded ? 'border-t border-[var(--surface-subtle)] pt-4' : 'pt-4')}>
         <ProviderApiBaseUrlInput provider="gitea" />
         <ProviderDetectUrlsInput provider="gitea" />
       </div>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div data-settings-item="git.gitea-account" className="p-4">
+        {sectionContent}
+      </div>
+    );
+  }
+
+  return (
+    <SettingsSection
+      title={t('settings.gitea.page.title')}
+      description={t('settings.gitea.page.description')}
+      info={t('settings.gitea.page.tooltip.connectAccount')}
+      settingsItem="git.gitea-account"
+    >
+      {sectionContent}
     </SettingsSection>
   );
 };

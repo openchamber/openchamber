@@ -5,7 +5,7 @@
 - This module owns Gitea/Forgejo auth (Personal Access Token), raw REST v1 client access, remote-URL repo resolution, and Gitea issue / pull-request (PR) APIs for OpenChamber, including issue create/update and PR create/update/merge writes.
 - From a user perspective, this is the layer that lets the app show Gitea issues and pull requests for a local project, including comments and per-file diffs, and create, edit, and merge pull requests.
 - Gitea and Forgejo share the same GitHub-style REST v1 API, so this module serves both. Gitea calls remote work **pull requests** (PR), not merge requests. Gitea repos are flat `owner/repo` — there are no multi-segment namespaces.
-- The module mirrors `packages/web/server/lib/gitlab/` (PAT auth + raw-fetch client) but uses a **Personal Access Token** against the `Authorization: token <pat>` header and a **user-supplied base URL** (Gitea is self-hosted; there is no default instance).
+- The module mirrors `packages/web/server/lib/gitlab/` (PAT auth + raw-fetch client) but uses a **Personal Access Token** against the `Authorization: token <pat>` header and a **user-supplied base URL** (Gitea is self-hosted; codeberg.org is the only built-in default).
 
 ## Entrypoints and structure
 
@@ -29,8 +29,8 @@
 - `clearGiteaAuth()`: remove the current account.
 - `normalizeBaseUrl(raw)`: add `https://` when a scheme is missing, strip trailing slash, return `null` for invalid input.
 - `GITEA_AUTH_FILE`: auth file path.
-- `getGiteaDefaultBaseUrl()`: effective default base URL — configured `gitProviders.gitea.apiBaseUrl` from `settings.json`, else `null`. Used to prefill the connect form and as the connect/status default; stored accounts still require an explicit base URL (there is no invented host).
-- There is **no built-in default base URL**: Gitea/Forgejo is self-hosted, so the instance URL is always user-provided.
+- `getGiteaDefaultBaseUrl()`: effective default base URL — configured `gitProviders.gitea.apiBaseUrl` from `settings.json`, else `https://codeberg.org`. Used to prefill the connect form and as the connect/status default; stored accounts still require an explicit base URL.
+- The only built-in default base URL is **codeberg.org** (a well-known public Forgejo instance); any other Gitea/Forgejo instance URL is user-provided.
 
 ### Client (`client.js`)
 
@@ -47,7 +47,7 @@
 
 - Auth storage: `~/.config/openchamber/gitea-auth.json` (override with `OPENCHAMBER_DATA_DIR`).
 - Writes are atomic (tmp file + rename) and file mode is `0o600`.
-- Base URL resolution: the caller-supplied `baseUrl` (normalized) is the primary source — there is no built-in default instance. A configured `settings.json` `gitProviders.gitea.apiBaseUrl` acts as the connect-form default/fallback. Stored entries without a usable base URL are dropped.
+- Base URL resolution: the caller-supplied `baseUrl` (normalized) is the primary source, then the effective default (configured `settings.json` `gitProviders.gitea.apiBaseUrl`, else `https://codeberg.org`). Stored entries without a usable base URL are dropped.
 - Account id: `` `${host}:${username}` `` (e.g. `gitea.example.com:alice`), falling back to `token:<first8>` when the username is missing.
 - Auth header on every request: `Authorization: token <pat>`.
 - Gitea's `GET /user` uses `login`/`full_name`/`html_url`; `setGiteaAuth` accepts both that and the `username`/`web_url` variants.
@@ -92,7 +92,7 @@
 
 | Method | Path | Shape |
 |---|---|---|
-| GET | `/api/gitea/auth/status` | `{ connected, user?, accounts[], defaultBaseUrl? }` (`defaultBaseUrl` present when connected; the configured `gitProviders.gitea.apiBaseUrl`, else `null`) |
+| GET | `/api/gitea/auth/status` | `{ connected, user?, accounts[], defaultBaseUrl? }` (`defaultBaseUrl` present when connected; the effective default — configured `gitProviders.gitea.apiBaseUrl`, else `https://codeberg.org`) |
 | POST | `/api/gitea/auth/connect` | body `{ accessToken, baseUrl? }` -> `{ connected, user, accounts }`; `400` for missing/invalid token; `400` when neither a valid `baseUrl` nor a configured default exists |
 | POST | `/api/gitea/auth/activate` | body `{ accountId }` -> `{ connected, user, accounts }`; `404` unknown account |
 | DELETE | `/api/gitea/auth` | `{ removed }` |

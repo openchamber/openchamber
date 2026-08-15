@@ -8,11 +8,13 @@ process.env.OPENCHAMBER_DATA_DIR = TEMP_DATA_DIR;
 
 const {
   GIT_PROVIDER_DEFAULTS,
+  GIT_PROVIDER_DEFAULT_DETECT_URLS,
   normalizeBaseUrl,
   normalizeDetectionHost,
   sanitizeGitProviders,
   readGitProvidersConfig,
   getProviderApiBaseUrl,
+  getProviderDetectUrls,
   githubWebOriginFromApiBase,
 } = await import('./config.js');
 
@@ -126,7 +128,7 @@ describe('readGitProvidersConfig / getProviderApiBaseUrl', () => {
     expect(readGitProvidersConfig()).toEqual({});
     expect(getProviderApiBaseUrl('github')).toBe('https://api.github.com');
     expect(getProviderApiBaseUrl('gitlab')).toBe('https://gitlab.com');
-    expect(getProviderApiBaseUrl('gitea')).toBeNull();
+    expect(getProviderApiBaseUrl('gitea')).toBe('https://codeberg.org');
   });
 
   test('reads the configured values from settings.json', () => {
@@ -142,13 +144,33 @@ describe('readGitProvidersConfig / getProviderApiBaseUrl', () => {
     });
     expect(getProviderApiBaseUrl('github')).toBe('https://github.example.com/api/v3');
     expect(getProviderApiBaseUrl('gitlab')).toBe('https://gitlab.example.com');
-    expect(getProviderApiBaseUrl('gitea')).toBeNull();
+    expect(getProviderApiBaseUrl('gitea')).toBe('https://codeberg.org');
   });
 
   test('never throws on a malformed settings file', () => {
     fs.writeFileSync(SETTINGS_FILE, '{not-json');
     expect(readGitProvidersConfig()).toEqual({});
     expect(getProviderApiBaseUrl('github')).toBe(GIT_PROVIDER_DEFAULTS.github);
+  });
+});
+
+describe('getProviderDetectUrls', () => {
+  test('returns the built-in default hosts when nothing is configured', () => {
+    expect(getProviderDetectUrls('github')).toEqual(['github.com']);
+    expect(getProviderDetectUrls('gitlab')).toEqual(['gitlab.com']);
+    expect(getProviderDetectUrls('gitea')).toEqual(['codeberg.org']);
+    expect(GIT_PROVIDER_DEFAULT_DETECT_URLS.gitea).toEqual(['codeberg.org']);
+  });
+
+  test('keeps the built-in hosts and appends configured detectUrls', () => {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify({
+      gitProviders: {
+        github: { detectUrls: ['github.example.com'] },
+        gitea: { detectUrls: ['gitea.example.com', 'codeberg.org'] },
+      },
+    }));
+    expect(getProviderDetectUrls('github')).toEqual(['github.com', 'github.example.com']);
+    expect(getProviderDetectUrls('gitea')).toEqual(['codeberg.org', 'gitea.example.com']);
   });
 });
 

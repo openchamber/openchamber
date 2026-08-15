@@ -88,8 +88,9 @@ describe('detectGitProvider', () => {
     expect(detectGitProvider(['ssh://git@[2001:db8::1]/owner/repo.git'], hosts)).toBe('gitea');
   });
 
-  test('does not classify codeberg.org as gitea without a configured host', () => {
-    expect(detectGitProvider(['git@codeberg.org:owner/repo.git'], EMPTY_HOSTS)).toBe('other');
+  test('classifies codeberg.org as gitea by default (built-in host)', () => {
+    expect(detectGitProvider(['git@codeberg.org:owner/repo.git'], EMPTY_HOSTS)).toBe('gitea');
+    expect(detectGitProvider(['https://codeberg.org/owner/repo.git'], EMPTY_HOSTS)).toBe('gitea');
   });
 
   test('github wins over a configured gitea host when both remotes are present', () => {

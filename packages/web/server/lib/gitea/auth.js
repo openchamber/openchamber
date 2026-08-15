@@ -10,13 +10,13 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
 const STORAGE_DIR = OPENCHAMBER_DATA_DIR;
 const STORAGE_FILE = path.join(STORAGE_DIR, 'gitea-auth.json');
 
-// Gitea/Forgejo are self-hosted — there is deliberately NO built-in default
-// base URL. The instance URL is always user-provided (see `normalizeBaseUrl`);
-// auth.js never invents a host for a stored account. A configured
-// settings.json gitProviders.gitea.apiBaseUrl can act as the default for the
-// connect form, but stored accounts still require an explicit baseUrl.
+// Gitea/Forgejo are primarily self-hosted, but codeberg.org (a well-known
+// public Forgejo instance) acts as the built-in default base URL. The instance
+// URL is always user-provided when connecting to a different host (see
+// `normalizeBaseUrl`); auth.js never invents a host for a stored account. A
+// configured settings.json gitProviders.gitea.apiBaseUrl overrides the default.
 
-/** Effective default Gitea base URL: configured settings.json value, else null (no built-in default). */
+/** Effective default Gitea base URL: configured settings.json value, else codeberg.org. */
 export function getGiteaDefaultBaseUrl() {
   return getProviderApiBaseUrl('gitea');
 }

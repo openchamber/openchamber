@@ -14,7 +14,17 @@ const GIT_PROVIDER_KEYS = ['github', 'gitlab', 'gitea'];
 export const GIT_PROVIDER_DEFAULTS = {
   github: 'https://api.github.com',
   gitlab: 'https://gitlab.com',
-  gitea: null,
+  gitea: 'https://codeberg.org',
+};
+
+// Built-in detection hostnames: remotes on these hosts are recognized as the
+// provider even when the user configures nothing. Configured detectUrls extend
+// them — the built-ins always apply (mirrors the client-side detection in
+// packages/ui/src/lib/gitProvider.ts).
+export const GIT_PROVIDER_DEFAULT_DETECT_URLS = {
+  github: ['github.com'],
+  gitlab: ['gitlab.com'],
+  gitea: ['codeberg.org'],
 };
 
 /**
@@ -171,10 +181,21 @@ export function readGitProvidersConfig() {
 
 /**
  * Effective API base URL for a provider: the configured settings.json value if
- * present, else the built-in default (null for gitea, which has none).
+ * present, else the built-in default.
  */
 export function getProviderApiBaseUrl(provider) {
   return readGitProvidersConfig()[provider]?.apiBaseUrl || GIT_PROVIDER_DEFAULTS[provider] || null;
+}
+
+/**
+ * Effective detection hostnames for a provider: the built-in default hosts
+ * plus any user-configured detectUrls, deduped. The built-ins always apply so
+ * a default host (e.g. github.com) keeps classifying remotes even when custom
+ * enterprise hosts are configured.
+ */
+export function getProviderDetectUrls(provider) {
+  const configured = readGitProvidersConfig()[provider]?.detectUrls ?? [];
+  return [...new Set([...(GIT_PROVIDER_DEFAULT_DETECT_URLS[provider] ?? []), ...configured])];
 }
 
 /**
