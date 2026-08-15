@@ -735,11 +735,14 @@ const sessionAssistRuntime = createSessionAssistRuntime({
   getSmallModelService: async () => import('./lib/small-model/index.js'),
 });
 
+let processScheduledGoalSettled = () => {};
+
 const sessionGoalRuntime = createSessionGoalRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getSmallModelService: async () => import('./lib/small-model/index.js'),
   emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
+    processScheduledGoalSettled({ sessionId, directory, status });
     // The goal settle notification replaces the per-turn ready notifications
     // (suppressed while the goal is active) — so it obeys the same toggle.
     const settings = await readSettingsFromDisk();
@@ -1158,6 +1161,14 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
     }
   },
   logger: console,
+});
+processScheduledGoalSettled = (event) => scheduledTasksRuntime.processGoalSettled(event);
+globalMessageStreamHub.subscribeEvent((event) => {
+  const raw = event?.payload;
+  const payload = raw?.payload && typeof raw.payload === 'object' ? raw.payload : raw;
+  if (payload && typeof payload === 'object') {
+    scheduledTasksRuntime.processPayload(payload);
+  }
 });
 const emitSessionCreatedEvent = (event) => {
   for (const client of uiOpenChamberEventClients) {

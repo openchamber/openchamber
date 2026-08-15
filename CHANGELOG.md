@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - **Usage/Claude:** Claude plan limits now work when you are signed in through Claude Code, without also signing into Anthropic in OpenCode; the account is read from Claude Code's own login on macOS, Linux, and WSL. The page shows your session and weekly limits again, adds per-model weekly limits and extra usage spending, and names your plan. Limits are kept on screen instead of disappearing when Anthropic temporarily blocks refreshes.
 - **Settings/Integrations:** a new Integrations settings page lists Claude Code, Command Code, and Cursor plugins with install, update, setup, and remove actions, plus Discord and Telegram Coming soon placeholders.
 - Chat: opening a busy subagent in the context panel now shows its history instead of only the working-status line (thanks to @makeittech).
+- Scheduled Tasks: you can now archive a successful run session automatically from a new Lifecycle option in the task editor. The session stays reachable from Last run and the Archived view; a failed archive does not change the run result.
 
 ## [1.18.4] - 2026-08-14
 

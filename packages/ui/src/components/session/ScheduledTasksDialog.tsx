@@ -406,6 +406,17 @@ export function ScheduledTasksDialog() {
     }
   }, [selectedProjectID, projects, reloadTasks, t]);
 
+  const handleOpenLastRun = React.useCallback((task: ScheduledTask) => {
+    const sessionId = task.state?.lastSessionId;
+    if (!sessionId) {
+      return;
+    }
+    const project = projects.find((entry) => entry.id === selectedProjectID);
+    setOpen(false);
+    useSessionUIStore.getState().setCurrentSession(sessionId, project?.path ?? null);
+    useUIStore.getState().setActiveMainTab('chat');
+  }, [projects, selectedProjectID, setOpen]);
+
   const projectSelector = (
     <div className="flex flex-col items-start gap-1">
       <span className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.dialog.project.label')}</span>
@@ -560,6 +571,16 @@ export function ScheduledTasksDialog() {
                   </div>
                 ) : null}
 
+                {task.state?.lastArchiveError ? (
+                  <div
+                    className="mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro"
+                    style={toneStyle('warning')}
+                  >
+                    <Icon name="error-warning" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span className="min-w-0 break-words">{task.state.lastArchiveError}</span>
+                  </div>
+                ) : null}
+
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
                   <label
                     className={cn(
@@ -580,6 +601,16 @@ export function ScheduledTasksDialog() {
                   </label>
 
                   <div className="flex flex-wrap items-center gap-1.5">
+                    {task.state?.lastSessionId ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleOpenLastRun(task)}
+                        aria-label={t('sessions.scheduledTasks.dialog.actions.lastRunAria', { taskName: task.name })}
+                      >
+                        <Icon name="history" className="h-4 w-4" /> {t('sessions.scheduledTasks.dialog.lastRun.label')}
+                      </Button>
+                    ) : null}
                     <Button
                       variant="outline"
                       size="sm"
