@@ -210,9 +210,9 @@ export function registerGiteaRoutes(app, options = {}) {
     return giteaLibraries;
   };
 
-  const getClient = async () => {
+  const getClient = async (directory) => {
     const { getGiteaClientOrNull } = await getGiteaLibraries();
-    return getGiteaClientOrNull();
+    return getGiteaClientOrNull(directory);
   };
 
   // Resolve which Gitea repo a request targets. A directory-local git remote
@@ -397,7 +397,7 @@ export function registerGiteaRoutes(app, options = {}) {
       const effectivePage = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
       const searchQuery = asString(req.query?.query);
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, issues: [], page: effectivePage, hasMore: false });
       }
@@ -449,7 +449,7 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'number is required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, issue: null });
       }
@@ -491,7 +491,7 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'number is required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, comments: [] });
       }
@@ -530,7 +530,7 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'directory, number, body are required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -582,7 +582,7 @@ export function registerGiteaRoutes(app, options = {}) {
         ? req.body.labels.filter((label) => typeof label === 'string' && label.length > 0)
         : undefined;
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -632,7 +632,7 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'directory and number are required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -718,7 +718,7 @@ export function registerGiteaRoutes(app, options = {}) {
       const searchQuery = asString(req.query?.query);
       const sourceBranch = asString(req.query?.sourceBranch);
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, prs: [], page: effectivePage, hasMore: false });
       }
@@ -806,7 +806,7 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'number is required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, pr: null, comments: [], files: [] });
       }
@@ -917,7 +917,7 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'number is required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, commits: [] });
       }
@@ -973,7 +973,7 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'number is required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, reviews: [] });
       }
@@ -1026,7 +1026,7 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'number is required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, statuses: [] });
       }
@@ -1096,7 +1096,7 @@ export function registerGiteaRoutes(app, options = {}) {
         ? req.body.description
         : undefined;
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -1152,7 +1152,7 @@ export function registerGiteaRoutes(app, options = {}) {
       const title = asString(req.body?.title);
       const description = typeof req.body?.description === 'string' ? req.body.description : undefined;
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -1214,7 +1214,7 @@ export function registerGiteaRoutes(app, options = {}) {
       }
       const method = ['merge', 'squash', 'rebase'].includes(req.body?.method) ? req.body.method : 'merge';
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -1270,7 +1270,7 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'directory, number, body are required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -1322,7 +1322,7 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'event must be APPROVED, REQUEST_CHANGES, or COMMENT' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -1438,7 +1438,7 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'directory or owner/repo is required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, labels: [] });
       }
@@ -1488,7 +1488,7 @@ export function registerGiteaRoutes(app, options = {}) {
     if (!directory && !requestedRepo) {
       return { error: 'directory or owner/repo is required' };
     }
-    const client = await getClient();
+    const client = await getClient(directory);
     if (!client) {
       return { client: null };
     }

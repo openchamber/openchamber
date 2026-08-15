@@ -103,10 +103,20 @@ const normalizeGitProvidersConfig = (config: unknown): {
 type GitProviderDomainsStore = {
   domains: GitProviderDomains;
   apiBaseUrls: GitProviderApiBaseUrls;
+  /**
+   * Per-project api base url overrides, keyed by project id. Server-authoritative
+   * and intentionally NOT persisted (the server owns the config file); hydrated
+   * on demand and cleared when the override is removed server-side.
+   */
+  projectApiBaseUrls: Record<string, GitProviderApiBaseUrls>;
   setDomains: (provider: GitProviderName, domains: string[]) => void;
   setApiBaseUrl: (provider: GitProviderName, url: string) => void;
   /** Apply the server's `gitProviders` settings, keeping the server authoritative. */
   hydrateFromServer: (gitProvidersConfig?: unknown) => void;
+  /** Store one project's server-authoritative git provider override; drops the key when empty. */
+  hydrateProjectFromServer: (projectId: string, config?: unknown) => void;
+  /** Remove a project's override entry. */
+  clearProjectGitProviders: (projectId: string) => void;
 };
 
 export const useGitProviderDomainsStore = create<GitProviderDomainsStore>()(
@@ -114,6 +124,7 @@ export const useGitProviderDomainsStore = create<GitProviderDomainsStore>()(
     (set, get) => ({
       domains: EMPTY_DOMAINS,
       apiBaseUrls: EMPTY_API_BASE_URLS,
+      projectApiBaseUrls: {},
       setDomains: (provider, domains) => {
         set({
           domains: {
@@ -145,6 +156,36 @@ export const useGitProviderDomainsStore = create<GitProviderDomainsStore>()(
           }
         }
         set({ domains, apiBaseUrls } as Partial<GitProviderDomainsStore>);
+      },
+      hydrateProjectFromServer: (projectId, config) => {
+        if (!projectId) return;
+        const { apiBaseUrls } = normalizeGitProvidersConfig(config);
+        const hasAny = Boolean(apiBaseUrls.github || apiBaseUrls.gitlab || apiBaseUrls.gitea);
+        const current = get().projectApiBaseUrls[projectId];
+        const unchanged = hasAny
+          ? current !== undefined
+            && current.github === apiBaseUrls.github
+            && current.gitlab === apiBaseUrls.gitlab
+            && current.gitea === apiBaseUrls.gitea
+          : current === undefined;
+        if (unchanged) return;
+        set((state) => {
+          const next = { ...state.projectApiBaseUrls };
+          if (hasAny) {
+            next[projectId] = apiBaseUrls;
+          } else {
+            delete next[projectId];
+          }
+          return { projectApiBaseUrls: next };
+        });
+      },
+      clearProjectGitProviders: (projectId) => {
+        if (!projectId || get().projectApiBaseUrls[projectId] === undefined) return;
+        set((state) => {
+          const next = { ...state.projectApiBaseUrls };
+          delete next[projectId];
+          return { projectApiBaseUrls: next };
+        });
       },
     }),
     {

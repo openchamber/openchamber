@@ -35,7 +35,7 @@
 ### Client (`client.js`)
 
 - `createGiteaClient({ token, baseUrl })`: raw-fetch REST v1 client with `request(path, { method, query, body, signal, raw })` plus convenience methods `user()`, `repo(owner, repo)`, `issues(owner, repo, params)`, `issue(owner, repo, number)`, `issueComments(owner, repo, number, params)`, `createIssueComment(owner, repo, number, body)`, `createIssue(owner, repo, params)` (POST), `updateIssue(owner, repo, number, params)` (PATCH), `milestones(owner, repo, params)`, `repoLabels(owner, repo, params)`, `pullRequests(owner, repo, params)`, `pullRequest(owner, repo, number)`, `pullRequestDiff(owner, repo, number)` (raw `.diff` text via the `raw` option), `pullRequestFiles(owner, repo, number, params)`, `pullRequestCommits(owner, repo, number, params)`, `pullRequestReviews(owner, repo, number, params)`, `createPullReview(owner, repo, number, params)` (POST), `commitStatuses(owner, repo, sha, params)`, `createPullRequest(owner, repo, body)`, `updatePullRequest(owner, repo, number, body)` (PATCH), `mergePullRequest(owner, repo, number, body)` (POST), `branches(owner, repo, params)`.
-- `getGiteaClientOrNull()`: client for the current account, or `null`.
+- `getGiteaClientOrNull(directory?)`: client for the current account, or `null`. With `directory`, a per-project API base override wins over the account's base URL for that project (see "Per-project overrides").
 - `isGiteaRateLimited()` / `noteGiteaRateLimit(error)`: own module-level rate-limit cooldown (not shared with the GitHub/GitLab modules).
 
 ### Repo (`repo.js`)
@@ -48,6 +48,7 @@
 - Auth storage: `~/.config/openchamber/gitea-auth.json` (override with `OPENCHAMBER_DATA_DIR`).
 - Writes are atomic (tmp file + rename) and file mode is `0o600`.
 - Base URL resolution: the caller-supplied `baseUrl` (normalized) is the primary source, then the effective default (configured `settings.json` `gitProviders.gitea.apiBaseUrl`, else `https://codeberg.org`). Stored entries without a usable base URL are dropped.
+- Per-project overrides: a per-project `gitProviders.gitea.apiBaseUrl` override (stored under `projects/<projectId>.json`, resolved via `getEffectiveProviderApiBaseUrl('gitea', directory)` in `packages/web/server/lib/git-providers/project-config.js`) replaces the account's base URL for that project's data routes (`getGiteaClientOrNull(directory)`), and its host is accepted for directory-to-repo resolution (`resolveGiteaRepoFromDirectory`). Global routes (`auth/status`, `auth/connect`, `auth/activate`, DELETE auth, `me`, `repo/branches`) stay global.
 - Account id: `` `${host}:${username}` `` (e.g. `gitea.example.com:alice`), falling back to `token:<first8>` when the username is missing.
 - Auth header on every request: `Authorization: token <pat>`.
 - Gitea's `GET /user` uses `login`/`full_name`/`html_url`; `setGiteaAuth` accepts both that and the `username`/`web_url` variants.

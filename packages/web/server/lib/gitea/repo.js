@@ -1,5 +1,6 @@
 import { getRemoteUrl } from '../git/index.js';
 import { getGiteaAuthAccounts, normalizeBaseUrl } from './auth.js';
+import { getEffectiveProviderApiBaseUrl } from '../git-providers/project-config.js';
 
 // When no explicit host allowlist is provided, accept any host that matches the
 // base URL of a stored Gitea account. Gitea/Forgejo is self-hosted, so there is
@@ -117,8 +118,23 @@ export async function resolveGiteaRepoFromDirectory(directory, remoteName = 'ori
   if (!remoteUrl) {
     return { repo: null, remoteUrl: null };
   }
+  // A per-project API base override makes its host acceptable for directory
+  // resolution even when no connected account covers it.
+  const overrideBaseUrl = getEffectiveProviderApiBaseUrl('gitea', directory);
+  let knownHosts;
+  if (overrideBaseUrl) {
+    knownHosts = acceptedHosts();
+    try {
+      const host = new URL(overrideBaseUrl).hostname.toLowerCase();
+      if (host) {
+        knownHosts.add(host);
+      }
+    } catch {
+      // ignore a malformed override base URL
+    }
+  }
   return {
-    repo: parseGiteaRemoteUrl(remoteUrl),
+    repo: parseGiteaRemoteUrl(remoteUrl, knownHosts),
     remoteUrl,
   };
 }

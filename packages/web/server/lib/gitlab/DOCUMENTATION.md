@@ -47,6 +47,7 @@
 - Auth storage: `~/.config/openchamber/gitlab-auth.json` (override with `OPENCHAMBER_DATA_DIR`).
 - Writes are atomic (tmp file + rename) and file mode is `0o600`.
 - Base URL resolution: caller-supplied `baseUrl` (normalized) -> effective default via `getGitLabDefaultBaseUrl()` (configured `settings.json` `gitProviders.gitlab.apiBaseUrl`, else `https://gitlab.com`).
+- Per-project overrides: data routes resolve a directory-scoped API base via `getEffectiveProviderApiBaseUrl('gitlab', directory)` (in `packages/web/server/lib/git-providers/project-config.js`). A per-project `gitProviders.gitlab.apiBaseUrl` override (stored under `projects/<projectId>.json`) replaces the global default for that project's routes, and its host is accepted for directory-to-repo resolution (`resolveGitLabRepoFromDirectory`); a connected account whose host matches the remote keeps its own base URL. Global routes (`auth/connect`, `auth/status`, `auth/activate`, `me`, `repo/branches`) stay global.
 - Account id: `` `${host}:${username}` `` (e.g. `gitlab.com:alice`), falling back to `token:<first8>` when the username is missing.
 - Auth header on every request: `PRIVATE-TOKEN: <pat>`.
 

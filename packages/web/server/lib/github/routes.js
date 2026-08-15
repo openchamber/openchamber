@@ -590,7 +590,7 @@ export function registerGitHubRoutes(app) {
       };
 
       const { getOctokitOrNull, getGitHubAuth } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -781,7 +781,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.status(401).json({ error: 'GitHub not connected' });
       }
@@ -976,7 +976,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.status(401).json({ error: 'GitHub not connected' });
       }
@@ -1113,7 +1113,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.status(401).json({ error: 'GitHub not connected' });
       }
@@ -1159,7 +1159,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.status(401).json({ error: 'GitHub not connected' });
       }
@@ -1216,7 +1216,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -1277,7 +1277,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -1361,7 +1361,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -1422,7 +1422,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false, isFork: false, upstream: null });
       }
@@ -1530,7 +1530,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false, users: [] });
       }
@@ -1576,7 +1576,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false, labels: [] });
       }
@@ -1621,7 +1621,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false, milestones: [] });
       }
@@ -1667,7 +1667,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false, branches: [] });
       }
@@ -1721,7 +1721,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false, tags: [] });
       }
@@ -1770,7 +1770,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -1879,7 +1879,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -1947,7 +1947,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -1991,7 +1991,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -2052,7 +2052,7 @@ export function registerGitHubRoutes(app) {
         : undefined;
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -2122,7 +2122,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -2243,7 +2243,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -2390,7 +2390,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -2748,7 +2748,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }
@@ -2805,7 +2805,7 @@ export function registerGitHubRoutes(app) {
       }
 
       const { getOctokitOrNull } = await getGitHubLibraries();
-      const octokit = getOctokitOrNull();
+      const octokit = getOctokitOrNull(directory);
       if (!octokit) {
         return res.json({ connected: false });
       }

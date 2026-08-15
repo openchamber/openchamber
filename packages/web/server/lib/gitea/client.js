@@ -1,4 +1,6 @@
 import { getGiteaAuth } from './auth.js';
+import { getProviderApiBaseUrl } from '../git-providers/config.js';
+import { getEffectiveProviderApiBaseUrl } from '../git-providers/project-config.js';
 
 // Per-request timeout for every Gitea call. Self-hosted instances can hang
 // under load; bounding each request lets the caller fail fast and serve
@@ -306,11 +308,21 @@ export function createGiteaClient({ token, baseUrl }) {
   };
 }
 
-/** Picks the current account (from auth.js) token + base URL, or null. */
-export function getGiteaClientOrNull() {
+/** Picks the current account (from auth.js) token + base URL, or null. A per-project override replaces the account's base URL for that project. */
+export function getGiteaClientOrNull(directory) {
   const auth = getGiteaAuth();
   if (!auth?.accessToken || !auth?.baseUrl) {
     return null;
   }
-  return createGiteaClient({ token: auth.accessToken, baseUrl: auth.baseUrl });
+  let baseUrl = auth.baseUrl;
+  if (directory) {
+    const effectiveBaseUrl = getEffectiveProviderApiBaseUrl('gitea', directory);
+    // Only a per-project override replaces the account's base URL; without one
+    // the effective value is just the global default, which stored accounts
+    // (an explicit baseUrl is required) already outrank.
+    if (effectiveBaseUrl !== null && effectiveBaseUrl !== getProviderApiBaseUrl('gitea')) {
+      baseUrl = effectiveBaseUrl;
+    }
+  }
+  return createGiteaClient({ token: auth.accessToken, baseUrl });
 }

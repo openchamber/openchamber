@@ -5,6 +5,7 @@ const resetDomains = () => {
   useGitProviderDomainsStore.setState({
     domains: { github: [], gitlab: [], gitea: [] },
     apiBaseUrls: { github: '', gitlab: '', gitea: '' },
+    projectApiBaseUrls: {},
   });
 };
 
@@ -133,5 +134,87 @@ describe('useGitProviderDomainsStore', () => {
     expect(domains.github).toEqual(['github.example.com']);
     expect(domains.gitlab).toEqual(['gitlab.example.com']);
     expect(domains.gitea).toEqual([]);
+  });
+});
+
+describe('useGitProviderDomainsStore per-project overrides', () => {
+  test('hydrateProjectFromServer stores a normalized per-project override', () => {
+    resetDomains();
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_proj', {
+      github: { apiBaseUrl: 'https://git.self.example.com/api/v3/', detectUrls: ['git.self.example.com'] },
+    });
+    expect(useGitProviderDomainsStore.getState().projectApiBaseUrls).toEqual({
+      path_proj: { github: 'https://git.self.example.com/api/v3', gitlab: '', gitea: '' },
+    });
+  });
+
+  test('hydrateProjectFromServer drops the key when all api base urls are empty', () => {
+    resetDomains();
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_proj', {
+      github: { apiBaseUrl: 'https://git.self.example.com/api/v3' },
+    });
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_proj', {
+      github: { apiBaseUrl: '' },
+    });
+    expect(useGitProviderDomainsStore.getState().projectApiBaseUrls).toEqual({});
+  });
+
+  test('hydrateProjectFromServer with malformed config stores nothing', () => {
+    resetDomains();
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_proj', { github: 'not an object' });
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_proj', undefined);
+    expect(useGitProviderDomainsStore.getState().projectApiBaseUrls).toEqual({});
+  });
+
+  test('hydrateProjectFromServer keeps unrelated projects and global slices untouched', () => {
+    resetDomains();
+    useGitProviderDomainsStore.getState().setDomains('github', ['github.example.com']);
+    useGitProviderDomainsStore.getState().setApiBaseUrl('github', 'https://github.example.com/api/v3');
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_a', {
+      gitlab: { apiBaseUrl: 'https://gitlab.example.com' },
+    });
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_b', {
+      gitea: { apiBaseUrl: 'https://gitea.example.com' },
+    });
+    expect(useGitProviderDomainsStore.getState().projectApiBaseUrls).toEqual({
+      path_a: { github: '', gitlab: 'https://gitlab.example.com', gitea: '' },
+      path_b: { github: '', gitlab: '', gitea: 'https://gitea.example.com' },
+    });
+    // Global slices are untouched by per-project hydration.
+    const { domains, apiBaseUrls } = useGitProviderDomainsStore.getState();
+    expect(domains.github).toEqual(['github.example.com']);
+    expect(apiBaseUrls.github).toBe('https://github.example.com/api/v3');
+  });
+
+  test('clearProjectGitProviders removes only the given project key', () => {
+    resetDomains();
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_a', {
+      gitlab: { apiBaseUrl: 'https://gitlab.example.com' },
+    });
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_b', {
+      gitea: { apiBaseUrl: 'https://gitea.example.com' },
+    });
+    useGitProviderDomainsStore.getState().clearProjectGitProviders('path_a');
+    expect(useGitProviderDomainsStore.getState().projectApiBaseUrls).toEqual({
+      path_b: { github: '', gitlab: '', gitea: 'https://gitea.example.com' },
+    });
+  });
+
+  test('hydrateProjectFromServer does not disturb global hydrateFromServer behavior', () => {
+    resetDomains();
+    useGitProviderDomainsStore.getState().hydrateFromServer({
+      github: { apiBaseUrl: 'https://github.example.com/api/v3', detectUrls: ['github.example.com'] },
+    });
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_a', {
+      gitlab: { apiBaseUrl: 'https://gitlab.example.com' },
+    });
+    const state = useGitProviderDomainsStore.getState();
+    expect(state.apiBaseUrls.github).toBe('https://github.example.com/api/v3');
+    expect(state.domains.github).toEqual(['github.example.com']);
+    expect(state.projectApiBaseUrls.path_a).toEqual({
+      github: '',
+      gitlab: 'https://gitlab.example.com',
+      gitea: '',
+    });
   });
 });

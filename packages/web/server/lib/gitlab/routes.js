@@ -1,3 +1,5 @@
+import { getEffectiveProviderApiBaseUrl } from '../git-providers/project-config.js';
+
 // Route-level budget for composite GitLab calls (lists, comments, MR context).
 // The client bounds each individual request at 8s; this caps the whole route
 // so a slow self-hosted instance cannot hold a response (and a client socket)
@@ -287,9 +289,36 @@ export function registerGitLabRoutes(app, options = {}) {
     return gitlabLibraries;
   };
 
-  const getClient = async () => {
-    const { getGitLabClientOrNull } = await getGitLabLibraries();
-    return getGitLabClientOrNull();
+  const hostFromBaseUrl = (baseUrl) => {
+    try {
+      return new URL(baseUrl).hostname || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const getClient = async (directory) => {
+    const { getGitLabClientOrNull, createGitLabClient, getGitLabAuth, getGitLabDefaultBaseUrl } = await getGitLabLibraries();
+    const auth = getGitLabAuth();
+    if (!auth?.accessToken) {
+      return null;
+    }
+    const effectiveBaseUrl = directory ? getEffectiveProviderApiBaseUrl('gitlab', directory) : null;
+    // No project override: the account's own base URL keeps driving requests
+    // exactly as before.
+    if (!effectiveBaseUrl || effectiveBaseUrl === getGitLabDefaultBaseUrl()) {
+      return getGitLabClientOrNull();
+    }
+    // A per-project override is in play. A connected account whose host
+    // matches the remote still wins; otherwise the override serves as the API
+    // base (it makes its host acceptable even with no account covering it).
+    const accountHost = hostFromBaseUrl(auth.baseUrl);
+    const { resolveGitLabRepoFromDirectory } = await getGitLabLibraries();
+    const { repo } = await resolveGitLabRepoFromDirectory(directory).catch(() => ({ repo: null }));
+    if (repo?.host && accountHost && accountHost === repo.host) {
+      return getGitLabClientOrNull();
+    }
+    return createGitLabClient({ token: auth.accessToken, baseUrl: effectiveBaseUrl });
   };
 
   // Resolve which GitLab project a request targets. A directory-local git
@@ -474,7 +503,7 @@ export function registerGitLabRoutes(app, options = {}) {
       const effectivePage = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
       const searchQuery = asString(req.query?.query);
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, issues: [], page: effectivePage, hasMore: false });
       }
@@ -522,7 +551,7 @@ export function registerGitLabRoutes(app, options = {}) {
         return res.status(400).json({ error: 'number is required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, issue: null });
       }
@@ -564,7 +593,7 @@ export function registerGitLabRoutes(app, options = {}) {
         return res.status(400).json({ error: 'number is required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, comments: [] });
       }
@@ -619,7 +648,7 @@ export function registerGitLabRoutes(app, options = {}) {
         return res.status(400).json({ error: 'directory, number, body are required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -682,7 +711,7 @@ export function registerGitLabRoutes(app, options = {}) {
         ? req.body.labels.filter((label) => typeof label === 'string' && label.length > 0)
         : undefined;
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -732,7 +761,7 @@ export function registerGitLabRoutes(app, options = {}) {
         return res.status(400).json({ error: 'directory and number are required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -828,7 +857,7 @@ export function registerGitLabRoutes(app, options = {}) {
       const searchQuery = asString(req.query?.query);
       const sourceBranch = asString(req.query?.sourceBranch);
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, mrs: [], page: effectivePage, hasMore: false });
       }
@@ -880,7 +909,7 @@ export function registerGitLabRoutes(app, options = {}) {
         return res.status(400).json({ error: 'number is required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, mr: null, comments: [], files: [] });
       }
@@ -997,7 +1026,7 @@ export function registerGitLabRoutes(app, options = {}) {
         return res.status(400).json({ error: 'number is required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, commits: [] });
       }
@@ -1051,7 +1080,7 @@ export function registerGitLabRoutes(app, options = {}) {
         return res.status(400).json({ error: 'number is required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false, events: [] });
       }
@@ -1113,7 +1142,7 @@ export function registerGitLabRoutes(app, options = {}) {
         ? req.body.removeSourceBranch
         : false;
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -1170,7 +1199,7 @@ export function registerGitLabRoutes(app, options = {}) {
       const title = asString(req.body?.title);
       const description = typeof req.body?.description === 'string' ? req.body.description : undefined;
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -1261,7 +1290,7 @@ export function registerGitLabRoutes(app, options = {}) {
       }
       const squash = typeof req.body?.squash === 'boolean' ? req.body.squash : undefined;
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -1318,7 +1347,7 @@ export function registerGitLabRoutes(app, options = {}) {
         return res.status(400).json({ error: 'directory, number, body are required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -1377,7 +1406,7 @@ export function registerGitLabRoutes(app, options = {}) {
         return res.status(400).json({ error: 'directory and number are required' });
       }
 
-      const client = await getClient();
+      const client = await getClient(directory);
       if (!client) {
         return res.json({ connected: false });
       }
@@ -1428,7 +1457,7 @@ export function registerGitLabRoutes(app, options = {}) {
     if (!directory && !requestedProject) {
       return { error: 'directory or namespace/project is required' };
     }
-    const client = await getClient();
+    const client = await getClient(directory);
     if (!client) {
       return { client: null };
     }

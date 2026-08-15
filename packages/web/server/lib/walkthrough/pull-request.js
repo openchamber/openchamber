@@ -15,7 +15,7 @@ const GITLAB_DIFFS_MAX_PAGES = 10;
  * base branch is not part of it.
  */
 async function getGitHubPullRequestDiff(directory, number) {
-  const octokit = getOctokitOrNull();
+  const octokit = getOctokitOrNull(directory);
   if (!octokit) {
     throw Object.assign(new Error('Connect a GitHub account to review pull requests'), {
       statusCode: 401,

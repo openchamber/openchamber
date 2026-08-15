@@ -2,6 +2,7 @@ import { Octokit } from '@octokit/rest';
 import { getGitHubAuth, isGhCliActive, isGhCliDisabled } from './auth.js';
 import { getGhCliToken } from './gh-cli-credential.js';
 import { getProviderApiBaseUrl } from '../git-providers/config.js';
+import { getEffectiveProviderApiBaseUrl } from '../git-providers/project-config.js';
 
 // Per-request timeout for every GitHub call. Octokit v22 uses native fetch,
 // which has no built-in timeout — without this, a stuck connection hangs until
@@ -78,12 +79,12 @@ export function createOctokit(token, baseUrl) {
   });
 }
 
-export function getOctokitOrNull() {
+export function getOctokitOrNull(directory) {
   const auth = getGitHubAuth();
   const ghToken = !isGhCliDisabled() ? getGhCliToken() : null;
   const token = isGhCliActive() ? ghToken || auth?.accessToken : auth?.accessToken || ghToken;
   if (!token) {
     return null;
   }
-  return createOctokit(token, getProviderApiBaseUrl('github'));
+  return createOctokit(token, directory ? getEffectiveProviderApiBaseUrl('github', directory) : getProviderApiBaseUrl('github'));
 }

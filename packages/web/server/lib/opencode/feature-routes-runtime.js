@@ -7,6 +7,7 @@ import { registerGitHubRoutes } from '../github/routes.js';
 import { registerGitLabRoutes } from '../gitlab/routes.js';
 import { registerGiteaRoutes } from '../gitea/routes.js';
 import { registerGitRoutes } from '../git/routes.js';
+import { registerGitProviderRoutes } from '../git-providers/routes.js';
 import { registerDevServerRoutes } from '../dev-servers/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
@@ -301,6 +302,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerGitHubRoutes(app);
     registerGitLabRoutes(app);
     registerGiteaRoutes(app);
+    registerGitProviderRoutes(app);
     registerGitRoutes(app);
     registerDevServerRoutes(app, { scanner: devServerScanner, getOwnPorts });
     registerMagicPromptRoutes(app, {

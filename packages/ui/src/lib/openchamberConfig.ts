@@ -40,6 +40,8 @@ interface OpenChamberConfig {
   projectActions?: OpenChamberProjectAction[];
   projectActionsPrimaryId?: string;
   draftStarters?: DraftStarterRef[];
+  /** Written by the server via the git-providers route; the client must preserve it. */
+  gitProviders?: unknown;
 }
 
 type OpenChamberProjectActionPlatform = 'macos' | 'linux' | 'windows';
@@ -620,9 +622,10 @@ async function readOpenChamberConfig(project: ProjectRef): Promise<OpenChamberCo
 /**
  * Write the per-user config for a project.
  *
- * Server owns `version` and `scheduledTasks` keys; client reads them via their
- * dedicated route and never round-trips them through this config write path to
- * avoid a read-then-write race clobbering a concurrent server update.
+ * Server owns `version`, `scheduledTasks`, and `gitProviders` keys; client
+ * reads them via their dedicated routes and never round-trips them through
+ * this config write path to avoid a read-then-write race clobbering a
+ * concurrent server update.
  */
 async function writeOpenChamberConfig(
   project: ProjectRef,
@@ -661,6 +664,7 @@ async function writeOpenChamberConfig(
     const serverOwned: Record<string, unknown> = {};
     if (existing.version !== undefined) serverOwned.version = existing.version;
     if (existing.scheduledTasks !== undefined) serverOwned.scheduledTasks = existing.scheduledTasks;
+    if (existing.gitProviders !== undefined) serverOwned.gitProviders = existing.gitProviders;
 
     const content = JSON.stringify({
       ...existing,

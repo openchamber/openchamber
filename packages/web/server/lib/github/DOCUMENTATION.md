@@ -37,7 +37,7 @@
 
 ### Octokit
 
-- `getOctokitOrNull()`: current Octokit or `null`.
+- `getOctokitOrNull(directory?)`: current Octokit or `null`. When `directory` is provided the API base resolution is directory-aware (see "Per-project overrides" below); without it the global base URL is used.
 - `createOctokit(token, baseUrl?)`: Octokit factory; the optional `baseUrl` (GitHub Enterprise API base) is passed to the Octokit constructor.
 
 ### Repo
@@ -51,6 +51,10 @@ Per-provider settings come from `~/.config/openchamber/settings.json` under `git
 
 - API base URL: configured `gitProviders.github.apiBaseUrl` -> default `https://api.github.com`. The configured value drives the Octokit `baseUrl` (`getOctokitOrNull`, device-flow account activation).
 - Device flow web origin: derived from the API base via `githubWebOriginFromApiBase` — the public host maps to `https://github.com`; an Enterprise base (`https://host/api/v3` or `https://host/api`) maps to `https://host`.
+
+### Per-project overrides
+
+API base resolution is directory-aware for project-scoped routes: `getOctokitOrNull(directory)` resolves the effective base via `getEffectiveProviderApiBaseUrl('github', directory)` (in `packages/web/server/lib/git-providers/project-config.js`), which prefers a per-project `gitProviders.github.apiBaseUrl` override (stored under `projects/<projectId>.json`) over the global `settings.json` value and the built-in default. Global routes (auth/status, auth/activate, me, repo/branches) and the device flow keep using the global base URL unchanged.
 
 ## Auth storage and config
 

@@ -8,6 +8,10 @@ import {
   normalizeApiBaseUrl,
   normalizeDomainList,
 } from '@/stores/useGitProviderDomainsStore';
+import { getProjectGitProviders, resolveProjectIdForDirectory } from '@/lib/projectGitProviders';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import {
   DEFAULT_FOLLOW_UP_BEHAVIOR,
   isFollowUpBehavior,
@@ -1846,6 +1850,30 @@ export const syncDesktopSettings = async (): Promise<void> => {
       }
     } catch (error) {
       console.warn('applyGitProviderSettings failed:', error);
+    }
+    try {
+      // Per-project git provider api base url overrides are also
+      // server-authoritative. Resolve the active project with the same
+      // directory resolution used by git provider detection (so hydration and
+      // detection key by the same project id) and fetch its override
+      // best-effort; failures are ignored and prior state is preserved.
+      const projectsState = useProjectsStore.getState();
+      const activeProjectId = projectsState.getActiveProject()?.id ?? null;
+      const projectId = activeProjectId
+        ?? resolveProjectIdForDirectory(
+          useDirectoryStore.getState().currentDirectory,
+          projectsState.projects,
+          useSessionUIStore.getState().availableWorktreesByProject,
+        );
+      if (projectId) {
+        void getProjectGitProviders(projectId)
+          .then(({ gitProviders }) => {
+            useGitProviderDomainsStore.getState().hydrateProjectFromServer(projectId, gitProviders);
+          })
+          .catch(() => undefined);
+      }
+    } catch (error) {
+      console.warn('applyProjectGitProviderSettings failed:', error);
     }
     const migrationPatch: Partial<DesktopSettings> = {};
     if (shouldPersistCraftGoalMigration) {

@@ -124,11 +124,21 @@ describe('Gitea auth routes', () => {
     expect(response.body).toEqual({ error: 'accessToken is required' });
   });
 
-  test('auth/connect requires a base URL (no default instance)', async () => {
+  test('auth/connect uses the built-in default base URL when none is provided', async () => {
+    const fetchMock = scriptedFetch([(url) => (matches(/\/api\/v1\/user$/)(url) ? jsonResponse(aliceUser) : null)]);
+
     const app = createApp();
     const response = await request(app).post('/api/gitea/auth/connect').send({ accessToken: 'gitea-valid' });
-    expect(response.status).toBe(400);
-    expect(response.body).toEqual({ error: 'baseUrl is required and must be a valid URL' });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://codeberg.org/api/v1/user');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      connected: true,
+      user: { username: 'alice', id: 42, name: 'Alice Example', avatarUrl: 'https://gitea.example.com/avatars/alice.png', webUrl: 'https://gitea.example.com/alice', email: 'alice@example.com' },
+    });
+    expect(response.body.accounts).toEqual([
+      { id: 'codeberg.org:alice', user: { username: 'alice', name: 'Alice Example', avatarUrl: 'https://gitea.example.com/avatars/alice.png', webUrl: 'https://gitea.example.com/alice' }, baseUrl: 'https://codeberg.org', current: true },
+    ]);
   });
 
   test('auth/connect normalizes a scheme-less base URL', async () => {

@@ -10,6 +10,21 @@ vi.mock('../git/index.js', () => ({
   getRemoteUrl: vi.fn(async () => null),
 }));
 
+// Per-project overrides only apply for the directory configured with one; all
+// other directories fall through to the real (global-only) resolution.
+vi.mock('../git-providers/project-config.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getEffectiveProviderApiBaseUrl: vi.fn((provider, directory) => {
+      if (directory === '/override/project') {
+        return provider === 'gitlab' ? 'https://gitlab.override.example' : actual.getEffectiveProviderApiBaseUrl(provider, directory);
+      }
+      return actual.getEffectiveProviderApiBaseUrl(provider, directory);
+    }),
+  };
+});
+
 const { parseGitLabRemoteUrl, resolveGitLabRepoFromDirectory } = await import('./repo.js');
 const { getRemoteUrl } = await import('../git/index.js');
 const { setGitLabAuth, clearGitLabAuth } = await import('./auth.js');
@@ -118,5 +133,18 @@ describe('resolveGitLabRepoFromDirectory', () => {
     const { repo, remoteUrl } = await resolveGitLabRepoFromDirectory('/some/project');
     expect(repo).toBeNull();
     expect(remoteUrl).toBeNull();
+  });
+
+  test('accepts the per-project override host for a directory with an override', async () => {
+    vi.mocked(getRemoteUrl).mockResolvedValue('git@gitlab.override.example:team/app.git');
+    const { repo, remoteUrl } = await resolveGitLabRepoFromDirectory('/override/project');
+    expect(remoteUrl).toBe('git@gitlab.override.example:team/app.git');
+    expect(repo).toMatchObject({ namespace: 'team', project: 'app', host: 'gitlab.override.example' });
+  });
+
+  test('rejects the override host for a directory without an override', async () => {
+    vi.mocked(getRemoteUrl).mockResolvedValue('git@gitlab.override.example:team/app.git');
+    const { repo } = await resolveGitLabRepoFromDirectory('/some/project');
+    expect(repo).toBeNull();
   });
 });

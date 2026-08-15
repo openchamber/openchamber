@@ -612,6 +612,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['worktree', 'setup commands', 'bootstrap', 'wait'],
   },
   {
+    id: 'projects.git-providers',
+    page: 'projects',
+    titleKey: 'settings.projects.page.gitProviders.title',
+    descriptionKey: 'settings.projects.page.gitProviders.description',
+    keywords: ['github', 'gitlab', 'gitea', 'api base url', 'self-hosted', 'override', 'enterprise', 'server'],
+  },
+  {
     id: 'remote-instances.client-auth',
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.clientAuth.title',

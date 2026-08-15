@@ -3,6 +3,12 @@ import { parseGitHost } from '@/lib/gitHost';
 import { getRemotes } from '@/lib/gitApi';
 import { useGitLabAuthStore } from '@/stores/useGitLabAuthStore';
 import { useGiteaAuthStore } from '@/stores/useGiteaAuthStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import {
+  mergeGitProviderApiBaseUrls,
+  resolveProjectApiBaseUrls,
+} from '@/lib/projectGitProviders';
 import {
   useGitProviderDomainsStore,
   normalizeProviderDomain,
@@ -134,8 +140,20 @@ export const detectGitProvider = (fetchUrls: string[], hosts: GitProviderHosts):
 const RESOLVE_CACHE_TTL_MS = 60_000;
 const resolveCache = new Map<string, { at: number; provider: GitProvider | null }>();
 
+/**
+ * Per-directory detection is memoized for RESOLVE_CACHE_TTL_MS. The cache key
+ * includes the effective detection host sets, so a project override (or any
+ * api base/domain/account change) that alters the hosts invalidates the cached
+ * classification immediately instead of serving a stale provider for up to a
+ * minute. The serialized key is stable across renders because
+ * `buildGitProviderHosts` emits deterministic, deduped host lists.
+ */
+const resolveCacheKey = (directory: string, hosts: GitProviderHosts): string =>
+  `${directory}|${JSON.stringify(hosts)}`;
+
 export const resolveGitProvider = async (directory: string, hosts: GitProviderHosts): Promise<GitProvider | null> => {
-  const cached = resolveCache.get(directory);
+  const cacheKey = resolveCacheKey(directory, hosts);
+  const cached = resolveCache.get(cacheKey);
   if (cached && Date.now() - cached.at < RESOLVE_CACHE_TTL_MS) {
     return cached.provider;
   }
@@ -146,7 +164,7 @@ export const resolveGitProvider = async (directory: string, hosts: GitProviderHo
   } catch {
     provider = null;
   }
-  resolveCache.set(directory, { at: Date.now(), provider });
+  resolveCache.set(cacheKey, { at: Date.now(), provider });
   return provider;
 };
 
@@ -162,9 +180,19 @@ export const useGitProvider = (directory: string | null | undefined): GitProvide
   const giteaAccounts = useGiteaAuthStore((state) => state.status?.accounts);
   const domains = useGitProviderDomainsStore((state) => state.domains);
   const apiBaseUrls = useGitProviderDomainsStore((state) => state.apiBaseUrls);
+  const projectApiBaseUrls = useGitProviderDomainsStore((state) => state.projectApiBaseUrls);
+  const projects = useProjectsStore((state) => state.projects);
+  const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const hosts = useMemo<GitProviderHosts>(
-    () => buildGitProviderHosts({ domains, apiBaseUrls, gitlabAccounts, giteaAccounts }),
-    [domains, apiBaseUrls, gitlabAccounts, giteaAccounts],
+    () => {
+      // Precedence per provider: project override > global server settings.
+      // The merged api base urls flow into buildGitProviderHosts, whose
+      // apiBaseHost handling then auto-adds the override host to detection.
+      const projectOverride = resolveProjectApiBaseUrls(directory, projects, projectApiBaseUrls, worktreesByProject);
+      const effectiveApiBaseUrls = mergeGitProviderApiBaseUrls(projectOverride, apiBaseUrls);
+      return buildGitProviderHosts({ domains, apiBaseUrls: effectiveApiBaseUrls, gitlabAccounts, giteaAccounts });
+    },
+    [directory, projects, projectApiBaseUrls, worktreesByProject, domains, apiBaseUrls, gitlabAccounts, giteaAccounts],
   );
   const [provider, setProvider] = useState<GitProvider | null>(null);
 

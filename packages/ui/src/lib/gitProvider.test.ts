@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { buildGitProviderHosts, detectGitProvider, type GitProviderHosts } from './gitProvider';
+import {
+  mergeGitProviderApiBaseUrls,
+  resolveProjectApiBaseUrls,
+  resolveProjectIdForDirectory,
+} from './projectGitProviders';
+import { createProjectIdFromPath } from '@/lib/projectId';
 
 const EMPTY_HOSTS: GitProviderHosts = { github: [], gitlab: [], gitea: [] };
 
@@ -204,5 +210,125 @@ describe('buildGitProviderHosts', () => {
       apiBaseUrls: { github: 'https://github.example.com/api/v3', gitlab: '', gitea: '' },
     });
     expect(hosts.github).toEqual(['github.example.com']);
+  });
+});
+
+describe('resolveProjectIdForDirectory', () => {
+  const projects = [
+    { id: 'parent', path: '/workspace' },
+    { id: 'child', path: '/workspace/app' },
+  ];
+
+  test('matches the longest containing project path', () => {
+    expect(resolveProjectIdForDirectory('/workspace/app/sub', projects)).toBe('child');
+    expect(resolveProjectIdForDirectory('/workspace/app', projects)).toBe('child');
+    expect(resolveProjectIdForDirectory('/workspace', projects)).toBe('parent');
+    expect(resolveProjectIdForDirectory('/workspace/other', projects)).toBe('parent');
+  });
+
+  test('matches a root project for any directory', () => {
+    expect(resolveProjectIdForDirectory('/workspace/app', [{ id: 'root', path: '/' }])).toBe('root');
+  });
+
+  test('normalizes windows drive casing before matching', () => {
+    expect(resolveProjectIdForDirectory('C:\\repo\\sub', [{ id: 'proj', path: 'c:\\repo' }])).toBe('proj');
+  });
+
+  test('falls back to a path-derived project id when nothing matches', () => {
+    const directory = '/some/unregistered/repo';
+    expect(resolveProjectIdForDirectory(directory, [])).toBe(createProjectIdFromPath(directory));
+    expect(resolveProjectIdForDirectory(directory, projects)).toBe(createProjectIdFromPath(directory));
+  });
+
+  test('an external worktree resolves to its owning project via the worktree map', () => {
+    const worktreesByProject = new Map([
+      ['/workspace', [{ path: '/other/repo-worktrees/slug' }]],
+    ]);
+    // Worktree lives outside the project path and nothing contains it, but the
+    // map still ties it to the owning project.
+    expect(resolveProjectIdForDirectory('/other/repo-worktrees/slug', projects, worktreesByProject)).toBe('parent');
+  });
+
+  test('the worktree map lookup wins over containment when both would match', () => {
+    const worktreesByProject = new Map([
+      // Directory is inside the `child` project but declared as a worktree of
+      // the shallower `parent` project — the map is authoritative.
+      ['/workspace', [{ path: '/workspace/app/sub' }]],
+    ]);
+    expect(resolveProjectIdForDirectory('/workspace/app/sub', projects, worktreesByProject)).toBe('parent');
+  });
+
+  test('a worktree whose owning project is not registered falls through to path fallback', () => {
+    const worktreesByProject = new Map([
+      ['/unknown/owner', [{ path: '/other/worktrees/slug' }]],
+    ]);
+    expect(resolveProjectIdForDirectory('/other/worktrees/slug', projects, worktreesByProject))
+      .toBe(createProjectIdFromPath('/other/worktrees/slug'));
+  });
+
+  test('resolution is unchanged when worktreesByProject is omitted', () => {
+    expect(resolveProjectIdForDirectory('/workspace/app/sub', projects)).toBe('child');
+    expect(resolveProjectIdForDirectory('/some/unregistered/repo', projects)).toBe(createProjectIdFromPath('/some/unregistered/repo'));
+    expect(resolveProjectIdForDirectory(null, projects)).toBeNull();
+  });
+
+  test('returns null for empty or sibling-only directories without a matching project', () => {
+    expect(resolveProjectIdForDirectory('', projects)).toBeNull();
+    expect(resolveProjectIdForDirectory(null, projects)).toBeNull();
+    expect(resolveProjectIdForDirectory('   ', projects)).toBeNull();
+  });
+});
+
+describe('project override detection overlay', () => {
+  const projects = [{ id: 'proj', path: '/repo' }];
+  const overrides = { proj: { github: '', gitlab: 'https://git.self.example.com', gitea: '' } };
+
+  test('resolveProjectApiBaseUrls returns the owning project override', () => {
+    expect(resolveProjectApiBaseUrls('/repo/sub', projects, overrides)).toEqual(overrides.proj);
+    expect(resolveProjectApiBaseUrls('/repo', projects, overrides)).toEqual(overrides.proj);
+  });
+
+  test('resolveProjectApiBaseUrls returns undefined without a resolvable project', () => {
+    expect(resolveProjectApiBaseUrls('/unknown', [], overrides)).toBe(undefined);
+    expect(resolveProjectApiBaseUrls('/unknown', projects, {})).toBe(undefined);
+    expect(resolveProjectApiBaseUrls(null, projects, overrides)).toBe(undefined);
+  });
+
+  test('resolveProjectApiBaseUrls forwards the worktree map to project resolution', () => {
+    const worktreesByProject = new Map([
+      ['/repo', [{ path: '/elsewhere/worktrees/pr-42' }]],
+    ]);
+    expect(resolveProjectApiBaseUrls('/elsewhere/worktrees/pr-42', projects, overrides, worktreesByProject)).toEqual(overrides.proj);
+  });
+
+  test('mergeGitProviderApiBaseUrls: project values win, empty slots fall back to global', () => {
+    const global = { github: 'https://github.example.com/api/v3', gitlab: '', gitea: 'https://gitea.example.com' };
+    const override = { github: '', gitlab: 'https://git.self.example.com', gitea: '' };
+    expect(mergeGitProviderApiBaseUrls(override, global)).toEqual({
+      github: 'https://github.example.com/api/v3',
+      gitlab: 'https://git.self.example.com',
+      gitea: 'https://gitea.example.com',
+    });
+    expect(mergeGitProviderApiBaseUrls(undefined, global)).toEqual(global);
+  });
+
+  test('a project override host that is not global classifies the remote as the provider', () => {
+    const override = resolveProjectApiBaseUrls('/repo/sub', projects, overrides);
+    const effective = mergeGitProviderApiBaseUrls(override, emptyInput.apiBaseUrls);
+    const hosts = buildGitProviderHosts({ ...emptyInput, apiBaseUrls: effective });
+    // The override host is added to detection even though nothing global or
+    // account-derived knows it.
+    expect(hosts.gitlab).toEqual(['git.self.example.com']);
+    expect(hosts.github).toEqual([]);
+    expect(detectGitProvider(['git@git.self.example.com:group/repo.git'], hosts)).toBe('gitlab');
+    expect(detectGitProvider(['https://git.self.example.com/group/repo.git'], hosts)).toBe('gitlab');
+  });
+
+  test('global api base urls keep working when the project has no override', () => {
+    const globalApi = { github: '', gitlab: 'https://gitlab.example.com', gitea: '' };
+    const override = resolveProjectApiBaseUrls('/repo/sub', projects, {});
+    const effective = mergeGitProviderApiBaseUrls(override, globalApi);
+    const hosts = buildGitProviderHosts({ ...emptyInput, apiBaseUrls: effective });
+    expect(detectGitProvider(['git@gitlab.example.com:group/repo.git'], hosts)).toBe('gitlab');
   });
 });

@@ -1,5 +1,6 @@
 import { getRemoteUrl } from '../git/index.js';
 import { getGitLabAuthAccounts, normalizeBaseUrl } from './auth.js';
+import { getEffectiveProviderApiBaseUrl } from '../git-providers/project-config.js';
 
 // When no explicit host allowlist is provided, accept gitlab.com or any host
 // that matches the base URL of a stored GitLab account. Never github.com.
@@ -115,8 +116,23 @@ export async function resolveGitLabRepoFromDirectory(directory, remoteName = 'or
   if (!remoteUrl) {
     return { repo: null, remoteUrl: null };
   }
+  // A per-project API base override makes its host acceptable for directory
+  // resolution even when no connected account covers it.
+  const overrideBaseUrl = getEffectiveProviderApiBaseUrl('gitlab', directory);
+  let knownHosts;
+  if (overrideBaseUrl) {
+    knownHosts = acceptedHosts();
+    try {
+      const host = new URL(overrideBaseUrl).hostname.toLowerCase();
+      if (host) {
+        knownHosts.add(host);
+      }
+    } catch {
+      // ignore a malformed override base URL
+    }
+  }
   return {
-    repo: parseGitLabRemoteUrl(remoteUrl),
+    repo: parseGitLabRemoteUrl(remoteUrl, knownHosts),
     remoteUrl,
   };
 }

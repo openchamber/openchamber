@@ -10,6 +10,21 @@ vi.mock('../git/index.js', () => ({
   getRemoteUrl: vi.fn(async () => null),
 }));
 
+// Per-project overrides only apply for the directory configured with one; all
+// other directories fall through to the real (global-only) resolution.
+vi.mock('../git-providers/project-config.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getEffectiveProviderApiBaseUrl: vi.fn((provider, directory) => {
+      if (directory === '/override/project') {
+        return provider === 'gitea' ? 'https://gitea.override.example' : actual.getEffectiveProviderApiBaseUrl(provider, directory);
+      }
+      return actual.getEffectiveProviderApiBaseUrl(provider, directory);
+    }),
+  };
+});
+
 const { parseGiteaRemoteUrl, resolveGiteaRepoFromDirectory } = await import('./repo.js');
 const { getRemoteUrl } = await import('../git/index.js');
 const { setGiteaAuth, clearGiteaAuth } = await import('./auth.js');
@@ -121,5 +136,18 @@ describe('resolveGiteaRepoFromDirectory', () => {
     const { repo, remoteUrl } = await resolveGiteaRepoFromDirectory('/some/project');
     expect(repo).toBeNull();
     expect(remoteUrl).toBeNull();
+  });
+
+  test('accepts the per-project override host for a directory with an override', async () => {
+    vi.mocked(getRemoteUrl).mockResolvedValue('git@gitea.override.example:team/app.git');
+    const { repo, remoteUrl } = await resolveGiteaRepoFromDirectory('/override/project');
+    expect(remoteUrl).toBe('git@gitea.override.example:team/app.git');
+    expect(repo).toMatchObject({ owner: 'team', repo: 'app', host: 'gitea.override.example' });
+  });
+
+  test('rejects the override host for a directory without an override', async () => {
+    vi.mocked(getRemoteUrl).mockResolvedValue('git@gitea.override.example:team/app.git');
+    const { repo } = await resolveGiteaRepoFromDirectory('/some/project');
+    expect(repo).toBeNull();
   });
 });
