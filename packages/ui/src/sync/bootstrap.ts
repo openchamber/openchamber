@@ -168,7 +168,10 @@ export async function bootstrapDirectory(input: {
         if (next) commit({ project: next })
       }),
     ),
-    retry(() => sdk.session.status().then((x) => commit({ session_status: unwrap(x, "session.status") }))),
+    retry(() => sdk.session.status().then((x) => {
+      const session_status = unwrap(x, "session.status")
+      commit({ session_status, session_status_ready: true })
+    })),
   ])
 
   if (input.isStale?.()) return "stale"

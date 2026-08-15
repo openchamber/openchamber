@@ -37,6 +37,7 @@ import {
     useSessionMessageCount,
     useSessionMessageRecords,
     useSessionMessageLoadState,
+    useDirectorySync,
     useSyncDirectory,
     useSessionRenderable,
     useSessionStatus,
@@ -57,6 +58,7 @@ import { findShellCommandForMessage, isUserShellMarkerMessage } from './lib/shel
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createFirstVisibleSessionPerformanceTracker } from '@/sync/session-load-performance';
+import { isSessionStatusAuthoritative } from '@/hooks/useSessionActivity';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -608,7 +610,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     usePlanDetection(currentSessionId ?? '', sessionMessages);
 
     // Session status from sync system
-    const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '', effectiveSessionDirectory) ?? IDLE_SESSION_STATUS;
+    const rawSessionStatusForCurrent = useSessionStatus(currentSessionId ?? '', effectiveSessionDirectory);
+    const sessionStatusForCurrent = rawSessionStatusForCurrent ?? IDLE_SESSION_STATUS;
+    const sessionStatusSnapshotReady = useDirectorySync(
+        React.useCallback((state) => state.session_status_ready === true, []),
+        effectiveSessionDirectory,
+    );
 
     // Scoped blocking requests — only subscribe to permissions/questions for
     // the current session + descendant subagent sessions, not all sessions in
@@ -626,13 +633,25 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
             return true;
         }
 
+        if (isSessionStatusAuthoritative(rawSessionStatusForCurrent, sessionStatusSnapshotReady)) {
+            return false;
+        }
+
         const lastMessage = sessionMessages[sessionMessages.length - 1]?.info as Message | undefined;
         return Boolean(
             lastMessage
             && lastMessage.role === 'assistant'
             && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
         );
-    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionQuestions.length, sessionStatusForCurrent.type]);
+    }, [
+        currentSessionId,
+        rawSessionStatusForCurrent,
+        sessionMessages,
+        sessionPermissions.length,
+        sessionQuestions.length,
+        sessionStatusForCurrent.type,
+        sessionStatusSnapshotReady,
+    ]);
     const activeRetryStatus = React.useMemo(() => {
         if (!currentSessionId || sessionStatusForCurrent.type !== 'retry') {
             return null;

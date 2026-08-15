@@ -169,9 +169,21 @@ describe('resolveQueuedSessionStatusType', () => {
 
   test('resolves an explicit idle entry and unknown sessions as idle', () => {
     const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
-    store.setState({ session_status: { ses_1: { type: 'idle' } } });
+    store.setState({
+      session_status: { ses_1: { type: 'idle' } },
+      message: { ses_1: [assistantMessage('msg_stale')] },
+    });
     expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
     expect(resolveQueuedSessionStatusType('ses_unknown', DIRECTORY)).toBe('idle');
+  });
+
+  test('trusts a successful status snapshot over an unfinished historical assistant', () => {
+    const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
+    store.setState({
+      session_status_ready: true,
+      message: { ses_1: [assistantMessage('msg_stale')] },
+    });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
   });
 });
 

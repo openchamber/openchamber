@@ -611,7 +611,14 @@ export function applySessionStatusSnapshot(
       }
     }
 
-    return next ? { session_status: next } : state
+    if (next) {
+      return mode === "authoritative"
+        ? { session_status: next, session_status_ready: true }
+        : { session_status: next }
+    }
+    return mode === "authoritative" && !state.session_status_ready
+      ? { session_status_ready: true }
+      : state
   })
 
   return changed

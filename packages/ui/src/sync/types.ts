@@ -56,6 +56,8 @@ export type State = {
   sessionEventRevision?: Record<string, number>
   sessionDeletedRevision?: Record<string, number>
   session_status: Record<string, SessionStatus>
+  /** True after an authoritative /session/status snapshot for this directory. */
+  session_status_ready: boolean
   session_diff: Record<string, FileDiff[]>
   todo: Record<string, Todo[]>
   permission: Record<string, PermissionRequest[]>
@@ -143,6 +145,7 @@ export const INITIAL_STATE: State = {
   sessionEventRevision: {},
   sessionDeletedRevision: {},
   session_status: {},
+  session_status_ready: false,
   session_diff: {},
   todo: {},
   permission: {},
