@@ -9,6 +9,101 @@ import {
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 const BASE_URL_PATTERN = /^https?:\/\//;
 const OPENAI_COMPATIBLE_NPM = '@ai-sdk/openai-compatible';
+const CUSTOM_PROVIDER_NPMS = new Set([
+  OPENAI_COMPATIBLE_NPM,
+  '@ai-sdk/openai',
+  '@ai-sdk/anthropic',
+]);
+const MODEL_MODALITIES = new Set(['text', 'audio', 'image', 'video', 'pdf']);
+const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function setOwnProperty(target, key, value) {
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  });
+}
+
+function normalizeModelConfig(modelValue) {
+  const normalized = {
+    name: modelValue.name.trim(),
+  };
+
+  for (const key of ['reasoning', 'attachment', 'tool_call']) {
+    if (typeof modelValue[key] === 'boolean') {
+      setOwnProperty(normalized, key, modelValue[key]);
+    }
+  }
+
+  if (isPlainObject(modelValue.modalities)) {
+    const modalities = {};
+    for (const direction of ['input', 'output']) {
+      if (!Array.isArray(modelValue.modalities[direction])) continue;
+      const values = modelValue.modalities[direction].filter(
+        (value) => typeof value === 'string' && MODEL_MODALITIES.has(value),
+      );
+      if (values.length > 0) setOwnProperty(modalities, direction, [...new Set(values)]);
+    }
+    if (Object.keys(modalities).length > 0) setOwnProperty(normalized, 'modalities', modalities);
+  }
+
+  if (isPlainObject(modelValue.limit)) {
+    const limit = {};
+    for (const key of ['context', 'input', 'output']) {
+      const value = modelValue.limit[key];
+      if (Number.isSafeInteger(value) && value > 0) setOwnProperty(limit, key, value);
+    }
+    if (Object.keys(limit).length > 0) setOwnProperty(normalized, 'limit', limit);
+  }
+
+  if (isPlainObject(modelValue.variants)) {
+    const variants = {};
+    for (const [variantId, variantValue] of Object.entries(modelValue.variants)) {
+      if (!variantId.trim() || UNSAFE_OBJECT_KEYS.has(variantId.trim()) || !isPlainObject(variantValue)) continue;
+      const cleanVariant = normalizeJsonRecord(variantValue);
+      if (cleanVariant) setOwnProperty(variants, variantId.trim(), cleanVariant);
+    }
+    if (Object.keys(variants).length > 0) setOwnProperty(normalized, 'variants', variants);
+  }
+
+  return normalized;
+}
+
+function normalizeJsonRecord(value) {
+  if (!isPlainObject(value)) return null;
+  const result = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key || UNSAFE_OBJECT_KEYS.has(key)) continue;
+    if (entry === null || typeof entry === 'string' || typeof entry === 'boolean') {
+      setOwnProperty(result, key, entry);
+      continue;
+    }
+    if (typeof entry === 'number' && Number.isFinite(entry)) {
+      setOwnProperty(result, key, entry);
+      continue;
+    }
+    if (Array.isArray(entry)) {
+      const array = entry.map((item) => normalizeJsonValue(item)).filter((item) => item !== undefined);
+      if (array.length === entry.length) setOwnProperty(result, key, array);
+      continue;
+    }
+    const nested = normalizeJsonRecord(entry);
+    if (nested) setOwnProperty(result, key, nested);
+  }
+  return result;
+}
+
+function normalizeJsonValue(value) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) {
+    const result = value.map((item) => normalizeJsonValue(item));
+    return result.every((item) => item !== undefined) ? result : undefined;
+  }
+  return normalizeJsonRecord(value) ?? undefined;
+}
 
 function getProviderSources(providerId, workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
@@ -42,7 +137,7 @@ function getProviderSources(providerId, workingDirectory) {
 }
 
 /**
- * Validate a custom OpenAI-compatible provider config payload before persistence.
+ * Validate a custom OpenAI/Anthropic provider config payload before persistence.
  * Returns { ok: true, value } or { ok: false, error }.
  *
  * Credentials: either config.env contains a variable name, or hasStoredAuth is true
@@ -63,8 +158,8 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
   }
 
   const npm = typeof config.npm === 'string' ? config.npm.trim() : OPENAI_COMPATIBLE_NPM;
-  if (npm !== OPENAI_COMPATIBLE_NPM) {
-    return { ok: false, error: `Custom providers must use npm package ${OPENAI_COMPATIBLE_NPM}` };
+  if (!CUSTOM_PROVIDER_NPMS.has(npm)) {
+    return { ok: false, error: 'Custom provider npm package is not supported' };
   }
 
   const optionsBlock = isPlainObject(config.options) ? config.options : null;
@@ -98,11 +193,11 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
     if (!modelName) {
       return { ok: false, error: `Model "${trimmedId}" requires a name` };
     }
-    normalizedModels[trimmedId] = { name: modelName };
+    setOwnProperty(normalizedModels, trimmedId, normalizeModelConfig(modelValue));
   }
 
   const normalized = {
-    npm: OPENAI_COMPATIBLE_NPM,
+    npm,
     name,
     options: {
       baseURL,
@@ -137,7 +232,7 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
       if (typeof headerValue !== 'string' || !headerValue.trim()) {
         return { ok: false, error: `Header "${headerKey}" requires a non-empty value` };
       }
-      headers[headerKey.trim()] = headerValue.trim();
+      setOwnProperty(headers, headerKey.trim(), headerValue.trim());
     }
     if (Object.keys(headers).length > 0) {
       normalized.options.headers = headers;

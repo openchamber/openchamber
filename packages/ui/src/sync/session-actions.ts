@@ -2023,6 +2023,45 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   restoreFilePartsToInput(fileParts)
 }
 
+/** Fork the complete session history and continue in the new session. */
+export async function forkSession(sessionId: string): Promise<void> {
+  const expectedRuntimeKey = getRuntimeKey()
+  const { directory } = dirStoreForSession(sessionId)
+  const forkedSession = await opencodeClient.forkSession(sessionId, undefined, directory)
+
+  if (isStaleRuntime(expectedRuntimeKey)) {
+    throw new Error("Runtime changed while forking session")
+  }
+
+  const responseDirectory = normalizePath((forkedSession as { directory?: string | null }).directory ?? null)
+  const forkedDirectory = responseDirectory ?? normalizePath(directory ?? null)
+  const publishedSession = forkedDirectory && !responseDirectory
+    ? { ...forkedSession, directory: forkedDirectory } as Session
+    : forkedSession
+  const store = forkedDirectory ? dirStoreForDirectory(forkedDirectory) : dirStoreForSession(sessionId).store
+  const current = store.getState()
+  const sessions = [...current.session]
+  const searchResult = Binary.search(sessions, publishedSession.id, (session) => session.id)
+
+  if (searchResult.found) {
+    sessions[searchResult.index] = publishedSession
+  } else {
+    sessions.splice(searchResult.index, 0, publishedSession)
+  }
+
+  store.setState({
+    session: sessions,
+    sessionTotal: !searchResult.found && !publishedSession.parentID
+      ? current.sessionTotal + 1
+      : current.sessionTotal,
+    ...sessionMutationPatch(current, publishedSession.id, false),
+  })
+
+  if (forkedDirectory) registerSessionDirectory(publishedSession.id, forkedDirectory)
+  useGlobalSessionsStore.getState().upsertSession(publishedSession)
+  useSessionUIStore.getState().setCurrentSession(publishedSession.id, forkedDirectory)
+}
+
 export async function fetchMessagesForSession(sessionID: string, directory?: string | null): Promise<void> {
   const resolvedDir = directory ?? dir()
   if (!resolvedDir) return

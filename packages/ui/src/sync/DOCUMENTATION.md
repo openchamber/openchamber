@@ -159,6 +159,7 @@ VS Code does not run the server permission-auto-accept runtime. The extension ho
    - title update
    - share
    - unshare
+    - fork
     - archive
     - delete
     - move to another worktree directory
@@ -252,6 +253,7 @@ Rules:
 5. Composer and queued sends carry their captured runtime, directory, and session through asynchronous preparation. A runtime change cancels the send instead of re-resolving it against the new runtime.
 6. After session creation, the directory returned by the server is authoritative over the requested draft directory. The server may canonicalize a worktree path, and the first prompt must use the same directory identity as the created session.
 7. A prompt send that fails **after** the request left the client is ambiguous, never a definite failure: the server may already be answering it. Transports tag those errors (`markAmbiguousTransportFailure` in `@/lib/relay/transport-error`; the relay tunnel tags every stream that dies with a request in flight), and `isAmbiguousSendFailure` reads the tag before falling back to status/text heuristics. An ambiguous failure waits for the connection to return, refetches recent messages, and confirms the optimistic message in place instead of rolling it back — rolling it back lets the message queue re-send a prompt the engine is already running, producing two independent AI responses for one user message.
+8. Forking after the latest completed assistant turn omits `messageID`, which copies the complete session history. The action registers and publishes the returned session before selecting it so every shared UI runtime can navigate without waiting for the session event.
 
 Examples of global-store updates performed in `session-actions.ts`:
 

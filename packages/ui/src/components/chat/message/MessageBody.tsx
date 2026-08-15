@@ -1259,6 +1259,7 @@ const AssistantMessageBody = React.memo(({
     }, [assistantTextParts, isMobile, isMiniChatSurface, isVSCode, toolParts]);
 
     const createSessionFromAssistantMessage = useSessionUIStore((state) => state.createSessionFromAssistantMessage);
+    const forkSession = useSessionUIStore((state) => state.forkSession);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((state) => state.getDirectoryForSession);
     const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
@@ -1298,6 +1299,7 @@ const AssistantMessageBody = React.memo(({
     const [isSavingPlan, setIsSavingPlan] = React.useState(false);
     const [isForkDialogOpen, setIsForkDialogOpen] = React.useState(false);
     const [isForkSubmitting, setIsForkSubmitting] = React.useState(false);
+    const [isSessionForking, setIsSessionForking] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
@@ -1307,6 +1309,7 @@ const AssistantMessageBody = React.memo(({
     const collapsedPreviewCount = 7;
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
     const hasStopFinish = messageFinish === 'stop';
+    const isCompletedAnswer = isMessageCompleted || hasStopFinish;
     const effectiveStreamPhase: StreamPhase = hasStopFinish ? 'completed' : streamPhase;
 
     const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
@@ -1483,6 +1486,27 @@ const AssistantMessageBody = React.memo(({
             openMultiRunLauncherWithPrompt(prefilledPrompt);
         },
         [assistantPlanText, openMultiRunLauncherWithPrompt]
+    );
+
+    const handleSessionForkClick = React.useCallback(
+        async (event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            event.preventDefault();
+            if (!sessionId || isSessionForking) {
+                return;
+            }
+
+            setIsSessionForking(true);
+            try {
+                await forkSession(sessionId);
+            } catch (error) {
+                console.error('[session-fork] failed to fork session', error);
+                toast.error(t('chat.messageBody.toast.forkSessionFailed'));
+            } finally {
+                setIsSessionForking(false);
+            }
+        },
+        [forkSession, isSessionForking, sessionId, t]
     );
 
     const handleSaveAsPlanClick = React.useCallback(
@@ -1706,7 +1730,7 @@ const AssistantMessageBody = React.memo(({
     const showErrorMessage = Boolean(errorMessage);
     const errorIconName = errorVariant === 'info' ? 'information' : 'error-warning';
     const shouldShowMessageActions = hasCopyableText;
-    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage));
+    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (isCompletedAnswer || Boolean(errorMessage));
     const shouldRenderActionsInActivity = isSortedRenderMode;
     const shouldShowStandaloneMessageActions = showSplitAssistantMessageActions && shouldShowMessageActions && !shouldShowTurnFooter && !shouldRenderActionsInActivity;
 
@@ -2142,6 +2166,30 @@ const AssistantMessageBody = React.memo(({
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent sideOffset={6}>{t(contextPinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}</TooltipContent>
+                </Tooltip>
+            ) : null}
+            {!isMiniChatSurface
+                && !isReviewSessionView
+                && turnGroupingContext?.isLatestTurn === true
+                && isLastAssistantInTurn
+                && isCompletedAnswer
+                && sessionId ? (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            disabled={isSessionForking}
+                            aria-label={t('chat.messageBody.actions.forkSessionWithContext')}
+                            className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={handleSessionForkClick}
+                        >
+                            <Icon name={isSessionForking ? "loader-4" : "git-branch"} className={cn('h-4 w-4', isSessionForking && 'animate-spin')} />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.forkSessionWithContext')}</TooltipContent>
                 </Tooltip>
             ) : null}
             {!isMiniChatSurface && !isReviewSessionView ? <Tooltip>

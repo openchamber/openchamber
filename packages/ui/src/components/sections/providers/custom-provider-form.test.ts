@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   buildAuthSetRequest,
   buildProviderUpsertRequest,
   isConfigDefinedCustomProvider,
-  isCustomOpenAICompatibleProvider,
+  isSupportedCustomProvider,
   providerToCustomFormState,
   resolveProviderConfigScope,
   validateCustomProvider,
@@ -12,10 +13,12 @@ import {
 } from './custom-provider-form';
 
 const t = (key: string) => key;
+const componentSource = readFileSync(new URL('./CustomProviderForm.tsx', import.meta.url), 'utf8');
 
 const baseForm = (overrides: Partial<CustomProviderFormState> = {}): CustomProviderFormState => ({
   providerID: 'custom-provider',
   name: 'Custom Provider',
+  protocol: 'openaiChat',
   baseURL: 'https://api.example.com/v1',
   apiKey: 'sk-test',
   models: [{ row: 'm0', id: 'model-a', name: 'Model A' }],
@@ -44,6 +47,15 @@ function mergeProviderConfig(
   }
   return next;
 }
+
+describe('CustomProviderForm protocol selector', () => {
+  test('renders a concise protocol label instead of the internal value', () => {
+    expect(componentSource).toContain('<SelectValue>{PROTOCOL_TRIGGER_LABELS[form.protocol]}</SelectValue>');
+    expect(componentSource).toContain("openaiChat: 'OpenAI Chat'");
+    expect(componentSource).toContain("openaiResponses: 'OpenAI Responses'");
+    expect(componentSource).toContain("anthropicMessages: 'Anthropic'");
+  });
+});
 
 describe('validateCustomProvider', () => {
   test('builds trimmed config and auth payloads', () => {
@@ -94,6 +106,136 @@ describe('validateCustomProvider', () => {
 
     expect(result.result?.apiKey).toEqual(undefined);
     expect(result.result?.config.env).toEqual(['CUSTOM_PROVIDER_KEY']);
+  });
+
+  test('maps each API protocol to its OpenCode adapter', () => {
+    const protocols = [
+      ['openaiChat', '@ai-sdk/openai-compatible'],
+      ['openaiResponses', '@ai-sdk/openai'],
+      ['anthropicMessages', '@ai-sdk/anthropic'],
+    ] as const;
+
+    for (const [protocol, npm] of protocols) {
+      const result = validateCustomProvider({
+        form: baseForm({ protocol }),
+        t,
+        existingProviderIDs: new Set(),
+      });
+      expect(result.result?.config.npm).toBe(npm);
+    }
+  });
+
+  test('uses protocol-specific defaults for new thinking variants', () => {
+    const anthropic = validateCustomProvider({
+      form: baseForm({
+        protocol: 'anthropicMessages',
+        models: [{ row: 'm0', id: 'claude', name: 'Claude', thinkingLevels: 'low, high' }],
+      }),
+      t,
+      existingProviderIDs: new Set(),
+    });
+    expect(anthropic.result?.config.models.claude.variants).toEqual({
+      low: { thinking: { type: 'adaptive' }, effort: 'low' },
+      high: { thinking: { type: 'adaptive' }, effort: 'high' },
+    });
+
+    const responses = validateCustomProvider({
+      form: baseForm({
+        protocol: 'openaiResponses',
+        models: [{ row: 'm0', id: 'gpt', name: 'GPT', thinkingLevels: 'low' }],
+      }),
+      t,
+      existingProviderIDs: new Set(),
+    });
+    expect(responses.result?.config.models.gpt.variants).toEqual({
+      low: { reasoningEffort: 'low' },
+    });
+  });
+
+  test('preserves configured thinking levels for each protocol', () => {
+    const openAILevels = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+    for (const protocol of ['openaiChat', 'openaiResponses'] as const) {
+      const result = validateCustomProvider({
+        form: baseForm({
+          protocol,
+          models: [{
+            row: 'm0',
+            id: 'model',
+            name: 'Model',
+            thinkingLevels: openAILevels.join(', '),
+          }],
+        }),
+        t,
+        existingProviderIDs: new Set(),
+      });
+
+      expect(result.result?.config.models.model.variants).toEqual(Object.fromEntries(
+        openAILevels.map((level) => [level, { reasoningEffort: level }]),
+      ));
+    }
+
+    const anthropicLevels = ['low', 'medium', 'high', 'xhigh', 'max'];
+    const anthropic = validateCustomProvider({
+      form: baseForm({
+        protocol: 'anthropicMessages',
+        models: [{
+          row: 'm0',
+          id: 'model',
+          name: 'Model',
+          thinkingLevels: anthropicLevels.join(', '),
+        }],
+      }),
+      t,
+      existingProviderIDs: new Set(),
+    });
+    expect(anthropic.result?.config.models.model.variants).toEqual(Object.fromEntries(
+      anthropicLevels.map((level) => [level, { thinking: { type: 'adaptive' }, effort: level }]),
+    ));
+  });
+
+  test('round-trips existing Anthropic adaptive thinking variants', () => {
+    const resolvedVariants = {
+      low: { thinking: { type: 'adaptive' }, effort: 'low' },
+      medium: { thinking: { type: 'adaptive' }, effort: 'medium' },
+      high: { thinking: { type: 'adaptive', budgetTokens: 16000 }, effort: 'high' },
+      xhigh: { thinking: { type: 'adaptive' }, effort: 'xhigh' },
+      max: { thinking: { type: 'adaptive', budgetTokens: 31999 }, effort: 'max' },
+    };
+    const persistedVariants = {
+      low: { thinking: { type: 'adaptive' }, effort: 'low' },
+      medium: { thinking: { type: 'adaptive' }, effort: 'medium' },
+      high: { thinking: { type: 'adaptive' }, effort: 'high' },
+      xhigh: { thinking: { type: 'adaptive' }, effort: 'xhigh' },
+      max: { thinking: { type: 'adaptive' }, effort: 'max' },
+    };
+    const state = providerToCustomFormState({
+      id: 'anthropic-provider',
+      npm: '@ai-sdk/anthropic',
+      name: 'Anthropic Provider',
+      env: ['ANTHROPIC_KEY'],
+      options: { baseURL: 'https://api.example.com/v1' },
+      models: {
+        claude: {
+          name: 'Claude',
+          reasoning: true,
+          variants: resolvedVariants,
+        },
+      },
+    });
+
+    expect(state.protocol).toBe('anthropicMessages');
+    expect(state.models[0]?.thinkingLevels).toBe('low, medium, high, xhigh, max');
+
+    const result = validateCustomProvider({
+      form: state,
+      t,
+      existingProviderIDs: new Set(['anthropic-provider']),
+      editingProviderID: 'anthropic-provider',
+      allowExistingAuth: true,
+    });
+
+    expect(result.result?.config.models.claude.variants).toEqual(persistedVariants);
   });
 
   test('rejects missing credentials', () => {
@@ -278,8 +420,8 @@ describe('mergeProviderConfig persistence shape', () => {
 });
 
 describe('provider edit helpers', () => {
-  test('detects openai-compatible custom providers and prefills form state', () => {
-    expect(isCustomOpenAICompatibleProvider({
+  test('detects supported custom providers and prefills form state', () => {
+    expect(isSupportedCustomProvider({
       id: 'campus-llm',
       options: { baseURL: 'https://llm.example.edu/v1' },
       models: [],
@@ -298,10 +440,161 @@ describe('provider edit helpers', () => {
 
     expect(state.providerID).toBe('campus-llm');
     expect(state.name).toBe('Campus LLM');
+    expect(state.protocol).toBe('openaiChat');
     expect(state.baseURL).toBe('https://llm.example.edu/v1');
     expect(state.apiKey).toBe('{env:CAMPUS_KEY}');
-    expect(state.models[0]).toEqual({ row: state.models[0].row, id: 'fast', name: 'Fast' });
+    expect(state.models[0]).toEqual({
+      row: state.models[0].row,
+      id: 'fast',
+      name: 'Fast',
+      inputModalities: [],
+      outputModalities: [],
+      contextLimit: '',
+      inputLimit: '',
+      outputLimit: '',
+      imageInput: 'default',
+      reasoning: 'default',
+      toolCalling: 'default',
+      thinkingLevels: '',
+      variantOptions: {},
+    });
     expect(state.headers[0]).toEqual({ row: state.headers[0].row, key: 'X-Campus', value: '1' });
+  });
+
+  test('hydrates protocol from provider and resolved model npm metadata', () => {
+    expect(providerToCustomFormState({
+      id: 'responses-provider',
+      npm: '@ai-sdk/openai',
+      options: { baseURL: 'https://api.example.com/v1' },
+      models: { model: { name: 'Model' } },
+    }).protocol).toBe('openaiResponses');
+
+    expect(providerToCustomFormState({
+      id: 'anthropic-provider',
+      options: { baseURL: 'https://api.example.com/v1' },
+      models: [{ id: 'claude', name: 'Claude', api: { npm: '@ai-sdk/anthropic' } }],
+    }).protocol).toBe('anthropicMessages');
+  });
+
+  test('does not treat supported built-in adapters without a custom base URL as custom providers', () => {
+    expect(isSupportedCustomProvider({
+      id: 'openai',
+      options: {},
+      models: [{ id: 'gpt', name: 'GPT', api: { npm: '@ai-sdk/openai' } }],
+    })).toBe(false);
+  });
+
+  test('hydrates and serializes advanced model metadata without losing variant bodies', () => {
+    const state = providerToCustomFormState({
+      id: 'campus-llm',
+      name: 'Campus LLM',
+      env: ['CAMPUS_KEY'],
+      options: { baseURL: 'https://llm.example.edu/v1' },
+      models: {
+        'vision-fast': {
+          name: 'Vision Fast',
+          reasoning: true,
+          attachment: true,
+          tool_call: false,
+          modalities: { input: ['text', 'image'], output: ['text'] },
+          limit: { context: 128000, input: 64000, output: 8192 },
+          variants: {
+            low: { reasoningEffort: 'low', headers: { 'X-Reasoning': 'low' } },
+            high: { reasoningEffort: 'high' },
+          },
+        },
+      },
+    });
+
+    expect(state.models[0]).toEqual({
+      row: state.models[0].row,
+      id: 'vision-fast',
+      name: 'Vision Fast',
+      inputModalities: ['text', 'image'],
+      outputModalities: ['text'],
+      contextLimit: '128000',
+      inputLimit: '64000',
+      outputLimit: '8192',
+      imageInput: 'supported',
+      reasoning: 'supported',
+      toolCalling: 'unsupported',
+      thinkingLevels: 'low, high',
+      variantOptions: {
+        low: { reasoningEffort: 'low', headers: { 'X-Reasoning': 'low' } },
+        high: { reasoningEffort: 'high' },
+      },
+    });
+
+    const result = validateCustomProvider({
+      form: state,
+      t,
+      existingProviderIDs: new Set(),
+    });
+
+    expect(result.result?.config.models).toEqual({
+      'vision-fast': {
+        name: 'Vision Fast',
+        reasoning: true,
+        attachment: true,
+        tool_call: false,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+        limit: { context: 128000, input: 64000, output: 8192 },
+        variants: {
+          low: { reasoningEffort: 'low', headers: { 'X-Reasoning': 'low' } },
+          high: { reasoningEffort: 'high' },
+        },
+      },
+    });
+  });
+
+  test('removes stale image modality when image input is explicitly unsupported', () => {
+    const result = validateCustomProvider({
+      form: baseForm({
+        models: [{
+          row: 'm0',
+          id: 'text-only',
+          name: 'Text only',
+          inputModalities: ['text', 'image'],
+          imageInput: 'unsupported',
+        }],
+      }),
+      t,
+      existingProviderIDs: new Set(),
+    });
+
+    expect(result.result?.config.models['text-only']).toEqual({
+      name: 'Text only',
+      attachment: false,
+      modalities: { input: ['text'] },
+    });
+  });
+
+  test('validates positive limits and duplicate thinking levels', () => {
+    const result = validateCustomProvider({
+      form: baseForm({
+        models: [{
+          row: 'm0',
+          id: 'model-a',
+          name: 'Model A',
+          contextLimit: '0',
+          inputLimit: '1.5',
+          outputLimit: '9007199254740992',
+          thinkingLevels: 'low, medium, low',
+        }],
+      }),
+      t,
+      existingProviderIDs: new Set(),
+    });
+
+    expect(result.result).toEqual(undefined);
+    expect(result.models[0]).toEqual({
+      id: undefined,
+      name: undefined,
+      contextLimit: 'settings.providers.page.custom.error.positiveInteger',
+      inputLimit: 'settings.providers.page.custom.error.positiveInteger',
+      outputLimit: 'settings.providers.page.custom.error.positiveInteger',
+      thinkingLevels: 'settings.providers.page.custom.error.duplicate',
+    });
   });
 
   test('requires a config-layer source before treating a provider as editable custom', () => {
@@ -311,7 +604,7 @@ describe('provider edit helpers', () => {
       models: [{ id: 'gpt-4o', name: 'GPT-4o', api: { npm: '@ai-sdk/openai-compatible' } }],
     };
 
-    expect(isCustomOpenAICompatibleProvider(catalogLike)).toBe(true);
+    expect(isSupportedCustomProvider(catalogLike)).toBe(true);
     expect(isConfigDefinedCustomProvider(catalogLike, undefined)).toBe(false);
     expect(isConfigDefinedCustomProvider(catalogLike, {
       user: { exists: false },

@@ -1039,7 +1039,7 @@ class OpencodeService {
     const response = await this.client.session.fork({
       sessionID: sessionId,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
-      messageID: messageId,
+      ...(messageId ? { messageID: messageId } : {}),
     });
     return unwrapSdkData(response, 'session.fork');
   }

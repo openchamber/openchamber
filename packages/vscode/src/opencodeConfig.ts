@@ -2171,6 +2171,89 @@ export const removeProviderConfig = (providerId: string, workingDirectory?: stri
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 const BASE_URL_PATTERN = /^https?:\/\//;
 const OPENAI_COMPATIBLE_NPM = '@ai-sdk/openai-compatible';
+const CUSTOM_PROVIDER_NPMS = new Set([
+  OPENAI_COMPATIBLE_NPM,
+  '@ai-sdk/openai',
+  '@ai-sdk/anthropic',
+]);
+const MODEL_MODALITIES = new Set(['text', 'audio', 'image', 'video', 'pdf']);
+const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+const setOwnProperty = (target: Record<string, unknown>, key: string, value: unknown) => {
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  });
+};
+
+const normalizeJsonValue = (value: unknown): unknown => {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) {
+    const result = value.map((item) => normalizeJsonValue(item));
+    return result.every((item) => item !== undefined) ? result : undefined;
+  }
+  return normalizeJsonRecord(value) ?? undefined;
+};
+
+const normalizeJsonRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!isPlainObject(value)) return null;
+  const result: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key || UNSAFE_OBJECT_KEYS.has(key)) continue;
+    const normalized = normalizeJsonValue(entry);
+    if (normalized !== undefined) setOwnProperty(result, key, normalized);
+  }
+  return result;
+};
+
+const normalizeModelConfig = (modelValue: Record<string, unknown>): Record<string, unknown> => {
+  const normalized: Record<string, unknown> = {
+    name: typeof modelValue.name === 'string' ? modelValue.name.trim() : '',
+  };
+
+  for (const key of ['reasoning', 'attachment', 'tool_call']) {
+    if (typeof modelValue[key] === 'boolean') setOwnProperty(normalized, key, modelValue[key]);
+  }
+
+  if (isPlainObject(modelValue.modalities)) {
+    const modalities: Record<string, unknown> = {};
+    for (const direction of ['input', 'output']) {
+      const values = Array.isArray(modelValue.modalities[direction])
+        ? modelValue.modalities[direction].filter(
+            (entry): entry is string => typeof entry === 'string' && MODEL_MODALITIES.has(entry),
+          )
+        : [];
+      if (values.length > 0) setOwnProperty(modalities, direction, [...new Set(values)]);
+    }
+    if (Object.keys(modalities).length > 0) setOwnProperty(normalized, 'modalities', modalities);
+  }
+
+  if (isPlainObject(modelValue.limit)) {
+    const limit: Record<string, unknown> = {};
+    for (const key of ['context', 'input', 'output']) {
+      const value = modelValue.limit[key];
+      if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+        setOwnProperty(limit, key, value);
+      }
+    }
+    if (Object.keys(limit).length > 0) setOwnProperty(normalized, 'limit', limit);
+  }
+
+  if (isPlainObject(modelValue.variants)) {
+    const variants: Record<string, unknown> = {};
+    for (const [variantId, variantValue] of Object.entries(modelValue.variants)) {
+      if (!variantId.trim() || UNSAFE_OBJECT_KEYS.has(variantId.trim()) || !isPlainObject(variantValue)) continue;
+      const cleanVariant = normalizeJsonRecord(variantValue);
+      if (cleanVariant) setOwnProperty(variants, variantId.trim(), cleanVariant);
+    }
+    if (Object.keys(variants).length > 0) setOwnProperty(normalized, 'variants', variants);
+  }
+
+  return normalized;
+};
 
 export const validateCustomProviderConfig = (
   providerId: string,
@@ -2191,8 +2274,8 @@ export const validateCustomProviderConfig = (
   }
 
   const npm = typeof config.npm === 'string' ? config.npm.trim() : OPENAI_COMPATIBLE_NPM;
-  if (npm !== OPENAI_COMPATIBLE_NPM) {
-    return { ok: false as const, error: `Custom providers must use npm package ${OPENAI_COMPATIBLE_NPM}` };
+  if (!CUSTOM_PROVIDER_NPMS.has(npm)) {
+    return { ok: false as const, error: 'Custom provider npm package is not supported' };
   }
 
   const optionsBlock = isPlainObject(config.options) ? config.options : null;
@@ -2213,7 +2296,7 @@ export const validateCustomProviderConfig = (
     return { ok: false as const, error: 'At least one model is required' };
   }
 
-  const normalizedModels: Record<string, { name: string }> = {};
+  const normalizedModels: Record<string, unknown> = {};
   for (const [modelId, modelValue] of Object.entries(models)) {
     const trimmedId = typeof modelId === 'string' ? modelId.trim() : '';
     if (!trimmedId) {
@@ -2226,11 +2309,11 @@ export const validateCustomProviderConfig = (
     if (!modelName) {
       return { ok: false as const, error: `Model "${trimmedId}" requires a name` };
     }
-    normalizedModels[trimmedId] = { name: modelName };
+    setOwnProperty(normalizedModels, trimmedId, normalizeModelConfig(modelValue));
   }
 
   const normalized: Record<string, unknown> = {
-    npm: OPENAI_COMPATIBLE_NPM,
+    npm,
     name,
     options: {
       baseURL,
@@ -2261,7 +2344,7 @@ export const validateCustomProviderConfig = (
       if (typeof headerValue !== 'string' || !headerValue.trim()) {
         return { ok: false as const, error: `Header "${headerKey}" requires a non-empty value` };
       }
-      headers[headerKey.trim()] = headerValue.trim();
+      setOwnProperty(headers, headerKey.trim(), headerValue.trim());
     }
     if (Object.keys(headers).length > 0) {
       (normalized.options as Record<string, unknown>).headers = headers;
