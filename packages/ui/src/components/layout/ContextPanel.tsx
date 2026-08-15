@@ -38,6 +38,8 @@ import { Icon } from "@/components/icon/Icon";
 import {
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
+  EMBEDDED_VISIBILITY_REQUEST,
+  EMBEDDED_VISIBILITY_UPDATE,
   getActiveEmbeddedSessionChatTab,
   getOrCreateEmbeddedSessionChatURL,
   type EmbeddedSessionChatURLCacheEntry,
@@ -803,27 +805,34 @@ export const ContextPanel: React.FC = () => {
     }
   }, [allowPromptingSubagentSessions]);
 
+  const postEmbeddedVisibilityToChat = React.useCallback((
+    tabID: string,
+    frame: HTMLIFrameElement,
+    targetOrigin: string,
+  ) => {
+    const frameWindow = frame.contentWindow;
+    if (!frameWindow) {
+      return;
+    }
+
+    frameWindow.postMessage(
+      {
+        type: EMBEDDED_VISIBILITY_UPDATE,
+        payload: { visible: activeChatTabID === tabID },
+      },
+      targetOrigin,
+    );
+  }, [activeChatTabID]);
+
   const postEmbeddedVisibilityToChats = React.useCallback(() => {
     if (typeof window === 'undefined') {
       return;
     }
 
     for (const [tabID, frame] of chatFrameRefs.current.entries()) {
-      const frameWindow = frame.contentWindow;
-      if (!frameWindow) {
-        continue;
-      }
-
-      const payload = { visible: activeChatTabID === tabID };
-      frameWindow.postMessage(
-        {
-          type: 'openchamber:embedded-visibility',
-          payload,
-        },
-        window.location.origin,
-      );
+      postEmbeddedVisibilityToChat(tabID, frame, window.location.origin);
     }
-  }, [activeChatTabID]);
+  }, [postEmbeddedVisibilityToChat]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -835,13 +844,18 @@ export const ContextPanel: React.FC = () => {
         return;
       }
 
-      const isKnownChatFrame = Array.from(chatFrameRefs.current.values())
-        .some((frame) => frame.contentWindow === event.source);
-      if (!isKnownChatFrame) {
+      const sourceChatFrame = Array.from(chatFrameRefs.current.entries())
+        .find(([, frame]) => frame.contentWindow === event.source);
+      if (!sourceChatFrame) {
         return;
       }
 
       const data = event.data as { type?: unknown; requestId?: unknown };
+      if (data?.type === EMBEDDED_VISIBILITY_REQUEST) {
+        const [tabID, frame] = sourceChatFrame;
+        postEmbeddedVisibilityToChat(tabID, frame, event.origin);
+        return;
+      }
       if (data?.type === EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST) {
         if (typeof data.requestId !== 'string' || !data.requestId) return;
         const runtimeKey = getRuntimeKey();
@@ -882,7 +896,7 @@ export const ContextPanel: React.FC = () => {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [postChatSettingsSyncToEmbeddedChat, postThemeSyncToEmbeddedChat, setThemeMode, themeMode]);
+  }, [postChatSettingsSyncToEmbeddedChat, postEmbeddedVisibilityToChat, postThemeSyncToEmbeddedChat, setThemeMode, themeMode]);
 
   React.useLayoutEffect(() => {
     const hasAnyChatTab = tabs.some((tab) => tab.mode === 'chat');

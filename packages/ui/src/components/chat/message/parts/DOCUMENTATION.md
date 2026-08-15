@@ -55,23 +55,32 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   HTML is sanitized as defense in depth, with script and style elements
   forbidden, so message content cannot inject active DOM or application-wide
   CSS into any runtime surface.
-- Final assistant Markdown collects HTTP(S), embedded, and workspace-local
+- Final assistant Markdown rendering is independent from image gallery
+  extraction: gallery presence never changes the chat body. Assistant image
+  syntax consistently renders as a shared image icon followed by its filename,
+  without loading the image in the body; tool and simple Markdown retain normal
+  inline image rendering. The gallery separately collects HTTP(S), embedded, and workspace-local
   PNG/JPEG/GIF/WebP image candidates into one 100px thumbnail gallery in the
   message-completion area after all message text and above the turn's changed
   files. Each muted filename caption includes the shared image-file icon.
   HTTP(S) images keep their browser URL. Embedded and workspace-local images
-  are limited to 10 MiB, validated as PNG/JPEG/GIF/WebP, and local paths are
-  fetched through the active runtime before conversion to data URLs. Local
-  Markdown links whose target has one of
-  those image suffixes stay links in the text and open the same existing
-  full-screen image preview as the gallery; image syntax does not insert a
-  large inline image. A
+  are limited to 10 MiB and validated as PNG/JPEG/GIF/WebP. Chat Markdown uses
+  the assistant image-label policy without gallery-specific link rewriting,
+  completion-state switching, or hidden placeholders. A
   completed assistant message hydrates at most 12 unique image candidates,
   including persisted text parts that omit their optional part-level end time.
-  Thumbnail assets begin loading only when their gallery items approach the
-  viewport, so mounted historical messages do not eagerly read every image.
+  In server-backed runtimes, a gallery approaching the viewport prepares all
+  local candidates in one message-level request, then reuses the authenticated
+  `/api/fs/raw` asset route. Each URL loads only when its thumbnail approaches
+  the viewport. VS Code instead loads workspace-contained images through its
+  local filesystem bridge and never calls the server grant route; OpenCode
+  temporary-directory images remain unsupported there. Mounted historical
+  messages therefore do not eagerly read every image.
   Gallery clicks do not introduce or alter preview chrome: desktop and mobile
   both reuse the pre-existing attachment image preview overlay.
+  Workspace-external images receive the existing path-bound `outsideFileGrant`
+  only when the server verifies the exact source in the owning assistant
+  message and the real file is inside OpenCode's dedicated temporary directory.
 - `read` and `skill` are **static navigation tools** and render via `StaticToolRow`.
 - Every other tool, including search/fetch, OpenCode built-ins, custom tools, plugins, and MCP tools, is **expandable** and renders through `ToolPart`.
 - The managed `openchamber` plugin tool uses the expandable path and hides its broad protocol input. The plugin supplies the selected action's human description as the native tool title; the UI renders that metadata without owning an action map. The full versioned result envelope renders through the same neutral JSON summary/tree/raw views as other tools, without a tool-specific output card.

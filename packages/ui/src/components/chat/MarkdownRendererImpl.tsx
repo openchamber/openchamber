@@ -19,8 +19,7 @@ import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime } from '@/l
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
-import { getMarkdownImageFilename, renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
-import { resolveMarkdownImageSource } from './markdown/markdownImageAssets';
+import { renderMarkdownBlocks, renderMarkdownSync, type MarkdownImageMode } from './markdown/markdownCore';
 import { ensureMarkdownShikiTheme } from './markdown/markdownTheme';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import {
@@ -109,59 +108,6 @@ const useExternalLinkInteractions = ({
   }, [containerRef, enabled]);
 };
 
-const useMarkdownImageLinkInteractions = ({
-  containerRef,
-  directory,
-  enabled,
-  onShowPopup,
-}: {
-  containerRef: React.RefObject<HTMLDivElement | null>;
-  directory: string;
-  enabled: boolean;
-  onShowPopup?: (content: ToolPopupContent) => void;
-}) => {
-  React.useEffect(() => {
-    const container = containerRef.current;
-    if (!enabled || !container || !onShowPopup) return;
-
-    const controller = new AbortController();
-    const handleClick = (event: MouseEvent) => {
-      if (event.defaultPrevented || event.button !== 0) return;
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-
-      const link = target.closest<HTMLAnchorElement>('[data-openchamber-markdown-image-link="true"]');
-      if (!link || !container.contains(link)) return;
-
-      const source = link.getAttribute('data-openchamber-markdown-image-source') ?? '';
-      const filename = link.getAttribute('data-openchamber-markdown-image-filename')
-        || getMarkdownImageFilename(source, '');
-      if (!source || !filename) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      void resolveMarkdownImageSource(source, directory, controller.signal)
-        .then((url) => {
-          if (controller.signal.aborted || !link.isConnected) return;
-          onShowPopup({
-            open: true,
-            title: filename,
-            content: '',
-            metadata: { tool: 'markdown-image-preview', filename },
-            image: { url, filename },
-          });
-        })
-        .catch(() => undefined);
-    };
-
-    container.addEventListener('click', handleClick);
-    return () => {
-      controller.abort();
-      container.removeEventListener('click', handleClick);
-    };
-  }, [containerRef, directory, enabled, onShowPopup]);
-};
-
 const DEFAULT_MERMAID_CONTROLS: MermaidControlOptions = {
   download: true,
   copy: true,
@@ -195,7 +141,6 @@ interface MarkdownRendererProps {
   variant?: MarkdownVariant;
   onShowPopup?: (content: ToolPopupContent) => void;
   enableFileReferences?: boolean;
-  enableLocalImages?: boolean;
 }
 
 const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
@@ -557,10 +502,6 @@ const useFileReferenceInteractions = ({
       let linkedCount = 0;
 
       for (const candidate of Array.from(candidates)) {
-        if (candidate.matches('[data-openchamber-markdown-image-link="true"]')) {
-          clearFileLinkAttributes(candidate);
-          continue;
-        }
         const rawCandidate = extractPathCandidateFromElement(candidate);
         const resolved = getResolvedReference(rawCandidate, effectiveDirectory);
         clearFileLinkAttributes(candidate);
@@ -895,7 +836,7 @@ const useMorphdomMarkdown = ({
   text,
   streaming,
   cacheKey,
-  deferImages = false,
+  imageMode = 'inline',
   syntaxVars,
   ctx,
 }: {
@@ -903,7 +844,7 @@ const useMorphdomMarkdown = ({
   text: string;
   streaming: boolean;
   cacheKey: string;
-  deferImages?: boolean;
+  imageMode?: MarkdownImageMode;
   syntaxVars: Record<string, string>;
   ctx: DecorateContext;
 }) => {
@@ -942,7 +883,7 @@ const useMorphdomMarkdown = ({
       // `display:contents` keeps margin-collapsing/spacing identical to a flat
       // HTML body — the wrapper exists only for per-block reconciliation.
       block.style.display = 'contents';
-      block.innerHTML = renderMarkdownSync(text, deferImages);
+      block.innerHTML = renderMarkdownSync(text, imageMode);
       // Decorate synchronously too: wrap code blocks in their framed card,
       // mark inline code, build table controls, etc. The async pass re-decorates
       // its own DOM before morphing, so without this the first paint shows bare
@@ -954,7 +895,7 @@ const useMorphdomMarkdown = ({
         refreshMermaidViewers();
       }
     }
-  }, [containerRef, text, deferImages, ctx, refreshMermaidViewers]);
+  }, [containerRef, text, imageMode, ctx, refreshMermaidViewers]);
 
   React.useEffect(() => () => {
     mermaidViewerRef.current?.cleanup();
@@ -967,7 +908,7 @@ const useMorphdomMarkdown = ({
     const target = container.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
     let active = true;
 
-    void renderMarkdownBlocks(text, streaming, cacheKey, deferImages).then((blocks) => {
+    void renderMarkdownBlocks(text, streaming, cacheKey, imageMode).then((blocks) => {
       if (!active) return;
       const existing = Array.from(target.children) as HTMLElement[];
 
@@ -1018,7 +959,7 @@ const useMorphdomMarkdown = ({
     return () => {
       active = false;
     };
-  }, [containerRef, text, streaming, cacheKey, deferImages, ctx, refreshMermaidViewers]);
+  }, [containerRef, text, streaming, cacheKey, imageMode, ctx, refreshMermaidViewers]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1065,7 +1006,6 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   variant = 'assistant',
   onShowPopup,
   enableFileReferences = true,
-  enableLocalImages = false,
 }) => {
   streamPerfCount('ui.markdown_renderer.render');
   if (isStreaming) streamPerfCount('ui.markdown_renderer.render.streaming');
@@ -1097,12 +1037,6 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     enabled: enableFileReferences && !isStreaming,
   });
   useExternalLinkInteractions({ containerRef });
-  useMarkdownImageLinkInteractions({
-    containerRef,
-    directory: effectiveDirectory,
-    enabled: enableLocalImages && variant === 'assistant' && !isStreaming,
-    onShowPopup,
-  });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
   const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
@@ -1113,17 +1047,13 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     text: content,
     streaming: live,
     cacheKey,
-    deferImages: enableLocalImages && variant === 'assistant' && !isStreaming,
+    imageMode: variant === 'assistant' ? 'label' : 'inline',
     syntaxVars,
     ctx,
   });
 
   const markdownContent = (
-    <div
-      className={cn('break-words w-full min-w-0', className)}
-      ref={containerRef}
-      data-openchamber-finalized-assistant-images={enableLocalImages && variant === 'assistant' && !isStreaming ? 'true' : undefined}
-    >
+    <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
       <div className={markdownContentClassName(variant)} data-markdown-content />
     </div>
   );
@@ -1150,7 +1080,6 @@ export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) =>
     && prev.messageId === next.messageId
     && prev.onShowPopup === next.onShowPopup
     && prev.enableFileReferences === next.enableFileReferences
-    && prev.enableLocalImages === next.enableLocalImages
     && prev.part?.id === next.part?.id;
 });
 

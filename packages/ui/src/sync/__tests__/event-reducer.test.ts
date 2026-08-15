@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Session } from "@opencode-ai/sdk/v2"
-import type { Event, Part, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Event, Message, Part, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { applyDirectoryEvent } from "../event-reducer"
 import { INITIAL_STATE, type State } from "../types"
 
@@ -65,6 +65,55 @@ function buildSession(title: string, time: Session["time"]): Session {
 }
 
 describe("applyDirectoryEvent", () => {
+  test("inserts post-rollover message events by creation time rather than ID", () => {
+    const legacy = {
+      id: "msg_ffffffffffffLegacy",
+      sessionID: "ses_1",
+      role: "user",
+      time: { created: 100 },
+    } as Message
+    const current = {
+      id: "msg_000000000000Current",
+      sessionID: "ses_1",
+      role: "assistant",
+      time: { created: 200 },
+    } as Message
+    const draft = state({ message: { ses_1: [legacy] } })
+
+    expect(applyDirectoryEvent(draft, {
+      type: "message.updated",
+      properties: { info: current },
+    } as Event)).toBe(true)
+    expect(draft.message.ses_1).toEqual([legacy, current])
+  })
+
+  test("preserves part event order across the part ID rollover", () => {
+    const legacyPart = {
+      id: "prt_ffffffffffffLegacy",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "text",
+      text: "legacy",
+    } as Part
+    const currentPart = {
+      id: "prt_000000000000Current",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "text",
+      text: "current",
+    } as Part
+    const draft = state({
+      message: { ses_1: [{ id: "msg_1", sessionID: "ses_1", role: "assistant", time: { created: 1 } } as Message] },
+      part: { msg_1: [legacyPart] },
+    })
+
+    expect(applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: { part: currentPart },
+    } as Event)).toBe(true)
+    expect(draft.part.msg_1).toEqual([legacyPart, currentPart])
+  })
+
   test("returns typed materialization when delta arrives before parts", () => {
     const result = applyDirectoryEvent(state(), deltaEvent())
 

@@ -1,3 +1,4 @@
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go usage tracking',
   'settings.providers.page.openCodeGo.description': 'Connect the OpenCode Go dashboard to show rolling, weekly, and monthly quota.',
@@ -1192,6 +1193,7 @@ export const settingsDict = {
   'settings.usage.page.header.providerUsage': '{provider} Usage',
   'settings.usage.page.header.refreshing': 'Refreshing usage...',
   'settings.usage.page.header.lastUpdated': 'Last updated: {time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': 'Plan: {plan} · Last updated: {time}',
   'settings.usage.page.options.showInWorkStatusAria': 'Show in work status panel',
   'settings.usage.page.options.showInWorkStatus': 'Show in Work Status Panel',
   'settings.usage.page.options.showInWorkStatusTooltip': 'When enabled, this provider\'s usage will be visible in the work status panel.',
@@ -2123,4 +2125,5 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...thirdPartyIntegrationI18n.en,
 } as const;

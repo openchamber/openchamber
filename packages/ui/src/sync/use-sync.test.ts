@@ -40,11 +40,11 @@ describe('shouldFetchSessionForRenderableSync', () => {
 //      already-committed messages (no re-render churn, no reference breaks).
 //   3. mergeOptimisticPage + clearOptimistic is idempotent across commits.
 
-function assistantMessage(id: string): Message {
-  return { id, sessionID: 'ses_1', role: 'assistant', time: { created: 1 } } as Message
+function assistantMessage(id: string, created = 1): Message {
+  return { id, sessionID: 'ses_1', role: 'assistant', time: { created } } as Message
 }
-function userMessage(id: string): Message {
-  return { id, sessionID: 'ses_1', role: 'user', time: { created: 1 } } as Message
+function userMessage(id: string, created = 1): Message {
+  return { id, sessionID: 'ses_1', role: 'user', time: { created } } as Message
 }
 function assistantMessageWithClientRole(id: string): Message {
   // OpenCode sets clientRole on the wire; role may be absent.
@@ -79,11 +79,26 @@ describe('hasUserMessage', () => {
 describe('incremental materialization of superset pages (#2084)', () => {
   const SKIP_PARTS = new Set(['patch', 'step-start', 'step-finish'])
 
+  test('preserves authoritative part order across the part ID rollover', () => {
+    const msg = assistantMessage('msg_1')
+    const legacy = textPart('prt_ffffffffffffLegacy', msg.id)
+    const current = textPart('prt_000000000000Current', msg.id)
+
+    const result = materializeSessionSnapshots(
+      { message: {}, part: {} },
+      'ses_1',
+      [{ info: msg, parts: [legacy, current] }],
+      { skipPartTypes: SKIP_PARTS },
+    )
+
+    expect(result.part[msg.id]).toEqual([legacy, current])
+  })
+
   test('preserves message references for already-committed messages', () => {
     // Simulate expansion: commit 50 (assistant-only), then 100 (with user), then 150.
     // Pages are supersets: the 100-page includes all 50 from the first page,
     // the 150-page includes all 100 from the second.
-    // Messages are sorted by id in the store (mergeMessages uses cmp by id),
+    // Messages are chronological in the store,
     // so look them up by id rather than positional index.
     const a1 = assistantMessage('a_1')
     const a2 = assistantMessage('a_2')
@@ -168,6 +183,16 @@ describe('incremental materialization of superset pages (#2084)', () => {
 })
 
 describe('mergeOptimisticPage idempotency across commits (#2084)', () => {
+  test('places a post-rollover optimistic message at the chronological tail', () => {
+    const legacy = userMessage('msg_ffffffffffffLegacy', 100)
+    const current = userMessage('msg_000000000000Current', 200)
+    const page = { session: [legacy], part: [], cursor: undefined, complete: true }
+
+    const merged = mergeOptimisticPage(page, [{ message: current, parts: [] }])
+
+    expect(merged.session).toEqual([legacy, current])
+  })
+
   test('second call after clearOptimistic returns the page unchanged', () => {
     // Simulate: first commit confirmed an optimistic item, clearOptimistic
     // removed it; second commit (expansion) finds no optimistic items.

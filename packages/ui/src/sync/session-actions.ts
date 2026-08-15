@@ -33,6 +33,8 @@ import { getRuntimeKey } from "@/lib/runtime-switch"
 import { isAmbiguousTransportFailure } from "@/lib/relay/transport-error"
 import { getStaleRunningToolMessageID } from "./materialization"
 import { normalizePath } from "@/lib/pathNormalization"
+import { mergeMessages } from "./optimistic"
+import { messagesBefore, messagesFrom } from "./message-ordering"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -1230,9 +1232,10 @@ export async function unshareSession(sessionId: string): Promise<Session | null>
 // Optimistic message send — insert user message before API call, rollback on error
 // ---------------------------------------------------------------------------
 
-// ID generator matching OpenCode's Identifier.ascending format.
+// ID generator matching OpenCode's Identifier.ascending wire format.
 // Uses BigInt(timestamp) * 0x1000 + counter, encoded as 6 hex bytes + random base62.
-// This ensures client-generated IDs sort correctly with server-generated ones.
+// The 6-byte prefix rolls over, so this value is identity only; transcript
+// chronology is always derived from message.time.created.
 let lastIdTimestamp = 0
 let idCounter = 0
 
@@ -1308,9 +1311,8 @@ export async function optimisticSend(input: {
   const stateBeforeSend = store.getState()
   const sessionBeforeSend = stateBeforeSend.session.find((session) => session.id === input.sessionId)
   const revertMessageID = sessionBeforeSend?.revert?.messageID
-  const revertedMessages = revertMessageID
-    ? (stateBeforeSend.message[input.sessionId] ?? []).filter((message) => message.id >= revertMessageID)
-    : []
+  const messagesBeforeSend = stateBeforeSend.message[input.sessionId] ?? []
+  const revertedMessages = messagesFrom(messagesBeforeSend, revertMessageID)
   const revertedParts = new Map(
     revertedMessages.map((message) => [message.id, stateBeforeSend.part[message.id] ?? []] as const),
   )
@@ -1321,7 +1323,7 @@ export async function optimisticSend(input: {
     ))
     const message = {
       ...stateBeforeSend.message,
-      [input.sessionId]: (stateBeforeSend.message[input.sessionId] ?? []).filter((candidate) => candidate.id < revertMessageID),
+      [input.sessionId]: messagesBefore(messagesBeforeSend, revertMessageID),
     }
     const part = { ...stateBeforeSend.part }
     for (const revertedMessage of revertedMessages) delete part[revertedMessage.id]
@@ -1439,8 +1441,7 @@ export async function optimisticSend(input: {
       ))
       message = {
         ...rollbackState.message,
-        [input.sessionId]: [...(rollbackState.message[input.sessionId] ?? []), ...revertedMessages]
-          .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+        [input.sessionId]: mergeMessages(rollbackState.message[input.sessionId] ?? [], revertedMessages),
       }
       part = { ...rollbackState.part }
       for (const [revertedMessageID, parts] of revertedParts) {

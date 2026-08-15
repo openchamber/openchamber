@@ -61,6 +61,12 @@ describe('annotation overlay script', () => {
     expect(script).toContain(JSON.stringify(labels.commentPlaceholder));
   });
 
+  test('keeps comment keystrokes away from shortcuts on the annotated page', () => {
+    expect(script).toContain("comment.addEventListener('keydown', onCommentKeyDown)");
+    expect(script).toContain('var onCommentKeyDown = function (event) {');
+    expect(script).toContain('event.stopPropagation();');
+  });
+
   test('escapes a label that would otherwise close the script', () => {
     const hostile = buildAnnotationOverlayScript(theme, {
       ...labels,

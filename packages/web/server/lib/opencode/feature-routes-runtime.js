@@ -15,6 +15,7 @@ import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes.js';
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
+import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
 import { getNpmInfo, clearCache as clearNpmCache } from './npm-registry.js';
@@ -189,6 +190,16 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
 
     registerOpenChamberControlRoutes(app, { controlService: openChamberControlService });
+
+    registerMarkdownImageGrantRoutes(app, {
+      fsPromises,
+      path,
+      os,
+      crypto,
+      validateDirectoryPath,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+    });
 
     registerConfigEntityRoutes(app, {
       resolveProjectDirectory,

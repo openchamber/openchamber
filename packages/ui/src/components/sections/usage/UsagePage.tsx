@@ -162,6 +162,11 @@ export const UsagePage: React.FC = () => {
       description={
         isLoading ? (
           <span className="animate-pulse typography-settings-description text-muted-foreground">{t('settings.usage.page.header.refreshing')}</span>
+        ) : selectedResult?.planLabel ? (
+          t('settings.usage.page.header.lastUpdatedWithPlan', {
+            plan: selectedResult.planLabel,
+            time: formatTime(lastUpdated, timeFormatPreference),
+          })
         ) : (
           t('settings.usage.page.header.lastUpdated', { time: formatTime(lastUpdated, timeFormatPreference) })
         )

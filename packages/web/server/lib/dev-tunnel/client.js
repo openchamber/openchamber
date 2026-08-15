@@ -27,6 +27,14 @@ const HANDSHAKE_TIMEOUT_MS = 15_000;
 
 const toWebSocketUrl = (baseUrl, port) => {
   const parsed = new URL('/api/dev-tunnel', baseUrl);
+  // WHATWG URL silently ignores a protocol assignment that crosses from a
+  // non-special scheme (custom app protocols, relay-virtual URLs) to `ws:`.
+  // Without this check the stale scheme survives into `new WebSocket(...)`,
+  // which then throws inside the connection handler and takes the whole
+  // process down; rejecting here fails the open() call cleanly instead.
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`The remote base URL must be http(s); got "${parsed.protocol}"`);
+  }
   parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
   parsed.searchParams.set('port', String(port));
   return parsed.toString();
@@ -76,7 +84,18 @@ export const createDevTunnelClient = ({
         socket.setNoDelay(true);
         sockets.add(socket);
 
-        const upstream = new WebSocket(target, { headers, perMessageDeflate: false });
+        // A synchronous throw here would be an uncaught exception in the
+        // connection handler and crash the process; one bad connection must
+        // fail alone.
+        let upstream;
+        try {
+          upstream = new WebSocket(target, { headers, perMessageDeflate: false });
+        } catch (error) {
+          logger.warn?.(`[dev-tunnel] failed to dial upstream for port ${remotePort}: ${error?.message || error}`);
+          sockets.delete(socket);
+          try { socket.destroy(); } catch { /* already gone */ }
+          return;
+        }
         upstream.binaryType = 'nodebuffer';
         let pendingWrites = [];
         let pendingBytes = 0;

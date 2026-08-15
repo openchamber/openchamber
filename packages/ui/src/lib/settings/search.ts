@@ -933,6 +933,54 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['background', 'push'],
     isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
   },
+
+  {
+    id: 'integrations.messengers',
+    page: 'integrations',
+    titleKey: 'settings.integrations.messengers.title',
+    keywords: ['messenger', 'discord', 'telegram', 'bot', 'coming soon'],
+  },
+  {
+    id: 'integrations.messengers.discord',
+    page: 'integrations',
+    titleKey: 'settings.integrations.messengers.discord.name',
+    descriptionKey: 'settings.integrations.messengers.discord.description',
+    keywords: ['discord', 'bot', 'messenger', 'coming soon'],
+  },
+  {
+    id: 'integrations.messengers.telegram',
+    page: 'integrations',
+    titleKey: 'settings.integrations.messengers.telegram.name',
+    descriptionKey: 'settings.integrations.messengers.telegram.description',
+    keywords: ['telegram', 'bot', 'messenger', 'coming soon'],
+  },
+  {
+    id: 'integrations.third-party',
+    page: 'integrations',
+    titleKey: 'settings.integrations.thirdParty.title',
+    keywords: ['plugin', 'provider', 'oauth', 'install', 'update', 'remove'],
+  },
+  {
+    id: 'integrations.third-party.opencode-claude',
+    page: 'integrations',
+    titleKey: 'settings.integrations.thirdParty.opencodeClaude.name',
+    descriptionKey: 'settings.integrations.thirdParty.opencodeClaude.description',
+    keywords: ['claude', 'anthropic', 'claude code', 'pro', 'max', 'agent sdk', '@openchamber/opencode-claude'],
+  },
+  {
+    id: 'integrations.third-party.opencode-commandcode',
+    page: 'integrations',
+    titleKey: 'settings.integrations.thirdParty.opencodeCommandcode.name',
+    descriptionKey: 'settings.integrations.thirdParty.opencodeCommandcode.description',
+    keywords: ['command code', 'commandcode', 'laguna', 'poolside', 'gateway', '@openchamber/opencode-commandcode'],
+  },
+  {
+    id: 'integrations.third-party.opencode-cursor-oauth',
+    page: 'integrations',
+    titleKey: 'settings.integrations.thirdParty.opencodeCursorOauth.name',
+    descriptionKey: 'settings.integrations.thirdParty.opencodeCursorOauth.description',
+    keywords: ['cursor', 'oauth', 'subscription', 'openai compatible', '@openchamber/opencode-cursor'],
+  },
 ] as const;
 
 interface BuildSettingsSearchResultsOptions {

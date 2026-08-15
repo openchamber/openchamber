@@ -1,3 +1,4 @@
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 使用量追跡',
   'settings.providers.page.openCodeGo.description': 'OpenCode Go ダッシュボードを接続して、ローリング、週間、月間のクォータを表示します。',
@@ -1193,6 +1194,7 @@ export const settingsDict = {
   'settings.usage.page.header.providerUsage': '{provider} の使用量',
   'settings.usage.page.header.refreshing': '使用量を更新中...',
   'settings.usage.page.header.lastUpdated': '最終更新: {time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': 'プラン: {plan} · 最終更新: {time}',
   'settings.usage.page.options.showInWorkStatusAria': '作業ステータスパネルに表示',
   'settings.usage.page.options.showInWorkStatus': '作業ステータスパネルに表示',
   'settings.usage.page.options.showInWorkStatusTooltip': '有効にすると、このプロバイダーの使用量が作業ステータスパネルに表示されます。',
@@ -2133,4 +2135,5 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'エージェントが応答している間にフォローアップメッセージで Enter を押したときの動作を選択します。',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'ステア',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'キュー',
+  ...thirdPartyIntegrationI18n.ja,
 } as const;

@@ -195,6 +195,15 @@ describe('dev tunnel end to end', () => {
     expect(client.list()).toEqual([]);
   });
 
+  test('rejects a non-http(s) base URL instead of crashing on first connection', async () => {
+    // A non-special scheme survives the `ws:` protocol assignment (WHATWG URL
+    // ignores it), so `new WebSocket(...)` used to throw inside the connection
+    // handler and take the whole process down.
+    const client = createDevTunnelClient({ logger: { warn: () => {} } });
+    await expect(client.open({ baseUrl: 'openchamber-ui://index', port: 5173 })).rejects.toThrow('must be http(s)');
+    expect(client.list()).toEqual([]);
+  });
+
   // Not covered here: recovery after a request the dev server kills mid-flight.
   // The behaviour is real (each connection tears down independently), but the
   // abandoned socket makes this harness's teardown unreliable, and a flaky test

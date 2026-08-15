@@ -28,6 +28,8 @@ export type EmbeddedSessionRuntimeBootstrap = {
 
 export const EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST = 'openchamber:embedded-runtime-bootstrap-request';
 export const EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE = 'openchamber:embedded-runtime-bootstrap-response';
+export const EMBEDDED_VISIBILITY_REQUEST = 'openchamber:embedded-visibility-request';
+export const EMBEDDED_VISIBILITY_UPDATE = 'openchamber:embedded-visibility';
 const EMBEDDED_RUNTIME_BOOTSTRAP_TIMEOUT_MS = 5_000;
 const EMBEDDED_RUNTIME_BOOTSTRAP_RETRY_MS = 100;
 
@@ -102,6 +104,13 @@ export const requestEmbeddedSessionRuntimeBootstrap = (): Promise<EmbeddedSessio
     window.addEventListener('message', handleMessage);
     sendRequest();
   });
+};
+
+export const requestEmbeddedSessionVisibility = (): void => {
+  if (!isEmbeddedSessionChat() || typeof window === 'undefined' || !window.parent || window.parent === window) {
+    return;
+  }
+  window.parent.postMessage({ type: EMBEDDED_VISIBILITY_REQUEST }, window.location.origin);
 };
 
 const buildEmbeddedSessionChatURLSignature = (

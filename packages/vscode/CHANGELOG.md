@@ -1,3 +1,14 @@
+## [Unreleased]
+
+- Chat: new chats no longer start against a deleted last worktree directory; they fall back to the active project instead of saving the first message and never starting.
+- Chat: opening a busy subagent in the context panel now shows its history instead of only the working-status line (thanks to @makeittech).
+- Projects: project names now match the folder name exactly, so `.ssh` and `opencode-claude` are no longer shown as `.Ssh` and `Opencode Claude`; names you renamed yourself are kept.
+- Skills Catalog: the source is now named ClawHub instead of "ClawdHub" (thanks to @makeittech).
+
+## [1.18.4] - 2026-08-14
+
+- **Chat:** new messages now remain at the end of the conversation instead of jumping before older messages after the message ID sequence rolls over; history loading, revert, and redo follow the same chronological order.
+
 ## [1.18.3] - 2026-08-14
 
 - Chat images: completed assistant replies now collect Markdown images into a compact gallery with thumbnails and full-screen previews, including workspace-local images across multi-root workspaces (thanks to @ChangeHow).

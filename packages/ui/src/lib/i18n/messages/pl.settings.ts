@@ -1,3 +1,4 @@
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Śledzenie użycia OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Połącz panel OpenCode Go, aby wyświetlać limity kroczące, tygodniowe i miesięczne.',
@@ -1962,6 +1963,7 @@ export const settingsDict = {
   'settings.usage.pace.waitSeparator': ' · Czekaj ',
   'settings.usage.page.empty.selectProvider': 'Wybierz dostawcę, aby wyświetlić szczegóły użycia.',
   'settings.usage.page.header.lastUpdated': 'Ostatnio aktualizowano: {time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': 'Plan: {plan} · Ostatnia aktualizacja: {time}',
   'settings.usage.page.header.providerUsage': 'Użycie {provider}',
   'settings.usage.page.header.refreshing': 'Odświeżanie użycia...',
   'settings.usage.page.options.showInWorkStatus': 'Pokaż w panelu statusu pracy',
@@ -2125,4 +2127,5 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...thirdPartyIntegrationI18n.pl,
 };

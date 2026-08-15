@@ -1876,7 +1876,6 @@ const AssistantMessageBody = React.memo(({
                             chatRenderMode={chatRenderMode}
                             onContentChange={onContentChange}
                             onShowPopup={onShowPopup}
-                            enableMarkdownImages={isMessageCompleted}
                         />
                     </div>
                 );
@@ -2031,7 +2030,6 @@ const AssistantMessageBody = React.memo(({
         collapsedPreviewCount,
         expandedTools,
         isMobile,
-        isMessageCompleted,
         isActivityOwnerMessage,
         isSortedRenderMode,
         lastRenderableTextPartIndex,
@@ -2244,6 +2242,8 @@ const AssistantMessageBody = React.memo(({
                 </div>
                 <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} />
                 <MarkdownImageGallery
+                    sessionId={sessionId}
+                    messageId={messageId}
                     contents={finalizedAssistantMarkdownContents}
                     onShowPopup={onShowPopup}
                 />

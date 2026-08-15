@@ -1,3 +1,4 @@
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 사용량 추적',
   'settings.providers.page.openCodeGo.description': 'OpenCode Go 대시보드를 연결하여 롤링, 주간 및 월간 할당량을 표시합니다.',
@@ -1160,6 +1161,7 @@ export const settingsDict = {
   'settings.usage.page.header.providerUsage': '{provider} 사용량',
   'settings.usage.page.header.refreshing': '사용량 새로고침 중...',
   'settings.usage.page.header.lastUpdated': '마지막 업데이트: {time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': '플랜: {plan} · 마지막 업데이트: {time}',
   'settings.usage.page.options.showInWorkStatusAria': '작업 상태 패널에 표시',
   'settings.usage.page.options.showInWorkStatus': '작업 상태 패널에 표시',
   'settings.usage.page.options.showInWorkStatusTooltip': '활성화하면 이 제공업체의 사용량이 작업 상태 패널에 표시됩니다.',
@@ -2133,4 +2135,5 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...thirdPartyIntegrationI18n.ko,
 } as const;

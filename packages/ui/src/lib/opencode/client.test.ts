@@ -9,12 +9,19 @@ let configCalls = 0;
 let runtimeKey = 'test-runtime';
 const promptAsyncCalls: unknown[][] = [];
 const promptAsyncResults: Array<unknown> = [];
+const pathGetResults: Array<unknown> = [];
 
 const promptAsyncMock = mock(async (...args: unknown[]) => {
   promptAsyncCalls.push(args);
   const next = promptAsyncResults.shift();
   if (next instanceof Error) throw next;
   return next ?? { response: new Response(null, { status: 200 }) };
+});
+
+const pathGetMock = mock(async () => {
+  const next = pathGetResults.shift();
+  if (next instanceof Error) throw next;
+  return next ?? { data: { directory: '/workspace/project' } };
 });
 
 mock.module('@opencode-ai/sdk/v2', () => ({
@@ -29,6 +36,9 @@ mock.module('@opencode-ai/sdk/v2', () => ({
     },
     session: {
       promptAsync: promptAsyncMock,
+    },
+    path: {
+      get: pathGetMock,
     },
   })),
 }));
@@ -64,6 +74,17 @@ beforeEach(() => {
   runtimeKey = 'test-runtime';
   promptAsyncCalls.length = 0;
   promptAsyncResults.length = 0;
+  pathGetResults.length = 0;
+});
+
+describe('opencodeClient directory availability', () => {
+  test('distinguishes a missing directory from an unavailable path probe', async () => {
+    pathGetResults.push({ error: { code: 'ENOENT', message: 'no such file or directory' } });
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('missing');
+
+    pathGetResults.push(new Error('offline'));
+    expect(await opencodeClient.getDirectoryAvailability('/private/deleted-worktree')).toBe('unknown');
+  });
 });
 
 describe('opencodeClient getConfig cache', () => {

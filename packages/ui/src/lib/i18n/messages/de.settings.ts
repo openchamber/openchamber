@@ -1,3 +1,4 @@
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go Nutzungsverfolgung',
   'settings.providers.page.openCodeGo.description': 'Verbinden Sie das OpenCode Go Dashboard, um rollierenden, wöchentlichen und monatlichen Verbrauch anzuzeigen.',
@@ -1130,6 +1131,7 @@ export const settingsDict = {
   'settings.usage.page.header.providerUsage': '{provider} Nutzung',
   'settings.usage.page.header.refreshing': 'Aktualisiere Nutzung...',
   'settings.usage.page.header.lastUpdated': 'Zuletzt aktualisiert: {time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': 'Tarif: {plan} · Zuletzt aktualisiert: {time}',
   'settings.usage.page.options.showInWorkStatusAria': 'Im Arbeitsstatusbereich anzeigen',
   'settings.usage.page.options.showInWorkStatus': 'Im Arbeitsstatusbereich anzeigen',
   'settings.usage.page.options.showInWorkStatusTooltip': 'Wenn aktiviert, ist die Nutzung dieses Anbieters im Arbeitsstatusbereich sichtbar.',
@@ -2124,4 +2126,5 @@ export const settingsDict = {
   'settings.openchamber.visual.option.themeMode.light.description': 'Immer helles Erscheinungsbild verwenden',
   'settings.openchamber.visual.option.themeMode.dark.description': 'Immer dunkles Erscheinungsbild verwenden',
   'chat.message.userText.collapseAria': 'Benutzernachricht einklappen',
+  ...thirdPartyIntegrationI18n.de,
 };
