@@ -151,6 +151,8 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 - Local and remote instance handling.
 - SSH host import, connections, logs, and port forwarding.
 - SSH uses OpenSSH ControlMaster on macOS/Linux. Windows uses independent hidden OpenSSH processes for setup commands and each long-lived forward because Win32 OpenSSH does not support ControlMaster reliably.
+- Remote commands run through non-interactive `sh -lc` shells, which never load `~/.bashrc`. Well-known version-manager bin directories (nvm, volta, fnm, mise, asdf, bun) are prepended to `PATH` first so bun/npm detection, remote installation, and the managed `openchamber serve` process resolve on hosts whose node tooling was installed per-user.
+- Managed remote servers persist their last used port per instance. Reconnects probe that port and reuse the running daemon; a daemon reporting an older version than the app is restarted after an update, and only when no daemon answers does a connect start a new one. This keeps `keepRunning` instances from accumulating one background server per connect.
 - Tunnel lifecycle integration through the web server runtime.
 - Auto-update checks, downloads, and restart/apply flow.
 - The browser panel's own session (`persist:openchamber-browser`): its storage is

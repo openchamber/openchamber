@@ -81,6 +81,189 @@ describe('ElectronSshManager', () => {
     expect(calls[0].args).not.toContain('ControlPath=C:\\Temp\\unused.sock');
   });
 
+  test('prepends version-manager bin directories to the remote command PATH', async () => {
+    const calls = [];
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+      platform: 'darwin',
+      spawn: (command, args) => {
+        calls.push({ command, args });
+        const child = createChild();
+        queueMicrotask(() => {
+          child.stdout.end('yes\n');
+          child.exitCode = 0;
+          child.emit('close', 0);
+        });
+        return child;
+      },
+    });
+    const parsed = { destination: 'user@example.test', args: [] };
+
+    await expect(manager.remoteCommandExists(parsed, '/tmp/control.sock', 'npm')).resolves.toBe(true);
+
+    const remoteCommand = calls[0].args.find((arg) => arg.startsWith('sh -lc '));
+    expect(remoteCommand).toBeDefined();
+    expect(remoteCommand).toContain('"$HOME"/.nvm/versions/node/*/bin');
+    expect(remoteCommand).toContain('"$HOME"/.bun/bin');
+    expect(remoteCommand).toContain('"$HOME"/.volta/bin');
+    expect(remoteCommand).toContain('"$HOME"/.local/share/mise/shims');
+    expect(remoteCommand).toContain('"$HOME"/.asdf/shims');
+    expect(remoteCommand.indexOf('unset _oc_dir')).toBeLessThan(remoteCommand.indexOf('command -v npm'));
+  });
+
+  const createManagedProbeManager = ({ appVersion = '1.18.4', portStates, calls } ) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-managed-test-'));
+    tempDirs.push(tempDir);
+    const settingsFilePath = path.join(tempDir, 'settings.json');
+    fs.writeFileSync(settingsFilePath, JSON.stringify({ desktopSshInstances: [{ id: 'ssh-managed-1', sshCommand: 'ssh host', remoteOpenchamber: {} }] }));
+    const manager = new ElectronSshManager({
+      settingsFilePath,
+      appVersion,
+      emit: () => undefined,
+      platform: 'darwin',
+      spawn: (_command, args) => {
+        const child = createChild();
+        const remoteCommand = args[args.length - 1] || '';
+        calls?.push(remoteCommand);
+        let output = '';
+        if (remoteCommand.includes('openchamber --version')) {
+          output = `${appVersion}\n`;
+        } else if (remoteCommand.includes('/api/system/shutdown')) {
+          const port = Number.parseInt(remoteCommand.match(/127\.0\.0\.1:(\d+)/)?.[1] || '', 10);
+          if (portStates[port]) portStates[port].alive = false;
+        } else if (remoteCommand.includes('/api/system/info')) {
+          const port = Number.parseInt(remoteCommand.match(/127\.0\.0\.1:(\d+)/)?.[1] || '', 10);
+          const state = portStates[port];
+          output = state?.alive
+            ? `INFO_STATUS=200\nAUTH_STATUS=0\nHEALTH_STATUS=200\n${JSON.stringify({ openchamberVersion: state.version })}\n`
+            : 'INFO_STATUS=000\nAUTH_STATUS=0\nHEALTH_STATUS=000\n';
+        } else if (remoteCommand.includes('openchamber serve')) {
+          const port = Number.parseInt(remoteCommand.match(/--port\s+(\d+)/)?.[1] || '', 10);
+          portStates[port] = { alive: true, version: appVersion };
+          output = `OpenChamber Started ${appVersion}\n  port ${port} (PID: 7)\n`;
+        }
+        queueMicrotask(() => {
+          child.stdout.end(output);
+          child.exitCode = 0;
+          child.emit('close', 0);
+        });
+        return child;
+      },
+    });
+    return { manager, settingsFilePath };
+  };
+
+  test('reuses a running managed server on its last used port without restarting it', async () => {
+    const calls = [];
+    const { manager } = createManagedProbeManager({
+      portStates: { 4500: { alive: true, version: '1.18.4' } },
+      calls,
+    });
+
+    const result = await manager.ensureRemoteServer(
+      { id: 'ssh-managed-1', remoteOpenchamber: { mode: 'managed', installMethod: 'npm', lastUsedPort: 4500 } },
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+    );
+
+    expect(result).toEqual({ remotePort: 4500, startedByUs: false });
+    expect(calls.some((command) => command.includes('openchamber serve'))).toBe(false);
+    expect(calls.some((command) => command.includes('/api/system/shutdown'))).toBe(false);
+  });
+
+  test('restarts a stale managed daemon, starts a fresh one, and persists its port', async () => {
+    const calls = [];
+    const { manager, settingsFilePath } = createManagedProbeManager({
+      portStates: { 4500: { alive: true, version: '1.18.3-stale' } },
+      calls,
+    });
+
+    const result = await manager.ensureRemoteServer(
+      { id: 'ssh-managed-1', remoteOpenchamber: { mode: 'managed', installMethod: 'npm', lastUsedPort: 4500 } },
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+    );
+
+    expect(result.startedByUs).toBe(true);
+    expect(result.remotePort).toBeGreaterThan(0);
+    expect(result.remotePort).not.toBe(4500);
+    expect(calls.filter((command) => command.includes('/api/system/shutdown'))).toHaveLength(1);
+    expect(calls.some((command) => command.includes('openchamber serve'))).toBe(true);
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.desktopSshInstances[0].remoteOpenchamber.lastUsedPort).toBe(result.remotePort);
+  });
+
+  test('starts and persists a fresh managed server when the last used port is dead', async () => {
+    const calls = [];
+    const { manager, settingsFilePath } = createManagedProbeManager({
+      portStates: { 4500: { alive: false, version: null } },
+      calls,
+    });
+
+    const result = await manager.ensureRemoteServer(
+      { id: 'ssh-managed-1', remoteOpenchamber: { mode: 'managed', installMethod: 'npm', lastUsedPort: 4500 } },
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+    );
+
+    expect(result.startedByUs).toBe(true);
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.desktopSshInstances[0].remoteOpenchamber.lastUsedPort).toBe(result.remotePort);
+  });
+
+  test('parses the labeled port token from serve output over banner integers', async () => {
+    const calls = [];
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-serve-test-'));
+    tempDirs.push(tempDir);
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(tempDir, 'settings.json'),
+      appVersion: '1.18.4',
+      emit: () => undefined,
+      platform: 'darwin',
+      spawn: (_command, args) => {
+        const child = createChild();
+        calls.push(args[args.length - 1] || '');
+        queueMicrotask(() => {
+          child.stdout.end('OpenChamber 1.18.4 started\n  port 47881 (PID: 521203)\n');
+          child.exitCode = 0;
+          child.emit('close', 0);
+        });
+        return child;
+      },
+    });
+
+    const port = await manager.startRemoteServerManaged(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      { remoteOpenchamber: {} },
+      47000,
+    );
+
+    expect(port).toBe(47881);
+  });
+
+  test('sanitizeInstance preserves the persisted last used remote port', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-sanitize-test-'));
+    tempDirs.push(tempDir);
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(tempDir, 'settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+    });
+
+    const sanitized = manager.sanitizeInstance({
+      id: 'ssh-1',
+      sshCommand: 'ssh user@example.test',
+      remoteOpenchamber: { lastUsedPort: 4500 },
+    });
+    expect(sanitized.remoteOpenchamber.lastUsedPort).toBe(4500);
+
+    const withoutPort = manager.sanitizeInstance({ id: 'ssh-2', sshCommand: 'ssh user@example.test' });
+    expect(withoutPort.remoteOpenchamber.lastUsedPort).toBeUndefined();
+  });
+
   test('creates a PowerShell-backed askpass helper on Windows', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-askpass-test-'));
     tempDirs.push(tempDir);
