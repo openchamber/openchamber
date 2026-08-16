@@ -80,6 +80,7 @@ import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime
 import { createLinearSessionStatusRuntime } from './lib/linear/status-runtime.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
+import { createScheduledTaskPreflight } from './lib/scheduled-tasks/preflight.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
@@ -1245,6 +1246,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   waitForOpenCodeReady,
   sessionKnowledgeRuntime,
   setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
+  preflight: createScheduledTaskPreflight(),
   emitTaskRunEvent: (event) => {
     for (const client of uiOpenChamberEventClients) {
       try {
