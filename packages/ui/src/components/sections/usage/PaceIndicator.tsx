@@ -65,6 +65,8 @@ export const PaceIndicator: React.FC<PaceIndicatorProps> = ({
         <div
           className="h-2 w-2 rounded-full flex-shrink-0"
           style={{ backgroundColor: statusColor }}
+          role="img"
+          aria-label={statusLabel}
           title={statusLabel}
         />
       </div>

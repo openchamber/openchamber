@@ -70,6 +70,8 @@ const WorkStatusPace: React.FC<{
       <span
         className="size-1.5 rounded-full"
         style={{ backgroundColor: statusColor }}
+        role="img"
+        aria-label={t(PACE_STATUS_LABEL_KEYS[paceInfo.status])}
         title={t(PACE_STATUS_LABEL_KEYS[paceInfo.status])}
       />
       <span className="text-[11px] tabular-nums" style={{ color: statusColor }}>
