@@ -37,6 +37,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
     - directory listing
     - file search
     - file read path safety checks
+    - active-directory selection across multi-root workspaces
     - dropped-file parsing and attachment reading
     - models metadata fetch helper
 
@@ -44,6 +45,10 @@ The webview CSP permits `blob:` only for `worker-src` so shared UI parsers can r
 
 - `bridge-localfs-proxy-runtime.ts`
   - Local `/api/fs/read` and `/api/fs/raw` proxy helpers and shared proxy utility helpers.
+  - Workspace-contained Markdown gallery images use these local filesystem
+    routes without calling the server grant route. Grant requests for OpenCode
+    temporary-directory images return an explicit unsupported response instead
+    of being forwarded to OpenCode.
 
 - `bridge-proxy-runtime.ts`
   - Proxy route handlers (`api:proxy`, `api:session:message`) with injected helper dependencies.
@@ -70,6 +75,10 @@ The webview CSP permits `blob:` only for `worker-src` so shared UI parsers can r
 - `bridge-permission-auto-accept-runtime.ts`
   - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.
   - Serializes reads and read-modify-write updates, persists a monotonic policy revision, and broadcasts the exact committed snapshot to every active OpenChamber webview. Permission replies remain foreground UI-owned because VS Code does not run the OpenChamber server runtime.
+
+## Shared webview message ordering
+
+Message and part ordering is owned by [`packages/ui/src/sync/DOCUMENTATION.md`](../../ui/src/sync/DOCUMENTATION.md#session-message-loading). The VS Code webview consumes that shared sync implementation; bridge and proxy runtimes pass OpenCode records through without adding runtime-specific ordering.
 
 ## Extension guideline
 

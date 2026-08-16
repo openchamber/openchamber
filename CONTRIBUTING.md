@@ -113,8 +113,15 @@ The final AppImage verifier checks desktop identity and the architecture of Elec
 ```bash
 bun run type-check   # Must pass
 bun run lint         # Must pass
+bun run test         # Must pass
 bun run build        # Must succeed
 ```
+
+`bun run test` runs every suite in the repository: shared UI, VS Code, Electron,
+web/server, and the root scripts. The UI, VS Code, and Electron suites keep
+module-level singletons, so `scripts/run-isolated-tests.mjs` gives each test file
+its own process instead of letting load order decide the result. Run a single
+file directly while iterating (`bun test <file>`).
 
 For docs-only changes, validation may be enough:
 

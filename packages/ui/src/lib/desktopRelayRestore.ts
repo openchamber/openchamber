@@ -28,7 +28,7 @@ let candidateRefreshInFlight = false;
  * (stable tunnel hostname) is never overwritten: the DHCP problem does not apply
  * to it and the server does not know its own public hostnames.
  */
-export const refreshDesktopHostCandidates = async (hostId: string): Promise<void> => {
+const refreshDesktopHostCandidates = async (hostId: string): Promise<void> => {
   if (!isElectronShell() || candidateRefreshInFlight) return;
   const runtimeKey = `host:${hostId}`;
   // The candidates fetch rides the active runtime's transport — only meaningful

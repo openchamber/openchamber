@@ -574,10 +574,17 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: true, repo: searchRepo, branch, pr: null, checks: null, canMerge: false });
       }
 
+      const isMerged = Boolean(prData.merged || prData.merged_at);
+      const prState = isMerged ? 'merged' : (prData.state === 'closed' ? 'closed' : 'open');
+      // A closed/merged PR is a historical record for this branch: its checks
+      // are no longer actionable and it can never be merged from here, so skip
+      // the extra GitHub calls those two fields would cost.
+      const isHistorical = prState !== 'open';
+
       // Checks summary: prefer check-runs (Actions), fallback to classic statuses.
       let checks = null;
       const sha = prData.head?.sha;
-      if (sha) {
+      if (sha && !isHistorical) {
         try {
           const runs = await octokit.rest.checks.listForRef({
             owner: searchRepo.owner,
@@ -610,37 +617,36 @@ export function registerGitHubRoutes(app) {
 
       // Permission check (best-effort)
       let canMerge = false;
-      try {
-        const auth = getGitHubAuth();
-        // gh-CLI tokens have no persisted user record; resolve the login from
-        // the API once (memoized) so permissions still resolve for them.
-        let username = auth?.user?.login;
-        if (!username) {
-          if (!resolvedAuthLoginPromise) {
-            resolvedAuthLoginPromise = octokit.rest.users.getAuthenticated()
-              .then((resp) => resp?.data?.login || null)
-              .catch(() => {
-                resolvedAuthLoginPromise = null;
-                return null;
-              });
+      if (!isHistorical) {
+        try {
+          const auth = getGitHubAuth();
+          // gh-CLI tokens have no persisted user record; resolve the login from
+          // the API once (memoized) so permissions still resolve for them.
+          let username = auth?.user?.login;
+          if (!username) {
+            if (!resolvedAuthLoginPromise) {
+              resolvedAuthLoginPromise = octokit.rest.users.getAuthenticated()
+                .then((resp) => resp?.data?.login || null)
+                .catch(() => {
+                  resolvedAuthLoginPromise = null;
+                  return null;
+                });
+            }
+            username = await resolvedAuthLoginPromise;
           }
-          username = await resolvedAuthLoginPromise;
+          if (username) {
+            const perm = await octokit.rest.repos.getCollaboratorPermissionLevel({
+              owner: searchRepo.owner,
+              repo: searchRepo.repo,
+              username,
+            });
+            const level = perm?.data?.permission;
+            canMerge = level === 'admin' || level === 'maintain' || level === 'write';
+          }
+        } catch {
+          canMerge = false;
         }
-        if (username) {
-          const perm = await octokit.rest.repos.getCollaboratorPermissionLevel({
-            owner: searchRepo.owner,
-            repo: searchRepo.repo,
-            username,
-          });
-          const level = perm?.data?.permission;
-          canMerge = level === 'admin' || level === 'maintain' || level === 'write';
-        }
-      } catch {
-        canMerge = false;
       }
-
-       const isMerged = Boolean(prData.merged || prData.merged_at);
-       const mergedState = isMerged ? 'merged' : (prData.state === 'closed' ? 'closed' : 'open');
 
       return res.json({
         connected: true,
@@ -651,7 +657,7 @@ export function registerGitHubRoutes(app) {
           title: prData.title,
           body: prData.body || '',
           url: prData.html_url,
-          state: mergedState,
+          state: prState,
           draft: Boolean(prData.draft),
           base: prData.base?.ref,
           head: prData.head?.ref,

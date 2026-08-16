@@ -67,7 +67,7 @@ export interface PluginsStore {
   setSelected: (id: string | null) => void;
   setDraft: (draft: PluginDraft | null) => void;
   loadPlugins: (options?: { force?: boolean }) => Promise<boolean>;
-  loadRegistryInfo: (opts?: { specs?: string[]; force?: boolean }) => Promise<void>;
+  loadRegistryInfo: (opts?: { specs?: string[]; force?: boolean }) => Promise<boolean>;
   updateToLatest: (id: string) => Promise<PluginMutationResult>;
   createEntry: (input: { spec: string; options?: Record<string, unknown>; scope: PluginScope }) => Promise<PluginMutationResult>;
   updateEntry: (id: string, input: { spec?: string; options?: Record<string, unknown> }) => Promise<PluginMutationResult>;
@@ -207,7 +207,7 @@ export const usePluginsStore = create<PluginsStore>()(
           const specs = dedupeSpecs(opts?.specs ?? get().entries.map((entry) => entry.spec));
           if (specs.length === 0) {
             set({ isLoadingRegistry: false });
-            return;
+            return true;
           }
 
           set({ isLoadingRegistry: true });
@@ -227,9 +227,11 @@ export const usePluginsStore = create<PluginsStore>()(
               }
             }
             set({ registryInfo: nextRegistryInfo, isLoadingRegistry: false });
+            return true;
           } catch (error) {
             console.error('[PluginsStore] Failed to load plugin registry info:', error);
             set({ isLoadingRegistry: false });
+            return false;
           }
         },
 

@@ -104,6 +104,8 @@ A loopback-only updater fixture is available for contributor QA of N-to-N+1 AppI
 
 The package supports macOS, Windows, and Linux desktop features. Linux AppImage builds include in-app window controls, auto-update, system tray (right-click Show / Hide / Close), and launch-at-login (XDG autostart). Opening files in installed apps, installed-app discovery, and FreeDesktop icon lookup (including the default file manager) work on macOS, Windows, and Linux.
 
+On Windows and Linux, the General setting persisted as `desktopMinimizeToTrayEnabled` keeps the app running in the tray when the main window is **closed**. Minimize — the in-app control, the native title-bar button, and the taskbar — always performs a normal window minimize, so the taskbar entry stays available.
+
 The macOS menu bar item is enabled by default and can be disabled in General settings. The setting applies after restart; while disabled, Desktop does not create the native tray controller or start the renderer subscriptions, polling, quota refresh, or IPC updates that feed it.
 
 ## Bundled OpenCode CLI
@@ -151,6 +153,13 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 - SSH uses OpenSSH ControlMaster on macOS/Linux. Windows uses independent hidden OpenSSH processes for setup commands and each long-lived forward because Win32 OpenSSH does not support ControlMaster reliably.
 - Tunnel lifecycle integration through the web server runtime.
 - Auto-update checks, downloads, and restart/apply flow.
+- The browser panel's own session (`persist:openchamber-browser`): its storage is
+  cleared only through the scoped clear-data command, and camera, microphone,
+  location, and device-picker requests from pages shown there are denied. Electron
+  grants permission requests by default when no handler is set, and the panel
+  loads whatever address the user types. Tab favicons are fetched in this
+  session too, so icons behind the page's own login resolve and the app's origin
+  never requests anything from a third-party host.
 
 ## IPC Pattern
 

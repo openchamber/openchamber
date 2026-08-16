@@ -40,6 +40,16 @@ Examples:
 
 These stores coordinate visible app state, navigation, selected tabs, dialogs, and lightweight feature flags.
 
+Context-panel session chats mount only the active chat iframe. After installing
+its message listener, the iframe requests its authoritative visibility from the
+parent. The parent accepts requests only from a currently mounted chat frame and
+answers from the current active tab. Do not rely only on a parent `onLoad`
+notification: it can arrive before the iframe listener exists and leave a
+visible chat with background work disabled. Message-history subscriptions in the
+mounted session-chat iframe stay enabled independently of that visibility flag
+so a delayed or lost handshake cannot hide an already-materialized transcript
+(busy subagents would otherwise show only the working-status row).
+
 ### Session / project coordination stores
 
 Examples:
@@ -163,6 +173,10 @@ Important properties:
 - `refreshTargets()` supports one-shot multi-target bootstrap without turning on live watching
 - runtime reset disposes timers, watchers, API references, and request ownership while inert namespaced snapshots remain isolated
 - persisted cache is versioned, TTL-filtered, and bounded for page refresh continuity, not broad background syncing
+- a closed/merged PR is the branch's history, not live status: it is displayed and persisted, but never treated as authority
+- closed/merged associations use the same `5m` discovery cadence as missing PRs so a newer open PR (or authoritative `pr: null`) replaces them without a manual refresh
+- hydrate restores a persisted closed/merged PR but resets its `lastDiscoveryPollAt`, so revalidation runs on the first watcher tick after a reload
+- a successful refresh that returns `pr: null` replaces any previously cached PR authoritatively; a failed refresh keeps the previous one
 
 ## Ownership Rules
 
@@ -189,7 +203,6 @@ Good:
 - `useGitBranches(directory)`
 - `useGitBranchLabel(directory)`
 - `useGitRepoStatusMap(directories)`
-- `usePrVisualSummaryByKeys(keys)`
 
 Bad:
 

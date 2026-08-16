@@ -63,7 +63,6 @@ describe('useUIStore openContextSurface', () => {
   });
 
   test('does nothing for content-driven modes without existing content', () => {
-    useUIStore.getState().openContextSurface(directory, 'preview');
     useUIStore.getState().openContextSurface(directory, 'chat');
 
     expect(useUIStore.getState().contextPanelByDirectory[directory]).toBe(undefined);
@@ -173,5 +172,34 @@ describe('useUIStore contextRailOrder', () => {
     // surface is added or removed.
     expect(new Set(ids)).toEqual(new Set(CONTEXT_SURFACES.map((surface) => surface.id)));
     expect(ids).toHaveLength(CONTEXT_SURFACES.length);
+  });
+});
+
+describe('context panel tab limits', () => {
+  test('a surface filling up never evicts another surface tab', () => {
+    const directory = '/repo';
+    useUIStore.getState().openContextDiff(directory, 'src/app.ts');
+
+    for (let index = 0; index < 20; index += 1) {
+      useUIStore.getState().openContextPreview(directory, `http://localhost:${3000 + index}/`);
+    }
+
+    const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
+    // The diff tab is not on screen while browsing, so losing it would be a
+    // disappearance the user never saw happen.
+    expect(tabs.some((tab) => tab.mode === 'diff')).toBe(true);
+    expect(tabs.filter((tab) => tab.mode === 'browser').length).toBeLessThan(20);
+  });
+
+  test('keeps the tab that was just opened', () => {
+    const directory = '/repo';
+    for (let index = 0; index < 20; index += 1) {
+      useUIStore.getState().openContextPreview(directory, `http://localhost:${3000 + index}/`);
+    }
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    const tabs = state?.tabs ?? [];
+    expect(tabs.some((tab) => tab.id === state?.activeTabId)).toBe(true);
+    expect(tabs.some((tab) => tab.targetPath === 'http://localhost:3019/')).toBe(true);
   });
 });

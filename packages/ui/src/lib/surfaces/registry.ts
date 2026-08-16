@@ -13,7 +13,6 @@ export type ContextSurfaceId =
   | 'notes'
   | 'context'
   | 'browser'
-  | 'preview'
   | 'chat';
 
 export type ContextSurfaceDescriptor = {
@@ -25,8 +24,8 @@ export type ContextSurfaceDescriptor = {
   /**
    * 'always' surfaces can be opened empty from the rail.
    * 'has-content' surfaces are content-driven: they need an existing tab of
-   * their mode (a preview URL emitted, a split session) and stay hidden on
-   * the rail until one exists.
+   * their mode (a split session, a diff to show) and stay hidden on the rail
+   * until one exists.
    */
   availability: 'always' | 'has-content';
   /** Short tooltip explanation shown on the rail. */
@@ -130,15 +129,6 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     availability: 'always',
   },
   {
-    id: 'preview',
-    descriptionKey: 'contextRail.surface.preview.description',
-    defaultWidthFraction: 0.45,
-    mode: 'preview',
-    icon: 'window',
-    labelKey: 'contextPanel.mode.preview',
-    availability: 'has-content',
-  },
-  {
     id: 'chat',
     descriptionKey: 'contextRail.surface.chat.description',
     defaultWidthFraction: 0.45,
@@ -216,6 +206,14 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     // The walkthrough needs room for a stop list beside real code, and its
     // diffs come from OpenChamber's Git routes, which VS Code does not serve.
     if (surface.id === 'walkthrough' && (options.isVSCode || options.screenWidth < WALKTHROUGH_MIN_WIDTH)) {
+      return false;
+    }
+    // VS Code already is an editor with a browser next to it. What OpenChamber
+    // could add there is a bare frame: no annotation, no agent control, no
+    // remote dev servers — all of which need a Chromium host the extension does
+    // not have. Offering the surface anyway would promise the panel people see
+    // on the desktop.
+    if (surface.id === 'browser' && options.isVSCode) {
       return false;
     }
     if (surface.availability === 'has-content') {

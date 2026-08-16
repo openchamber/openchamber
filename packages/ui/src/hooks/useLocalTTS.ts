@@ -41,7 +41,7 @@ const MAX_CHUNK_CHARS = 400;
  * Sentences are merged until MIN_CHUNK_CHARS and hard-split at
  * MAX_CHUNK_CHARS so a single run-on sentence cannot stall the pipeline.
  */
-export function splitTextForSynthesis(text: string): string[] {
+function splitTextForSynthesis(text: string): string[] {
     const normalized = text.replace(/\s+/g, ' ').trim();
     if (!normalized) {
         return [];

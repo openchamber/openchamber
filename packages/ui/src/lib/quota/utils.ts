@@ -75,8 +75,7 @@ export const resolveUsageTone = (percent: number | null): 'safe' | 'warn' | 'cri
 export const formatWindowLabel = (label: string): string => {
   if (label === '5h') return t('quota.window.5h');
   if (label === '7d') return t('quota.window.7d');
-  if (label === '7d-sonnet') return t('quota.window.7dSonnet');
-  if (label === '7d-opus') return t('quota.window.7dOpus');
+  if (label === 'extra_usage') return t('quota.window.extraUsage');
   if (label === 'weekly') return t('quota.window.weekly');
   if (label === 'daily') return t('quota.window.daily');
   if (label === 'monthly') return t('quota.window.monthly');
