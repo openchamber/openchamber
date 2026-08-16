@@ -4,6 +4,8 @@
  *  2. Progressive model-usage map updates every BATCH_UPDATE_SIZE (15) sessions.
  *  3. Module-scoped cache: re-opening the page serves cached breakdowns without
  *     refetching.
+ *  4. Cache freshness: a session whose `time.updated` advanced is re-fetched
+ *     and its stale breakdown replaced (change detection via fingerprints).
  *
  * The hook is mounted via createRoot against a minimal DOM stub (Bun's test
  * runner does not provide a DOM by default) — same pattern as
@@ -457,6 +459,46 @@ describe("useSessionModelUsage", () => {
     expect(breakdownA!.get("zai/glm-5.2")!.tokens).toBe(30);
 
     reopened.unmount();
+  });
+
+  test("refetches a session whose time.updated advanced and replaces the stale breakdown", async () => {
+    // --- First visit: fetch s-stale at time.updated = 1. ---
+    const handle = mountHook([makeSession("s-stale", 1)]);
+    await resolveSession("s-stale", {
+      data: [makeAssistantMessage("zai", "glm-5.2", { input: 10, output: 20, reasoning: 0, cache: { read: 0, write: 0 } }, 0.01)],
+    });
+    await flush();
+
+    expect(handle.value.modelUsage.size).toBe(1);
+    // tokens = 10 + 20 = 30
+    expect(handle.value.modelUsage.get("s-stale")!.get("zai/glm-5.2")!.tokens).toBe(30);
+    const fetchesAfterFirstVisit = messagesCallCount;
+
+    handle.unmount();
+
+    // --- Re-open: the session gained messages (time.updated 1 -> 2). The
+    // changed fingerprint must trigger a re-fetch even though the session is
+    // already cached, and the new breakdown must replace the stale entry. ---
+    const reopened = mountHook([makeSession("s-stale", 2)]);
+    await resolveSession("s-stale", {
+      data: [makeAssistantMessage("kimi", "k3", { input: 50, output: 50, reasoning: 0, cache: { read: 0, write: 0 } }, 0.02)],
+    });
+    await flush();
+
+    expect(messagesCallCount).toBe(fetchesAfterFirstVisit + 1);
+
+    const breakdown = reopened.value.modelUsage.get("s-stale");
+    expect(breakdown).toBeDefined();
+    expect(breakdown!.has("zai/glm-5.2")).toBe(false);
+    expect(breakdown!.get("kimi/k3")!.tokens).toBe(100);
+
+    // --- Third open at the same time.updated: served from cache, no refetch. ---
+    const third = mountHook([makeSession("s-stale", 2)]);
+    await flush();
+    expect(messagesCallCount).toBe(fetchesAfterFirstVisit + 1);
+    expect(third.value.modelUsage.get("s-stale")!.get("kimi/k3")!.tokens).toBe(100);
+
+    third.unmount();
   });
 
   test("retries a session whose fetch failed on the next mount", async () => {

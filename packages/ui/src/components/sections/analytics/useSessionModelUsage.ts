@@ -33,8 +33,10 @@ type SdkMessagesResponse = {
  * the next page open; until then they fall back to session-level model
  * attribution inside aggregateAnalytics.
  *
- * Results are cached module-wide keyed by `sessionId:time.updated`, so
- * re-opening the page reuses previously fetched breakdowns.
+ * Breakdowns are cached module-wide by session id; a separate
+ * `sessionId:time.updated` fingerprint set drives change detection, so
+ * re-opening the page reuses unchanged sessions' breakdowns and re-fetches
+ * sessions whose `time.updated` advanced.
  */
 export function useSessionModelUsage(
   sessions: readonly Session[],
@@ -57,7 +59,10 @@ export function useSessionModelUsage(
     const toLoad: Session[] = [];
     for (const session of sessions) {
       const fp = `${session.id}:${session.time?.updated ?? 0}`;
-      if (!processed.has(fp) && !cache.has(session.id)) {
+      // Change detection is driven by the processed-fingerprint set alone:
+      // an unchanged session is skipped (cache served), while a session whose
+      // `time.updated` advanced is re-fetched and its cache entry replaced.
+      if (!processed.has(fp)) {
         toLoad.push(session);
       }
     }
@@ -166,7 +171,8 @@ export function useSessionModelUsage(
       // fetch itself (the wrapped SDK call takes no AbortSignal), so background
       // requests may still complete; and two concurrently-mounted pages can
       // fetch the same unprocessed session. Both are acceptable here because the
-      // cache write is idempotent and keyed by session fingerprint.
+      // cache write is idempotent and keyed by session id, and the
+      // processed fingerprint drives whether a re-mount re-fetches.
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
