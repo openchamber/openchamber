@@ -83,6 +83,7 @@ process violation.
 |---|---|
 | Source/dependency changes, exports or package contracts, build/generated assets, or module ownership | `openchamber-change-discipline` |
 | CLI commands, prompts, terminal output, non-TTY, `--quiet`, or `--json` behavior | `clack-cli-patterns` |
+| CLI flag parsing, per-command option schemas, help text, or command dispatch tables | `commander-cli-patterns` |
 | Shared UI data access, OpenCode SDK or server routes, `RuntimeAPIs`, runtime auth/URLs, bridges, or runtime switching | `ui-api-decoupling` |
 | Electron main/preload, IPC, native UI, updater, deep links, SSH/tunnels, packaging, or child processes | `desktop-shell` |
 | Session sync, bootstrap/reconnect, reducers, polling, optimistic state, queues, live status, reconciliation, or directory-scoped caches | `sync-state-invariants` |
@@ -113,6 +114,8 @@ Keep each cross-cutting rule with one canonical owner; companion skills add only
 | UI tokens, primitives, icons, and animation styling | `theme-system` |
 | Settings composition and search behavior | `settings-ui-patterns` |
 | User-facing text and localization | `locale-ui-patterns` |
+| CLI output parity, prompts, and mode contracts | `clack-cli-patterns` |
+| CLI flag schemas, parsing, and help structure | `commander-cli-patterns` |
 | Agent-facing document structure and context pointers | `writing-for-agents` |
 
 Before adding guidance to a skill, identify its canonical owner. If another skill owns the rule, add a precise companion pointer and only the local consequence; do not copy the rule.

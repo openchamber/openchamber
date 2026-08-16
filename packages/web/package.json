@@ -29,6 +29,7 @@
     "@simplewebauthn/server": "13.3.1",
     "adm-zip": "^0.6.0",
     "bun-pty": "^0.4.5",
+    "commander": "^15.0.0",
     "compression": "^1.8.1",
     "cron-parser": "^4.9.0",
     "express": "^5.1.0",

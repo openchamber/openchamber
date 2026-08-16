@@ -13,7 +13,7 @@ async function startupCommand(options, action = 'status') {
   const normalized = typeof action === 'string' ? action.trim().toLowerCase() : 'status';
   if (!['status', 'enable', 'disable'].includes(normalized)) {
     throw new TunnelCliError(
-      `Unknown startup subcommand '${action}'. Use 'openchamber startup --help'.`,
+      `Unknown startup command '${action}'. Use 'openchamber startup --help'.`,
       EXIT_CODE.USAGE_ERROR
     );
   }
