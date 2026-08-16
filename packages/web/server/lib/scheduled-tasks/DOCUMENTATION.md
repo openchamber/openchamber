@@ -9,6 +9,14 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 - Runtime orchestration and execution is owned by `packages/web/server/lib/scheduled-tasks/runtime.js`.
 - This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
 
+## Preflight gate
+
+`~/.config/openchamber/preflight.json` may configure a local argv command that
+runs after an occurrence is claimed but before OpenChamber creates its agent
+session. A zero exit allows the task; a nonzero exit persists `denied` and
+creates no LLM session. The command receives task context as JSON on stdin and
+never runs through a shell.
+
 ## Cross-instance occurrence claiming
 
 Multiple OpenChamber server processes can share the same on-disk project config
