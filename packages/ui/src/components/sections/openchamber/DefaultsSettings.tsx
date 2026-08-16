@@ -16,7 +16,6 @@ import {
   SETTINGS_SELECT_SIZE,
   SETTINGS_OPTION_STACK_CLASS,
   SETTINGS_ICON_BUTTON_CLASS,
-  SETTINGS_CONTROL_CLUSTER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -438,27 +437,27 @@ export const DefaultsSettings: React.FC = () => {
               settingsItem="sessions.default-directory"
               label={t('settings.openchamber.defaults.field.defaultDirectory')}
               info={t('settings.openchamber.defaults.field.defaultDirectoryHint')}
+              alignEnd={false}
+              controlClassName="@xl:w-[20rem]"
             >
-              <div className={SETTINGS_CONTROL_CLUSTER_CLASS}>
-                <Input
-                  value={defaultDirectory ?? ''}
-                  onChange={(e) => void handleDefaultDirectoryChange(e.target.value)}
-                  placeholder={t('settings.openchamber.defaults.field.defaultDirectoryPlaceholder')}
-                  className="h-8 min-w-0 flex-1 font-mono text-xs"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  onClick={handleBrowseDefaultDirectory}
-                  disabled={!isDesktopShell()}
-                  className={SETTINGS_ICON_BUTTON_CLASS}
-                  aria-label={t('settings.openchamber.defaults.actions.browseDirectoryAria')}
-                  title={t('settings.openchamber.defaults.actions.browseDirectory')}
-                >
-                  <Icon name="folder" className="h-4 w-4" />
-                </Button>
-              </div>
+              <Input
+                value={defaultDirectory ?? ''}
+                onChange={(e) => void handleDefaultDirectoryChange(e.target.value)}
+                placeholder={t('settings.openchamber.defaults.field.defaultDirectoryPlaceholder')}
+                className="h-8 min-w-0 flex-1 font-mono text-xs"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={handleBrowseDefaultDirectory}
+                disabled={!isDesktopShell()}
+                className={SETTINGS_ICON_BUTTON_CLASS}
+                aria-label={t('settings.openchamber.defaults.actions.browseDirectoryAria')}
+                title={t('settings.openchamber.defaults.actions.browseDirectory')}
+              >
+                <Icon name="folder" className="h-4 w-4" />
+              </Button>
             </SettingsFieldRow>
           </div>
 
