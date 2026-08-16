@@ -98,7 +98,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
             </SelectContent>
           </Select>
         </div>
-        <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="mt-2 flex items-center justify-between gap-2" data-settings-item="usage.show-predictions">
           <span className="typography-micro text-muted-foreground">
             {t('settings.usage.sidebar.field.showPredictions')}
           </span>
