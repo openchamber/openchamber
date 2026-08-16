@@ -22,9 +22,9 @@ const MONITOR_STABILIZE_TICKS = 5;
 // asdf, bun) stays off PATH even though an interactive login finds it. Prepend
 // their well-known bin directories to PATH before every remote script so
 // bun/npm detection, package installation, and `openchamber serve` all resolve.
-// Glob expansion is alphabetical, so prepending each nvm version leaves the
-// highest installed version first on PATH.
-const REMOTE_PATH_PREAMBLE = 'for _oc_dir in "$HOME"/.nvm/versions/node/*/bin "$HOME"/.bun/bin "$HOME"/.volta/bin "$HOME"/.fnm/aliases/default/bin "$HOME"/.local/share/fnm/aliases/default/bin "$HOME"/.local/share/mise/shims "$HOME"/.asdf/shims; do [ -d "$_oc_dir" ] && PATH="$_oc_dir:$PATH"; done; unset _oc_dir';
+// nvm can hold several node versions: shell glob order is alphabetical, where
+// a legacy v8 would outrank v24, so pick the numerically highest version only.
+const REMOTE_PATH_PREAMBLE = '_oc_hi=$(ls "$HOME"/.nvm/versions/node 2>/dev/null | sed -n "s/^v\\([0-9][0-9]*\\(\\.[0-9][0-9]*\\)*\\)$/\\1/p" | sort -t . -k 1,1nr -k 2,2nr -k 3,3nr | head -n 1); [ -n "$_oc_hi" ] && PATH="$HOME/.nvm/versions/node/v$_oc_hi/bin:$PATH"; for _oc_dir in "$HOME"/.bun/bin "$HOME"/.volta/bin "$HOME"/.fnm/aliases/default/bin "$HOME"/.local/share/fnm/aliases/default/bin "$HOME"/.local/share/mise/shims "$HOME"/.asdf/shims; do [ -d "$_oc_dir" ] && PATH="$_oc_dir:$PATH"; done; unset _oc_dir _oc_hi';
 const SSH_STATUS_EVENT = 'openchamber:ssh-instance-status';
 const MAX_PROCESS_ERROR_CHARS = 2000;
 const MAX_PROCESS_ERROR_CAPTURE_CHARS = MAX_PROCESS_ERROR_CHARS * 2;
@@ -1192,11 +1192,17 @@ export class ElectronSshManager {
 
     let remotePort = null;
     let runningVersion = null;
+    // A daemon found on our own persisted port was started by an earlier
+    // session of this app, so this session adopts its lifecycle (stops it on
+    // disconnect when keepRunning is off). A daemon on the user's preferred
+    // port may be externally managed and keeps the old reuse-only behavior.
+    let adoptedByUs = false;
     for (const candidate of candidatePorts) {
       try {
         const info = await this.probeRemoteSystemInfo(parsed, controlPath, candidate, this.configuredOpenChamberPassword(instance));
         remotePort = candidate;
         runningVersion = typeof info?.openchamberVersion === 'string' ? info.openchamberVersion : null;
+        adoptedByUs = candidate === instance.remoteOpenchamber.lastUsedPort && candidate !== instance.remoteOpenchamber.preferredPort;
         break;
       } catch {
       }
@@ -1230,7 +1236,7 @@ export class ElectronSshManager {
     if (!(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance)))) {
       throw new Error('Managed OpenChamber server failed to become reachable');
     }
-    return { remotePort, startedByUs };
+    return { remotePort, startedByUs: startedByUs || adoptedByUs };
   }
 
   async disconnectInternal(id, reportIdle) {

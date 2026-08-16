@@ -105,7 +105,8 @@ describe('ElectronSshManager', () => {
 
     const remoteCommand = calls[0].args.find((arg) => arg.startsWith('sh -lc '));
     expect(remoteCommand).toBeDefined();
-    expect(remoteCommand).toContain('"$HOME"/.nvm/versions/node/*/bin');
+    expect(remoteCommand).toContain('ls "$HOME"/.nvm/versions/node');
+    expect(remoteCommand).toContain('sort -t . -k 1,1nr -k 2,2nr -k 3,3nr');
     expect(remoteCommand).toContain('"$HOME"/.bun/bin');
     expect(remoteCommand).toContain('"$HOME"/.volta/bin');
     expect(remoteCommand).toContain('"$HOME"/.local/share/mise/shims');
@@ -155,7 +156,7 @@ describe('ElectronSshManager', () => {
     return { manager, settingsFilePath };
   };
 
-  test('reuses a running managed server on its last used port without restarting it', async () => {
+  test('adopts a daemon found on the persisted last used port without restarting it', async () => {
     const calls = [];
     const { manager } = createManagedProbeManager({
       portStates: { 4500: { alive: true, version: '1.18.4' } },
@@ -168,9 +169,45 @@ describe('ElectronSshManager', () => {
       '/tmp/control.sock',
     );
 
-    expect(result).toEqual({ remotePort: 4500, startedByUs: false });
+    expect(result).toEqual({ remotePort: 4500, startedByUs: true });
     expect(calls.some((command) => command.includes('openchamber serve'))).toBe(false);
     expect(calls.some((command) => command.includes('/api/system/shutdown'))).toBe(false);
+  });
+
+  test('reuses a daemon on the user-pinned preferred port without adopting its lifecycle', async () => {
+    const calls = [];
+    const { manager } = createManagedProbeManager({
+      portStates: { 4600: { alive: true, version: '1.18.4' } },
+      calls,
+    });
+
+    const result = await manager.ensureRemoteServer(
+      { id: 'ssh-managed-1', remoteOpenchamber: { mode: 'managed', installMethod: 'npm', preferredPort: 4600, lastUsedPort: 4500 } },
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+    );
+
+    expect(result).toEqual({ remotePort: 4600, startedByUs: false });
+    expect(calls.some((command) => command.includes('openchamber serve'))).toBe(false);
+  });
+
+  test('probes the preferred port before the persisted port', async () => {
+    const calls = [];
+    const { manager } = createManagedProbeManager({
+      portStates: { 4600: { alive: false, version: null }, 4500: { alive: true, version: '1.18.4' } },
+      calls,
+    });
+
+    const result = await manager.ensureRemoteServer(
+      { id: 'ssh-managed-1', remoteOpenchamber: { mode: 'managed', installMethod: 'npm', preferredPort: 4600, lastUsedPort: 4500 } },
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+    );
+
+    expect(result).toEqual({ remotePort: 4500, startedByUs: true });
+    const probeCommands = calls.filter((command) => command.includes('/api/system/info'));
+    expect(probeCommands[0]).toContain('127.0.0.1:4600');
+    expect(probeCommands[1]).toContain('127.0.0.1:4500');
   });
 
   test('restarts a stale managed daemon, starts a fresh one, and persists its port', async () => {
