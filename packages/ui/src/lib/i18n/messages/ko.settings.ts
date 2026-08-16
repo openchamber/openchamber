@@ -1184,6 +1184,8 @@ export const settingsDict = {
   'settings.usage.pace.rate': '속도: {rate}',
   'settings.usage.pace.waitSeparator': ' · 대기 ',
   'settings.usage.pace.predictionLabel': '예측: ',
+  'settings.usage.pace.expectedUsedMarker': '균등하게 사용할 경우 예상 사용량: 할당량의 {percent}%',
+  'settings.usage.pace.expectedRemainingMarker': '균등하게 사용할 경우 예상 잔여량: 할당량의 {percent}%',
   'settings.remoteInstances.page.title': '원격 인스턴스',
   'settings.remoteInstances.page.description': 'SSH로 다른 컴퓨터에 연결하고 그곳에서 OpenChamber를 엽니다.',
   'settings.remoteInstances.page.empty.selectInstance': '설정을 보고 편집할 인스턴스를 선택하세요.',

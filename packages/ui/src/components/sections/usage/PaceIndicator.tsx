@@ -7,8 +7,6 @@ import { useI18n } from '@/lib/i18n';
 interface PaceIndicatorProps {
   paceInfo: PaceInfo;
   className?: string;
-  /** Compact mode shows just the status dot and prediction */
-  compact?: boolean;
 }
 
 /**
@@ -18,7 +16,6 @@ interface PaceIndicatorProps {
 export const PaceIndicator: React.FC<PaceIndicatorProps> = ({
   paceInfo,
   className,
-  compact = false,
 }) => {
   const { t } = useI18n();
   const statusColor = getPaceStatusColor(paceInfo.status);
@@ -37,29 +34,6 @@ export const PaceIndicator: React.FC<PaceIndicatorProps> = ({
   }, [paceInfo.status, t]);
 
   const predictionTooltip = t('settings.usage.pace.predictionTooltip', { prediction: paceInfo.predictText });
-
-  if (compact) {
-    return (
-      <div className={cn('flex items-center gap-1.5', className)}>
-        <div
-          className="h-2 w-2 rounded-full flex-shrink-0"
-          style={{ backgroundColor: statusColor }}
-          title={statusLabel}
-        />
-        <span
-          className="typography-micro tabular-nums"
-          style={{ color: statusColor }}
-          title={paceInfo.isExhausted ? undefined : predictionTooltip}
-        >
-          {paceInfo.isExhausted ? (
-            <>{t('settings.usage.pace.wait', { duration: formatRemainingTime(paceInfo.remainingSeconds) })}</>
-          ) : (
-            <>{t('settings.usage.pace.prediction', { prediction: paceInfo.predictText })}</>
-          )}
-        </span>
-      </div>
-    );
-  }
 
   return (
     <div className={cn('flex items-center justify-between gap-2', className)}>

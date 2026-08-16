@@ -1102,6 +1102,8 @@ export const settingsDict = {
   'settings.usage.pace.rate': 'Rythme : {rate}',
   'settings.usage.pace.waitSeparator': '· Attendez',
   'settings.usage.pace.predictionLabel': 'Préd :',
+  'settings.usage.pace.expectedUsedMarker': 'Utilisation prévue en cas de répartition uniforme : {percent}% du quota',
+  'settings.usage.pace.expectedRemainingMarker': 'Restant prévu en cas de répartition uniforme : {percent}% du quota',
   'settings.remoteInstances.page.title': 'Instance distante',
   'settings.remoteInstances.page.description': 'Configurez la connexion SSH, le serveur distant et les paramètres de transfert.',
   'settings.remoteInstances.page.empty.selectInstance': 'Sélectionnez une instance pour afficher et modifier ses paramètres.',

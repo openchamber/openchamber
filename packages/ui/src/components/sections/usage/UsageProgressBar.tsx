@@ -11,6 +11,8 @@ interface UsageProgressBarProps {
    * Used for weekly/monthly quotas to show where usage "should" be if evenly distributed.
    */
   expectedMarkerPercent?: number | null;
+  /** Tooltip for the expected-usage marker, localized by the caller. */
+  expectedMarkerTooltip?: string | null;
 }
 
 export const UsageProgressBar: React.FC<UsageProgressBarProps> = ({
@@ -18,6 +20,7 @@ export const UsageProgressBar: React.FC<UsageProgressBarProps> = ({
   tonePercent,
   className,
   expectedMarkerPercent,
+  expectedMarkerTooltip,
 }) => {
   const clamped = clampPercent(percent) ?? 0;
   const tone = resolveUsageTone(tonePercent ?? percent);
@@ -45,7 +48,7 @@ export const UsageProgressBar: React.FC<UsageProgressBarProps> = ({
         <div
           className="absolute top-0 h-full w-0.5 bg-foreground"
           style={{ left: `${markerClamped}%` }}
-          title={`Expected usage if spread evenly: ${Math.round(markerClamped)}% of quota`}
+          title={expectedMarkerTooltip ?? undefined}
           aria-hidden="true"
         />
       )}

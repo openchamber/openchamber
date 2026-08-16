@@ -1184,6 +1184,8 @@ export const settingsDict = {
   'settings.usage.pace.rate': '速度：{rate}',
   'settings.usage.pace.waitSeparator': ' · 等待 ',
   'settings.usage.pace.predictionLabel': '预测：',
+  'settings.usage.pace.expectedUsedMarker': '如果均匀使用，预计用量：配额的 {percent}%',
+  'settings.usage.pace.expectedRemainingMarker': '如果均匀使用，预计剩余：配额的 {percent}%',
   'settings.remoteInstances.page.title': '远程实例',
   'settings.remoteInstances.page.description': '通过 SSH 连接到另一台机器，并在那里打开 OpenChamber。',
   'settings.remoteInstances.page.empty.selectInstance': '选择一个实例以查看和编辑其设置。',

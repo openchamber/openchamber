@@ -1154,6 +1154,8 @@ export const settingsDict = {
   'settings.usage.pace.rate': 'Tempo: {rate}',
   'settings.usage.pace.waitSeparator': ' · Warten ',
   'settings.usage.pace.predictionLabel': 'Vorh.: ',
+  'settings.usage.pace.expectedUsedMarker': 'Erwartete Nutzung bei gleichmäßiger Verteilung: {percent}% des Kontingents',
+  'settings.usage.pace.expectedRemainingMarker': 'Erwarteter Rest bei gleichmäßiger Verteilung: {percent}% des Kontingents',
   'settings.remoteInstances.page.title': 'Remote-Instanz',
   'settings.remoteInstances.page.description': 'Stellen Sie eine Verbindung zu einem anderen Computer über SSH her und öffnen Sie dort OpenChamber.',
   'settings.remoteInstances.page.empty.selectInstance': 'Wählen Sie eine Instanz aus, um ihre Einstellungen anzuzeigen und zu bearbeiten.',

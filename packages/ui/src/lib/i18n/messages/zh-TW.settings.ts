@@ -1091,6 +1091,8 @@ export const settingsDict = {
   'settings.usage.pace.rate': '速度：{rate}',
   'settings.usage.pace.waitSeparator': ' · 等待 ',
   'settings.usage.pace.predictionLabel': '預測：',
+  'settings.usage.pace.expectedUsedMarker': '如果均勻使用，預計用量：配額的 {percent}%',
+  'settings.usage.pace.expectedRemainingMarker': '如果均勻使用，預計剩餘：配額的 {percent}%',
   'settings.remoteInstances.page.title': '遠端執行個體',
   'settings.remoteInstances.page.description': '設定 SSH 連線、遠端服務和連接埠轉送設定。',
   'settings.remoteInstances.page.empty.selectInstance': '選擇一個執行個體以查看和編輯其設定。',

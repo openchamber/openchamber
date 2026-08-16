@@ -1961,6 +1961,8 @@ export const settingsDict = {
   'settings.usage.pace.status.usedUp': 'Wykorzystano',
   'settings.usage.pace.wait': 'Czekaj {duration}',
   'settings.usage.pace.waitSeparator': ' · Czekaj ',
+  'settings.usage.pace.expectedUsedMarker': 'Przewidywane użycie przy równomiernym rozłożeniu: {percent}% limitu',
+  'settings.usage.pace.expectedRemainingMarker': 'Przewidywany pozostały limit przy równomiernym rozłożeniu: {percent}%',
   'settings.usage.page.empty.selectProvider': 'Wybierz dostawcę, aby wyświetlić szczegóły użycia.',
   'settings.usage.page.header.lastUpdated': 'Ostatnio aktualizowano: {time}',
   'settings.usage.page.header.lastUpdatedWithPlan': 'Plan: {plan} · Ostatnia aktualizacja: {time}',

@@ -1184,6 +1184,8 @@ export const settingsDict = {
   "settings.usage.pace.rate": "Темп: {rate}",
   "settings.usage.pace.waitSeparator": " · Зачекайте ",
   "settings.usage.pace.predictionLabel": "Прогноз: ",
+  "settings.usage.pace.expectedUsedMarker": "Очікуване використання за рівномірного розподілу: {percent}% квоти",
+  "settings.usage.pace.expectedRemainingMarker": "Очікуваний залишок за рівномірного розподілу: {percent}% квоти",
   "settings.remoteInstances.page.title": "Віддалений інстанс",
   "settings.remoteInstances.page.description": "Підключіться до іншої машини через SSH і відкрийте там OpenChamber.",
   "settings.remoteInstances.page.empty.selectInstance": "Виберіть інстанс, щоб переглянути та змінити його налаштування.",

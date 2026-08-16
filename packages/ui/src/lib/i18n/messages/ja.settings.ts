@@ -1217,6 +1217,8 @@ export const settingsDict = {
   'settings.usage.pace.rate': 'ペース: {rate}',
   'settings.usage.pace.waitSeparator': ' · 待機 ',
   'settings.usage.pace.predictionLabel': '予測: ',
+  'settings.usage.pace.expectedUsedMarker': '均等に使用した場合の予想使用量: クォータの {percent}%',
+  'settings.usage.pace.expectedRemainingMarker': '均等に使用した場合の予想残量: クォータの {percent}%',
   'settings.remoteInstances.page.title': 'リモートインスタンス',
   'settings.remoteInstances.page.description': 'SSH 経由で別のマシンに接続し、そこで OpenChamber を開きます。',
   'settings.remoteInstances.page.empty.selectInstance': 'インスタンスを選択して設定を表示・編集します。',

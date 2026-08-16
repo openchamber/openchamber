@@ -6,6 +6,7 @@ import { PaceIndicator } from './PaceIndicator';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useUIStore } from '@/stores/useUIStore';
+import { useI18n } from '@/lib/i18n';
 
 interface UsageCardProps {
   title: string;
@@ -24,6 +25,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   toggleEnabled = false,
   onToggle,
 }) => {
+  const { t } = useI18n();
   const displayMode = useQuotaStore((state) => state.displayMode);
   const showPredValues = useQuotaStore((state) => state.showPredValues);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
@@ -38,12 +40,21 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   }, [window.usedPercent, window.resetAt, window.windowSeconds, title]);
 
   const expectedMarkerPercent = React.useMemo(() => {
-    if (!paceInfo || paceInfo.dailyAllocationPercent === null) {
+    if (!showPredValues || !paceInfo || paceInfo.dailyAllocationPercent === null) {
       return null;
     }
     const expectedUsed = calculateExpectedUsagePercent(paceInfo.elapsedRatio);
     return displayMode === 'remaining' ? 100 - expectedUsed : expectedUsed;
-  }, [paceInfo, displayMode]);
+  }, [paceInfo, displayMode, showPredValues]);
+
+  const expectedMarkerTooltip = expectedMarkerPercent !== null
+    ? t(
+      displayMode === 'remaining'
+        ? 'settings.usage.pace.expectedRemainingMarker'
+        : 'settings.usage.pace.expectedUsedMarker',
+      { percent: Math.round(expectedMarkerPercent) },
+    )
+    : null;
 
   return (
     <div className="py-3">
@@ -73,6 +84,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
           percent={displayPercent}
           tonePercent={window.usedPercent}
           expectedMarkerPercent={expectedMarkerPercent}
+          expectedMarkerTooltip={expectedMarkerTooltip}
           className="h-1.5"
         />
         <div className="mt-1 flex items-center justify-between">

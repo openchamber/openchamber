@@ -30,7 +30,7 @@ describe('calculatePace', () => {
 
   test('accepts resetAt as an ISO string like the opencode-go provider sends', () => {
     const resetAt = new Date(Date.now() + 12 * 3600 * 1000).toISOString();
-    const pace = calculatePace(50, resetAt as unknown as number, 24 * 3600, '24h');
+    const pace = calculatePace(50, resetAt, 24 * 3600, '24h');
     expect(pace).not.toBeNull();
     expect(pace?.paceRateText).not.toBe('-');
     expect(pace?.status).toBe('on-track');

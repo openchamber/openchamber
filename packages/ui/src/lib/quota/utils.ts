@@ -26,7 +26,7 @@ export const formatQuotaValueLabel = (
 };
 
 export const formatQuotaResetLabel = (
-  resetAt: number | null,
+  resetAt: number | string | null,
   fallback?: string | null,
   timeFormatPreference: TimeFormatPreference = 'auto',
 ): string => {
@@ -154,14 +154,14 @@ const inferWindowSeconds = (label: string): number | null => {
  * Calculate pace information for a usage window.
  *
  * @param usedPercent - Current usage percentage (0-100)
- * @param resetAt - Timestamp (ms) when the window resets
+ * @param resetAt - Timestamp (ms) or ISO string when the window resets
  * @param windowSeconds - Total window duration in seconds (can be null, will be inferred from label if possible)
  * @param windowLabel - Optional label to infer window duration from
  * @returns PaceInfo object with pace calculations
  */
 export const calculatePace = (
   usedPercent: number | null,
-  resetAt: number | null,
+  resetAt: number | string | null,
   windowSeconds: number | null,
   windowLabel?: string
 ): PaceInfo | null => {

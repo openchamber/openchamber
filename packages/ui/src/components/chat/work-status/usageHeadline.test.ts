@@ -14,14 +14,14 @@ const window = (windowSeconds: number | null) => ({
   resetAfterFormatted: null,
 });
 
-const group = (providerId: string, rows: Array<{ key: string; label: string; subtitle?: string; seconds: number | null }>): UsageProviderGroup => ({
+const group = (providerId: string, rows: Array<{ key: string; label: string; windowKey: string; subtitle?: string; seconds: number | null }>): UsageProviderGroup => ({
   providerId: providerId as UsageProviderGroup['providerId'],
   providerName: providerId,
   status: null,
   rows: rows.map((row) => ({
     key: row.key,
     label: row.label,
-    windowKey: row.key,
+    windowKey: row.windowKey,
     subtitle: row.subtitle,
     window: window(row.seconds),
   })),
@@ -50,11 +50,11 @@ describe('resolveQuotaProviderId', () => {
 
 describe('pickUsageHeadline', () => {
   const groups = [
-    group('codex', [{ key: 'w', label: 'Weekly Limit', seconds: 7 * 24 * HOUR }]),
+    group('codex', [{ key: 'w', label: 'Weekly Limit', windowKey: 'weekly', seconds: 7 * 24 * HOUR }]),
     group('opencode-go', [
-      { key: 'm', label: 'Monthly Limit', seconds: 30 * 24 * HOUR },
-      { key: 'h', label: '5-Hour', seconds: 5 * HOUR },
-      { key: 'w', label: 'Weekly Limit', seconds: 7 * 24 * HOUR },
+      { key: 'm', label: 'Monthly Limit', windowKey: 'monthly', seconds: 30 * 24 * HOUR },
+      { key: 'h', label: '5-Hour', windowKey: '5h', seconds: 5 * HOUR },
+      { key: 'w', label: 'Weekly Limit', windowKey: 'weekly', seconds: 7 * 24 * HOUR },
     ]),
   ];
 
@@ -75,21 +75,21 @@ describe('pickUsageHeadline', () => {
 
   test('ignores model-scoped rows while any provider-level row exists', () => {
     const scoped = [group('zai-coding-plan', [
-      { key: 'model', label: '5-Hour', subtitle: 'GLM-5', seconds: 5 * HOUR },
-      { key: 'provider', label: 'Weekly Limit', seconds: 7 * 24 * HOUR },
+      { key: 'model', label: '5-Hour', windowKey: '5h', subtitle: 'GLM-5', seconds: 5 * HOUR },
+      { key: 'provider', label: 'Weekly Limit', windowKey: 'weekly', seconds: 7 * 24 * HOUR },
     ])];
     expect(pickUsageHeadline(scoped, 'zai-coding-plan')?.row.label).toBe('Weekly Limit');
   });
 
   test('falls back to a durationless row when nothing reports a window', () => {
-    const balances = [group('codex', [{ key: 'credits', label: 'Credits Balance', seconds: null }])];
+    const balances = [group('codex', [{ key: 'credits', label: 'Credits Balance', windowKey: 'credits_balance', seconds: null }])];
     expect(pickUsageHeadline(balances, 'codex')?.row.label).toBe('Credits Balance');
   });
 
   test('prefers any real window over a durationless row', () => {
     const mixed = [group('codex', [
-      { key: 'credits', label: 'Credits Balance', seconds: null },
-      { key: 'w', label: 'Weekly Limit', seconds: 7 * 24 * HOUR },
+      { key: 'credits', label: 'Credits Balance', windowKey: 'credits_balance', seconds: null },
+      { key: 'w', label: 'Weekly Limit', windowKey: 'weekly', seconds: 7 * 24 * HOUR },
     ])];
     expect(pickUsageHeadline(mixed, 'codex')?.row.label).toBe('Weekly Limit');
   });
