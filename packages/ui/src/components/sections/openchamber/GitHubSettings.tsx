@@ -442,8 +442,16 @@ export const GitHubSettings: React.FC<{ embedded?: boolean }> = ({ embedded = fa
       )}
 
       <div className={cn('flex flex-col gap-4', embedded ? 'border-t border-[var(--surface-subtle)] pt-4' : 'pt-4')}>
-        <ProviderApiBaseUrlInput provider="github" />
-        <ProviderDetectUrlsInput provider="github" />
+        {connected ? (
+          <>
+            <ProviderApiBaseUrlInput provider="github" />
+            <ProviderDetectUrlsInput provider="github" />
+          </>
+        ) : (
+          <p className="typography-meta text-muted-foreground">
+            {t('settings.gitProviders.overridesLocked.description', { provider: t('settings.git.tabs.github') })}
+          </p>
+        )}
       </div>
     </>
   );

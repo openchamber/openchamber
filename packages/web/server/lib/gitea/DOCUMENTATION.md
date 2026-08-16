@@ -13,6 +13,7 @@
 - `packages/web/server/lib/gitea/routes.js`: Express route registration for `/api/gitea/*` endpoints.
 - `packages/web/server/lib/gitea/auth.js`: PAT auth storage, multi-account support, base URL normalization.
 - `packages/web/server/lib/gitea/client.js`: raw `fetch` Gitea REST v1 client (timeout, ETag conditional GET, rate-limit cooldown, `Link`-header pagination, redirect handling).
+- `packages/web/server/lib/gitea/client.d.ts`: hand-written type declaration for `client.js` (the module is plain JS); consumed by the live-test harness.
 - `packages/web/server/lib/gitea/repo.js`: Gitea remote URL parsing (flat `owner/repo`) and directory-to-repo resolution.
 - `packages/web/server/lib/opencode/feature-routes-runtime.js`: API route layer that calls this module (via `registerGiteaRoutes`).
 - `packages/web/src/api/gitea.ts`: web client wrapper for Gitea endpoints.
@@ -48,7 +49,7 @@
 - Auth storage: `~/.config/openchamber/gitea-auth.json` (override with `OPENCHAMBER_DATA_DIR`).
 - Writes are atomic (tmp file + rename) and file mode is `0o600`.
 - Base URL resolution: the caller-supplied `baseUrl` (normalized) is the primary source, then the effective default (configured `settings.json` `gitProviders.gitea.apiBaseUrl`, else `https://codeberg.org`). Stored entries without a usable base URL are dropped.
-- Per-project overrides: a per-project `gitProviders.gitea.apiBaseUrl` override (stored under `projects/<projectId>.json`, resolved via `getEffectiveProviderApiBaseUrl('gitea', directory)` in `packages/web/server/lib/git-providers/project-config.js`) replaces the account's base URL for that project's data routes (`getGiteaClientOrNull(directory)`), and its host is accepted for directory-to-repo resolution (`resolveGiteaRepoFromDirectory`). Global routes (`auth/status`, `auth/connect`, `auth/activate`, DELETE auth, `me`, `repo/branches`) stay global.
+- Per-project overrides: a per-project `gitProviders.gitea.apiBaseUrl` override (stored under `projects/<projectId>.json`, resolved via `getEffectiveProviderApiBaseUrl('gitea', directory)` in `packages/web/server/lib/git-providers/project-config.js`) replaces the account's base URL for that project's data routes (`getGiteaClientOrNull(directory)`), and its host is accepted for directory-to-repo resolution (`resolveGiteaRepoFromDirectory`). A forced `gitProviders.provider: 'gitea'` accepts any remote host for directory resolution. Global routes (`auth/status`, `auth/connect`, `auth/activate`, DELETE auth, `me`, `repo/branches`) stay global.
 - Account id: `` `${host}:${username}` `` (e.g. `gitea.example.com:alice`), falling back to `token:<first8>` when the username is missing.
 - Auth header on every request: `Authorization: token <pat>`.
 - Gitea's `GET /user` uses `login`/`full_name`/`html_url`; `setGiteaAuth` accepts both that and the `username`/`web_url` variants.
@@ -80,7 +81,7 @@
 - Commit statuses: `GET /repos/{owner}/{repo}/commits/{sha}/statuses?limit=100` (the `prs/statuses` route resolves the PR `head.sha` first, then maps statuses to `{ state, name, description, url, createdAt }` with `state` lowercased).
 - PR create: `POST /repos/{owner}/{repo}/pulls` with `{ title, head, base, body? }` (body omitted when absent).
 - PR update: `PATCH /repos/{owner}/{repo}/pulls/{number}` with `{ title?, body?, state? }` (undefined fields omitted; the PR number IS the issue index, so the edit-issue `state` transition applies directly).
-- PR merge: `POST /repos/{owner}/{repo}/pulls/{number}/merge` with `{ Do: true, MergeMethod: 'merge' | 'squash' | 'rebase' }` (`method` defaults to `'merge'`).
+- PR merge: `POST /repos/{owner}/{repo}/pulls/{number}/merge` with `{ Do: 'merge' | 'squash' | 'rebase' }` (`method` defaults to `'merge'`). `Do` is a string enum of the merge style — Gitea has no separate `MergeMethod` field.
 - Issue comment write: `POST /repos/{owner}/{repo}/issues/{number}/comments` with `{ body }` (PRs are issues at the API level, so `prs/comment` uses the same endpoint with the PR number as the index).
 - Issue update: `PATCH /repos/{owner}/{repo}/issues/{number}` with `{ title?, body?, state?, labels?, assignees?, milestone?, unset_milestone? }` (labels are label **names**, assignees are logins; `milestone` is resolved from a title to a milestone id and `null` sets `unset_milestone: true`).
 - Pull review write: `POST /repos/{owner}/{repo}/pulls/{number}/reviews` with `{ event, body? }` (`event` is `APPROVED`/`REQUEST_CHANGES`/`COMMENT`).
@@ -131,6 +132,7 @@ Conventions mirror `github/routes.js` and `gitlab/routes.js`:
 
 - `packages/web/src/api/gitea.ts` calls every `/api/gitea/*` endpoint and maps them to the shared types.
 - `packages/ui/src/lib/api/types.ts` defines the shared `Gitea*` response types used across web, desktop, VS Code, and mobile.
+- `packages/web/scripts/gitea-live-test.ts` is a live-test harness for the raw client: run with `bun run gitea:live-test` (requires `GITEA_TOKEN`; `GITEA_BASE_URL` defaults to `https://git.buzzbee.dev`). It exercises every client method against a real instance, reports PASS/WARN/FAIL/SKIP per endpoint, and runs a controlled write pass (scratch issue plus a scratch-repo PR lifecycle that is deleted afterward).
 
 ## Failure handling
 

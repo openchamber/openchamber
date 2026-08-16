@@ -30,26 +30,35 @@ const normalizeProjectPathForMatch = (value) => {
   return value.replace(/\\/g, '/').replace(/\/+$/g, '') || value;
 };
 
+const GIT_PROVIDER_SET = new Set(['github', 'gitlab', 'gitea']);
+
 /**
  * Validate/normalize a per-project `gitProviders` value. Same provider
  * allowlist and `normalizeBaseUrl` rules as `sanitizeGitProviders`, but the
  * per-project shape only carries `apiBaseUrl` (any `detectUrls` are tolerated
- * and stripped). Returns undefined when nothing valid remains.
+ * and stripped) plus an optional forced `provider` (github|gitlab|gitea) that
+ * overrides automatic provider detection for the project. Returns undefined
+ * when nothing valid remains.
  */
 export function sanitizeProjectGitProviders(payload) {
-  const sanitized = sanitizeGitProviders(payload);
-  if (!sanitized) {
-    return undefined;
-  }
   const result = {};
-  for (const provider of Object.keys(sanitized)) {
-    const entry = sanitized[provider];
-    const normalized = {};
-    if (entry.apiBaseUrl) {
-      normalized.apiBaseUrl = entry.apiBaseUrl;
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const forcedProvider = typeof payload.provider === 'string' ? payload.provider.trim().toLowerCase() : '';
+    if (GIT_PROVIDER_SET.has(forcedProvider)) {
+      result.provider = forcedProvider;
     }
-    if (Object.keys(normalized).length > 0) {
-      result[provider] = normalized;
+  }
+  const sanitized = sanitizeGitProviders(payload);
+  if (sanitized) {
+    for (const provider of Object.keys(sanitized)) {
+      const entry = sanitized[provider];
+      const normalized = {};
+      if (entry.apiBaseUrl) {
+        normalized.apiBaseUrl = entry.apiBaseUrl;
+      }
+      if (Object.keys(normalized).length > 0) {
+        result[provider] = normalized;
+      }
     }
   }
   return Object.keys(result).length > 0 ? result : undefined;
@@ -268,6 +277,28 @@ export function resolveProjectIdFromDirectory(directory) {
  */
 export function getProjectProviderApiBaseUrl(provider, projectId) {
   return getProjectGitProviders(projectId)[provider]?.apiBaseUrl || null;
+}
+
+/**
+ * The project's forced git provider (github|gitlab|gitea), or null when the
+ * provider is auto-detected from the remote. Only meaningful for a projectId
+ * that resolves to a project config; invalid ids yield null.
+ */
+export function getProjectProvider(projectId) {
+  const providers = getProjectGitProviders(projectId);
+  return providers.provider || null;
+}
+
+/**
+ * The forced git provider for a directory's owning project, or null when
+ * unset or when the directory resolves to no project.
+ */
+export function getProjectProviderFromDirectory(directory) {
+  const projectId = resolveProjectIdFromDirectory(directory);
+  if (!projectId) {
+    return null;
+  }
+  return getProjectProvider(projectId);
 }
 
 /**

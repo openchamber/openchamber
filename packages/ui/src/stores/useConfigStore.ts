@@ -712,12 +712,28 @@ const toDirectoryKey = (directory: string | null | undefined): string => {
 
 const fromDirectoryKey = (key: string): string | null => (key === DIRECTORY_KEY_GLOBAL ? null : key);
 
+/**
+ * The directory store is part of this store's circular import cluster
+ * (useConfigStore → persistence → session-ui-store → useConfigStore, with
+ * useDirectoryStore in the same strongly-connected component). In the bundled
+ * chunk its module body may not have run yet when this module evaluates, so the
+ * static import binding is in TDZ. Read it through the window registration that
+ * useDirectoryStore publishes as soon as it initializes; fall back to the
+ * client directory, which the directory store seeds at the same time.
+ */
+const getDirectoryStore = (): typeof useDirectoryStore | null => {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+    return window.__zustand_directory_store__ ?? null;
+};
+
 const resolveInitialDirectoryKey = (): string => {
     if (typeof window === 'undefined') {
         return DIRECTORY_KEY_GLOBAL;
     }
 
-    const directory = opencodeClient.getDirectory() ?? useDirectoryStore.getState().currentDirectory;
+    const directory = opencodeClient.getDirectory() ?? getDirectoryStore()?.getState().currentDirectory;
     return toConfigDirectoryKey(directory);
 };
 
@@ -3429,14 +3445,24 @@ if (!unsubscribeConfigStoreSyncConfigChanges) {
 }
 
 if (typeof window !== "undefined" && !unsubscribeConfigStoreDirectoryChanges) {
-    unsubscribeConfigStoreDirectoryChanges = useDirectoryStore.subscribe((state, prevState) => {
-        const nextKey = toDirectoryKey(state.currentDirectory);
-        const prevKey = toDirectoryKey(prevState.currentDirectory);
-        if (nextKey === prevKey) {
-            return;
-        }
+    // useDirectoryStore's module body may not have run yet when this module
+    // evaluates (the two stores share a circular import cluster, and the
+    // bundled chunk can evaluate either body first). Defer subscription setup
+    // until after module evaluation completes so the import binding is no
+    // longer in TDZ. The subscription is registered before any user-driven
+    // directory change can occur; the initial directory is reconciled by
+    // initializeApp.
+    queueMicrotask(() => {
+        if (unsubscribeConfigStoreDirectoryChanges) return;
+        unsubscribeConfigStoreDirectoryChanges = useDirectoryStore.subscribe((state, prevState) => {
+            const nextKey = toDirectoryKey(state.currentDirectory);
+            const prevKey = toDirectoryKey(prevState.currentDirectory);
+            if (nextKey === prevKey) {
+                return;
+            }
 
-        markStartupTrace('directoryStore:changed', { previous: prevKey, next: nextKey });
-        void useConfigStore.getState().activateDirectory(state.currentDirectory);
+            markStartupTrace('directoryStore:changed', { previous: prevKey, next: nextKey });
+            void useConfigStore.getState().activateDirectory(state.currentDirectory);
+        });
     });
 }

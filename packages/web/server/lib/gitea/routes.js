@@ -1225,7 +1225,10 @@ export function registerGiteaRoutes(app, options = {}) {
         return res.status(400).json({ error: 'Unable to resolve Gitea repo from directory' });
       }
 
-      const body = { Do: true, MergeMethod: method };
+      // Gitea's merge endpoint takes the merge style directly in `Do` (a
+      // string enum: merge/rebase/rebase-merge/squash/fast-forward-only/
+      // manually-merged). There is no separate `MergeMethod` field.
+      const body = { Do: method };
 
       const resp = await withTimeout(client.mergePullRequest(owner, repo, number, body), ROUTE_TIMEOUT_MS, 'gitea pr merge');
       if (resp.status === 429) {

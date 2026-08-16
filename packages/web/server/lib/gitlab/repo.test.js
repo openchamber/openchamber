@@ -22,6 +22,12 @@ vi.mock('../git-providers/project-config.js', async (importOriginal) => {
       }
       return actual.getEffectiveProviderApiBaseUrl(provider, directory);
     }),
+    getProjectProviderFromDirectory: vi.fn((directory) => {
+      if (directory === '/forced/project') {
+        return 'gitlab';
+      }
+      return actual.getProjectProviderFromDirectory(directory);
+    }),
   };
 });
 
@@ -146,5 +152,12 @@ describe('resolveGitLabRepoFromDirectory', () => {
     vi.mocked(getRemoteUrl).mockResolvedValue('git@gitlab.override.example:team/app.git');
     const { repo } = await resolveGitLabRepoFromDirectory('/some/project');
     expect(repo).toBeNull();
+  });
+
+  test('accepts any remote host when the provider is forced to gitlab', async () => {
+    vi.mocked(getRemoteUrl).mockResolvedValue('git@gitlab.internal.corp:team/app.git');
+    const { repo, remoteUrl } = await resolveGitLabRepoFromDirectory('/forced/project');
+    expect(remoteUrl).toBe('git@gitlab.internal.corp:team/app.git');
+    expect(repo).toMatchObject({ namespace: 'team', project: 'app', host: 'gitlab.internal.corp' });
   });
 });

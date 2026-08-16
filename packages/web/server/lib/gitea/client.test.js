@@ -242,17 +242,17 @@ describe('pull request write methods', () => {
     expect(JSON.parse(options.body)).toEqual({ title: 'Updated', body: 'Body text' });
   });
 
-  test('mergePullRequest POSTs Do and MergeMethod to the merge endpoint', async () => {
+  test('mergePullRequest POSTs the merge style in Do to the merge endpoint', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ merged: true }));
     globalThis.fetch = fetchMock;
 
     const client = createGiteaClient({ token: 't', baseUrl: 'https://gitea.example.com' });
-    await client.mergePullRequest('owner', 'repo', 5, { Do: true, MergeMethod: 'squash' });
+    await client.mergePullRequest('owner', 'repo', 5, { Do: 'squash' });
 
     const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toBe('https://gitea.example.com/api/v1/repos/owner/repo/pulls/5/merge');
     expect(options.method).toBe('POST');
-    expect(JSON.parse(options.body)).toEqual({ Do: true, MergeMethod: 'squash' });
+    expect(JSON.parse(options.body)).toEqual({ Do: 'squash' });
   });
 
   test('write methods surface error statuses without throwing', async () => {
@@ -260,7 +260,7 @@ describe('pull request write methods', () => {
     globalThis.fetch = fetchMock;
 
     const client = createGiteaClient({ token: 't', baseUrl: 'https://gitea.example.com' });
-    const result = await client.mergePullRequest('owner', 'repo', 5, { Do: true, MergeMethod: 'merge' });
+    const result = await client.mergePullRequest('owner', 'repo', 5, { Do: 'merge' });
     expect(result.status).toBe(409);
     expect(result.data).toEqual({ message: 'Conflict' });
   });

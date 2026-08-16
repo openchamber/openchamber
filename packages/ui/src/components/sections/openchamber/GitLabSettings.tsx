@@ -292,8 +292,16 @@ export const GitLabSettings: React.FC<{ embedded?: boolean }> = ({ embedded = fa
       </div>
 
       <div className={cn('flex flex-col gap-4', embedded ? 'border-t border-[var(--surface-subtle)] pt-4' : 'pt-4')}>
-        <ProviderApiBaseUrlInput provider="gitlab" />
-        <ProviderDetectUrlsInput provider="gitlab" />
+        {connected ? (
+          <>
+            <ProviderApiBaseUrlInput provider="gitlab" />
+            <ProviderDetectUrlsInput provider="gitlab" />
+          </>
+        ) : (
+          <p className="typography-meta text-muted-foreground">
+            {t('settings.gitProviders.overridesLocked.description', { provider: t('settings.git.tabs.gitlab') })}
+          </p>
+        )}
       </div>
     </>
   );

@@ -22,6 +22,12 @@ vi.mock('../git-providers/project-config.js', async (importOriginal) => {
       }
       return actual.getEffectiveProviderApiBaseUrl(provider, directory);
     }),
+    getProjectProviderFromDirectory: vi.fn((directory) => {
+      if (directory === '/forced/project') {
+        return 'gitea';
+      }
+      return actual.getProjectProviderFromDirectory(directory);
+    }),
   };
 });
 
@@ -149,5 +155,12 @@ describe('resolveGiteaRepoFromDirectory', () => {
     vi.mocked(getRemoteUrl).mockResolvedValue('git@gitea.override.example:team/app.git');
     const { repo } = await resolveGiteaRepoFromDirectory('/some/project');
     expect(repo).toBeNull();
+  });
+
+  test('accepts any remote host when the provider is forced to gitea', async () => {
+    vi.mocked(getRemoteUrl).mockResolvedValue('git@gitea.internal.corp:team/app.git');
+    const { repo, remoteUrl } = await resolveGiteaRepoFromDirectory('/forced/project');
+    expect(remoteUrl).toBe('git@gitea.internal.corp:team/app.git');
+    expect(repo).toMatchObject({ owner: 'team', repo: 'app', host: 'gitea.internal.corp' });
   });
 });

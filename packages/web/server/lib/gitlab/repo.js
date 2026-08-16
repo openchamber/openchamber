@@ -1,6 +1,6 @@
 import { getRemoteUrl } from '../git/index.js';
 import { getGitLabAuthAccounts, normalizeBaseUrl } from './auth.js';
-import { getEffectiveProviderApiBaseUrl } from '../git-providers/project-config.js';
+import { getEffectiveProviderApiBaseUrl, getProjectProviderFromDirectory } from '../git-providers/project-config.js';
 
 // When no explicit host allowlist is provided, accept gitlab.com or any host
 // that matches the base URL of a stored GitLab account. Never github.com.
@@ -49,7 +49,7 @@ function acceptedHosts(knownHosts) {
  * When omitted, `gitlab.com` and hosts from stored auth accounts are accepted.
  * github.com is never accepted.
  */
-export const parseGitLabRemoteUrl = (raw, knownHosts) => {
+export const parseGitLabRemoteUrl = (raw, knownHosts, options = {}) => {
   if (typeof raw !== 'string') {
     return null;
   }
@@ -84,7 +84,7 @@ export const parseGitLabRemoteUrl = (raw, knownHosts) => {
   if (host === 'github.com') {
     return null;
   }
-  if (!acceptedHosts(knownHosts).has(host)) {
+  if (!options.allowAnyHost && !acceptedHosts(knownHosts).has(host)) {
     return null;
   }
 
@@ -131,8 +131,10 @@ export async function resolveGitLabRepoFromDirectory(directory, remoteName = 'or
       // ignore a malformed override base URL
     }
   }
+  // A forced gitlab provider (per-project override) accepts any remote host.
+  const forcedProvider = getProjectProviderFromDirectory(directory);
   return {
-    repo: parseGitLabRemoteUrl(remoteUrl, knownHosts),
+    repo: parseGitLabRemoteUrl(remoteUrl, knownHosts, { allowAnyHost: forcedProvider === 'gitlab' }),
     remoteUrl,
   };
 }

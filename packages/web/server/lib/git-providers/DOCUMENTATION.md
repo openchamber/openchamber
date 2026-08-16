@@ -27,11 +27,13 @@
 ## Public exports — `project-config.js`
 
 - `OPENCHAMBER_PROJECTS_DIR`: `path.join(OPENCHAMBER_DATA_DIR, 'projects')` (same `OPENCHAMBER_DATA_DIR` env logic as `config.js`).
-- `sanitizeProjectGitProviders(payload)`: same provider allowlist/`normalizeBaseUrl` rules as `sanitizeGitProviders`, but the per-project shape only carries `apiBaseUrl` (`detectUrls` tolerated and stripped); `undefined` when nothing valid remains.
+- `sanitizeProjectGitProviders(payload)`: same provider allowlist/`normalizeBaseUrl` rules as `sanitizeGitProviders`, but the per-project shape only carries `apiBaseUrl` (`detectUrls` tolerated and stripped) plus an optional forced `provider` (`github|gitlab|gitea`, normalized lowercase; unknown values dropped); `undefined` when nothing valid remains.
 - `readProjectJson(projectId)`: raw JSON object from `projects/<projectId>.json`; `{}` on missing/malformed file, `null` for an invalid projectId; never throws.
 - `getProjectGitProviders(projectId)`: effective per-project overrides (`{}` when unset or invalid projectId).
 - `resolveProjectIdFromDirectory(directory)`: projectId for a directory — worktree-aware: the directory is first resolved to its main repo root via `git rev-parse --git-common-dir` (handles linked worktrees created outside the project root, and a project rooted at the filesystem `/`), then the longest matching project path from the settings.json `projects` list that equals it or is a path-prefix wins; when git is unavailable or the directory is not a git repo, the directory's own exact/containment match applies; fallback `createProjectIdFromPath(directory)`; `null` for empty input. Results are cached per-directory for 60s (TTL cache, negative results included) so forge hot paths don't exec git / re-read settings.json per request. `_clearResolveProjectIdCache()` is a test-only hook to drop the cache.
 - `getProjectProviderApiBaseUrl(provider, projectId)`: per-project `apiBaseUrl` override or `null`.
+- `getProjectProvider(projectId)`: the project's forced provider (`github|gitlab|gitea`) or `null` when auto-detected.
+- `getProjectProviderFromDirectory(directory)`: forced provider for a directory's owning project (via `resolveProjectIdFromDirectory` → `getProjectProvider`), or `null`.
 - `getEffectiveProviderApiBaseUrl(provider, directory)`: project override -> `getProviderApiBaseUrl(provider)` (global -> built-in default); `null` only when nothing resolves.
 - `saveProjectGitProviders(projectId, payload)`: persist the per-project overrides, preserving all other project JSON keys (atomic tmp-file + rename write); returns the saved `gitProviders` object (or `{}`); throws for an invalid projectId.
 
@@ -65,6 +67,7 @@
   "version": 1,
   "projectNotes": "...",
   "gitProviders": {
+    "provider": "gitlab",
     "github": { "apiBaseUrl": "https://project.github.example.com" },
     "gitlab": { "apiBaseUrl": "https://project.gitlab.example.com" }
   }
@@ -72,6 +75,7 @@
 ```
 
 - Per-project `gitProviders` carry `apiBaseUrl` only (no `detectUrls`); unknown provider keys are dropped and `apiBaseUrl` is normalized with the same rules as the global settings.
+- Optional `provider` (`github|gitlab|gitea`) forces the project's git provider instead of auto-detection. Client-side, a forced provider short-circuits remote-host detection (`useGitProvider`); server-side, it makes any remote host acceptable for that provider's repo parsing (`gitlab/repo.js`, `gitea/repo.js`).
 - `projects/<projectId>.json` is shared with the scheduled-tasks/projectNotes config; reading and saving preserve all other keys (the `gitProviders` key is omitted entirely when empty).
 - **Precedence per provider:** project override (`projects/<projectId>.json` → `getProjectProviderApiBaseUrl`) > global `settings.json` (`getProviderApiBaseUrl`) > built-in default (`GIT_PROVIDER_DEFAULTS`).
 

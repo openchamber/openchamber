@@ -6,6 +6,7 @@ const resetDomains = () => {
     domains: { github: [], gitlab: [], gitea: [] },
     apiBaseUrls: { github: '', gitlab: '', gitea: '' },
     projectApiBaseUrls: {},
+    projectProviders: {},
   });
 };
 
@@ -216,5 +217,37 @@ describe('useGitProviderDomainsStore per-project overrides', () => {
       gitlab: 'https://gitlab.example.com',
       gitea: '',
     });
+  });
+
+  test('hydrateProjectFromServer stores a forced provider', () => {
+    resetDomains();
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_proj', {
+      provider: 'gitlab',
+      gitlab: { apiBaseUrl: 'https://gitlab.example.com' },
+    });
+    expect(useGitProviderDomainsStore.getState().projectProviders).toEqual({ path_proj: 'gitlab' });
+  });
+
+  test('hydrateProjectFromServer normalizes and drops unknown providers', () => {
+    resetDomains();
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_bad', { provider: 'Bitbucket' });
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_empty', { provider: '' });
+    expect(useGitProviderDomainsStore.getState().projectProviders).toEqual({});
+  });
+
+  test('hydrateProjectFromServer clears the forced provider when removed', () => {
+    resetDomains();
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_proj', { provider: 'gitea' });
+    expect(useGitProviderDomainsStore.getState().projectProviders).toEqual({ path_proj: 'gitea' });
+    // A config without a provider removes it even when base urls stay empty.
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_proj', {});
+    expect(useGitProviderDomainsStore.getState().projectProviders).toEqual({});
+  });
+
+  test('clearProjectGitProviders clears the forced provider too', () => {
+    resetDomains();
+    useGitProviderDomainsStore.getState().hydrateProjectFromServer('path_proj', { provider: 'github' });
+    useGitProviderDomainsStore.getState().clearProjectGitProviders('path_proj');
+    expect(useGitProviderDomainsStore.getState().projectProviders).toEqual({});
   });
 });

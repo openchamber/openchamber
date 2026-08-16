@@ -12,6 +12,8 @@ process.env.OPENCHAMBER_DATA_DIR = TEMP_DATA_DIR;
 const {
   sanitizeProjectGitProviders,
   getProjectGitProviders,
+  getProjectProvider,
+  getProjectProviderFromDirectory,
   resolveProjectIdFromDirectory,
   getProjectProviderApiBaseUrl,
   getEffectiveProviderApiBaseUrl,
@@ -72,6 +74,46 @@ describe('sanitizeProjectGitProviders', () => {
     expect(sanitizeProjectGitProviders('not-an-object')).toBeUndefined();
     expect(sanitizeProjectGitProviders([])).toBeUndefined();
     expect(getProjectGitProviders('proj_1')).toEqual({});
+  });
+
+  test('keeps a forced provider when it is one of the known providers', () => {
+    expect(sanitizeProjectGitProviders({
+      provider: 'GitLab',
+      gitlab: { apiBaseUrl: 'gitlab.example.com' },
+    })).toEqual({
+      provider: 'gitlab',
+      gitlab: { apiBaseUrl: 'https://gitlab.example.com' },
+    });
+  });
+
+  test('drops an unknown or empty forced provider', () => {
+    expect(sanitizeProjectGitProviders({
+      provider: 'bitbucket',
+      github: { apiBaseUrl: 'github.example.com' },
+    })).toEqual({ github: { apiBaseUrl: 'https://github.example.com' } });
+    expect(sanitizeProjectGitProviders({ provider: '' })).toBeUndefined();
+    expect(sanitizeProjectGitProviders({ provider: '  ' })).toBeUndefined();
+  });
+});
+
+describe('getProjectProvider / getProjectProviderFromDirectory', () => {
+  test('returns the forced provider or null', () => {
+    fs.mkdirSync(PROJECTS_DIR, { recursive: true });
+    fs.writeFileSync(projectFile('proj_provider'), JSON.stringify({
+      gitProviders: { provider: 'gitea', gitea: { apiBaseUrl: 'https://gitea.example.com' } },
+    }, null, 2));
+    expect(getProjectProvider('proj_provider')).toBe('gitea');
+    expect(getProjectProvider('proj_missing')).toBeNull();
+  });
+
+  test('resolves the forced provider through the directory', () => {
+    fs.mkdirSync(PROJECTS_DIR, { recursive: true });
+    fs.writeFileSync(projectFile('proj_forced'), JSON.stringify({
+      gitProviders: { provider: 'gitlab' },
+    }, null, 2));
+    writeSettingsProjects([{ id: 'proj_forced', path: '/home/user/gl' }]);
+    expect(getProjectProviderFromDirectory('/home/user/gl')).toBe('gitlab');
+    expect(getProjectProviderFromDirectory('/home/user/unregistered')).toBeNull();
   });
 });
 

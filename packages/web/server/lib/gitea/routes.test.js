@@ -889,7 +889,7 @@ describe('Gitea data routes', () => {
     expect(response.body).toEqual({ error: 'Pull request not found' });
   });
 
-  test('pr/merge POSTs Do/MergeMethod and reports merged:true', async () => {
+  test('pr/merge POSTs the merge style in Do and reports merged:true', async () => {
     const fetchMock = scriptedFetch([
       (url, options) => {
         if (matches(/\/pulls\/12\/merge$/)(url) && options.method === 'POST') {
@@ -908,10 +908,10 @@ describe('Gitea data routes', () => {
     expect(response.body).toEqual({ connected: true, merged: true });
     const [, options] = fetchMock.mock.calls[0];
     expect(options.method).toBe('POST');
-    expect(JSON.parse(options.body)).toEqual({ Do: true, MergeMethod: 'merge' });
+    expect(JSON.parse(options.body)).toEqual({ Do: 'merge' });
   });
 
-  test('pr/merge maps the method to MergeMethod', async () => {
+  test('pr/merge maps the method to Do', async () => {
     const fetchMock = scriptedFetch([
       (url, options) => {
         if (matches(/\/pulls\/12\/merge$/)(url) && options.method === 'POST') {
@@ -927,7 +927,7 @@ describe('Gitea data routes', () => {
       .send({ directory: '/tmp/work', number: 12, method: 'squash' });
 
     const [, options] = fetchMock.mock.calls[0];
-    expect(JSON.parse(options.body)).toEqual({ Do: true, MergeMethod: 'squash' });
+    expect(JSON.parse(options.body)).toEqual({ Do: 'squash' });
   });
 
   test('pr/merge passes through a Gitea merge rejection as merged:false', async () => {

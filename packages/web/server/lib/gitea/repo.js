@@ -1,6 +1,6 @@
 import { getRemoteUrl } from '../git/index.js';
 import { getGiteaAuthAccounts, normalizeBaseUrl } from './auth.js';
-import { getEffectiveProviderApiBaseUrl } from '../git-providers/project-config.js';
+import { getEffectiveProviderApiBaseUrl, getProjectProviderFromDirectory } from '../git-providers/project-config.js';
 
 // When no explicit host allowlist is provided, accept any host that matches the
 // base URL of a stored Gitea account. Gitea/Forgejo is self-hosted, so there is
@@ -50,7 +50,7 @@ function acceptedHosts(knownHosts) {
  * When omitted, hosts from stored auth accounts are accepted. `github.com` and
  * `gitlab.com` are never accepted.
  */
-export const parseGiteaRemoteUrl = (raw, knownHosts) => {
+export const parseGiteaRemoteUrl = (raw, knownHosts, options = {}) => {
   if (typeof raw !== 'string') {
     return null;
   }
@@ -85,7 +85,7 @@ export const parseGiteaRemoteUrl = (raw, knownHosts) => {
   if (host === 'github.com' || host === 'gitlab.com') {
     return null;
   }
-  if (!acceptedHosts(knownHosts).has(host)) {
+  if (!options.allowAnyHost && !acceptedHosts(knownHosts).has(host)) {
     return null;
   }
 
@@ -133,8 +133,10 @@ export async function resolveGiteaRepoFromDirectory(directory, remoteName = 'ori
       // ignore a malformed override base URL
     }
   }
+  // A forced gitea provider (per-project override) accepts any remote host.
+  const forcedProvider = getProjectProviderFromDirectory(directory);
   return {
-    repo: parseGiteaRemoteUrl(remoteUrl, knownHosts),
+    repo: parseGiteaRemoteUrl(remoteUrl, knownHosts, { allowAnyHost: forcedProvider === 'gitea' }),
     remoteUrl,
   };
 }

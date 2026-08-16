@@ -302,8 +302,16 @@ export const GiteaSettings: React.FC<{ embedded?: boolean }> = ({ embedded = fal
       </div>
 
       <div className={cn('flex flex-col gap-4', embedded ? 'border-t border-[var(--surface-subtle)] pt-4' : 'pt-4')}>
-        <ProviderApiBaseUrlInput provider="gitea" />
-        <ProviderDetectUrlsInput provider="gitea" />
+        {connected ? (
+          <>
+            <ProviderApiBaseUrlInput provider="gitea" />
+            <ProviderDetectUrlsInput provider="gitea" />
+          </>
+        ) : (
+          <p className="typography-meta text-muted-foreground">
+            {t('settings.gitProviders.overridesLocked.description', { provider: t('settings.git.tabs.gitea') })}
+          </p>
+        )}
       </div>
     </>
   );

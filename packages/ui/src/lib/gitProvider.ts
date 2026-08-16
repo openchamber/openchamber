@@ -8,6 +8,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import {
   mergeGitProviderApiBaseUrls,
   resolveProjectApiBaseUrls,
+  resolveProjectIdForDirectory,
 } from '@/lib/projectGitProviders';
 import {
   useGitProviderDomainsStore,
@@ -181,8 +182,14 @@ export const useGitProvider = (directory: string | null | undefined): GitProvide
   const domains = useGitProviderDomainsStore((state) => state.domains);
   const apiBaseUrls = useGitProviderDomainsStore((state) => state.apiBaseUrls);
   const projectApiBaseUrls = useGitProviderDomainsStore((state) => state.projectApiBaseUrls);
+  const projectProviders = useGitProviderDomainsStore((state) => state.projectProviders);
   const projects = useProjectsStore((state) => state.projects);
   const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const projectId = useMemo(
+    () => resolveProjectIdForDirectory(directory, projects, worktreesByProject),
+    [directory, projects, worktreesByProject],
+  );
+  const forcedProvider = projectId ? (projectProviders[projectId] ?? null) : null;
   const hosts = useMemo<GitProviderHosts>(
     () => {
       // Precedence per provider: project override > global server settings.
@@ -201,6 +208,11 @@ export const useGitProvider = (directory: string | null | undefined): GitProvide
       setProvider(null);
       return;
     }
+    // A per-project forced provider wins over remote-host detection.
+    if (forcedProvider) {
+      setProvider(forcedProvider);
+      return;
+    }
     let cancelled = false;
     void resolveGitProvider(directory, hosts).then((resolved) => {
       if (!cancelled) {
@@ -210,7 +222,7 @@ export const useGitProvider = (directory: string | null | undefined): GitProvide
     return () => {
       cancelled = true;
     };
-  }, [directory, hosts]);
+  }, [directory, hosts, forcedProvider]);
 
   return provider;
 };
