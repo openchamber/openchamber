@@ -376,6 +376,7 @@ jobs:
           name: desktop-release-smoke-linux-${{ matrix.arch }}
           path: |
             packages/electron/dist/OpenChamber-${{ steps.versions.outputs.app }}-linux-${{ matrix.artifact_arch }}.AppImage
+            packages/electron/dist/OpenChamber-${{ steps.versions.outputs.app }}-linux-${{ matrix.artifact_arch }}.rpm
             packages/electron/dist/${{ matrix.manifest }}
           if-no-files-found: error
           retention-days: ${{ fromJSON(inputs.retention_days) }}

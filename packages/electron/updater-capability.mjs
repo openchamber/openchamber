@@ -10,11 +10,9 @@ export const assertUpdaterCapability = ({
 } = {}) => {
   if (platform !== 'linux' || !packaged) return;
 
-  if (!appImagePath) {
-    throw new Error(
-      'Updates require the packaged Linux AppImage. Start OpenChamber from its .AppImage file, not an extracted or repackaged copy.',
-    );
-  }
+  // RPM installs (and extracted AppImages) have no APPIMAGE env var; skip the
+  // updater silently instead of throwing so RPM users see no error on launch.
+  if (!appImagePath) return;
   if (!path.isAbsolute(appImagePath)) {
     throw new Error(`Updates require APPIMAGE to be an absolute path, got: ${appImagePath}`);
   }
