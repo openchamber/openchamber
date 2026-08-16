@@ -49,8 +49,6 @@ export const UsagePage: React.FC = () => {
   const error = useQuotaStore((state) => state.error);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const setDropdownProviderIds = useQuotaStore((state) => state.setDropdownProviderIds);
-  const showPredValues = useQuotaStore((state) => state.showPredValues);
-  const setShowPredValues = useQuotaStore((state) => state.setShowPredValues);
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const toggleModelSelected = useQuotaStore((state) => state.toggleModelSelected);
   const applyDefaultSelections = useQuotaStore((state) => state.applyDefaultSelections);
@@ -93,11 +91,6 @@ export const UsagePage: React.FC = () => {
     setDropdownProviderIds(next);
     void updateDesktopSettings({ usageDropdownProviders: next });
   }, [dropdownProviderIds, selectedProviderId, setDropdownProviderIds]);
-
-  const handleShowPredValuesChange = React.useCallback((enabled: boolean) => {
-    setShowPredValues(enabled);
-    void updateDesktopSettings({ usageShowPredValues: enabled });
-  }, [setShowPredValues]);
 
   const providerModels = React.useMemo((): ModelInfo[] => {
     if (!usage?.models) return [];
@@ -187,15 +180,6 @@ export const UsagePage: React.FC = () => {
           label={t('settings.usage.page.options.showInWorkStatus')}
           ariaLabel={t('settings.usage.page.options.showInWorkStatusAria')}
           info={t('settings.usage.page.options.showInWorkStatusTooltip')}
-        />
-      </SettingsSection>
-
-      <SettingsSection settingsItem="usage.show-predictions">
-        <SettingsCheckboxRow
-          checked={showPredValues}
-          onChange={handleShowPredValuesChange}
-          label={t('settings.usage.sidebar.field.showPredictions')}
-          ariaLabel={t('settings.usage.sidebar.field.showPredictions')}
         />
       </SettingsSection>
 
