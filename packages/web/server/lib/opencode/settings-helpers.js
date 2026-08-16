@@ -440,6 +440,10 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.defaultAgent.trim();
       result.defaultAgent = trimmed.length > 0 ? trimmed : undefined;
     }
+    if (typeof candidate.defaultDirectory === 'string') {
+      const trimmed = candidate.defaultDirectory.trim();
+      result.defaultDirectory = trimmed.length > 0 ? trimmed : undefined;
+    }
     if (typeof candidate.smallModelUseDefault === 'boolean') {
       result.smallModelUseDefault = candidate.smallModelUseDefault;
     }

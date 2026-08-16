@@ -358,6 +358,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['agent', 'new sessions'],
   },
   {
+    id: 'sessions.default-directory',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.field.defaultDirectory',
+    keywords: ['directory', 'folder', 'path', 'new sessions'],
+  },
+  {
     id: 'sessions.deletion-dialog',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.field.showDeletionDialog',
