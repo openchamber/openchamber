@@ -1,12 +1,14 @@
 import path from 'node:path';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { OpenChamberControlError, asControlError } from './error.js';
-import { OPENCHAMBER_CONTROL_ACTIONS } from './actions.js';
+import { OPENCHAMBER_ALL_ACTIONS } from './actions.js';
+import { writeScreenshot } from './screenshots.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
 const WAIT_POLL_INTERVAL_MS = 500;
-const CONTROL_ACTIONS = new Set(OPENCHAMBER_CONTROL_ACTIONS);
+// One service, both capabilities: which tool asked is the caller's concern.
+const CONTROL_ACTIONS = new Set(OPENCHAMBER_ALL_ACTIONS);
 const SCHEDULE_TASK_ID_ACTIONS = new Set([
   'schedule.run',
   'schedule.delete',
@@ -141,6 +143,7 @@ export const createOpenChamberControlService = (dependencies) => {
     waitForOpenCodeReady,
     sessionService,
     scheduledTaskService,
+    browserControl = null,
     createClient = createOpencodeClient,
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
     now = Date.now,
@@ -320,10 +323,146 @@ export const createOpenChamberControlService = (dependencies) => {
     return publicResult;
   };
 
+  /**
+   * Validates browser inputs here rather than in the renderer: an invalid call
+   * should come back as a usage error the agent can correct, without waking a
+   * client or waiting for a round trip.
+   */
+  const browserAction = async (action, input, signal, contextDirectory) => {
+    const parameters = {};
+
+    const readViewport = (required) => {
+      const viewport = asNonEmptyString(input.viewport);
+      if (!viewport) {
+        if (required) throw new OpenChamberControlError('viewport is required for browser.resize', 400);
+        return;
+      }
+      if (!['mobile', 'tablet', 'desktop', 'fill'].includes(viewport)) {
+        throw new OpenChamberControlError('viewport must be mobile, tablet, desktop, or fill', 400);
+      }
+      parameters.viewport = viewport;
+    };
+
+    if (action === 'browser.resize') readViewport(true);
+
+    if (action === 'browser.capture') {
+      const label = asNonEmptyString(input.label);
+      if (label) parameters.label = label;
+    }
+
+    if (action === 'browser.open') {
+      readViewport(false);
+      const url = asNonEmptyString(input.url);
+      if (!url) throw new OpenChamberControlError('url is required for browser.open', 400);
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        throw new OpenChamberControlError('url must be an absolute http(s) URL', 400);
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new OpenChamberControlError('url must use http or https', 400);
+      }
+      parameters.url = parsed.toString();
+    }
+
+
+    if (action === 'browser.click') {
+      const selector = asNonEmptyString(input.selector);
+      const text = asNonEmptyString(input.text);
+      if (!selector && !text) {
+        throw new OpenChamberControlError('browser.click requires selector or text', 400);
+      }
+      if (selector) parameters.selector = selector;
+      if (text) parameters.text = text;
+    }
+
+    if (action === 'browser.snapshot') {
+      const selector = asNonEmptyString(input.selector);
+      if (selector) parameters.selector = selector;
+    }
+
+    if (action === 'browser.inspect') {
+      const selector = asNonEmptyString(input.selector);
+      if (!selector) throw new OpenChamberControlError('selector is required for browser.inspect', 400);
+      parameters.selector = selector;
+    }
+
+    if (action === 'browser.type') {
+      const selector = asNonEmptyString(input.selector);
+      if (!selector) throw new OpenChamberControlError('selector is required for browser.type', 400);
+      if (typeof input.value !== 'string') {
+        throw new OpenChamberControlError('value is required for browser.type', 400);
+      }
+      parameters.selector = selector;
+      parameters.value = input.value;
+      parameters.submit = input.submit === true;
+    }
+
+    if (action === 'browser.scroll') {
+      const selector = asNonEmptyString(input.selector);
+      const direction = asNonEmptyString(input.direction);
+      if (!selector && !direction) {
+        throw new OpenChamberControlError('browser.scroll requires direction or selector', 400);
+      }
+      if (direction && !['up', 'down', 'top', 'bottom'].includes(direction)) {
+        throw new OpenChamberControlError('direction must be up, down, top, or bottom', 400);
+      }
+      if (selector) parameters.selector = selector;
+      if (direction) parameters.direction = direction;
+    }
+
+    // Opening a page waits for the navigation to settle, so its budget has to
+    // exceed the client's own wait; sharing one timeout with the quick actions
+    // made a slow page indistinguishable from an unreachable browser.
+    const timeoutMs = action === 'browser.open' ? 45_000 : 20_000;
+    const result = await browserControl.request(action, parameters, { signal, timeoutMs });
+
+    // The image is written here rather than in the renderer: the file belongs
+    // beside the code it documents, and the client that took it may be on a
+    // different machine than the repository.
+    if (action === 'browser.capture') {
+      const directory = asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory);
+      if (!directory) {
+        throw new OpenChamberControlError('directory is required to save a screenshot', 400);
+      }
+      const capture = result && typeof result === 'object' ? result : {};
+      const saved = await writeScreenshot({
+        directory,
+        base64: capture.base64,
+        mime: capture.mime,
+        label: input.label,
+      });
+      // The base64 never goes back to the caller: it is large, and the path is
+      // what an answer, a commit, or a review can actually use.
+      return {
+        path: saved.path,
+        // Saving the file is only half of showing it. Chat collects the image
+        // paths written in a finished answer and renders them below it, so the
+        // agent is told the one thing it cannot infer: that writing the path is
+        // what puts the picture in front of the user.
+        hint: `Write ![](${saved.path}) in your reply to show this image to the user; it is rendered under your message.`,
+        url: capture.url ?? null,
+        title: capture.title ?? null,
+        viewport: capture.viewport ?? null,
+        width: capture.width ?? null,
+        height: capture.height ?? null,
+      };
+    }
+
+    return result;
+  };
+
   const execute = async (action, input = {}, contextDirectory, options = {}) => {
     try {
       if (!CONTROL_ACTIONS.has(action)) {
         throw new OpenChamberControlError(`Unsupported OpenChamber action: ${action || 'missing'}`, 400);
+      }
+      if (action.startsWith('browser.')) {
+        if (!browserControl) {
+          throw new OpenChamberControlError('The in-app browser is not available on this server', 503);
+        }
+        return browserAction(action, input, options.signal, contextDirectory);
       }
       if (action === 'projects.list') return { projects: await projects() };
       if (action === 'models.list') return models();

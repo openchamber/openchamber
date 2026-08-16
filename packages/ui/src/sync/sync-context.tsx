@@ -40,6 +40,7 @@ import { stripSessionDiffSnapshots } from "./sanitize"
 import { applySessionEventToGlobalSessions } from "./session-event-router"
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
+import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import {
@@ -2769,26 +2770,6 @@ export function useChildStoreManager() {
   return useSyncSystem().childStores
 }
 
-export type SessionTextMessage = {
-  id: string
-  role: string | null
-  text: string
-}
-
-const getPartText = (part: Part): string => {
-  if (part?.type !== "text") return ""
-  const text = (part as { text?: unknown }).text
-  return typeof text === "string" ? text : ""
-}
-
-const getConcatenatedTextFromParts = (parts: Part[]): string => {
-  let text = ""
-  for (const part of parts) {
-    text += getPartText(part)
-  }
-  return text
-}
-
 type SessionMessageRecord = { info: Message; parts: Part[] }
 const EMPTY_SESSION_MESSAGE_RECORDS: SessionMessageRecord[] = []
 
@@ -3015,7 +2996,7 @@ function getVisibleMessagesForSession(state: State, sessionID: string, previous?
 
   return {
     sourceMessages,
-    visibleMessages: revertMessageID ? sourceMessages.filter((message) => message.id < revertMessageID) : sourceMessages,
+    visibleMessages: messagesBefore(sourceMessages, revertMessageID),
     revertMessageID,
   }
 }
@@ -3112,19 +3093,6 @@ export function useSessionRenderable(sessionID: string, directory?: string): boo
     [sessionID, store],
   )
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-}
-
-export function useSessionTextMessages(sessionID: string, directory?: string): SessionTextMessage[] {
-  const records = useSessionMessageRecords(sessionID, directory)
-
-  return useMemo(
-    () => records.map((record) => ({
-      id: record.info.id,
-      role: typeof record.info.role === "string" ? record.info.role : null,
-      text: getConcatenatedTextFromParts(record.parts),
-    })),
-    [records],
-  )
 }
 
 export function useUserMessageHistory(sessionID: string, directory?: string): string[] {

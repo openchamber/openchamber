@@ -231,6 +231,8 @@ type SendMessageOptions = {
   target?: CapturedSendTarget
   sessionId?: string
   directory?: string
+  /** Immutable copy of the new-session draft at submit time; used instead of the live draft. */
+  draftSnapshot?: NewSessionDraftState
   delivery?: 'steer'
 }
 
@@ -252,9 +254,6 @@ function notifyMessageSent(sessionId: string): void {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type { SyntheticContextPart } from "./input-store"
-export type { SessionMemoryState } from "./viewport-store"
 
 export type NewSessionDraftState = {
   open: boolean
@@ -604,14 +603,111 @@ const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, pr
   }
 }
 
+const resolveActiveProjectDirectory = (draft: NewSessionDraftState): string | null => {
+  const projectsState = useProjectsStore.getState()
+  return normalizePath(
+    projectsState.getActiveProject()?.path
+      ?? (draft.selectedProjectId
+        ? projectsState.projects.find((project) => project.id === draft.selectedProjectId)?.path
+        : null)
+      ?? null,
+  )
+}
+
+/**
+ * Regular new-chat drafts inherit the persisted current/last directory. If that
+ * path is confirmed missing (deleted worktree), fall back to the active project.
+ * Explicit worktree targets, in-flight worktree creation, and unknown/offline
+ * probes stay unchanged so a temporary outage cannot rewrite the destination.
+ * A concurrent rewrite of the same implicit draft to that fallback is accepted
+ * instead of aborting create.
+ */
+const resolveCreatableDraftDirectory = async (
+  draft: NewSessionDraftState,
+  requestedDirectory: string | null | undefined,
+): Promise<{ status: "ok"; directory: string | null | undefined } | { status: "aborted" }> => {
+  const directory = requestedDirectory ?? opencodeClient.getDirectory() ?? null
+  const isRecoverableDraftDirectory =
+    draft.open
+    && draft.preserveDirectoryOverride !== true
+    && !draft.pendingWorktreeRequestId
+    && !draft.bootstrapPendingDirectory
+    && normalizePath(draft.directoryOverride) === normalizePath(directory)
+
+  if (!isRecoverableDraftDirectory || !directory) {
+    return { status: "ok", directory }
+  }
+
+  const activeProjectDirectory = resolveActiveProjectDirectory(draft)
+  if (!activeProjectDirectory || normalizePath(directory) === activeProjectDirectory) {
+    return { status: "ok", directory }
+  }
+
+  const runtimeKey = getRuntimeKey()
+  const draftDirectory = draft.directoryOverride
+  const availability = await opencodeClient.getDirectoryAvailability(directory)
+  const currentDraft = useSessionUIStore.getState().newSessionDraft
+  const currentDirectory = normalizePath(currentDraft.directoryOverride)
+  const capturedDirectory = normalizePath(draftDirectory)
+  // openNewSessionDraft may rewrite the same implicit draft to this fallback
+  // while createSession's probe is still in flight. That is the intended
+  // destination, not a user change, so do not abort the create.
+  const recoveredToActiveProject = currentDirectory === activeProjectDirectory
+    && capturedDirectory !== activeProjectDirectory
+  const draftChanged = !currentDraft.open
+    || currentDraft.preserveDirectoryOverride !== draft.preserveDirectoryOverride
+    || currentDraft.pendingWorktreeRequestId !== draft.pendingWorktreeRequestId
+    || (currentDirectory !== capturedDirectory && !recoveredToActiveProject)
+
+  if (getRuntimeKey() !== runtimeKey || draftChanged) {
+    return { status: "aborted" }
+  }
+
+  if (recoveredToActiveProject) {
+    return { status: "ok", directory: activeProjectDirectory }
+  }
+
+  return {
+    status: "ok",
+    directory: availability === "missing" ? activeProjectDirectory : directory,
+  }
+}
+
+const recoverStaleDraftDirectory = async (openedDraft: NewSessionDraftState): Promise<void> => {
+  const resolved = await resolveCreatableDraftDirectory(openedDraft, openedDraft.directoryOverride)
+  if (resolved.status !== "ok") return
+  const recovered = normalizePath(resolved.directory ?? null)
+  const original = normalizePath(openedDraft.directoryOverride)
+  if (!recovered || recovered === original) return
+
+  const currentDraft = useSessionUIStore.getState().newSessionDraft
+  if (!currentDraft.open) return
+  if (currentDraft.preserveDirectoryOverride === true) return
+  if (currentDraft.pendingWorktreeRequestId) return
+  if (normalizePath(currentDraft.directoryOverride) !== original) return
+
+  const recoveredProject = useProjectsStore.getState().projects.find((project) => (
+    normalizePath(project.path) === recovered
+  ))
+  const nextDraft: NewSessionDraftState = {
+    ...currentDraft,
+    selectedProjectId: recoveredProject?.id ?? currentDraft.selectedProjectId,
+    directoryOverride: recovered,
+  }
+  useSessionUIStore.setState({ newSessionDraft: nextDraft })
+  writeRuntimeSessionMemory(runtimeMemoryKey(), { draft: nextDraft })
+  persistDraftTarget({ projectId: nextDraft.selectedProjectId ?? null, directory: recovered })
+  void activateConfigForDirectory(recovered)
+}
+
 export async function materializeOpenDraftSession(selection: {
   providerID: string
   modelID: string
   agent?: string
   variant?: string
-}): Promise<MaterializedDraftSession | null> {
+}, draftOverride?: NewSessionDraftState): Promise<MaterializedDraftSession | null> {
   const store = useSessionUIStore.getState()
-  const draft = store.newSessionDraft
+  const draft = draftOverride ?? store.newSessionDraft
   if (!draft?.open) return null
   const draftPermissionAutoAcceptEnabled = draft.permissionAutoAcceptEnabled === true
 
@@ -965,6 +1061,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (directory && directory !== useDirectoryStore.getState().currentDirectory) {
       useDirectoryStore.getState().setDirectory(directory)
     }
+
+    void recoverStaleDraftDirectory(nextDraft)
   },
 
   // ---------------------------------------------------------------------------
@@ -1224,7 +1322,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       set({ pendingChangesBarDismissed: map });
     }
 
-    const draft = get().newSessionDraft
+    const draft = options?.draftSnapshot ?? get().newSessionDraft
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
     const goalArm = inputMode !== "shell" && content.trim().length > 0
@@ -1282,7 +1380,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         modelID,
         agent: trimmedAgent,
         variant,
-      })
+      }, options?.draftSnapshot)
       if (!createdDraftSession) throw new Error("Failed to create session")
 
       const mergedAdditionalParts = createdDraftSession.syntheticParts?.length
@@ -1417,14 +1515,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const targetFolderId = draft.targetFolderId
 
     try {
-      const dir = directoryOverride ?? opencodeClient.getDirectory()
+      const resolved = await resolveCreatableDraftDirectory(draft, directoryOverride)
+      if (resolved.status === "aborted") return null
+      const dir = resolved.directory
       const session = await createSessionAction(title, dir, parentID ?? null, metadata)
       if (!session) return null
 
       get().closeNewSessionDraft()
 
       if (targetFolderId) {
-        const scopeKey = directoryOverride || get().lastLoadedDirectory || session.directory
+        const scopeKey = dir || get().lastLoadedDirectory || session.directory
         if (scopeKey) {
           useSessionFoldersStore.getState().addSessionToFolder(scopeKey, targetFolderId, session.id)
         }
@@ -1491,7 +1591,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const revertToId = currentSession?.revert?.messageID
     let targetMessage: typeof messages[number] | undefined
     if (revertToId) {
-      targetMessage = [...userMessages].reverse().find((m) => m.id < revertToId)
+      const revertIndex = userMessages.findIndex((message) => message.id === revertToId)
+      targetMessage = revertIndex > 0 ? userMessages[revertIndex - 1] : undefined
     } else {
       targetMessage = userMessages[userMessages.length - 1]
     }
@@ -1538,7 +1639,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     await refetchSessionMessages(sessionId)
     const messages = getSyncMessages(sessionId)
     const userMessages = messages.filter((m) => m.role === "user")
-    const targetMessage = userMessages.find((m) => m.id > revertToId)
+    const revertIndex = userMessages.findIndex((message) => message.id === revertToId)
+    const targetMessage = revertIndex >= 0 ? userMessages[revertIndex + 1] : undefined
 
     if (targetMessage) {
       await get().revertToMessage(sessionId, targetMessage.id, { skipRedoPush: true })

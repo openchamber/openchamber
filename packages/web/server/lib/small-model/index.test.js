@@ -26,11 +26,41 @@ vi.mock('./call.js', () => ({
   }),
 }));
 
-const { generateSmallModelText, describeSmallModel } = await import('./index.js');
+const { generateSmallModelText, describeSmallModel, listAuthenticatedProviders } = await import('./index.js');
 const { readAuthFile } = await import('../opencode/auth.js');
 const { readConfigLayers } = await import('../opencode/shared.js');
 const { getModelCatalog } = await import('./catalog.js');
 const { callSmallModel } = await import('./call.js');
+
+describe('unsupported small-model providers', () => {
+  beforeEach(() => {
+    readAuthFile.mockReturnValue({
+      'claude-code': {
+        type: 'oauth',
+        access: 'claude-cli-managed',
+        refresh: 'claude-cli-managed',
+      },
+    });
+    readConfigLayers.mockReturnValue({ mergedConfig: {} });
+    getModelCatalog.mockResolvedValue({});
+    callSmallModel.mockReset();
+  });
+
+  it('rejects Claude Code with an actionable error before transport dispatch', async () => {
+    await expect(generateSmallModelText({
+      prompt: 'summarize this',
+      model: 'claude-code/haiku',
+    })).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'small-model-provider-unsupported',
+    });
+    expect(callSmallModel).not.toHaveBeenCalled();
+  });
+
+  it('does not offer Claude Code in the Small Model picker', () => {
+    expect(listAuthenticatedProviders()).not.toContain('claude-code');
+  });
+});
 
 // 8k context leaves 4k input tokens after the output reserve → 16k chars.
 const CATALOG = {

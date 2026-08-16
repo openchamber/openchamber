@@ -59,7 +59,7 @@ export const SETTINGS_SECTION_TITLE_CLASS =
 /** Split-pane sidebar panel title — same level as section titles. */
 export const SETTINGS_PANEL_TITLE_CLASS = SETTINGS_SECTION_TITLE_CLASS;
 /** L3 — control-group heading inside a section. */
-export const SETTINGS_GROUP_TITLE_CLASS =
+const SETTINGS_GROUP_TITLE_CLASS =
   'typography-settings-group-title text-foreground';
 /** L4 — field / control labels. */
 export const SETTINGS_FIELD_LABEL_CLASS =

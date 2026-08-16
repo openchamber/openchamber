@@ -11,7 +11,7 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
 
 - A surface maps 1:1 to a `ContextPanelMode` tab mode in `useUIStore`.
 - `availability: 'always'` surfaces are always present on the rail.
-  `availability: 'has-content'` surfaces (preview, chat) are hidden from the
+  `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one
   does — they must not disappear while in use.
 - `defaultWidthFraction` is the panel width as a fraction of the content area,
@@ -50,7 +50,7 @@ the `openContext*` actions in `useUIStore`.
   positions). Chat tab records stay open, but only the active chat iframe is
   mounted while the panel is open. A selected chat restores its state from
   the session stores. A closed panel mounts no chat iframe.
-  Singleton surfaces (git, pr, notes, plan, context) and preview tabs remount
-  on switch. These surfaces must restore their state from stores or snapshots.
+  Singleton surfaces (git, pr, notes, plan, context) remount on switch. These
+  surfaces must restore their state from stores or snapshots.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
   mobile shell have their own layouts and do not consume this registry.

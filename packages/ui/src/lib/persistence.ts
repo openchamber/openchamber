@@ -553,6 +553,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     inputSpellcheckEnabled: defaults.inputSpellcheckEnabled,
     showOpenCodeUpdateNotifications: defaults.showOpenCodeUpdateNotifications,
     agentControlToolEnabled: defaults.agentControlToolEnabled,
+    agentWebToolEnabled: defaults.agentWebToolEnabled,
     showToolFileIcons: defaults.showToolFileIcons,
     codeBlockLineWrap: defaults.codeBlockLineWrap,
     showTurnChangedFiles: defaults.showTurnChangedFiles,
@@ -728,6 +729,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     && settings.agentControlToolEnabled !== store.agentControlToolEnabled
   ) {
     store.setAgentControlToolEnabled(settings.agentControlToolEnabled);
+  }
+  if (
+    typeof settings.agentWebToolEnabled === 'boolean'
+    && settings.agentWebToolEnabled !== store.agentWebToolEnabled
+  ) {
+    store.setAgentWebToolEnabled(settings.agentWebToolEnabled);
   }
   if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
     store.setShowToolFileIcons(settings.showToolFileIcons);
@@ -1374,6 +1381,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.agentControlToolEnabled === 'boolean') {
     result.agentControlToolEnabled = candidate.agentControlToolEnabled;
+  }
+  if (typeof candidate.agentWebToolEnabled === 'boolean') {
+    result.agentWebToolEnabled = candidate.agentWebToolEnabled;
   }
   if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
     result.openCodeUpdateToastDismissedVersion = candidate.openCodeUpdateToastDismissedVersion.trim().slice(0, 128);

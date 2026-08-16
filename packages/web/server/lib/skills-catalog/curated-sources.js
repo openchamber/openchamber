@@ -9,7 +9,7 @@ const CURATED_SKILLS_SOURCES = [
   },
   {
     id: 'clawdhub',
-    label: 'ClawdHub',
+    label: 'ClawHub',
     description: 'Community skill registry with vector search',
     source: 'clawdhub:registry',
     sourceType: 'clawdhub',

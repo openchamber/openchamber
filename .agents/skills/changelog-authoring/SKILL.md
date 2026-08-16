@@ -18,37 +18,21 @@ Only update the `[Unreleased]` bullets. Never add a new release header.
 
 ## Gather Context First
 
-Read recent release sections for style before drafting:
-
-```bash
-head -140 CHANGELOG.md
-```
-
-Collect git context (base tag, commit count, changed files):
+Read recent release sections for style. Determine the latest tag (or initial commit fallback), then inspect every commit and changed path through `HEAD`:
 
 ```bash
 BASE=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
-echo "Base: $BASE"
-echo "Commits since base: $(git rev-list --count "$BASE"..HEAD)"
-echo "Diff stats: $(git diff --shortstat "$BASE"..HEAD)"
-echo "=== Top 30 commits ==="; git log --oneline -30 "$BASE"..HEAD
-echo "=== Changed files ==="; git diff --stat "$BASE"..HEAD
+git log --oneline "$BASE"..HEAD
+git diff --stat "$BASE"..HEAD
 ```
 
-Inspect all commits after the base up to `HEAD`. Use the changed files/code paths to decide which platform each change touches.
+Context gathering is complete when each user-visible change has evidence, platform reach, and contributor identity where available.
 
 ## Squashed PR Merges
 
 A squashed merge commit often collapses a whole PR into a single terse subject line that omits valuable detail. When a commit looks like a squashed PR merge (subject ending in `(#123)`, or a `Merge pull request #123` commit), inspect the PR itself — its title and description usually carry the real user-facing context.
 
-```bash
-# Find PR-linked commits since base
-BASE=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
-git log --oneline "$BASE"..HEAD | grep -oE '#[0-9]+'
-
-# Read a PR's title, body, and author (requires gh)
-gh pr view <number> --json number,title,body,author,mergedAt
-```
+Use `gh pr view <number> --json number,title,body,author,mergedAt` for PR evidence.
 
 - Prefer the PR description over the squashed commit subject when the description explains the user-visible change more accurately.
 - Do not copy PR descriptions verbatim; distill them into the changelog style below.
@@ -90,7 +74,7 @@ gh pr view <number> --json number,title,body,author,mergedAt
 - Find usernames from commit authors (GitHub username, not email) or PR metadata when available.
 - Skip credit when the contributor is `btriapitsyn` (repo owner).
 
-## Quality Checks Before Editing
+## Completion Criteria
 
 - For every bullet: "Could a user point to this in the UI or behavior?" If not, rewrite or drop it.
 - For every VS Code bullet: verify the change applies to the extension, not just shared web UI or server code.
@@ -99,9 +83,11 @@ gh pr view <number> --json number,title,body,author,mergedAt
 - Do not bundle unrelated changes to reduce bullet count. Prefer omitting minor internal fixes over vague catch-all sentences.
 - Mention mostly-internal refactors only when there is a concrete user-visible fix; otherwise add no bullet.
 
+The lists are complete when every bullet is supported by inspected evidence, points to user-observable behavior, is ranked by impact, appears only in changelogs whose runtime receives it, and credits eligible contributors.
+
 ## Workflow
 
-1. Gather repo style and git context (commands above).
+1. Gather repo style and complete git/PR context.
 2. Propose the new `[Unreleased]` bullet list for the main `CHANGELOG.md`.
 3. Propose the VS Code-specific `[Unreleased]` list for `packages/vscode/CHANGELOG.md`.
 4. Edit both files to update their respective `[Unreleased]` sections.

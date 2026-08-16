@@ -200,6 +200,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  public focusChatInput(): void {
+    if (!this._view) {
+      return;
+    }
+
+    this._view.show(true);
+    void this._view.webview.postMessage({
+      type: 'command',
+      command: 'focusChatInput',
+    });
+  }
+
   public addContextSelection(selection: { filePath: string; filename: string; text: string }) {
     if (!this._view) {
       return;

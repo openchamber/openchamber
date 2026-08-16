@@ -7,7 +7,7 @@
 
 import { buildResult } from '../utils/index.js';
 
-import * as claude from './claude.js';
+import * as claude from './claude/index.js';
 import * as codex from './codex.js';
 import * as copilot from './copilot.js';
 import * as crof from './crof.js';

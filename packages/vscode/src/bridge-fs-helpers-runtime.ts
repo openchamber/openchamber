@@ -538,7 +538,13 @@ export const fetchModelsMetadata = async () => {
   }
 };
 
-const getFsAccessRoot = (): string => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+const getFsAccessRoot = (requestedRoot?: string): string => {
+  const workspaceRoots = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [];
+  const requested = requestedRoot ? path.resolve(requestedRoot) : '';
+  return workspaceRoots.find((root) => path.resolve(root) === requested)
+    || workspaceRoots[0]
+    || os.homedir();
+};
 
 export const getFsMimeType = (filePath: string): string => {
   const ext = path.extname(filePath).toLowerCase();
@@ -564,13 +570,13 @@ export type FsReadPathResolution =
   | { ok: true; resolvedPath: string }
   | { ok: false; status: number; error: string };
 
-export const resolveFileReadPath = async (targetPath: string): Promise<FsReadPathResolution> => {
+export const resolveFileReadPath = async (targetPath: string, requestedRoot?: string): Promise<FsReadPathResolution> => {
   const trimmed = targetPath.trim();
   if (!trimmed) {
     return { ok: false, status: 400, error: 'Path is required' };
   }
 
-  const baseRoot = getFsAccessRoot();
+  const baseRoot = getFsAccessRoot(requestedRoot);
   const resolved = resolveUserPath(trimmed, baseRoot);
   if (!resolved) {
     return { ok: false, status: 400, error: 'Path is required' };

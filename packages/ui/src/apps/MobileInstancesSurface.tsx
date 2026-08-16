@@ -7,6 +7,8 @@ import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { cn } from '@/lib/utils';
 
 import { connectionDisplayUrl, isActiveRuntimeConnection, useMobileConnection } from './mobileConnections';
+import { useDebugPanelLongPress } from './mobileConnectionDebug';
+import { MobileConnectionDebugPanel } from './MobileConnectionDebugPanel';
 import { isQrScanSupported, scanConnectionQr } from './mobileQrScan';
 import { mobileConnectionInputClass, mobileInputKeyboardProps } from './mobileConnectionUi';
 import { MobileQrConnectionLoading, MobileQrScannerOverlay } from './MobileQrScannerOverlay';
@@ -37,6 +39,10 @@ export const MobileInstancesSurface: React.FC<{
   const [formOpen, setFormOpen] = React.useState(false);
   // Which row is being connected to, for the per-row spinner.
   const [connectingId, setConnectingId] = React.useState<string | null>(null);
+  // Hidden diagnostics: long-press a connection row to open the connection
+  // event log (the long-press swallows the row's normal connect tap).
+  const [debugOpen, setDebugOpen] = React.useState(false);
+  const debugLongPress = useDebugPanelLongPress(React.useCallback(() => setDebugOpen(true), []));
 
   // Populate/clear the form imperatively (on edit tap / cancel / save) rather than via
   // an effect keyed on the derived connection object. With an effect, any churn of the
@@ -189,11 +195,12 @@ export const MobileInstancesSurface: React.FC<{
     <>
     {isScanning ? <MobileQrScannerOverlay onCancel={() => scanAbortRef.current?.abort()} /> : null}
     {isCompletingScan ? <MobileQrConnectionLoading /> : null}
+    {debugOpen ? <MobileConnectionDebugPanel onClose={() => setDebugOpen(false)} /> : null}
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto px-5 py-4">
         <div className="space-y-6">
           {connections.length > 0 ? (
-            <div className="overflow-hidden rounded-[18px] border border-border/70 bg-surface-elevated">
+            <div {...debugLongPress} className="overflow-hidden rounded-[18px] border border-border/70 bg-surface-elevated">
               {connections.map((connection) => {
                 const confirming = confirmingDeleteId === connection.id;
                 const isActive = isActiveRuntimeConnection(connection);
@@ -287,7 +294,7 @@ export const MobileInstancesSurface: React.FC<{
               })}
             </div>
           ) : (
-            <p className="rounded-[18px] border border-dashed border-border/70 px-4 py-6 text-center typography-small text-muted-foreground">
+            <p {...debugLongPress} className="rounded-[18px] border border-dashed border-border/70 px-4 py-6 text-center typography-small text-muted-foreground">
               {t('mobile.connect.saved.empty')}
             </p>
           )}

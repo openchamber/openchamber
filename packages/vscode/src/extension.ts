@@ -182,7 +182,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.focusChat', async () => {
-      await vscode.commands.executeCommand('openchamber.chatView.focus');
+      if (!(await revealChatViewForPayload())) {
+        return;
+      }
+      chatViewProvider?.focusChatInput();
     })
   );
 

@@ -1,14 +1,172 @@
-import { marked, type Tokens } from 'marked';
+import { Marked, marked, type Tokens } from 'marked';
 import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { highlightCodeInWorker } from './markdown-worker';
-import { escapeRawMarkdownHtml, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
+import { escapeRawMarkdownHtml, isLocalFileUrl, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
 
 const escapeAttr = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const LOCAL_IMAGE_EXTENSION_RE = /\.(?:png|jpe?g|gif|webp)(?:[?#].*)?$/i;
+const WINDOWS_ABSOLUTE_PATH_RE = /^[A-Za-z]:[\\/]/;
+const URL_SCHEME_RE = /^[A-Za-z][A-Za-z\d+.-]*:/;
+
+export interface MarkdownImageCandidate {
+  source: string;
+  filename: string;
+}
+
+export type MarkdownImageMode = 'inline' | 'label';
+
+export const MAX_MARKDOWN_IMAGE_COUNT = 12;
+
+const MARKDOWN_IMAGE_CANDIDATE_CACHE_MAX_ENTRIES = 1024;
+const MARKDOWN_IMAGE_CANDIDATE_CACHE_MAX_BYTES = 2 * 1024 * 1024;
+const MARKDOWN_IMAGE_CANDIDATE_CACHE_MAX_ENTRY_BYTES = 64 * 1024;
+
+type MarkdownImageCandidateCacheEntry = {
+  candidates: MarkdownImageCandidate[];
+  bytes: number;
+};
+
+const markdownImageCandidateCache = new Map<string, MarkdownImageCandidateCacheEntry>();
+let markdownImageCandidateCacheBytes = 0;
+let markdownImageCandidateScanCount = 0;
+
+const isLocalMarkdownImageSource = (source: string): boolean => {
+  if (/^\/\//.test(source) || !LOCAL_IMAGE_EXTENSION_RE.test(source)) return false;
+  return WINDOWS_ABSOLUTE_PATH_RE.test(source)
+    || /^file:\/\//i.test(source)
+    || !URL_SCHEME_RE.test(source);
+};
+
+const isSupportedMarkdownImageSource = (source: string): boolean => (
+  /^(?:https?:)?\/\//i.test(source)
+  || /^data:image\/(?:png|jpeg|gif|webp);base64,/i.test(source)
+  || isLocalMarkdownImageSource(source)
+);
+
+const getMarkdownImageFilename = (source: string, fallback: string): string => {
+  if (/^data:image\/(png|jpeg|gif|webp)/i.test(source)) {
+    const extension = /^data:image\/([^;,]+)/i.exec(source)?.[1]?.replace('jpeg', 'jpg') ?? 'png';
+    return fallback.trim() || `image.${extension}`;
+  }
+
+  const path = source.split(/[?#]/, 1)[0]?.replace(/\\/g, '/') ?? '';
+  const encodedName = path.split('/').filter(Boolean).at(-1) ?? '';
+  if (!encodedName) return fallback.trim();
+  try {
+    return decodeURIComponent(encodedName);
+  } catch {
+    return encodedName;
+  }
+};
+
+const estimateMarkdownImageCandidateCacheEntryBytes = (
+  markdown: string,
+  candidates: readonly MarkdownImageCandidate[],
+): number => (
+  (markdown.length + candidates.reduce((total, candidate) => total + candidate.source.length + candidate.filename.length, 0)) * 2
+);
+
+const scanMarkdownImageCandidates = (markdown: string): MarkdownImageCandidate[] => {
+  markdownImageCandidateScanCount += 1;
+  const candidates: MarkdownImageCandidate[] = [];
+  const seen = new Set<string>();
+  const tokens = marked.lexer(markdown);
+  marked.walkTokens(tokens, (token) => {
+    if (token.type !== 'image') return;
+
+    const source = token.href ?? '';
+    if (!source || !isSupportedMarkdownImageSource(source) || seen.has(source)) return;
+    const fallback = typeof token.text === 'string' ? token.text : '';
+    const filename = getMarkdownImageFilename(source, fallback);
+    if (!filename) return;
+
+    seen.add(source);
+    candidates.push({ source, filename });
+  });
+  return candidates;
+};
+
+const getMarkdownImageCandidates = (markdown: string): MarkdownImageCandidate[] => {
+  const cached = markdownImageCandidateCache.get(markdown);
+  if (cached) {
+    markdownImageCandidateCache.delete(markdown);
+    markdownImageCandidateCache.set(markdown, cached);
+    return cached.candidates;
+  }
+
+  const candidates = scanMarkdownImageCandidates(markdown);
+  const bytes = estimateMarkdownImageCandidateCacheEntryBytes(markdown, candidates);
+  if (bytes > MARKDOWN_IMAGE_CANDIDATE_CACHE_MAX_ENTRY_BYTES) return candidates;
+
+  while (
+    markdownImageCandidateCache.size >= MARKDOWN_IMAGE_CANDIDATE_CACHE_MAX_ENTRIES
+    || markdownImageCandidateCacheBytes + bytes > MARKDOWN_IMAGE_CANDIDATE_CACHE_MAX_BYTES
+  ) {
+    const oldest = markdownImageCandidateCache.entries().next().value;
+    if (!oldest) break;
+    markdownImageCandidateCache.delete(oldest[0]);
+    markdownImageCandidateCacheBytes -= oldest[1].bytes;
+  }
+  markdownImageCandidateCache.set(markdown, { candidates, bytes });
+  markdownImageCandidateCacheBytes += bytes;
+  return candidates;
+};
+
+/** @internal Test-only cache instrumentation for deterministic regression tests. */
+export const __markdownImageCandidateCacheForTests = {
+  reset: (): void => {
+    markdownImageCandidateCache.clear();
+    markdownImageCandidateCacheBytes = 0;
+    markdownImageCandidateScanCount = 0;
+  },
+  stats: () => ({
+    entries: markdownImageCandidateCache.size,
+    bytes: markdownImageCandidateCacheBytes,
+    scans: markdownImageCandidateScanCount,
+  }),
+};
+
+const renderMarkdownImageLabel = ({
+  href,
+  title,
+  text,
+}: {
+  href: string;
+  title?: string | null;
+  text: string;
+}): string => {
+  const label = getMarkdownImageFilename(href ?? '', text);
+  const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
+  return `<span${titleAttr} class="inline-flex items-center gap-1 align-text-bottom text-muted-foreground" data-openchamber-markdown-image-label="true">${escapeAttr(label)}</span>`;
+};
+
+export const extractMarkdownImageCandidates = (
+  markdownTexts: readonly string[],
+  limit = MAX_MARKDOWN_IMAGE_COUNT,
+): MarkdownImageCandidate[] => {
+  if (limit <= 0) return [];
+
+  const candidates: MarkdownImageCandidate[] = [];
+  const seen = new Set<string>();
+
+  for (const markdown of markdownTexts) {
+    if (!markdown || candidates.length >= limit) continue;
+    for (const candidate of getMarkdownImageCandidates(markdown)) {
+      if (candidates.length >= limit) break;
+      if (seen.has(candidate.source)) continue;
+      seen.add(candidate.source);
+      candidates.push({ ...candidate });
+    }
+  }
+
+  return candidates;
+};
 
 // ---------------------------------------------------------------------------
 // Streaming block segmentation (port of OpenCode's markdown-stream)
@@ -162,7 +320,7 @@ const blockMathExtension = {
   },
 };
 
-const parser = marked.use({
+const createParser = (imageMode: MarkdownImageMode) => new Marked().use({
   gfm: true,
   breaks: false,
   extensions: [inlineMathExtension, blockMathExtension],
@@ -186,8 +344,12 @@ const parser = marked.use({
       const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
       return `<a href="${escapeAttr(target)}"${titleAttr} class="external-link" target="_blank" rel="noopener noreferrer">${text}</a>`;
     },
+    ...(imageMode === 'label' ? { image: renderMarkdownImageLabel } : {}),
   },
 });
+
+const inlineImageParser = createParser('inline');
+const imageLabelParser = createParser('label');
 
 // ---------------------------------------------------------------------------
 // Math (KaTeX) — post-process the parsed HTML, skipping code/pre/kbd content
@@ -302,6 +464,10 @@ const ensureSanitizeHook = (): void => {
   if (sanitizeHookInstalled) return;
   if (typeof window === 'undefined' || !DOMPurify.isSupported) return;
   sanitizeHookInstalled = true;
+  DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+    if (!(node instanceof HTMLAnchorElement) || data.attrName !== 'href') return;
+    if (isLocalFileUrl(data.attrValue)) data.forceKeepAttr = true;
+  });
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     if (!(node instanceof HTMLAnchorElement)) return;
     if (node.target !== '_blank') return;
@@ -341,7 +507,8 @@ const touch = (key: string, entry: { hash: string; html: string }): void => {
   if (oldest) htmlCache.delete(oldest);
 };
 
-const parseBlock = async (block: MarkdownBlock): Promise<string> => {
+const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): Promise<string> => {
+  const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
   const parsed = await Promise.resolve(parser.parse(block.src));
   const withMath = renderMathExpressions(parsed);
   const highlighted = block.highlight ? await highlightCodeBlocks(withMath) : withMath;
@@ -357,8 +524,9 @@ const parseBlock = async (block: MarkdownBlock): Promise<string> => {
  * is synchronous (marked is not configured `async`), so this never blocks on a
  * worker round-trip.
  */
-export const renderMarkdownSync = (text: string): string => {
+export const renderMarkdownSync = (text: string, imageMode: MarkdownImageMode = 'inline'): string => {
   if (!text) return '';
+  const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
   const parsed = parser.parse(text) as string;
   const withMath = renderMathExpressions(parsed);
   return sanitize(withMath);
@@ -382,6 +550,7 @@ export const renderMarkdownBlocks = async (
   text: string,
   streaming: boolean,
   cacheKey: string,
+  imageMode: MarkdownImageMode = 'inline',
 ): Promise<RenderedBlock[]> => {
   if (!text) return [];
 
@@ -389,14 +558,14 @@ export const renderMarkdownBlocks = async (
   return Promise.all(
     blocks.map(async (block, index) => {
       const contentHash = hash(block.raw);
-      const id = `${contentHash}:${block.mode}:${block.highlight ? 1 : 0}`;
-      const key = `${cacheKey}:${index}:${block.mode}`;
+      const id = `${contentHash}:${block.mode}:${block.highlight ? 1 : 0}:${imageMode}`;
+      const key = `${cacheKey}:${index}:${block.mode}:${imageMode}`;
       const cached = htmlCache.get(key);
       if (cached && cached.hash === contentHash) {
         touch(key, cached);
         return { id, html: cached.html };
       }
-      const html = await parseBlock(block);
+      const html = await parseBlock(block, imageMode);
       touch(key, { hash: contentHash, html });
       return { id, html };
     }),
