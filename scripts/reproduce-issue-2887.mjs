@@ -14,6 +14,8 @@
  * and `tar` are absent from PATH (bzip2-absent case) and when they are
  * available (control case). It fails (non-zero exit) if extraction breaks.
  *
+ * Prerequisite: Python 3 (`python3`) must be available to build the fixture archive.
+ *
  * Run with: bun scripts/reproduce-issue-2887.mjs  (or `node`)
  */
 
@@ -33,6 +35,12 @@ const archiveName = 'sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2';
 const requiredFiles = ['encoder.int8.onnx', 'decoder.int8.onnx', 'joiner.int8.onnx', 'tokens.txt'];
 
 const work = path.join(path.dirname(fileURLToPath(import.meta.url)), '.repro-issue-2887');
+let cleanupPromise;
+
+function cleanup() {
+  cleanupPromise ??= rm(work, { recursive: true, force: true });
+  return cleanupPromise;
+}
 
 async function buildFixture(modelsDir) {
   await rm(work, { recursive: true, force: true });
@@ -57,7 +65,7 @@ async function buildFixture(modelsDir) {
 }
 
 async function runDownloader(modelsDir, env) {
-  const isBun = typeof Bun !== 'undefined';
+  const isBun = Boolean(process.versions.bun);
   const result = spawnSync(
     process.execPath,
     (isBun ? ['-e'] : ['--input-type=module', '-e']).concat([
@@ -85,43 +93,68 @@ async function runDownloader(modelsDir, env) {
   return result.stdout.trim();
 }
 
-// --- Case 1: bzip2 absent from PATH (reporter's environment) ---------------
-{
-  const modelsDir = path.join(work, 'models-nobzip2');
-  await buildFixture(modelsDir);
+async function main() {
+  // --- Case 1: bzip2 absent from PATH (reporter's environment) ---------------
+  {
+    const modelsDir = path.join(work, 'models-nobzip2');
+    await buildFixture(modelsDir);
 
-  // Shim that behaves exactly like a missing `bzip2` (shell reports not found,
-  // child exits 127) while keeping the real `tar` available.
-  const fakeBin = path.join(work, 'fakebin');
-  await mkdir(fakeBin, { recursive: true });
-  // Shim BOTH tools: the pure-JS pipeline must not depend on a system
-  // `tar`/`bzip2` pair, so neither may be reachable.
-  await writeFile(
-    path.join(fakeBin, 'bzip2'),
-    '#!/bin/sh\necho "/bin/sh: 1: bzip2: not found" >&2\nexit 127\n',
-  );
-  await writeFile(
-    path.join(fakeBin, 'tar'),
-    '#!/bin/sh\necho "tar: not found" >&2\nexit 127\n',
-  );
-  await chmod(path.join(fakeBin, 'bzip2'), 0o755);
-  await chmod(path.join(fakeBin, 'tar'), 0o755);
+    // Shim that behaves exactly like a missing `bzip2` (shell reports not found,
+    // child exits 127) while keeping the real `tar` available.
+    const fakeBin = path.join(work, 'fakebin');
+    await mkdir(fakeBin, { recursive: true });
+    // Shim BOTH tools: the pure-JS pipeline must not depend on a system
+    // `tar`/`bzip2` pair, so neither may be reachable.
+    await writeFile(
+      path.join(fakeBin, 'bzip2'),
+      '#!/bin/sh\necho "/bin/sh: 1: bzip2: not found" >&2\nexit 127\n',
+    );
+    await writeFile(
+      path.join(fakeBin, 'tar'),
+      '#!/bin/sh\necho "tar: not found" >&2\nexit 127\n',
+    );
+    await chmod(path.join(fakeBin, 'bzip2'), 0o755);
+    await chmod(path.join(fakeBin, 'tar'), 0o755);
 
-  const env = { ...process.env, PATH: `${fakeBin}:/usr/bin:/bin` };
-  const out = await runDownloader(modelsDir, env);
-  console.log('[bzip2 ABSENT ]', out);
-  if (!out.startsWith('RESULT: OK')) {
-    throw new Error(`Expected extraction to succeed without bzip2/tar, got: ${out}`);
+    const env = { ...process.env, PATH: `${fakeBin}:/usr/bin:/bin` };
+    const out = await runDownloader(modelsDir, env);
+    console.log('[bzip2 ABSENT ]', out);
+    if (!out.startsWith('RESULT: OK')) {
+      throw new Error(`Expected extraction to succeed without bzip2/tar, got: ${out}`);
+    }
+  }
+
+  // --- Case 2 (control): bzip2 available on PATH ------------------------------
+  {
+    const modelsDir = path.join(work, 'models-bzip2');
+    await buildFixture(modelsDir);
+    const out = await runDownloader(modelsDir, process.env);
+    console.log('[bzip2 PRESENT]', out);
+    if (!out.startsWith('RESULT: OK')) {
+      throw new Error(`Expected extraction to succeed with bzip2/tar, got: ${out}`);
+    }
   }
 }
 
-// --- Case 2 (control): bzip2 available on PATH ------------------------------
-{
-  const modelsDir = path.join(work, 'models-bzip2');
-  await buildFixture(modelsDir);
-  const out = await runDownloader(modelsDir, process.env);
-  console.log('[bzip2 PRESENT]', out);
-  if (!out.startsWith('RESULT: OK')) {
-    throw new Error(`Expected extraction to succeed with bzip2/tar, got: ${out}`);
-  }
+let mainPromise;
+let signalExitPromise;
+
+function exitOnSignal(exitCode) {
+  signalExitPromise ??= (mainPromise ?? Promise.resolve())
+    .catch(() => {})
+    .then(() => cleanup())
+    .catch((error) => console.error(`Failed to clean up ${work}:`, error))
+    .finally(() => process.exit(exitCode));
+}
+
+process.once('SIGINT', () => exitOnSignal(130));
+process.once('SIGTERM', () => exitOnSignal(143));
+process.once('SIGHUP', () => exitOnSignal(129));
+
+mainPromise = main();
+
+try {
+  await mainPromise;
+} finally {
+  await cleanup();
 }
