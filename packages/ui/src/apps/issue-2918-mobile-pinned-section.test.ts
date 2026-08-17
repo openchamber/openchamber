@@ -36,6 +36,7 @@ import {
   orderSessionsByLifecycleScopes,
   resetSessionOrdering,
 } from '@/sync/session-ordering';
+import { collectSessionSubtreeIds, getSessionParentId, selectPinnedRootSessionIds } from './mobileSessionGrouping';
 
 // --- Constants mirroring packages/ui/src/apps/MobileSessionsSheet.tsx -------
 // The sheet pages each project/worktree bucket to the first
@@ -52,6 +53,14 @@ const session = (id: string, updated: number, directory = REPO): Session => ({
   projectID: 'proj',
   time: { created: updated - DAY_MS, updated },
 } as Session);
+
+const treeSession = (id: string, parentID?: string | null): Session => {
+  // SAFETY: this fixture exercises parent-tree logic; other SDK session fields are irrelevant here.
+  return {
+    id,
+    parentID: parentID ?? null,
+  } as Session;
+};
 
 beforeEach(() => {
   resetSessionOrdering();
@@ -102,8 +111,7 @@ describe('issue #2918: global Pinned section on the mobile sessions sheet', () =
     expect(recencyOnly.slice(0, SESSIONS_PER_BUCKET).map((entry) => entry.id)).not.toContain('pinned-old');
 
     // The mobile sheet's pinned section selects pinned root sessions via
-    // isSessionPinned and the shared lifecycle ordering (the same selector
-    // `selectPinnedRootSessions` uses).
+    // isSessionPinned and the shared lifecycle ordering.
     const pinnedSection = orderSessionsByLifecycleScopes(
       [pinnedOld, ...recent].filter((entry) => (
         !(entry as Session & { parentID?: string | null }).parentID
@@ -114,6 +122,63 @@ describe('issue #2918: global Pinned section on the mobile sessions sheet', () =
     );
 
     expect(pinnedSection.map((entry) => entry.id)).toEqual(['pinned-old']);
+  });
+
+  test('excludes a pinned root and its complete child/grandchild subtree from the drawer tree', () => {
+    const sessions = [
+      treeSession('root'),
+      treeSession('child', 'root'),
+      treeSession('grandchild', 'child'),
+      treeSession('sibling'),
+    ];
+    const pinnedRootIds = selectPinnedRootSessionIds(sessions, (entry) => entry.id === 'root');
+
+    expect(pinnedRootIds).toEqual(new Set(['root']));
+    expect(collectSessionSubtreeIds(sessions, pinnedRootIds)).toEqual(
+      new Set(['root', 'child', 'grandchild']),
+    );
+  });
+
+  test('excludes a pinned root from the drawer tree but keeps it in the project total', () => {
+    const now = Date.now();
+    const sessions = [
+      session('pinned-root', now),
+      { ...session('pinned-child', now - 1), parentID: 'pinned-root' },
+      session('visible-root', now - 2),
+      session('other-project-root', now - 3, '/home/user/other-project'),
+    ];
+    const pinnedRootIds = selectPinnedRootSessionIds(sessions, (entry) => entry.id === 'pinned-root');
+    const pinnedSessionSubtreeIds = collectSessionSubtreeIds(sessions, pinnedRootIds);
+    const projectSessions = sessions.filter((entry) => entry.directory === REPO);
+    const drawerTreeSessions = projectSessions.filter((entry) => !pinnedSessionSubtreeIds.has(entry.id));
+    const projectTotal = projectSessions.filter((entry) => !getSessionParentId(entry)).length;
+
+    expect(drawerTreeSessions.map((entry) => entry.id)).toEqual(['visible-root']);
+    expect(projectTotal).toBe(2);
+  });
+
+  test('keeps a pinned child under an unpinned root in the existing project tree', () => {
+    const sessions = [
+      treeSession('root'),
+      treeSession('pinned-child', 'root'),
+      treeSession('grandchild', 'pinned-child'),
+    ];
+    const pinnedRootIds = selectPinnedRootSessionIds(sessions, (entry) => entry.id === 'pinned-child');
+
+    expect(pinnedRootIds).toEqual(new Set());
+    expect(collectSessionSubtreeIds(sessions, pinnedRootIds)).toEqual(new Set());
+  });
+
+  test('terminates safely for malformed parent cycles', () => {
+    const sessions = [
+      treeSession('cycle-a', 'cycle-b'),
+      treeSession('cycle-b', 'cycle-a'),
+      treeSession('cycle-child', 'cycle-b'),
+    ];
+
+    expect(collectSessionSubtreeIds(sessions, new Set(['cycle-a']))).toEqual(
+      new Set(['cycle-a', 'cycle-b', 'cycle-child']),
+    );
   });
 
   test('structural: MobileSessionsSheet renders a Pinned section with pin icon and pin/unpin action', () => {
@@ -133,7 +198,10 @@ describe('issue #2918: global Pinned section on the mobile sessions sheet', () =
     // Pinned selection is derived from the local pin store via isSessionPinned
     // (not a new pinning mechanism).
     expect(source).toContain('isSessionPinned(pinnedSessionIds');
-    expect(source).toContain('selectPinnedRootSessions');
+    expect(source).toContain('selectPinnedRootSessionIds');
+    expect(source).toContain('collectSessionSubtreeIds');
+    expect(source).toContain('pinnedSessionSubtreeIds.has(session.id)');
+    expect(source).toContain("variant === 'drawer' && pinnedSessions.length > 0");
 
     // Desktop-parity affordances: pushpin marker on pinned rows and a
     // pin/unpin swipe action calling the store's existing toggle.
@@ -142,8 +210,22 @@ describe('issue #2918: global Pinned section on the mobile sessions sheet', () =
     expect(source).toContain("t('sessions.sidebar.session.menu.pin')");
     expect(source).toContain("t('sessions.sidebar.session.menu.unpin')");
 
-    // No duplicate rows: pinned root sessions are excluded from the project
-    // tree buckets (they render only in the Pinned section).
-    expect(source).toContain('isSessionPinned(pinnedSessionIds, directory, session.id)');
+    // No duplicate rows: pinned roots and all in-snapshot descendants are
+    // excluded from the drawer's project tree buckets.
+    expect(source).toContain('pinnedSessionSubtreeIds.has(session.id)');
+
+    // Project totals are owned by project resolution, so a pinned root still
+    // contributes even though the drawer tree skips its subtree.
+    const projectResolutionIndex = source.indexOf('const node = nodes.find');
+    const resolvedNodeGuardIndex = source.indexOf('if (!node) continue;', projectResolutionIndex);
+    const projectCountIndex = source.indexOf('if (!getSessionParentId(session)) node.totalSessions += 1;');
+    const drawerExclusionIndex = source.indexOf(
+      "if (variant === 'drawer' && pinnedSessionSubtreeIds.has(session.id)) continue;",
+    );
+    expect(projectResolutionIndex).toBeGreaterThanOrEqual(0);
+    expect(resolvedNodeGuardIndex).toBeGreaterThan(projectResolutionIndex);
+    expect(projectCountIndex).toBeGreaterThan(resolvedNodeGuardIndex);
+    expect(projectCountIndex).toBeLessThan(drawerExclusionIndex);
+    expect(source.match(/node\.totalSessions \+= 1;/g) ?? []).toHaveLength(1);
   });
 });
