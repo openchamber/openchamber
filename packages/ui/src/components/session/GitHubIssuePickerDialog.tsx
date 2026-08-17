@@ -16,16 +16,21 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { buildLinkedIssue } from '@/lib/linkedIssues';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useInitialSessionOverrides } from '@/hooks/useInitialSessionOverrides';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import { AgentSelector } from '@/components/sections/commands/AgentSelector';
+import { ThinkingPill } from '@/components/session/ThinkingPill';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
-import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { useDeviceInfo } from '@/lib/device';
-import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
+import {
+  createWorktreeSessionForNewBranch,
+  resolveWorktreeSessionSelection,
+} from '@/lib/worktreeSessionCreator';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { GitHubIssue, GitHubIssueComment, GitHubIssuesListResult, GitHubIssueSummary, GitHubRepoSelector } from '@/lib/api/types';
@@ -234,67 +239,29 @@ export function GitHubIssuePickerDialog({
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
 
-  const resolveDefaultAgentName = React.useCallback((): string | undefined => {
-    const configState = useConfigStore.getState();
-    const visibleAgents = configState.getVisibleAgents();
-
-    if (configState.settingsDefaultAgent) {
-      const settingsAgent = visibleAgents.find((a) => a.name === configState.settingsDefaultAgent);
-      if (settingsAgent) {
-        return settingsAgent.name;
-      }
-    }
-
-    return (
-      visibleAgents.find((agent) => agent.name === 'build')?.name ||
-      visibleAgents[0]?.name
-    );
-  }, []);
-
-  const resolveDefaultModelSelection = React.useCallback((): { providerID: string; modelID: string } | null => {
-    const configState = useConfigStore.getState();
-    const settingsDefaultModel = configState.settingsDefaultModel;
-    if (!settingsDefaultModel) {
-      return null;
-    }
-
-    const parsed = parseModelIdentifier(settingsDefaultModel);
-    if (!parsed) {
-      return null;
-    }
-    const { providerId: providerID, modelId: modelID } = parsed;
-
-    const modelMetadata = configState.getModelMetadata(providerID, modelID);
-    if (!modelMetadata) {
-      return null;
-    }
-
-    return { providerID, modelID };
-  }, []);
-
-  const resolveDefaultVariant = React.useCallback((providerID: string, modelID: string): string | undefined => {
-    const configState = useConfigStore.getState();
-    const settingsDefaultVariant = configState.settingsDefaultVariant;
-    const currentVariant = configState.currentProviderId === providerID && configState.currentModelId === modelID
-      ? configState.currentVariant
-      : undefined;
-
-    const provider = configState.providers.find((p) => p.id === providerID);
-    const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === modelID) as
-      | { variants?: Record<string, unknown> }
-      | undefined;
-    const variants = model?.variants;
-    if (!variants) {
-      return settingsDefaultVariant || currentVariant || undefined;
-    }
-    if (settingsDefaultVariant && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
-      return settingsDefaultVariant;
-    }
-    if (currentVariant && Object.prototype.hasOwnProperty.call(variants, currentVariant)) {
-      return currentVariant;
-    }
-    return undefined;
-  }, []);
+  // Shared session-override state (providers/agents loading, default prefill,
+  // provider/model fallback, variant reset, agent filter). The
+  // `createInWorktree` toggle is forwarded as an extra prefill trigger so that
+  // toggling it off then on restores settings defaults instead of leaving the
+  // user's previous manual choices in place. See
+  // packages/ui/src/hooks/useInitialSessionOverrides.ts.
+  const {
+    providerID,
+    modelID,
+    variant,
+    agent,
+    setVariant,
+    setAgent,
+    variantOptions,
+    hasVariantOptions,
+    agentFilter,
+    setProviderAndModel,
+  } = useInitialSessionOverrides({
+    open,
+    projectDirectory,
+    source: 'githubIssuePickerDialog',
+    extraPrefillTriggers: [createInWorktree],
+  });
 
   const startSession = React.useCallback(async (issueNumber: number, sourceRepo?: GitHubRepoSelector | null) => {
     if (mode === 'select') {
@@ -395,6 +362,17 @@ export function GitHubIssuePickerDialog({
       const comments = commentsRes.comments ?? [];
 
       const sessionTitle = `#${issue.number} ${issue.title}`.trim();
+      const selectionOverrides = createInWorktree
+        ? { providerID, modelID, variant, agentName: agent }
+        : undefined;
+      const sessionSelection = resolveWorktreeSessionSelection(
+        useConfigStore.getState(),
+        selectionOverrides,
+      );
+      if (!sessionSelection) {
+        toast.error(t('session.githubIssuePicker.error.noModelSelected'));
+        return;
+      }
 
       const { sessionId, sessionDirectory } = await (async () => {
         if (createInWorktree) {
@@ -403,7 +381,11 @@ export function GitHubIssuePickerDialog({
             projectDirectory,
             preferred,
             undefined,
-            { returnAfterDirectoryCreated: true }
+            {
+              returnAfterDirectoryCreated: true,
+              overrides: selectionOverrides,
+              selection: sessionSelection,
+            }
           );
           if (!created?.id) {
             throw new Error('Failed to create worktree session');
@@ -430,20 +412,6 @@ export function GitHubIssuePickerDialog({
       // Close modal immediately after session exists (don't wait for message send).
       onOpenChange(false);
 
-      const configState = useConfigStore.getState();
-      const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
-
-      const defaultModel = resolveDefaultModelSelection();
-      const providerID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;
-      const modelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;
-      const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
-      if (!providerID || !modelID) {
-        toast.error(t('session.githubIssuePicker.error.noModelSelected'));
-        return;
-      }
-
-      const variant = resolveDefaultVariant(providerID, modelID);
-
       const visiblePromptText = await renderMagicPrompt('github.issue.review.visible', {
         issue_number: String(issue.number),
       });
@@ -469,16 +437,16 @@ export function GitHubIssuePickerDialog({
 
       void useSessionUIStore.getState().sendMessage(
         visiblePromptText,
-        providerID,
-        modelID,
-        agentName,
+        sessionSelection.providerID,
+        sessionSelection.modelID,
+        sessionSelection.agentName,
         undefined,
         undefined,
         [
           { text: instructionsText, synthetic: true },
           { text: contextText, synthetic: true },
         ],
-        variant,
+        sessionSelection.variant,
         undefined,
         { sessionId },
       ).catch((e) => {
@@ -495,12 +463,48 @@ export function GitHubIssuePickerDialog({
     } finally {
       setStartingIssueNumber(null);
     }
-  }, [createInWorktree, github, mode, onOpenChange, onSelect, projectDirectory, resolveDefaultAgentName, resolveDefaultModelSelection, resolveDefaultVariant, startingIssueNumber, t]);
+  }, [agent, createInWorktree, github, mode, modelID, onOpenChange, onSelect, projectDirectory, providerID, startingIssueNumber, t, variant]);
 
   const title = mode === 'select' ? t('session.githubIssuePicker.title.select') : t('session.githubIssuePicker.title.createSession');
   const description = mode === 'select'
     ? t('session.githubIssuePicker.description.select')
     : t('session.githubIssuePicker.description.createSession');
+
+  const renderOverridesSection = () => (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-1.5">
+        <span className="typography-meta font-medium text-muted-foreground">{t('chat.modelControls.model')}</span>
+        <ModelSelector
+          providerId={providerID}
+          modelId={modelID}
+          className="max-w-[320px] justify-between"
+          dropdownPortalToBody
+          onChange={setProviderAndModel}
+        />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.thinkingLevel.label')}</span>
+        <ThinkingPill
+          value={variant}
+          options={variantOptions}
+          disabled={!hasVariantOptions}
+          onChange={setVariant}
+        />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.agent.label')}</span>
+        <AgentSelector
+          agentName={agent}
+          filter={agentFilter}
+          dropdownPortalToBody
+          onChange={setAgent}
+        />
+      </div>
+      <p className="typography-micro text-muted-foreground">
+        {t('session.githubIssuePicker.overridesHelper')}
+      </p>
+    </div>
+  );
 
   const content = (
     <>
@@ -674,6 +678,11 @@ export function GitHubIssuePickerDialog({
               <span className="typography-meta text-muted-foreground">{t('session.githubIssuePicker.actions.createInWorktree')}</span>
               <span className="typography-meta text-muted-foreground/70 hidden sm:inline">(issue-&lt;number&gt;-&lt;slug&gt;)</span>
             </div>
+            {createInWorktree ? (
+              <div className="flex flex-col gap-3 pt-1">
+                {renderOverridesSection()}
+              </div>
+            ) : null}
             <div className="hidden sm:block sm:flex-1" />
             <div className="flex items-center gap-2">
               {repoUrl ? (

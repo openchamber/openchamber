@@ -11,11 +11,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { ThinkingPill } from '@/components/session/ThinkingPill';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { useAgentsStore } from '@/stores/useAgentsStore';
-import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { EXECUTION_FORK_DEFAULT_INSTRUCTIONS, EXECUTION_FORK_GOAL_INSTRUCTIONS } from '@/lib/messages/executionMeta';
 import { useI18n } from '@/lib/i18n';
+import { useInitialSessionOverrides } from '@/hooks/useInitialSessionOverrides';
 import { isVSCodeRuntime } from '@/lib/desktop';
 
 export type ForkSessionExecution = {
@@ -40,19 +38,6 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
   const { t } = useI18n();
   const { open, onOpenChange, projectDirectory, submitting = false, onConfirm } = props;
 
-  const loadProviders = useConfigStore((state) => state.loadProviders);
-  const loadConfigAgents = useConfigStore((state) => state.loadAgents);
-  const loadAgentsStoreAgents = useAgentsStore((state) => state.loadAgents);
-  const providers = useConfigStore((state) => state.providers);
-  const currentProviderID = useConfigStore((state) => state.currentProviderId);
-  const currentModelID = useConfigStore((state) => state.currentModelId);
-  const currentVariant = useConfigStore((state) => state.currentVariant || '');
-  const currentAgentName = useConfigStore((state) => state.currentAgentName || '');
-
-  const [providerID, setProviderID] = React.useState(currentProviderID);
-  const [modelID, setModelID] = React.useState(currentModelID);
-  const [variant, setVariant] = React.useState(currentVariant);
-  const [agent, setAgent] = React.useState(currentAgentName);
   const [instructions, setInstructions] = React.useState(EXECUTION_FORK_DEFAULT_INSTRUCTIONS);
   const [createWorktree, setCreateWorktree] = React.useState(false);
   const [runAsGoal, setRunAsGoal] = React.useState(false);
@@ -72,57 +57,36 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
     });
   }, []);
 
-  React.useEffect(() => {
-    if (!open) return;
-    void loadProviders({ directory: projectDirectory, source: 'forkSessionDialog' });
-    void loadConfigAgents({ directory: projectDirectory });
-    void loadAgentsStoreAgents();
-  }, [open, loadProviders, loadConfigAgents, loadAgentsStoreAgents, projectDirectory]);
+  // Shared session-override state (providers/agents loading, default prefill,
+  // provider/model fallback, variant reset, agent filter). See
+  // packages/ui/src/hooks/useInitialSessionOverrides.ts.
+  const {
+    providerID,
+    modelID,
+    variant,
+    agent,
+    setVariant,
+    setAgent,
+    variantOptions,
+    hasVariantOptions,
+    agentFilter,
+    setProviderAndModel,
+  } = useInitialSessionOverrides({
+    open,
+    projectDirectory,
+    source: 'forkSessionDialog',
+  });
 
-  // Reset only when the dialog transitions to open. Reading the store snapshot
-  // here (instead of subscribing) avoids clobbering in-progress user edits when
-  // the config store refreshes in the background while the dialog is open.
+  // Reset dialog-local state when the dialog opens.
+  // This is a fresh dialog surface each time, so clearing is safe and desired;
+  // the user's override choices live inside `useInitialSessionOverrides` and
+  // are managed by that hook, not this effect.
   React.useEffect(() => {
     if (!open) return;
-    const config = useConfigStore.getState();
-    setProviderID(config.currentProviderId);
-    setModelID(config.currentModelId);
-    setVariant(config.currentVariant || '');
-    setAgent(config.currentAgentName || '');
     setInstructions(EXECUTION_FORK_DEFAULT_INSTRUCTIONS);
     setCreateWorktree(false);
     setRunAsGoal(false);
   }, [open]);
-
-  React.useEffect(() => {
-    if (!open || providers.length === 0) return;
-
-    const provider = providers.find((item) => item.id === providerID) ?? providers[0];
-    const models = Array.isArray(provider?.models) ? provider.models : [];
-    const hasModel = models.some((item) => item.id === modelID);
-    const fallbackModelID = models[0]?.id ?? '';
-
-    if (provider?.id === providerID && hasModel) return;
-
-    setProviderID(provider?.id ?? '');
-    setModelID(hasModel ? modelID : fallbackModelID);
-    setVariant('');
-  }, [open, providers, providerID, modelID]);
-
-  const agentFilter = React.useCallback((candidate: { mode?: string }) => isPrimaryMode(candidate.mode), []);
-
-  const variantOptions = React.useMemo(() => {
-    const provider = providers.find((item) => item.id === providerID);
-    const model = provider?.models?.find((item) => item.id === modelID) as { variants?: Record<string, unknown> } | undefined;
-    return model?.variants ? Object.keys(model.variants) : [];
-  }, [providers, providerID, modelID]);
-
-  const hasVariantOptions = variantOptions.length > 0;
-
-  React.useEffect(() => {
-    if (hasVariantOptions || !variant) return;
-    setVariant('');
-  }, [hasVariantOptions, variant]);
 
   const canConfirm =
     providerID.trim().length > 0 && modelID.trim().length > 0 && instructions.trim().length > 0;
@@ -167,11 +131,7 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
               modelId={modelID}
               className="max-w-[320px] justify-between"
               dropdownPortalToBody
-              onChange={(nextProviderID, nextModelID) => {
-                setProviderID(nextProviderID);
-                setModelID(nextModelID);
-                setVariant('');
-              }}
+              onChange={setProviderAndModel}
             />
           </div>
           <div className="flex flex-col gap-1.5">

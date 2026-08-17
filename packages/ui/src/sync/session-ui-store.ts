@@ -1713,71 +1713,62 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     )
     const sourceWorktreeMetadata = sourceSessionId ? get().worktreeMetadata.get(sourceSessionId) : undefined
 
-    const pID = execution.providerID || useSelectionStore.getState().lastUsedProvider?.providerID
-    const mID = execution.modelID || useSelectionStore.getState().lastUsedProvider?.modelID
-
-    if (!pID || !mID) return
-
     const sourceDirectory = normalizePath(directory ?? opencodeClient.getDirectory() ?? null)
     let sessionDirectory = sourceDirectory
-    let createdWorktree: WorktreeMetadata | null = null
-    let createdWorktreeProject: { id: string; path: string } | null = null
+    let session: { id: string } | null = null
+    let selection: {
+      providerID: string
+      modelID: string
+      agentName: string
+      variant?: string
+    } | null = null
 
     if (execution.createWorktree) {
-      const projects = useProjectsStore.getState().projects
-      const project = resolveProjectForSessionDirectory(
-        projects,
-        get().availableWorktreesByProject,
-        sourceDirectory,
-      ) ?? resolveProjectForSessionDirectory(
-        projects,
-        get().availableWorktreesByProject,
-        sourceWorktreeMetadata?.projectDirectory ?? null,
-      )
-      if (!project?.path) {
+      const worktreeSourceDirectory = sourceDirectory ?? sourceWorktreeMetadata?.projectDirectory
+      if (!worktreeSourceDirectory) {
         throw new Error("Project is not registered in OpenChamber")
       }
 
-      const [branchNameModule, configModule, createModule] = await Promise.all([
+      const [branchNameModule, worktreeSessionCreator] = await Promise.all([
         import("@/lib/git/branchNameGenerator"),
-        import("@/lib/openchamberConfig"),
-        import("@/lib/worktrees/worktreeCreate"),
+        import("@/lib/worktreeSessionCreator"),
       ])
-      const branchName = branchNameModule.generateBranchName()
-      createdWorktreeProject = { id: project.id, path: project.path }
-      const setupCommands = await configModule.getWorktreeSetupCommands(createdWorktreeProject)
-      createdWorktree = await createModule.createWorktreeWithDefaults(createdWorktreeProject, {
-        preferredName: branchName,
-        mode: "new",
-        branchName,
-        worktreeName: branchName,
-        setupCommands,
-        returnAfterDirectoryCreated: true,
-      })
-      sessionDirectory = normalizePath(createdWorktree.path)
-      if (!sessionDirectory) {
-        throw new Error("Worktree create missing name/path")
+      const created = await worktreeSessionCreator.createWorktreeSessionForNewBranch(
+        worktreeSourceDirectory,
+        branchNameModule.generateBranchName(),
+        undefined,
+        {
+          returnAfterDirectoryCreated: true,
+          overrides: {
+            agentName: execution.agent || undefined,
+            providerID: execution.providerID || undefined,
+            modelID: execution.modelID || undefined,
+            variant: execution.variant,
+          },
+        },
+      )
+      if (!created) {
+        return
       }
-      if (await configModule.getWorktreeSetupWaitEnabled(createdWorktreeProject)) {
-        await waitForWorktreeBootstrap(sessionDirectory)
+      session = { id: created.id }
+      sessionDirectory = normalizePath(created.path)
+      selection = created.selection
+    } else {
+      const pID = execution.providerID || useSelectionStore.getState().lastUsedProvider?.providerID
+      const mID = execution.modelID || useSelectionStore.getState().lastUsedProvider?.modelID
+      if (!pID || !mID) return
+
+      session = await get().createSession(undefined, sessionDirectory || null, null)
+      selection = {
+        providerID: pID,
+        modelID: mID,
+        agentName: execution.agent,
+        variant: execution.variant || undefined,
       }
     }
 
-    const session = await get().createSession(undefined, sessionDirectory || null, null)
-    if (!session) {
-      if (createdWorktree && createdWorktreeProject) {
-        const { removeProjectWorktree } = await import("@/lib/worktrees/worktreeManager")
-        await removeProjectWorktree(createdWorktreeProject, createdWorktree, { deleteLocalBranch: true }).catch(() => undefined)
-      }
+    if (!session || !selection) {
       return
-    }
-
-    if (createdWorktree) {
-      get().setWorktreeMetadata(session.id, {
-        ...createdWorktree,
-        kind: "standard",
-      })
-      useDirectoryStore.getState().setDirectory(createdWorktree.path, { showOverlay: false })
     }
 
     // "Run as goal" rides the same arm mechanism as the composer target
@@ -1789,13 +1780,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     await get().sendMessage(
       composeForkSessionMessage(execution.instructions, assistantPlanText),
-      pID,
-      mID,
-      execution.agent || undefined,
+      selection.providerID,
+      selection.modelID,
+      selection.agentName || undefined,
       undefined,
       undefined,
       undefined,
-      execution.variant || undefined,
+      selection.variant,
       undefined,
       { sessionId: session.id },
     )

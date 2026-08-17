@@ -39,7 +39,7 @@ import { EditorView } from '@codemirror/view';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { parseProjectPlanMarkdown } from '@/lib/openchamberConfig';
-import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
+import { createWorktreeSessionForNewBranch, type WorktreeSessionSelection } from '@/lib/worktreeSessionCreator';
 import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
 import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
@@ -559,17 +559,31 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, onNavigat
 
         let sessionId: string | null = null;
         let directoryHint: string | null = currentProjectRef.path;
+        let worktreeSelection: WorktreeSessionSelection | null = null;
 
         if (pendingPlanSend.target === 'worktree') {
           if (!canCreateWorktree) {
             return;
           }
-          const created = await createWorktreeSessionForNewBranch(currentProjectRef.path, generateBranchName());
+          const created = await createWorktreeSessionForNewBranch(
+            currentProjectRef.path,
+            generateBranchName(),
+            undefined,
+            {
+              overrides: {
+                providerID: execution.providerID,
+                modelID: execution.modelID,
+                variant: execution.variant,
+                agentName: execution.agent.trim() || undefined,
+              },
+            },
+          );
           if (!created?.id) {
             return;
           }
           sessionId = created.id;
           directoryHint = created.path;
+          worktreeSelection = created.selection;
         } else {
           const sessionResult = await createSession(undefined, currentProjectRef.path, null);
           if (!sessionResult?.id) {
@@ -584,19 +598,28 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, onNavigat
           return;
         }
 
-        const selectionState = useSelectionStore.getState();
-        selectionState.saveSessionModelSelection(sessionId, execution.providerID, execution.modelID);
-        if (execution.agent.trim()) {
-          selectionState.saveSessionAgentSelection(sessionId, execution.agent);
-          selectionState.saveAgentModelForSession(sessionId, execution.agent, execution.providerID, execution.modelID);
-          selectionState.saveAgentModelVariantForSession(
-            sessionId,
-            execution.agent,
-            execution.providerID,
-            execution.modelID,
-            execution.variant || undefined,
-          );
+        if (!worktreeSelection) {
+          const selectionState = useSelectionStore.getState();
+          selectionState.saveSessionModelSelection(sessionId, execution.providerID, execution.modelID);
+          if (execution.agent.trim()) {
+            selectionState.saveSessionAgentSelection(sessionId, execution.agent);
+            selectionState.saveAgentModelForSession(sessionId, execution.agent, execution.providerID, execution.modelID);
+            selectionState.saveAgentModelVariantForSession(
+              sessionId,
+              execution.agent,
+              execution.providerID,
+              execution.modelID,
+              execution.variant || undefined,
+            );
+          }
         }
+
+        const messageSelection = worktreeSelection ?? {
+          providerID: execution.providerID,
+          modelID: execution.modelID,
+          variant: execution.variant || undefined,
+          agentName: execution.agent.trim() || undefined,
+        };
 
         setCurrentSession(sessionId, directoryHint);
         // "Run as goal" rides the same arm mechanism as the composer target
@@ -623,13 +646,13 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, onNavigat
         useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true, goalObjective);
         await sendMessage(
           visiblePrompt,
-          execution.providerID,
-          execution.modelID,
-          execution.agent.trim() || undefined,
+          messageSelection.providerID,
+          messageSelection.modelID,
+          messageSelection.agentName,
           undefined,
           undefined,
           syntheticParts,
-          execution.variant || undefined,
+          messageSelection.variant,
         );
 
         setPendingPlanSend(null);

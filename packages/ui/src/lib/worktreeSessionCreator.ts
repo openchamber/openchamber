@@ -5,14 +5,15 @@
  */
 
 import { toast } from '@/components/ui';
+import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { checkIsGitRepository, previewGitWorktree } from '@/lib/gitApi';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
-import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import {
@@ -28,6 +29,18 @@ import {
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { normalizePath } from '@/lib/pathNormalization';
 import { resolveProjectForDirectory } from '@/lib/projectResolution';
+import {
+  isValidWorktreeSessionSelection,
+  resolveWorktreeSessionSelection,
+  type WorktreeSessionOverrides,
+  type WorktreeSessionSelection,
+} from '@/lib/worktreeSessionSelection';
+
+export {
+  resolveWorktreeSessionSelection,
+  type WorktreeSessionOverrides,
+  type WorktreeSessionSelection,
+} from '@/lib/worktreeSessionSelection';
 
 const waitForWorktreeBootstrapIfEnabled = async (project: ProjectRef, directory: string): Promise<void> => {
   if (await getWorktreeSetupWaitEnabled(project)) {
@@ -87,87 +100,73 @@ let isCreatingWorktreeSession = false;
 
 
 
-const applyDefaultAgentAndModelSelection = (sessionId: string, configState = useConfigStore.getState()) => {
+export const applyDefaultAgentAndModelSelection = (
+  sessionId: string,
+  configState = useConfigStore.getState(),
+  overrides?: WorktreeSessionOverrides,
+  selection = resolveWorktreeSessionSelection(configState, overrides),
+): WorktreeSessionSelection | null => {
   try {
-    const visibleAgents = configState.getVisibleAgents();
-    let agentName: string | undefined;
-
-    if (configState.settingsDefaultAgent) {
-      const settingsAgent = visibleAgents.find((a) => a.name === configState.settingsDefaultAgent);
-      if (settingsAgent) {
-        agentName = settingsAgent.name;
-      }
+    if (!selection) {
+      return null;
     }
 
-    if (!agentName) {
-      agentName =
-        visibleAgents.find((agent) => agent.name === 'build')?.name ||
-        visibleAgents[0]?.name;
+    configState.setAgent(selection.agentName);
+    const selectionStore = useSelectionStore.getState();
+    selectionStore.saveSessionAgentSelection(sessionId, selection.agentName);
+    selectionStore.saveSessionModelSelection(sessionId, selection.providerID, selection.modelID);
+    selectionStore.saveAgentModelForSession(sessionId, selection.agentName, selection.providerID, selection.modelID);
+    selectionStore.saveAgentModelVariantForSession(
+      sessionId,
+      selection.agentName,
+      selection.providerID,
+      selection.modelID,
+      selection.variant,
+    );
+
+    const contextStore = useContextStore.getState();
+    contextStore.saveSessionAgentSelection(sessionId, selection.agentName);
+    contextStore.saveSessionModelSelection(sessionId, selection.providerID, selection.modelID);
+    contextStore.saveAgentModelForSession(sessionId, selection.agentName, selection.providerID, selection.modelID);
+
+    if (selection.variant !== undefined) {
+      configState.setCurrentVariant(selection.variant);
     }
+    contextStore.saveAgentModelVariantForSession(
+      sessionId,
+      selection.agentName,
+      selection.providerID,
+      selection.modelID,
+      selection.variant,
+    );
 
-    if (!agentName) {
-      return;
-    }
-
-    configState.setAgent(agentName);
-    useContextStore.getState().saveSessionAgentSelection(sessionId, agentName);
-
-    const settingsDefaultModel = configState.settingsDefaultModel;
-    if (!settingsDefaultModel) {
-      return;
-    }
-
-    const parsed = parseModelIdentifier(settingsDefaultModel);
-    if (!parsed) {
-      return;
-    }
-
-    const { providerId, modelId } = parsed;
-    const modelMetadata = configState.getModelMetadata(providerId, modelId);
-    if (!modelMetadata) {
-      return;
-    }
-
-    useContextStore.getState().saveSessionModelSelection(sessionId, providerId, modelId);
-    useContextStore.getState().saveAgentModelForSession(sessionId, agentName, providerId, modelId);
-
-    const settingsDefaultVariant = configState.settingsDefaultVariant;
-    if (!settingsDefaultVariant) {
-      return;
-    }
-
-    const provider = configState.providers.find((p) => p.id === providerId);
-    const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === modelId) as
-      | { variants?: Record<string, unknown> }
-      | undefined;
-    const variants = model?.variants;
-
-    if (variants && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
-      configState.setCurrentVariant(settingsDefaultVariant);
-      useContextStore
-        .getState()
-        .saveAgentModelVariantForSession(sessionId, agentName, providerId, modelId, settingsDefaultVariant);
-    }
-  } catch {
-    // Ignore errors setting default agent
+    return selection;
+  } catch (error) {
+    console.warn('[worktreeSessionCreator] applyDefaultAgentAndModelSelection failed', error);
+    return null;
   }
 };
 
-const initializeSessionForWorktree = (sessionId: string, metadata: {
-  path: string;
-  projectDirectory: string;
-  branch: string;
-  label: string;
-  name?: string;
-  createdFromBranch?: string;
-  kind?: 'pr' | 'standard';
-}) => {
+const initializeSessionForWorktree = (
+  sessionId: string,
+  metadata: {
+    path: string;
+    projectDirectory: string;
+    branch: string;
+    label: string;
+    name?: string;
+    createdFromBranch?: string;
+    kind?: 'pr' | 'standard';
+  },
+  overrides?: WorktreeSessionOverrides,
+  selection?: WorktreeSessionSelection | null,
+) => {
   const sessionStore = useSessionUIStore.getState();
   const configState = useConfigStore.getState();
   sessionStore.initializeNewOpenChamberSession(sessionId, configState.agents);
   sessionStore.setSessionDirectory(sessionId, metadata.path);
   sessionStore.setWorktreeMetadata(sessionId, metadata);
-  applyDefaultAgentAndModelSelection(sessionId, configState);
+  applyDefaultAgentAndModelSelection(sessionId, configState, overrides, selection);
   useDirectoryStore.getState().setDirectory(metadata.path, { showOverlay: false });
 };
 
@@ -321,9 +320,23 @@ export async function createWorktreeSessionForNewBranch(
     ensureRemoteUrl?: string;
     createdFromBranch?: string;
     returnAfterDirectoryCreated?: boolean;
+    overrides?: WorktreeSessionOverrides;
+    selection?: WorktreeSessionSelection | null;
   }
-): Promise<{ id: string; branch: string; path: string } | null> {
+): Promise<{ id: string; branch: string; path: string; selection: WorktreeSessionSelection } | null> {
   if (isCreatingWorktreeSession) {
+    return null;
+  }
+
+  const configState = useConfigStore.getState();
+  const selection = options?.selection === undefined
+    ? resolveWorktreeSessionSelection(configState, options?.overrides)
+    : options.selection;
+  if (!selection || !isValidWorktreeSessionSelection(configState, selection)) {
+    toast.error(formatMessage(
+      useI18nStore.getState().dictionary,
+      'session.newWorktree.error.noModelSelected',
+    ));
     return null;
   }
 
@@ -389,9 +402,9 @@ export async function createWorktreeSessionForNewBranch(
         throw new Error('Could not create a session for the worktree.');
       }
 
-      initializeSessionForWorktree(session.id, createdMetadata);
+      initializeSessionForWorktree(session.id, createdMetadata, options?.overrides, selection);
 
-      return { id: session.id, branch: metadata.branch || base, path: metadata.path };
+      return { id: session.id, branch: metadata.branch || base, path: metadata.path, selection };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create worktree session';
       toast.error('Failed to create worktree', { description: message });
