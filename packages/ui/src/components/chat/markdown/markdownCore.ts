@@ -3,6 +3,7 @@ import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
+import { isAppLinkUrl } from '@/lib/url';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { highlightCodeInWorker } from './markdown-worker';
 import { escapeRawMarkdownHtml, isLocalFileUrl, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
@@ -466,7 +467,10 @@ const ensureSanitizeHook = (): void => {
   sanitizeHookInstalled = true;
   DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
     if (!(node instanceof HTMLAnchorElement) || data.attrName !== 'href') return;
-    if (isLocalFileUrl(data.attrValue)) data.forceKeepAttr = true;
+    // DOMPurify's default URI policy strips custom application schemes
+    // (obsidian://, vscode://, ...). Keep them for anchors; dangerous schemes
+    // stay excluded via isAppLinkUrl and clicks go through confirmation.
+    if (isLocalFileUrl(data.attrValue) || isAppLinkUrl(data.attrValue)) data.forceKeepAttr = true;
   });
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     if (!(node instanceof HTMLAnchorElement)) return;
@@ -475,10 +479,17 @@ const ensureSanitizeHook = (): void => {
   });
 };
 
-const sanitize = (html: string): string => {
+const sanitize = (html: string, allowAppLinks = true): string => {
   if (!DOMPurify.isSupported) return '';
   ensureSanitizeHook();
-  return DOMPurify.sanitize(html, SANITIZE_CONFIG) as unknown as string;
+  const sanitized = DOMPurify.sanitize(html, SANITIZE_CONFIG) as unknown as string;
+  if (allowAppLinks) return sanitized;
+
+  // DOMPurify serializes attributes with double quotes. Remove app-link hrefs
+  // for runtimes that retain main's unsupported-link behavior.
+  return sanitized.replace(/ href="([^"]*)"/g, (attribute, href: string) =>
+    isAppLinkUrl(href) ? '' : attribute,
+  );
 };
 
 
@@ -507,12 +518,16 @@ const touch = (key: string, entry: { hash: string; html: string }): void => {
   if (oldest) htmlCache.delete(oldest);
 };
 
-const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): Promise<string> => {
+const parseBlock = async (
+  block: MarkdownBlock,
+  imageMode: MarkdownImageMode,
+  allowAppLinks: boolean,
+): Promise<string> => {
   const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
   const parsed = await Promise.resolve(parser.parse(block.src));
   const withMath = renderMathExpressions(parsed);
   const highlighted = block.highlight ? await highlightCodeBlocks(withMath) : withMath;
-  return sanitize(highlighted);
+  return sanitize(highlighted, allowAppLinks);
 };
 
 /**
@@ -524,12 +539,16 @@ const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): P
  * is synchronous (marked is not configured `async`), so this never blocks on a
  * worker round-trip.
  */
-export const renderMarkdownSync = (text: string, imageMode: MarkdownImageMode = 'inline'): string => {
+export const renderMarkdownSync = (
+  text: string,
+  imageMode: MarkdownImageMode = 'inline',
+  allowAppLinks = true,
+): string => {
   if (!text) return '';
   const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
   const parsed = parser.parse(text) as string;
   const withMath = renderMathExpressions(parsed);
-  return sanitize(withMath);
+  return sanitize(withMath, allowAppLinks);
 };
 
 export type RenderedBlock = {
@@ -551,6 +570,7 @@ export const renderMarkdownBlocks = async (
   streaming: boolean,
   cacheKey: string,
   imageMode: MarkdownImageMode = 'inline',
+  allowAppLinks = true,
 ): Promise<RenderedBlock[]> => {
   if (!text) return [];
 
@@ -558,14 +578,14 @@ export const renderMarkdownBlocks = async (
   return Promise.all(
     blocks.map(async (block, index) => {
       const contentHash = hash(block.raw);
-      const id = `${contentHash}:${block.mode}:${block.highlight ? 1 : 0}:${imageMode}`;
-      const key = `${cacheKey}:${index}:${block.mode}:${imageMode}`;
+      const id = `${contentHash}:${block.mode}:${block.highlight ? 1 : 0}:${imageMode}:${allowAppLinks ? 1 : 0}`;
+      const key = `${cacheKey}:${index}:${block.mode}:${imageMode}:${allowAppLinks ? 1 : 0}`;
       const cached = htmlCache.get(key);
       if (cached && cached.hash === contentHash) {
         touch(key, cached);
         return { id, html: cached.html };
       }
-      const html = await parseBlock(block, imageMode);
+      const html = await parseBlock(block, imageMode, allowAppLinks);
       touch(key, { hash: contentHash, html });
       return { id, html };
     }),

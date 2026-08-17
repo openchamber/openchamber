@@ -5,10 +5,11 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { isExternalHttpUrl, openExternalUrl } from '@/lib/url';
+import { isAppLinkUrl, isExternalHttpUrl, openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { Theme } from '@/types/theme';
+import { openAppLinkWithConfirmation } from './appLinkConfirmation';
 import type { ToolPopupContent } from './message/types';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import { useUIStore } from '@/stores/useUIStore';
@@ -62,18 +63,17 @@ const useExternalLinkInteractions = ({
   containerRef: React.RefObject<HTMLDivElement | null>;
   enabled?: boolean;
 }) => {
-  React.useEffect(() => {
-    if (enabled === false) {
-      return;
-    }
+  const runtimeApis = useRuntimeAPIs();
+  const isVSCode = runtimeApis.runtime.isVSCode;
 
+  React.useEffect(() => {
     const container = containerRef.current;
     if (!container) {
       return;
     }
 
-    const handleClick = (event: MouseEvent) => {
-      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+    const handleLinkActivation = (event: MouseEvent, allowExternalHttp: boolean) => {
+      if (event.defaultPrevented) {
         return;
       }
 
@@ -92,7 +92,24 @@ const useExternalLinkInteractions = ({
       }
 
       const href = anchor.getAttribute('href') ?? '';
-      if (!isExternalHttpUrl(href)) {
+      if (isAppLinkUrl(href)) {
+        if (isVSCode) {
+          // VS Code keeps main's unsupported app-link behavior. This only
+          // applies if a custom href reaches the DOM despite sanitization.
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+
+        // Custom application deep links (obsidian://, vscode://, ...) open in
+        // another application, so they require explicit user confirmation.
+        event.preventDefault();
+        event.stopPropagation();
+        void openAppLinkWithConfirmation(href);
+        return;
+      }
+
+      if (!allowExternalHttp || event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !isExternalHttpUrl(href)) {
         return;
       }
 
@@ -101,11 +118,24 @@ const useExternalLinkInteractions = ({
       void openExternalUrl(href);
     };
 
+    const handleClick = (event: MouseEvent) => {
+      // App links must be intercepted before modifier checks: target=_blank
+      // otherwise reaches Electron's native external-navigation fallback.
+      handleLinkActivation(event, enabled !== false);
+    };
+
+    const handleAuxClick = (event: MouseEvent) => {
+      if (event.button !== 1) return;
+      handleLinkActivation(event, false);
+    };
+
     container.addEventListener('click', handleClick);
+    container.addEventListener('auxclick', handleAuxClick);
     return () => {
       container.removeEventListener('click', handleClick);
+      container.removeEventListener('auxclick', handleAuxClick);
     };
-  }, [containerRef, enabled]);
+  }, [containerRef, enabled, isVSCode]);
 };
 
 const DEFAULT_MERMAID_CONTROLS: MermaidControlOptions = {
@@ -837,6 +867,7 @@ const useMorphdomMarkdown = ({
   streaming,
   cacheKey,
   imageMode = 'inline',
+  allowAppLinks = true,
   syntaxVars,
   ctx,
 }: {
@@ -845,6 +876,7 @@ const useMorphdomMarkdown = ({
   streaming: boolean;
   cacheKey: string;
   imageMode?: MarkdownImageMode;
+  allowAppLinks?: boolean;
   syntaxVars: Record<string, string>;
   ctx: DecorateContext;
 }) => {
@@ -883,7 +915,7 @@ const useMorphdomMarkdown = ({
       // `display:contents` keeps margin-collapsing/spacing identical to a flat
       // HTML body — the wrapper exists only for per-block reconciliation.
       block.style.display = 'contents';
-      block.innerHTML = renderMarkdownSync(text, imageMode);
+      block.innerHTML = renderMarkdownSync(text, imageMode, allowAppLinks);
       // Decorate synchronously too: wrap code blocks in their framed card,
       // mark inline code, build table controls, etc. The async pass re-decorates
       // its own DOM before morphing, so without this the first paint shows bare
@@ -895,7 +927,7 @@ const useMorphdomMarkdown = ({
         refreshMermaidViewers();
       }
     }
-  }, [containerRef, text, imageMode, ctx, refreshMermaidViewers]);
+  }, [containerRef, text, imageMode, allowAppLinks, ctx, refreshMermaidViewers]);
 
   React.useEffect(() => () => {
     mermaidViewerRef.current?.cleanup();
@@ -908,7 +940,7 @@ const useMorphdomMarkdown = ({
     const target = container.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
     let active = true;
 
-    void renderMarkdownBlocks(text, streaming, cacheKey, imageMode).then((blocks) => {
+    void renderMarkdownBlocks(text, streaming, cacheKey, imageMode, allowAppLinks).then((blocks) => {
       if (!active) return;
       const existing = Array.from(target.children) as HTMLElement[];
 
@@ -959,7 +991,7 @@ const useMorphdomMarkdown = ({
     return () => {
       active = false;
     };
-  }, [containerRef, text, streaming, cacheKey, imageMode, ctx, refreshMermaidViewers]);
+  }, [containerRef, text, streaming, cacheKey, imageMode, allowAppLinks, ctx, refreshMermaidViewers]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1048,6 +1080,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     streaming: live,
     cacheKey,
     imageMode: variant === 'assistant' ? 'label' : 'inline',
+    allowAppLinks: !runtime.isVSCode,
     syntaxVars,
     ctx,
   });
@@ -1087,6 +1120,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   content: string;
   className?: string;
   variant?: MarkdownVariant;
+  // App links remain confirmed even where ordinary HTTP link handling is off.
   disableLinkSafety?: boolean;
   stripFrontmatter?: boolean;
   onShowPopup?: (content: ToolPopupContent) => void;
@@ -1138,6 +1172,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     text: renderedContent,
     streaming: false,
     cacheKey: `simple:${variant}`,
+    allowAppLinks: !runtime.isVSCode,
     syntaxVars,
     ctx,
   });
