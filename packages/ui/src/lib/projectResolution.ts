@@ -5,9 +5,9 @@ import type { WorktreeMetadata } from "@/types/worktree";
 import { normalizePath } from "@/lib/pathNormalization";
 export const normalizeProjectPath = normalizePath;
 
-export const deriveProjectLabelFromPath = (path: string, preserveCasing = false): string => {
+export const deriveProjectLabelFromPath = (path: string, preserveCasing = true): string => {
   const normalized = normalizeProjectPath(path);
-  if (!normalized || normalized === '/') return 'Root';
+  if (!normalized || normalized === '/') return normalized || path.trim();
   const segments = normalized.split('/').filter(Boolean);
   const raw = segments[segments.length - 1] || normalized;
   return preserveCasing
@@ -73,8 +73,8 @@ export const resolveProjectForSessionDirectory = (
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
   directory: string | null,
 ): ProjectEntry | null =>
-  resolveProjectFromWorktreeDirectory(projects, availableWorktreesByProject, directory) ??
-  resolveProjectForDirectory(projects, directory);
+  resolveProjectForDirectory(projects, directory) ??
+  resolveProjectFromWorktreeDirectory(projects, availableWorktreesByProject, directory);
 
 const resolveSessionDirectory = (session: Session): string | null => {
   const record = session as Session & {

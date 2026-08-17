@@ -39,12 +39,16 @@ const session = (id: string, directory: string): Session => ({
 } as Session);
 
 describe('deriveProjectLabelFromPath', () => {
-  test('formats folder names by default', () => {
-    expect(deriveProjectLabelFromPath('/workspace/my_PROJECT')).toBe('My PROJECT');
+  test('preserves folder names by default', () => {
+    expect(deriveProjectLabelFromPath('/workspace/my_PROJECT')).toBe('my_PROJECT');
   });
 
   test('preserves the exact folder basename when requested', () => {
     expect(deriveProjectLabelFromPath('/workspace/my_PROJECT', true)).toBe('my_PROJECT');
+  });
+
+  test('returns the normalized root path instead of hardcoded English UI text', () => {
+    expect(deriveProjectLabelFromPath('/')).toBe('/');
   });
 });
 

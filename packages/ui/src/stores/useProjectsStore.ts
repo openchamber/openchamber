@@ -430,7 +430,7 @@ const createVSCodeWorkspaceProject = (
     ...existing,
     id,
     path: normalizedPath,
-    label: deriveProjectLabelFromPath(normalizedPath),
+    label: deriveProjectLabelFromPath(normalizedPath, true),
     addedAt: existing?.addedAt ?? now,
     lastOpenedAt: isActive ? now : existing?.lastOpenedAt ?? now,
   };

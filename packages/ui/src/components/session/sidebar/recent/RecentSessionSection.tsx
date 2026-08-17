@@ -83,7 +83,7 @@ export const RecentSessionSection: React.FC<Props> = (props) => {
       }
       if (!owner) continue;
       const worktree = availableWorktreesByProject.get(owner.normalizedPath)?.find((entry) => normalizePath(entry.path) === directory);
-      const projectLabel = formatProjectLabel(owner.label?.trim() || deriveProjectLabelFromPath(owner.normalizedPath));
+      const projectLabel = formatProjectLabel(owner.label?.trim() || deriveProjectLabelFromPath(owner.normalizedPath, true));
       const branch = worktree?.branch?.trim() || gitBranches.get(directory)?.trim() || null;
       locations.set(session.id, {
         projectId: owner.id,

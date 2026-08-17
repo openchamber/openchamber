@@ -59,20 +59,20 @@ describe('useSessionDisplayStore project display', () => {
 describe('useSessionDisplayStore project preferences', () => {
   beforeEach(() => {
     useSessionDisplayStore.setState({
-      preserveProjectNameCasing: false,
+      preserveProjectNameCasing: true,
       autoCloseEmptyProjects: false,
     });
   });
 
-  test('keeps project preferences disabled by default', () => {
+  test('preserves project name casing by default while leaving auto-close disabled', () => {
     const state = useSessionDisplayStore.getState();
-    expect(state.preserveProjectNameCasing).toBe(false);
+    expect(state.preserveProjectNameCasing).toBe(true);
     expect(state.autoCloseEmptyProjects).toBe(false);
   });
 
   test('toggles project preferences independently', () => {
     useSessionDisplayStore.getState().togglePreserveProjectNameCasing();
-    expect(useSessionDisplayStore.getState().preserveProjectNameCasing).toBe(true);
+    expect(useSessionDisplayStore.getState().preserveProjectNameCasing).toBe(false);
     expect(useSessionDisplayStore.getState().autoCloseEmptyProjects).toBe(false);
 
     useSessionDisplayStore.getState().toggleAutoCloseEmptyProjects();

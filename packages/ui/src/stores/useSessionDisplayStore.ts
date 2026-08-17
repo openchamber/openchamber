@@ -73,7 +73,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       // disappear once the persisted preference rehydrates.
       showArchivedSessions: false,
       projectSortOrder: 'manual',
-      preserveProjectNameCasing: false,
+      preserveProjectNameCasing: true,
       autoCloseEmptyProjects: false,
       setShowRecentSection: (show) => set({ showRecentSection: show }),
       setShowArchivedSessions: (show) => set({ showArchivedSessions: show }),
