@@ -88,6 +88,8 @@ chmod +x OpenChamber-*.AppImage
 
 Linux AppImages require FUSE (`libfuse.so.2`). Without FUSE, run with `APPIMAGE_EXTRACT_AND_RUN=1`.
 
+On Fedora, RHEL, or CentOS, install the `.rpm` instead: `sudo dnf install ./OpenChamber-*.rpm` (updates are manual — download the new `.rpm` from the releases page).
+
 ### VS Code
 
 Install [OpenChamber from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber), or search for “OpenChamber” in Extensions.

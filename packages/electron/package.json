@@ -114,7 +114,8 @@
     },
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "rpm"
       ],
       "category": "Development",
       "icon": "resources/icons/icon.png",
