@@ -51,6 +51,7 @@ import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
+import { Button } from '@/components/ui/button';
 // useMessageStore removed — messages now come from sync system
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useTabletLayout } from '@/lib/device';
@@ -70,6 +71,8 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useWorkspaceReauth } from '@/components/workspaces/WorkspaceReauth';
+import type { WorkspaceReadinessResult } from '@/lib/api/types';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { togglePermissionAutoAccept } from './permissionAutoAccept';
@@ -322,6 +325,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         s.newSessionDraft?.open ? s.newSessionDraft.permissionAutoAcceptEnabled === true : false
     ));
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
+    const setNewSessionWorkspaceMode = useSessionUIStore((s) => s.setNewSessionWorkspaceMode);
     const setDraftPermissionAutoAcceptEnabled = useSessionUIStore((s) => s.setDraftPermissionAutoAcceptEnabled);
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
@@ -343,6 +347,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const currentManagementSessionId = currentSessionId;
     const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
     const [reviewFlowSubmitting, setReviewFlowSubmitting] = React.useState(false);
+    const workspaceReauth = useWorkspaceReauth();
+    const [workspaceProgress, setWorkspaceProgress] = React.useState<'preparing' | 'connecting' | 'creating' | 'opening' | null>(null);
+    const [workspaceRecovery, setWorkspaceRecovery] = React.useState<{ code: string; message: string } | null>(null);
+    const [workspaceCompat, setWorkspaceCompat] = React.useState<WorkspaceReadinessResult | null>(null);
+    const [secureBlocked, setSecureBlocked] = React.useState<'project' | 'setup' | null>(null);
+    const workspaceSubmitInFlightRef = React.useRef(false);
 
     const currentProviderId = useConfigStore((state) => state.currentProviderId);
     const currentModelId = useConfigStore((state) => state.currentModelId);
@@ -368,7 +378,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
     const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
-    const { git: runtimeGit, vscode: vscodeApi } = useRuntimeAPIs();
+    const runtimeAPIs = useRuntimeAPIs();
+
+    React.useEffect(() => {
+        const workspaces = runtimeAPIs.workspaces;
+        if (!newSessionDraftOpen || !workspaces || isVSCodeRuntime()) {
+            setSecureBlocked(null);
+            return;
+        }
+        let cancelled = false;
+        workspaces.readiness().then((result) => {
+            if (!cancelled) setWorkspaceCompat(result);
+        }).catch(() => {});
+        return () => { cancelled = true; };
+    }, [newSessionDraftOpen, runtimeAPIs.workspaces]);
+    const { git: runtimeGit, vscode: vscodeApi } = runtimeAPIs;
     const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
     const cycleAgentShortcut = React.useMemo(() => (
         getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
@@ -1039,15 +1063,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
+        const requestWorkspaceReauth = async (input: { operation: 'workspace.session.start'; project: string; payload: Record<string, unknown> }) =>
+            workspaceReauth.requestProof(input.operation, input.project, input.payload);
+        const secureWorkspaceDraft = newSessionDraft?.workspaceMode === 'secure';
         const sendMessageOptions: {
             target?: NonNullable<typeof capturedTarget>;
             draftSnapshot?: NonNullable<typeof capturedDraftSnapshot>;
             delivery?: 'steer';
-        } | undefined = (capturedTarget || capturedDraftSnapshot || delivery)
+            workspaceReauthenticate?: typeof requestWorkspaceReauth;
+            workspaceProgress?: typeof setWorkspaceProgress;
+        } | undefined = (capturedTarget || capturedDraftSnapshot || delivery || secureWorkspaceDraft)
             ? {
                 ...(capturedTarget ? { target: capturedTarget } : {}),
                 ...(capturedDraftSnapshot ? { draftSnapshot: capturedDraftSnapshot } : {}),
                 ...(delivery ? { delivery } : {}),
+                workspaceReauthenticate: requestWorkspaceReauth,
+                workspaceProgress: setWorkspaceProgress,
             }
             : undefined;
 
@@ -1163,6 +1194,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             if (command && commandIsAvailable) {
                 const variables = buildCommandVariables(command, argument);
                 try {
+                    if (secureWorkspaceDraft && workspaceSubmitInFlightRef.current) return;
+                    if (secureWorkspaceDraft) {
+                        workspaceSubmitInFlightRef.current = true;
+                        setWorkspaceRecovery(null);
+                    }
                     await sessionActions.waitForConnectionOrThrow();
                     const visibleText = await renderMagicPrompt(command.visiblePrompt, variables.visible);
                     const instructionsText = await renderMagicPrompt(command.instructionsPrompt, variables.instructions);
@@ -1181,6 +1217,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     scrollToBottom?.();
                 } catch (error) {
                     toast.error(getSubmitErrorMessage(error, t(command.errorToastKey)));
+                } finally {
+                    if (secureWorkspaceDraft) {
+                        workspaceSubmitInFlightRef.current = false;
+                        setWorkspaceProgress(null);
+                    }
                 }
                 return;
             }
@@ -1214,6 +1255,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             ...additionalParts.flatMap(p => p.attachments ?? []),
         ];
 
+        if (secureWorkspaceDraft && workspaceSubmitInFlightRef.current) return;
+        if (secureWorkspaceDraft) {
+            workspaceSubmitInFlightRef.current = true;
+            setWorkspaceRecovery(null);
+        }
         const sendPromise = sendMessage(
             primaryText,
             providerIdToSend,
@@ -1288,6 +1334,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 setLinkedPr(null);
             }
         }).catch((error: unknown) => {
+            const structuredCode = typeof error === 'object' && error !== null && 'code' in error
+                ? String((error as { code?: unknown }).code ?? '')
+                : '';
             const rawMessage =
                 error instanceof Error
                     ? error.message
@@ -1324,6 +1373,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 return;
             }
 
+            if (structuredCode === 'WORKSPACE_SESSION_PARTIAL' || structuredCode === 'WORKSPACE_SESSION_CONNECTION_TIMEOUT') {
+                setWorkspaceRecovery({ code: structuredCode, message: rawMessage });
+                toast.error(t('settings.workspaces.newSession.partial'));
+                return;
+            }
+
+            if (typeof structuredCode === 'string' && structuredCode.startsWith('WORKSPACE_SESSION_')) {
+                // Provider failures arrive as internal sentences ("Docker CLI is not
+                // available"); say what to do instead of forwarding the sentence.
+                const hint = workspaceStartRemedy(rawMessage);
+                toast.error(hint ? t(hint) : t('settings.workspaces.newSession.startFailed'));
+                return;
+            }
+
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
                     useInputStore.getState().setAttachedFiles(allAttachments);
@@ -1344,6 +1407,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 useInputStore.getState().setAttachedFiles(allAttachments);
             }
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
+        }).finally(() => {
+            setWorkspaceProgress(null);
+            workspaceSubmitInFlightRef.current = false;
         });
 
         if (!isMobile) {
@@ -2514,6 +2580,80 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     </h1>
                 </div>
             ) : null}
+            {newSessionDraftOpen && !isVSCode ? (
+                <div className="chat-input-column mb-3 space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-center gap-2" role="group" aria-label={t('settings.workspaces.newSession.groupLabel')}>
+                        <span className="typography-meta text-muted-foreground">{t('settings.workspaces.newSession.groupLabel')}</span>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="chip"
+                            data-testid="workspace-mode-host"
+                            aria-pressed={newSessionDraft?.workspaceMode !== 'secure'}
+                            onClick={() => { setSecureBlocked(null); setNewSessionWorkspaceMode('host'); }}
+                        >
+                            {t('settings.workspaces.newSession.host')}
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="chip"
+                            data-testid="workspace-mode-secure"
+                            aria-pressed={newSessionDraft?.workspaceMode === 'secure'}
+                            onClick={() => {
+                                // Never a dead end: an unusable option explains itself instead of
+                                // sitting disabled with the reason somewhere else on screen.
+                                if (!selectedDraftDirectory) { setSecureBlocked('project'); return; }
+                                if (workspaceCompat && !workspaceCompat.active) { setSecureBlocked('setup'); return; }
+                                setSecureBlocked(null);
+                                setNewSessionWorkspaceMode('secure');
+                            }}
+                        >
+                            {t('settings.workspaces.newSession.secure')}
+                        </Button>
+                    </div>
+                    {workspaceProgress ? (
+                        <div className="flex items-center justify-center gap-2 typography-ui text-foreground" role="status">
+                            <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" aria-hidden="true" />
+                            <span>
+                                {workspaceProgress === 'preparing'
+                                    ? t('settings.workspaces.newSession.phasePreparing')
+                                    : workspaceProgress === 'connecting'
+                                        ? t('settings.workspaces.newSession.phaseConnecting')
+                                        : workspaceProgress === 'creating'
+                                            ? t('settings.workspaces.newSession.phaseCreating')
+                                            : t('settings.workspaces.newSession.phaseOpening')}
+                            </span>
+                        </div>
+                    ) : workspaceRecovery ? (
+                        <div className="flex flex-wrap items-center justify-center gap-2" role="alert">
+                            <span className="typography-meta text-[var(--status-warning)]">{t('settings.workspaces.newSession.partial')}</span>
+                            <Button type="submit" size="sm" variant="outline" data-testid="workspace-session-retry" disabled={workspaceProgress !== null}>
+                                {t('settings.workspaces.newSession.retry')}
+                            </Button>
+                        </div>
+                    ) : secureBlocked === 'setup' ? (
+                        <div className="flex flex-wrap items-center justify-center gap-2" role="status">
+                            <span className="typography-meta text-muted-foreground">{t('settings.workspaces.newSession.notConfigured')}</span>
+                            <Button type="button" size="sm" variant="outline" onClick={() => {
+                                setSecureBlocked(null);
+                                useUIStore.getState().setSettingsPage('workspaces');
+                                useUIStore.getState().setSettingsDialogOpen(true);
+                            }}>
+                                {t('gitView.pr.actions.openSettings')}
+                            </Button>
+                        </div>
+                    ) : secureBlocked === 'project' ? (
+                        <p className="text-center typography-meta text-muted-foreground" role="status">{t('settings.workspaces.newSession.chooseProject')}</p>
+                    ) : newSessionDraft?.workspaceMode === 'secure' ? (
+                        <p className="text-center typography-meta text-muted-foreground">
+                            {workspaceCompat?.defaultProvider
+                                ? t('settings.workspaces.newSession.secureHintWithRuntime', { runtime: workspaceRuntimeLabel(t, workspaceCompat.defaultProvider) })
+                                : t('settings.workspaces.newSession.secureHint')}
+                        </p>
+                    ) : null}
+                </div>
+            ) : null}
             <div className={cn('chat-input-column relative overflow-visible', isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
                 <AttachedFilesList onShowPopup={handleShowAttachmentPreview} />
                 <QueuedMessageChips
@@ -2859,6 +2999,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 />
             ) : null}
         </form>
+        {workspaceReauth.dialog}
 
         {/* Issue Picker Dialog */}
         <GitHubIssuePickerDialog
@@ -2990,5 +3131,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 };
 
 ChatInputComponent.displayName = 'ChatInput';
+
+/** Human name of the runtime a secure session would use, for the composer hint. */
+function workspaceRuntimeLabel(t: (key: never) => string, provider: string) {
+    if (provider === 'apple-container') return t('settings.workspaces.provider.appleContainer' as never);
+    if (provider === 'kubernetes') return t('settings.workspaces.provider.kubernetes' as never);
+    return t('settings.workspaces.provider.docker' as never);
+}
+
+/**
+ * Maps a workspace start failure to actionable guidance. The server sends provider
+ * sentences meant for logs; the composer needs the remedy, not the sentence.
+ */
+function workspaceStartRemedy(message: string) {
+    const text = (message || '').toLowerCase();
+    if (text.includes('docker cli is not available')) return 'settings.workspaces.remediation.docker.cliMissing' as const;
+    if (text.includes('docker daemon is not reachable')) return 'settings.workspaces.remediation.docker.daemonUnavailable' as const;
+    if (text.includes('kubectl is not available')) return 'settings.workspaces.remediation.kubernetes.cliMissing' as const;
+    if (text.includes('no kubernetes configuration')) return 'settings.workspaces.remediation.kubernetes.notConfigured' as const;
+    if (text.includes('cluster is not reachable')) return 'settings.workspaces.remediation.kubernetes.clusterUnreachable' as const;
+    if (text.includes('namespace does not exist')) return 'settings.workspaces.remediation.kubernetes.namespaceMissing' as const;
+    if (text.includes('apple container cli is not available')) return 'settings.workspaces.remediation.apple.cliMissing' as const;
+    if (text.includes('supported only on macos')) return 'settings.workspaces.remediation.apple.unsupportedPlatform' as const;
+    return null;
+}
 
 export const ChatInput = React.memo(ChatInputComponent);

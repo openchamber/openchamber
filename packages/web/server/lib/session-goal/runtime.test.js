@@ -5,6 +5,7 @@ import { createSessionGoalRuntime } from './runtime.js';
 const SESSION_ID = 'ses_parent';
 const CHILD_ID = 'ses_child';
 const DIRECTORY = '/workspace';
+const WORKSPACE = 'wrk_1';
 
 const goal = {
   id: 'goal_1',
@@ -40,7 +41,7 @@ const startIdleTick = async (fetchImpl) => {
   runtime.processPayload({
     type: 'session.status',
     properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory: DIRECTORY },
-  });
+  }, DIRECTORY, WORKSPACE);
   await vi.advanceTimersByTimeAsync(10);
   return { runtime, getSmallModelService };
 };
@@ -123,7 +124,7 @@ describe('session goal live activity gate', () => {
     const requests = [];
     const fetchImpl = vi.fn(async (input, init = {}) => {
       const pathname = requestPath(input);
-      requests.push({ pathname, method: init.method ?? 'GET', body: init.body });
+      requests.push({ pathname, searchParams: new URL(typeof input === 'string' ? input : input.url).searchParams, method: init.method ?? 'GET', body: init.body });
       if (pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') return jsonResponse(session);
       if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
       if (pathname === '/session/status') return jsonResponse({});
@@ -162,12 +163,13 @@ describe('session goal live activity gate', () => {
     runtime.processPayload({
       type: 'session.status',
       properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory: DIRECTORY },
-    });
+    }, DIRECTORY, WORKSPACE);
     await vi.advanceTimersByTimeAsync(10);
 
     expect(service.generateSmallModelText).toHaveBeenCalledOnce();
     const patch = requests.find((request) => request.pathname === `/session/${SESSION_ID}` && request.method === 'PATCH');
     expect(patch).toBeDefined();
+    expect(requests.every((request) => request.searchParams.get('workspace') === WORKSPACE)).toBe(true);
     const writtenGoal = JSON.parse(patch.body).metadata.openchamber.goal;
     expect(writtenGoal).toMatchObject({
       status: 'complete',

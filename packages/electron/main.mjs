@@ -15,6 +15,7 @@ import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
+import { mintAndPersistDesktopLocalClient } from './desktop-local-client.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
@@ -32,6 +33,8 @@ import {
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
+import { isPackagedSmokeEnabled, writePackagedSmokeReady } from './packaged-smoke.mjs';
+import { runPackagedWorkspaceSmoke } from './packaged-workspace-smoke.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -46,6 +49,36 @@ const PACKAGED_APP_USER_MODEL_ID = 'dev.openchamber.desktop';
 const DEV_APP_USER_MODEL_ID = 'dev.openchamber.desktop.dev';
 const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
 const BACKGROUND_START_ARG = '--background';
+const packagedSmoke = isPackagedSmokeEnabled({ argv: process.argv, env: process.env, packaged: app.isPackaged });
+let packagedSmokeServerReady = false;
+let packagedSmokeRendererReady = false;
+let packagedSmokeExitScheduled = false;
+let packagedSmokeWorkspaceRunning = false;
+const packagedWorkspaceSmoke = packagedSmoke && process.env.OPENCHAMBER_PACKAGED_SMOKE_WORKSPACE === '1';
+const maybeFinishPackagedSmoke = async () => {
+  if (!packagedSmoke || packagedSmokeExitScheduled) return;
+  if (!packagedSmokeServerReady || !packagedSmokeRendererReady || packagedSmokeWorkspaceRunning) return;
+  packagedSmokeWorkspaceRunning = true;
+  try {
+    if (packagedWorkspaceSmoke) {
+      await runPackagedWorkspaceSmoke({
+        baseUrl: state.sidecarUrl,
+        clientToken: state.clientToken,
+        password: process.env.OPENCHAMBER_PACKAGED_SMOKE_PASSWORD,
+        directory: process.env.OPENCHAMBER_PACKAGED_SMOKE_PROJECT,
+        runtimeImage: process.env.OPENCHAMBER_PACKAGED_SMOKE_RUNTIME_IMAGE,
+        gatewayImage: process.env.OPENCHAMBER_PACKAGED_SMOKE_GATEWAY_IMAGE,
+      });
+    }
+    if (!writePackagedSmokeReady({ env: process.env, serverReady: packagedSmokeServerReady, rendererReady: packagedSmokeRendererReady, requireWorkspace: packagedWorkspaceSmoke, workspaceReady: true })) return;
+    packagedSmokeExitScheduled = true;
+    setTimeout(() => app.exit(0), 100);
+  } catch (error) {
+    log.error('[electron smoke] packaged Secure Workspace validation failed:', error instanceof Error ? error.message : 'unknown error');
+    packagedSmokeExitScheduled = true;
+    setTimeout(() => app.exit(1), 100);
+  }
+};
 
 const getLoginItemOptions = () => {
   if (process.platform === 'win32') {
@@ -223,8 +256,6 @@ const MINI_CHAT_MIN_WINDOW_WIDTH = 360;
 const MINI_CHAT_MIN_WINDOW_HEIGHT = 480;
 const MAX_CAPTURE_PAGE_RECT_AREA = 4_000_000;
 const LOCAL_HOST_ID = 'local';
-const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
-const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 // Remote hosts get a regular 'desktop' client (NOT 'desktop-local' — that kind
 // grants whole-server device management and must never be issued to a desktop
 // connecting to someone else's server).
@@ -697,11 +728,8 @@ const isLocalRuntimeUrl = (targetUrl) => {
   const localUrl = state.sidecarUrl || state.localOrigin || '';
   if (!localUrl) return false;
   if (sameOrigin(targetUrl, localUrl)) return true;
-  // The embedded server bound to 0.0.0.0 for LAN access is still THIS
-  // machine's server when addressed via any of its own interfaces on the same
-  // port — the minted client token must carry the desktop-local kind, or the
-  // server's client-create gate rejects it (the "Local — Auth required" +
-  // unreachable-screen regression).
+  // The embedded server bound to 0.0.0.0 for LAN access is still this process's
+  // local runtime when addressed through another interface on the same port.
   try {
     const target = new URL(targetUrl);
     const local = new URL(localUrl);
@@ -1418,6 +1446,7 @@ const loadWindowsEnv = () => {
     path.join(homeDir, '.opencode', 'bin'),
     path.join(homeDir, '.bun', 'bin'),
     path.join(homeDir, '.local', 'bin'),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Docker', 'Docker', 'resources', 'bin'),
     path.join(localAppData, 'Programs', 'Microsoft VS Code', 'bin'),
     path.join(localAppData, 'Programs', 'Cursor', 'resources', 'app', 'bin'),
     path.join(appData, 'npm'),
@@ -1564,11 +1593,28 @@ const spawnLocalServer = async () => {
     }),
   });
 
+  let localClientToken;
+  try {
+    localClientToken = await mintAndPersistDesktopLocalClient({
+      serverHandle: handle,
+      metadata: desktopDeviceMetadata(),
+      persistToken: (token) => mutateSettingsRoot((root) => {
+        root.desktopLocalClientToken = token;
+      }),
+    });
+  } catch (error) {
+    await handle.stop({ exitProcess: false }).catch(() => {});
+    throw error;
+  }
+
   const port = handle.getPort();
   const url = buildLocalUrl(port);
 
   state.serverHandle = handle;
   state.sidecarUrl = url;
+  state.clientToken = localClientToken;
+  packagedSmokeServerReady = true;
+  maybeFinishPackagedSmoke();
   recordElectronStartupPerformance('electron.server.ready', {
     durationMs: performance.now() - serverStartedAt,
   });
@@ -1903,12 +1949,11 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
   if (!baseUrl) throw new Error('Invalid URL');
   if (!candidatePassword) throw new Error('Password is required');
 
-  // Stable client identity so re-login reuses the same device record. Local
-  // uses the fixed desktop-local identity; remote uses this install's id with a
-  // regular 'desktop' kind.
-  const clientIdentity = isLocalRuntimeUrl(baseUrl)
-    ? { clientKind: LOCAL_DESKTOP_CLIENT_KIND, dedupeKey: LOCAL_DESKTOP_CLIENT_DEDUPE_KEY, ...desktopDeviceMetadata() }
-    : { clientKind: REMOTE_DESKTOP_CLIENT_KIND, dedupeKey: `desktop:${await getOrCreateDesktopInstallId()}`, ...desktopDeviceMetadata() };
+  const clientIdentity = {
+    clientKind: REMOTE_DESKTOP_CLIENT_KIND,
+    dedupeKey: `desktop:${await getOrCreateDesktopInstallId()}`,
+    ...desktopDeviceMetadata(),
+  };
 
   const loginResponse = await fetch(new URL('/auth/session', `${baseUrl}/`).toString(), {
     method: 'POST',
@@ -2628,6 +2673,10 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
       });
     }
     browserWindow.webContents.setZoomFactor(1);
+    if (packagedSmoke && browserWindow.__ocLabel === 'main' && classifyStartupDocument(browserWindow.webContents.getURL()) === 'application') {
+      packagedSmokeRendererReady = true;
+      maybeFinishPackagedSmoke();
+    }
     if (state.mainWindow && browserWindow.id === state.mainWindow.id && pendingDeepLinks.length > 0) {
       const timer = setTimeout(flushPendingDeepLinks, 400);
       if (typeof timer?.unref === 'function') timer.unref();

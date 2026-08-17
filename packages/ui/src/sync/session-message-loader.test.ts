@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, OpencodeClient, Part } from "@opencode-ai/sdk/v2/client"
+import { rememberConfirmedSessionWorkspaceRoute } from "@/stores/useGlobalSessionsStore"
 import { ChildStoreManager } from "./child-store"
 import { SessionMessageLoader } from "./session-message-loader"
 import {
@@ -27,7 +28,8 @@ const response = (data: ReturnType<typeof createRecord>[], cursor?: string) => (
 
 const createLoader = (messages: (input: {
   sessionID: string
-  directory?: string
+    directory?: string
+    workspace?: string
   limit?: number
   before?: string
 }) => Promise<unknown>) => {
@@ -38,6 +40,22 @@ const createLoader = (messages: (input: {
 }
 
 describe("SessionMessageLoader", () => {
+  test("routes message reads through the confirmed workspace", async () => {
+    const requests: Array<{ workspace?: string }> = []
+    const { childStores, loader } = createLoader(async (input) => {
+      requests.push(input)
+      return response([createRecord(input.sessionID)])
+    })
+    const target = { directory: "/workspace", sessionID: "session-workspace" }
+    rememberConfirmedSessionWorkspaceRoute(target.sessionID, "wrk_1")
+
+    await loader.ensure(target, { reason: "navigation" })
+
+    expect(requests).toEqual([{ sessionID: "session-workspace", directory: "/workspace", workspace: "wrk_1", limit: 50, before: undefined }])
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("deduplicates navigation and reactive loading for the same target", async () => {
     const pending = deferred<ReturnType<typeof response>>()
     let calls = 0

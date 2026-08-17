@@ -19,7 +19,11 @@ export interface RouteState {
 /**
  * Valid main tab values for URL routing.
  */
-export const VALID_TABS: readonly MainTab[] = ['chat', 'git', 'diff', 'terminal', 'files', 'diagram'] as const;
+export const VALID_TABS: readonly MainTab[] = ['chat', 'git', 'diff', 'terminal', 'files', 'diagram', 'workspaces'] as const;
+
+export function isMainTabAvailable(tab: MainTab, runtime: { isVSCode: boolean }): boolean {
+  return tab !== 'workspaces' || !runtime.isVSCode;
+}
 
 /**
  * Valid settings section values for URL routing.

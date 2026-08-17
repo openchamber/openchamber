@@ -265,10 +265,11 @@ export const createSessionGoalRuntime = ({
     }
   };
 
-  const openCodeFetch = async (fetchPath, { directory, method = 'GET', body, query } = {}) => {
+  const openCodeFetch = async (fetchPath, { directory, workspace, method = 'GET', body, query } = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const params = new URLSearchParams(query || {});
     if (directory) params.set('directory', directory);
+    if (workspace) params.set('workspace', workspace);
     const search = params.toString();
     const url = search ? `${base}?${search}` : base;
     const response = await fetch(url, {
@@ -287,21 +288,22 @@ export const createSessionGoalRuntime = ({
     return response.json().catch(() => null);
   };
 
-  const fetchRecentMessages = async (sessionId, directory) => {
+  const fetchRecentMessages = async (sessionId, directory, workspace) => {
     const messages = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/message`, {
       directory,
+      workspace,
       query: { limit: String(MESSAGE_FETCH_LIMIT) },
     }).catch(() => null);
     return Array.isArray(messages) ? messages : null;
   };
 
-  const fetchSessionStatuses = async (directory) => {
-    const statuses = await openCodeFetch('/session/status', { directory }).catch(() => null);
+  const fetchSessionStatuses = async (directory, workspace) => {
+    const statuses = await openCodeFetch('/session/status', { directory, workspace }).catch(() => null);
     return statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : null;
   };
 
-  const fetchSessionChildren = async (sessionId, directory) => {
-    const children = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/children`, { directory })
+  const fetchSessionChildren = async (sessionId, directory, workspace) => {
+    const children = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/children`, { directory, workspace })
       .catch(() => null);
     return Array.isArray(children) ? children : null;
   };
@@ -312,8 +314,8 @@ export const createSessionGoalRuntime = ({
   // metadata writes (assist payloads, dismissals, UI goal edits) survive.
   // Returns the written goal, or null when the stored goal no longer matches
   // the expected id (user replaced/cleared it while we worked).
-  const writeGoal = async (sessionId, directory, expectedGoalId, mutate) => {
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory });
+  const writeGoal = async (sessionId, directory, workspace, expectedGoalId, mutate) => {
+    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory, workspace });
     const currentGoal = parseGoalMetadata(session);
     if (!currentGoal || currentGoal.id !== expectedGoalId) return null;
     const nextGoal = { ...currentGoal, ...mutate(currentGoal), updatedAt: Date.now() };
@@ -323,6 +325,7 @@ export const createSessionGoalRuntime = ({
       : {};
     await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, {
       directory,
+      workspace,
       method: 'PATCH',
       body: {
         metadata: {
@@ -334,8 +337,8 @@ export const createSessionGoalRuntime = ({
     return nextGoal;
   };
 
-  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID }) => {
-    const written = await writeGoal(sessionId, directory, goal.id, (current) => ({
+  const settleGoal = async ({ sessionId, directory, workspace, goal, status, statusReason, note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID }) => {
+    const written = await writeGoal(sessionId, directory, workspace, goal.id, (current) => ({
       status,
       statusReason: clampText(statusReason, REASON_CHAR_LIMIT),
       note: note !== undefined ? clampText(note, NOTE_CHAR_LIMIT) : current.note,
@@ -421,7 +424,7 @@ export const createSessionGoalRuntime = ({
     }
   };
 
-  const sendContinuation = async ({ sessionId, directory, goal, lastAssistantInfo }) => {
+  const sendContinuation = async ({ sessionId, directory, workspace, goal, lastAssistantInfo }) => {
     const providerID = typeof lastAssistantInfo?.providerID === 'string' ? lastAssistantInfo.providerID : '';
     const modelID = typeof lastAssistantInfo?.modelID === 'string' ? lastAssistantInfo.modelID : '';
     if (!providerID || !modelID) {
@@ -433,6 +436,7 @@ export const createSessionGoalRuntime = ({
     const variant = typeof lastAssistantInfo?.variant === 'string' ? lastAssistantInfo.variant : '';
     await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/prompt_async`, {
       directory,
+      workspace,
       method: 'POST',
       body: {
         model: { providerID, modelID },
@@ -443,10 +447,10 @@ export const createSessionGoalRuntime = ({
     });
   };
 
-  const tick = async (sessionId, directory) => {
+  const tick = async (sessionId, directory, workspace) => {
     if (!isSessionGoalEnabled()) return;
 
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
+    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory, workspace })
       .catch((error) => {
         console.warn(`[session-goal] session fetch failed: ${error?.message || error}`);
         return null;
@@ -482,21 +486,21 @@ export const createSessionGoalRuntime = ({
     // its next idle event will arm a fresh tick. If a child is still working,
     // OpenCode will inject its result into the parent and produce the same
     // busy→idle cycle, so do not poll or audit the interim parent reply.
-    const statuses = await fetchSessionStatuses(directory);
+    const statuses = await fetchSessionStatuses(directory, workspace);
     if (!statuses) {
-      armTimer(sessionId, directory, idleQuietMs);
+      armTimer(sessionId, directory, workspace, idleQuietMs);
       return;
     }
     if (isWorkingStatus(statuses[sessionId])) return;
 
-    const children = await fetchSessionChildren(sessionId, directory);
+    const children = await fetchSessionChildren(sessionId, directory, workspace);
     if (!children) {
-      armTimer(sessionId, directory, idleQuietMs);
+      armTimer(sessionId, directory, workspace, idleQuietMs);
       return;
     }
     if (children.some((child) => typeof child?.id === 'string' && isWorkingStatus(statuses[child.id]))) return;
 
-    const messages = await fetchRecentMessages(sessionId, directory);
+    const messages = await fetchRecentMessages(sessionId, directory, workspace);
     if (!messages) return;
 
     let lastAssistant = null;
@@ -609,7 +613,7 @@ export const createSessionGoalRuntime = ({
     // aborted reply is not evidence of anything).
     const abortedTail = lastAssistantInfo.error?.name === 'MessageAbortedError';
     if (abortedTail && goal.statusReason !== 'resumed') {
-      await writeGoal(sessionId, directory, goal.id, () => ({
+      await writeGoal(sessionId, directory, workspace, goal.id, () => ({
         status: 'paused',
         statusReason: 'paused after abort',
         tokensUsed,
@@ -627,7 +631,7 @@ export const createSessionGoalRuntime = ({
         ? lastAssistantInfo.error.name
         : 'assistant turn failed';
       await settleGoal({
-        sessionId, directory, goal, status: 'blocked', statusReason: reason, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+        sessionId, directory, workspace, goal, status: 'blocked', statusReason: reason, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
       });
       return;
     }
@@ -635,7 +639,7 @@ export const createSessionGoalRuntime = ({
     // Token budget crossed → budgetLimited.
     if (typeof goal.tokenBudget === 'number' && tokensUsed >= goal.tokenBudget) {
       await settleGoal({
-        sessionId, directory, goal, status: 'budgetLimited', statusReason: 'token budget reached', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+        sessionId, directory, workspace, goal, status: 'budgetLimited', statusReason: 'token budget reached', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
       });
       return;
     }
@@ -643,7 +647,7 @@ export const createSessionGoalRuntime = ({
     // Auto-continuation safety cap → blocked.
     if (goal.turnsUsed >= maxAutoTurns) {
       await settleGoal({
-        sessionId, directory, goal, status: 'blocked', statusReason: 'auto-continuation limit reached', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+        sessionId, directory, workspace, goal, status: 'blocked', statusReason: 'auto-continuation limit reached', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
       });
       return;
     }
@@ -670,7 +674,7 @@ export const createSessionGoalRuntime = ({
         auditFailStreak += 1;
         if (auditFailStreak >= AUDIT_FAIL_LIMIT) {
           await settleGoal({
-            sessionId, directory, goal, status: 'blocked', statusReason: 'progress audit unavailable', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+            sessionId, directory, workspace, goal, status: 'blocked', statusReason: 'progress audit unavailable', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
           });
           return;
         }
@@ -681,7 +685,7 @@ export const createSessionGoalRuntime = ({
 
       if (audit?.verdict === 'complete') {
         await settleGoal({
-          sessionId, directory, goal, status: 'complete', statusReason: 'verified by audit', note: audit.note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+          sessionId, directory, workspace, goal, status: 'complete', statusReason: 'verified by audit', note: audit.note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
           evaluationProviderID: audit.evaluationProviderID, evaluationModelID: audit.evaluationModelID,
         });
         return;
@@ -696,7 +700,7 @@ export const createSessionGoalRuntime = ({
         });
         if (blockedStreak >= BLOCKED_STREAK_LIMIT) {
           await settleGoal({
-            sessionId, directory, goal, status: 'blocked', statusReason: audit.note || 'blocked per audit', note: audit.note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+            sessionId, directory, workspace, goal, status: 'blocked', statusReason: audit.note || 'blocked per audit', note: audit.note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
             evaluationProviderID: audit.evaluationProviderID, evaluationModelID: audit.evaluationModelID,
           });
           return;
@@ -707,7 +711,7 @@ export const createSessionGoalRuntime = ({
     // --- Continue: persist accounting first, then re-prompt ---
     // Order matters: if the write lands and the prompt fails, the goal just
     // waits for the next idle tick; the reverse could double-charge a turn.
-    const written = await writeGoal(sessionId, directory, goal.id, (current) => ({
+    const written = await writeGoal(sessionId, directory, workspace, goal.id, (current) => ({
       tokensUsed,
       tokensBaseline,
       tokensCommitted,
@@ -727,7 +731,7 @@ export const createSessionGoalRuntime = ({
 
     // The tail may have moved while auditing (user sent a message) — a
     // continuation now would collide with the user's own turn.
-    const latest = await fetchRecentMessages(sessionId, directory);
+    const latest = await fetchRecentMessages(sessionId, directory, workspace);
     const latestLastInfo = latest && latest.length > 0 ? latest[latest.length - 1]?.info : null;
     if (!latestLastInfo || latestLastInfo.id !== lastMessageInfo?.id) {
       console.log('[session-goal] tail moved on, dropping continuation');
@@ -735,16 +739,16 @@ export const createSessionGoalRuntime = ({
     }
 
     console.log(`[session-goal] continuing ${sessionId} (turn ${written.turnsUsed}/${maxAutoTurns}, tokens ${written.tokensUsed}${written.tokenBudget ? `/${written.tokenBudget}` : ''})`);
-    await sendContinuation({ sessionId, directory, goal: { ...written, objective: effectiveObjective }, lastAssistantInfo: executionInfo ?? lastAssistantInfo });
+    await sendContinuation({ sessionId, directory, workspace, goal: { ...written, objective: effectiveObjective }, lastAssistantInfo: executionInfo ?? lastAssistantInfo });
   };
 
-  const armTimer = (sessionId, directory, quietMs) => {
+  const armTimer = (sessionId, directory, workspace, quietMs) => {
     clearTimer(sessionId);
     const timer = setTimeout(() => {
       timers.delete(sessionId);
       if (stopped || inflight.has(sessionId)) return;
       inflight.add(sessionId);
-      tick(sessionId, directory)
+      tick(sessionId, directory, workspace)
         .catch((error) => {
           console.warn('[session-goal] tick failed:', error?.message || error);
         })
@@ -760,19 +764,19 @@ export const createSessionGoalRuntime = ({
   // BEFORE any idle tick could send a continuation over the user's explicit
   // "stop". Messages the user sends afterwards leave the paused goal alone;
   // Resume re-arms the loop (and kicks off immediately on an idle session).
-  const pauseAfterAbort = async (sessionId, directory) => {
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
+  const pauseAfterAbort = async (sessionId, directory, workspace) => {
+    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory, workspace })
       .catch(() => null);
     const goal = parseGoalMetadata(session);
     if (!goal || goal.status !== 'active') return;
-    await writeGoal(sessionId, directory, goal.id, () => ({
+    await writeGoal(sessionId, directory, workspace, goal.id, () => ({
       status: 'paused',
       statusReason: 'paused after abort',
     }));
     console.log(`[session-goal] ${sessionId} paused after user abort`);
   };
 
-  const processPayload = (payload, directoryHint = '') => {
+  const processPayload = (payload, directoryHint = '', workspaceHint = '') => {
     if (stopped) return;
 
     const aborted = extractAbortedAssistant(payload);
@@ -780,7 +784,7 @@ export const createSessionGoalRuntime = ({
       clearTimer(aborted.sessionId);
       if (!inflight.has(aborted.sessionId)) {
         inflight.add(aborted.sessionId);
-        pauseAfterAbort(aborted.sessionId, directoryHint)
+        pauseAfterAbort(aborted.sessionId, directoryHint, workspaceHint)
           .catch((error) => {
             console.warn('[session-goal] pause after abort failed:', error?.message || error);
           })
@@ -794,7 +798,7 @@ export const createSessionGoalRuntime = ({
     const status = extractSessionStatus(payload);
     if (status) {
       if (status.type === 'idle') {
-        armTimer(status.sessionId, status.directory || directoryHint, idleQuietMs);
+        armTimer(status.sessionId, status.directory || directoryHint, workspaceHint, idleQuietMs);
       } else {
         clearTimer(status.sessionId);
       }
@@ -816,7 +820,7 @@ export const createSessionGoalRuntime = ({
       && !inflight.has(update.sessionId)
     ) {
       const quiet = update.goal.statusReason === 'resumed' ? RESUME_KICKOFF_MS : kickoffQuietMs;
-      armTimer(update.sessionId, update.directory || directoryHint, quiet);
+      armTimer(update.sessionId, update.directory || directoryHint, workspaceHint, quiet);
     }
   };
 

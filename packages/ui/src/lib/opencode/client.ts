@@ -1,5 +1,11 @@
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
-import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
+import type {
+  PermissionV2Request,
+  PermissionV2Effect,
+  PermissionV2Source,
+  Workspace,
+  WorkspaceEventConnectionStatus,
+} from "@opencode-ai/sdk/v2/client";
 import type { FilesAPI } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
 import type {
@@ -253,6 +259,14 @@ type DirectorySwitchResult = {
   models?: unknown[];
 };
 
+type ExperimentalWorkspaceCreateInput = {
+  type: string;
+  id?: string;
+  branch?: string | null;
+  extra?: unknown | null;
+  directory?: string | null;
+};
+
 const normalizeFsPath = (path: string): string => path.replace(/\\/g, "/");
 const FS_LIST_CACHE_TTL_MS = 400;
 
@@ -336,6 +350,50 @@ class OpencodeService {
     this.scopedClients.set(key, scoped);
     return scoped;
   }
+
+  experimentalWorkspaces = {
+    listAdapters: async (directory?: string | null) => {
+      const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+      const result = await this.client.experimental.workspace.adapter.list(requestDirectory ? { directory: requestDirectory } : undefined);
+      return unwrapSdkData(result, 'experimental.workspace.adapter.list');
+    },
+    list: async (directory?: string | null): Promise<Workspace[]> => {
+      const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+      const result = await this.client.experimental.workspace.list(requestDirectory ? { directory: requestDirectory } : undefined);
+      return unwrapSdkData(result, 'experimental.workspace.list');
+    },
+    syncList: async (directory?: string | null): Promise<void> => {
+      const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+      const result = await this.client.experimental.workspace.syncList(requestDirectory ? { directory: requestDirectory } : undefined);
+      unwrapSdkOptional(result, 'experimental.workspace.syncList');
+    },
+    startSync: async (directory?: string | null): Promise<boolean> => {
+      const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+      const result = await this.client.sync.start(requestDirectory ? { directory: requestDirectory } : undefined);
+      return unwrapSdkData(result, 'sync.start') === true;
+    },
+    status: async (directory?: string | null): Promise<WorkspaceEventConnectionStatus[]> => {
+      const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+      const result = await this.client.experimental.workspace.status(requestDirectory ? { directory: requestDirectory } : undefined);
+      return unwrapSdkData(result, 'experimental.workspace.status');
+    },
+    create: async (input: ExperimentalWorkspaceCreateInput): Promise<Workspace> => {
+      const requestDirectory = this.normalizeCandidatePath(input.directory) ?? this.currentDirectory;
+      const result = await this.client.experimental.workspace.create({
+        ...(requestDirectory ? { directory: requestDirectory } : {}),
+        ...(input.id ? { id: input.id } : {}),
+        type: input.type,
+        branch: input.branch ?? null,
+        extra: input.extra ?? null,
+      });
+      return unwrapSdkData(result, 'experimental.workspace.create');
+    },
+    remove: async (id: string, directory?: string | null): Promise<Workspace> => {
+      const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+      const result = await this.client.experimental.workspace.remove({ id, ...(requestDirectory ? { directory: requestDirectory } : {}) });
+      return unwrapSdkData(result, 'experimental.workspace.remove');
+    },
+  };
 
   private normalizeCandidatePath(path?: string | null): string | null {
     if (typeof path !== 'string') {
@@ -554,10 +612,11 @@ class OpencodeService {
     return Array.isArray(response.data) ? response.data : [];
   }
 
-  async createSession(params?: { parentID?: string; title?: string; metadata?: Record<string, unknown> }, directory?: string | null): Promise<Session> {
+  async createSession(params?: { parentID?: string; title?: string; metadata?: Record<string, unknown>; workspace?: string }, directory?: string | null): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.create({
       ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(params?.workspace ? { workspace: params.workspace } : {}),
       parentID: params?.parentID,
       title: params?.title,
       metadata: params?.metadata,
@@ -565,20 +624,22 @@ class OpencodeService {
     return unwrapSdkData(response, 'session.create');
   }
 
-  async getSession(id: string, directory?: string | null): Promise<Session> {
+  async getSession(id: string, directory?: string | null, workspace?: string | null): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.get({
       sessionID: id,
-      ...(requestDirectory ? { directory: requestDirectory } : {})
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(workspace ? { workspace } : {}),
     });
     return unwrapSdkData(response, 'session.get');
   }
 
-  async deleteSession(id: string, directory?: string | null): Promise<boolean> {
+  async deleteSession(id: string, directory?: string | null, workspace?: string | null): Promise<boolean> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.delete({
       sessionID: id,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(workspace ? { workspace } : {}),
     });
     return unwrapSdkOptional(response, 'session.delete') === true;
   }
@@ -587,6 +648,7 @@ class OpencodeService {
     id: string,
     patch: { title?: string; metadata?: Record<string, unknown>; time?: { archived?: number | null } },
     directory?: string | null,
+    workspace?: string | null,
   ): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const sdkPatch = {
@@ -597,15 +659,18 @@ class OpencodeService {
     const response = await this.client.session.update({
       sessionID: id,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(workspace ? { workspace } : {}),
       ...sdkPatch,
     });
     return unwrapSdkData(response, 'session.update');
   }
 
-  async getSessionMessages(id: string, limit?: number): Promise<{ info: Message; parts: Part[] }[]> {
+  async getSessionMessages(id: string, limit?: number, directory?: string | null, workspace?: string | null): Promise<{ info: Message; parts: Part[] }[]> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.messages({
       sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(workspace ? { workspace } : {}),
       ...(typeof limit === 'number' ? { limit } : {}),
     });
     return unwrapSdkData(response, 'session.messages');
@@ -802,6 +867,7 @@ class OpencodeService {
       retryCount?: number;
     };
     directory?: string | null;
+    workspace?: string | null;
   }): Promise<string> {
     this.assertRuntimeUnchanged(params.runtimeKey);
 
@@ -896,6 +962,7 @@ class OpencodeService {
       const result = await this.client.session.promptAsync({
         sessionID: params.id,
         ...(requestDirectory ? { directory: requestDirectory } : {}),
+        ...(params.workspace ? { workspace: params.workspace } : {}),
         model: {
           providerID: params.providerID,
           modelID: params.modelID,
@@ -966,6 +1033,7 @@ class OpencodeService {
     files?: Array<FileInputLite>;
     messageId?: string;
     directory?: string | null;
+    workspace?: string | null;
   }): Promise<string> {
     this.assertRuntimeUnchanged(params.runtimeKey);
 
@@ -984,6 +1052,7 @@ class OpencodeService {
     const response = await this.client.session.command({
       sessionID: params.id,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(params.workspace ? { workspace: params.workspace } : {}),
       command: params.command,
       arguments: params.arguments ?? '',
       model: `${params.providerID}/${params.modelID}`,
@@ -997,11 +1066,13 @@ class OpencodeService {
     return tempMessageId;
   }
 
-  async abortSession(id: string): Promise<boolean> {
+  async abortSession(id: string, directory?: string | null, workspace?: string | null): Promise<boolean> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.abort(
       {
         sessionID: id,
-        ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
+        ...(requestDirectory ? { directory: requestDirectory } : {}),
+        ...(workspace ? { workspace } : {}),
       },
       { throwOnError: true }
     );
@@ -1016,12 +1087,14 @@ class OpencodeService {
     model: { providerID: string; modelID: string };
     messageId?: string;
     directory?: string | null;
+    workspace?: string | null;
   }): Promise<{ info: Message; parts: Part[] }> {
     this.assertRuntimeUnchanged(params.runtimeKey);
     const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
     const response = await this.client.session.shell({
       sessionID: params.sessionId,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(params.workspace ? { workspace: params.workspace } : {}),
       messageID: params.messageId,
       agent: params.agent,
       model: params.model,
@@ -1030,11 +1103,12 @@ class OpencodeService {
     return unwrapSdkData(response, 'session.shell') as { info: Message; parts: Part[] };
   }
 
-  async revertSession(sessionId: string, messageId: string, partId?: string, directory?: string | null): Promise<Session> {
+  async revertSession(sessionId: string, messageId: string, partId?: string, directory?: string | null, workspace?: string | null): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.revert({
       sessionID: sessionId,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(workspace ? { workspace } : {}),
       messageID: messageId,
       partID: partId,
     });
@@ -1052,10 +1126,12 @@ class OpencodeService {
     return unwrapSdkOptional(response, 'session.summarize') === true;
   }
 
-  async unrevertSession(sessionId: string): Promise<Session> {
+  async unrevertSession(sessionId: string, directory?: string | null, workspace?: string | null): Promise<Session> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.unrevert({
       sessionID: sessionId,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(workspace ? { workspace } : {}),
     });
     return unwrapSdkData(response, 'session.unrevert');
   }
@@ -1158,12 +1234,13 @@ class OpencodeService {
   async replyToPermission(
     requestId: string,
     reply: 'once' | 'always' | 'reject',
-    options?: { message?: string; directory?: string | null }
+    options?: { message?: string; directory?: string | null; workspace?: string | null }
   ): Promise<boolean> {
     const requestDirectory = this.normalizeCandidatePath(options?.directory ?? null) ?? this.currentDirectory;
     const response = await this.client.permission.reply({
       requestID: requestId,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(options?.workspace ? { workspace: options.workspace } : {}),
       reply,
       ...(options?.message ? { message: options.message } : {}),
     });
@@ -1323,7 +1400,7 @@ class OpencodeService {
   }
 
   // Questions ("ask" tool)
-  async replyToQuestion(requestId: string, answers: string[] | string[][], directory?: string | null): Promise<boolean> {
+  async replyToQuestion(requestId: string, answers: string[] | string[][], directory?: string | null, workspace?: string | null): Promise<boolean> {
     const normalizedAnswers: string[][] = (() => {
       if (!Array.isArray(answers) || answers.length === 0) {
         return [];
@@ -1338,15 +1415,18 @@ class OpencodeService {
     const response = await this.client.question.reply({
       requestID: requestId,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(workspace ? { workspace } : {}),
       answers: normalizedAnswers,
     });
     return unwrapSdkOptional(response, 'question.reply') === true;
   }
 
-  async rejectQuestion(requestId: string): Promise<boolean> {
+  async rejectQuestion(requestId: string, directory?: string | null, workspace?: string | null): Promise<boolean> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const result = await this.client.question.reject({
       requestID: requestId,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(workspace ? { workspace } : {}),
     });
     return unwrapSdkOptional(result, 'question.reject') === true;
   }

@@ -1,5 +1,16 @@
 export const createRequestSecurityRuntime = (deps) => {
   const { readSettingsFromDiskMigrated } = deps;
+  const corsAllowedHeaders = [
+    'Content-Type',
+    'Authorization',
+    'Accept',
+    'X-Requested-With',
+    'Cache-Control',
+    'X-OpenCode-Directory',
+    'X-OpenCode-Directory-Encoding',
+    'X-OpenChamber-Reauth-Proof',
+    'X-OpenChamber-Reauth-Nonce',
+  ].join(',');
   // Origins of packaged (non-browser) clients whose WebView origin never
   // matches the server host: the desktop shell, the iOS Capacitor WebView
   // (capacitor://localhost), and the Android Capacitor WebView, which uses
@@ -123,6 +134,7 @@ export const createRequestSecurityRuntime = (deps) => {
   };
 
   return {
+    getCorsAllowedHeaders: () => corsAllowedHeaders,
     getUiSessionTokenFromRequest,
     rejectWebSocketUpgrade,
     isRequestOriginAllowed,

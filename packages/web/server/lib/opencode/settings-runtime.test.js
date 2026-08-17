@@ -95,7 +95,7 @@ describe('settings runtime', () => {
     }
   });
 
-  it.skipIf(process.platform !== 'win32')('falls back when Windows blocks atomic settings replacement', async () => {
+  it.skipIf(process.platform !== 'win32')('preserves prior settings when Windows blocks atomic replacement', async () => {
     const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
     const settingsFilePath = path.join(tempRoot, 'settings.json');
     const wrappedFs = {
@@ -126,9 +126,11 @@ describe('settings runtime', () => {
     });
 
     try {
-      await runtime.writeSettingsToDisk({ theme: 'dark' });
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ theme: 'light' }, null, 2));
+      await expect(runtime.writeSettingsToDisk({ theme: 'dark' })).rejects.toThrow('operation not permitted');
 
-      await expect(fsPromises.readFile(settingsFilePath, 'utf8')).resolves.toBe(JSON.stringify({ theme: 'dark' }, null, 2));
+      await expect(fsPromises.readFile(settingsFilePath, 'utf8')).resolves.toBe(JSON.stringify({ theme: 'light' }, null, 2));
+      expect((await fsPromises.readdir(tempRoot)).some((entry) => entry.includes('.tmp-'))).toBe(false);
     } finally {
       await fsPromises.rm(tempRoot, { recursive: true, force: true });
     }

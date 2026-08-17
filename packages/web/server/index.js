@@ -91,6 +91,7 @@ import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
+import { createDesktopLocalClientMint } from './lib/client-auth/desktop-local-client.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
@@ -377,12 +378,14 @@ const readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(.
 const readSettingsFromDiskStrict = (...args) => settingsRuntime.readSettingsFromDiskStrict(...args);
 const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
 const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
+const restoreSettingsFields = (...args) => settingsRuntime.restoreSettingsFields(...args);
 
 const requestSecurityRuntime = createRequestSecurityRuntime({
   readSettingsFromDiskMigrated,
 });
 
 const getUiSessionTokenFromRequest = (...args) => requestSecurityRuntime.getUiSessionTokenFromRequest(...args);
+const getCorsAllowedHeaders = () => requestSecurityRuntime.getCorsAllowedHeaders();
 
 const pushRuntime = createPushRuntime({
   fsPromises,
@@ -440,6 +443,8 @@ const notificationEmitterRuntime = createNotificationEmitterRuntime({
   getDesktopNotifyEnabled: () => ENV_DESKTOP_NOTIFY,
   desktopNotifyPrefix: DESKTOP_NOTIFY_PREFIX,
   getUiNotificationClients: () => uiNotificationClients,
+  getUiAuthController: () => uiAuthController,
+  getTunnelAuthController: () => tunnelAuthController,
   getBroadcastGlobalUiEvent: () => broadcastGlobalUiEvent,
 });
 
@@ -821,9 +826,10 @@ globalMessageStreamHub.subscribeEvent((event) => {
   const directory = typeof event?.directory === 'string' && event.directory && event.directory !== 'global'
     ? event.directory
     : '';
-  sessionAssistRuntime.processPayload(payload, directory);
-  sessionGoalRuntime.processPayload(payload, directory);
-  contextObligatoryRuntime.processPayload(payload, directory);
+  const workspace = typeof event?.workspace === 'string' ? event.workspace : '';
+  sessionAssistRuntime.processPayload(payload, directory, workspace);
+  sessionGoalRuntime.processPayload(payload, directory, workspace);
+  contextObligatoryRuntime.processPayload(payload, directory, workspace);
 });
 
 const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
@@ -1096,6 +1102,13 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   },
   getManagedOpenCodeEnv: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    // A caller-supplied data directory is an isolated OpenChamber profile, so
+    // its managed OpenCode child must not inherit the user's global state.
+    const isolatedProfileEnv = process.env.OPENCHAMBER_DATA_DIR
+      ? {
+          XDG_DATA_HOME: process.env.XDG_DATA_HOME || path.join(OPENCHAMBER_DATA_DIR, 'opencode-data'),
+        }
+      : {};
     // Each capability is its own tool and its own switch; the plugin is only
     // injected while at least one of them is on.
     const includeControl = settings?.agentControlToolEnabled !== false;
@@ -1103,11 +1116,11 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     const managedEnv = includeControl || includeWeb
       ? await (agentToolRuntime?.prepareManagedOpenCodeEnv({ includeControl, includeWeb }) || {})
       : {};
-    if (settings?.optimizeSystemPrompt !== true) return managedEnv;
+    if (settings?.optimizeSystemPrompt !== true) return { ...managedEnv, ...isolatedProfileEnv };
 
     const configContent = managedEnv.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT;
     const systemPromptEnv = await systemPromptRuntime.prepareManagedOpenCodeEnv(configContent);
-    return { ...managedEnv, ...systemPromptEnv };
+    return { ...managedEnv, ...systemPromptEnv, ...isolatedProfileEnv };
   },
 });
 
@@ -1254,12 +1267,14 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
   if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
     startHealthMonitoring();
   }
-  // The global watcher used to start only for desktop notifications; the
-  // session-assist runtime also rides its event hub, so it now starts
-  // unconditionally once OpenCode is up.
-  void ensureGlobalWatcherStarted().catch((error) => {
-    console.warn(`Global event watcher startup failed: ${error?.message || error}`);
-  });
+  if (openCodeLifecycleState.openCodePort) {
+    // The global watcher used to start only for desktop notifications; the
+    // session-assist runtime also rides its event hub, so it starts whenever an
+    // OpenCode target is available.
+    void ensureGlobalWatcherStarted().catch((error) => {
+      console.warn(`Global event watcher startup failed: ${error?.message || error}`);
+    });
+  }
 };
 const killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
 const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);
@@ -1316,6 +1331,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
 
 async function main(options = {}) {
+  const runtimeName = process.env.OPENCHAMBER_RUNTIME || 'web';
   const port = Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
   const host = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
   const effectiveBindHost = host
@@ -1499,7 +1515,7 @@ async function main(options = {}) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding');
+      res.setHeader('Access-Control-Allow-Headers', getCorsAllowedHeaders());
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
       res.setHeader('Vary', 'Origin');
       if (req.method === 'OPTIONS') {
@@ -1532,7 +1548,7 @@ async function main(options = {}) {
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
     openchamberVersion: OPENCHAMBER_VERSION,
-    runtimeName: process.env.OPENCHAMBER_RUNTIME || 'web',
+    runtimeName,
     serverStartedAt,
     gracefulShutdown,
     getHealthSnapshot: () => {
@@ -1732,6 +1748,8 @@ async function main(options = {}) {
     readSettingsFromDisk,
     readSettingsFromDiskMigrated,
     persistSettings,
+    restoreSettingsFields,
+    sanitizeSettingsUpdate,
     sanitizeProjects,
     sanitizeSkillCatalogs,
     isUnsafeSkillRelativePath,
@@ -1753,6 +1771,20 @@ async function main(options = {}) {
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
     permissionAutoAcceptRuntime,
+    uiAuthController,
+    tunnelAuthController,
+    getWorkspaceRuntimeBoundary: () => {
+      if (!isExternalOpenCode) return { supported: true, diagnostics: ['Managed OpenCode runtime: Secure Workspace management and handoff are available.'] };
+      let hostname = '';
+      try { hostname = new URL(openCodeBaseUrl || '').hostname.toLowerCase(); } catch { /* invalid external authority is unsupported */ }
+      const sameHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0';
+      if (sameHost) return { supported: true, diagnostics: ['Same-host external OpenCode runtime: Secure Workspace management and handoff are available.'] };
+      return {
+        supported: false,
+        error: 'Secure Workspace management and session handoff are not supported for a remote external OpenCode runtime.',
+        diagnostics: ['OpenCode lifecycle authority reports an external runtime whose host is not local to this OpenChamber server.'],
+      };
+    },
   });
 
   const startupPipelineResult = await startupPipelineRuntime.run({
@@ -1829,6 +1861,11 @@ async function main(options = {}) {
   }, 60_000);
   relayReconcileTimer.unref?.();
 
+  const createDesktopLocalClient = createDesktopLocalClientMint({
+    runtimeName,
+    createClient: (metadata) => remoteClientAuthRuntime.createNativeDesktopClient(metadata),
+  });
+
   return {
     expressApp: app,
     httpServer: server,
@@ -1843,6 +1880,7 @@ async function main(options = {}) {
     }),
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
+    ...(createDesktopLocalClient ? { createDesktopLocalClient } : {}),
     getOpenCodeProcessInfo: () => {
       const managed = Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode);
       // Only ever expose pid/port for a server WE manage. The Electron-side

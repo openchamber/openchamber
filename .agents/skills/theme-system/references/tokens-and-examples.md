@@ -89,8 +89,15 @@ Input footers stay transparent over the elevated input surface.
 ### Error Feedback
 
 ```tsx
-<div className="bg-[var(--status-error-background)] text-[var(--status-error-foreground)]" />
+<div className="bg-[var(--status-error-background)] text-foreground" />
+<span className="text-[var(--status-error)]">Failed to save</span>
 ```
+
+`status.*Background` is the status color at low alpha, so it takes the tone of whatever
+theme is active. `status.*Foreground` is the content color for the **solid** status fill,
+which is near-black in dark themes — pairing the two renders dark on dark. On a tint use
+`text-foreground`, or `text-[var(--status-*)]` when the text itself should carry the
+status color.
 
 ### Neutral Card
 

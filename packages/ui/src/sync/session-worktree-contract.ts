@@ -32,7 +32,15 @@ const normalizePath = (value: string): string => {
   return replaced.replace(/\/+$/, '') || replaced;
 };
 
-function isWithinWorktreeRoot(candidate: string | null, worktreeRoot: string | null): boolean {
+/**
+ * Whether a directory is the worktree root or lives beneath it.
+ *
+ * Exported because its contract is worth stating directly: the trailing separator is what
+ * stops `/repo/worktrees/feat-abc` from counting as inside `/repo/worktrees/feat-a`, and a
+ * plain prefix check would look correct while quietly attaching a session to the wrong
+ * worktree.
+ */
+export function isWithinWorktreeRoot(candidate: string | null, worktreeRoot: string | null): boolean {
   if (!candidate || !worktreeRoot) return false;
   const c = normalizePath(candidate);
   const r = normalizePath(worktreeRoot);

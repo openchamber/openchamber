@@ -88,6 +88,7 @@ process violation.
 | Session sync, bootstrap/reconnect, reducers, polling, optimistic state, queues, live status, reconciliation, or directory-scoped caches | `sync-state-invariants` |
 | Render/store/event hot paths, large lists, caches/indexes, or reported lag, freezes, CPU/memory, startup, or performance regressions | `performance-engineering` |
 | WebSocket, SSE, streaming transport, runtime transport internals, or private relay | `relay-transport` |
+| Secure Workspaces policy, providers, isolation, egress, credentials, lifecycle, export/review/apply, handoff, plugin pins, runtime images, release workflows, platform setup, or live/physical validation | `secure-workspaces` |
 | UI components, styling, colors, buttons, or icons | `theme-system` |
 | User-facing or accessible UI text, labels, aria, toasts, dialogs, or navigation copy | `locale-ui-patterns` |
 | Settings UI, settings dialogs, configuration surfaces, or settings search | `settings-ui-patterns` |

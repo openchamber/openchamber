@@ -6,6 +6,13 @@ const createRuntime = () => createRequestSecurityRuntime({
 });
 
 describe('request security runtime', () => {
+  test('allows privileged reauthentication headers for packaged-client preflights', () => {
+    const allowedHeaders = createRuntime().getCorsAllowedHeaders().split(',');
+
+    expect(allowedHeaders).toContain('X-OpenChamber-Reauth-Proof');
+    expect(allowedHeaders).toContain('X-OpenChamber-Reauth-Nonce');
+  });
+
   test('allows packaged client origins for remote client transports', async () => {
     const runtime = createRuntime();
 

@@ -19,6 +19,7 @@ import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionWorkspaceBadge } from '@/components/workspaces/useSessionWorkspaceBadge';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
 import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionMessagesResolved } from '@/sync/sync-context';
@@ -469,6 +470,14 @@ interface HeaderProps {
   rightDrawerOpen?: boolean;
 }
 
+/** Provider name for the session badge tooltip, falling back when it is not yet known. */
+function workspaceRuntimeName(t: (key: never) => string, type: string | undefined) {
+  if (type === 'kubernetes') return t('settings.workspaces.provider.kubernetes' as never);
+  if (type === 'apple-container') return t('settings.workspaces.provider.appleContainer' as never);
+  if (type === 'docker') return t('settings.workspaces.provider.docker' as never);
+  return t('session.workspaceBadge.fallback' as never);
+}
+
 type HeaderSessionSnapshot = {
   title: string | null;
   directory: string | null;
@@ -476,6 +485,8 @@ type HeaderSessionSnapshot = {
   slug: string | null;
   shareUrl: string | null;
   parentId: string | null;
+  /** Set when the session runs inside a secure workspace rather than on the host. */
+  workspaceID: string | null;
 };
 
 export const Header: React.FC<HeaderProps> = ({
@@ -519,6 +530,7 @@ export const Header: React.FC<HeaderProps> = ({
         slug: record.slug ?? null,
         shareUrl: session.share?.url ?? null,
         parentId: session.parentID ?? null,
+        workspaceID: session.workspaceID ?? null,
       };
     },
     [currentSessionId],
@@ -1019,6 +1031,8 @@ export const Header: React.FC<HeaderProps> = ({
   const worktreeAttachment = useSessionWorktreeStore((state) =>
     currentSessionId ? state.getAttachment(currentSessionId) : undefined
   );
+
+  const sessionWorkspace = useSessionWorkspaceBadge(currentSession?.workspaceID ?? null, currentSession?.directory ?? null);
 
   const worktreeBadge = React.useMemo(() => {
     if (!worktreeAttachment) return null;
@@ -1705,6 +1719,7 @@ export const Header: React.FC<HeaderProps> = ({
         { id: 'diff', label: t('layout.mainTab.diff'), icon: 'diff' },
         { id: 'files', label: t('layout.mainTab.files'), icon: "folder-6" },
         { id: 'terminal', label: t('layout.mainTab.terminal'), icon: "terminal-box" },
+        { id: 'workspaces', label: t('settings.page.workspaces.title'), icon: "shield-check" },
         { id: 'context', label: t('layout.mainTab.context'), icon: "file-list-2" },
         { id: 'diagram', label: t('layout.mainTab.diagram'), icon: 'file' },
       );
@@ -1722,9 +1737,10 @@ export const Header: React.FC<HeaderProps> = ({
 
   useEffect(() => {
     // Project actions may intentionally promote the terminal to the desktop
-    // main view, and diagram clicks open the diagram viewer; every other
-    // legacy main tab now lives in the context panel on desktop.
-    if (!isMobile && activeMainTab !== 'chat' && activeMainTab !== 'terminal' && activeMainTab !== 'diagram') {
+    // main view, diagram clicks open the diagram viewer, and Workspaces is a
+    // desktop lifecycle surface; every other legacy main tab lives in the
+    // context panel on desktop.
+    if (!isMobile && activeMainTab !== 'chat' && activeMainTab !== 'terminal' && activeMainTab !== 'diagram' && activeMainTab !== 'workspaces') {
       setActiveMainTab('chat');
     }
   }, [activeMainTab, isMobile, setActiveMainTab]);
@@ -2000,6 +2016,15 @@ export const Header: React.FC<HeaderProps> = ({
               {showHeaderMetaRow ? (
                 <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
                   {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
+                  {currentSession?.workspaceID ? (
+                    <span
+                      className="inline-flex min-w-0 items-center gap-0.5 text-[var(--status-info)]"
+                      title={t('session.workspaceBadge.hint', { runtime: workspaceRuntimeName(t, sessionWorkspace?.type) })}
+                    >
+                      <Icon name="shield-check" className="h-3 w-3 flex-shrink-0" />
+                      <span className="truncate">{sessionWorkspace?.name ?? t('session.workspaceBadge.fallback')}</span>
+                    </span>
+                  ) : null}
                   {currentBranchLabel ? (
                     <span className="inline-flex min-w-0 items-center gap-0.5">
                       <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />

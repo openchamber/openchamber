@@ -6,8 +6,35 @@ import {
   formatSessionWorktreeBadge,
   getSessionWorktreeRepairActions,
   getMutationBlockingReasons,
+  isWithinWorktreeRoot,
   buildSessionTargetOptions,
 } from './session-worktree-contract';
+
+describe('isWithinWorktreeRoot', () => {
+  test('returns true when candidate equals root', () => {
+    expect(isWithinWorktreeRoot('/repo/worktrees/feat-a', '/repo/worktrees/feat-a')).toBe(true);
+  });
+
+  test('returns true when candidate is a subdirectory of root', () => {
+    expect(isWithinWorktreeRoot('/repo/worktrees/feat-a/src', '/repo/worktrees/feat-a')).toBe(true);
+  });
+
+  test('returns false when candidate is outside root', () => {
+    expect(isWithinWorktreeRoot('/tmp/outside', '/repo/worktrees/feat-a')).toBe(false);
+  });
+
+  test('does not count a sibling that merely starts with the same characters', () => {
+    // A plain prefix check passes this and attaches the session to the wrong worktree.
+    expect(isWithinWorktreeRoot('/repo/worktrees/feat-abc', '/repo/worktrees/feat-a')).toBe(false);
+    expect(isWithinWorktreeRoot('/repo/worktrees/feat-a-old/src', '/repo/worktrees/feat-a')).toBe(false);
+  });
+
+  test('returns false when either is null/empty', () => {
+    expect(isWithinWorktreeRoot(null, '/repo')).toBe(false);
+    expect(isWithinWorktreeRoot('/repo', null)).toBe(false);
+    expect(isWithinWorktreeRoot('', '/repo')).toBe(false);
+  });
+});
 
 describe('getAttachedSessionDirectory', () => {
   test('prefers canonical cwd when attachment is healthy', () => {

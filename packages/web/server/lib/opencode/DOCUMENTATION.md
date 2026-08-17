@@ -40,10 +40,16 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/project-icon-routes.js`: project icon upload/read/discovery route registration and icon storage orchestration.
 - `packages/web/server/lib/opencode/skill-routes.js`: route registration for skill config CRUD, supporting files, and skills catalog scan/install flows.
 - `packages/web/server/lib/opencode/settings-runtime.js`: Settings persistence runtime (disk IO, migrations, normalization, project validation, and persisted update serialization).
+  - Settings writes use fsynced same-directory temporary files and atomic replacement before workspace transaction journals are cleared. Windows replacement retries fail closed instead of publishing through a non-atomic copy, and transaction rollback reads current settings strictly before preserving unrelated fields.
 - `packages/web/server/lib/opencode/settings-helpers.js`: Settings payload sanitization/format helpers runtime for response shaping and persisted merge prep.
+  - Secure Workspace fields delegate to the workspace policy validator; digest enforcement is always enabled and malformed policy is rejected before persistence. Generic settings mutation rejects these fields; the workspace module owns their proof-bound atomic persistence/configuration transaction.
+- `packages/web/server/lib/opencode/plugin-routes.js`: generic plugin configuration routes; reserved Secure Workspace package and path entries are read-only here and can be changed only through the proof-bound workspace settings transaction.
+- Native desktop client operator authority requires a record minted and attested by the current Electron-host process in addition to `clientKind: desktop-local` and `authMethod: native-electron`; persisted marker strings alone never confer authority. Legacy or forged records are normalized to ordinary remote clients with default capabilities, the `desktop-local` dedupe identity is reserved to the native mint, and attested native records always retain the complete immutable capability set. Remote-client credentials fail closed on malformed JSON and use private fsynced temporary files plus atomic replacement so an interrupted write cannot publish a partial store.
 - `packages/web/server/lib/opencode/settings-normalization-runtime.js`: path/settings/tunnel normalization and sanitization helpers runtime used by settings/routes/config wiring.
 - `packages/web/server/lib/opencode/theme-runtime.js`: custom theme JSON validation and theme directory loading runtime for settings utility routes.
 - `packages/web/server/lib/opencode/proxy.js`: OpenCode API/SSE forwarding and readiness-gate route registration.
+  - Before generic forwarding, workspace-routed client calls require `workspace.use`; existing session routes resolve authoritative upstream `Session.workspaceID`, and direct workspace lifecycle mutation is denied.
+  - OpenChamber remains the browser-facing CORS authority. Forwarded OpenCode responses drop upstream `Access-Control-*` headers so remote workspace origins cannot override the packaged/web renderer policy.
 - `packages/web/server/lib/opencode/session-runtime.js`: session status/attention/activity runtime for OpenCode SSE events.
 - `packages/web/server/lib/opencode/watcher.js`: global SSE watcher runtime for push/session event fanout.
 - `packages/web/server/lib/opencode/shared.js`: shared utilities for config, markdown, skills, and git helpers.
@@ -127,6 +133,8 @@ The runtime maintains active-session count incrementally from idempotent activit
   - `startHealthMonitoring(healthCheckIntervalMs)`
   - `waitForPortRelease(port, timeoutMs, hostname?)`
   - `killProcessOnPort(port)`
+- `OPENCODE_SKIP_START=true` takes precedence over HMR managed-process reuse. With `OPENCODE_HOST` or `OPENCODE_PORT`, startup attaches only to that external target; without either target, OpenCode remains explicitly unavailable and OpenChamber startup does not enter OpenCode readiness or watcher wait paths. Skip-start never launches a managed process, and only a known managed HMR child may be stopped when switching modes.
+- Managed OpenCode starts with `OPENCODE_EXPERIMENTAL_WORKSPACES=true` so workspace adapter sync can emit the status events required by the official create lifecycle. External OpenCode hosts must enable compatible workspace support themselves.
 
 Managed OpenCode launch also merges the environment returned by the agent-tool
 runtime. PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
@@ -134,6 +142,11 @@ be replaced by injected values. External OpenCode processes receive no
 OpenChamber tool injection. Managed launch env strips AppImage `ARGV0` before
 spawn so zsh-backed OpenCode tools do not rewrite child argv[0] to the AppImage
 path (#2588).
+
+When `OPENCHAMBER_DATA_DIR` is supplied, the managed OpenCode child receives a
+profile-local `XDG_DATA_HOME` unless explicitly set by the caller. This keeps
+disposable OpenChamber profiles independent from global OpenCode sessions while
+retaining the shared OpenCode configuration that owns plugin setup.
 
 Before spawn, `applyProviderEnvAliases` fills unset Google credential aliases
 from any present sibling (`GOOGLE_GENERATIVE_AI_API_KEY`, `GOOGLE_API_KEY`,
@@ -204,6 +217,7 @@ Transport-triggered health checks share the periodic monitor's failure accountin
   - `readSettingsFromDiskMigrated()`
   - `writeSettingsToDisk(settings)`
   - `persistSettings(changes)`
+  - `restoreSettingsFields(settings, keyPrefix)` (serialized exact field-family restoration that preserves unrelated concurrent settings)
   - Persistent permission auto-accept policy is stored under `permissionAutoAccept`; execution ownership lives in `lib/permission-auto-accept/`.
 
 ## Public exports (settings-helpers.js)

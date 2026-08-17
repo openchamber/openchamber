@@ -47,6 +47,7 @@ export function parseSseEventEnvelope(block) {
       return {
         eventId,
         directory: typeof parsed.directory === 'string' && parsed.directory.length > 0 ? parsed.directory : null,
+        ...(typeof parsed.workspace === 'string' && parsed.workspace.length > 0 ? { workspace: parsed.workspace } : {}),
         payload: parsed.payload,
       };
     }

@@ -37,9 +37,10 @@ export const createContextObligatoryRuntime = ({
   const inflight = new Set();
   let stopped = false;
 
-  const openCodeFetch = async (fetchPath, { directory, method = 'GET', body, query } = {}) => {
+  const openCodeFetch = async (fetchPath, { directory, workspace, method = 'GET', body, query } = {}) => {
     const params = new URLSearchParams(query || {});
     if (directory) params.set('directory', directory);
+    if (workspace) params.set('workspace', workspace);
     const search = params.toString();
     const response = await fetch(`${buildOpenCodeUrl(fetchPath, '')}${search ? `?${search}` : ''}`, {
       method,
@@ -55,14 +56,15 @@ export const createContextObligatoryRuntime = ({
     return response.json().catch(() => null);
   };
 
-  const tick = async (sessionId, directory) => {
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory });
+  const tick = async (sessionId, directory, workspace) => {
+    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory, workspace });
     if (session?.parentID) return;
     const state = readContextState(session);
     if (state.messages.length === 0) return;
 
     const recent = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/message`, {
       directory,
+      workspace,
       query: { limit: String(MESSAGE_FETCH_LIMIT) },
     });
     if (!Array.isArray(recent) || recent.length === 0) return;
@@ -74,7 +76,7 @@ export const createContextObligatoryRuntime = ({
     const fetched = await Promise.allSettled(state.messages.map(async (pinned) => {
       const message = await openCodeFetch(
         `/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(pinned.id)}`,
-        { directory },
+        { directory, workspace },
       );
       const text = Array.isArray(message?.parts)
         ? message.parts.filter((part) => part?.type === 'text' && typeof part.text === 'string')
@@ -96,6 +98,7 @@ export const createContextObligatoryRuntime = ({
     const agent = typeof executionInfo.agent === 'string' ? executionInfo.agent : executionInfo.mode;
     await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/prompt_async`, {
       directory,
+      workspace,
       method: 'POST',
       body: {
         model: { providerID, modelID },
@@ -104,10 +107,11 @@ export const createContextObligatoryRuntime = ({
       },
     });
 
-    const fresh = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory });
+    const fresh = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory, workspace });
     const freshState = readContextState(fresh);
     await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, {
       directory,
+      workspace,
       method: 'PATCH',
       body: {
         metadata: {
@@ -121,13 +125,13 @@ export const createContextObligatoryRuntime = ({
     });
   };
 
-  const processPayload = (payload, directoryHint = '') => {
+  const processPayload = (payload, directoryHint = '', workspaceHint = '') => {
     if (stopped || payload?.type !== 'session.compacted') return;
     const sessionId = payload?.properties?.sessionID;
     if (typeof sessionId !== 'string' || inflight.has(sessionId)) return;
     const directory = payload?.properties?.directory || directoryHint;
     inflight.add(sessionId);
-    return tick(sessionId, directory)
+    return tick(sessionId, directory, workspaceHint)
       .catch((error) => console.warn('[context-obligatory] injection failed:', error?.message || error))
       .finally(() => inflight.delete(sessionId));
   };

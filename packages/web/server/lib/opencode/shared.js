@@ -312,7 +312,10 @@ function getConfigForPath(layers, targetPath) {
 }
 
 function writeConfig(config, filePath = CONFIG_FILE) {
+  let temporaryFile = null;
+  let descriptor = null;
   try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
     if (fs.existsSync(filePath)) {
       // Defense in depth: never overwrite a file we cannot fully parse.
       const existing = fs.readFileSync(filePath, 'utf8').trim();
@@ -325,10 +328,28 @@ function writeConfig(config, filePath = CONFIG_FILE) {
       console.log(`Created config backup: ${backupFile}`);
     }
 
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf8');
+    temporaryFile = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    descriptor = fs.openSync(temporaryFile, 'wx', 0o600);
+    fs.writeFileSync(descriptor, JSON.stringify(config, null, 2), 'utf8');
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = null;
+    fs.renameSync(temporaryFile, filePath);
+    temporaryFile = null;
+    try {
+      const directoryDescriptor = fs.openSync(path.dirname(filePath), 'r');
+      try { fs.fsyncSync(directoryDescriptor); } finally { fs.closeSync(directoryDescriptor); }
+    } catch {
+      // Directory fsync is not supported by every platform/filesystem.
+    }
     console.log(`Successfully wrote config file: ${filePath}`);
   } catch (error) {
+    if (descriptor !== null) {
+      try { fs.closeSync(descriptor); } catch {}
+    }
+    if (temporaryFile) {
+      try { fs.rmSync(temporaryFile, { force: true }); } catch {}
+    }
     if (isInvalidJsoncError(error)) {
       throw error;
     }
