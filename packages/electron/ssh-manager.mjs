@@ -1208,10 +1208,13 @@ export class ElectronSshManager {
       }
     }
 
-    // A daemon left running by an earlier session can predate the binary
-    // update installed above; restart it so the forwarded server matches this
-    // app version instead of silently serving the stale one.
-    if (remotePort && runningVersion && runningVersion !== this.appVersion) {
+    // A daemon we own (persisted port, not user-pinned) can predate the
+    // binary update installed above; restart it so the forwarded server
+    // matches this app version instead of silently serving a different one.
+    // A daemon on the user's preferred port may be externally managed at any
+    // version and is reused untouched, mirroring the non-adoption stance at
+    // disconnect.
+    if (adoptedByUs && runningVersion && runningVersion !== this.appVersion) {
       this.setStatus(instance.id, 'server_starting', `Restarting managed OpenChamber server ${runningVersion} to ${this.appVersion}`);
       await this.stopRemoteServerBestEffort(parsed, controlPath, remotePort);
       const stopDeadline = Date.now() + 5000;

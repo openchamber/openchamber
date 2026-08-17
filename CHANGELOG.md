@@ -12,7 +12,7 @@ All notable changes to this project will be documented in this file.
 - Chat: saved chats in the context panel open again instead of staying blank.
 - Projects: project names now match the folder name exactly, so `.ssh` and `opencode-claude` are no longer shown as `.Ssh` and `Opencode Claude` in the sidebar, window title, settings and notifications; names you renamed yourself are kept.
 - Desktop/SSH: connecting to a remote host now succeeds when npm or bun was installed through a version manager such as nvm; the connection previously failed with "Remote host has neither bun nor npm available" even though npm was installed on the host.
-- Desktop/SSH: reconnecting to a managed remote server now reuses the background server already running from the previous session instead of starting another one on a new port each time, a server left running from an older version is restarted to match the app after an update, and a reused server on the app-persisted port is stopped on disconnect when keep-running is disabled.
+- Desktop/SSH: reconnecting to a managed remote server now reuses the background server already running from the previous session instead of starting another one on a new port each time; a reused server on the app-persisted port is restarted when its version no longer matches the app and stopped on disconnect when keep-running is disabled, while a server on a port you pinned yourself is always reused untouched.
 - Settings: the session retention action you pick is now saved instead of being dropped (thanks to @Gautam0507).
 - Browser: typing a comment on a page no longer triggers app shortcuts.
 - Skills Catalog: the source is now named ClawHub instead of "ClawdHub" (thanks to @makeittech).

@@ -191,6 +191,24 @@ describe('ElectronSshManager', () => {
     expect(calls.some((command) => command.includes('openchamber serve'))).toBe(false);
   });
 
+  test('reuses a user-pinned preferred-port daemon at a different version without restarting it', async () => {
+    const calls = [];
+    const { manager } = createManagedProbeManager({
+      portStates: { 4600: { alive: true, version: '1.16.0-external' } },
+      calls,
+    });
+
+    const result = await manager.ensureRemoteServer(
+      { id: 'ssh-managed-1', remoteOpenchamber: { mode: 'managed', installMethod: 'npm', preferredPort: 4600 } },
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+    );
+
+    expect(result).toEqual({ remotePort: 4600, startedByUs: false });
+    expect(calls.some((command) => command.includes('/api/system/shutdown'))).toBe(false);
+    expect(calls.some((command) => command.includes('openchamber serve'))).toBe(false);
+  });
+
   test('probes the preferred port before the persisted port', async () => {
     const calls = [];
     const { manager } = createManagedProbeManager({
