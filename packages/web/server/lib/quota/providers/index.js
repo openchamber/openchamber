@@ -9,6 +9,7 @@ import { buildResult } from '../utils/index.js';
 
 import * as claude from './claude.js';
 import * as codex from './codex.js';
+import * as commandcode from './commandcode.js';
 import * as copilot from './copilot.js';
 import * as crof from './crof.js';
 import * as cursor from './cursor.js';
@@ -40,6 +41,12 @@ const registry = {
     providerName: codex.providerName,
     isConfigured: codex.isConfigured,
     fetchQuota: codex.fetchQuota
+  },
+  commandcode: {
+    providerId: commandcode.providerId,
+    providerName: commandcode.providerName,
+    isConfigured: commandcode.isConfigured,
+    fetchQuota: commandcode.fetchQuota
   },
   crof: {
     providerId: crof.providerId,

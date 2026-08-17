@@ -18,6 +18,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | --- | --- | --- | --- |
 | `claude` | Claude | `providers/claude.js` | `anthropic`, `claude` |
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
+| `commandcode` | Command Code | `providers/commandcode.js` | `commandcode` (API key under `key` or `token`) |
 | `cursor` | Cursor | `providers/cursor.js` | Environment/token files, OpenChamber-managed credentials, or explicit one-time Cursor import |
 | `crof` | CrofAI | `providers/crof.js` | `crof` (API key under `key` or `token`) |
 | `deepseek` | DeepSeek | `providers/deepseek.js` | `deepseek` (API key under `key` or `token`) |

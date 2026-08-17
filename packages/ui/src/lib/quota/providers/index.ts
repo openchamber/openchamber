@@ -8,6 +8,7 @@ export interface QuotaProviderMeta {
 export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'claude', name: 'Claude' },
   { id: 'codex', name: 'Codex' },
+  { id: 'commandcode', name: 'Command Code' },
   { id: 'cursor', name: 'Cursor' },
   { id: 'github-copilot', name: 'GitHub Copilot' },
   { id: 'google', name: 'Google' },
