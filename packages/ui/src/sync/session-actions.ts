@@ -23,7 +23,7 @@ import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { materializeSessionSnapshots } from "./materialization"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { sessionEvents } from "@/lib/sessionEvents"
-import { resolveProjectsWithNoActiveSessions } from "@/lib/projectResolution"
+import { resolveProjectForSessionDirectory, resolveProjectsWithNoActiveSessions } from "@/lib/projectResolution"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
 import {
@@ -1003,11 +1003,18 @@ export async function closeProjectsWithoutActiveSessionsForDirectories(
   const changedDirectories = [...directories].filter((directory): directory is string => Boolean(directory))
   if (changedDirectories.length === 0) return
 
+  const projectsState = useProjectsStore.getState()
+  const availableWorktrees = useSessionUIStore.getState().availableWorktreesByProject
+  if (!changedDirectories.some((directory) => resolveProjectForSessionDirectory(
+    projectsState.projects,
+    availableWorktrees,
+    directory,
+  ))) return
+
   await refreshGlobalSessionsAfterPending(getAllSyncSessions())
   const globalSessions = useGlobalSessionsStore.getState()
   if (!globalSessions.hasLoaded || globalSessions.status !== "ready") return
 
-  const projectsState = useProjectsStore.getState()
   const emptyProjects = resolveProjectsWithNoActiveSessions(
     projectsState.projects,
     useSessionUIStore.getState().availableWorktreesByProject,
@@ -1077,6 +1084,7 @@ export async function deleteSessions(
   const deletedIds: string[] = []
   const failedIds: string[] = []
   const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+  const directoriesById = new Map(ids.map((id) => [id, getSessionDirectory(id)] as const))
 
   for (const [index, id] of ids.entries()) {
     if (isStaleRuntime(expectedRuntimeKey)) {
@@ -1087,6 +1095,7 @@ export async function deleteSessions(
     else failedIds.push(id)
   }
 
+  await closeProjectsWithoutActiveSessionsForDirectories(deletedIds.map((id) => directoriesById.get(id)))
   return { deletedIds, failedIds }
 }
 
@@ -1161,6 +1170,7 @@ export async function archiveSessions(
   const archivedIds: string[] = []
   const failedIds: string[] = []
   const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+  const directoriesById = new Map(ids.map((id) => [id, getSessionDirectory(id)] as const))
 
   for (const [index, id] of ids.entries()) {
     if (isStaleRuntime(expectedRuntimeKey)) {
@@ -1171,6 +1181,7 @@ export async function archiveSessions(
     else failedIds.push(id)
   }
 
+  await closeProjectsWithoutActiveSessionsForDirectories(archivedIds.map((id) => directoriesById.get(id)))
   return { archivedIds, failedIds }
 }
 

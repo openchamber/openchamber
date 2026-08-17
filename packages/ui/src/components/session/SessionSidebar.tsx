@@ -1322,7 +1322,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     projectSections.forEach((section) => {
       const projectLabel = formatProjectLabel(
         section.project.label?.trim()
-        || deriveProjectLabelFromPath(section.project.normalizedPath),
+        || deriveProjectLabelFromPath(section.project.normalizedPath, true),
       );
       section.groups.forEach((group) => {
         const branchCandidate = group.branch && group.branch !== 'HEAD' && group.branch !== projectLabel

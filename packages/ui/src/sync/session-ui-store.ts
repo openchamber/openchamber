@@ -59,8 +59,9 @@ import {
   deleteSession as deleteSessionAction,
   archiveSession as archiveSessionAction,
   unarchiveSession as unarchiveSessionAction,
+  deleteSessions as deleteSessionsAction,
+  archiveSessions as archiveSessionsAction,
   unarchiveSessions as unarchiveSessionsAction,
-  closeProjectsWithoutActiveSessionsForDirectories,
   updateSessionTitle as updateSessionTitleAction,
   shareSession as shareSessionAction,
   unshareSession as unshareSessionAction,
@@ -1738,57 +1739,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   deleteSession: async (id, options) => deleteSessionAction(id, options),
 
-  deleteSessions: async (ids, options) => {
-    const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
-    const globalSessions = useGlobalSessionsStore.getState()
-    const globalById = new Map(
-      [...globalSessions.activeSessions, ...globalSessions.archivedSessions]
-        .map((session) => [session.id, session] as const),
-    )
-    const directoriesById = new Map(ids.map((id) => {
-      const session = globalById.get(id)
-      return [
-        id,
-        (session ? resolveGlobalSessionDirectory(session) : null) ?? get().getDirectoryForSession(id),
-      ] as const
-    }))
-    const deletedIds: string[] = []
-    const failedIds: string[] = []
-    for (const id of ids) {
-      const ok = await deleteSessionAction(id, { expectedRuntimeKey, deferProjectAutoClose: true })
-      if (ok) deletedIds.push(id)
-      else failedIds.push(id)
-    }
-    await closeProjectsWithoutActiveSessionsForDirectories(deletedIds.map((id) => directoriesById.get(id)))
-    return { deletedIds, failedIds }
-  },
+  deleteSessions: (ids, options) => deleteSessionsAction(ids, options),
 
   archiveSession: (id) => archiveSessionAction(id),
 
-  archiveSessions: async (ids, options) => {
-    const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
-    const globalSessions = useGlobalSessionsStore.getState()
-    const globalById = new Map(
-      [...globalSessions.activeSessions, ...globalSessions.archivedSessions]
-        .map((session) => [session.id, session] as const),
-    )
-    const directoriesById = new Map(ids.map((id) => {
-      const session = globalById.get(id)
-      return [
-        id,
-        (session ? resolveGlobalSessionDirectory(session) : null) ?? get().getDirectoryForSession(id),
-      ] as const
-    }))
-    const archivedIds: string[] = []
-    const failedIds: string[] = []
-    for (const id of ids) {
-      const ok = await archiveSessionAction(id, { expectedRuntimeKey, deferProjectAutoClose: true })
-      if (ok) archivedIds.push(id)
-      else failedIds.push(id)
-    }
-    await closeProjectsWithoutActiveSessionsForDirectories(archivedIds.map((id) => directoriesById.get(id)))
-    return { archivedIds, failedIds }
-  },
+  archiveSessions: (ids, options) => archiveSessionsAction(ids, options),
 
   unarchiveSession: (id) => unarchiveSessionAction(id),
 
