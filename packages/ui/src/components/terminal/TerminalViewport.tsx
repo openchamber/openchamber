@@ -14,6 +14,7 @@ import {
   type TerminalCellPosition,
 } from '@/lib/terminalTouchSelection';
 import type { TerminalChunk } from '@/stores/useTerminalStore';
+import { shouldSuppressGhosttyCopyOnClick } from './ghosttyCopySuppression';
 
 // ghostty-web (638 KB raw of JS + the WASM VT) loads on demand: TerminalView
 // stays eagerly importable for the bottom dock without pulling the emulator
@@ -230,11 +231,23 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     const handleWindowBlur = () => {
       if (terminal) terminal.options.cursorBlink = false;
     };
+    // ghostty-web copies the clicked cell to the clipboard on document mouseup
+    // (copy-on-click). Intercept in the capture phase: suppress the copy for
+    // plain clicks inside the terminal, keep real drag selections (and clicks
+    // outside the terminal) untouched.
+    const handleDocumentMouseUpCapture = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      if (!(event.target instanceof Node) || !container.contains(event.target)) return;
+      if (!terminal || !shouldSuppressGhosttyCopyOnClick(terminal.hasSelection())) return;
+      event.stopPropagation();
+      terminal.clearSelection();
+    };
 
     container.addEventListener('focusin', handleFocusIn);
     container.addEventListener('focusout', handleFocusOut);
     window.addEventListener('focus', handleWindowFocus);
     window.addEventListener('blur', handleWindowBlur);
+    document.addEventListener('mouseup', handleDocumentMouseUpCapture, true);
 
     Promise.all([loadGhostty(), ensureNerdFonts()]).then(([{ module, ghostty }]) => {
       if (disposed) return;
@@ -282,6 +295,7 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       container.removeEventListener('focusout', handleFocusOut);
       window.removeEventListener('focus', handleWindowFocus);
       window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener('mouseup', handleDocumentMouseUpCapture, true);
       subscriptions.forEach((subscription) => subscription.dispose());
       terminal?.dispose();
       terminalRef.current = null;

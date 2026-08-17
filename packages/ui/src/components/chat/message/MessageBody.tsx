@@ -40,6 +40,7 @@ import { formatTimestampForDisplay } from './timeFormat';
 import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
+import { renderTerminalOutput } from './parts/toolOutput';
 import TurnActivity from '../components/TurnActivity';
 import { createProjectPlanFile } from '@/lib/openchamberConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -310,7 +311,11 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
     const copyOutputToClipboard = React.useCallback(async () => {
         if (!hasOutput) return;
 
-        const result = await copyTextToClipboard(output);
+        // Copy the VT-interpreted visible text, not the raw terminal stream:
+        // raw bash output contains \r / ESC[2K / color sequences that a VT
+        // emulator (the integrated terminal) would interpret as commands on
+        // paste, collapsing the output to its last frame.
+        const result = await copyTextToClipboard(renderTerminalOutput(output));
         if (!result.ok) return;
 
         clearCopiedResetTimeout();
