@@ -359,15 +359,22 @@ const toPersistedEntry = (entry: PrStatusEntry): PersistedPrStatusEntry => ({
   resolvedRemoteName: entry.resolvedRemoteName ?? entry.status?.resolvedRemoteName ?? null,
 });
 
-const hydrateEntry = (entry: PersistedPrStatusEntry | undefined): PrStatusEntry => ({
-  ...createEntry(),
-  status: entry?.status ?? null,
-  isInitialStatusResolved: entry?.isInitialStatusResolved ?? false,
-  lastRefreshAt: entry?.lastRefreshAt ?? 0,
-  lastDiscoveryPollAt: entry?.lastDiscoveryPollAt ?? 0,
-  identity: entry?.identity ?? null,
-  resolvedRemoteName: entry?.resolvedRemoteName ?? entry?.status?.resolvedRemoteName ?? null,
-});
+const hydrateEntry = (entry: PersistedPrStatusEntry | undefined): PrStatusEntry => {
+  // A persisted closed/merged PR is restored so the panel keeps showing the
+  // branch's PR history across a reload. It is never treated as live authority:
+  // `lastDiscoveryPollAt` is reset so the watcher revalidates it immediately and
+  // an open PR (or an authoritative empty result) replaces it.
+  const hasTerminalPr = isTerminalPrState(entry?.status?.pr?.state);
+  return {
+    ...createEntry(),
+    status: entry?.status ?? null,
+    isInitialStatusResolved: entry?.isInitialStatusResolved ?? false,
+    lastRefreshAt: entry?.lastRefreshAt ?? 0,
+    lastDiscoveryPollAt: hasTerminalPr ? 0 : (entry?.lastDiscoveryPollAt ?? 0),
+    identity: entry?.identity ?? null,
+    resolvedRemoteName: entry?.resolvedRemoteName ?? entry?.status?.resolvedRemoteName ?? null,
+  };
+};
 
 const boundEntries = (entries: Record<string, PrStatusEntry>): Record<string, PrStatusEntry> => {
   const all = Object.entries(entries);
@@ -472,6 +479,9 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
             if (!entry || entry.watchers <= 0) {
               return;
             }
+            // Bootstrap retries only help discovery before any PR is known.
+            // Once a PR is cached — open or historical — the discovery interval
+            // owns revalidation.
             if (entry.status?.pr) {
               return;
             }
@@ -496,7 +506,11 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
           }
 
           const hasPr = Boolean(entry.status?.pr);
-          if (!hasPr) {
+          // A closed/merged PR is history, not live status. It stays on the
+          // discovery cadence like a branch with no PR at all, so a newer open
+          // PR — or an authoritative empty result — replaces it on its own.
+          const isTerminal = isTerminalPrState(entry.status?.pr?.state);
+          if (!hasPr || isTerminal) {
             const now = Date.now();
             if (now - entry.lastDiscoveryPollAt < PR_DISCOVERY_INTERVAL_MS) {
               return;
@@ -517,10 +531,6 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
               };
             });
             void get().refresh(key, { force: true, silent: true, markInitialResolved: true });
-            return;
-          }
-
-          if (isTerminalPrState(entry.status?.pr?.state)) {
             return;
           }
 

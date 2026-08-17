@@ -39,7 +39,9 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
         console.error('Small model generation failed:', error);
       }
       res.status(statusCode).json({
-        error: error.message || 'Small model generation failed',
+        error: statusCode === 404
+          ? (error.message || 'No small model is available')
+          : 'The selected Small Model could not complete this action. Choose another model in Settings → Sessions → Small Model and try again.',
         ...(error?.code ? { code: error.code } : {}),
       });
     }

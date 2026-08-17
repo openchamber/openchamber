@@ -817,6 +817,8 @@ export const dict = {
   'gitView.pr.field.draft': 'Brouillon',
   'gitView.pr.field.title': 'Titre',
   'gitView.pr.githubNotConnected': 'GitHub n\'est pas connecté',
+  'gitView.pr.history.merged': 'La PR #{number} a été fusionnée dans {base}.',
+  'gitView.pr.history.closed': 'La PR #{number} a été fermée.',
   'gitView.pr.loadingDescription': 'Chargement de la description de la PR...',
   'gitView.pr.mergeMethod.merge': 'Créer un commit de fusion',
   'gitView.pr.mergeMethod.rebase': 'Rebase et fusionner',

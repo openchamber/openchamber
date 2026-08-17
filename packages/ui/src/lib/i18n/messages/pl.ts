@@ -2187,6 +2187,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.field.draft': 'Szkic',
   'gitView.pr.field.title': 'Tytuł',
   'gitView.pr.githubNotConnected': 'GitHub nie jest połączony',
+  'gitView.pr.history.merged': 'PR #{number} został scalony do {base}.',
+  'gitView.pr.history.closed': 'PR #{number} został zamknięty.',
   'gitView.pr.loadingDescription': 'Loading description...',
   'gitView.pr.mergeMethod.merge': 'Create a merge commit',
   'gitView.pr.mergeMethod.rebase': 'Rebase and merge',

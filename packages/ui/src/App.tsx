@@ -209,6 +209,11 @@ const EmbeddedSessionChatContent: React.FC<{
       <OpenCodeUpdateToast />
       <ChatView
         active={embeddedBackgroundWorkEnabled}
+        // Always subscribe to message history in the mounted session-chat
+        // iframe. Visibility still gates composer focus and background work so
+        // a boot-inactive / lost-handshake race cannot leave a busy subagent
+        // showing only its status row (#2903 / #2892).
+        messagesEnabled={true}
         readOnly={embeddedSessionChat.readOnly}
         initialAllowPromptingSubagentSessions={embeddedSessionChat.allowPromptingSubagentSessions}
       />

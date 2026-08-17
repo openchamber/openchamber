@@ -998,6 +998,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.field.draft': '드래프트',
   'gitView.pr.field.title': '제목',
   'gitView.pr.githubNotConnected': 'GitHub에 연결되지 않음',
+  'gitView.pr.history.merged': 'PR #{number}이(가) {base}에 병합되었습니다.',
+  'gitView.pr.history.closed': 'PR #{number}이(가) 닫혔습니다.',
   'gitView.pr.loadingDescription': '설명 로드 중…',
   'gitView.pr.mergeMethod.merge': '병합 커밋 생성',
   'gitView.pr.mergeMethod.rebase': '리베이스 후 병합',

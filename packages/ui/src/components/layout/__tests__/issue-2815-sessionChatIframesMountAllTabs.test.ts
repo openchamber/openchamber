@@ -147,11 +147,12 @@ describe('issue #2815 active-only chat iframe source guard', () => {
     expect(requestIndex).toBeGreaterThan(listenerIndex);
   });
 
-  test('gates embedded chat subscriptions and background work on visibility', () => {
+  test('gates embedded chat background work on visibility but keeps message history enabled', () => {
     expect(appSource).toContain(
       'const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;',
     );
     expect(appSource).toContain('active={embeddedBackgroundWorkEnabled}');
+    expect(appSource).toContain('messagesEnabled={true}');
     expect(appSource).toContain(
       'useWebNotificationStream({ enabled: embeddedBackgroundWorkEnabled });',
     );

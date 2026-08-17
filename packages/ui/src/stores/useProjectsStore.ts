@@ -166,14 +166,22 @@ const normalizeProjectPath = (value: string): string => {
   return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
 };
 
+// Folder names are shown verbatim: title-casing them turned `.ssh` into `.Ssh`
+// and made every project look like a name the user never chose.
 const deriveProjectLabel = (path: string): string => {
   const normalized = normalizeProjectPath(path);
   if (!normalized || normalized === '/') {
     return 'Root';
   }
   const segments = normalized.split('/').filter(Boolean);
-  const raw = segments[segments.length - 1] || normalized;
-  return raw.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return segments[segments.length - 1] || normalized;
+};
+
+// Labels auto-derived by older versions were title-cased and persisted. Drop
+// them back to the folder name; labels the user typed themselves are kept.
+const legacyAutoProjectLabel = (path: string): string => {
+  const derived = deriveProjectLabel(path);
+  return derived.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
 const sanitizeProjectIconImage = (value: unknown): ProjectEntry['iconImage'] | undefined => {
@@ -261,7 +269,10 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     };
 
     if (typeof candidate.label === 'string' && candidate.label.trim().length > 0) {
-      project.label = candidate.label.trim();
+      const storedLabel = candidate.label.trim();
+      project.label = storedLabel === legacyAutoProjectLabel(normalizedPath)
+        ? deriveProjectLabel(normalizedPath)
+        : storedLabel;
     }
     if (typeof candidate.icon === 'string' && candidate.icon.trim().length > 0) {
       project.icon = candidate.icon.trim();

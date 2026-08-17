@@ -994,6 +994,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.field.draft': '下書き',
   'gitView.pr.field.title': 'タイトル',
   'gitView.pr.githubNotConnected': 'GitHubが接続されていません',
+  'gitView.pr.history.merged': 'PR #{number} は {base} にマージされました。',
+  'gitView.pr.history.closed': 'PR #{number} はクローズされました。',
   'gitView.pr.loadingDescription': '説明を読み込み中...',
   'gitView.pr.mergeMethod.merge': 'マージコミットを作成',
   'gitView.pr.mergeMethod.rebase': 'リベースしてマージ',

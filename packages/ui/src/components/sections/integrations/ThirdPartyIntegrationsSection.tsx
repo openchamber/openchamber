@@ -12,7 +12,7 @@ import {
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
-import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
@@ -323,10 +323,7 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
           data-settings-item={`integrations.third-party.${plugin.id}`}
           className="overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)]"
         >
-          <button
-            type="button"
-            aria-expanded={open}
-            onClick={() => setPluginOpen(plugin.id, !open)}
+          <CollapsibleTrigger
             className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left hover:bg-[var(--interactive-hover)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--interactive-focus-ring)]"
           >
             <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
@@ -348,10 +345,13 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
               {status}
             </span>
             <Icon
-              name={open ? 'arrow-up-s' : 'arrow-down-s'}
-              className="size-4 shrink-0 text-muted-foreground"
+              name="arrow-down-s"
+              className={cn(
+                'size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out motion-reduce:transition-none',
+                open && 'rotate-180',
+              )}
             />
-          </button>
+          </CollapsibleTrigger>
           <CollapsibleContent className="border-t border-[var(--interactive-border)] px-4 py-4">
             <div className="space-y-3">
               {state.projectEntries.length > 0 ? (

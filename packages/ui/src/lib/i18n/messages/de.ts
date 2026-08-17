@@ -933,6 +933,8 @@ export const dict = {
   'gitView.pr.field.draft': 'Entwurf',
   'gitView.pr.field.title': 'Titel',
   'gitView.pr.githubNotConnected': 'GitHub ist nicht verbunden',
+  'gitView.pr.history.merged': 'PR #{number} wurde in {base} gemergt.',
+  'gitView.pr.history.closed': 'PR #{number} wurde geschlossen.',
   'gitView.pr.loadingDescription': 'Beschreibung wird geladen...',
   'gitView.pr.mergeMethod.merge': 'Einen Merge-Commit erstellen',
   'gitView.pr.mergeMethod.rebase': 'Rebase und Merge',

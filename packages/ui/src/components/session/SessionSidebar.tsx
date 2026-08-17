@@ -1471,12 +1471,16 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         }
         const key = getGitHubPrStatusKey(directory, branch);
         const entry = useGitHubPrStatusStore.getState().entries[key];
-        const hasPr = Boolean(entry?.status?.pr);
+        const prState = entry?.status?.pr?.state;
+        const isTerminalPr = prState === 'closed' || prState === 'merged';
+        // Closed/merged associations are not live branch status — retry them on
+        // the same cadence as missing PRs so a newer open PR can appear.
+        const hasLivePr = Boolean(entry?.status?.pr) && !isTerminalPr;
         const retryKey = `${directory}::${branch}`;
         const noPrLastCheckedAt = Math.max(entry?.lastRefreshAt ?? 0, entry?.lastDiscoveryPollAt ?? 0);
         const shouldRetryNoPr = Boolean(
           entry?.isInitialStatusResolved
-          && !hasPr
+          && !hasLivePr
           && (
             !retriedNoPrStatusKeysRef.current.has(retryKey)
             || now - noPrLastCheckedAt >= SIDEBAR_PR_NO_PR_RETRY_MS

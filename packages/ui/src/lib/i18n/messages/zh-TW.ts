@@ -1010,6 +1010,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.field.draft': '草稿',
   'gitView.pr.field.title': '標題',
   'gitView.pr.githubNotConnected': 'GitHub 未連線',
+  'gitView.pr.history.merged': 'PR #{number} 已合併到 {base}。',
+  'gitView.pr.history.closed': 'PR #{number} 已關閉。',
   'gitView.pr.loadingDescription': '正在載入描述...',
   'gitView.pr.mergeMethod.merge': '建立合併提交',
   'gitView.pr.mergeMethod.rebase': 'Rebase 並合併',
