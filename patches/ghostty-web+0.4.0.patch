@@ -46,3 +46,67 @@ index 0000000000000000000000000000000000000000..11111111111111111111111111111111
     * Render cursor
     */
    renderCursor(A, B) {
+@@ -1724,7 +1759,7 @@
+ const L = class Y {
+   // ms between scroll steps
+   constructor(A, B, g, E) {
+-    this.selectionStart = null, this.selectionEnd = null, this.isSelecting = !1, this.mouseDownTarget = null, this.dirtySelectionRows = /* @__PURE__ */ new Set(), this.selectionChangedEmitter = new J(), this.boundMouseUpHandler = null, this.boundContextMenuHandler = null, this.boundClickHandler = null, this.boundDocumentMouseMoveHandler = null, this.autoScrollInterval = null, this.autoScrollDirection = 0, this.terminal = A, this.renderer = B, this.wasmTerm = g, this.textarea = E, this.attachEventListeners();
++    this.selectionStart = null, this.selectionEnd = null, this.isSelecting = !1, this.mouseDownX = 0, this.mouseDownY = 0, this.dragThresholdMet = !1, this.mouseDownTarget = null, this.dirtySelectionRows = /* @__PURE__ */ new Set(), this.selectionChangedEmitter = new J(), this.boundMouseUpHandler = null, this.boundContextMenuHandler = null, this.boundClickHandler = null, this.boundDocumentMouseMoveHandler = null, this.autoScrollInterval = null, this.autoScrollDirection = 0, this.terminal = A, this.renderer = B, this.wasmTerm = g, this.textarea = E, this.attachEventListeners();
+   }
+   // pixels from edge to trigger scroll
+   /**
+@@ -1801,7 +1836,11 @@
+    * Check if there's an active selection
+    */
+   hasSelection() {
+-    return !this.selectionStart || !this.selectionEnd ? !1 : !(this.selectionStart.col === this.selectionEnd.col && this.selectionStart.absoluteRow === this.selectionEnd.absoluteRow);
++    if (!this.selectionStart || !this.selectionEnd)
++      return !1;
++    if (this.isSelecting && !this.dragThresholdMet)
++      return !1;
++    return !0;
+   }
+   /**
+    * Clear the selection
+@@ -1916,10 +1955,16 @@
+         const g = this.pixelToCell(B.offsetX, B.offsetY);
+         this.hasSelection() && this.clearSelection();
+         const C = this.viewportRowToAbsolute(g.row);
+-        this.selectionStart = { col: g.col, absoluteRow: C }, this.selectionEnd = { col: g.col, absoluteRow: C }, this.isSelecting = !0;
++        this.selectionStart = { col: g.col, absoluteRow: C }, this.selectionEnd = { col: g.col, absoluteRow: C }, this.isSelecting = !0, this.mouseDownX = B.offsetX, this.mouseDownY = B.offsetY, this.dragThresholdMet = !1;
+       }
+     }), A.addEventListener("mousemove", (B) => {
+       if (this.isSelecting) {
++        if (!this.dragThresholdMet) {
++          const I = B.offsetX - this.mouseDownX, D = B.offsetY - this.mouseDownY, i = this.renderer.getMetrics().width * 0.5;
++          if (I * I + D * D < i * i)
++            return;
++          this.dragThresholdMet = !0;
++        }
+         this.markCurrentSelectionDirty();
+         const g = this.pixelToCell(B.offsetX, B.offsetY), E = this.viewportRowToAbsolute(g.row);
+         this.selectionEnd = { col: g.col, absoluteRow: E }, this.requestRender(), this.updateAutoScroll(B.offsetY, A.clientHeight);
+@@ -1933,6 +1978,12 @@
+       this.isSelecting && this.stopAutoScroll();
+     }), this.boundDocumentMouseMoveHandler = (B) => {
+       if (this.isSelecting) {
++        if (!this.dragThresholdMet) {
++          const i = B.clientX - (A.getBoundingClientRect().left + this.mouseDownX), w = B.clientY - (A.getBoundingClientRect().top + this.mouseDownY), s = this.renderer.getMetrics().width * 0.5;
++          if (i * i + w * w < s * s)
++            return;
++          this.dragThresholdMet = !0;
++        }
+         const g = A.getBoundingClientRect(), E = Math.max(g.left, Math.min(B.clientX, g.right)), C = Math.max(g.top, Math.min(B.clientY, g.bottom)), I = E - g.left, D = C - g.top;
+         if ((B.clientX < g.left || B.clientX > g.right || B.clientY < g.top || B.clientY > g.bottom) && (B.clientY < g.top ? this.startAutoScroll(-1) : B.clientY > g.bottom ? this.startAutoScroll(1) : this.stopAutoScroll(), this.autoScrollDirection === 0)) {
+           this.markCurrentSelectionDirty();
+@@ -1945,6 +1996,10 @@
+     }), this.boundMouseUpHandler = (B) => {
+       if (this.isSelecting) {
+         this.isSelecting = !1, this.stopAutoScroll();
++        if (!this.dragThresholdMet) {
++          this.clearSelection();
++          return;
++        }
+         const g = this.getSelection();
+         g && (this.copyToClipboard(g), this.selectionChangedEmitter.fire());
+       }

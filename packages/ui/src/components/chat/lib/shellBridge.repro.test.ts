@@ -52,6 +52,8 @@ describe('issue 2876: shell widget copy -> integrated terminal paste', () => {
             ],
         };
 
+        // SAFETY: This fixture intentionally supplies only the runtime message
+        // fields inspected by getShellBridgeAssistantDetails.
         const { hide, details } = getShellBridgeAssistantDetails(assistantMessage as never, 'user-1');
 
         expect(hide).toBe(true);

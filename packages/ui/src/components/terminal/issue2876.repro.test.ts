@@ -1,61 +1,39 @@
 import { describe, expect, test } from 'bun:test';
 
-import { shouldSuppressGhosttyCopyOnClick } from './ghosttyCopySuppression';
-
 // Regression test for https://github.com/openchamber/openchamber/issues/2876
 //
 // [Bug] Pasting from the copy button in the shell widget to the terminal fails
 //
-// Symptom (macOS desktop): after clicking the copy button on the chat shell
-// widget, pasting into the integrated terminal yields a single "random"
-// character ~90% of the time. The character is stable across repeated pastes
-// but changes on re-copy, is not the first/last character of the copied text,
-// and pasting the same clipboard into an external app shows the same single
-// character. Copying via terminal selection / Cmd+C works fine.
+// ghostty-web 0.4.0 arms SelectionManager.isSelecting on every canvas
+// mousedown and copies on document mouseup. A plain click therefore copied the
+// clicked cell over the shell widget's clipboard text. The dependency patch
+// keeps selection armed until the pointer moves past half a cell, then copies
+// only a real drag. Double-click word copying remains a separate path.
 //
-// Root cause: ghostty-web (v0.4.0, used by TerminalViewport.tsx) implements
-// copy-on-click. Its SelectionManager:
-//
-//   mousedown (button 0) on the canvas:
-//     selectionStart = selectionEnd = clicked cell
-//     isSelecting = true
-//   mouseup (document level):
-//     if isSelecting:
-//       text = getSelection()          // single character of the clicked cell
-//       if text: copyToClipboard(text) // navigator.clipboard.writeText(char)
-//
-// So a plain left click on any character in the integrated terminal WRITES that
-// single character to the system clipboard. The reporter's flow is:
-//
-//   1. click shell widget copy button  -> clipboard = full output
-//   2. click into the integrated terminal to focus it
-//      -> ghostty copies the character under the cursor to the clipboard
-//   3. Cmd+V -> pastes that single character
-//
-// Fix: TerminalViewport registers a document-level `mouseup` listener in the
-// CAPTURE phase. For a plain click (no real selection) inside the terminal
-// container it stops propagation — so ghostty's document bubble-phase mouseup
-// handler never runs — and clears the single-cell selection. Real drag
-// selections (`hasSelection()` true) and clicks outside the terminal are
-// untouched. The predicate is exported as
-// `shouldSuppressGhosttyCopyOnClick(hasSelection, targetInContainer)` and
-// tested directly below; the full event flow is modeled with a faithful
-// ghostty SelectionManager plus a capture-phase suppress handler.
+// The patch intentionally updates only ghostty-web's ESM bundle, matching the
+// existing patch-package precedent; the UMD bundle remains unchanged.
 
 type Cell = { col: number; absoluteRow: number };
+type Point = { x: number; y: number };
+
+const CELL_WIDTH = 10;
+const DRAG_THRESHOLD = CELL_WIDTH * 0.5;
 
 /**
- * Faithful model of ghostty-web v0.4.0 SelectionManager mouse handling
- * (packages from `node_modules/ghostty-web/dist/ghostty-web.js`):
- * - left mousedown on the canvas selects a single cell and arms isSelecting
- * - document-level mouseup copies the selection to the clipboard
- * - getSelection() returns the character(s) of the selected range
- * - hasSelection() is false for a single-cell (plain click) selection
+ * Faithful model of the patched ghostty-web 0.4.0 SelectionManager mouse path:
+ * - mousedown records the cell and pointer position and sets isSelecting
+ * - movement below half a cell leaves the endpoint unchanged
+ * - movement past the threshold extends the selection
+ * - mouseup clears a click before the copy branch
+ * - clearSelection() still has its hasSelection() early return
  */
 const createGhosttySelectionModel = (screen: string[][]) => {
     let selectionStart: Cell | null = null;
     let selectionEnd: Cell | null = null;
     let isSelecting = false;
+    let dragThresholdMet = false;
+    let mouseDownX = 0;
+    let mouseDownY = 0;
     const clipboardWrites: string[] = [];
 
     const getSelection = (): string => {
@@ -68,6 +46,7 @@ const createGhosttySelectionModel = (screen: string[][]) => {
             [fromCol, toCol] = [toCol, fromCol];
             [fromRow, toRow] = [toRow, fromRow];
         }
+
         let result = '';
         for (let row = fromRow; row <= toRow; row += 1) {
             const line = screen[row];
@@ -77,10 +56,10 @@ const createGhosttySelectionModel = (screen: string[][]) => {
             const endCol = row === toRow ? toCol : line.length - 1;
             let cellText = '';
             for (let col = startCol; col <= endCol; col += 1) {
-                const char = line[col];
-                if (char && char !== ' ') {
-                    cellText += char;
-                    if (char.trim()) lastNonSpace = cellText.length;
+                const character = line[col];
+                if (character && character !== ' ') {
+                    cellText += character;
+                    if (character.trim()) lastNonSpace = cellText.length;
                 } else {
                     cellText += ' ';
                 }
@@ -92,143 +71,191 @@ const createGhosttySelectionModel = (screen: string[][]) => {
         return result;
     };
 
-    // canvas mousedown listener
-    const mousedown = (button: number, col: number, row: number): void => {
-        if (button !== 0) return;
-        selectionStart = { col, absoluteRow: row };
-        selectionEnd = { col, absoluteRow: row };
-        isSelecting = true;
-    };
-
-    // canvas mousemove listener (only extends the selection while selecting)
-    const mousemove = (col: number, row: number): void => {
-        if (!isSelecting) return;
-        selectionEnd = { col, absoluteRow: row };
-    };
-
-    // document mouseup listener (bubble phase, as in the library)
-    const mouseup = (): void => {
-        if (!isSelecting) return;
-        isSelecting = false;
-        const text = getSelection();
-        if (text) clipboardWrites.push(text); // copyToClipboard(text)
-    };
-
+    // Patched hasSelection(): a pending single-cell click is not active while
+    // the pointer is still below the drag threshold, but becomes clearable
+    // after mouseup sets isSelecting to false.
     const hasSelection = (): boolean => {
         if (!selectionStart || !selectionEnd) return false;
-        return !(selectionStart.col === selectionEnd.col && selectionStart.absoluteRow === selectionEnd.absoluteRow);
+        if (isSelecting && !dragThresholdMet) return false;
+        return true;
     };
 
+    // Keep the upstream early return: mouseup must set isSelecting false first
+    // so a pending single cell reaches the clearing branch.
     const clearSelection = (): void => {
+        if (!hasSelection()) return;
         selectionStart = null;
         selectionEnd = null;
         isSelecting = false;
     };
 
-    return { mousedown, mousemove, mouseup, hasSelection, clearSelection, getSelection, clipboardWrites };
-};
-
-/**
- * Model of TerminalViewport's capture-phase document mouseup handler: it
- * suppresses ghostty's copy when the click is a plain click (no real
- * selection) inside the terminal container, and leaves everything else alone.
- */
-const createSuppressHandler = (model: ReturnType<typeof createGhosttySelectionModel>) => {
-    const handleMouseUpCapture = (targetInContainer: boolean): boolean => {
-        // Caller (TerminalViewport) filters clicks outside the container
-        // before consulting the suppression predicate.
-        if (!targetInContainer) return false;
-        if (!shouldSuppressGhosttyCopyOnClick(model.hasSelection())) return false;
-        model.clearSelection();
-        return true; // stopPropagation: ghostty's bubble-phase mouseup never runs
+    const mousedown = (button: number, col: number, row: number, point: Point): void => {
+        if (button !== 0) return;
+        if (hasSelection()) clearSelection();
+        selectionStart = { col, absoluteRow: row };
+        selectionEnd = { col, absoluteRow: row };
+        isSelecting = true;
+        mouseDownX = point.x;
+        mouseDownY = point.y;
+        dragThresholdMet = false;
     };
-    return { handleMouseUpCapture };
+
+    const markDragThreshold = (point: Point): boolean => {
+        if (dragThresholdMet) return true;
+        const dx = point.x - mouseDownX;
+        const dy = point.y - mouseDownY;
+        if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return false;
+        dragThresholdMet = true;
+        return true;
+    };
+
+    // Both the canvas mousemove and document mousemove handlers share the
+    // patched threshold behavior. The latter is used when a drag leaves the
+    // canvas before document mouseup.
+    const move = (col: number, row: number, point: Point): void => {
+        if (!isSelecting || !markDragThreshold(point)) return;
+        selectionEnd = { col, absoluteRow: row };
+    };
+
+    const mouseup = (): void => {
+        if (!isSelecting) return;
+        isSelecting = false;
+        if (!dragThresholdMet) {
+            clearSelection();
+            return;
+        }
+        const text = getSelection();
+        if (text) clipboardWrites.push(text);
+    };
+
+    const getWordRange = (col: number, row: number): { startCol: number; endCol: number } | null => {
+        const line = screen[row] ?? [];
+        const isWordCharacter = (character: string | undefined): boolean => Boolean(character && /[\w-]/.test(character));
+        if (!isWordCharacter(line[col])) return null;
+
+        let startCol = col;
+        let endCol = col;
+        while (startCol > 0 && isWordCharacter(line[startCol - 1])) startCol -= 1;
+        while (endCol + 1 < line.length && isWordCharacter(line[endCol + 1])) endCol += 1;
+        return { startCol, endCol };
+    };
+
+    const doubleClick = (col: number, row: number): void => {
+        const word = getWordRange(col, row);
+        if (!word) return;
+        selectionStart = { col: word.startCol, absoluteRow: row };
+        selectionEnd = { col: word.endCol, absoluteRow: row };
+        const text = getSelection();
+        if (text) clipboardWrites.push(text);
+    };
+
+    return {
+        mousedown,
+        mousemove: move,
+        documentMousemove: move,
+        mouseup,
+        outsideClick: mouseup,
+        doubleClick,
+        hasSelection,
+        clearSelection,
+        getSelection,
+        get isSelecting(): boolean { return isSelecting; },
+        get dragThresholdMet(): boolean { return dragThresholdMet; },
+        clipboardWrites,
+    };
 };
 
 describe('issue 2876: copy-on-click in the integrated terminal clobbers the clipboard', () => {
-    test('a plain left click on a character writes that single character to the clipboard (bug)', () => {
-        // Terminal screen: row 0 is `$ echo hi` (prompt + command).
-        const screen = [['$', ' ', 'e', 'c', 'h', 'o', ' ', 'h', 'i']];
+    const screen = [['$', ' ', 'e', 'c', 'h', 'o', ' ', 'h', 'i']];
 
-        // 1. User copied the shell widget output; clipboard holds the full text.
-        const clipboard: string[] = ['pnpm install\n'];
-
-        // 2. User clicks into the terminal to focus it — click lands on cell
-        //    (col 3, row 0), the character 'c' of "echo".
+    test('a plain click clears its single-cell state without writing to the clipboard', () => {
         const model = createGhosttySelectionModel(screen);
-        model.mousedown(0, 3, 0);
+
+        model.mousedown(0, 3, 0, { x: 30, y: 0 });
         model.mouseup();
 
-        expect(model.getSelection()).toBe('c');
-        expect(model.clipboardWrites).toEqual(['c']);
-
-        // 3. ghostty-web copied the clicked character over the full output.
-        for (const write of model.clipboardWrites) clipboard.unshift(write);
-        expect(clipboard[0]).toBe('c');
+        expect(model.clipboardWrites).toEqual([]);
+        expect(model.isSelecting).toBe(false);
+        expect(model.getSelection()).toBe('');
     });
 
-    test('the capture-phase suppress handler stops the plain-click copy (fix)', () => {
-        const screen = [['$', ' ', 'e', 'c', 'h', 'o', ' ', 'h', 'i']];
-        const clipboard: string[] = ['pnpm install\n'];
-
-        // Plain click inside the terminal: mousedown selects the cell, then the
-        // capture-phase mouseup suppresses the copy before ghostty's handler.
+    test('sub-threshold movement does not extend the selection or copy', () => {
         const model = createGhosttySelectionModel(screen);
-        const suppress = createSuppressHandler(model);
-        model.mousedown(0, 3, 0);
-        const suppressed = suppress.handleMouseUpCapture(true);
 
-        expect(suppressed).toBe(true);
-        expect(model.clipboardWrites).toEqual([]);
+        model.mousedown(0, 2, 0, { x: 20, y: 0 });
+        model.mousemove(5, 0, { x: 24, y: 0 });
+
         expect(model.hasSelection()).toBe(false);
+        expect(model.dragThresholdMet).toBe(false);
+        expect(model.getSelection()).toBe('e');
 
-        // The clipboard still holds the shell widget output.
-        expect(clipboard[0]).toBe('pnpm install\n');
-    });
-
-    test('drag selection still copies the selected text (not suppressed)', () => {
-        const screen = [['$', ' ', 'e', 'c', 'h', 'o', ' ', 'h', 'i']];
-
-        // Real drag selection: mousedown, mousemove to extend, mouseup.
-        const model = createGhosttySelectionModel(screen);
-        const suppress = createSuppressHandler(model);
-        model.mousedown(0, 2, 0);
-        // mousemove extends selectionEnd (mirrors the library's mousemove handler)
-        model.mousemove(5, 0);
-
-        // hasSelection() is now true, so the capture-phase handler does not
-        // suppress; ghostty's bubble-phase mouseup copies the selection.
-        const suppressed = suppress.handleMouseUpCapture(true);
-        model.mouseup();
-
-        expect(suppressed).toBe(false);
-        expect(model.clipboardWrites[0]).toBe('echo');
-    });
-
-    test('clicks outside the terminal container are untouched', () => {
-        const screen = [['$', ' ', 'e', 'c', 'h', 'o', ' ', 'h', 'i']];
-
-        // Click outside the terminal: the capture-phase handler returns early
-        // (target not in container) and ghostty's handler runs as before.
-        const model = createGhosttySelectionModel(screen);
-        const suppress = createSuppressHandler(model);
-        model.mousedown(0, 3, 0);
-        const suppressed = suppress.handleMouseUpCapture(false);
-        model.mouseup();
-
-        expect(suppressed).toBe(false);
-        expect(model.clipboardWrites).toEqual(['c']);
-    });
-
-    test('clicking empty/whitespace cells does not clobber the clipboard (~10% success)', () => {
-        const screen = [['$', ' ', 'e', 'c', 'h', 'o'], [], [' ', ' ', ' ']];
-
-        const model = createGhosttySelectionModel(screen);
-        model.mousedown(0, 1, 0); // the space in `$ echo`
-        model.mouseup();
-        model.mousedown(0, 0, 2); // an empty line
         model.mouseup();
 
         expect(model.clipboardWrites).toEqual([]);
+        expect(model.isSelecting).toBe(false);
+        expect(model.getSelection()).toBe('');
+    });
+
+    test('dragging past the threshold extends and copies the selected text', () => {
+        const model = createGhosttySelectionModel(screen);
+
+        model.mousedown(0, 2, 0, { x: 20, y: 0 });
+        model.mousemove(5, 0, { x: 26, y: 0 });
+
+        expect(model.hasSelection()).toBe(true);
+        expect(model.dragThresholdMet).toBe(true);
+        expect(model.getSelection()).toBe('echo');
+
+        model.mouseup();
+
+        expect(model.clipboardWrites).toEqual(['echo']);
+        expect(model.isSelecting).toBe(false);
+    });
+
+    test('dragging outside the canvas updates the clamped endpoint and copies the selection', () => {
+        const model = createGhosttySelectionModel(screen);
+        const canvasWidth = screen[0].length * CELL_WIDTH;
+
+        model.mousedown(0, 2, 0, { x: 20, y: 0 });
+        model.documentMousemove(screen[0].length - 1, 0, { x: canvasWidth + CELL_WIDTH, y: 0 });
+
+        expect(model.hasSelection()).toBe(true);
+        expect(model.dragThresholdMet).toBe(true);
+        expect(model.getSelection()).toBe('echo hi');
+
+        model.mouseup();
+
+        expect(model.clipboardWrites).toEqual(['echo hi']);
+        expect(model.isSelecting).toBe(false);
+    });
+
+    test('a terminal press released outside clears pending selection without writing', () => {
+        const model = createGhosttySelectionModel(screen);
+
+        model.mousedown(0, 3, 0, { x: 30, y: 0 });
+        model.outsideClick();
+
+        expect(model.clipboardWrites).toEqual([]);
+        expect(model.isSelecting).toBe(false);
+        expect(model.getSelection()).toBe('');
+    });
+
+    test('double-click word copy remains available', () => {
+        const model = createGhosttySelectionModel(screen);
+
+        model.mousedown(0, 3, 0, { x: 30, y: 0 });
+        model.mouseup();
+        model.mousedown(0, 3, 0, { x: 30, y: 0 });
+        model.mouseup();
+
+        expect(model.clipboardWrites).toEqual([]);
+        expect(model.isSelecting).toBe(false);
+        expect(model.getSelection()).toBe('');
+
+        model.doubleClick(3, 0);
+
+        expect(model.clipboardWrites).toEqual(['echo']);
+        expect(model.getSelection()).toBe('echo');
+        expect(model.isSelecting).toBe(false);
     });
 });
