@@ -241,6 +241,47 @@ describe('updateDesktopSettings', () => {
     }
   });
 
+  test('sanitizes a successful fallback settings response before applying it', async () => {
+    const previousFetch = globalThis.fetch;
+    const fallbackFetch: typeof fetch = async () => new Response(JSON.stringify({ terminalShell: 'zsh' }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    try {
+      globalThis.fetch = fallbackFetch;
+      useUIStore.getState().setTerminalShell('fish');
+
+      await updateDesktopSettings({ terminalShell: 'zsh' });
+
+      expect(useUIStore.getState().terminalShell).toBe('zsh');
+      expect(getSettingsSaveState()).toBe('idle');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  test('reports an error without applying a malformed fallback settings response', async () => {
+    const previousFetch = globalThis.fetch;
+    const fallbackFetch: typeof fetch = async () => new Response(JSON.stringify('ok'), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const states: string[] = [];
+    const unsubscribe = subscribeToSettingsSaveState(() => {
+      states.push(getSettingsSaveState());
+    });
+    try {
+      globalThis.fetch = fallbackFetch;
+      useUIStore.getState().setTerminalShell('fish');
+
+      await updateDesktopSettings({ terminalShell: 'zsh' });
+
+      expect(useUIStore.getState().terminalShell).toBe('fish');
+      expect(states).toEqual(['saving', 'error']);
+    } finally {
+      unsubscribe();
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   test('drains a pending save to the previous runtime and ignores its stale response', async () => {
     switchRuntimeEndpoint({ apiBaseUrl: 'https://settings-a.example', runtimeKey: 'settings-a' });
     const saveResult = deferred<SettingsPayload>();

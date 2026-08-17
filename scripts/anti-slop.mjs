@@ -13,116 +13,59 @@ import {
   runDirPath,
 } from "./lib/batch-claims.mjs";
 
-const PROJECT_NAME = "openchamber-monorepo";
-// Pinned so unattended batch runs cannot change diagnostics or output shape
-// without an explicit update here.
-const REACT_DOCTOR_VERSION = "0.9.12";
-const PIPELINE = "rd";
+const PIPELINE = "as";
 // Resolved before command dispatch so every command shares one claims location.
 const { runsDir: RUNS_DIR, shared: SHARED_CLAIMS } = resolveRunsDir(parseArgs(process.argv.slice(2))["claims-dir"]);
 const DEFAULT_MAX_ACTIVE = 20;
 const DEFAULT_CLAIM_TTL_DAYS = 3;
 
+// Rules ordered by how mechanical and behavior-safe their fixes are. Higher
+// scores are preferred when selecting the next batch.
 const PRIORITY_RULES = new Map([
-  ["effect-needs-cleanup", 100],
-  ["no-mutable-in-deps", 95],
-  ["click-events-have-key-events", 90],
-  ["no-static-element-interactions", 88],
-  ["no-direct-state-mutation", 86],
-  ["no-secrets-in-client-code", 85],
-  ["no-danger", 84],
-  ["no-prevent-default", 82],
-  ["async-await-in-loop", 80],
-  ["server-sequential-independent-await", 80],
-  ["async-parallel", 78],
-  ["async-defer-await", 76],
-  ["js-set-map-lookups", 75],
-  ["js-index-maps", 74],
-  ["js-cache-property-access", 72],
-  ["advanced-event-handler-refs", 70],
-  ["client-passive-event-listeners", 70],
-  ["js-combine-iterations", 68],
-  ["js-flatmap-filter", 66],
-  ["js-batch-dom-css", 66],
-  ["js-cache-storage", 64],
-  ["js-hoist-intl", 64],
-  ["js-hoist-regexp", 64],
-  ["js-length-check-first", 64],
-  ["js-min-max-loop", 64],
-  ["js-tosorted-immutable", 62],
-  ["no-fetch-in-effect", 62],
-  ["rerender-state-only-in-handlers", 62],
-  ["rerender-functional-setstate", 60],
-  ["rerender-lazy-state-init", 60],
-  ["rerender-memo-before-early-return", 60],
-  ["rerender-memo-with-default-value", 60],
-  ["rendering-hydration-mismatch-time", 58],
-  ["rendering-hydration-no-flicker", 58],
-  ["rendering-usetransition-loading", 58],
-  ["rendering-conditional-render", 56],
-  ["rendering-svg-precision", 56],
-  ["no-unknown-property", 55],
-  ["no-autofocus", 54],
-  ["no-array-index-as-key", 52],
-  ["no-react19-deprecated-apis", 52],
-  ["client-localstorage-no-version", 50],
-  ["no-dynamic-import-path", 50],
-  ["no-flush-sync", 50],
-  ["no-long-transition-duration", 48],
-  ["no-tiny-text", 48],
-  ["prefer-dynamic-import", 48],
-  ["use-lazy-motion", 48],
-  ["duplicates", 45],
-  ["no-barrel-import", 45],
-  ["no-derived-useState", 44],
-  ["no-derived-state-effect", 42],
-  ["no-effect-chain", 42],
-  ["no-effect-event-handler", 42],
-  ["no-mirror-prop-effect", 42],
-  ["no-prop-callback-in-effect", 42],
-  ["prefer-use-effect-event", 42],
-  ["no-cascading-set-state", 40],
-  ["no-usememo-simple-expression", 40],
-  ["design-no-redundant-size-axes", 35],
-  ["design-no-redundant-padding-axes", 35],
-  ["design-no-em-dash-in-jsx-text", 34],
-  ["design-no-space-on-flex-children", 34],
-  ["design-no-three-period-ellipsis", 34],
-  ["no-inline-prop-on-memo-component", 32],
-  ["no-many-boolean-props", 30],
-  ["no-polymorphic-children", 30],
-  ["no-render-in-render", 28],
-  ["prefer-useReducer", 26],
-  ["no-generic-handler-names", 24],
-  ["no-giant-component", 15],
-  ["exports", 10],
-  ["types", 10],
-  ["files", 5],
+  ["no-object-parameters", 100],
+  ["no-shape-in-symbol-names", 95],
+  ["no-unknown-type-aliases", 90],
+  ["no-unknown-returns", 85],
+  ["no-unknown-parameters", 80],
+  ["no-unsafe-dictionary-type", 75],
+  ["no-conditional-empty-object-spread", 70],
+  ["no-known-value-widening", 65],
+  ["no-chained-type-assertions", 60],
+  ["no-widen-then-assert", 55],
+  ["no-reflect-get", 50],
+  ["no-reflect-apply", 50],
+  ["no-module-mocking", 30],
+  ["require-safety-comment-for-type-assertion", 20],
+  ["no-runtime-typeof", 10],
 ]);
+
+// Excluded by default because they account for most of the existing backlog and
+// their fixes are the least mechanical. Opt in with --include-noisy.
+const NOISY_RULES = new Set(["no-runtime-typeof", "require-safety-comment-for-type-assertion"]);
 
 function usage(exitCode = 0) {
   const out = exitCode === 0 ? console.log : console.error;
   out(`Usage:
-  bun run doctor -- next-batch [--min-issues 75] [--max-issues 120] [--max-files 4]
-                              [--max-active ${DEFAULT_MAX_ACTIVE}] [--claim-ttl ${DEFAULT_CLAIM_TTL_DAYS}]
-  bun run doctor -- check-batch --run <run-id>
-  bun run doctor -- active [--claim-ttl ${DEFAULT_CLAIM_TTL_DAYS}]
+  bun run deslop -- next-batch [--min-issues 60] [--max-issues 120] [--max-files 4]
+                              [--max-active ${DEFAULT_MAX_ACTIVE}] [--claim-ttl ${DEFAULT_CLAIM_TTL_DAYS}] [--include-noisy]
+  bun run deslop -- check-batch --run <run-id>
+  bun run deslop -- active [--claim-ttl ${DEFAULT_CLAIM_TTL_DAYS}]
 
 Every command accepts --claims-dir <path> to isolate a working copy.
-  bun run doctor -- release --run <run-id>
-  bun run doctor -- file <path>
-  bun run doctor -- top [--limit 10]
+  bun run deslop -- release --run <run-id>
+  bun run deslop -- file <path> [--include-noisy]
+  bun run deslop -- top [--limit 10] [--include-noisy]
 
 Files selected by an active batch are excluded from later batches, so concurrent
-batches never touch the same file, including batches created by the anti-slop
+batches never touch the same file, including batches created by the React Doctor
 pipeline. Claims are shared across clones by default. A batch stays active until
 it is released.
 
 Examples:
-  bun run doctor -- next-batch --min-issues 75 --max-issues 120
-  bun run doctor -- file packages/ui/src/components/chat/ChatInput.tsx
-  bun run doctor -- check-batch --run 2026-05-14T12-31-44Z
-  bun run doctor -- release --run 2026-05-14T12-31-44Z`);
+  bun run deslop -- next-batch --min-issues 60 --max-issues 120
+  bun run deslop -- file packages/ui/src/lib/settings/metadata.ts
+  bun run deslop -- check-batch --run 2026-08-16T10-12-44Z
+  bun run deslop -- release --run 2026-08-16T10-12-44Z`);
   process.exit(exitCode);
 }
 
@@ -155,25 +98,49 @@ function asPositiveInt(value, fallback, name) {
   return parsed;
 }
 
-function runReactDoctor() {
-  const output = execFileSync(
-    "npx",
-    [
-      `react-doctor@${REACT_DOCTOR_VERSION}`,
-      "--project",
-      PROJECT_NAME,
-      "--json",
-      "--offline",
-      "--fail-on",
-      "none",
-    ],
-    { cwd: process.cwd(), encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] },
-  );
-  return JSON.parse(output);
+function runOxlint() {
+  // Oxlint exits non-zero whenever it reports findings, so the report has to be
+  // read from stdout of the failed invocation rather than treated as an error.
+  let output;
+  try {
+    output = execFileSync("bunx", ["oxlint", "--format", "json"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    // The utf8 encoding above makes stdout a string whenever the run produced
+    // a report; an empty stdout means the run itself failed.
+    if (!error.stdout) throw error;
+    output = error.stdout;
+  }
+  const report = JSON.parse(output);
+  return { diagnostics: normalizeDiagnostics(report.diagnostics ?? []) };
 }
 
-function allDiagnostics(report) {
-  return report.diagnostics ?? report.projects?.flatMap((project) => project.diagnostics ?? []) ?? [];
+function ruleOf(code) {
+  const match = /^anti-slop\((.+)\)$/.exec(code ?? "");
+  return match ? match[1] : (code ?? "unknown");
+}
+
+function normalizeDiagnostics(rawDiagnostics) {
+  return rawDiagnostics.map((diagnostic) => {
+    const span = diagnostic.labels?.[0]?.span;
+    return {
+      filePath: diagnostic.filename,
+      rule: ruleOf(diagnostic.code),
+      severity: diagnostic.severity ?? "error",
+      message: diagnostic.message,
+      line: span?.line,
+      column: span?.column,
+    };
+  });
+}
+
+function selectableDiagnostics(report, includeNoisy) {
+  if (includeNoisy) return report.diagnostics;
+  return report.diagnostics.filter((diagnostic) => !NOISY_RULES.has(diagnostic.rule));
 }
 
 function groupByFile(diagnostics) {
@@ -191,12 +158,9 @@ function rulePriority(rule) {
 }
 
 function filePriority(diagnostics) {
-  const usefulScore = diagnostics.reduce((sum, diagnostic) => sum + rulePriority(diagnostic.rule), 0);
-  const noisyCount = diagnostics.filter((diagnostic) => rulePriority(diagnostic.rule) <= 35).length;
-  const highSignalCount = diagnostics.filter((diagnostic) => rulePriority(diagnostic.rule) >= 66).length;
-  const noisyRatio = diagnostics.length === 0 ? 0 : noisyCount / diagnostics.length;
-  const noisyPenalty = noisyRatio > 0.5 ? diagnostics.length * 35 : noisyCount * 8;
-  return usefulScore + highSignalCount * 25 - noisyPenalty;
+  const score = diagnostics.reduce((sum, diagnostic) => sum + rulePriority(diagnostic.rule), 0);
+  const mechanicalCount = diagnostics.filter((diagnostic) => rulePriority(diagnostic.rule) >= 75).length;
+  return score + mechanicalCount * 20;
 }
 
 function sortedFileEntries(diagnostics) {
@@ -212,16 +176,7 @@ function sortedFileEntries(diagnostics) {
 function summarizeRules(diagnostics) {
   const counts = new Map();
   for (const diagnostic of diagnostics) {
-    const key = `${diagnostic.category} / ${diagnostic.rule}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-}
-
-function summarizeCategories(diagnostics) {
-  const counts = new Map();
-  for (const diagnostic of diagnostics) {
-    counts.set(diagnostic.category, (counts.get(diagnostic.category) ?? 0) + 1);
+    counts.set(diagnostic.rule, (counts.get(diagnostic.rule) ?? 0) + 1);
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
@@ -255,19 +210,23 @@ function createBatchMetadata(runId, selectedFiles) {
   const [datePart, timePart = ""] = runId.replace(/Z$/, "").split("T");
   const timestamp = `${datePart.replace(/-/g, "")}-${timePart.replace(/-/g, "")}`;
   const stems = selectedFiles.map((file) => fileNameWithoutExtension(file.filePath));
-  const readableArea = stems.length === 1 ? stems[0] : `${stems.slice(0, 2).join(" and ")}${stems.length > 2 ? ` plus ${stems.length - 2}` : ""}`;
+  const readableArea = stems.length === 1
+    ? stems[0]
+    : `${stems.slice(0, 2).join(" and ")}${stems.length > 2 ? ` plus ${stems.length - 2}` : ""}`;
   const areaSlug = slugify(stems.slice(0, 3).join("-")) || "batch";
-  const batchName = `rd-${timestamp}-${areaSlug}`;
+  const batchName = `as-${timestamp}-${areaSlug}`;
 
   return {
     batchName,
-    branchName: `react-doctor/${batchName}`,
-    prTitle: `Reduce React Doctor diagnostics in ${titleCase(readableArea)}`,
+    branchName: `anti-slop/${batchName}`,
+    prTitle: `Reduce anti-slop findings in ${titleCase(readableArea)}`,
   };
 }
 
 function selectBatch(entries, minIssues, maxIssues, maxFiles) {
-  if (entries.length === 0) return { selected: [], oversized: false, belowTarget: false, reason: "No diagnostics found." };
+  if (entries.length === 0) {
+    return { selected: [], oversized: false, belowTarget: false, reason: "No findings available for selection." };
+  }
 
   const firstFitting = entries.find(([, diagnostics]) => diagnostics.length >= minIssues && diagnostics.length <= maxIssues);
   if (firstFitting) {
@@ -344,31 +303,25 @@ function readRun(runId) {
 }
 
 function printReportHeader(report) {
-  const summary = report.summary ?? {};
-  console.log(`Repository score: ${summary.score ?? "unknown"} / 100 ${summary.scoreLabel ?? ""}`.trim());
-  console.log(`Total diagnostics: ${summary.totalDiagnosticCount ?? allDiagnostics(report).length} issues across ${summary.affectedFileCount ?? "unknown"} files`);
-  console.log(`Severity: ${summary.errorCount ?? 0} errors, ${summary.warningCount ?? 0} warnings`);
-}
-
-function printDiagnostics(diagnostics, limit = diagnostics.length) {
-  for (const diagnostic of diagnostics.slice(0, limit)) {
-    console.log(`line ${diagnostic.line ?? "?"}:${diagnostic.column ?? "?"}  ${diagnostic.severity}  ${diagnostic.category} / ${diagnostic.rule}`);
-    console.log(`  ${diagnostic.message}`);
-    if (diagnostic.help && diagnostic.help !== diagnostic.message) console.log(`  Help: ${diagnostic.help}`);
-  }
+  const total = report.diagnostics.length;
+  const affected = groupByFile(report.diagnostics).size;
+  const noisy = report.diagnostics.filter((diagnostic) => NOISY_RULES.has(diagnostic.rule)).length;
+  console.log(`Total findings: ${total} across ${affected} files`);
+  console.log(`Excluded-by-default findings: ${noisy} (${[...NOISY_RULES].join(", ")})`);
 }
 
 function commandNextBatch(args) {
-  const minIssues = asPositiveInt(args["min-issues"], 75, "min-issues");
+  const minIssues = asPositiveInt(args["min-issues"], 60, "min-issues");
   const maxIssues = asPositiveInt(args["max-issues"], 120, "max-issues");
   const maxFiles = asPositiveInt(args["max-files"], 4, "max-files");
   if (minIssues > maxIssues) throw new Error("--min-issues cannot be greater than --max-issues.");
   const maxActive = asPositiveInt(args["max-active"], DEFAULT_MAX_ACTIVE, "max-active");
   const claimTtlDays = asPositiveInt(args["claim-ttl"], DEFAULT_CLAIM_TTL_DAYS, "claim-ttl");
+  const includeNoisy = args["include-noisy"] === true;
 
   const claims = readActiveClaims(RUNS_DIR, claimTtlDays);
   if (claims.length >= maxActive) {
-    console.log("React Doctor Next Batch");
+    console.log("Anti-Slop Next Batch");
     console.log("");
     console.log("NO BATCH AVAILABLE");
     console.log(`Reason: ${claims.length} active batches already exist and the limit is ${maxActive}.`);
@@ -378,16 +331,17 @@ function commandNextBatch(args) {
     return;
   }
 
-  const report = runReactDoctor();
+  const report = runOxlint();
   const claimedPaths = claimedFilePaths(claims);
-  const diagnostics = allDiagnostics(report).filter((diagnostic) => !claimedPaths.has(diagnostic.filePath));
-  const entries = sortedFileEntries(diagnostics);
+  const candidates = selectableDiagnostics(report, includeNoisy)
+    .filter((diagnostic) => !claimedPaths.has(diagnostic.filePath));
+  const entries = sortedFileEntries(candidates);
 
   if (entries.length === 0) {
-    console.log("React Doctor Next Batch");
+    console.log("Anti-Slop Next Batch");
     console.log("");
     console.log("NO BATCH AVAILABLE");
-    console.log("Reason: no unclaimed diagnostics remain.");
+    console.log("Reason: no unclaimed findings remain for the selected rules.");
     console.log("Stop here. Do not create a branch or a pull request.");
     console.log("");
     printClaims(claims, PIPELINE);
@@ -401,10 +355,22 @@ function commandNextBatch(args) {
     rules: summarizeRules(fileDiagnostics),
   }));
   const metadata = createBatchMetadata(runId, selectedFiles);
-  const batch = { runId, ...metadata, minIssues, maxIssues, maxFiles, maxActive, selectedFiles, oversized: selection.oversized, belowTarget: selection.belowTarget, reason: selection.reason };
+  const batch = {
+    runId,
+    ...metadata,
+    minIssues,
+    maxIssues,
+    maxFiles,
+    maxActive,
+    includeNoisy,
+    selectedFiles,
+    oversized: selection.oversized,
+    belowTarget: selection.belowTarget,
+    reason: selection.reason,
+  };
   const runDir = writeRun(runId, { report, batch });
 
-  console.log("React Doctor Next Batch");
+  console.log("Anti-Slop Next Batch");
   console.log("");
   console.log(`Run ID: ${runId}`);
   console.log(`Batch name: ${batch.batchName}`);
@@ -415,12 +381,13 @@ function commandNextBatch(args) {
   console.log("");
   printReportHeader(report);
   console.log("");
-  console.log(`Batch window: ${minIssues}-${maxIssues} diagnostics`);
+  console.log(`Batch window: ${minIssues}-${maxIssues} findings`);
+  console.log(`Noisy rules included: ${includeNoisy ? "yes" : "no"}`);
   console.log(`Active batches before this one: ${claims.length} of ${maxActive}`);
   console.log(`Claims directory: ${RUNS_DIR} (${SHARED_CLAIMS ? "shared default" : "override"})`);
   console.log(`Files excluded as claimed by active batches: ${claimedPaths.size}`);
   console.log(`Selection mode: complete files only`);
-  console.log(`Batch total: ${selectedFiles.reduce((sum, file) => sum + file.diagnosticCount, 0)} diagnostics`);
+  console.log(`Batch total: ${selectedFiles.reduce((sum, file) => sum + file.diagnosticCount, 0)} findings`);
   console.log(`Oversized: ${selection.oversized ? "yes" : "no"}`);
   console.log(`Below target: ${selection.belowTarget ? "yes" : "no"}`);
   console.log(`Selection reason: ${selection.reason}`);
@@ -428,15 +395,14 @@ function commandNextBatch(args) {
   console.log("Selected files:");
   selection.selected.forEach(([filePath, fileDiagnostics], index) => {
     console.log(`${index + 1}. ${filePath}`);
-    console.log(`   Diagnostics: ${fileDiagnostics.length}`);
-    console.log("   Categories: " + summarizeCategories(fileDiagnostics).map(([category, count]) => `${category} ${count}`).join(", "));
+    console.log(`   Findings: ${fileDiagnostics.length}`);
     console.log("   Rules:");
-    for (const [rule, count] of summarizeRules(fileDiagnostics).slice(0, 10)) {
+    for (const [rule, count] of summarizeRules(fileDiagnostics)) {
       console.log(`   ${String(count).padStart(3)}  ${rule}`);
     }
-    console.log("   Diagnostics:");
+    console.log("   Findings detail:");
     for (const diagnostic of fileDiagnostics) {
-      console.log(`   line ${diagnostic.line ?? "?"}:${diagnostic.column ?? "?"}  ${diagnostic.severity}  ${diagnostic.category} / ${diagnostic.rule}`);
+      console.log(`   line ${diagnostic.line ?? "?"}:${diagnostic.column ?? "?"}  ${diagnostic.severity}  ${diagnostic.rule}`);
       console.log(`     ${diagnostic.message}`);
     }
     console.log("");
@@ -459,23 +425,25 @@ function commandRelease(args) {
 
 function commandTop(args) {
   const limit = asPositiveInt(args.limit, 10, "limit");
-  const report = runReactDoctor();
-  const entries = sortedFileEntries(allDiagnostics(report)).slice(0, limit);
-  console.log(`Top ${limit} files by prioritized React Doctor diagnostics`);
+  const includeNoisy = args["include-noisy"] === true;
+  const report = runOxlint();
+  const entries = sortedFileEntries(selectableDiagnostics(report, includeNoisy)).slice(0, limit);
+  console.log(`Top ${limit} files by prioritized anti-slop findings`);
   console.log("");
   for (const [filePath, diagnostics] of entries) {
     console.log(`${String(diagnostics.length).padStart(4)}  ${filePath}`);
-    console.log(`      ${summarizeCategories(diagnostics).map(([category, count]) => `${category} ${count}`).join(", ")}`);
+    console.log(`      ${summarizeRules(diagnostics).map(([rule, count]) => `${rule} ${count}`).join(", ")}`);
   }
 }
 
 function commandFile(args) {
   const filePath = args._[1];
-  if (!filePath) throw new Error("Missing file path. Usage: bun run doctor -- file <path>");
-  const report = runReactDoctor();
-  const diagnostics = groupByFile(allDiagnostics(report)).get(filePath) ?? [];
+  if (!filePath) throw new Error("Missing file path. Usage: bun run deslop -- file <path>");
+  const includeNoisy = args["include-noisy"] === true;
+  const report = runOxlint();
+  const diagnostics = groupByFile(selectableDiagnostics(report, includeNoisy)).get(filePath) ?? [];
   console.log(filePath);
-  console.log(`${diagnostics.length} issues`);
+  console.log(`${diagnostics.length} findings`);
   console.log("");
   if (diagnostics.length === 0) return;
   console.log("Rules:");
@@ -483,22 +451,28 @@ function commandFile(args) {
     console.log(`${String(count).padStart(4)}  ${rule}`);
   }
   console.log("");
-  console.log("Issues:");
-  printDiagnostics(diagnostics);
+  console.log("Findings:");
+  for (const diagnostic of diagnostics) {
+    console.log(`line ${diagnostic.line ?? "?"}:${diagnostic.column ?? "?"}  ${diagnostic.severity}  ${diagnostic.rule}`);
+    console.log(`  ${diagnostic.message}`);
+  }
 }
 
 function commandCheckBatch(args) {
   const runId = args.run;
   if (!runId || runId === true) throw new Error("Missing --run <run-id>.");
   const { baseline, batch } = readRun(runId);
-  const current = runReactDoctor();
-  const beforeByFile = groupByFile(allDiagnostics(baseline));
-  const afterByFile = groupByFile(allDiagnostics(current));
+  const current = runOxlint();
+  const includeNoisy = batch.includeNoisy === true;
+  const beforeDiagnostics = selectableDiagnostics(baseline, includeNoisy);
+  const afterDiagnostics = selectableDiagnostics(current, includeNoisy);
+  const beforeByFile = groupByFile(beforeDiagnostics);
+  const afterByFile = groupByFile(afterDiagnostics);
   const selected = batch.selectedFiles ?? [];
   let beforeTotal = 0;
   let afterTotal = 0;
 
-  console.log("React Doctor Batch Check");
+  console.log("Anti-Slop Batch Check");
   console.log("");
   console.log(`Run ID: ${runId}`);
   if (batch.batchName) console.log(`Batch name: ${batch.batchName}`);
@@ -518,14 +492,14 @@ function commandCheckBatch(args) {
   }
 
   const selectedPaths = new Set(selected.map((file) => file.filePath));
-  const beforeOutside = allDiagnostics(baseline).filter((diagnostic) => !selectedPaths.has(diagnostic.filePath)).length;
-  const afterOutside = allDiagnostics(current).filter((diagnostic) => !selectedPaths.has(diagnostic.filePath)).length;
+  const beforeOutside = beforeDiagnostics.filter((diagnostic) => !selectedPaths.has(diagnostic.filePath)).length;
+  const afterOutside = afterDiagnostics.filter((diagnostic) => !selectedPaths.has(diagnostic.filePath)).length;
 
   console.log("");
   console.log("Batch result:");
-  console.log(`Fixed diagnostics in selected files: ${Math.max(0, beforeTotal - afterTotal)}`);
-  console.log(`Remaining diagnostics in selected files: ${afterTotal}`);
-  console.log(`Diagnostics outside selected files delta: ${afterOutside - beforeOutside}`);
+  console.log(`Fixed findings in selected files: ${Math.max(0, beforeTotal - afterTotal)}`);
+  console.log(`Remaining findings in selected files: ${afterTotal}`);
+  console.log(`Findings outside selected files delta: ${afterOutside - beforeOutside}`);
   console.log("");
   console.log("Current repository summary:");
   printReportHeader(current);
