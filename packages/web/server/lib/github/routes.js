@@ -1442,15 +1442,6 @@ export function registerGitHubRoutes(app) {
               sshUrl: pr.head.repo.ssh_url,
             }
           : null;
-        const baseRepo = pr.base?.repo
-          ? {
-              owner: pr.base.repo.owner?.login,
-              repo: pr.base.repo.name,
-              url: pr.base.repo.html_url,
-              cloneUrl: pr.base.repo.clone_url,
-              sshUrl: pr.base.repo.ssh_url,
-            }
-          : null;
         return {
           number: pr.number,
           title: pr.title,
@@ -1466,9 +1457,6 @@ export function registerGitHubRoutes(app) {
           headLabel: pr.head?.label,
           headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
             ? headRepo
-            : null,
-          baseRepo: baseRepo && baseRepo.owner && baseRepo.repo && baseRepo.url
-            ? baseRepo
             : null,
           sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
         };
@@ -1630,15 +1618,6 @@ export function registerGitHubRoutes(app) {
             sshUrl: prData.head.repo.ssh_url,
           }
         : null;
-      const baseRepo = prData.base?.repo
-        ? {
-            owner: prData.base.repo.owner?.login,
-            repo: prData.base.repo.name,
-            url: prData.base.repo.html_url,
-            cloneUrl: prData.base.repo.clone_url,
-            sshUrl: prData.base.repo.ssh_url,
-          }
-        : null;
 
       const mergedState = prData.merged ? 'merged' : (prData.state === 'closed' ? 'closed' : 'open');
       const pr = {
@@ -1655,7 +1634,6 @@ export function registerGitHubRoutes(app) {
         author: prData.user ? { login: prData.user.login, id: prData.user.id, avatarUrl: prData.user.avatar_url } : null,
         headLabel: prData.head?.label,
         headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url ? headRepo : null,
-        baseRepo: baseRepo && baseRepo.owner && baseRepo.repo && baseRepo.url ? baseRepo : null,
         body: prData.body || '',
         createdAt: prData.created_at,
         updatedAt: prData.updated_at,

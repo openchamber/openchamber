@@ -696,6 +696,18 @@ describe('createWorktree from a forked GitHub PR', () => {
     }
   };
 
+  const forkWorktreeInput = ({ fork, worktreeName }) => ({
+    mode: 'existing',
+    branchName: 'feature/login',
+    worktreeName,
+    existingBranch: 'remotes/pr-alice/feature/login',
+    setUpstream: true,
+    upstreamRemote: 'pr-alice',
+    upstreamBranch: 'feature/login',
+    ensureRemoteName: 'pr-alice',
+    ensureRemoteUrl: fork,
+  });
+
   it('creates a worktree from a reachable fork head remote', async () => {
     if (!canRunGit()) return;
 
@@ -705,18 +717,10 @@ describe('createWorktree from a forked GitHub PR', () => {
       runGit(fork, ['init', '--bare']);
       const sha = publishForkHead(repository, fork, 'feature/login');
 
-      const created = await createWorktree(repository, {
-        mode: 'existing',
-        branchName: 'feature/login',
+      const created = await createWorktree(repository, forkWorktreeInput({
+        fork,
         worktreeName: 'pr-42',
-        pullRequest: {
-          number: 42,
-          headBranch: 'feature/login',
-          headSha: sha,
-          headRepoUrl: fork,
-          headOwner: 'alice',
-        },
-      });
+      }));
 
       expect(created.branch).toBe('feature/login');
       expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(sha);
@@ -729,123 +733,27 @@ describe('createWorktree from a forked GitHub PR', () => {
     });
   }, 30_000);
 
-  it('rejects missing fork URL with an actionable error', async () => {
-    if (!canRunGit()) return;
-
-    await withDataHome(async () => {
-      const { repository } = createRepositoryWithRemote();
-
-      await expect(createWorktree(repository, {
-        mode: 'existing',
-        branchName: 'feature/login',
-        worktreeName: 'pr-42-missing',
-        pullRequest: {
-          number: 42,
-          headBranch: 'feature/login',
-        },
-      })).rejects.toThrow(/head repository URL is unavailable/i);
-
-      const validation = await validateWorktreeCreate(repository, {
-        mode: 'existing',
-        branchName: 'feature/login',
-        worktreeName: 'pr-42-missing',
-        pullRequest: {
-          number: 42,
-          headBranch: 'feature/login',
-        },
-      });
-      expect(validation.ok).toBe(false);
-      expect(validation.errors.some((error) => /head repository URL is unavailable/i.test(error.message))).toBe(true);
-    });
-  }, 30_000);
-
   it('rejects an unreachable fork with an actionable error and no worktree', async () => {
     if (!canRunGit()) return;
 
     await withDataHome(async () => {
       const { repository } = createRepositoryWithRemote();
       const missingFork = path.join(createTempDir(), 'missing-fork.git');
+      const before = runGit(repository, ['worktree', 'list', '--porcelain']);
 
-      await expect(createWorktree(repository, {
-        mode: 'existing',
-        branchName: 'feature/login',
+      await expect(createWorktree(repository, forkWorktreeInput({
+        fork: missingFork,
         worktreeName: 'pr-42-unreachable',
-        pullRequest: {
-          number: 42,
-          headBranch: 'feature/login',
-          headRepoUrl: missingFork,
-          headOwner: 'alice',
-        },
-      })).rejects.toThrow(/Unable to (reach|fetch) PR #42/i);
-    });
-  }, 30_000);
+      }))).rejects.toThrow(/Unable to (reach|fetch)/i);
 
-  it('creates from the fork when a same-named local branch exists with a different tip', async () => {
-    if (!canRunGit()) return;
+      expect(runGit(repository, ['worktree', 'list', '--porcelain'])).toBe(before);
 
-    await withDataHome(async () => {
-      const { repository } = createRepositoryWithRemote();
-      const staleSha = runGit(repository, ['rev-parse', 'HEAD']).trim();
-      runGit(repository, ['branch', 'feature/login']);
-
-      const fork = createTempDir();
-      runGit(fork, ['init', '--bare']);
-      const prSha = publishForkHead(repository, fork, 'feature/login');
-      expect(prSha).not.toBe(staleSha);
-
-      // UI locks branchName to pr.head (feature/login), which already exists.
-      const input = {
-        mode: 'existing',
-        branchName: 'feature/login',
-        worktreeName: 'pr-42-from-fork',
-        pullRequest: {
-          number: 42,
-          headBranch: 'feature/login',
-          headSha: prSha,
-          headRepoUrl: fork,
-          headOwner: 'alice',
-        },
-      };
-
-      const validation = await validateWorktreeCreate(repository, input);
-      expect(validation.ok).toBe(true);
-      expect(validation.resolved?.localBranch).toBe('pr-42');
-
-      const created = await createWorktree(repository, input);
-      expect(created.branch).toBe('pr-42');
-      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(prSha);
-      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).not.toBe(staleSha);
-    });
-  }, 30_000);
-
-  it('reuses a local branch only when its tip matches headSha', async () => {
-    if (!canRunGit()) return;
-
-    await withDataHome(async () => {
-      const { repository } = createRepositoryWithRemote();
-      fs.writeFileSync(path.join(repository, 'MATCH.md'), '# match\n');
-      runGit(repository, ['add', 'MATCH.md']);
-      runGit(repository, ['commit', '-m', 'matching tip']);
-      const sha = runGit(repository, ['rev-parse', 'HEAD']).trim();
-      runGit(repository, ['branch', 'feature/login']);
-
-      const created = await createWorktree(repository, {
-        mode: 'existing',
-        branchName: 'feature/login',
-        worktreeName: 'pr-42-local',
-        pullRequest: {
-          number: 42,
-          headBranch: 'feature/login',
-          headSha: sha,
-          // Even with a fork URL, matching local tip wins.
-          headRepoUrl: path.join(createTempDir(), 'unused.git'),
-          headOwner: 'alice',
-        },
-      });
-
-      expect(created.branch).toBe('feature/login');
-      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(sha);
-      expect(getBranchTrackingRemote(created.path, 'feature/login')).toBe('');
+      const validation = await validateWorktreeCreate(repository, forkWorktreeInput({
+        fork: missingFork,
+        worktreeName: 'pr-42-unreachable',
+      }));
+      expect(validation.ok).toBe(false);
+      expect(validation.errors.some((error) => /Unable to (reach|fetch)/i.test(error.message))).toBe(true);
     });
   }, 30_000);
 

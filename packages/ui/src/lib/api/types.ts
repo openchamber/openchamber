@@ -392,28 +392,11 @@ export interface CreateGitWorktreePayload {
   setUpstream?: boolean;
   upstreamRemote?: string;
   upstreamBranch?: string;
-  /** Optional remote provisioning (used for non-PR fork workflows). */
+  /** Optional remote provisioning (used for fork PR workflows). */
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
-  /**
-   * Create a worktree from a linked GitHub pull request. The server provisions
-   * the fork remote and fetches `headBranch`. Missing/unreachable forks fail
-   * with a clear error (no partial worktree).
-   */
-  pullRequest?: CreateGitWorktreePullRequest;
   /** Return once the target directory exists and finish Git worktree setup in the background. */
   returnAfterDirectoryCreated?: boolean;
-}
-
-/** Linked GitHub PR identity for worktree create/validate. Server owns git strategy. */
-export interface CreateGitWorktreePullRequest {
-  number: number;
-  headBranch: string;
-  /** Authoritative PR head tip when known; required for safe local reuse. */
-  headSha?: string;
-  /** Prefer HTTPS clone URL. Omit when the fork was deleted. */
-  headRepoUrl?: string;
-  headOwner?: string;
 }
 
 export interface GitWorktreeCreateResult {
@@ -911,15 +894,13 @@ export type GitHubPullRequest = {
   mergeableState?: string | null;
 };
 
-type GitHubPullRequestRepo = {
+type GitHubPullRequestHeadRepo = {
   owner: string;
   repo: string;
   url: string;
   cloneUrl?: string;
   sshUrl?: string;
 };
-
-type GitHubPullRequestHeadRepo = GitHubPullRequestRepo;
 
 export type GitHubPullRequestSummary = GitHubPullRequest & {
   author?: GitHubUserSummary | null;
@@ -928,8 +909,6 @@ export type GitHubPullRequestSummary = GitHubPullRequest & {
   updatedAt?: string;
   headLabel?: string;
   headRepo?: GitHubPullRequestHeadRepo | null;
-  /** Base repository that serves `refs/pull/<n>/head` for this PR. */
-  baseRepo?: GitHubPullRequestRepo | null;
   sourceRepo?: (GitHubRepoSelector & { source: string }) | null;
 };
 

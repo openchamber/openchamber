@@ -103,7 +103,6 @@ const {
   validateWorktreeCreate,
   worktreeMapsEqual,
 } = await import('./worktreeManager');
-import type { CreateGitWorktreePullRequest } from '@/lib/api/types';
 
 const waitForListCallCount = async (count: number): Promise<void> => {
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -386,7 +385,7 @@ describe('partitionWorktreesByRegisteredProject', () => {
   });
 });
 
-describe('worktreeManager PR payload wiring', () => {
+describe('worktreeManager fork remote payload wiring', () => {
   beforeEach(() => {
     listCalls.length = 0;
     listResolvers.length = 0;
@@ -401,21 +400,18 @@ describe('worktreeManager PR payload wiring', () => {
     attachmentState.attachments = new Map();
   });
 
-  test('validate and create forward fork pullRequest identity only', async () => {
-    const pullRequest: CreateGitWorktreePullRequest = {
-      number: 42,
-      headBranch: 'feature/login',
-      headSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-      headRepoUrl: 'https://github.com/alice/openchamber.git',
-      headOwner: 'alice',
-    };
-
+  test('validate and create forward ensureRemoteName/Url for a fork head', async () => {
     const project = { id: 'project-1', path: '/repo' };
     const args = {
       mode: 'existing' as const,
       branchName: 'feature/login',
       worktreeName: 'pr-42',
-      pullRequest,
+      existingBranch: 'remotes/pr-alice/feature/login',
+      setUpstream: true as const,
+      upstreamRemote: 'pr-alice',
+      upstreamBranch: 'feature/login',
+      ensureRemoteName: 'pr-alice',
+      ensureRemoteUrl: 'https://github.com/alice/openchamber.git',
     };
 
     const validation = await validateWorktreeCreate(project, args);
@@ -423,11 +419,10 @@ describe('worktreeManager PR payload wiring', () => {
     expect(validatePayloads).toHaveLength(1);
     const validated = validatePayloads[0] as Record<string, unknown>;
     expect(validated.mode).toBe('existing');
-    expect(validated.pullRequest).toEqual(pullRequest);
-    expect('existingBranch' in validated).toBe(false);
-    expect('ensureRemoteName' in validated).toBe(false);
-    expect('prRef' in validated).toBe(false);
-    expect('baseRepoUrl' in (validated.pullRequest as object)).toBe(false);
+    expect(validated.existingBranch).toBe('remotes/pr-alice/feature/login');
+    expect(validated.ensureRemoteName).toBe('pr-alice');
+    expect(validated.ensureRemoteUrl).toBe('https://github.com/alice/openchamber.git');
+    expect('pullRequest' in validated).toBe(false);
 
     await createWorktree(project, {
       ...args,
@@ -435,8 +430,10 @@ describe('worktreeManager PR payload wiring', () => {
     });
     expect(createPayloads).toHaveLength(1);
     const created = createPayloads[0] as Record<string, unknown>;
-    expect(created.pullRequest).toEqual(pullRequest);
-    expect('ensureRemoteUrl' in created).toBe(false);
-    expect('setUpstream' in created).toBe(false);
+    expect(created.existingBranch).toBe('remotes/pr-alice/feature/login');
+    expect(created.ensureRemoteName).toBe('pr-alice');
+    expect(created.ensureRemoteUrl).toBe('https://github.com/alice/openchamber.git');
+    expect(created.setUpstream).toBe(true);
+    expect('pullRequest' in created).toBe(false);
   });
 });

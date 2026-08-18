@@ -58,7 +58,6 @@ import type {
   GitHubIssuesListResult,
   GitHubPullRequestContextResult,
   GitHubPullRequestSummary,
-  CreateGitWorktreePullRequest,
 } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useI18n } from '@/lib/i18n';
@@ -98,25 +97,77 @@ const normalizeBranchName = (value: string): string => {
     .replace(/^\/+|\/+$/g, '');
 };
 
-/** Map a linked GitHub PR to create/validate identity (server owns checkout). */
-const toWorktreePullRequest = (pr: GitHubPullRequestSummary): CreateGitWorktreePullRequest => {
+const sanitizeRemoteName = (value: string): string => {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || 'pr-head';
+};
+
+const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: string[], remoteBranches: string[]) => {
   const headBranch = normalizeBranchName(pr.head || '');
   if (!headBranch) {
     throw new Error('PR head branch is missing');
   }
 
-  // Prefer HTTPS so anonymous public fetches do not require SSH agent setup.
-  const headRepoUrl = (pr.headRepo?.cloneUrl || pr.headRepo?.sshUrl || '').trim() || undefined;
+  if (localBranches.includes(headBranch)) {
+    return {
+      existingBranch: headBranch,
+      setUpstream: undefined,
+      upstreamRemote: undefined,
+      upstreamBranch: undefined,
+      ensureRemoteName: undefined,
+      ensureRemoteUrl: undefined,
+      sourceLabel: headBranch,
+    };
+  }
+
+  const availableRemoteBranch = remoteBranches.find((remoteBranch) => {
+    const slashIndex = remoteBranch.indexOf('/');
+    if (slashIndex <= 0 || slashIndex >= remoteBranch.length - 1) {
+      return false;
+    }
+    return remoteBranch.slice(slashIndex + 1) === headBranch;
+  });
+
+  if (availableRemoteBranch) {
+    const slashIndex = availableRemoteBranch.indexOf('/');
+    const remoteName = availableRemoteBranch.slice(0, slashIndex);
+    return {
+      existingBranch: `remotes/${availableRemoteBranch}`,
+      setUpstream: true as const,
+      upstreamRemote: remoteName,
+      upstreamBranch: headBranch,
+      ensureRemoteName: undefined,
+      ensureRemoteUrl: undefined,
+      sourceLabel: `${remoteName}/${headBranch}`,
+    };
+  }
+
   const ownerFromLabel = String(pr.headLabel || '').split(':')[0]?.trim();
-  const headOwner = (pr.headRepo?.owner || ownerFromLabel || '').trim() || undefined;
-  const headSha = String(pr.headSha || '').trim() || undefined;
+  const remoteSeed = pr.headRepo?.owner || ownerFromLabel || 'pr-head';
+  const remoteName = `pr-${sanitizeRemoteName(remoteSeed)}`;
+  // Prefer HTTPS so anonymous public fetches do not require SSH agent setup.
+  const remoteUrl = pr.headRepo?.cloneUrl || pr.headRepo?.sshUrl || '';
+
+  if (!remoteUrl) {
+    throw new Error(
+      'PR head repository URL is unavailable. The fork may have been deleted; '
+      + 'push the branch to a reachable repository and try again.'
+    );
+  }
 
   return {
-    number: pr.number,
-    headBranch,
-    ...(headSha ? { headSha } : {}),
-    ...(headRepoUrl ? { headRepoUrl } : {}),
-    ...(headOwner ? { headOwner } : {}),
+    existingBranch: `remotes/${remoteName}/${headBranch}`,
+    setUpstream: true as const,
+    upstreamRemote: remoteName,
+    upstreamBranch: headBranch,
+    ensureRemoteName: remoteName,
+    ensureRemoteUrl: remoteUrl,
+    sourceLabel: `${remoteName}/${headBranch}`,
   };
 };
 
@@ -667,13 +718,14 @@ export function NewWorktreeDialog({
       // Only run server validation if we have values
       if (normalizedBranch && normalizedWorktree) {
         const linkedPr = mode === 'new-branch' ? newBranchState.linkedPr : null;
-        const pullRequest = linkedPr ? toWorktreePullRequest(linkedPr) : undefined;
+        const prConfig = linkedPr ? resolvePrWorktreeConfig(linkedPr, localBranches, remoteBranches) : null;
         const result = await validateWorktreeCreate(projectRef, {
-          mode: mode === 'existing-branch' || pullRequest ? 'existing' : 'new',
+          mode: mode === 'existing-branch' || prConfig ? 'existing' : 'new',
           branchName: normalizedBranch,
           worktreeName: normalizedWorktree,
-          existingBranch: mode === 'existing-branch' ? normalizedBranch : undefined,
-          ...(pullRequest ? { pullRequest } : {}),
+          existingBranch: prConfig?.existingBranch ?? (mode === 'existing-branch' ? normalizedBranch : undefined),
+          ...(prConfig?.ensureRemoteName ? { ensureRemoteName: prConfig.ensureRemoteName } : {}),
+          ...(prConfig?.ensureRemoteUrl ? { ensureRemoteUrl: prConfig.ensureRemoteUrl } : {}),
         });
         
         if (abortController.signal.aborted) return;
@@ -715,6 +767,8 @@ export function NewWorktreeDialog({
     newBranchState.linkedPr,
     existingBranchState.selectedBranch,
     currentState.worktreeName,
+    localBranches,
+    remoteBranches,
     validation.touched,
     validationAbortController,
     isCreating,
@@ -787,15 +841,21 @@ export function NewWorktreeDialog({
       let sourceLabel = '';
       const args = (() => {
         if (linkedPr) {
-          sourceLabel = `#${linkedPr.number} head`;
+          const prConfig = resolvePrWorktreeConfig(linkedPr, localBranches, remoteBranches);
+          sourceLabel = prConfig.sourceLabel;
           return {
             preferredName: normalizedBranch || normalizedWorktree,
             mode: 'existing' as const,
             branchName: normalizedBranch,
             worktreeName: normalizedWorktree,
+            existingBranch: prConfig.existingBranch,
             setupCommands,
+            setUpstream: prConfig.setUpstream,
+            upstreamRemote: prConfig.upstreamRemote,
+            upstreamBranch: prConfig.upstreamBranch,
             returnAfterDirectoryCreated: true,
-            pullRequest: toWorktreePullRequest(linkedPr),
+            ...(prConfig.ensureRemoteName ? { ensureRemoteName: prConfig.ensureRemoteName } : {}),
+            ...(prConfig.ensureRemoteUrl ? { ensureRemoteUrl: prConfig.ensureRemoteUrl } : {}),
           };
         }
 
@@ -812,11 +872,7 @@ export function NewWorktreeDialog({
         };
       })();
 
-      // Linked PRs: server owns checkout + optional fork upstream. Do not inject
-      // root-branch tracking defaults that would fight that model.
-      const resolvedArgs = linkedPr
-        ? args
-        : await withWorktreeUpstreamDefaults(projectDirectory, args);
+      const resolvedArgs = await withWorktreeUpstreamDefaults(projectDirectory, args);
 
       const metadata = await createWorktree(projectRef, resolvedArgs);
 

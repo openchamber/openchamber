@@ -13,7 +13,6 @@ import {
 import { invalidateResolvedProjectRootCache, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
 import type {
   CreateGitWorktreePayload,
-  CreateGitWorktreePullRequest,
   GitWorktreeBootstrapStatus,
   GitWorktreeValidationResult,
 } from '@/lib/api/types';
@@ -223,7 +222,6 @@ const toCreatePayload = (args: {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
-  pullRequest?: CreateGitWorktreePullRequest;
   returnAfterDirectoryCreated?: boolean;
 }, projectDirectory: string): CreateGitWorktreePayload => {
   const mode = args.mode === 'existing' ? 'existing' : 'new';
@@ -247,8 +245,7 @@ const toCreatePayload = (args: {
     mode,
     ...(worktreeName ? { worktreeName } : {}),
     ...(branchName ? { branchName } : {}),
-    // Linked PRs: server owns source resolution; do not invent existingBranch.
-    ...(!args.pullRequest && existingBranch ? { existingBranch } : {}),
+    ...(existingBranch ? { existingBranch } : {}),
     ...(startRef ? { startRef } : {}),
     ...(startCommand ? { startCommand } : {}),
     ...(args.setUpstream ? { setUpstream: true } : {}),
@@ -256,7 +253,6 @@ const toCreatePayload = (args: {
     ...(args.upstreamBranch ? { upstreamBranch: args.upstreamBranch } : {}),
     ...(args.ensureRemoteName ? { ensureRemoteName: args.ensureRemoteName } : {}),
     ...(args.ensureRemoteUrl ? { ensureRemoteUrl: args.ensureRemoteUrl } : {}),
-    ...(args.pullRequest ? { pullRequest: args.pullRequest } : {}),
     ...(args.returnAfterDirectoryCreated ? { returnAfterDirectoryCreated: true } : {}),
   };
 };
@@ -476,8 +472,6 @@ export type CreateWorktreeArgs = {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
-  /** Linked GitHub PR: server fetches the fork head branch (identity only). */
-  pullRequest?: CreateGitWorktreePullRequest;
   returnAfterDirectoryCreated?: boolean;
 };
 
