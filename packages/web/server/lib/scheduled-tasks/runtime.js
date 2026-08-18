@@ -254,6 +254,7 @@ export const createScheduledTasksRuntime = (deps) => {
     waitForOpenCodeReady,
     emitTaskRunEvent,
     setSessionAutoAccept,
+    sessionKnowledgeRuntime = null,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -451,7 +452,7 @@ export const createScheduledTasksRuntime = (deps) => {
     return projectRunning < maxProjectConcurrency;
   };
 
-  const buildPromptAsyncPayload = (task, projectPath) => ({
+  const buildPromptAsyncPayload = (task, projectPath, knowledgeText = '') => ({
     model: {
       providerID: task.execution.providerID,
       modelID: task.execution.modelID,
@@ -459,6 +460,10 @@ export const createScheduledTasksRuntime = (deps) => {
     ...(task.execution.agent ? { agent: task.execution.agent } : {}),
     ...(task.execution.variant ? { variant: task.execution.variant } : {}),
     parts: [
+      // Standing project context first, so the prompt reads against it. A
+      // scheduled run has no UI to attach this, which is why it is asked for
+      // here rather than assembled by whoever is sending.
+      ...(knowledgeText ? [{ type: 'text', text: knowledgeText, synthetic: true }] : []),
       {
         type: 'text',
         text: expandSnippets(task.execution.prompt, projectPath),
@@ -470,6 +475,13 @@ export const createScheduledTasksRuntime = (deps) => {
   });
 
   const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, projectPath, task }) => {
+    // Never allowed to fail the run: a task that executes without its
+    // background is a lesser loss than a task that does not execute.
+    const knowledge = sessionKnowledgeRuntime
+      ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, projectPath)
+        .catch(() => ({ text: '', signature: '' }))
+      : { text: '', signature: '' };
+
     const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
     promptUrl.searchParams.set('directory', projectPath);
     const response = await fetch(promptUrl.toString(), {
@@ -479,12 +491,19 @@ export const createScheduledTasksRuntime = (deps) => {
         'content-type': 'application/json',
         accept: 'application/json',
       },
-      body: JSON.stringify(buildPromptAsyncPayload(task, projectPath)),
+      body: JSON.stringify(buildPromptAsyncPayload(task, projectPath, knowledge.text)),
     });
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
       throw new Error(`prompt_async failed (${response.status})${body ? `: ${body}` : ''}`);
+    }
+
+    // Recorded only after the prompt is accepted, so a failed dispatch carries
+    // the context again on the next run.
+    if (knowledge.text && sessionKnowledgeRuntime) {
+      await sessionKnowledgeRuntime.recordDelivered(sessionID, projectPath, knowledge.signature)
+        .catch(() => undefined);
     }
   };
 

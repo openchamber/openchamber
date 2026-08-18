@@ -31,7 +31,22 @@ type BrowserControlRequestEvent = {
   parameters: Record<string, unknown>;
 };
 
-type OpenChamberEvent = ScheduledTaskRanEvent | SessionCreatedEvent | BrowserControlRequestEvent;
+/**
+ * The agent changed what it remembers. Carries only which store moved, not the
+ * entries: listeners re-read from the server, so the event cannot go stale
+ * between being sent and being handled.
+ */
+type AgentMemoryChangedEvent = {
+  type: 'agent-memory-changed';
+  scope: 'global' | 'project';
+  projectId?: string;
+};
+
+type OpenChamberEvent =
+  | ScheduledTaskRanEvent
+  | SessionCreatedEvent
+  | BrowserControlRequestEvent
+  | AgentMemoryChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -115,6 +130,22 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   }
 
   if (envelope.type === 'openchamber:heartbeat') {
+    return;
+  }
+
+  if (envelope.type === 'openchamber:agent-memory-changed') {
+    const properties = getEventProperties(envelope.properties);
+    const scope = properties?.scope === 'project' ? 'project' : 'global';
+    const nextEvent: AgentMemoryChangedEvent = {
+      type: 'agent-memory-changed',
+      scope,
+      ...(typeof properties?.projectId === 'string' && properties.projectId.length > 0
+        ? { projectId: properties.projectId }
+        : {}),
+    };
+    for (const listener of listeners) {
+      listener(nextEvent);
+    }
     return;
   }
 

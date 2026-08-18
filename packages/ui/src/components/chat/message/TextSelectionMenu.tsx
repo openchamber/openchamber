@@ -9,7 +9,8 @@ import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
-import { OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH, getProjectNotesAndTodos, saveProjectNotesAndTodos } from '@/lib/openchamberConfig';
+import { PROJECT_NOTE_BODY_MAX_LENGTH } from '@/lib/projectContextApi';
+import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { summarizeSelectionForNotes } from '@/lib/smallModel';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -34,15 +35,9 @@ interface SelectionPayload {
   rect: DOMRect;
 }
 
-const appendDistilledInsightToNotes = (existingNotes: string, insight: string): string => {
-  const trimmedInsight = insight.trim().replace(/^[-*+]\s+/, '').slice(0, OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH);
-  if (!trimmedInsight) {
-    return existingNotes;
-  }
-
-  const trimmedNotes = existingNotes.trimEnd();
-  return trimmedNotes ? `${trimmedNotes}\n${trimmedInsight}` : trimmedInsight;
-};
+const normalizeDistilledInsight = (insight: string): string => (
+  insight.trim().replace(/^[-*+]\s+/, '').slice(0, PROJECT_NOTE_BODY_MAX_LENGTH)
+);
 
 const DESKTOP_MENU_SIDE_MARGIN_PX = 8;
 const DESKTOP_MENU_FALLBACK_WIDTH_PX = 280;
@@ -366,19 +361,22 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       // Long selections are distilled into a compact note by the small model;
       // short ones (and any generation failure) go in verbatim.
       const noteText = await summarizeSelectionForNotes(selectedTextMarkdown || selectedText, currentSessionId);
-      const projectData = await getProjectNotesAndTodos(currentProjectRef);
-      const nextNotes = appendDistilledInsightToNotes(projectData.notes, noteText);
-      const saved = await saveProjectNotesAndTodos(currentProjectRef, {
-        notes: nextNotes,
-        todos: projectData.todos,
+      const insight = normalizeDistilledInsight(noteText);
+      if (!insight) {
+        toast.error(t('chat.textSelection.toast.addToNotesFailed'));
+        return;
+      }
+      // Recorded as its own note with provenance, so the distilled insight can
+      // later be traced back to the conversation it came from.
+      const saved = await useProjectContextStore.getState().createNote(currentProjectRef, {
+        body: insight,
+        source: 'selection',
+        ...(currentSessionId ? { origin: { sessionId: currentSessionId } } : {}),
       });
       if (!saved) {
         toast.error(t('chat.textSelection.toast.addToNotesFailed'));
         return;
       }
-      window.dispatchEvent(new CustomEvent('openchamber:project-notes-updated', {
-        detail: { projectId: currentProjectRef.id },
-      }));
       toast.success(t('chat.textSelection.toast.addToNotesSuccess'));
       hideMenu();
       window.getSelection()?.removeAllRanges();
