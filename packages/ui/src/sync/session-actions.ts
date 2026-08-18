@@ -1474,6 +1474,36 @@ async function fetchRecentSendConfirmationRecords(
     await wait(SEND_CONFIRMATION_RECONNECT_POLL_MS)
   }
 
+  // Authoritative confirmation first: the direct per-message fetch is keyed by
+  // message ID, so it is robust to the sortable-ID rollover that makes the
+  // ID-ordered "recent N" window miss a freshly sent post-rollover message
+  // (issue-2909). A 404 means the server never accepted the message — do not
+  // retry it; fall through to the recent-window scan below.
+  if (typeof sdk().session.message === "function") {
+    for (let attempt = 0; attempt < SEND_CONFIRMATION_REFETCH_ATTEMPTS; attempt += 1) {
+      if (attempt > 0) await wait(SEND_CONFIRMATION_REFETCH_BASE_RETRY_MS * 2 ** (attempt - 1))
+      try {
+        const result = await sdk().session.message({
+          sessionID: sessionId,
+          messageID,
+          directory: directory ?? undefined,
+        })
+        const record = assertSdkSuccess(result, "session.message")
+        if (record?.info?.id === messageID) {
+          return [{ info: record.info, parts: record.parts }]
+        }
+        // 200 without the expected ID — treat as not accepted.
+        break
+      } catch (error) {
+        if (getErrorStatus(error) === 404) break
+        // Transport error — retry with backoff.
+      }
+    }
+  }
+
+  // Secondary fallback: the ID-ordered recent-window scan. Covers servers
+  // without the direct per-message endpoint and pre-rollover sessions where
+  // the window still contains the sent ID.
   for (let attempt = 0; attempt < SEND_CONFIRMATION_REFETCH_ATTEMPTS; attempt += 1) {
     if (attempt > 0) await wait(SEND_CONFIRMATION_REFETCH_BASE_RETRY_MS * 2 ** (attempt - 1))
     try {
