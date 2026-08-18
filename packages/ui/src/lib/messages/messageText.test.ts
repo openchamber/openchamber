@@ -56,6 +56,20 @@ describe('flattenAssistantTextParts', () => {
       .toBe('First paragraph\n\nSecond paragraph');
   });
 
+  test('does not add a blank line when a fenced block splits without a newline', () => {
+    expect(flattenAssistantTextParts(textParts(
+      '```ts',
+      'const value = 1;\n```',
+    ))).toBe('```ts\nconst value = 1;\n```');
+  });
+
+  test('does not add a blank line when an indented code block splits without a newline', () => {
+    expect(flattenAssistantTextParts(textParts(
+      '    const first = 1;',
+      '    const second = 2;',
+    ))).toBe('    const first = 1;\n    const second = 2;');
+  });
+
   test('collapses excessive blank-line runs to one blank line', () => {
     expect(flattenAssistantTextParts(textParts('First\n\n\n\nSecond\n \n\n\nThird')))
       .toBe('First\n\nSecond\n\nThird');

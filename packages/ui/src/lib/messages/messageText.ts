@@ -132,6 +132,73 @@ const isLazyListContinuation = (
     return Boolean(current && getLineIndent(line) < current.contentIndent);
 };
 
+const isInsideMarkdownCodeBlock = (text: string): boolean => {
+    const lines = text.replace(/\r\n?/g, '\n').split('\n');
+    let fence: MarkdownFence | null = null;
+    let inIndentedCode = false;
+    let indentedCodeIndent = 0;
+    const listItems: MarkdownListItem[] = [];
+    let pendingIndentedBlankLines = 0;
+    let pendingBlankLines = 0;
+
+    for (const line of lines) {
+        if (fence) {
+            if (closesFence(line, fence)) fence = null;
+            continue;
+        }
+
+        if (inIndentedCode) {
+            if (getLineIndent(line) >= indentedCodeIndent) {
+                pendingIndentedBlankLines = 0;
+                continue;
+            }
+
+            if (isBlankLine(line)) {
+                pendingIndentedBlankLines += 1;
+                continue;
+            }
+
+            inIndentedCode = false;
+            indentedCodeIndent = 0;
+            pendingBlankLines += pendingIndentedBlankLines;
+            pendingIndentedBlankLines = 0;
+        }
+
+        if (isBlankLine(line)) {
+            pendingBlankLines += 1;
+            continue;
+        }
+
+        const hasPendingBlankLines = pendingBlankLines > 0;
+        const listItem = getListItem(line);
+        const validListItem = listItem ? isValidListItem(listItem, listItems) : false;
+        const listContinuation = getListContinuation(line, listItems, hasPendingBlankLines);
+        const isIndentedCode = getLineIndent(line) >= 4;
+
+        pendingBlankLines = 0;
+
+        const nextFence = getFence(line);
+        if (nextFence) {
+            fence = nextFence;
+        } else if (isIndentedCode && !validListItem && !listContinuation) {
+            inIndentedCode = true;
+            indentedCodeIndent = listItems[listItems.length - 1]?.codeIndent || 4;
+        }
+
+        if (validListItem && listItem) {
+            updateListItems(listItem, listItems);
+        } else if (
+            !listContinuation
+            && !isIndentedCode
+            && !isLazyListContinuation(line, listItems, hasPendingBlankLines)
+        ) {
+            listItems.length = 0;
+        }
+    }
+
+    return Boolean(fence || inIndentedCode);
+};
+
 const countBoundaryLineBreaks = (text: string, fromStart: boolean): number => {
     const match = fromStart
         ? text.match(/^[ \t]*(?:\r?\n[ \t]*)+/)
@@ -140,17 +207,25 @@ const countBoundaryLineBreaks = (text: string, fromStart: boolean): number => {
     return match?.[0].match(/\r?\n/g)?.length || 0;
 };
 
-const joinTextParts = (textParts: string[]): string => textParts
-    .map((text, index) => {
-        if (index === 0) return text;
+const joinTextParts = (textParts: string[]): string => {
+    let joined = '';
+
+    textParts.forEach((text, index) => {
+        if (index === 0) {
+            joined = text;
+            return;
+        }
 
         const previousText = textParts[index - 1];
         const boundaryLineBreaks = countBoundaryLineBreaks(previousText, false)
             + countBoundaryLineBreaks(text, true);
-        const separator = '\n'.repeat(Math.max(0, 2 - boundaryLineBreaks));
-        return `${separator}${text}`;
-    })
-    .join('');
+        const desiredLineBreaks = isInsideMarkdownCodeBlock(joined) ? 1 : 2;
+        const separator = '\n'.repeat(Math.max(0, desiredLineBreaks - boundaryLineBreaks));
+        joined += `${separator}${text}`;
+    });
+
+    return joined;
+};
 
 const normalizeMarkdownBlankLines = (text: string): string => {
     const lines = text.replace(/\r\n?/g, '\n').split('\n');
