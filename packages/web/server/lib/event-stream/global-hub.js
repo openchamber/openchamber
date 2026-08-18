@@ -7,6 +7,7 @@ const LATEST_SESSION_STATUS_CACHE_MAX_ENTRIES = 200;
 const LATEST_SESSION_STATUS_CACHE_MAX_BYTES = 256 * 1024;
 const LATEST_SESSION_STATUS_MESSAGE_MAX_BYTES = 4 * 1024;
 const LATEST_SESSION_STATUS_ENTRY_OVERHEAD_BYTES = 64;
+const STATUS_ACTION_STRING_FIELDS = ['reason', 'provider', 'title', 'message', 'label', 'link'];
 const CALLABLE_TAGS = new Set([
   '[object Function]',
   '[object AsyncFunction]',
@@ -51,6 +52,21 @@ function capStatusMessage(message) {
   return Buffer.from(message.slice(0, end), 'utf8').toString('utf8');
 }
 
+function normalizeStatusAction(action) {
+  if (!isObject(action)) {
+    return null;
+  }
+
+  const normalized = {};
+  for (const field of STATUS_ACTION_STRING_FIELDS) {
+    if (isString(action[field])) {
+      normalized[field] = capStatusMessage(action[field]);
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
 function normalizeStatusValue(status) {
   if (!isObject(status)) {
     return null;
@@ -70,6 +86,10 @@ function normalizeStatusValue(status) {
   if (Number.isFinite(status.next)) {
     normalized.next = status.next;
   }
+  const action = status.type === 'retry' ? normalizeStatusAction(status.action) : null;
+  if (action) {
+    normalized.action = action;
+  }
   return normalized;
 }
 
@@ -83,10 +103,13 @@ function isRecognizedTerminalStatus(status) {
 }
 
 function isSameStatus(left, right) {
+  const leftAction = left.action;
+  const rightAction = right.action;
   return left.type === right.type
     && left.attempt === right.attempt
     && left.message === right.message
-    && left.next === right.next;
+    && left.next === right.next
+    && STATUS_ACTION_STRING_FIELDS.every((field) => leftAction?.[field] === rightAction?.[field]);
 }
 
 function getSessionId(properties) {
@@ -104,13 +127,26 @@ function getSessionId(properties) {
 
 function getStatusCacheEntryBytes(entry) {
   const { status } = entry;
+  const actionBytes = STATUS_ACTION_STRING_FIELDS.reduce(
+    (total, field) => total + (isString(status.action?.[field]) ? byteLength(status.action[field]) : 0),
+    0,
+  );
   return LATEST_SESSION_STATUS_ENTRY_OVERHEAD_BYTES
     + byteLength(entry.sessionID)
     + byteLength(entry.directory)
     + byteLength(status.type)
     + (isString(status.message) ? byteLength(status.message) : 0)
     + (Number.isFinite(status.attempt) ? 8 : 0)
-    + (Number.isFinite(status.next) ? 8 : 0);
+    + (Number.isFinite(status.next) ? 8 : 0)
+    + actionBytes;
+}
+
+function cloneStatusValue(status) {
+  const clone = { ...status };
+  if (isObject(status.action)) {
+    clone.action = { ...status.action };
+  }
+  return clone;
 }
 
 function createLatestSessionStatusCache() {
@@ -378,7 +414,7 @@ export function createGlobalMessageStreamHub({
     getSessionStatusSnapshot() {
       return Array.from(latestSessionStatuses.entries.values(), ({ sessionID, status, directory }) => ({
         sessionID,
-        status: { ...status },
+        status: cloneStatusValue(status),
         directory,
       }));
     },

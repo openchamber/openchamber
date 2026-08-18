@@ -154,7 +154,7 @@ describe('message stream websocket runtime', () => {
           holdOpen: true,
           blocks: [
             'id: evt-one\ndata: {"directory":"/tmp/one","payload":{"type":"session.status","properties":{"sessionID":"ses_one","status":{"type":"busy"}}}}\n\n',
-            'id: evt-two\ndata: {"directory":"/tmp/two","payload":{"type":"session.status","properties":{"sessionID":"ses_two","status":{"type":"retry","attempt":2,"message":"rate limited","next":30}}}}\n\n',
+            'id: evt-two\ndata: {"directory":"/tmp/two","payload":{"type":"session.status","properties":{"sessionID":"ses_two","status":{"type":"retry","attempt":2,"message":"rate limited","next":30,"action":{"reason":"provider rate limit","provider":"openai","title":"Retry request","message":"Try again later","label":"Retry","link":"https://example.com/retry"}}}}}\n\n',
           ],
         });
       },
@@ -192,7 +192,20 @@ describe('message stream websocket runtime', () => {
           type: 'session.status',
           properties: {
             sessionID: 'ses_two',
-            status: { type: 'retry', attempt: 2, message: 'rate limited', next: 30 },
+            status: {
+              type: 'retry',
+              attempt: 2,
+              message: 'rate limited',
+              next: 30,
+              action: {
+                reason: 'provider rate limit',
+                provider: 'openai',
+                title: 'Retry request',
+                message: 'Try again later',
+                label: 'Retry',
+                link: 'https://example.com/retry',
+              },
+            },
           },
         },
         directory: '/tmp/two',
@@ -346,7 +359,7 @@ describe('message stream websocket runtime', () => {
           holdOpen: true,
           blocks: [
             'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
-            ],
+          ],
           });
       },
     });
