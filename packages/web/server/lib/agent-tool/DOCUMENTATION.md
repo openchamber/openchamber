@@ -103,3 +103,17 @@ error state.
 - VS Code: not injected; the extension owns a separate OpenCode lifecycle.
 - Hosted and Capacitor mobile clients use the server's managed OpenCode tool
   when connected to such a server; no tool runs in the client runtime.
+
+## The calling tool is part of the request
+
+Each generated tool sends its own name with every callback. Models routinely
+drop the namespace their tool's name appears to supply — `openchamber_memory`
+asked for `memory.read` gets called as `read` — and resolving the bare name
+inside the calling tool's action set makes that unambiguous even where it is not
+globally (`delete` belongs to both schedule and memory).
+
+Resolution never reaches outside the tool that asked: `open` from the memory
+tool fails rather than driving the browser. An unresolvable action answers with
+the actions that tool actually has, because an error that only says
+"unsupported" leaves the model to guess a second wrong name — which is exactly
+what happened before this existed.

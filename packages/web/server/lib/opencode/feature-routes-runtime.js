@@ -8,6 +8,9 @@ import { registerGitRoutes } from '../git/routes.js';
 import { registerDevServerRoutes } from '../dev-servers/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
+import { registerProjectContextRoutes } from '../project-context/routes.js';
+import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
+import { registerSessionKnowledgeRoutes } from '../session-knowledge/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
@@ -116,6 +119,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       devServerScanner,
       buildAugmentedPath,
       projectConfigRuntime,
+      projectContextRuntime,
+      agentMemoryRuntime,
+      isAgentMemoryEnabled,
+      sessionKnowledgeRuntime,
       scheduledTasksRuntime,
       scheduledTaskService,
       openChamberSessionService,
@@ -304,6 +311,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       path,
       openchamberDataDir,
     });
+    registerProjectContextRoutes(app, { projectContextRuntime });
+    registerAgentMemoryRoutes(app, { agentMemoryRuntime, isAgentMemoryEnabled });
+    registerSessionKnowledgeRoutes(app, { sessionKnowledgeRuntime });
+
     registerSessionFoldersRoutes(app, {
       fsPromises,
       path,

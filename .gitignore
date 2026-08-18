@@ -68,5 +68,8 @@ data/
 workspaces/
 *.pid
 .worktrees/
+
+# Marks a disposable clone dedicated to unattended maintenance tasks.
+.maintenance-clone
 test-results/
 artifacts/

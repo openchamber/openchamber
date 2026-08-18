@@ -14,6 +14,7 @@ import { useTraySync } from '@/hooks/useTraySync';
 import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
+import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -703,6 +704,10 @@ function App({ apis }: AppProps) {
 
   usePushVisibilityBeacon({ enabled: embeddedBackgroundWorkEnabled });
   useWebNotificationStream({ enabled: embeddedBackgroundWorkEnabled });
+  // Loaded here rather than by the Memory tab: the session index is built from
+  // this snapshot, so leaving it to the panel meant a user who never opened
+  // Project notes sent every message with no memory index at all.
+  useAgentMemorySync(currentDirectory || null);
   usePwaInstallPrompt();
 
   useWindowTitle();
