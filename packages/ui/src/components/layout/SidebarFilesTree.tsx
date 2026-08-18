@@ -45,6 +45,7 @@ import { Icon } from "@/components/icon/Icon";
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { isBrowserClientRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { recordFileTreeDragStart, shouldTreatFileTreeDragEndAsClick } from './fileTreeDragClick';
 
 type FileNode = {
   name: string;
@@ -327,11 +328,19 @@ const FileRow: React.FC<FileRowProps> = ({
   );
 
   const handleDragStart = React.useCallback((e: React.DragEvent) => {
+    recordFileTreeDragStart(e);
     const path = getRelativePath(root, node.path);
     if (!path || path === '.') return;
     e.dataTransfer.setData('application/x-openchamber-file-path', path);
     e.dataTransfer.effectAllowed = 'copy';
   }, [node.path, root]);
+
+  const handleDragEnd = React.useCallback((e: React.DragEvent) => {
+    // A micro-drag suppressed the click this gesture was meant to be (#2368).
+    if (shouldTreatFileTreeDragEndAsClick(e)) {
+      handleInteraction();
+    }
+  }, [handleInteraction]);
 
   return (
     <ContextMenu open={rightClickOpen} onOpenChange={setRightClickOpen}>
@@ -342,10 +351,10 @@ const FileRow: React.FC<FileRowProps> = ({
         onContextMenu={handleContextMenu}
         draggable
         onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
         className={cn(
           'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors pr-8 select-none',
-          isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40',
-          'cursor-grab active:cursor-grabbing'
+          isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'
         )}
       >
         {isDir ? (
@@ -1199,13 +1208,20 @@ export const SidebarFilesTree: React.FC = () => {
                     onClick={() => handleOpenFile(node)}
                     draggable
                     onDragStart={(e) => {
+                      recordFileTreeDragStart(e);
                       const path = node.relativePath || getRelativePath(root ?? '', node.path);
                       if (!path || path === '.') return;
                       e.dataTransfer.setData('application/x-openchamber-file-path', path);
                       e.dataTransfer.effectAllowed = 'copy';
                     }}
+                    onDragEnd={(e) => {
+                      // A micro-drag suppressed the click this gesture was meant to be (#2368).
+                      if (shouldTreatFileTreeDragEndAsClick(e)) {
+                        void handleOpenFile(node);
+                      }
+                    }}
                     className={cn(
-                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors cursor-grab active:cursor-grabbing',
+                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors',
                       isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'
                     )}
                     title={node.path}
