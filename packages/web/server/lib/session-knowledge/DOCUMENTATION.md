@@ -1,6 +1,6 @@
 # Session Knowledge
 
-What a session must be told about the project — the user's pinned notes and
+What a session must be told about the project — that session's pinned notes and
 plans, and the index of what the agent has remembered — and whether it has been
 told yet.
 
@@ -18,6 +18,11 @@ does not. After a summary the agent no longer holds the block, but the tab goes
 on believing it does and never sends it again.
 
 ## The contract
+
+`session.metadata.openchamber.project_context_pins` owns the note and plan ids
+attached to that session. Pins never come from project-wide note or plan state.
+A new-session draft passes its pins into this metadata when its first message
+creates the session.
 
 `session.metadata.openchamber.knowledge_context_delivered` holds the signature
 of what the session is carrying. It lives with the session, so it survives the
@@ -78,5 +83,5 @@ no session index, no settings row and no panel tab — absent rather than switch
 off, which would invite turning on something never announced. The setting itself
 also defaults to off, so setting the variable does not enable memory by itself.
 
-Pinned notes and plans are unaffected: they ship as normal and travel with every
-message whether or not memory exists.
+Pinned notes and plans are unaffected by the memory switch and remain scoped to
+the session that pinned them.

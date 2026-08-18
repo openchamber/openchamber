@@ -55,11 +55,31 @@ export const registerSessionKnowledgeRoutes = (app, dependencies) => {
     if (!directory) {
       return res.json({ notes: [], plans: [], memory: { global: 0, project: 0 } });
     }
+    const sessionId = asNonEmptyString(req.query.sessionId);
     try {
-      return res.json(await sessionKnowledgeRuntime.collectSummary(directory));
+      return res.json(sessionId
+        ? await sessionKnowledgeRuntime.collectSummaryForSession(sessionId, directory)
+        : await sessionKnowledgeRuntime.collectSummary(directory));
     } catch {
       // A panel that cannot read this shows nothing rather than an error.
       return res.json({ notes: [], plans: [], memory: { global: 0, project: 0 } });
+    }
+  });
+
+  app.post('/api/session-knowledge/pin', parseJsonBody, async (req, res) => {
+    const body = req.body;
+    if (!isRecord(body)) return res.status(400).json({ error: 'Body must be an object' });
+    const sessionId = asNonEmptyString(body.sessionId);
+    const directory = asNonEmptyString(body.directory);
+    const id = asNonEmptyString(body.id);
+    const kind = body.kind === 'note' || body.kind === 'plan' ? body.kind : '';
+    if (!sessionId || !directory || !id || !kind || typeof body.pinned !== 'boolean') {
+      return res.status(400).json({ error: 'sessionId, directory, kind, id and pinned are required' });
+    }
+    try {
+      return res.json({ pins: await sessionKnowledgeRuntime.setPin(sessionId, directory, kind, id, body.pinned) });
+    } catch (error) {
+      return res.status(500).json({ error: error?.message ?? 'Unable to update pin' });
     }
   });
 

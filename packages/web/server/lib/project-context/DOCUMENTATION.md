@@ -27,11 +27,10 @@ Nothing outside this module may write `context.json` or the `plans` directory.
   "notes": [{
     "id": "", "body": "", "createdAt": 0, "updatedAt": 0,
     "source": "manual | selection | agent",
-    "pinned": false,
     "origin": { "sessionId": "", "messageId": "" }
   }],
   "todos": [{ "id": "", "text": "", "completed": false, "createdAt": 0 }],
-  "plans": [{ "id": "", "file": "1700000000-title.md", "title": "", "createdAt": 0, "pinned": false }]
+  "plans": [{ "id": "", "file": "1700000000-title.md", "title": "", "createdAt": 0 }]
 }
 ```
 
@@ -39,6 +38,8 @@ Notes are entries, not one blob. Version 1 stored a single string; it converts
 to a single `manual` note on read (an empty string converts to no notes at
 all). The conversion lives in the read path rather than a separate migration
 pass so that every reader — including one racing a writer — sees one shape.
+Legacy `pinned` fields may remain in existing files but are ignored; attachment
+ownership lives in each session's metadata.
 
 `source` records where a note came from, and `origin` links it back to the
 message it was distilled from, so a note taken off a chat selection can be
@@ -62,9 +63,9 @@ the two ever disagree.
 | GET | `/api/project-context/:projectId` | full context; missing file is `200` empty |
 | PUT | `/api/project-context/:projectId/todos` | replaces the whole list; returns committed context |
 | POST | `/api/project-context/:projectId/notes` | `201`; takes `{body, source?, origin?}` |
-| PATCH | `/api/project-context/:projectId/notes/:noteId` | patches `body` and/or `pinned`; `404` when unknown |
+| PATCH | `/api/project-context/:projectId/notes/:noteId` | patches `body`; legacy `pinned` input is ignored by session knowledge; `404` when unknown |
 | DELETE | `/api/project-context/:projectId/notes/:noteId` | `404` when unknown |
-| PATCH | `/api/project-context/:projectId/plans/:planId` | pin state only; `404` when unknown |
+| PATCH | `/api/project-context/:projectId/plans/:planId` | legacy project pin state only; session attachment uses session knowledge; `404` when unknown |
 | GET | `/api/project-context/:projectId/plans/:planId` | `404` when the link or its markdown is gone |
 | POST | `/api/project-context/:projectId/plans` | `201`; takes `{title, body}`, never a path |
 | PUT | `/api/project-context/:projectId/plans/:planId` | takes the whole `{raw}` document; `404` when the link or its markdown is gone |

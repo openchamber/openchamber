@@ -108,6 +108,12 @@ const createGitCheckIgnoreTimeoutMs = () => {
   return 2500;
 };
 
+const createUploadMaxBytes = () => {
+  const raw = Number(process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES);
+  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  return 100 * 1024 * 1024;
+};
+
 const FILE_MIME_MAP = Object.freeze({
   '.html': 'text/html',
   '.htm': 'text/html',
@@ -139,28 +145,26 @@ const FILE_MIME_MAP = Object.freeze({
 });
 
 const MAX_SERVE_BYTES = 100 * 1024 * 1024;
-const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
-const readUploadBody = async (req) => {
-  const declaredSize = Number.parseInt(req.headers?.['content-length'] || '0', 10);
-  if (Number.isFinite(declaredSize) && declaredSize > MAX_UPLOAD_BYTES) {
-    req.resume?.();
-    return null;
-  }
-
-  const chunks = [];
-  let size = 0;
+const streamUploadBody = async (req, handle, maxBytes) => {
+  let received = 0;
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > MAX_UPLOAD_BYTES) {
+    received += buffer.length;
+    if (received > maxBytes) {
       req.resume?.();
-      return null;
+      throw Object.assign(new Error('Upload exceeds the maximum allowed size'), { uploadTooLarge: true });
     }
-    chunks.push(buffer);
-  }
 
-  return Buffer.concat(chunks, size);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const { bytesWritten } = await handle.write(buffer, offset, buffer.length - offset, null);
+      if (!Number.isFinite(bytesWritten) || bytesWritten <= 0) {
+        throw new Error('Failed to write upload');
+      }
+      offset += bytesWritten;
+    }
+  }
 };
 
 // Only deterministic, side-effect-free git plumbing path queries are cacheable.
@@ -1074,6 +1078,13 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.status(415).json({ error: 'Content-Type must be application/octet-stream' });
     }
 
+    const maxUploadBytes = createUploadMaxBytes();
+    const declaredSize = Number(req.headers?.['content-length']);
+    if (Number.isFinite(declaredSize) && declaredSize > maxUploadBytes) {
+      req.resume?.();
+      return res.status(413).json({ error: `File exceeds maximum size of ${maxUploadBytes} bytes` });
+    }
+
     try {
       const resolved = await resolveWorkspacePathFromContext({
         req,
@@ -1106,22 +1117,50 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      const body = await readUploadBody(req);
-      if (!body) {
-        return res.status(413).json({ error: `File exceeds maximum size of ${MAX_UPLOAD_BYTES} bytes` });
+      if (existingPath) {
+        const stats = await fsPromises.stat(existingPath);
+        if (stats.isDirectory()) {
+          return res.status(400).json({ error: 'Specified path is a directory' });
+        }
+        if (!overwrite) {
+          req.resume?.();
+          return res.status(409).json({ error: 'File already exists', reason: 'already-exists' });
+        }
       }
 
-      if (!overwrite) {
-        await fsPromises.writeFile(writePath, body, { flag: 'wx' });
-      } else {
-        const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const tmp = `${writePath}.upload-${crypto.randomUUID()}`;
+      let tempExists = false;
+      try {
+        const handle = await fsPromises.open(tmp, 'wx');
+        tempExists = true;
+        let streamError = null;
         try {
-          await fsPromises.writeFile(tmp, body, { flag: 'wx' });
-          await fsPromises.rename(tmp, writePath);
+          await streamUploadBody(req, handle, maxUploadBytes);
         } catch (error) {
-          await fsPromises.unlink(tmp).catch(() => {});
-          throw error;
+          streamError = error;
         }
+        try {
+          await handle.close();
+        } catch (error) {
+          if (!streamError) throw error;
+        }
+        if (streamError) throw streamError;
+
+        if (overwrite) {
+          await fsPromises.rename(tmp, writePath);
+        } else {
+          // A same-directory hard link commits without replacing a target that
+          // appeared after the existence check. The temp file is already fully
+          // flushed, so readers never observe a partial upload.
+          await fsPromises.link(tmp, writePath);
+          await fsPromises.unlink(tmp).catch(() => {});
+        }
+        tempExists = false;
+      } catch (error) {
+        if (tempExists) {
+          await fsPromises.unlink(tmp).catch(() => {});
+        }
+        throw error;
       }
 
       return res.json({ success: true, path: resolved.resolved });
@@ -1132,6 +1171,12 @@ export const registerFsRoutes = (app, dependencies) => {
       }
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'Destination directory not found', reason: 'not-found' });
+      }
+      if (err && typeof err === 'object' && err.uploadTooLarge) {
+        return res.status(413).json({ error: `File exceeds maximum size of ${maxUploadBytes} bytes` });
+      }
+      if (err && typeof err === 'object' && (err.code === 'EISDIR' || err.code === 'ENOTDIR')) {
+        return res.status(400).json({ error: 'Specified path is a directory' });
       }
       if (isOsPermissionError(err)) {
         return sendOsPermissionDenied(res, 'Access denied');

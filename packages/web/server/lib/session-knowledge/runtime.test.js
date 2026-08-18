@@ -4,6 +4,7 @@ import { buildKnowledgeSignature, buildKnowledgeText, createSessionKnowledgeRunt
 
 const DIRECTORY = '/work/project';
 const PROJECT_ID = 'path_project';
+const PINS = { notes: ['n1'], plans: ['p1'] };
 
 const note = (overrides = {}) => ({
   id: 'n1', body: 'Pinned note body.', createdAt: 1, updatedAt: 1, pinned: true, source: 'manual', ...overrides,
@@ -26,12 +27,13 @@ const createRuntime = (overrides = {}) => createSessionKnowledgeRuntime({
     readAll: async () => ({ global: [memory()], project: [], globalFailed: false, projectFailed: false }),
     ...overrides.agentMemoryRuntime,
   },
+  ...('openCodeFetch' in overrides ? { openCodeFetch: overrides.openCodeFetch } : {}),
   ...('isAgentMemoryEnabled' in overrides ? { isAgentMemoryEnabled: overrides.isAgentMemoryEnabled } : {}),
 });
 
 describe('what the session is owed', () => {
   test('carries pinned notes, pinned plan bodies, and the memory index', async () => {
-    const { text } = await createRuntime().resolvePending(DIRECTORY, '');
+    const { text } = await createRuntime().resolvePending(DIRECTORY, '', PINS);
 
     expect(text).toContain('Pinned note body.');
     expect(text).toContain('Migration plan');
@@ -52,7 +54,7 @@ describe('what the session is owed', () => {
       },
     });
 
-    const { text } = await runtime.resolvePending(DIRECTORY, '');
+    const { text } = await runtime.resolvePending(DIRECTORY, '', { notes: [], plans: [] });
 
     expect(text).not.toContain('Pinned note body.');
   });
@@ -123,7 +125,7 @@ describe('when a source will not load', () => {
       agentMemoryRuntime: { readAll: async () => { throw new Error('unreadable'); } },
     });
 
-    const { text } = await runtime.resolvePending(DIRECTORY, '');
+    const { text } = await runtime.resolvePending(DIRECTORY, '', PINS);
 
     expect(text).toContain('Pinned note body.');
   });
@@ -135,7 +137,7 @@ describe('when a source will not load', () => {
       },
     });
 
-    const { text } = await runtime.resolvePending(DIRECTORY, '');
+    const { text } = await runtime.resolvePending(DIRECTORY, '', PINS);
 
     expect(text).not.toContain('Uses bun');
   });
@@ -148,7 +150,7 @@ describe('when a source will not load', () => {
       },
     });
 
-    const { text } = await runtime.resolvePending(DIRECTORY, '');
+    const { text } = await runtime.resolvePending(DIRECTORY, '', PINS);
 
     expect(text).toContain('Migration plan');
     expect(text).toContain('plan content unavailable');
@@ -159,7 +161,7 @@ describe('when a source will not load', () => {
       projectContextRuntime: { readContext: async () => { throw new Error('unreadable'); } },
     });
 
-    const { text } = await runtime.resolvePending(DIRECTORY, '');
+    const { text } = await runtime.resolvePending(DIRECTORY, '', PINS);
 
     expect(text).toContain('Uses bun');
   });
@@ -169,7 +171,7 @@ describe('the memory switch', () => {
   test('memory is left out entirely while the feature is off', async () => {
     const runtime = createRuntime({ isAgentMemoryEnabled: async () => false });
 
-    const { text } = await runtime.resolvePending(DIRECTORY, '');
+    const { text } = await runtime.resolvePending(DIRECTORY, '', PINS);
 
     expect(text).not.toContain('Uses bun');
     expect(text).toContain('Pinned note body.');
@@ -187,6 +189,39 @@ describe('the memory switch', () => {
 });
 
 describe('reading what a session was told', () => {
+  test('project context pins are isolated in each session metadata record', () => {
+    const runtime = createRuntime();
+
+    expect(runtime.readPins({
+      metadata: { openchamber: { project_context_pins: { notes: ['n1'], plans: [] } } },
+    })).toEqual({ notes: ['n1'], plans: [] });
+    expect(runtime.readPins({
+      metadata: { openchamber: { project_context_pins: { notes: [], plans: ['p1'] } } },
+    })).toEqual({ notes: [], plans: ['p1'] });
+    expect(runtime.readPins({})).toEqual({ notes: [], plans: [] });
+  });
+
+  test('pinning updates only the target session and invalidates its delivered signature', async () => {
+    const requests = [];
+    const runtime = createRuntime({
+      openCodeFetch: async (path, options = {}) => {
+        requests.push({ path, options });
+        if (options.method === 'PATCH') return {};
+        return {
+          metadata: { openchamber: { project_context_pins: { notes: [], plans: [] }, knowledge_context_delivered: 'old' } },
+        };
+      },
+    });
+
+    await runtime.setPin('ses_a', DIRECTORY, 'note', 'n1', true);
+
+    expect(requests.map((request) => request.path)).toEqual(['/session/ses_a', '/session/ses_a']);
+    expect(requests[1].options.body.metadata.openchamber).toEqual({
+      project_context_pins: { notes: ['n1'], plans: [] },
+      knowledge_context_delivered: '',
+    });
+  });
+
   test('finds the signature stored on the session', () => {
     const runtime = createRuntime();
 

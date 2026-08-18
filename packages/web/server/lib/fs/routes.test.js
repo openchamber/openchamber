@@ -146,7 +146,11 @@ const registerUpload = (fsPromises) => {
     os: { homedir: () => '/home/user' },
     path: path.posix,
     fsPromises: {
-      realpath: async (targetPath) => targetPath,
+      realpath: async (targetPath) => {
+        if (targetPath === '/repo') return targetPath;
+        throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+      },
+      stat: async () => ({ isDirectory: () => false }),
       ...fsPromises,
     },
     spawn: vi.fn(),
@@ -253,16 +257,22 @@ const callWrite = async (handler, body) => {
   return res;
 };
 
-const callUpload = async (handler, { body = Buffer.from('upload'), path: filePath = '/repo/file.bin', overwrite = false } = {}) => {
+const callUpload = async (handler, {
+  body = Buffer.from('upload'),
+  chunks,
+  includeContentLength = true,
+  path: filePath = '/repo/file.bin',
+  overwrite = false,
+} = {}) => {
   const res = createMockResponse();
+  const uploadChunks = chunks ?? [body];
+  const headers = { 'content-type': 'application/octet-stream' };
+  if (includeContentLength) headers['content-length'] = String(body.length);
   const req = {
-    headers: {
-      'content-type': 'application/octet-stream',
-      'content-length': String(body.length),
-    },
+    headers,
     query: { path: filePath, overwrite: overwrite ? 'true' : undefined },
     async *[Symbol.asyncIterator]() {
-      yield body;
+      yield* uploadChunks;
     },
   };
   await handler(req, res);
@@ -377,29 +387,40 @@ describe('fs write', () => {
 });
 
 describe('fs upload', () => {
-  it('creates a binary file without overwriting existing content', async () => {
+  it('streams a binary file to temp storage before committing it without overwrite', async () => {
+    const write = vi.fn(async (_buffer, _offset, length) => ({ bytesWritten: length }));
+    const close = vi.fn(async () => undefined);
     const fsPromises = {
-      writeFile: vi.fn(async () => undefined),
+      open: vi.fn(async () => ({ write, close })),
+      link: vi.fn(async () => undefined),
       rename: vi.fn(async () => undefined),
       unlink: vi.fn(async () => undefined),
     };
     const handler = registerUpload(fsPromises);
 
-    const res = await callUpload(handler, { body: Buffer.from([0, 1, 2, 255]) });
+    const body = Buffer.from([0, 1, 2, 255]);
+    const res = await callUpload(handler, {
+      body,
+      chunks: [body.subarray(0, 2), body.subarray(2)],
+    });
 
     expect(res.body).toEqual({ success: true, path: '/repo/file.bin' });
-    expect(fsPromises.writeFile).toHaveBeenCalledWith(
-      '/repo/file.bin',
-      Buffer.from([0, 1, 2, 255]),
-      { flag: 'wx' },
-    );
+    const tmp = fsPromises.open.mock.calls[0][0];
+    expect(tmp).toMatch(/^\/repo\/file\.bin\.upload-/);
+    expect(fsPromises.open).toHaveBeenCalledWith(tmp, 'wx');
+    expect(write).toHaveBeenNthCalledWith(1, Buffer.from([0, 1]), 0, 2, null);
+    expect(write).toHaveBeenNthCalledWith(2, Buffer.from([2, 255]), 0, 2, null);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(fsPromises.link).toHaveBeenCalledWith(tmp, '/repo/file.bin');
+    expect(fsPromises.unlink).toHaveBeenCalledWith(tmp);
     expect(fsPromises.rename).not.toHaveBeenCalled();
   });
 
   it('returns a conflict instead of silently replacing an existing file', async () => {
-    const error = Object.assign(new Error('exists'), { code: 'EEXIST' });
     const fsPromises = {
-      writeFile: vi.fn(async () => { throw error; }),
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isDirectory: () => false })),
+      open: vi.fn(async () => ({ write: vi.fn(), close: vi.fn() })),
     };
     const handler = registerUpload(fsPromises);
 
@@ -407,11 +428,15 @@ describe('fs upload', () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.body).toEqual({ error: 'File already exists', reason: 'already-exists' });
+    expect(fsPromises.open).not.toHaveBeenCalled();
   });
 
   it('atomically replaces a file only when overwrite is explicit', async () => {
+    const write = vi.fn(async (_buffer, _offset, length) => ({ bytesWritten: length }));
     const fsPromises = {
-      writeFile: vi.fn(async () => undefined),
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isDirectory: () => false })),
+      open: vi.fn(async () => ({ write, close: vi.fn(async () => undefined) })),
       rename: vi.fn(async () => undefined),
       unlink: vi.fn(async () => undefined),
     };
@@ -420,16 +445,31 @@ describe('fs upload', () => {
     const res = await callUpload(handler, { overwrite: true });
 
     expect(res.body).toEqual({ success: true, path: '/repo/file.bin' });
-    const tmp = fsPromises.writeFile.mock.calls[0][0];
-    expect(tmp).toMatch(/^\/repo\/file\.bin\.tmp-/);
-    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, Buffer.from('upload'), { flag: 'wx' });
+    const tmp = fsPromises.open.mock.calls[0][0];
+    expect(tmp).toMatch(/^\/repo\/file\.bin\.upload-/);
+    expect(write).toHaveBeenCalledWith(Buffer.from('upload'), 0, 6, null);
     expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.bin');
+  });
+
+  it('rejects an existing directory before reading the upload body', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isDirectory: () => true })),
+      open: vi.fn(async () => ({ write: vi.fn(), close: vi.fn() })),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Specified path is a directory' });
+    expect(fsPromises.open).not.toHaveBeenCalled();
   });
 
   it('rejects a destination parent that resolves outside the workspace', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => targetPath === '/repo/link' ? '/outside' : targetPath),
-      writeFile: vi.fn(async () => undefined),
+      open: vi.fn(async () => ({ write: vi.fn(), close: vi.fn() })),
     };
     const handler = registerUpload(fsPromises);
 
@@ -437,31 +477,73 @@ describe('fs upload', () => {
 
     expect(res.statusCode).toBe(403);
     expect(res.body).toEqual({ error: 'Access denied' });
-    expect(fsPromises.writeFile).not.toHaveBeenCalled();
+    expect(fsPromises.open).not.toHaveBeenCalled();
   });
 
-  it('rejects streamed bodies larger than 100 MB', async () => {
+  it('cleans up a partial temp file when the configured streaming limit is exceeded', async () => {
+    const previous = process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES;
+    process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES = '5';
+    const write = vi.fn(async (_buffer, _offset, length) => ({ bytesWritten: length }));
     const fsPromises = {
-      writeFile: vi.fn(async () => undefined),
+      open: vi.fn(async () => ({ write, close: vi.fn(async () => undefined) })),
+      link: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    try {
+      const handler = registerUpload(fsPromises);
+      const res = await callUpload(handler, {
+        body: Buffer.from('123456'),
+        chunks: [Buffer.from('123'), Buffer.from('456')],
+        includeContentLength: false,
+      });
+
+      expect(res.statusCode).toBe(413);
+      expect(res.body).toEqual({ error: 'File exceeds maximum size of 5 bytes' });
+      expect(write).toHaveBeenCalledWith(Buffer.from('123'), 0, 3, null);
+      expect(fsPromises.link).not.toHaveBeenCalled();
+      expect(fsPromises.unlink).toHaveBeenCalledWith(expect.stringMatching(/^\/repo\/file\.bin\.upload-/));
+    } finally {
+      if (previous === undefined) delete process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES;
+      else process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES = previous;
+    }
+  });
+
+  it('rejects a declared oversized upload before opening a temp file', async () => {
+    const previous = process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES;
+    process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES = '5';
+    const fsPromises = {
+      open: vi.fn(async () => ({ write: vi.fn(), close: vi.fn() })),
+    };
+    try {
+      const handler = registerUpload(fsPromises);
+      const res = await callUpload(handler, { body: Buffer.from('123456') });
+
+      expect(res.statusCode).toBe(413);
+      expect(res.body).toEqual({ error: 'File exceeds maximum size of 5 bytes' });
+      expect(fsPromises.open).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES;
+      else process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES = previous;
+    }
+  });
+
+  it('keeps the existing file when a target appears before the atomic commit', async () => {
+    const error = Object.assign(new Error('exists'), { code: 'EEXIST' });
+    const fsPromises = {
+      open: vi.fn(async () => ({
+        write: vi.fn(async (_buffer, _offset, length) => ({ bytesWritten: length })),
+        close: vi.fn(async () => undefined),
+      })),
+      link: vi.fn(async () => { throw error; }),
+      unlink: vi.fn(async () => undefined),
     };
     const handler = registerUpload(fsPromises);
-    const chunk = Buffer.alloc(1024 * 1024);
-    const req = {
-      headers: { 'content-type': 'application/octet-stream' },
-      query: { path: '/repo/file.bin' },
-      async *[Symbol.asyncIterator]() {
-        for (let index = 0; index < 101; index += 1) {
-          yield chunk;
-        }
-      },
-    };
-    const res = createMockResponse();
 
-    await handler(req, res);
+    const res = await callUpload(handler);
 
-    expect(res.statusCode).toBe(413);
-    expect(res.body).toEqual({ error: `File exceeds maximum size of ${100 * 1024 * 1024} bytes` });
-    expect(fsPromises.writeFile).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'File already exists', reason: 'already-exists' });
+    expect(fsPromises.unlink).toHaveBeenCalledWith(expect.stringMatching(/^\/repo\/file\.bin\.upload-/));
   });
 });
 
