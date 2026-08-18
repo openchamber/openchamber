@@ -16,6 +16,15 @@ const MAX_LOG_LINES_PER_INSTANCE = 1200;
 const MONITOR_INITIAL_POLL_MS = 2000;
 const MONITOR_STEADY_POLL_MS = 10000;
 const MONITOR_STABILIZE_TICKS = 5;
+
+// Non-interactive remote shells (`sh -lc`) source ~/.profile but not ~/.bashrc,
+// so node tooling installed through version managers (nvm, volta, fnm, mise,
+// asdf, bun) stays off PATH even though an interactive login finds it. Prepend
+// their well-known bin directories to PATH before every remote script so
+// bun/npm detection, package installation, and `openchamber serve` all resolve.
+// nvm can hold several node versions: shell glob order is alphabetical, where
+// a legacy v8 would outrank v24, so pick the numerically highest version only.
+const REMOTE_PATH_PREAMBLE = '_oc_hi=$(ls "$HOME"/.nvm/versions/node 2>/dev/null | sed -n "s/^v\\([0-9][0-9]*\\(\\.[0-9][0-9]*\\)*\\)$/\\1/p" | sort -t . -k 1,1nr -k 2,2nr -k 3,3nr | head -n 1); [ -n "$_oc_hi" ] && PATH="$HOME/.nvm/versions/node/v$_oc_hi/bin:$PATH"; for _oc_dir in "$HOME"/.bun/bin "$HOME"/.volta/bin "$HOME"/.fnm/aliases/default/bin "$HOME"/.local/share/fnm/aliases/default/bin "$HOME"/.local/share/mise/shims "$HOME"/.asdf/shims; do [ -d "$_oc_dir" ] && PATH="$_oc_dir:$PATH"; done; unset _oc_dir _oc_hi';
 const SSH_STATUS_EVENT = 'openchamber:ssh-instance-status';
 const MAX_PROCESS_ERROR_CHARS = 2000;
 const MAX_PROCESS_ERROR_CAPTURE_CHARS = MAX_PROCESS_ERROR_CHARS * 2;
@@ -498,7 +507,7 @@ export class ElectronSshManager {
       ...connectionArgs,
       '-o', `ConnectTimeout=${timeoutSec}`,
       '-T',
-    ], `sh -lc ${shellQuote(script)}`);
+    ], `sh -lc ${shellQuote(`${REMOTE_PATH_PREAMBLE}; ${script}`)}`);
     if (code !== 0) {
       const auth = this.sshAuth.get(parsed);
       throw new Error(sanitizeProcessDiagnostic(stderr || stdout, auth?.sshPassword) || 'Remote command failed');
@@ -804,6 +813,7 @@ export class ElectronSshManager {
         mode: instance?.remoteOpenchamber?.mode === 'external' ? 'external' : 'managed',
         keepRunning: instance?.remoteOpenchamber?.keepRunning !== false,
         ...(Number.isFinite(instance?.remoteOpenchamber?.preferredPort) ? { preferredPort: Number(instance.remoteOpenchamber.preferredPort) } : {}),
+        ...(Number.isFinite(instance?.remoteOpenchamber?.lastUsedPort) ? { lastUsedPort: Number(instance.remoteOpenchamber.lastUsedPort) } : {}),
         installMethod: ['npm', 'bun', 'download_release', 'upload_bundle'].includes(instance?.remoteOpenchamber?.installMethod)
           ? instance.remoteOpenchamber.installMethod
           : 'bun',
@@ -907,6 +917,18 @@ export class ElectronSshManager {
       if (instance?.id !== instanceId) continue;
       instance.localForward = instance.localForward && typeof instance.localForward === 'object' ? instance.localForward : {};
       instance.localForward.preferredLocalPort = localPort;
+    }
+    root.desktopSshInstances = instances;
+    await writeJsonRoot(this.settingsFilePath, root);
+  }
+
+  async persistRemotePort(instanceId, remotePort) {
+    const root = readJsonRoot(this.settingsFilePath);
+    const instances = Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [];
+    for (const instance of instances) {
+      if (instance?.id !== instanceId) continue;
+      instance.remoteOpenchamber = instance.remoteOpenchamber && typeof instance.remoteOpenchamber === 'object' ? instance.remoteOpenchamber : {};
+      instance.remoteOpenchamber.lastUsedPort = remotePort;
     }
     root.desktopSshInstances = instances;
     await writeJsonRoot(this.settingsFilePath, root);
@@ -1016,7 +1038,7 @@ export class ElectronSshManager {
     }
 
     if (commands.length === 0) {
-      throw new Error('Remote host has neither bun nor npm available');
+      throw new Error('Remote host has neither bun nor npm available on PATH (checked non-interactive login PATH plus nvm, volta, fnm, mise, asdf, and bun install locations)');
     }
 
     let lastError = null;
@@ -1079,7 +1101,13 @@ export class ElectronSshManager {
       envPrefix += ` OPENCHAMBER_UI_PASSWORD=${shellQuote(secret)}`;
     }
     const output = await this.runRemoteCommand(parsed, controlPath, `${envPrefix} openchamber serve --hostname 127.0.0.1 --port ${desiredPort}`);
-    const port = output.split(/\s+/).map((token) => Number.parseInt(token, 10)).find((value) => Number.isFinite(value));
+    // The serve banner can print other integers (version, PID) before the
+    // port; the labeled port token is the stable contract, with the first
+    // integer kept as a fallback for unexpected formats.
+    const portMatch = output.match(/\bport\s+(\d+)\b/i);
+    const port = portMatch
+      ? Number.parseInt(portMatch[1], 10)
+      : output.split(/\s+/).map((token) => Number.parseInt(token, 10)).find((value) => Number.isFinite(value));
     return port || desiredPort;
   }
 
@@ -1157,21 +1185,61 @@ export class ElectronSshManager {
     }
 
     this.setStatus(instance.id, 'server_detecting', 'Detecting managed OpenChamber server');
-    let remotePort = instance.remoteOpenchamber.preferredPort || null;
-    let startedByUs = false;
-    if (remotePort && !(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance)))) {
+    const candidatePorts = [];
+    for (const candidate of [instance.remoteOpenchamber.preferredPort, instance.remoteOpenchamber.lastUsedPort]) {
+      if (Number.isFinite(candidate) && !candidatePorts.includes(candidate)) candidatePorts.push(Number(candidate));
+    }
+
+    let remotePort = null;
+    let runningVersion = null;
+    // A daemon found on our own persisted port was started by an earlier
+    // session of this app, so this session adopts its lifecycle (stops it on
+    // disconnect when keepRunning is off). A daemon on the user's preferred
+    // port may be externally managed and keeps the old reuse-only behavior.
+    let adoptedByUs = false;
+    for (const candidate of candidatePorts) {
+      try {
+        const info = await this.probeRemoteSystemInfo(parsed, controlPath, candidate, this.configuredOpenChamberPassword(instance));
+        remotePort = candidate;
+        runningVersion = typeof info?.openchamberVersion === 'string' ? info.openchamberVersion : null;
+        adoptedByUs = candidate === instance.remoteOpenchamber.lastUsedPort && candidate !== instance.remoteOpenchamber.preferredPort;
+        break;
+      } catch {
+      }
+    }
+
+    // A daemon we own (persisted port, not user-pinned) can predate the
+    // binary update installed above; restart it so the forwarded server
+    // matches this app version instead of silently serving a different one.
+    // A daemon on the user's preferred port may be externally managed at any
+    // version and is reused untouched, mirroring the non-adoption stance at
+    // disconnect.
+    if (adoptedByUs && runningVersion && runningVersion !== this.appVersion) {
+      this.setStatus(instance.id, 'server_starting', `Restarting managed OpenChamber server ${runningVersion} to ${this.appVersion}`);
+      await this.stopRemoteServerBestEffort(parsed, controlPath, remotePort);
+      const stopDeadline = Date.now() + 5000;
+      while (Date.now() < stopDeadline && (await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance)))) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
       remotePort = null;
     }
+
+    let startedByUs = false;
     if (!remotePort) {
       this.setStatus(instance.id, 'server_starting', 'Starting managed OpenChamber server');
       const desiredPort = instance.remoteOpenchamber.preferredPort || randomPortCandidate(instance.id);
       remotePort = await this.startRemoteServerManaged(parsed, controlPath, instance, desiredPort);
       startedByUs = true;
+      // Persist the port so the next connection reuses this daemon instead of
+      // leaving it running and starting another one on a random port.
+      if (remotePort !== instance.remoteOpenchamber.lastUsedPort) {
+        await this.persistRemotePort(instance.id, remotePort);
+      }
     }
     if (!(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance)))) {
       throw new Error('Managed OpenChamber server failed to become reachable');
     }
-    return { remotePort, startedByUs };
+    return { remotePort, startedByUs: startedByUs || adoptedByUs };
   }
 
   async disconnectInternal(id, reportIdle) {
