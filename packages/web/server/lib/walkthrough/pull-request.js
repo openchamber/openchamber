@@ -62,7 +62,7 @@ async function getGitHubPullRequestDiff(directory, number) {
  * dispatcher's `resolveGitLabRepoFromDirectory` call and is never re-resolved
  * here.
  */
-async function getGitLabMergeRequestDiff(repo, number) {
+async function getGitLabMergeRequestDiff(directory, repo, number) {
   // Resolve per-project API base override, mirroring getClient() in routes.js.
   const auth = getGitLabAuth();
   if (!auth?.accessToken) {
@@ -132,7 +132,7 @@ async function getGitLabMergeRequestDiff(repo, number) {
 export async function getPullRequestDiff(directory, number) {
   const { repo } = await resolveGitLabRepoFromDirectory(directory);
   if (repo) {
-    return getGitLabMergeRequestDiff(repo, number);
+    return getGitLabMergeRequestDiff(directory, repo, number);
   }
   return getGitHubPullRequestDiff(directory, number);
 }

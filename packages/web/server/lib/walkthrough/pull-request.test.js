@@ -2,13 +2,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../github/octokit.js', () => ({ getOctokitOrNull: vi.fn() }));
 vi.mock('../github/repo/index.js', () => ({ resolveGitHubRepoFromDirectory: vi.fn() }));
-vi.mock('../gitlab/client.js', () => ({ getGitLabClientOrNull: vi.fn() }));
+vi.mock('../gitlab/client.js', () => ({
+  getGitLabClientOrNull: vi.fn(),
+  createGitLabClient: vi.fn(),
+}));
+vi.mock('../gitlab/auth.js', () => ({
+  getGitLabAuth: vi.fn(),
+  getGitLabDefaultBaseUrl: vi.fn(() => 'https://gitlab.com'),
+}));
+vi.mock('../git-providers/project-config.js', () => ({
+  getEffectiveProviderApiBaseUrl: vi.fn(() => null),
+}));
 vi.mock('../gitlab/repo.js', () => ({ resolveGitLabRepoFromDirectory: vi.fn() }));
 
 const { getPullRequestDiff } = await import('./pull-request.js');
 const { getOctokitOrNull } = await import('../github/octokit.js');
 const { resolveGitHubRepoFromDirectory } = await import('../github/repo/index.js');
-const { getGitLabClientOrNull } = await import('../gitlab/client.js');
+const { getGitLabClientOrNull, createGitLabClient } = await import('../gitlab/client.js');
+const { getGitLabAuth } = await import('../gitlab/auth.js');
+const { getEffectiveProviderApiBaseUrl } = await import('../git-providers/project-config.js');
 const { resolveGitLabRepoFromDirectory } = await import('../gitlab/repo.js');
 
 const PATCH = `diff --git a/src/a.ts b/src/a.ts
@@ -57,6 +69,7 @@ describe('getPullRequestDiff', () => {
     // the GitHub path.
     resolveGitLabRepoFromDirectory.mockResolvedValue({ repo: null, remoteUrl: null });
     getGitLabClientOrNull.mockReturnValue(null);
+    getGitLabAuth.mockReturnValue({ accessToken: 'test-token' });
   });
 
   afterEach(() => {
@@ -146,6 +159,7 @@ describe('getPullRequestDiff', () => {
     });
 
     it('asks the user to connect GitLab before fetching diffs', async () => {
+      getGitLabAuth.mockReturnValue(null);
       getGitLabClientOrNull.mockReturnValue(null);
 
       await expect(getPullRequestDiff('/repo', 7)).rejects.toMatchObject({
