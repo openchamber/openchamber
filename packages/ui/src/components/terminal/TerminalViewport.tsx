@@ -401,15 +401,35 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       if (!canvas) return null;
       return getTerminalCellFromPoint(clientX, clientY, canvas.getBoundingClientRect(), terminal.cols, terminal.rows);
     };
+    type SelectionPixelOffset = { x: number; y: number };
+    const getSingleCellSelectionOffset = (): SelectionPixelOffset | undefined => {
+      const canvas = container.querySelector('canvas');
+      if (!canvas) return undefined;
+      const bounds = canvas.getBoundingClientRect();
+      const cellWidth = bounds.width / terminal.cols;
+      const cellHeight = bounds.height / terminal.rows;
+      if (cellWidth <= 0 || cellHeight <= 0) return undefined;
+
+      // Move diagonally inside the cell far enough to cross Ghostty's half-cell
+      // threshold, without changing the cell used for the selection endpoint.
+      const halfWidth = cellWidth / 2;
+      const halfHeight = cellHeight / 2;
+      const cellDiagonal = Math.hypot(halfWidth, halfHeight);
+      const scale = (halfWidth / cellDiagonal + 1) / 2;
+      return { x: halfWidth * scale, y: halfHeight * scale };
+    };
     const dispatchSelectionMouseEvent = (
       type: 'mousedown' | 'mousemove',
       cell: TerminalCellPosition,
+      pixelOffset?: SelectionPixelOffset,
     ) => {
       const canvas = container.querySelector('canvas');
       if (!canvas) return;
       const bounds = canvas.getBoundingClientRect();
-      const clientX = bounds.left + ((cell.column + 0.5) / terminal.cols) * bounds.width;
-      const clientY = bounds.top + ((cell.row + 0.5) / terminal.rows) * bounds.height;
+      const cellWidth = bounds.width / terminal.cols;
+      const cellHeight = bounds.height / terminal.rows;
+      const clientX = bounds.left + (cell.column + 0.5) * cellWidth + (pixelOffset?.x ?? 0);
+      const clientY = bounds.top + (cell.row + 0.5) * cellHeight + (pixelOffset?.y ?? 0);
       canvas.dispatchEvent(new MouseEvent(type, {
         bubbles: true,
         cancelable: true,
@@ -450,9 +470,13 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
         const word = getTerminalWordRange(cells, cell.column);
         const selectionAnchor = { column: word.startColumn, row: cell.row };
         selectionFocus = { column: word.endColumn, row: cell.row };
+        const singleCellOffset =
+          word.startColumn === word.endColumn && Boolean(cells[cell.column]?.trim())
+            ? getSingleCellSelectionOffset()
+            : undefined;
         gesture = 'selecting';
         dispatchSelectionMouseEvent('mousedown', selectionAnchor);
-        dispatchSelectionMouseEvent('mousemove', selectionFocus);
+        dispatchSelectionMouseEvent('mousemove', selectionFocus, singleCellOffset);
       }, 350);
     };
     const move = (event: PointerEvent) => {

@@ -196,6 +196,22 @@ describe('issue 2876: copy-on-click in the integrated terminal clobbers the clip
         expect(model.getSelection()).toBe('');
     });
 
+    test('same-cell movement past the threshold copies without expanding the endpoint', () => {
+        const model = createGhosttySelectionModel(screen);
+
+        model.mousedown(0, 2, 0, { x: 20, y: 0 });
+        model.mousemove(2, 0, { x: 24, y: 4 });
+
+        expect(model.hasSelection()).toBe(true);
+        expect(model.dragThresholdMet).toBe(true);
+        expect(model.getSelection()).toBe('e');
+
+        model.mouseup();
+
+        expect(model.clipboardWrites).toEqual(['e']);
+        expect(model.isSelecting).toBe(false);
+    });
+
     test('dragging past the threshold extends and copies the selected text', () => {
         const model = createGhosttySelectionModel(screen);
 
