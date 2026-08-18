@@ -2112,6 +2112,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.noLongerPending': '此问题不再等待回答。',
   'chat.questionCard.tryAgain': '请稍后重试。',
   'chat.textSelection.toast.noProject': '未找到此会话对应的项目',
+  'chat.textSelection.toast.copyFailed': '复制选中文本失败',
   'chat.textSelection.toast.addToNotesFailed': '添加到笔记失败',
   'chat.textSelection.toast.addToNotesSuccess': '已将选中文本添加到笔记',
   'chat.textSelection.toast.addToNotesSummaryFailed': '无法总结所选内容，已将所选文本添加到笔记',

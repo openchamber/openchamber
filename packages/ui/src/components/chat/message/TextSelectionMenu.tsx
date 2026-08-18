@@ -6,7 +6,7 @@ import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { cn } from '@/lib/utils';
-import { copyTextToClipboard } from '@/lib/clipboard';
+import { copyMarkdownToClipboard } from '@/lib/clipboard';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { PROJECT_NOTE_BODY_MAX_LENGTH } from '@/lib/projectContextApi';
@@ -325,14 +325,22 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const handleCopy = React.useCallback(async () => {
     if (!selectedText) return;
 
-    const result = await copyTextToClipboard(selectedText);
-    if (!result.ok) {
-      console.error('Failed to copy:', result.error);
+    try {
+      const markdownText = selectedTextMarkdown || selectedText;
+      const { renderMarkdownSync } = await import('../markdown/markdownCore');
+      const result = await copyMarkdownToClipboard(markdownText, renderMarkdownSync(markdownText));
+      if (!result.ok) {
+        console.error('Failed to copy:', result.error);
+        toast.error(t('chat.textSelection.toast.copyFailed'));
+      }
+    } catch (error) {
+      console.error('Failed to copy:', error);
+      toast.error(t('chat.textSelection.toast.copyFailed'));
+    } finally {
+      hideMenu();
+      window.getSelection()?.removeAllRanges();
     }
-
-    hideMenu();
-    window.getSelection()?.removeAllRanges();
-  }, [selectedText, hideMenu]);
+  }, [hideMenu, selectedText, selectedTextMarkdown, t]);
 
   const currentSession = React.useMemo(() => {
     if (!currentSessionId) {

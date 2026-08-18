@@ -2142,6 +2142,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.noLongerPending': 'この質問は応答待ちではなくなりました。',
   'chat.questionCard.tryAgain': 'しばらくしてからもう一度お試しください。',
   'chat.textSelection.toast.noProject': 'このセッションのプロジェクトが見つかりません',
+  'chat.textSelection.toast.copyFailed': '選択したテキストのコピーに失敗しました',
   'chat.textSelection.toast.addToNotesFailed': 'メモへの追加に失敗しました',
   'chat.textSelection.toast.addToNotesSuccess': '選択テキストをメモに追加しました',
   'chat.textSelection.toast.addToNotesSummaryFailed': '選択範囲を要約できませんでした。選択テキストをメモに追加しました。',

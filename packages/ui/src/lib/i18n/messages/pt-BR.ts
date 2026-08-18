@@ -2124,6 +2124,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.questionCard.noLongerPending": "Esta pergunta não está mais aguardando uma resposta.",
   "chat.questionCard.tryAgain": "Tente novamente em instantes.",
   "chat.textSelection.toast.noProject": "Não foi encontrado projeto para esta sessão",
+  "chat.textSelection.toast.copyFailed": "Não foi possível copiar o texto selecionado",
   "chat.textSelection.toast.addToNotesFailed": "Não foi possível adicionar às notas",
   "chat.textSelection.toast.addToNotesSuccess": "Texto selecionado adicionado às notas",
   "chat.textSelection.toast.addToNotesSummaryFailed": "Não foi possível resumir a seleção; o texto selecionado foi adicionado às notas",

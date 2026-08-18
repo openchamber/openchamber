@@ -2116,6 +2116,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.noLongerPending': '此問題不再等待回答。',
   'chat.questionCard.tryAgain': '請稍後再試。',
   'chat.textSelection.toast.noProject': '找不到此會話對應的專案',
+  'chat.textSelection.toast.copyFailed': '複製選取文字失敗',
   'chat.textSelection.toast.addToNotesFailed': '加入筆記失敗',
   'chat.textSelection.toast.addToNotesSuccess': '已將選取文字加入筆記',
   'chat.textSelection.toast.addToNotesSummaryFailed': '無法總結所選內容，已將所選文字加入筆記',
