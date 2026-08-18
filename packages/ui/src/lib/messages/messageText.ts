@@ -132,71 +132,128 @@ const isLazyListContinuation = (
     return Boolean(current && getLineIndent(line) < current.contentIndent);
 };
 
-const isInsideMarkdownCodeBlock = (text: string): boolean => {
-    const lines = text.replace(/\r\n?/g, '\n').split('\n');
-    let fence: MarkdownFence | null = null;
-    let inIndentedCode = false;
-    let indentedCodeIndent = 0;
-    const listItems: MarkdownListItem[] = [];
-    let pendingIndentedBlankLines = 0;
-    let pendingBlankLines = 0;
+type MarkdownScannerState = {
+    fence: MarkdownFence | null;
+    indentedCodeIndent: number;
+    listItems: MarkdownListItem[];
+    pendingIndentedBlankLines: string[] | null;
+    pendingIndentedBlankLineCount: number;
+    pendingBlankLines: number;
+};
 
-    for (const line of lines) {
-        if (fence) {
-            if (closesFence(line, fence)) fence = null;
-            continue;
+type MarkdownLineScan = {
+    kind: 'fence' | 'indented-code' | 'blank' | 'content';
+    pendingIndentedBlankLines: string[];
+    pendingBlankLines: number;
+};
+
+type MarkdownScannerMode = 'count' | 'normalize';
+
+const createMarkdownScanner = (mode: MarkdownScannerMode) => {
+    const retainLineDetails = mode === 'normalize';
+    const state: MarkdownScannerState = {
+        fence: null,
+        indentedCodeIndent: 0,
+        listItems: [],
+        pendingIndentedBlankLines: retainLineDetails ? [] : null,
+        pendingIndentedBlankLineCount: 0,
+        pendingBlankLines: 0,
+    };
+
+    const scanLine = (line: string): MarkdownLineScan | undefined => {
+        if (state.fence) {
+            if (closesFence(line, state.fence)) state.fence = null;
+            return retainLineDetails
+                ? { kind: 'fence', pendingIndentedBlankLines: [], pendingBlankLines: 0 }
+                : undefined;
         }
 
-        if (inIndentedCode) {
-            if (getLineIndent(line) >= indentedCodeIndent) {
-                pendingIndentedBlankLines = 0;
-                continue;
+        if (state.indentedCodeIndent > 0) {
+            if (getLineIndent(line) >= state.indentedCodeIndent) {
+                const pendingIndentedBlankLines = state.pendingIndentedBlankLines;
+                state.pendingIndentedBlankLines = retainLineDetails ? [] : null;
+                state.pendingIndentedBlankLineCount = 0;
+                return retainLineDetails
+                    ? {
+                        kind: 'indented-code',
+                        pendingIndentedBlankLines: pendingIndentedBlankLines ?? [],
+                        pendingBlankLines: 0,
+                    }
+                    : undefined;
             }
 
             if (isBlankLine(line)) {
-                pendingIndentedBlankLines += 1;
-                continue;
+                if (state.pendingIndentedBlankLines) {
+                    state.pendingIndentedBlankLines.push(line);
+                } else {
+                    state.pendingIndentedBlankLineCount += 1;
+                }
+                return retainLineDetails
+                    ? { kind: 'blank', pendingIndentedBlankLines: [], pendingBlankLines: 0 }
+                    : undefined;
             }
 
-            inIndentedCode = false;
-            indentedCodeIndent = 0;
-            pendingBlankLines += pendingIndentedBlankLines;
-            pendingIndentedBlankLines = 0;
+            state.indentedCodeIndent = 0;
+            state.pendingBlankLines += (
+                state.pendingIndentedBlankLines?.length ?? state.pendingIndentedBlankLineCount
+            );
+            state.pendingIndentedBlankLines = retainLineDetails ? [] : null;
+            state.pendingIndentedBlankLineCount = 0;
         }
 
         if (isBlankLine(line)) {
-            pendingBlankLines += 1;
-            continue;
+            state.pendingBlankLines += 1;
+            return retainLineDetails
+                ? { kind: 'blank', pendingIndentedBlankLines: [], pendingBlankLines: 0 }
+                : undefined;
         }
 
-        const hasPendingBlankLines = pendingBlankLines > 0;
+        const hasPendingBlankLines = state.pendingBlankLines > 0;
         const listItem = getListItem(line);
-        const validListItem = listItem ? isValidListItem(listItem, listItems) : false;
-        const listContinuation = getListContinuation(line, listItems, hasPendingBlankLines);
+        const validListItem = listItem ? isValidListItem(listItem, state.listItems) : false;
+        const listContinuation = getListContinuation(line, state.listItems, hasPendingBlankLines);
         const isIndentedCode = getLineIndent(line) >= 4;
+        const pendingBlankLines = state.pendingBlankLines;
 
-        pendingBlankLines = 0;
+        state.pendingBlankLines = 0;
 
         const nextFence = getFence(line);
         if (nextFence) {
-            fence = nextFence;
+            state.fence = nextFence;
         } else if (isIndentedCode && !validListItem && !listContinuation) {
-            inIndentedCode = true;
-            indentedCodeIndent = listItems[listItems.length - 1]?.codeIndent || 4;
+            state.indentedCodeIndent = state.listItems[state.listItems.length - 1]?.codeIndent || 4;
         }
 
         if (validListItem && listItem) {
-            updateListItems(listItem, listItems);
+            updateListItems(listItem, state.listItems);
         } else if (
             !listContinuation
             && !isIndentedCode
-            && !isLazyListContinuation(line, listItems, hasPendingBlankLines)
+            && !isLazyListContinuation(line, state.listItems, hasPendingBlankLines)
         ) {
-            listItems.length = 0;
+            state.listItems.length = 0;
         }
+
+        return retainLineDetails
+            ? { kind: 'content', pendingIndentedBlankLines: [], pendingBlankLines }
+            : undefined;
+    };
+
+    return {
+        scanLine,
+        isInsideCodeBlock: (): boolean => Boolean(state.fence || state.indentedCodeIndent),
+    };
+};
+
+const isInsideMarkdownCodeBlock = (text: string): boolean => {
+    const lines = text.replace(/\r\n?/g, '\n').split('\n');
+    const scanner = createMarkdownScanner('count');
+
+    for (const line of lines) {
+        scanner.scanLine(line);
     }
 
-    return Boolean(fence || inIndentedCode);
+    return scanner.isInsideCodeBlock();
 };
 
 const countBoundaryLineBreaks = (text: string, fromStart: boolean): number => {
@@ -230,77 +287,27 @@ const joinTextParts = (textParts: string[]): string => {
 const normalizeMarkdownBlankLines = (text: string): string => {
     const lines = text.replace(/\r\n?/g, '\n').split('\n');
     const normalized: string[] = [];
-    let fence: MarkdownFence | null = null;
-    let inIndentedCode = false;
-    let indentedCodeIndent = 0;
-    const listItems: MarkdownListItem[] = [];
-    let pendingIndentedBlankLines: string[] = [];
-    let pendingBlankLines = 0;
+    const scanner = createMarkdownScanner('normalize');
 
-    const flushPendingBlankLines = (): void => {
-        if (pendingBlankLines > 0 && normalized.length > 0) normalized.push('');
-        pendingBlankLines = 0;
-    };
+    for (const line of lines) {
+        const scan = scanner.scanLine(line);
 
-    for (let index = 0; index < lines.length; index += 1) {
-        const line = lines[index];
+        if (!scan) continue;
 
-        if (fence) {
+        if (scan.kind === 'fence') {
             normalized.push(line);
-            if (closesFence(line, fence)) fence = null;
             continue;
         }
 
-        if (inIndentedCode) {
-            if (getLineIndent(line) >= indentedCodeIndent) {
-                normalized.push(...pendingIndentedBlankLines);
-                pendingIndentedBlankLines = [];
-                normalized.push(line);
-                continue;
-            }
-
-            if (isBlankLine(line)) {
-                pendingIndentedBlankLines.push(line);
-                continue;
-            }
-
-            inIndentedCode = false;
-            indentedCodeIndent = 0;
-            pendingBlankLines += pendingIndentedBlankLines.length;
-            pendingIndentedBlankLines = [];
-        }
-
-        if (isBlankLine(line)) {
-            pendingBlankLines += 1;
+        if (scan.kind === 'indented-code') {
+            normalized.push(...scan.pendingIndentedBlankLines, line);
             continue;
         }
 
-        const hasPendingBlankLines = pendingBlankLines > 0;
-        const listItem = getListItem(line);
-        const validListItem = listItem ? isValidListItem(listItem, listItems) : false;
-        const listContinuation = getListContinuation(line, listItems, hasPendingBlankLines);
-        const isIndentedCode = getLineIndent(line) >= 4;
+        if (scan.kind === 'blank') continue;
 
-        flushPendingBlankLines();
+        if (scan.pendingBlankLines > 0 && normalized.length > 0) normalized.push('');
         normalized.push(line);
-
-        const nextFence = getFence(line);
-        if (nextFence) {
-            fence = nextFence;
-        } else if (isIndentedCode && !validListItem && !listContinuation) {
-            inIndentedCode = true;
-            indentedCodeIndent = listItems[listItems.length - 1]?.codeIndent || 4;
-        }
-
-        if (validListItem && listItem) {
-            updateListItems(listItem, listItems);
-        } else if (
-            !listContinuation
-            && !isIndentedCode
-            && !isLazyListContinuation(line, listItems, hasPendingBlankLines)
-        ) {
-            listItems.length = 0;
-        }
     }
 
     return normalized.join('\n');
