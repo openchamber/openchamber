@@ -360,7 +360,7 @@ describe('message stream websocket runtime', () => {
           blocks: [
             'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
           ],
-          });
+        });
       },
     });
 
