@@ -3,6 +3,7 @@ import type { Part } from '@opencode-ai/sdk/v2';
 
 import { flattenAssistantTextParts, suggestPlanTitleFromText } from './messageText';
 
+// SAFETY: the fixture supplies every required SDK TextPart field, and its `type: 'text'` discriminant selects that Part variant.
 const textPart = (id: string, text: string): Part => ({
   id,
   sessionID: 'session-1',

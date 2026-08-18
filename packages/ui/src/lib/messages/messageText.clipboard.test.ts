@@ -33,6 +33,7 @@ afterEach(() => {
   restoreGlobal('ClipboardItem', originalClipboardItem);
 });
 
+// SAFETY: each mapped fixture supplies every required SDK TextPart field, and its `type: 'text'` discriminant selects that Part variant.
 const textParts = (texts: string[]): Part[] => texts.map((text, index) => ({
   id: `part-${index}`,
   sessionID: 'session-1',
