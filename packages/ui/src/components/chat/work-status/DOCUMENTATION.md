@@ -86,7 +86,7 @@ which requests only providers enabled for this panel.
 
 | Block | Source | Notes |
 |---|---|---|
-| Context + cost | `contextUsage.ts` over `useSessionMessages`, `Session.cost` | see below — the store getters cannot serve this |
+| Context + cost | `contextUsage.ts` over `useSessionMessages`, `useSessionSubtreeCost` over `Session.cost` | see below — the store getters cannot serve this |
 | Branch, ahead/behind, attention | `useGitStore` directory state | warmed via `runBackgroundNetworkTask(ensureStatus)` and refreshed from Git mutation hints |
 | Changed files | `useGitStore` status `files` + `diffStats` | working tree, not session-authored edits |
 | PR + checks | `usePrVisualSummary` | **read-only** |

@@ -18,6 +18,9 @@ import { useGitBranchLabel, useGitStore } from '@/stores/useGitStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { Icon } from "@/components/icon/Icon";
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { computeSessionMessageCounts, computeSessionTokenRate } from '@/stores/utils/tokenUtils';
+import { useSessionSubtreeCost } from '@/sync/session-cost';
+import { getSyncParts } from '@/sync/sync-refs';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 
 type MiniChatMode = 'session' | 'draft';
@@ -49,6 +52,7 @@ const normalizePath = (value: string | null | undefined): string => {
 const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
   const draftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const draftProjectId = useSessionUIStore((state) => state.newSessionDraft?.selectedProjectId ?? null);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -58,6 +62,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const providers = useConfigStore((state) => state.providers);
   const sessions = useSessions();
   const currentSessionMessages = useSessionMessages(currentSessionId ?? '');
+  const subtreeCost = useSessionSubtreeCost(currentSessionId ?? null, currentSessionDirectory ?? undefined);
   const runtimeApis = useRuntimeAPIs();
   const ensureGitStatus = useGitStore((state) => state.ensureStatus);
   const worktreePath = useSessionUIStore((state) => currentSessionId ? state.worktreeMetadata.get(currentSessionId)?.path ?? '' : '');
@@ -183,6 +188,12 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
     const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0;
     const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined;
 
+    const { userCount, assistantCount } = computeSessionMessageCounts(currentSessionMessages);
+    const { avgTokensPerSecond, lastTokensPerSecond } = computeSessionTokenRate(
+      currentSessionMessages,
+      (messageId) => getSyncParts(messageId, currentSessionDirectory ?? undefined),
+    );
+
     return {
       totalTokens,
       percentage,
@@ -191,8 +202,22 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       normalizedOutput,
       thresholdLimit,
       lastMessageId,
+      totalMessages: currentSessionMessages.length,
+      userMessages: userCount,
+      assistantMessages: assistantCount,
+      tokensPerSecond: avgTokensPerSecond > 0 ? avgTokensPerSecond : undefined,
+      lastTokensPerSecond: lastTokensPerSecond > 0 ? lastTokensPerSecond : undefined,
     };
-  }, [contextLimit, currentSessionId, currentSessionMessages, outputLimit]);
+  }, [contextLimit, currentSessionDirectory, currentSessionId, currentSessionMessages, outputLimit]);
+  const contextUsageWithSubtree = React.useMemo(() => (
+    contextUsage
+      ? {
+        ...contextUsage,
+        cost: subtreeCost && subtreeCost.totalCost > 0 ? subtreeCost.totalCost : undefined,
+        sessionCost: subtreeCost && subtreeCost.sessionCost > 0 ? subtreeCost.sessionCost : undefined,
+      }
+      : null
+  ), [contextUsage, subtreeCost]);
   const [stableContextUsage, setStableContextUsage] = React.useState<SessionContextUsage | null>(null);
   const dragRegionStyle = { WebkitAppRegion: 'drag' } as React.CSSProperties;
   const noDragRegionStyle = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
@@ -203,27 +228,34 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       return;
     }
 
-    if (contextUsage && contextUsage.totalTokens > 0) {
+    if (contextUsageWithSubtree && contextUsageWithSubtree.totalTokens > 0) {
       setStableContextUsage((prev) => {
         if (
           prev
-          && prev.totalTokens === contextUsage.totalTokens
-          && prev.percentage === contextUsage.percentage
-          && prev.contextLimit === contextUsage.contextLimit
-          && (prev.outputLimit ?? 0) === (contextUsage.outputLimit ?? 0)
-          && (prev.normalizedOutput ?? 0) === (contextUsage.normalizedOutput ?? 0)
-          && prev.thresholdLimit === contextUsage.thresholdLimit
-          && prev.lastMessageId === contextUsage.lastMessageId
+          && prev.totalTokens === contextUsageWithSubtree.totalTokens
+          && prev.percentage === contextUsageWithSubtree.percentage
+          && prev.contextLimit === contextUsageWithSubtree.contextLimit
+          && (prev.outputLimit ?? 0) === (contextUsageWithSubtree.outputLimit ?? 0)
+          && (prev.normalizedOutput ?? 0) === (contextUsageWithSubtree.normalizedOutput ?? 0)
+          && prev.thresholdLimit === contextUsageWithSubtree.thresholdLimit
+          && prev.lastMessageId === contextUsageWithSubtree.lastMessageId
+            && (prev.cost ?? 0) === (contextUsageWithSubtree.cost ?? 0)
+            && (prev.sessionCost ?? 0) === (contextUsageWithSubtree.sessionCost ?? 0)
+          && (prev.totalMessages ?? 0) === (contextUsageWithSubtree.totalMessages ?? 0)
+          && (prev.userMessages ?? 0) === (contextUsageWithSubtree.userMessages ?? 0)
+          && (prev.assistantMessages ?? 0) === (contextUsageWithSubtree.assistantMessages ?? 0)
+          && (prev.tokensPerSecond ?? 0) === (contextUsageWithSubtree.tokensPerSecond ?? 0)
+          && (prev.lastTokensPerSecond ?? 0) === (contextUsageWithSubtree.lastTokensPerSecond ?? 0)
         ) {
           return prev;
         }
-        return contextUsage;
+        return contextUsageWithSubtree;
       });
       return;
     }
 
     setStableContextUsage((prev) => (prev === null ? prev : null));
-  }, [contextUsage, currentSessionId]);
+  }, [contextUsageWithSubtree, currentSessionId]);
 
   const displayContextPercentage = stableContextUsage && stableContextUsage.contextLimit > 0
     ? Math.min(999, (stableContextUsage.totalTokens / stableContextUsage.contextLimit) * 100)
@@ -291,6 +323,13 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
           colorPercentage={stableContextUsage.percentage}
           contextLimit={stableContextUsage.contextLimit}
           outputLimit={stableContextUsage.outputLimit ?? 0}
+           cost={stableContextUsage.cost}
+            sessionCost={stableContextUsage.sessionCost}
+          totalMessages={stableContextUsage.totalMessages}
+          userMessages={stableContextUsage.userMessages}
+          assistantMessages={stableContextUsage.assistantMessages}
+          tokensPerSecond={stableContextUsage.tokensPerSecond}
+          lastTokensPerSecond={stableContextUsage.lastTokensPerSecond}
           className="h-9 shrink-0 pl-1 pr-1 typography-ui-label"
           valueClassName="font-semibold leading-none"
           hideIcon

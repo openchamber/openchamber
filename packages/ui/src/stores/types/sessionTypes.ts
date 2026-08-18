@@ -44,6 +44,15 @@ export interface SessionContextUsage {
     normalizedOutput?: number;
     thresholdLimit: number;
     lastMessageId?: string;
+    /** Authoritative cost: current session plus descendant sessions. */
+    cost?: number;
+    /** Authoritative OpenCode cost for the current session only. */
+    sessionCost?: number;
+    totalMessages?: number;
+    userMessages?: number;
+    assistantMessages?: number;
+    tokensPerSecond?: number;
+    lastTokensPerSecond?: number;
 }
 
 // Default message limit (can be overridden via settings).

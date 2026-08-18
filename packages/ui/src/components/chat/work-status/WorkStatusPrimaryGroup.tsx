@@ -4,7 +4,8 @@ import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
-import { useSession, useSessionMessages } from '@/sync/sync-context';
+import { useSessionMessages } from '@/sync/sync-context';
+import { useSessionSubtreeCost } from '@/sync/session-cost';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -49,7 +50,7 @@ const formatPercent = (percent: number): string => `${Math.min(percent, 999).toF
  */
 export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, goalRow, showSession, showRepository }) => {
   const { t } = useI18n();
-  const session = useSession(sessionId ?? '', directory ?? undefined);
+  const subtreeCost = useSessionSubtreeCost(sessionId, directory ?? undefined);
   const { git } = useRuntimeAPIs();
   const ensureStatus = useGitStore((state) => state.ensureStatus);
   const fetchStatus = useGitStore((state) => state.fetchStatus);
@@ -199,7 +200,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
     : usageTone === 'warn' ? 'var(--status-warning)'
       : 'var(--status-success)';
 
-  const cost = typeof session?.cost === 'number' && session.cost > 0 ? session.cost : null;
+  const cost = subtreeCost && subtreeCost.totalCost > 0 ? subtreeCost.totalCost : null;
   const hasSession = showSession && (usagePercent !== null || cost !== null || Boolean(goalRow));
   const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel);
 
@@ -223,7 +224,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                     <WorkStatusValue>{formatPercent(usagePercent)}</WorkStatusValue>
                     {/* No icon of its own: the sprite has no currency glyph, and
                         spend belongs with consumption anyway. The `$` labels it. */}
-                    {cost !== null ? <WorkStatusValue tone="muted">{formatCost(cost)}</WorkStatusValue> : null}
+                    {cost !== null ? <WorkStatusValue tone="muted">{`・ ${formatCost(cost)}`}</WorkStatusValue> : null}
                   </>
                 )}
               />
