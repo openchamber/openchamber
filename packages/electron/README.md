@@ -159,7 +159,9 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
   grants permission requests by default when no handler is set, and the panel
   loads whatever address the user types. Tab favicons are fetched in this
   session too, so icons behind the page's own login resolve and the app's origin
-  never requests anything from a third-party host.
+  never requests anything from a third-party host. Self-signed loopback HTTPS
+  pages may use an untrusted certificate authority; certificate failures for
+  external hosts and all other certificate errors remain blocked.
 
 ## IPC Pattern
 

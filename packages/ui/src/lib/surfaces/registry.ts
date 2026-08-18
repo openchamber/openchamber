@@ -88,7 +88,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     descriptionKey: 'contextRail.surface.editor.description',
     defaultWidthFraction: 3 / 5,
     mode: 'file',
-    icon: 'braces',
+    icon: 'file-edit',
     labelKey: 'contextPanel.mode.files',
     availability: 'always',
   },

@@ -20,6 +20,7 @@ const AUTH = JSON.stringify({
   'command-code': { type: 'oauth', access: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
+  anthropic: { access: 'test-token', refresh: 'test-refresh' },
 });
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
@@ -202,6 +203,27 @@ describe('Crof quota provider (VS Code parity)', () => {
 });
 
 describe('Codex quota provider (VS Code parity)', () => {
+  test('coalesces concurrent refreshes for the same provider', async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    let requestCount = 0;
+    globalThis.fetch = (() => {
+      requestCount += 1;
+      return new Promise<Response>((resolve) => {
+        resolveResponse = resolve;
+      });
+    }) as typeof fetch;
+
+    const first = fetchQuotaForProvider('codex');
+    const second = fetchQuotaForProvider('codex');
+    resolveResponse?.(mockResponse({ rate_limit: null }));
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    assert.equal(firstResult.ok, true);
+    assert.equal(secondResult.ok, true);
+    assert.equal(requestCount, 1);
+  });
+
   test('surfaces spend_control individual limit for business accounts', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
       plan_type: 'business',
@@ -223,6 +245,60 @@ describe('Codex quota provider (VS Code parity)', () => {
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.credits!.usedPercent, 36);
     assert.equal(result.usage!.windows.credits!.valueLabel, '2675 / 7500 used');
+  });
+});
+
+describe('Claude quota provider (VS Code parity)', () => {
+  test('parses current limits, model-scoped limits, and extra usage', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      limits: [
+        { kind: 'session', percent: 12, resets_at: '2026-08-20T12:00:00Z', scope: null },
+        { kind: 'weekly_all', percent: 34, resets_at: '2026-08-24T12:00:00Z', scope: null },
+        { kind: 'weekly_scoped', percent: 56, resets_at: '2026-08-24T12:00:00Z', scope: { model: { display_name: 'Sonnet' } } },
+      ],
+      spend: {
+        enabled: true,
+        percent: 25,
+        used: { amount_minor: 2500, exponent: 2, currency: 'USD' },
+        limit: { amount_minor: 10000, exponent: 2, currency: 'USD' },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('claude');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 12);
+    assert.equal(result.usage?.windows['7d']?.usedPercent, 34);
+    assert.equal(result.usage?.models?.Sonnet?.windows['7d']?.usedPercent, 56);
+    assert.equal(result.usage?.windows.extra_usage?.valueLabel, '$25.00 / $100.00');
+  });
+
+  test('keeps serving the last good values while Anthropic rate limits', async () => {
+    const responses = [
+      mockResponse({ five_hour: { utilization: 12, resets_at: '2026-08-20T12:00:00Z' } }),
+      {
+        ok: false,
+        status: 429,
+        headers: new Headers({ 'retry-after': '120' }),
+        json: async () => ({}),
+      } as Response,
+    ];
+    let requestCount = 0;
+    globalThis.fetch = (async () => {
+      const response = responses[requestCount];
+      requestCount += 1;
+      return response;
+    }) as typeof fetch;
+
+    const initial = await fetchQuotaForProvider('claude');
+    const rateLimited = await fetchQuotaForProvider('claude');
+    const duringCooldown = await fetchQuotaForProvider('claude');
+
+    assert.equal(initial.ok, true);
+    assert.equal(rateLimited.ok, true);
+    assert.equal(duringCooldown.ok, true);
+    assert.equal(duringCooldown.usage?.windows['5h']?.usedPercent, 12);
+    assert.equal(requestCount, 2);
   });
 });
 

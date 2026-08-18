@@ -170,6 +170,7 @@ export type ProviderResult = {
   usage: ProviderUsage | null;
   fetchedAt: number;
   error?: string;
+  planLabel?: string | null;
 };
 
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
@@ -1255,6 +1256,112 @@ const fetchGoogleQuota = async (): Promise<ProviderResult> => {
   });
 };
 
+const CLAUDE_DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
+const CLAUDE_MAX_COOLDOWN_MS = 60 * 60 * 1000;
+let claudeCredentialFingerprint: string | null = null;
+let claudeCachedUsage: ProviderUsage | null = null;
+let claudeCooldownUntil = 0;
+
+const claudeCooldownFromResponse = (response: Response): number => {
+  const raw = response.headers.get('retry-after');
+  const seconds = raw ? Number(raw) : Number.NaN;
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.min(seconds * 1000, CLAUDE_MAX_COOLDOWN_MS);
+  }
+  if (raw) {
+    const retryAt = Date.parse(raw);
+    if (Number.isFinite(retryAt) && retryAt > Date.now()) {
+      return Math.min(retryAt - Date.now(), CLAUDE_MAX_COOLDOWN_MS);
+    }
+  }
+  return CLAUDE_DEFAULT_COOLDOWN_MS;
+};
+
+const buildClaudeRateLimitResult = (): ProviderResult => (
+  claudeCachedUsage
+    ? buildResult({
+        providerId: 'claude',
+        providerName: 'Claude',
+        ok: true,
+        configured: true,
+        usage: claudeCachedUsage,
+      })
+    : buildResult({
+        providerId: 'claude',
+        providerName: 'Claude',
+        ok: false,
+        configured: true,
+        error: 'Rate limited by Anthropic. Retrying shortly.',
+      })
+);
+
+const buildClaudeUsage = (payload: Record<string, unknown>): ProviderUsage => {
+  const windows: Record<string, UsageWindow> = {};
+  const models: Record<string, ProviderUsage> = {};
+  const limits = Array.isArray(payload.limits) ? payload.limits : [];
+
+  for (const entry of limits) {
+    const limit = asObject(entry);
+    if (!limit) continue;
+    const usedPercent = toNumber(limit.percent);
+    const resetAt = toTimestamp(limit.resets_at);
+    if (limit.kind === 'session') {
+      windows['5h'] = toUsageWindow({ usedPercent, windowSeconds: 5 * 60 * 60, resetAt });
+    } else if (limit.kind === 'weekly_all') {
+      windows['7d'] = toUsageWindow({ usedPercent, windowSeconds: 7 * 24 * 60 * 60, resetAt });
+    } else if (limit.kind === 'weekly_scoped') {
+      const modelName = asNonEmptyString(asObject(asObject(limit.scope)?.model)?.display_name);
+      if (modelName) {
+        models[modelName] = {
+          windows: {
+            '7d': toUsageWindow({ usedPercent, windowSeconds: 7 * 24 * 60 * 60, resetAt }),
+          },
+        };
+      }
+    }
+  }
+
+  if (!limits.length) {
+    const fiveHour = asObject(payload.five_hour);
+    const sevenDay = asObject(payload.seven_day);
+    if (fiveHour) {
+      windows['5h'] = toUsageWindow({
+        usedPercent: toNumber(fiveHour.utilization),
+        windowSeconds: 5 * 60 * 60,
+        resetAt: toTimestamp(fiveHour.resets_at),
+      });
+    }
+    if (sevenDay) {
+      windows['7d'] = toUsageWindow({
+        usedPercent: toNumber(sevenDay.utilization),
+        windowSeconds: 7 * 24 * 60 * 60,
+        resetAt: toTimestamp(sevenDay.resets_at),
+      });
+    }
+  }
+
+  const spend = asObject(payload.spend);
+  if (spend?.enabled === true) {
+    const usedMoney = asObject(spend.used);
+    const limitMoney = asObject(spend.limit);
+    const usedMinor = toNumber(usedMoney?.amount_minor);
+    const limitMinor = toNumber(limitMoney?.amount_minor);
+    const exponent = toNumber(usedMoney?.exponent) ?? 2;
+    const currency = asNonEmptyString(usedMoney?.currency);
+    const prefix = currency === 'USD' || !currency ? '$' : `${currency} `;
+    const used = usedMinor === null ? null : usedMinor / 10 ** exponent;
+    const limit = limitMinor === null ? null : limitMinor / 10 ** (toNumber(limitMoney?.exponent) ?? 2);
+    windows.extra_usage = toUsageWindow({
+      usedPercent: toNumber(spend.percent),
+      windowSeconds: null,
+      resetAt: null,
+      valueLabel: used === null ? null : `${prefix}${formatMoney(used)}${limit === null ? '' : ` / ${prefix}${formatMoney(limit)}`}`,
+    });
+  }
+
+  return Object.keys(models).length ? { windows, models } : { windows };
+};
+
 const fetchClaudeQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude'])) as Record<string, unknown> | null;
@@ -1270,6 +1377,15 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
     });
   }
 
+  const refreshToken = typeof entry?.refresh === 'string' ? entry.refresh : '';
+  const fingerprint = `${accessToken}\0${refreshToken}`;
+  if (claudeCredentialFingerprint !== fingerprint) {
+    claudeCredentialFingerprint = fingerprint;
+    claudeCachedUsage = null;
+    claudeCooldownUntil = 0;
+  }
+  if (Date.now() < claudeCooldownUntil) return buildClaudeRateLimitResult();
+
   try {
     const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
       method: 'GET',
@@ -1278,6 +1394,21 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
         'anthropic-beta': 'oauth-2025-04-20',
       },
     });
+
+    if (response.status === 429) {
+      claudeCooldownUntil = Date.now() + claudeCooldownFromResponse(response);
+      return buildClaudeRateLimitResult();
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      return buildResult({
+        providerId: 'claude',
+        providerName: 'Claude',
+        ok: false,
+        configured: true,
+        error: 'Claude session expired. Open Claude Code to sign in again.',
+      });
+    }
 
     if (!response.ok) {
       return buildResult({
@@ -1290,47 +1421,14 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
     }
 
     const payload = await response.json() as Record<string, unknown>;
-    const windows: Record<string, UsageWindow> = {};
-    const fiveHour = (payload as Record<string, unknown>).five_hour as Record<string, unknown> | undefined;
-    const sevenDay = (payload as Record<string, unknown>).seven_day as Record<string, unknown> | undefined;
-    const sevenDaySonnet = (payload as Record<string, unknown>).seven_day_sonnet as Record<string, unknown> | undefined;
-    const sevenDayOpus = (payload as Record<string, unknown>).seven_day_opus as Record<string, unknown> | undefined;
-
-    if (fiveHour) {
-      windows['5h'] = toUsageWindow({
-        usedPercent: toNumber(fiveHour.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(fiveHour.resets_at),
-      });
-    }
-    if (sevenDay) {
-      windows['7d'] = toUsageWindow({
-        usedPercent: toNumber(sevenDay.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(sevenDay.resets_at),
-      });
-    }
-    if (sevenDaySonnet) {
-      windows['7d-sonnet'] = toUsageWindow({
-        usedPercent: toNumber(sevenDaySonnet.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(sevenDaySonnet.resets_at),
-      });
-    }
-    if (sevenDayOpus) {
-      windows['7d-opus'] = toUsageWindow({
-        usedPercent: toNumber(sevenDayOpus.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(sevenDayOpus.resets_at),
-      });
-    }
-
+    const usage = buildClaudeUsage(payload);
+    claudeCachedUsage = usage;
     return buildResult({
       providerId: 'claude',
       providerName: 'Claude',
       ok: true,
       configured: true,
-      usage: { windows },
+      usage,
     });
   } catch (error) {
     return buildResult({
@@ -2709,7 +2807,7 @@ const fetchXaiQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
+const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
       return fetchClaudeQuota();
@@ -2781,4 +2879,17 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
         error: 'Unsupported provider',
       });
   }
+};
+
+const pendingQuotaFetches = new Map<string, Promise<ProviderResult>>();
+
+export const fetchQuotaForProvider = (providerId: string): Promise<ProviderResult> => {
+  const existing = pendingQuotaFetches.get(providerId);
+  if (existing) return existing;
+
+  const pending = fetchQuotaForProviderUncoalesced(providerId).finally(() => {
+    if (pendingQuotaFetches.get(providerId) === pending) pendingQuotaFetches.delete(providerId);
+  });
+  pendingQuotaFetches.set(providerId, pending);
+  return pending;
 };

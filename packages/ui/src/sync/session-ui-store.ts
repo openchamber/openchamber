@@ -270,6 +270,7 @@ export type NewSessionDraftState = {
   initialPrompt?: string
   syntheticParts?: SyntheticContextPart[]
   targetFolderId?: string
+  projectContextPins?: { notes: string[]; plans: string[] }
 }
 
 export type ViewportAnchor = {
@@ -319,6 +320,7 @@ export type SessionUIState = {
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
   setDraftPreserveDirectoryOverride: (value: boolean) => void
   setDraftPermissionAutoAcceptEnabled: (enabled: boolean) => void
+  setDraftProjectContextPin: (kind: "note" | "plan", id: string, pinned: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
   armAbortPrompt: (durationMs?: number) => number | null
@@ -726,7 +728,15 @@ export async function materializeOpenDraftSession(selection: {
 
   await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
 
-  const created = await store.createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null)
+  const draftPins = draft.projectContextPins ?? { notes: [], plans: [] }
+  const created = await store.createSession(
+    draft.title,
+    draftDirectoryOverride,
+    draft.parentID ?? null,
+    draftPins.notes.length > 0 || draftPins.plans.length > 0
+      ? { openchamber: { project_context_pins: draftPins } }
+      : undefined,
+  )
   if (!created?.id) throw new Error("Failed to create session")
 
   // The server response is authoritative. It may canonicalize a requested
@@ -1026,6 +1036,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       initialPrompt: options?.initialPrompt,
       syntheticParts: options?.syntheticParts,
       targetFolderId: options?.targetFolderId,
+      projectContextPins: options?.projectContextPins,
     }
 
     set({
@@ -1136,6 +1147,22 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     set((s) => {
       if (!s.newSessionDraft?.open) return s
       return { newSessionDraft: { ...s.newSessionDraft, permissionAutoAcceptEnabled: enabled } }
+    }),
+
+  setDraftProjectContextPin: (kind, id, pinned) =>
+    set((s) => {
+      if (!s.newSessionDraft?.open) return s
+      const pins = s.newSessionDraft.projectContextPins ?? { notes: [], plans: [] }
+      const key = kind === "note" ? "notes" : "plans"
+      const next = new Set(pins[key])
+      if (pinned) next.add(id)
+      else next.delete(id)
+      return {
+        newSessionDraft: {
+          ...s.newSessionDraft,
+          projectContextPins: { ...pins, [key]: [...next] },
+        },
+      }
     }),
 
   acknowledgeSessionAbort: (sessionId) =>
@@ -1578,14 +1605,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // deleteSession — calls SDK, SSE event updates child store
   // ---------------------------------------------------------------------------
-  deleteSession: async (id, options) => {
-    const deleted = await deleteSessionAction(id, options)
-    if (deleted) {
-      // Nothing to forget here any more: what a session was told lives in its
-      // own metadata and goes with it.
-    }
-    return deleted
-  },
+  deleteSession: async (id, options) => deleteSessionAction(id, options),
 
   deleteSessions: async (ids, options) => {
     const result = await deleteSessionsAction(ids, options)

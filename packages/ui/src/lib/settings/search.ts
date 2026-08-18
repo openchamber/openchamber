@@ -946,26 +946,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
 
   {
-    id: 'integrations.messengers',
-    page: 'integrations',
-    titleKey: 'settings.integrations.messengers.title',
-    keywords: ['messenger', 'discord', 'telegram', 'bot', 'coming soon'],
-  },
-  {
-    id: 'integrations.messengers.discord',
-    page: 'integrations',
-    titleKey: 'settings.integrations.messengers.discord.name',
-    descriptionKey: 'settings.integrations.messengers.discord.description',
-    keywords: ['discord', 'bot', 'messenger', 'coming soon'],
-  },
-  {
-    id: 'integrations.messengers.telegram',
-    page: 'integrations',
-    titleKey: 'settings.integrations.messengers.telegram.name',
-    descriptionKey: 'settings.integrations.messengers.telegram.description',
-    keywords: ['telegram', 'bot', 'messenger', 'coming soon'],
-  },
-  {
     id: 'integrations.third-party',
     page: 'integrations',
     titleKey: 'settings.integrations.thirdParty.title',
