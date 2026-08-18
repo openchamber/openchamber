@@ -10,8 +10,10 @@ import {
 } from '@/lib/terminalOutput';
 import {
   getTerminalCellFromPoint,
+  getSingleCellSelectionOffset,
   getTerminalWordRange,
   type TerminalCellPosition,
+  type TerminalSelectionPixelOffset,
 } from '@/lib/terminalTouchSelection';
 import type { TerminalChunk } from '@/stores/useTerminalStore';
 
@@ -230,7 +232,6 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     const handleWindowBlur = () => {
       if (terminal) terminal.options.cursorBlink = false;
     };
-
     container.addEventListener('focusin', handleFocusIn);
     container.addEventListener('focusout', handleFocusOut);
     window.addEventListener('focus', handleWindowFocus);
@@ -405,12 +406,15 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     const dispatchSelectionMouseEvent = (
       type: 'mousedown' | 'mousemove',
       cell: TerminalCellPosition,
+      pixelOffset?: TerminalSelectionPixelOffset,
     ) => {
       const canvas = container.querySelector('canvas');
       if (!canvas) return;
       const bounds = canvas.getBoundingClientRect();
-      const clientX = bounds.left + ((cell.column + 0.5) / terminal.cols) * bounds.width;
-      const clientY = bounds.top + ((cell.row + 0.5) / terminal.rows) * bounds.height;
+      const cellWidth = bounds.width / terminal.cols;
+      const cellHeight = bounds.height / terminal.rows;
+      const clientX = bounds.left + (cell.column + 0.5) * cellWidth + (pixelOffset?.x ?? 0);
+      const clientY = bounds.top + (cell.row + 0.5) * cellHeight + (pixelOffset?.y ?? 0);
       canvas.dispatchEvent(new MouseEvent(type, {
         bubbles: true,
         cancelable: true,
@@ -451,9 +455,18 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
         const word = getTerminalWordRange(cells, cell.column);
         const selectionAnchor = { column: word.startColumn, row: cell.row };
         selectionFocus = { column: word.endColumn, row: cell.row };
+        const singleCellOffset =
+          word.startColumn === word.endColumn && Boolean(cells[cell.column]?.trim())
+            ? (() => {
+                const canvas = container.querySelector('canvas');
+                return canvas
+                  ? getSingleCellSelectionOffset(canvas.getBoundingClientRect(), terminal.cols, terminal.rows)
+                  : undefined;
+              })()
+            : undefined;
         gesture = 'selecting';
         dispatchSelectionMouseEvent('mousedown', selectionAnchor);
-        dispatchSelectionMouseEvent('mousemove', selectionFocus);
+        dispatchSelectionMouseEvent('mousemove', selectionFocus, singleCellOffset);
       }, 350);
     };
     const move = (event: PointerEvent) => {
