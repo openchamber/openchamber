@@ -83,10 +83,6 @@ export interface TunnelWsOpenPayload {
   protocols?: string[];
 }
 
-export interface TunnelWsOpenedPayload {
-  protocol?: string;
-}
-
 export interface TunnelWsClosePayload {
   code: number;
   reason: string;
@@ -110,13 +106,6 @@ export interface E2eeReadyMessage {
   // advertised it. Batching is enabled for the session only if both agree.
   batch?: boolean;
 }
-
-// Layer 1 control messages (relay <-> host control socket).
-export type RelayControlMessage =
-  | { type: 'sync'; connectionIds: string[] }
-  | { type: 'connected'; connectionId: string }
-  | { type: 'disconnected'; connectionId: string }
-  | { type: 'limit'; reason: string };
 
 // Relay-assigned WebSocket close codes.
 export const RelayCloseCode = {

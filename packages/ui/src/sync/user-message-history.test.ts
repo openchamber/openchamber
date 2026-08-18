@@ -78,16 +78,16 @@ describe('buildUserMessageHistorySnapshot', () => {
   });
 
   test('excludes user messages hidden by session revert state', () => {
-    const beforeRevert = message('user_1', 'user');
-    const reverted = message('user_2', 'user');
+    const beforeRevert = message('msg_ffffffffffffBefore', 'user');
+    const reverted = message('msg_000000000000Reverted', 'user');
 
     const snapshot = buildUserMessageHistorySnapshot(
       state({
-        session: [{ id: 'ses_1', revert: { messageID: 'user_2' } } as State['session'][number]],
+        session: [{ id: 'ses_1', revert: { messageID: reverted.id } } as State['session'][number]],
         message: { ses_1: [beforeRevert, reverted] },
         part: {
-          user_1: [textPart('part_user_1', 'kept')],
-          user_2: [textPart('part_user_2', 'reverted')],
+          [beforeRevert.id]: [textPart('part_user_1', 'kept')],
+          [reverted.id]: [textPart('part_user_2', 'reverted')],
         },
       }),
       'ses_1',

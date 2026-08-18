@@ -344,6 +344,10 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             if (!view) return;
             const current = view.state.doc.toString();
             if (current === value) return;
+            // Skip every controlled writeback while the browser is composing.
+            // A stale value echo can differ from CodeMirror's newer document,
+            // and replacing it would interrupt the IME session and move the caret.
+            if (view.compositionStarted) return;
             view.dispatch({
                 changes: { from: 0, to: current.length, insert: value },
                 // An external rewrite (draft restore, history navigation,

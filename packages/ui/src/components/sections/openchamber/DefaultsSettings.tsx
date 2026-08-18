@@ -52,7 +52,7 @@ export const DefaultsSettings: React.FC = () => {
   const [defaultAgent, setDefaultAgent] = React.useState<string | undefined>();
   const [smallModelUseDefault, setSmallModelUseDefault] = React.useState(true);
   const [smallModelOverride, setSmallModelOverride] = React.useState<string | undefined>();
-  const [smallModelProviders, setSmallModelProviders] = React.useState<string[] | undefined>();
+  const [smallModelProviders, setSmallModelProviders] = React.useState<string[]>([]);
   const [walkthroughModelOverride, setWalkthroughModelOverride] = React.useState<string | undefined>();
   const [isLoading, setIsLoading] = React.useState(true);
 
@@ -274,13 +274,9 @@ export const DefaultsSettings: React.FC = () => {
     () => getDisplayModel(walkthroughModelOverride),
     [walkthroughModelOverride]
   );
-
   React.useEffect(() => {
-    // Both pickers filter by the same authenticated-provider list, so either
-    // one being open is reason enough to fetch it.
     // Both pickers filter by the same authenticated-provider list, and the
     // walkthrough picker is always visible, so this is always worth fetching.
-    if (smallModelProviders !== undefined) return;
     let cancelled = false;
     (async () => {
       try {
@@ -291,13 +287,13 @@ export const DefaultsSettings: React.FC = () => {
           setSmallModelProviders(payload.authenticatedProviders.filter((id): id is string => typeof id === 'string'));
         }
       } catch {
-        // leave undefined — picker falls back to showing all providers
+        // Fail closed: never offer providers whose credentials were not verified.
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [smallModelProviders]);
+  }, []);
 
   const availableVariants = React.useMemo(() => {
     if (!parsedModel.providerId || !parsedModel.modelId) return [];

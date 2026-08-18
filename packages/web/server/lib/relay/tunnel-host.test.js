@@ -28,7 +28,7 @@ const startLoopback = () =>
     }));
   });
 
-const createHarness = async () => {
+const createHarness = async (hostOverrides = {}) => {
   const loopback = await startLoopback();
   const sentFrames = [];
   const host = createTunnelHost({
@@ -38,6 +38,7 @@ const createHarness = async () => {
       sentFrames.push(decodeTunnelFrame(frame));
     },
     getBufferedAmount: () => 0,
+    ...hostOverrides,
   });
   return { host, loopback, sentFrames };
 };
@@ -90,6 +91,36 @@ describe('tunnel-host HTTP body forwarding', () => {
   test('bodyless request (hasBody absent, legacy client) still forwards empty', async () => {
     const { host, loopback } = await createHarness();
     await host.handleFrame(httpHead());
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
+
+    const received = await waitFor(() => loopback.requests.length === 1);
+    expect(received).toBe(true);
+    expect(loopback.requests[0].body).toBe('');
+    await loopback.stop();
+  });
+
+  test('aborts a buffered body that never completes within the delivery deadline', async () => {
+    const { host, loopback, sentFrames } = await createHarness({ bodyDeliveryTimeoutMs: 50 });
+    await host.handleFrame(httpHead({ hasBody: true }));
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new TextEncoder().encode('partial')));
+    // No StreamEnd — the tunnel stalled mid-body.
+
+    const aborted = await waitFor(() => sentFrames.some((f) => f.frameType === TunnelFrameType.StreamAbort));
+    expect(aborted).toBe(true);
+    expect(loopback.requests.length).toBe(0);
+    // A late StreamEnd for the dropped stream must not trigger a second abort
+    // or forward the stale body.
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sentFrames.filter((f) => f.frameType === TunnelFrameType.StreamAbort).length).toBe(1);
+    expect(loopback.requests.length).toBe(0);
+    await loopback.stop();
+  });
+
+  test('forwards an empty body when the client delivered an explicit empty frame', async () => {
+    const { host, loopback } = await createHarness();
+    await host.handleFrame(httpHead({ hasBody: true }));
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new Uint8Array(0)));
     await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array(0)));
 
     const received = await waitFor(() => loopback.requests.length === 1);

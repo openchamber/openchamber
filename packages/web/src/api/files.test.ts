@@ -1,8 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { RuntimeUrlQuery, RuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
 
 const runtimeFetchMock = vi.fn();
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 vi.mock('@openchamber/ui/lib/runtime-fetch', () => ({
   runtimeFetch: runtimeFetchMock,
@@ -86,5 +90,21 @@ describe('createWebFilesAPI', () => {
       query: { path: '/current-workspace/file.txt', download: true },
       headers: { 'x-opencode-directory': '/current-workspace' },
     });
+  });
+
+  it('opens the native share sheet for downloads in the Capacitor app', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('window', globalThis);
+    vi.stubGlobal('navigator', {});
+    Object.defineProperty(window, 'Capacitor', { configurable: true, value: { isNativePlatform: () => true } });
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share });
+    runtimeFetchMock.mockResolvedValueOnce(new Response('hello', { headers: { 'Content-Type': 'text/plain' } }));
+
+    await api.downloadFile?.('/workspace/hello.txt');
+
+    expect(share).toHaveBeenCalledWith({ files: [expect.objectContaining({ name: 'hello.txt', type: 'text/plain' })] });
   });
 });

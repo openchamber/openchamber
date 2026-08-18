@@ -285,10 +285,20 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     }
 
     const blob = await response.blob();
+    const filename = target.split('/').pop() || 'file';
+    const capacitor = (window as typeof window & {
+      Capacitor?: { isNativePlatform?: () => boolean };
+    }).Capacitor;
+    const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+    if (capacitor?.isNativePlatform?.() === true && navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file] });
+      return;
+    }
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = target.split('/').pop() || 'file';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

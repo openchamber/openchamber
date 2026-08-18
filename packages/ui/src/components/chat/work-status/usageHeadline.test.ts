@@ -36,6 +36,10 @@ describe('resolveQuotaProviderId', () => {
     expect(resolveQuotaProviderId('anthropic')).toBe('claude');
   });
 
+  test('maps the opencode-claude integration provider onto Claude quota', () => {
+    expect(resolveQuotaProviderId('claude-code')).toBe('claude');
+  });
+
   test('is case and whitespace tolerant, and rejects empties', () => {
     expect(resolveQuotaProviderId('  OpenAI ')).toBe('codex');
     expect(resolveQuotaProviderId('')).toBeNull();

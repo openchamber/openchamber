@@ -824,15 +824,24 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       channel.send(encodeTunnelFrame(TunnelFrameType.HttpRequest, streamId, encodeJsonPayload(head)));
       void (async () => {
         try {
+          let sentBodyFrame = false;
           if (request.body) {
             for await (const chunk of request.body) {
               if (finished || channel.dead) return;
               for (const piece of chunkPayload(chunk)) {
                 channel.send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
+                sentBodyFrame = true;
               }
             }
           }
           if (!finished && !channel.dead) {
+            // A body source that yielded no chunks (e.g. an empty stream) still
+            // declared hasBody in the head. Emit one empty body frame so the
+            // host can tell this apart from body frames lost in transit, which
+            // it aborts as an ambiguous transport failure.
+            if (request.body && !sentBodyFrame) {
+              channel.send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, EMPTY_PAYLOAD));
+            }
             channel.send(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, EMPTY_PAYLOAD));
           }
         } catch (error) {

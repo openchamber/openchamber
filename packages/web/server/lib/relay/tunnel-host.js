@@ -96,10 +96,11 @@ const isWsClosePayload = (parsed) => Boolean(parsed && typeof parsed === 'object
  *   getLocalPort: () => number,
  *   sendFrame: (plaintextFrame: Uint8Array) => void | Promise<void>,
  *   getBufferedAmount: () => number,
+ *   bodyDeliveryTimeoutMs?: number,
  * }} deps
  */
-export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBufferedAmount }) => {
-  /** @type {Map<number, { kind: 'http', abort: AbortController, body: ReadableStreamDefaultController | null } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
+export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBufferedAmount, bodyDeliveryTimeoutMs = BODY_DELIVERY_TIMEOUT_MS }) => {
+  /** @type {Map<number, { kind: 'http', abort: AbortController, body: { enqueue(payload: Uint8Array): void, close(): void, error(error: Error): void } | null, noBody: boolean } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
   const streams = new Map();
   const assembler = createFragmentAssembler();
   let closed = false;
@@ -329,8 +330,12 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       if (streams.get(streamId) === stream && !completed && !liveStream) {
         dropStream(streamId);
         void sendAbort(streamId, 'tunnel request body was not delivered in time');
+        // Settle the buffered-body wait below so the stream's buffered chunks
+        // and this call frame are released (the post-wait guard sees the
+        // dropped stream and returns without a second abort).
+        finishBody(new Error('tunnel request body was not delivered in time'));
       }
-    }, BODY_DELIVERY_TIMEOUT_MS);
+    }, bodyDeliveryTimeoutMs);
     deliveryDeadline.unref?.();
 
     await bodyEnded;

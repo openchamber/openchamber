@@ -24,42 +24,6 @@ const parseLoopbackUrl = (rawUrl) => {
   return url;
 };
 
-const getRequestPathname = (req) => {
-  const rawUrl = req?.originalUrl || req?.url || '';
-  if (typeof rawUrl !== 'string' || rawUrl.length === 0) return '';
-  try {
-    return new URL(rawUrl, 'http://localhost').pathname;
-  } catch {
-    return '';
-  }
-};
-
-const getQueryParam = (req, name) => {
-  const rawUrl = req?.originalUrl || req?.url || '';
-  if (typeof rawUrl !== 'string' || rawUrl.length === 0) return '';
-  try {
-    return new URL(rawUrl, 'http://localhost').searchParams.get(name)?.trim() || '';
-  } catch {
-    return '';
-  }
-};
-
-const getCookieValue = (req, name) => {
-  const cookieHeader = req?.headers?.cookie;
-  if (typeof cookieHeader !== 'string' || cookieHeader.length === 0) return '';
-  for (const segment of cookieHeader.split(';')) {
-    const [rawName, ...rawValueParts] = segment.split('=');
-    if (rawName?.trim() !== name) continue;
-    return rawValueParts.join('=').trim();
-  }
-  return '';
-};
-
-const hasPreviewProxyCredential = (req) => {
-  if (!getRequestPathname(req).startsWith('/api/preview/proxy/')) return false;
-  return Boolean(getQueryParam(req, 'oc_preview_token') || getCookieValue(req, 'oc_preview_token'));
-};
-
 export const registerServerStatusRoutes = (app, dependencies) => {
   const {
     express,
@@ -626,14 +590,6 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   };
 
   const requireApiAuth = async (req, res, next) => {
-    // Preview proxy requests carry a target-scoped capability token that the
-    // preview proxy validates against the registered target id/TTL. Let those
-    // requests reach that stricter check instead of failing the global UI auth
-    // gate when the short-lived browser URL auth token expires.
-    if (hasPreviewProxyCredential(req)) {
-      return next();
-    }
-
     const requestScope = tunnelAuthController.classifyRequestScope(req);
     if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
       return tunnelAuthController.requireTunnelSession(req, res, next);

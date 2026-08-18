@@ -57,6 +57,7 @@ const ICONS = {
   zoomOut: spriteIcon('subtract'),
   fit: spriteIcon('refresh'),
   textWrap: spriteIcon('text-wrap'),
+  image: spriteIcon('file-image'),
 } as const;
 
 const ICON_BTN_CLASS =
@@ -64,6 +65,18 @@ const ICON_BTN_CLASS =
 
 const setIconHtml = (el: Element, html: string): void => {
   el.innerHTML = html;
+};
+
+const decorateImageLabels = (root: HTMLElement): void => {
+  for (const label of Array.from(root.querySelectorAll<HTMLElement>('[data-openchamber-markdown-image-label="true"]'))) {
+    if (label.querySelector('[data-openchamber-markdown-image-label-icon]')) continue;
+    const icon = document.createElement('span');
+    icon.className = 'inline-flex shrink-0';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('data-openchamber-markdown-image-label-icon', 'true');
+    setIconHtml(icon, ICONS.image);
+    label.prepend(icon);
+  }
 };
 
 const makeIconButton = (icon: keyof typeof ICONS, title: string, slot: string): HTMLButtonElement => {
@@ -487,6 +500,7 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
 
 /** Run all idempotent DOM decoration passes over freshly-rendered markdown. */
 export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void => {
+  decorateImageLabels(root);
   decorateInlineCode(root);
   decorateMermaid(root, ctx);
   decorateCodeBlocks(root, ctx);
