@@ -54,7 +54,7 @@ import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, useGlobalSess
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import {
   EMPTY_SESSION_ORDER_RANKS,
@@ -70,6 +70,7 @@ import type { WorktreeMetadata } from '@/types/worktree';
 
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
+import { collectSessionSubtreeIds, getSessionParentId, selectPinnedRootSessionIds } from './mobileSessionGrouping';
 
 type MobileSessionsSheetProps = {
   open: boolean;
@@ -90,6 +91,7 @@ type MobileSessionsSheetProps = {
 };
 
 const EMPTY_PINNED_SESSION_IDS = new Set<string>();
+const EMPTY_PINNED_SESSION_SUBTREE_IDS = new Set<string>();
 
 // Pseudo-project key for the collapsible "recent" group's persisted expansion.
 
@@ -133,9 +135,6 @@ const SESSIONS_PER_BUCKET = 7;
 const PROJECT_SESSION_INDENT = 40;
 // Extra left padding applied to each nested subsession level.
 const CHILD_INDENT_STEP = 16;
-
-const getParentId = (session: Session): string | null =>
-  (session as Session & { parentID?: string | null }).parentID ?? null;
 
 const getSessionDirectory = (session: Session): string => {
   const sessionWithDirectory = session as Session & {
@@ -268,8 +267,8 @@ const NewWorktreeIconButton: React.FC<{
   );
 };
 
-// Width of the swipe-revealed action area (rename + archive + delete buttons).
-const ROW_ACTIONS_WIDTH = 144;
+// Width of the swipe-revealed action area (pin + rename + archive + delete buttons).
+const ROW_ACTIONS_WIDTH = 192;
 const ROW_SWIPE_SNAP_MS = 180;
 
 /** Generic swipe-left-to-reveal wrapper for drawer rows (projects, worktrees).
@@ -447,6 +446,9 @@ const SessionRow: React.FC<{
   onRequestRename?: () => void;
   onSubmitRename?: (title: string) => void;
   onCancelRename?: () => void;
+  /** Pin state for this row (desktop sidebar parity: marker + pin/unpin action). */
+  pinned?: boolean;
+  onTogglePinned?: () => void;
 }> = ({
   session,
   active,
@@ -466,6 +468,8 @@ const SessionRow: React.FC<{
   onRequestRename,
   onSubmitRename,
   onCancelRename,
+  pinned = false,
+  onTogglePinned,
 }) => {
   const { t } = useI18n();
   const time = formatRelativeShort(getSessionTimestamp(session));
@@ -551,6 +555,20 @@ const SessionRow: React.FC<{
         >
           {/* Icon-only actions on the row's own background — they read as the
               row extending to reveal extra controls, not a separate panel. */}
+          {onTogglePinned ? (
+            <button
+              type="button"
+              tabIndex={revealed ? 0 : -1}
+              className="flex flex-1 items-center justify-center text-muted-foreground transition-colors active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+              aria-label={pinned
+                ? t('sessions.sidebar.session.menu.unpin')
+                : t('sessions.sidebar.session.menu.pin')}
+              onClick={onTogglePinned}
+              style={{ touchAction: 'manipulation' }}
+            >
+              {pinned ? <Icon name="unpin" className="size-[18px]" /> : <Icon name="pushpin" className="size-[18px]" />}
+            </button>
+          ) : null}
           <button
             type="button"
             tabIndex={revealed ? 0 : -1}
@@ -672,6 +690,13 @@ const SessionRow: React.FC<{
               >
                 {title}
               </span>
+              {pinned ? (
+                <Icon
+                  name="pushpin"
+                  className="size-3.5 shrink-0 text-primary"
+                  aria-label={t('sessions.sidebar.session.status.pinned')}
+                />
+              ) : null}
               {/* The elapsed turn takes the time slot while it matters, then
                   hands it back to the relative timestamp. */}
               {showActivityDuration ? (
@@ -859,6 +884,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     (state) => open || variant === 'sidebar' ? state.ids : EMPTY_PINNED_SESSION_IDS,
     [open, variant],
   ));
+  const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
   const sessionOrderRanks = useSessionOrderingStore(React.useCallback(
     (state) => open || variant === 'sidebar' ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
     [open, variant],
@@ -1026,6 +1052,35 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const normalizedQuery = query.trim().toLowerCase();
 
+  const pinnedRootIds = React.useMemo(() => {
+    if (!open || variant !== 'drawer') return EMPTY_PINNED_SESSION_IDS;
+    return selectPinnedRootSessionIds(
+      sessions,
+      (session) => isSessionPinned(pinnedSessionIds, getSessionDirectory(session), session.id),
+    );
+  }, [open, pinnedSessionIds, sessions, variant]);
+
+  const pinnedSessionSubtreeIds = React.useMemo(() => {
+    if (!open || variant !== 'drawer' || pinnedRootIds.size === 0) {
+      return EMPTY_PINNED_SESSION_SUBTREE_IDS;
+    }
+    return collectSessionSubtreeIds(sessions, pinnedRootIds);
+  }, [open, pinnedRootIds, sessions, variant]);
+
+  // Top-level sessions pinned via the existing pin affordance, ordered by the
+  // shared lifecycle comparator (pinned-first ordering, same as the desktop
+  // sidebar's recent list). Subsessions are excluded: the pinned section shows
+  // root sessions the user can jump into directly, matching the desktop
+  // pin action which pins a session row, not its children.
+  const pinnedSessions = React.useMemo<Session[]>(() => {
+    if (!open || variant !== 'drawer' || pinnedRootIds.size === 0) return [];
+    return orderSessionsByLifecycleScopes(
+      sessions.filter((session) => pinnedRootIds.has(session.id)),
+      pinnedSessionIds,
+      sessionOrderRanks,
+    );
+  }, [open, pinnedRootIds, pinnedSessionIds, sessionOrderRanks, sessions, variant]);
+
   // On open, bring the current session (or at least its project) into view —
   // the list keeps its scroll position between opens, so a long project list
   // otherwise lands wherever it was left. Rows carry data-active-* markers.
@@ -1078,6 +1133,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       const normalizedDirectory = normalizePath(directory);
       const node = nodes.find((entry) => projectMatchesExactDirectory(entry.project, normalizedDirectory));
       if (!node) continue;
+      if (!getSessionParentId(session)) node.totalSessions += 1;
+      // A pinned root and its complete in-snapshot subtree render through the
+      // global Pinned section and its chat; do not duplicate any of them in
+      // the drawer's project tree (issue #2918).
+      if (variant === 'drawer' && pinnedSessionSubtreeIds.has(session.id)) continue;
       const matchedWorktree = findExactWorktreeMatch(node.project, normalizedDirectory);
       const bucket = matchedWorktree
         ? ensureBucket(node, matchedWorktree.path, matchedWorktree)
@@ -1088,14 +1148,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     for (const node of nodes) {
       for (const bucket of node.buckets) {
         bucket.sessions = orderSessionsByLifecycleScopes(bucket.sessions, pinnedSessionIds, sessionOrderRanks);
-        for (const session of bucket.sessions) {
-          if (!getParentId(session)) node.totalSessions += 1;
-        }
       }
     }
 
     return nodes;
-  }, [activeProjectId, pinnedSessionIds, projectsMeta, sessionOrderRanks, sessions]);
+  }, [activeProjectId, pinnedSessionIds, pinnedSessionSubtreeIds, projectsMeta, sessionOrderRanks, sessions, variant]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 
@@ -1159,7 +1216,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     const idsInBucket = new Set(bucket.sessions.map((entry) => entry.id));
     const childrenByParent = new Map<string, Session[]>();
     for (const candidate of bucket.sessions) {
-      const parentId = getParentId(candidate);
+      const parentId = getSessionParentId(candidate);
       if (parentId && idsInBucket.has(parentId)) {
         const list = childrenByParent.get(parentId) ?? [];
         list.push(candidate);
@@ -1167,7 +1224,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       }
     }
     const roots = bucket.sessions.filter((entry) => {
-      const parentId = getParentId(entry);
+      const parentId = getSessionParentId(entry);
       return !parentId || !idsInBucket.has(parentId);
     });
 
@@ -1200,6 +1257,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             onRequestRename={() => handleRequestRename(session.id)}
             onSubmitRename={(nextTitle) => void handleSubmitRename(session.id, nextTitle)}
             onCancelRename={() => setRenamingSessionId(null)}
+            pinned={isSessionPinned(pinnedSessionIds, getSessionDirectory(session), session.id)}
+            onTogglePinned={() => togglePinnedSession({ directory: getSessionDirectory(session), sessionId: session.id })}
           />
           {hasChildren && expanded
             ? children.map((child) => renderNode(child, rowIndent + CHILD_INDENT_STEP))
@@ -1373,7 +1432,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       sessions.filter((session) => {
         // Subsessions are implementation noise in a flat search list — only
         // top-level sessions are searchable.
-        if (getParentId(session)) return false;
+        if (getSessionParentId(session)) return false;
         const directory = getSessionDirectory(session);
         const project = findExactProjectMatch(projectsMeta, directory);
         return sessionMatchesQuery(session, project?.label ?? '', normalizedQuery);
@@ -1390,7 +1449,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       .map((project) => ({
         ...project,
         sessionCount: sessions.filter((session) => {
-          if (getParentId(session)) return false;
+          if (getSessionParentId(session)) return false;
           const directory = normalizePath(getSessionDirectory(session));
           return projectMatchesExactDirectory(project, directory);
         }).length,
@@ -1525,6 +1584,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           indent={12}
                           contextLabel={buildSessionContextLabel(session)}
                           onSelect={() => handleSelectSession(session)}
+                          pinned={isSessionPinned(pinnedSessionIds, getSessionDirectory(session), session.id)}
                         />
                       </div>
                     ))}
@@ -1604,6 +1664,43 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             </div>
           ) : (
             <div className="flex flex-col">
+              {variant === 'drawer' && pinnedSessions.length > 0 ? (
+                <section className="px-3 pt-2">
+                  <div className="flex items-center justify-between px-1 pb-1.5">
+                    <span className="typography-micro font-semibold uppercase tracking-wider text-muted-foreground">
+                      {t('directoryTree.section.pinned')}
+                    </span>
+                    <span className="typography-micro text-muted-foreground tabular-nums">
+                      {pinnedSessions.length}
+                    </span>
+                  </div>
+                  <div className="overflow-hidden rounded-2xl border border-border/70 bg-[var(--surface-elevated)]">
+                    {pinnedSessions.map((session) => (
+                      <div key={session.id} className="border-t border-border/70 first:border-t-0">
+                        <SessionRow
+                          session={session}
+                          active={currentSessionId === session.id}
+                          indent={12}
+                          contextLabel={buildSessionContextLabel(session)}
+                          onSelect={() => handleSelectSession(session)}
+                          revealed={revealedSessionId === `pinned:${session.id}`}
+                          onRevealedChange={(nextRevealed) => handleRowRevealedChange(`pinned:${session.id}`, nextRevealed)}
+                          confirmingDelete={confirmingDeleteSessionId === `pinned:${session.id}`}
+                          onArchive={() => void handleArchive(session)}
+                          onRequestDelete={() => setConfirmingDeleteSessionId(`pinned:${session.id}`)}
+                          onConfirmDelete={() => void handleConfirmDelete(session)}
+                          renaming={renamingSessionId === `pinned:${session.id}`}
+                          onRequestRename={() => handleRequestRename(`pinned:${session.id}`)}
+                          onSubmitRename={(nextTitle) => void handleSubmitRename(session.id, nextTitle)}
+                          onCancelRename={() => setRenamingSessionId(null)}
+                          pinned
+                          onTogglePinned={() => togglePinnedSession({ directory: getSessionDirectory(session), sessionId: session.id })}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
               {orderedNodes.map((node, nodeIndex) => {
                 const projectExpanded = isProjectExpanded(node);
                 const buckets = normalizedQuery
