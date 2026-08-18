@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Ukrainian:** corrected session translations to use the accusative case and feminine agreement, including archive/restore errors, delete/archive confirmations, subtask actions, tunnel notifications, and planning prompts.
 - **Project knowledge:** the Project notes panel is now Project knowledge, with notes, todos, plans and their search in a resizable sidebar. Notes are cards you expand by clicking anywhere on them, plans open and edit in the panel itself instead of a separate tab, and notes and plans you pin travel with every message you send in that project until you unpin them.
 - **Work status:** the Context sources section now names each pinned note and plan riding along with your messages, and its pin button unpins them from there.
 - **Settings:** OpenChamber no longer replaces a full OpenCode config with an empty `$schema`-only stub when the file uses JSON5-style unquoted keys; Settings changes now fail instead of wiping plugins, MCP servers, and providers (thanks to @makeittech).
