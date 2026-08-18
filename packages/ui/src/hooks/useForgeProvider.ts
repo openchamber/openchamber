@@ -1,7 +1,5 @@
-import { useMemo } from 'react';
-import { resolveGitProvider, useGitProvider, buildGitProviderHosts } from '@/lib/gitProvider';
+import { resolveGitProvider, buildGitProviderHosts } from '@/lib/gitProvider';
 import type { GitProviderHosts } from '@/lib/gitProvider';
-import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { buildForgeProvider } from '@/lib/forge/adapters';
 import type { ForgeProvider } from '@/lib/forge/provider';
@@ -23,26 +21,7 @@ const buildProviderHosts = (): GitProviderHosts => {
 };
 
 /**
- * Resolve the forge provider for `directory` reactively: the provider kind is
- * detected from the directory's remotes via `useGitProvider`, and the provider
- * adapters are built from the registered runtime APIs. Returns null for 'other'
- * providers (no forge-backed UI) and for kinds whose runtime API is missing.
- */
-export const useForgeProvider = (directory: string | null | undefined): ForgeProvider | null => {
-  const kind = useGitProvider(directory);
-  const runtimeApis = useRuntimeAPIs();
-  const apis = useMemo(
-    () => ({ github: runtimeApis.github, gitlab: runtimeApis.gitlab, gitea: runtimeApis.gitea }),
-    [runtimeApis.github, runtimeApis.gitlab, runtimeApis.gitea],
-  );
-  return useMemo(
-    () => (kind && kind !== 'other' ? buildForgeProvider(kind, apis) : null),
-    [kind, apis],
-  );
-};
-
-/**
- * Imperative counterpart of `useForgeProvider` for non-React code paths.
+ * Resolve the forge provider for `directory` for non-React code paths.
  * Resolves the directory's provider from the auth stores' connected accounts
  * and the runtime's registered APIs in one async step.
  */

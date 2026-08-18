@@ -22,7 +22,7 @@ export interface ForgeLookupOption {
 }
 
 /** Resolve the dropdown option shape for a given provider/kind result. */
-export const toLookupOptions = (
+const toLookupOptions = (
   kind: ForgeLookupKind,
   users: ForgeUser[],
   labels: ForgeLabel[],

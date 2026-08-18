@@ -8,6 +8,4 @@
 export { ForgeMetadataChips } from './ForgeMetadataChips';
 export { ForgeCommitsSection } from './ForgeCommitsSection';
 export { ForgeFilesDiffSection } from './ForgeFilesDiffSection';
-export { ForgeTimelineSection } from './ForgeTimelineSection';
-export { ForgeChecksSection } from './ForgeChecksSection';
 export { ForgeEntityDetailView } from './ForgeEntityDetailView';
