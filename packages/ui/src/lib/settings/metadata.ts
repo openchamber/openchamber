@@ -26,7 +26,8 @@ export type SettingsPageSlug =
   | 'voice'
   | 'tunnel'
   | 'fusion'
-  | 'about';
+  | 'about'
+  | 'integrations';
 
 type SettingsPageGroup =
   | 'general'
@@ -203,6 +204,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   { slug: 'tunnel', title: 'External Tunnel', group: 'projects', kind: 'single', keywords: ['tunnel', 'external', 'cloudflare', 'qr', 'remote', 'mobile', 'share'], isAvailable: (ctx) => !ctx.isVSCode },
   { slug: 'fusion', title: 'Fusion', group: 'general', kind: 'single', keywords: ['fusion', 'presets', 'model panel', 'compare models', 'multi-model', 'deliberation'], isAvailable: (ctx) => !ctx.isVSCode },
   { slug: 'about', title: 'About', group: 'general', kind: 'single', keywords: ['about', 'version', 'updates', 'release', 'changelog'], isAvailable: (ctx) => ctx.isMobile && !ctx.isVSCode },
+  { slug: 'integrations', title: 'Integrations', group: 'general', kind: 'single', keywords: ['integration', 'plugin', 'provider', 'oauth', 'claude', 'cursor', 'command code', 'connect', 'discord', 'telegram', 'messenger'] },
 ] as const;
 
 const LEGACY_SIDEBAR_SECTION_TO_SETTINGS_SLUG: Record<SidebarSection, SettingsPageSlug> = {
@@ -287,6 +289,9 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
 
     case 'git':
       return 'git-branch';
+
+    case 'integrations':
+      return 'plug';
 
     case 'usage':
       return 'bar-chart-2';

@@ -1132,6 +1132,15 @@ const readOpenChamberChildren = (value: unknown): FusionChildRef[] | undefined =
     return normalized.length > 0 ? normalized : undefined;
 };
 
+const readOpenChamberRunId = (value: unknown): string | undefined => {
+    if (!value || typeof value !== 'object') return undefined;
+    const record = value as Record<string, unknown>;
+    const envelope = record.openchamber;
+    if (!envelope || typeof envelope !== 'object') return undefined;
+    const runId = (envelope as Record<string, unknown>).runId;
+    return typeof runId === 'string' && runId.trim().length > 0 ? runId : undefined;
+};
+
 /**
  * One fusion child session rendered with the exact subagent card: live
  * entries streamed from the child's own session messages, plus the
@@ -1204,13 +1213,14 @@ const OpenChamberChildSummary: React.FC<{
  */
 const OpenChamberCapabilityGroup: React.FC<{
     startTime?: number;
+    runId?: string;
     metadataChildren?: Array<{ model: string; sessionId: string }>;
     isActive: boolean;
     isExpanded: boolean;
     isMobile: boolean;
     onShowPopup: (content: ToolPopupContent) => void;
     animateTailText: boolean;
-}> = ({ startTime, metadataChildren, isActive, isExpanded, isMobile, onShowPopup, animateTailText }) => {
+}> = ({ startTime, runId, metadataChildren, isActive, isExpanded, isMobile, onShowPopup, animateTailText }) => {
     const { t } = useI18n();
     const parentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const directory = useEffectiveDirectory();
@@ -1218,17 +1228,16 @@ const OpenChamberCapabilityGroup: React.FC<{
     const parentMessages = useSessionMessageRecords(parentSessionId ?? '', directory ?? '');
     const [eventChildren, setEventChildren] = React.useState<Record<string, { model: string }>>({});
 
-    // A new fusion.run part in the same session must not inherit the previous
-    // run's evented children (the fallback filter bounds them by time; the
-    // event map cannot, so reset it per part).
+    // A new fusion.run part must not inherit evented children from another run.
     React.useEffect(() => {
         setEventChildren({});
-    }, [startTime]);
+    }, [runId, startTime]);
 
     React.useEffect(() => {
         if (!parentSessionId || !directory) return;
         return subscribeOpenchamberEvents((event) => {
             if (event.type !== 'fusion-children-created') return;
+            if (!runId || event.runId !== runId) return;
             if (event.sessionId !== parentSessionId || event.directory !== directory) return;
             setEventChildren((current) => {
                 let next: Record<string, { model: string }> | null = null;
@@ -1240,7 +1249,7 @@ const OpenChamberCapabilityGroup: React.FC<{
                 return next ?? current;
             });
         });
-    }, [directory, parentSessionId]);
+    }, [directory, parentSessionId, runId]);
 
     const nextCapabilityStart = React.useMemo(() => {
         if (startTime === undefined) return undefined;
@@ -1469,6 +1478,8 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     );
     const hasVisualDiffEntry = diffEntries.some((entry) => entry.renderMode === 'diff');
     const hideToolInputPreview = part.tool === 'openchamber'
+        || part.tool === 'openchamber_web'
+        || part.tool === 'openchamber_memory'
         || part.tool === 'apply_patch'
         || part.tool === 'edit'
         || part.tool === 'multiedit';
@@ -1995,6 +2006,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const openChamberMetadataChildren = React.useMemo<FusionChildRef[] | undefined>(() => (
         readOpenChamberChildren(metadata) ?? readOpenChamberChildren(partMetadata)
     ), [metadata, partMetadata]);
+    const openChamberMetadataRunId = React.useMemo<string | undefined>(() => (
+        readOpenChamberRunId(metadata) ?? readOpenChamberRunId(partMetadata)
+    ), [metadata, partMetadata]);
 
     const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>(() => ({
         start: typeof time?.start === 'number' ? time.start : undefined,
@@ -2464,6 +2478,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             {isOpenChamberCapability ? (
                 <OpenChamberCapabilityGroup
                     startTime={effectiveTimeStart}
+                    runId={openChamberMetadataRunId}
                     metadataChildren={openChamberMetadataChildren}
                     isActive={isActive}
                     isExpanded={isExpanded}

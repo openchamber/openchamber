@@ -312,6 +312,27 @@ describe('createRelayTunnelClient', () => {
     expect(await c.text()).toBe('payload-xyz');
   });
 
+  test('a body source with zero chunks still delivers an explicit empty body frame', async () => {
+    const frames: TunnelFrame[] = [];
+    const { client } = await setupClient({ recordFrame: (frame) => frames.push(frame) });
+    track(client);
+    const emptyStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
+    const response = await client.fetch('/echo-body', { method: 'POST', body: emptyStream });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('');
+    // The head declares hasBody, so the host must see at least one HttpBody
+    // frame — otherwise it treats the body as lost in transit and aborts.
+    const request = frames.find((frame) => frame.frameType === TunnelFrameType.HttpRequest);
+    expect(request).toBeDefined();
+    const bodyFrames = frames.filter((frame) => frame.frameType === TunnelFrameType.HttpBody && frame.streamId === request!.streamId);
+    expect(bodyFrames.length).toBe(1);
+    expect(bodyFrames[0]!.payload.length).toBe(0);
+  });
+
   test('streams a response body incrementally', async () => {
     const { client } = await setupClient();
     track(client);

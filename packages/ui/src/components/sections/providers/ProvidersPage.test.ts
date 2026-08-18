@@ -4,6 +4,7 @@ import {
   getOAuthAuthMethods,
   normalizeAuthType,
   parseAuthPayload,
+  requiresOpenCodeRestartAfterOAuth,
   shouldShowApiKeyAuth,
 } from './providerAuth';
 
@@ -56,5 +57,10 @@ describe('provider auth method helpers', () => {
     expect(getOAuthAuthMethods([{ type: 'oauth', label: 'Cursor' }])).toEqual([
       { method: { type: 'oauth', label: 'Cursor' }, methodIndex: 0 },
     ]);
+  });
+
+  test('Claude CLI OAuth does not require an OpenCode restart', () => {
+    expect(requiresOpenCodeRestartAfterOAuth('claude-code')).toBe(false);
+    expect(requiresOpenCodeRestartAfterOAuth('github-copilot')).toBe(true);
   });
 });

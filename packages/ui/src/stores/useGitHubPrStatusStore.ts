@@ -359,15 +359,22 @@ const toPersistedEntry = (entry: PrStatusEntry): PersistedPrStatusEntry => ({
   resolvedRemoteName: entry.resolvedRemoteName ?? entry.status?.resolvedRemoteName ?? null,
 });
 
-const hydrateEntry = (entry: PersistedPrStatusEntry | undefined): PrStatusEntry => ({
-  ...createEntry(),
-  status: entry?.status ?? null,
-  isInitialStatusResolved: entry?.isInitialStatusResolved ?? false,
-  lastRefreshAt: entry?.lastRefreshAt ?? 0,
-  lastDiscoveryPollAt: entry?.lastDiscoveryPollAt ?? 0,
-  identity: entry?.identity ?? null,
-  resolvedRemoteName: entry?.resolvedRemoteName ?? entry?.status?.resolvedRemoteName ?? null,
-});
+const hydrateEntry = (entry: PersistedPrStatusEntry | undefined): PrStatusEntry => {
+  // A persisted closed/merged PR is restored so the panel keeps showing the
+  // branch's PR history across a reload. It is never treated as live authority:
+  // `lastDiscoveryPollAt` is reset so the watcher revalidates it immediately and
+  // an open PR (or an authoritative empty result) replaces it.
+  const hasTerminalPr = isTerminalPrState(entry?.status?.pr?.state);
+  return {
+    ...createEntry(),
+    status: entry?.status ?? null,
+    isInitialStatusResolved: entry?.isInitialStatusResolved ?? false,
+    lastRefreshAt: entry?.lastRefreshAt ?? 0,
+    lastDiscoveryPollAt: hasTerminalPr ? 0 : (entry?.lastDiscoveryPollAt ?? 0),
+    identity: entry?.identity ?? null,
+    resolvedRemoteName: entry?.resolvedRemoteName ?? entry?.status?.resolvedRemoteName ?? null,
+  };
+};
 
 const boundEntries = (entries: Record<string, PrStatusEntry>): Record<string, PrStatusEntry> => {
   const all = Object.entries(entries);
@@ -472,6 +479,9 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
             if (!entry || entry.watchers <= 0) {
               return;
             }
+            // Bootstrap retries only help discovery before any PR is known.
+            // Once a PR is cached — open or historical — the discovery interval
+            // owns revalidation.
             if (entry.status?.pr) {
               return;
             }
@@ -496,7 +506,11 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
           }
 
           const hasPr = Boolean(entry.status?.pr);
-          if (!hasPr) {
+          // A closed/merged PR is history, not live status. It stays on the
+          // discovery cadence like a branch with no PR at all, so a newer open
+          // PR — or an authoritative empty result — replaces it on its own.
+          const isTerminal = isTerminalPrState(entry.status?.pr?.state);
+          if (!hasPr || isTerminal) {
             const now = Date.now();
             if (now - entry.lastDiscoveryPollAt < PR_DISCOVERY_INTERVAL_MS) {
               return;
@@ -517,10 +531,6 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
               };
             });
             void get().refresh(key, { force: true, silent: true, markInitialResolved: true });
-            return;
-          }
-
-          if (isTerminalPrState(entry.status?.pr?.state)) {
             return;
           }
 
@@ -932,11 +942,8 @@ const deriveSummary = (entry: PrStatusEntry): PrVisualSummary | null => {
 const summarySignature = (s: PrVisualSummary): string =>
   `${s.number}:${s.visualState}:${s.prState}:${s.draft}:${s.title ?? ''}:${s.url ?? ''}:${s.base ?? ''}:${s.head ?? ''}:${s.canMerge ?? ''}:${s.mergeableState ?? ''}:${s.checks?.state ?? ''}:${s.checks?.total ?? ''}:${s.checks?.success ?? ''}:${s.checks?.failure ?? ''}:${s.checks?.pending ?? ''}:${s.repo?.owner ?? ''}:${s.repo?.repo ?? ''}`;
 
-let prKeyedCacheSigs = new Map<string, string>();
-let prKeyedCacheResult: Map<string, PrVisualSummary> = new Map();
-
 // Per-key summary cache so many independent row subscribers (one key each)
-// keep referential stability without fighting over the multi-key cache above.
+// keep referential stability.
 // Practically bounded by the number of worktree branches observed in a
 // session; the explicit cap below guards long-running documents that rotate
 // through many branches/runtimes (entries are tiny; insertion-order eviction
@@ -962,36 +969,5 @@ export const usePrVisualSummary = (key: string | null): PrVisualSummary | null =
     }
     prSummaryCacheByKey.set(key, { sig, summary });
     return summary;
-  });
-};
-
-export const usePrVisualSummaryByKeys = (keys: string[]) => {
-  return useGitHubPrStatusStore((state) => {
-    // Derive summaries for requested keys only
-    const nextSigs = new Map<string, string>();
-    const nextSummaries = new Map<string, PrVisualSummary>();
-
-    for (const key of keys) {
-      const entry = state.entries[key];
-      if (!entry) continue;
-      const summary = deriveSummary(entry);
-      if (!summary) continue;
-      const sig = summarySignature(summary);
-      nextSigs.set(key, sig);
-      nextSummaries.set(key, summary);
-    }
-
-    // Compare with cached signatures
-    if (nextSigs.size === prKeyedCacheSigs.size) {
-      let same = true;
-      for (const [k, sig] of nextSigs) {
-        if (prKeyedCacheSigs.get(k) !== sig) { same = false; break; }
-      }
-      if (same) return prKeyedCacheResult;
-    }
-
-    prKeyedCacheSigs = nextSigs;
-    prKeyedCacheResult = nextSummaries;
-    return nextSummaries;
   });
 };

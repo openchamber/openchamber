@@ -81,20 +81,41 @@ process violation.
 
 | Trigger | Required skill |
 |---|---|
-| Any source, dependency, export, build-config, generated-asset, package-contract, or module-ownership change | `openchamber-change-discipline` |
+| Source/dependency changes, exports or package contracts, build/generated assets, or module ownership | `openchamber-change-discipline` |
 | CLI commands, prompts, terminal output, non-TTY, `--quiet`, or `--json` behavior | `clack-cli-patterns` |
-| Shared UI data access, OpenCode SDK, `RuntimeAPIs`, runtime fetch/auth/URLs, bridges/proxies, runtime switching, or server API routes | `ui-api-decoupling` |
+| Shared UI data access, OpenCode SDK or server routes, `RuntimeAPIs`, runtime auth/URLs, bridges, or runtime switching | `ui-api-decoupling` |
 | Electron main/preload, IPC, native UI, updater, deep links, SSH/tunnels, packaging, or child processes | `desktop-shell` |
 | Session sync, bootstrap/reconnect, reducers, polling, optimistic state, queues, live status, reconciliation, or directory-scoped caches | `sync-state-invariants` |
-| Render/store/event hot paths, large lists, caching/indexing, high CPU/memory, lag, jank, freezes, or performance regressions | `performance-engineering` |
+| Render/store/event hot paths, large lists, caches/indexes, or reported lag, freezes, CPU/memory, startup, or performance regressions | `performance-engineering` |
 | WebSocket, SSE, streaming transport, runtime transport internals, or private relay | `relay-transport` |
 | UI components, styling, colors, buttons, or icons | `theme-system` |
 | User-facing or accessible UI text, labels, aria, toasts, dialogs, or navigation copy | `locale-ui-patterns` |
 | Settings UI, settings dialogs, configuration surfaces, or settings search | `settings-ui-patterns` |
 | Sortable or drag-to-reorder behavior, especially `@dnd-kit` and touch/wrapping layouts | `drag-to-reorder` |
 | iOS Simulator build, launch, preview, gestures, or `serve-sim` control | `serve-sim` |
+| Drafting or updating user-facing CHANGELOG entries for the `[Unreleased]` section (main app or VS Code extension) | `changelog-authoring` |
+| Creating or editing skills, `AGENTS.md`, or docs reached through agent instructions/context pointers | `writing-for-agents` |
 
 Pure code-reading or explanation does not require implementation skills unless needed to interpret a specialized subsystem.
+
+### Skill Ownership
+
+Keep each cross-cutting rule with one canonical owner; companion skills add only domain-specific consequences and a pointer to that owner.
+
+| Concern | Canonical skill |
+|---|---|
+| Change scope, abstraction discipline, and validation risk | `openchamber-change-discipline` |
+| State authority, reconciliation, optimistic state, and lifecycle correctness | `sync-state-invariants` |
+| Measurement, hot-path cost, caching performance, and optimization evidence | `performance-engineering` |
+| Shared UI API and runtime boundaries | `ui-api-decoupling` |
+| WebSocket/SSE and private relay mechanics | `relay-transport` |
+| Electron native ownership and privilege boundary | `desktop-shell` |
+| UI tokens, primitives, icons, and animation styling | `theme-system` |
+| Settings composition and search behavior | `settings-ui-patterns` |
+| User-facing text and localization | `locale-ui-patterns` |
+| Agent-facing document structure and context pointers | `writing-for-agents` |
+
+Before adding guidance to a skill, identify its canonical owner. If another skill owns the rule, add a precise companion pointer and only the local consequence; do not copy the rule.
 
 ## Validation
 
@@ -102,6 +123,7 @@ Pure code-reading or explanation does not require implementation skills unless n
 - Prefer focused tests and package-scoped type-check/lint for executable source changes.
 - Use workspace-wide checks for cross-workspace contracts, root tooling, dependencies, or shared generated assets.
 - Run `bun run dead-code` when source files are added/deleted/renamed or exports, types, entrypoints, or import shape change; inspect its report because it is non-blocking.
+- Run `bunx oxlint <changed-paths>` on TypeScript/JavaScript files you created or substantially rewrote. This runs the vendored `anti-slop` plugin, which rejects low-evidence typing: unjustified type assertions, `unknown`/`object`/`Record<string, unknown>` contracts, ad hoc `typeof` narrowing, and module mocking. Fix findings in code you authored. Pre-existing findings elsewhere are a known backlog: do not mass-fix them, and never silence a rule, weaken severity, or launder types to make the check pass.
 - Do not assume TypeScript/lint covers server JS, CLI JS, Electron helpers, or native behavior; run focused tests, syntax checks, builds, or runtime validation for the touched surface.
 - For docs-only or isolated config changes, run the narrowest relevant validation.
 - Report exactly what was and was not validated. Static checks alone do not prove runtime, relay, performance, or platform correctness.

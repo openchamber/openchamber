@@ -29,7 +29,7 @@ const isTouchOrCoarsePointer = (): boolean => {
  * shell (always the mobile surface) → desktop shells → phone heuristic
  * gated by the stored mobile layout preference.
  */
-export const detectHostedSurface = (): HostedSurface => {
+const detectHostedSurface = (): HostedSurface => {
   if (typeof window === 'undefined') return 'desktop';
 
   const explicitSurface = window.__OPENCHAMBER_SURFACE__;

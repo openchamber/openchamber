@@ -6,7 +6,6 @@ import { randomUUID } from 'crypto';
 import { removeProviderConfig, getProviderSources, upsertProviderConfig } from './opencodeConfig';
 import { getProviderAuth, removeProviderAuth } from './opencodeAuth';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
-import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { credentialStatus, deleteCredential, importCursorCredential, normalizeCredential, readCredential, validateCredential, writeCredential, type ManagedProvider } from './quotaCredentials';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
@@ -554,7 +553,7 @@ export async function handleSystemBridgeMessage(
     case 'api:quota:credentials': {
       const { providerId, method, credential: input } = (payload || {}) as { providerId?: ManagedProvider; method?: string; credential?: unknown };
       try {
-        if (!providerId || !['opencode-go', 'ollama-cloud', 'cursor'].includes(providerId)) return { id, type, success: false, error: 'Unsupported credential provider' };
+        if (!providerId || !['ollama-cloud', 'cursor'].includes(providerId)) return { id, type, success: false, error: 'Unsupported credential provider' };
         if (method === 'GET') return { id, type, success: true, data: credentialStatus(providerId) };
         if (method === 'DELETE') { deleteCredential(providerId); return { id, type, success: true, data: { configured: false } }; }
         if (method === 'IMPORT') {
@@ -566,15 +565,13 @@ export async function handleSystemBridgeMessage(
         if (method === 'PUT') {
           const credential = normalizeCredential(providerId, input);
           if (!credential) return { id, type, success: false, error: 'Invalid credential' };
-          if (providerId === 'opencode-go') await fetchOpenCodeGoUsage(credential as { workspaceId: string; authCookie: string });
-          else await validateCredential(providerId, credential);
+          await validateCredential(providerId, credential);
           return { id, type, success: true, data: writeCredential(providerId, credential) };
         }
         if (method === 'VALIDATE') {
           const credential = readCredential(providerId);
           if (!credential) return { id, type, success: false, error: 'Not configured' };
-          if (providerId === 'opencode-go') await fetchOpenCodeGoUsage(credential as { workspaceId: string; authCookie: string });
-          else await validateCredential(providerId, credential);
+          await validateCredential(providerId, credential);
           return { id, type, success: true, data: { valid: true } };
         }
         return { id, type, success: false, error: 'Unsupported method' };

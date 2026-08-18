@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import {
   asNonEmptyString,
@@ -47,6 +48,7 @@ export const createFusionRuntime = (dependencies) => {
     maxFusionModels = DEFAULT_MAX_FUSION_MODELS,
     fusedTitlePrefix = FUSED_TITLE_PREFIX,
     now = Date.now,
+    createRunId = randomUUID,
     emitChildrenCreated,
   } = dependencies;
 
@@ -54,7 +56,7 @@ export const createFusionRuntime = (dependencies) => {
     throw new Error('createFusionRuntime requires a session runner');
   }
 
-  const execute = async ({ sessionId, directory, prompt, models, preset, agent, timeoutSeconds, signal }) => {
+  const execute = async ({ sessionId, directory, prompt, models, preset, agent, timeoutSeconds, signal, runId: requestedRunId }) => {
     const parentSessionID = asNonEmptyString(sessionId);
     const sessionDirectory = asNonEmptyString(directory);
     if (!parentSessionID) throw new OpenChamberControlError('sessionId is required', 400);
@@ -65,6 +67,7 @@ export const createFusionRuntime = (dependencies) => {
     const modelList = normalizeModels(models, maxFusionModels);
     const resolvedTimeoutSeconds = normalizeTimeoutSeconds(timeoutSeconds);
     const timeoutMs = resolvedTimeoutSeconds === null ? null : resolvedTimeoutSeconds * 1000;
+    const runId = asNonEmptyString(requestedRunId) || createRunId();
 
     await runner.validateModels(sessionDirectory, modelList);
 
@@ -100,6 +103,7 @@ export const createFusionRuntime = (dependencies) => {
     if (typeof emitChildrenCreated === 'function') {
       try {
         emitChildrenCreated({
+          runId,
           sessionId: parentSessionID,
           directory: sessionDirectory,
           preset: asNonEmptyString(preset) || undefined,
@@ -110,13 +114,22 @@ export const createFusionRuntime = (dependencies) => {
       }
     }
 
-    const abortChildren = () => {
-      const live = children.filter((child) => child.sessionID);
+    const successfulChildren = new Set();
+    let abortIncompletePromise = null;
+    const abortIncompleteChildren = () => {
+      const live = children
+        .filter((child) => child.sessionID && !successfulChildren.has(child.sessionID))
+        .map((child) => child.sessionID);
       if (live.length === 0) return Promise.resolve();
-      return runner.abortSessions({ client, sessionIDs: live.map((child) => child.sessionID), directory: sessionDirectory });
+      abortIncompletePromise ??= runner.abortSessions({
+        client,
+        sessionIDs: live,
+        directory: sessionDirectory,
+      }).catch(() => undefined);
+      return abortIncompletePromise;
     };
     const onAbort = () => {
-      void abortChildren();
+      void abortIncompleteChildren();
     };
     if (signal) signal.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) {
@@ -138,6 +151,7 @@ export const createFusionRuntime = (dependencies) => {
             timeoutMs,
             signal,
           });
+          successfulChildren.add(sessionID);
           return {
             model,
             sessionId: sessionID,
@@ -148,6 +162,7 @@ export const createFusionRuntime = (dependencies) => {
           };
         } catch (error) {
           if (signal?.aborted) throw error;
+          await abortIncompleteChildren();
           return {
             model,
             sessionId: sessionID,
@@ -158,6 +173,7 @@ export const createFusionRuntime = (dependencies) => {
         }
       }));
       return {
+        runId,
         ...(asNonEmptyString(preset) ? { preset: preset.trim() } : {}),
         runs,
         allOk: runs.every((run) => run.status === 'ok'),

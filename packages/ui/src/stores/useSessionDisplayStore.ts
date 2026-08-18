@@ -77,4 +77,4 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
   ),
 );
 
-export type { ProjectSortOrder, SessionGroupingMode };
+export type { ProjectSortOrder };

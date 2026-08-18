@@ -84,6 +84,7 @@ describe('openchamber events', () => {
       data: JSON.stringify({
         type: 'openchamber:fusion-children-created',
         properties: {
+          runId: 'fusion-run-1',
           sessionId: 'parent-1',
           directory: '/work',
           preset: 'deep-dive',
@@ -100,6 +101,7 @@ describe('openchamber events', () => {
     expect(events).toEqual([
       {
         type: 'fusion-children-created',
+        runId: 'fusion-run-1',
         sessionId: 'parent-1',
         directory: '/work',
         preset: 'deep-dive',
@@ -121,7 +123,7 @@ describe('openchamber events', () => {
     source.onmessage?.({
       data: JSON.stringify({
         type: 'openchamber:fusion-children-created',
-        properties: { children: [{ model: 'a/b', sessionId: 'child-1' }] },
+        properties: { runId: 'fusion-run-1', children: [{ model: 'a/b', sessionId: 'child-1' }] },
       }),
     });
 

@@ -27,6 +27,7 @@ import { shouldLoadAvailableProviders } from './providerAvailability';
 import {
   getOAuthAuthMethods,
   parseAuthPayload,
+  requiresOpenCodeRestartAfterOAuth,
   shouldShowApiKeyAuth,
   type AuthMethod,
   type OAuthAuthMethodEntry,
@@ -471,7 +472,9 @@ export const ProvidersPage: React.FC = () => {
 
   const handleOAuthConnected = (providerId: string) => {
     setShowAuthPanel(false);
-    recordDeferredOpenCodeRestart('providers', { id: providerId });
+    if (requiresOpenCodeRestartAfterOAuth(providerId)) {
+      recordDeferredOpenCodeRestart('providers', { id: providerId });
+    }
     setSelectedProvider(providerId);
   };
 

@@ -1342,6 +1342,7 @@ html:not(.dark) .chat-scroll {
   font-variant-numeric: tabular-nums;
   text-align: right;
   user-select: none;
+  white-space: nowrap;
 }
 
 .markdown-content [data-md-code-line-content] {

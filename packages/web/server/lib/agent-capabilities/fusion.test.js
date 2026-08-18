@@ -122,17 +122,20 @@ describe('model fusion runtime', () => {
       prompt: 'Compare',
       models: ['anthropic/claude-sonnet-4', 'openai/gpt-5'],
       preset: 'deep-dive',
+      runId: 'fusion-run-1',
     });
 
     expect(emitChildrenCreated).toHaveBeenCalledTimes(1);
     const payload = emitChildrenCreated.mock.calls[0][0];
     expect(payload.sessionId).toBe('parent-1');
+    expect(payload.runId).toBe('fusion-run-1');
     expect(payload.directory).toBe('/work');
     expect(payload.preset).toBe('deep-dive');
     expect(payload.children).toHaveLength(2);
     expect(payload.children.map(({ model }) => model)).toEqual(['anthropic/claude-sonnet-4', 'openai/gpt-5']);
     expect(payload.children.map(({ sessionId }) => sessionId).every((id) => typeof id === 'string' && id !== 'parent-1')).toBe(true);
     expect(result.allOk).toBe(true);
+    expect(result.runId).toBe('fusion-run-1');
   });
 
   it('never lets a failing event channel fail the run', async () => {
@@ -190,6 +193,10 @@ describe('model fusion runtime', () => {
       expect.objectContaining({ model: 'anthropic/claude-sonnet-4', status: 'ok' }),
       expect.objectContaining({ model: 'openai/gpt-5', status: 'error', error: 'rate limited' }),
     ]);
+    expect(runner.abortSessions).toHaveBeenCalledWith(expect.objectContaining({
+      sessionIDs: expect.arrayContaining([expect.any(String)]),
+      directory: '/work',
+    }));
   });
 
   it('aborts children and surfaces cancellation when the signal fires', async () => {

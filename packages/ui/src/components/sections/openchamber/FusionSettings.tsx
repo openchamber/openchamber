@@ -19,6 +19,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { FusionPreset } from '@/components/chat/FusionAutocomplete';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 
 const MAX_MODELS = 4;
 const MIN_MODELS = 2;
@@ -319,8 +320,11 @@ export const FusionSettings: React.FC = () => {
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
+    <SettingsSection
+      settingsItem="fusion.presets"
+      divider={false}
+      contentClassName="space-y-3"
+      headerAction={(
         <Button size="sm" onClick={() => {
           setEditing(null);
           setEditorOpen(true);
@@ -328,7 +332,8 @@ export const FusionSettings: React.FC = () => {
           <Icon name="add" className="mr-1 size-4" />
           {t('settings.fusion.add')}
         </Button>
-      </div>
+      )}
+    >
 
       {loadError ? (
         <p className="text-[13px] text-[var(--status-error)]">{loadError}</p>
@@ -402,6 +407,6 @@ export const FusionSettings: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </SettingsSection>
   );
 };

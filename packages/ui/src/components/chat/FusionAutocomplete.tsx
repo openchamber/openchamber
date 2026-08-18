@@ -176,7 +176,7 @@ export const FusionAutocomplete = React.forwardRef<FusionAutocompleteHandle, Fus
       </ScrollableOverlay>
       {!isMobile ? (
         <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
-          ↑↓ navigate • Enter select • Esc close
+          {t('chat.agentCapabilities.fusion.keyboardHint')}
         </div>
       ) : null}
     </div>

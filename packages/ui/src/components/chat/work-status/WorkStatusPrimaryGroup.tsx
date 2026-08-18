@@ -8,7 +8,8 @@ import { useSession, useSessionMessages } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { normalizeProjectPath } from '@/lib/projectResolution';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveUsageTone } from '@/lib/quota';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { normalizePath } from '@/lib/pathNormalization';
@@ -85,27 +86,22 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
 
   const branch = gitStatus?.current?.trim() || null;
 
-  // The panel's directory can be a worktree, so the project is the registered
-  // one whose path contains it — longest match wins, since projects can nest.
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  // Worktrees normally sit beside rather than beneath their project directory,
+  // so a prefix match alone cannot find their owning project. Reuse the shared
+  // session-directory resolver, which consults the discovered worktree map.
   const projectLabel = useProjectsStore(
     React.useCallback((state) => {
-      const normalizedDirectory = normalizeProjectPath(directory ?? null);
-      if (!normalizedDirectory) return null;
-      let best: { path: string; label: string } | null = null;
-      for (const project of state.projects) {
-        const projectPath = normalizeProjectPath(project.path);
-        if (!projectPath) continue;
-        const contains = normalizedDirectory === projectPath
-          || normalizedDirectory.startsWith(`${projectPath}/`);
-        if (!contains) continue;
-        if (best && best.path.length >= projectPath.length) continue;
-        const label = project.label?.trim()
-          || projectPath.split('/').filter(Boolean).pop()
-          || projectPath;
-        best = { path: projectPath, label };
-      }
-      return best?.label ?? null;
-    }, [directory]),
+      const project = resolveProjectForSessionDirectory(
+        state.projects,
+        availableWorktreesByProject,
+        directory,
+      );
+      if (!project) return null;
+      return project.label?.trim()
+        || project.path.split('/').filter(Boolean).pop()
+        || project.path;
+    }, [availableWorktreesByProject, directory]),
   );
 
   // Read-only: PR watching is owned by the background tracker. Starting a watch
@@ -242,7 +238,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
 
       {hasRepository ? (
         <WorkStatusSection
-          title={t('chat.workStatus.section.repository')}
+          title={t('chat.workStatus.section.project')}
           summary={projectLabel}
         >
           {attentionLabel ? <WorkStatusCallout>{attentionLabel}</WorkStatusCallout> : null}

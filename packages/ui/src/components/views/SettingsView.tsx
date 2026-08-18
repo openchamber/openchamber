@@ -34,6 +34,7 @@ import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromp
 import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar';
 import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
+import { IntegrationsPage } from '@/components/sections/integrations/IntegrationsPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
@@ -95,6 +96,7 @@ const pageOrder: SettingsPageSlug[] = [
   'shortcuts',
   'voice',
   'fusion',
+  'integrations',
   'usage',
   'about',
   // 'projects' group — Workspace
@@ -299,6 +301,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     setMobileStage(def.kind === 'split' ? 'page-sidebar' : 'page-content');
   }, [isMobile, setSettingsPage]);
 
+  const openThirdPartyProviderSetup = React.useCallback(async (providerId: string): Promise<boolean> => {
+    const configStore = useConfigStore.getState();
+    await configStore.loadProviders({ source: 'settings:third-party-provider-setup' });
+    const providerAvailable = useConfigStore.getState().providers.some(
+      (provider) => provider.id === providerId,
+    );
+    if (!providerAvailable) {
+      return false;
+    }
+
+    configStore.setSelectedProvider(providerId);
+    openPage('providers');
+    if (isMobile) {
+      setMobileStage('page-content');
+    }
+    return true;
+  }, [isMobile, openPage]);
+
   const activePageMeta = React.useMemo(() => {
     return getSettingsPageMeta(settingsSlug);
   }, [settingsSlug]);
@@ -345,6 +365,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.skillsCatalog.title');
       case 'git':
         return t('settings.page.git.title');
+      case 'integrations':
+        return t('settings.page.integrations.title');
       case 'appearance':
         return t('settings.page.appearance.title');
       case 'chat':
@@ -650,6 +672,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <SnippetsPage />;
       case 'git':
         return <GitPage />;
+      case 'integrations':
+        return (
+          <IntegrationsPage
+            onOpenProviderSetup={openThirdPartyProviderSetup}
+            onOpenPluginManager={() => openPage('plugins')}
+          />
+        );
       case 'general':
       case 'appearance':
       case 'chat':
@@ -666,7 +695,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       default:
         return null;
     }
-  }, [openChamberSectionBySlug, renderUnavailable, runtimeCtx, t]);
+  }, [openChamberSectionBySlug, openPage, openThirdPartyProviderSetup, renderUnavailable, runtimeCtx, t]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
-import { readCredential } from './quotaCredentials';
+import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { getProviderAuth, updateProviderAuth } from './opencodeAuth';
 
 type AuthEntry = Record<string, unknown> | string;
@@ -746,7 +746,8 @@ export const listConfiguredQuotaProviders = () => {
     // Managed credentials remain enumerable; unreadable auth cannot establish xAI configuration.
   }
   const configured = new Set<string>();
-  if (readCredential('opencode-go')) configured.add('opencode-go');
+  const openCodeGoAuth = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
+  if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
   if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
   if (readCredential('cursor')) configured.add('cursor');
 
@@ -2735,10 +2736,12 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
     case 'wafer':
       return fetchWaferQuota();
     case 'opencode-go': {
-      const credential = readCredential('opencode-go') as { workspaceId: string; authCookie: string } | null;
-      if (!credential) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
       try {
-        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(credential) } });
+        deleteLegacyOpenCodeGoCredential();
+        const entry = normalizeAuthEntry(getAuthEntry(readAuthFile(), ['opencode-go']));
+        const apiKey = typeof entry?.key === 'string' ? entry.key : typeof entry?.token === 'string' ? entry.token : null;
+        if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
+        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage({ apiKey }) } });
       } catch (error) {
         return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
       }

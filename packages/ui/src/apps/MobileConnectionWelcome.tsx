@@ -7,6 +7,8 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 import { connectionDisplayUrl, useMobileConnection } from './mobileConnections';
+import { useDebugPanelLongPress } from './mobileConnectionDebug';
+import { MobileConnectionDebugPanel } from './MobileConnectionDebugPanel';
 import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
 import { mobileConnectionInputClass, mobileInputKeyboardProps } from './mobileConnectionUi';
 import { MobileQrConnectionLoading, MobileQrScannerOverlay } from './MobileQrScannerOverlay';
@@ -37,6 +39,10 @@ export const MobileConnectionWelcome: React.FC<{
   // Which saved connection is being connected to, for the per-row spinner.
   const [connectingId, setConnectingId] = React.useState<string | null>(null);
   const [password, setPassword] = React.useState('');
+  // Hidden diagnostics: long-press the logo to open the connection event log —
+  // reachable even when a user has been bounced back to this screen.
+  const [debugOpen, setDebugOpen] = React.useState(false);
+  const debugLongPress = useDebugPanelLongPress(React.useCallback(() => setDebugOpen(true), []));
 
   const handleSubmit = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
@@ -127,10 +133,13 @@ export const MobileConnectionWelcome: React.FC<{
     <>
     {isScanning ? <MobileQrScannerOverlay onCancel={() => scanAbortRef.current?.abort()} /> : null}
     {isCompletingScan ? <MobileQrConnectionLoading /> : null}
+    {debugOpen ? <MobileConnectionDebugPanel onClose={() => setDebugOpen(false)} /> : null}
     <main className="oc-keyboard-fill-screen flex min-h-dvh flex-col overflow-y-auto bg-background px-6 pb-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+28px)] pt-[calc(var(--safe-area-inset-top,env(safe-area-inset-top,0px))+28px)] text-foreground">
       <div className="m-auto flex w-full max-w-[360px] shrink-0 flex-col items-center gap-9 py-8">
         <div className="flex flex-col items-center gap-5 text-center">
-          <OpenChamberLogo width={72} height={72} className="size-[72px]" />
+          <span {...debugLongPress} className="select-none" style={{ touchAction: 'manipulation' }}>
+            <OpenChamberLogo width={72} height={72} className="size-[72px]" />
+          </span>
           <h1 className="typography-h2 text-foreground">{t('mobile.connect.welcome.title')}</h1>
         </div>
 

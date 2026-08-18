@@ -7,10 +7,18 @@ import {
   isPromptVisible,
   parseAuthPrompts,
   parseAuthorization,
+  shouldOpenAuthorizationUrl,
   visiblePrompts,
   type AuthPrompt,
   type ProviderOAuthTranslator,
 } from './provider-oauth';
+
+describe('shouldOpenAuthorizationUrl', () => {
+  test('lets Claude Code CLI own browser launch', () => {
+    expect(shouldOpenAuthorizationUrl('claude-code', 'https://docs.example')).toBe(false);
+    expect(shouldOpenAuthorizationUrl('github-copilot', 'https://github.com/login')).toBe(true);
+  });
+});
 
 /** Mirrors the github-copilot auth method shipped by OpenCode. */
 const copilotPrompts = [
