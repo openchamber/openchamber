@@ -41,10 +41,23 @@ describe('composerEditorTheme', () => {
      * `caret-color: transparent !important` and draws a `.cm-cursor` element
      * instead. Styling `caret-color` looks correct and does nothing, leaving
      * CodeMirror's hard-coded black cursor on dark themes.
+     *
+     * The one exception is the empty-document fallback (issue #2518): while
+     * the placeholder is showing, the theme re-enables the native caret
+     * because some engines cannot measure a drawn-cursor position in an empty
+     * document. Every `caretColor` declaration must live in that
+     * placeholder-scoped rule and nowhere else.
      */
     test('the caret is coloured where it is drawn, not on the native caret', () => {
         expect(selectors.some((selector) => selector.includes('.cm-cursor'))).toBe(true);
-        expect(declarations.includes('caretColor')).toBe(false);
+        // SAFETY: the theme spec is a plain object literal; indexing it with a
+        // selector key found in `selectors` (its own keys) is always defined.
+        const spec = COMPOSER_EDITOR_THEME_SPEC as Record<string, Record<string, string>>;
+        const caretColorRules = selectors.filter((selector) => spec[selector].caretColor);
+        expect(caretColorRules.length).toBeGreaterThan(0);
+        for (const selector of caretColorRules) {
+            expect(selector.includes('.cm-placeholder')).toBe(true);
+        }
     });
 
     test('the drawn caret follows the theme rather than a fixed colour', () => {
@@ -111,6 +124,57 @@ describe('composerEditorTheme', () => {
 
     test('the common theme does not re-show the native selection', () => {
         expect(selectors.some((selector) => selector.includes('::selection'))).toBe(false);
+    });
+
+    /**
+     * Issue #2518: on engines where CodeMirror cannot measure a caret position
+     * in an empty document, no `.cm-cursor` element is drawn and the focused
+     * empty input shows no caret at all. While the placeholder is showing
+     * (document empty) and the editor is focused, the theme re-enables the
+     * native caret and hides the drawn cursor layer instead.
+     */
+    test('the empty-document fallback re-enables the native caret while focused', () => {
+        // SAFETY: the theme spec is a plain object literal; indexing it with a
+        // selector key found in `selectors` (its own keys) is always defined.
+        const spec = COMPOSER_EDITOR_THEME_SPEC as Record<string, Record<string, string>>;
+        const rule = selectors.find((selector) =>
+            selector.includes('.cm-placeholder') && spec[selector].caretColor);
+        expect(rule).toBeDefined();
+        // SAFETY: `rule` was just asserted defined; the same keyed lookup is
+        // defined for the same reason as above.
+        const value = spec[rule!];
+        expect(value.caretColor.startsWith('var(--')).toBe(true);
+        expect(value.caretColor.includes('!important')).toBe(true);
+        // Must beat `drawSelection()`'s `Prec.highest` transparent caret.
+        expect(rule!.includes('&.cm-editor')).toBe(true);
+        expect(rule!.includes('.cm-focused')).toBe(true);
+    });
+
+    test('the empty-document fallback hides the drawn cursor layer', () => {
+        // SAFETY: the theme spec is a plain object literal; indexing it with a
+        // selector key found in `selectors` (its own keys) is always defined.
+        const spec = COMPOSER_EDITOR_THEME_SPEC as Record<string, Record<string, string>>;
+        const rule = selectors.find((selector) =>
+            selector.includes('.cm-placeholder') && selector.includes('.cm-cursorLayer'));
+        expect(rule).toBeDefined();
+        // SAFETY: `rule` was just asserted defined; the same keyed lookup is
+        // defined for the same reason as above.
+        const value = spec[rule!];
+        expect(value.display).toBe('none');
+    });
+
+    test('the empty-document fallback is scoped to the placeholder, so typing releases it', () => {
+        // SAFETY: the theme spec is a plain object literal; indexing it with a
+        // selector key found in `selectors` (its own keys) is always defined.
+        const spec = COMPOSER_EDITOR_THEME_SPEC as Record<string, Record<string, string>>;
+        const caretRule = selectors.find((selector) =>
+            selector.includes('.cm-placeholder') && spec[selector].caretColor);
+        const layerRule = selectors.find((selector) =>
+            selector.includes('.cm-placeholder') && selector.includes('.cm-cursorLayer'));
+        // The placeholder only exists while the document is empty, so both
+        // rules release automatically on the first keystroke.
+        expect(caretRule!.includes('.cm-placeholder')).toBe(true);
+        expect(layerRule!.includes('.cm-placeholder')).toBe(true);
     });
 });
 

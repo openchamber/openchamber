@@ -51,6 +51,24 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
         transform: 'scaleY(1.15)',
         transformOrigin: 'center',
     },
+    // Empty-document caret fallback. The drawn cursor is only painted when
+    // CodeMirror can measure a caret position, and for an empty document that
+    // position resolves to the line's zero-width break/buffer geometry — some
+    // engines report no rects there, so no cursor element is drawn and the
+    // focused empty input shows no caret at all (`drawSelection()` also hides
+    // the native one). While the placeholder is showing (the document is
+    // empty) and the editor is focused, re-enable the native caret and hide
+    // the drawn cursor layer instead. The rules release the moment the first
+    // character is typed — the placeholder disappears, the native caret goes
+    // back to transparent, and the drawn cursor takes over before any
+    // keystroke-driven decoration redraw could make the native caret
+    // expensive.
+    '&.cm-editor.cm-focused:has(.cm-placeholder) .cm-content, &.cm-editor.cm-focused:has(.cm-placeholder) .cm-content .cm-line': {
+        caretColor: 'var(--surface-foreground) !important',
+    },
+    '&.cm-editor.cm-focused:has(.cm-placeholder) .cm-cursorLayer': {
+        display: 'none',
+    },
     '.cm-line': { padding: '0' },
     '.cm-scroller': {
         fontFamily: 'inherit',
