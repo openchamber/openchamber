@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- UI: fixed Ukrainian grammar in session pin and unpin menu labels.
 - Sessions: added a "Mark as unread" / "Mark as read" option to the session menu so you can restore or clear a session's unread indicator on demand.
 - **Project knowledge:** the Project notes panel is now Project knowledge, with notes, todos, plans and their search in a resizable sidebar. Notes are cards you expand by clicking anywhere on them, plans open and edit in the panel itself instead of a separate tab, and notes and plans you pin travel with every message you send in that project until you unpin them.
 - **Work status:** the Context sources section now names each pinned note and plan riding along with your messages, and its pin button unpins them from there.
