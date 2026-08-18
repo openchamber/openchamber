@@ -19,10 +19,11 @@ Puedes elegir qué proveedores aparecen, y el mismo resumen está disponible des
 
 ## Proveedores compatibles
 
-El uso funciona con los proveedores que publican una cuota, entre ellos Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud y Wafer.
+El uso funciona con los proveedores que publican una cuota, entre ellos Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud, Wafer y Sub2API.
 
 Un proveedor solo muestra el uso una vez que has iniciado sesión en él en la página de [Proveedores](/es/providers/). Algunos proveedores necesitan un paso extra: por ejemplo, Ollama Cloud lee un archivo de sesión que configuras por separado. Si un proveedor no muestra datos, normalmente significa que falta esa credencial adicional.
 
+Para Sub2API, conecta un proveedor personalizado compatible con OpenAI con el ID `sub2api` en la página de Proveedores (cualquier URL base y modelos que uses para el chat). El uso consulta entonces `GET <baseUrl>/v1/usage` con la clave de API de ese proveedor y muestra cuota limitada, suscripción o saldo de cartera según tu clave, además de estadísticas de modelos de 30 días opcionales.
 ## Relacionado
 
 - [Proveedores, modelos y agentes](/es/providers/) — inicia sesión antes de que aparezca el uso

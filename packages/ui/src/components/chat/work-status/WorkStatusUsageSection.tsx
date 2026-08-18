@@ -85,10 +85,7 @@ export const WorkStatusUsageSection: React.FC = () => {
   // showing some other provider's quota as if it were the active one.
   const headline = pickUsageHeadline(groups, currentProviderId);
   const headlineMetric = headline
-    ? formatQuotaValueLabel(
-      headline.row.window.valueLabel,
-      displayMode === 'remaining' ? headline.row.window.remainingPercent : headline.row.window.usedPercent,
-    )
+    ? formatQuotaValueLabel(headline.row.window, displayMode)
     : null;
 
   return (
@@ -131,10 +128,7 @@ export const WorkStatusUsageSection: React.FC = () => {
             ) : undefined}
           />
           {group.rows.map((row) => {
-            const displayPercent = displayMode === 'remaining'
-              ? row.window.remainingPercent
-              : row.window.usedPercent;
-            const metricLabel = formatQuotaValueLabel(row.window.valueLabel, displayPercent);
+            const metricLabel = formatQuotaValueLabel(row.window, displayMode);
             const resetLabel = formatQuotaResetLabel(
               row.window.resetAt,
               row.window.resetAfterFormatted ?? row.window.resetAtFormatted,

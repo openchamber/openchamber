@@ -26,7 +26,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const displayPercent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
   const barLabel = displayMode === 'remaining' ? 'remaining' : 'used';
-  const percentLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
+  const percentLabel = formatQuotaValueLabel(window, displayMode);
   const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
   const windowLabel = formatWindowLabel(title);
 

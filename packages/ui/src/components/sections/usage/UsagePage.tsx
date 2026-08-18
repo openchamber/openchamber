@@ -1,6 +1,7 @@
 import React from 'react';
 import { UsageCard } from './UsageCard';
 import { QuotaCredentials } from './QuotaCredentials';
+import { UsageStatistics } from './UsageStatistics';
 import { QUOTA_PROVIDERS } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -194,6 +195,16 @@ export const UsagePage: React.FC = () => {
         </div>
       )}
 
+      {selectedResult?.ok && (selectedResult.status === 'quota_exhausted' || selectedResult.status === 'expired') && (
+        <div className="mb-8 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-4 py-3">
+          <p className="typography-ui-label font-medium text-[var(--status-warning)]">
+            {selectedResult.status === 'quota_exhausted'
+              ? t('usage.status.quotaExhausted')
+              : t('usage.status.expired')}
+          </p>
+        </div>
+      )}
+
       {/* Providers with an inline credentials form don't need the "go to Providers" banner — the form IS the fix. */}
       {selectedResult && !selectedResult.configured && !hasCredentialsForm && (
         <div className="mb-8 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-4 py-3">
@@ -328,6 +339,10 @@ export const UsagePage: React.FC = () => {
           })()}
         </SettingsSection>
       )}
+
+      {selectedResult?.statistics ? (
+        <UsageStatistics statistics={selectedResult.statistics} />
+      ) : null}
 
       {selectedResult?.configured && usage && Object.keys(usage.windows ?? {}).length === 0 &&
         providerModels.length === 0 && (

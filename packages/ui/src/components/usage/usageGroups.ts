@@ -67,11 +67,17 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
           });
         }
 
+        const keyStatus = result.status === 'quota_exhausted'
+          ? t('usage.status.quotaExhausted')
+          : result.status === 'expired'
+            ? t('usage.status.expired')
+            : null;
+
         const status = !result.ok && result.error
           ? result.error
           : rows.length === 0
             ? t('header.services.noRateLimitsReported')
-            : null;
+            : keyStatus;
 
         return {
           providerId: providerMeta.id,

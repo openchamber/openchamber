@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { parse as parseJsonc } from 'jsonc-parser';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { fetchCommandCodeUsage } from './commandCodeQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
@@ -18,11 +19,29 @@ type UsageWindow = {
   resetAtFormatted: string | null;
   resetAfterFormatted: string | null;
   valueLabel?: string | null;
+  usedLabel?: string | null;
+  remainingLabel?: string | null;
 };
 
 type ProviderUsage = {
   windows: Record<string, UsageWindow>;
   models?: Record<string, ProviderUsage>;
+};
+
+type UsageStatisticsEntry = {
+  requests: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  totalTokens: number | null;
+  actualCost: number | null;
+};
+
+type ProviderStatistics = {
+  today: UsageStatisticsEntry | null;
+  total: UsageStatisticsEntry | null;
+  models: Record<string, UsageStatisticsEntry> | null;
+  unit: string | null;
 };
 
 type OpenAiUsagePayload = {
@@ -170,6 +189,8 @@ export type ProviderResult = {
   usage: ProviderUsage | null;
   fetchedAt: number;
   error?: string;
+  status?: string | null;
+  statistics?: ProviderStatistics | null;
 };
 
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
@@ -388,7 +409,7 @@ const calculateResetAfterSeconds = (resetAt: number | null) => {
   return delta < 0 ? 0 : delta;
 };
 
-const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number | null; resetAt: number | null; valueLabel?: string | null }) => {
+const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number | null; resetAt: number | null; valueLabel?: string | null; usedLabel?: string | null; remainingLabel?: string | null }) => {
   const resetAfterSeconds = calculateResetAfterSeconds(data.resetAt);
   const resetFormatted = data.resetAt ? formatResetTime(data.resetAt) : null;
   return {
@@ -400,6 +421,8 @@ const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number
     resetAtFormatted: resetFormatted,
     resetAfterFormatted: resetFormatted,
     ...(data.valueLabel ? { valueLabel: data.valueLabel } : {}),
+    ...(data.usedLabel ? { usedLabel: data.usedLabel } : {}),
+    ...(data.remainingLabel ? { remainingLabel: data.remainingLabel } : {}),
   } satisfies UsageWindow;
 };
 
@@ -410,6 +433,8 @@ const buildResult = (data: {
   configured: boolean;
   usage?: ProviderUsage | null;
   error?: string;
+  status?: string | null;
+  statistics?: ProviderStatistics | null;
 }): ProviderResult => ({
   providerId: data.providerId,
   providerName: data.providerName,
@@ -417,6 +442,8 @@ const buildResult = (data: {
   configured: data.configured,
   usage: data.usage ?? null,
   ...(data.error ? { error: data.error } : {}),
+  ...(data.status ? { status: data.status } : {}),
+  ...(data.statistics ? { statistics: data.statistics } : {}),
   fetchedAt: Date.now(),
 });
 
@@ -829,6 +856,11 @@ export const listConfiguredQuotaProviders = () => {
   const deepseekAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
   if (deepseekAuth && ((deepseekAuth as Record<string, unknown>).key || (deepseekAuth as Record<string, unknown>).token)) {
     configured.add('deepseek');
+  }
+
+  const sub2ApiAuth = normalizeAuthEntry(getAuthEntry(auth, ['sub2api']));
+  if ((sub2ApiAuth && (typeof sub2ApiAuth.key === 'string' || typeof sub2ApiAuth.token === 'string')) && readSub2ApiBaseUrl()) {
+    configured.add('sub2api');
   }
 
   let xaiAuth: XaiAuthEntry | null = null;
@@ -2709,6 +2741,320 @@ const fetchXaiQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const SUB2API_WINDOW_SECONDS: Record<string, number> = {
+  '5h': 5 * 60 * 60,
+  '1d': 24 * 60 * 60,
+  '7d': 7 * 24 * 60 * 60,
+};
+
+const SUB2API_WINDOW_KEY: Record<string, string> = {
+  '5h': '5h',
+  '1d': 'daily',
+  '7d': '7d',
+};
+
+const SUB2API_PERIODS = [
+  { key: 'daily', usageField: 'daily_usage_usd', limitField: 'daily_limit_usd', windowSeconds: 24 * 60 * 60 },
+  { key: 'weekly', usageField: 'weekly_usage_usd', limitField: 'weekly_limit_usd', windowSeconds: 7 * 24 * 60 * 60 },
+  { key: 'monthly', usageField: 'monthly_usage_usd', limitField: 'monthly_limit_usd', windowSeconds: 30 * 24 * 60 * 60 },
+] as const;
+
+const normalizeSub2ApiBaseUrl = (raw: unknown): string | null => {
+  const trimmed = asNonEmptyString(raw);
+  if (!trimmed || !/^https?:\/\//i.test(trimmed)) return null;
+  let base = trimmed.replace(/\/+$/, '');
+  if (/\/v1$/i.test(base)) {
+    base = base.slice(0, -3);
+  }
+  return base.replace(/\/+$/, '');
+};
+
+const readSub2ApiBaseUrl = (): string | null => {
+  const userCandidates = ['config.json', 'opencode.json', 'opencode.jsonc'];
+  const primaryUser = userCandidates.find((name) => fs.existsSync(path.join(OPENCODE_CONFIG_DIR, name)));
+
+  const candidates: string[] = [];
+  const envConfig = process.env.OPENCODE_CONFIG;
+  if (envConfig) candidates.push(path.resolve(envConfig));
+  if (primaryUser) candidates.push(path.join(OPENCODE_CONFIG_DIR, primaryUser));
+
+  for (const candidate of candidates) {
+    let content: string;
+    try {
+      content = fs.readFileSync(candidate, 'utf8');
+    } catch {
+      continue;
+    }
+    const normalized = content.trim();
+    if (!normalized) continue;
+
+    let parsed: unknown;
+    try {
+      parsed = parseJsonc(normalized, [], { allowTrailingComma: true });
+    } catch {
+      continue;
+    }
+
+    const providerBlock = asObject(asObject(parsed)?.provider);
+    const entry = providerBlock ? asObject(providerBlock.sub2api) : null;
+    const options = entry ? asObject(entry.options) : null;
+    if (!options) continue;
+
+    const baseUrl = normalizeSub2ApiBaseUrl(options.baseURL);
+    if (baseUrl) return baseUrl;
+  }
+
+  return null;
+};
+
+const formatSub2ApiAmount = (value: number | null, unit: string | null): string | null => {
+  const formatted = formatMoney(value);
+  if (formatted === null) return null;
+  const unitName = unit || 'USD';
+  return unitName === 'USD' ? `$${formatted}` : `${formatted} ${unitName}`;
+};
+
+const parseSub2ApiStatBlock = (block: Record<string, unknown> | null): UsageStatisticsEntry | null => {
+  if (!block) return null;
+  return {
+    requests: toNumber(block.requests),
+    inputTokens: toNumber(block.input_tokens),
+    outputTokens: toNumber(block.output_tokens),
+    cacheReadTokens: toNumber(block.cache_read_tokens),
+    totalTokens: toNumber(block.total_tokens),
+    actualCost: toNumber(block.actual_cost),
+  };
+};
+
+const parseSub2ApiUsage = (payload: Record<string, unknown>): {
+  windows: Record<string, UsageWindow>;
+  status: string | null;
+  statistics: ProviderStatistics | null;
+} => {
+  const unit = asNonEmptyString(payload.unit) ?? 'USD';
+  const mode = asNonEmptyString(payload.mode);
+  const windows: Record<string, UsageWindow> = {};
+
+  if (mode === 'quota_limited') {
+    const quota = asObject(payload.quota);
+    if (quota) {
+      const limit = toNumber(quota.limit);
+      const used = toNumber(quota.used);
+      const quotaUnit = asNonEmptyString(quota.unit) ?? unit;
+      if (limit !== null && used !== null) {
+        windows.plan_limit = toUsageWindow({
+          usedPercent: limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : null,
+          windowSeconds: null,
+          resetAt: null,
+          usedLabel: formatSub2ApiAmount(used, quotaUnit),
+          remainingLabel: formatSub2ApiAmount(toNumber(quota.remaining), quotaUnit),
+        });
+      }
+    }
+    if (Array.isArray(payload.rate_limits)) {
+      for (const entry of payload.rate_limits) {
+        const block = asObject(entry);
+        if (!block) continue;
+        const label = asNonEmptyString(block.window);
+        const limit = toNumber(block.limit);
+        const used = toNumber(block.used);
+        if (!label || limit === null || used === null) continue;
+
+        const startAt = toTimestamp(block.window_start);
+        const resetAt = toTimestamp(block.reset_at);
+        let windowSeconds = null;
+        if (startAt !== null && resetAt !== null && resetAt > startAt) {
+          windowSeconds = Math.floor((resetAt - startAt) / 1000);
+        }
+        if (windowSeconds === null) {
+          windowSeconds = SUB2API_WINDOW_SECONDS[label] ?? null;
+        }
+
+        const key = SUB2API_WINDOW_KEY[label] ?? label;
+        windows[key] = toUsageWindow({
+          usedPercent: limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : null,
+          windowSeconds,
+          resetAt,
+          usedLabel: formatSub2ApiAmount(used, unit),
+          remainingLabel: formatSub2ApiAmount(toNumber(block.remaining), unit),
+        });
+      }
+    }
+  } else if (mode === 'unrestricted') {
+    const subscription = asObject(payload.subscription);
+    if (subscription) {
+      for (const { key, usageField, limitField, windowSeconds } of SUB2API_PERIODS) {
+        const used = toNumber(subscription[usageField]);
+        const limit = toNumber(subscription[limitField]);
+        if (used === null || limit === null) continue;
+
+        let resetAt = null;
+        if (key === 'weekly') {
+          const windowStart = toTimestamp(subscription.weekly_window_start);
+          if (windowStart !== null) {
+            resetAt = windowStart + 7 * 24 * 60 * 60 * 1000;
+          }
+        }
+
+        windows[key] = toUsageWindow({
+          usedPercent: limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : null,
+          windowSeconds,
+          resetAt,
+          usedLabel: formatSub2ApiAmount(used, unit),
+          remainingLabel: formatSub2ApiAmount(Math.max(0, limit - used), unit),
+        });
+      }
+
+      const planName = asNonEmptyString(payload.planName);
+      const remaining = toNumber(payload.remaining);
+      if (remaining !== null) {
+        const key = planName ?? 'credits_balance';
+        windows[key] = toUsageWindow({
+          usedPercent: null,
+          windowSeconds: null,
+          resetAt: null,
+          valueLabel: formatSub2ApiAmount(remaining, unit),
+        });
+      }
+    } else {
+      const balance = toNumber(payload.balance);
+      const remaining = toNumber(payload.remaining);
+      const amount = balance ?? remaining;
+      if (amount !== null) {
+        windows.credits_balance = toUsageWindow({
+          usedPercent: null,
+          windowSeconds: null,
+          resetAt: null,
+          valueLabel: formatSub2ApiAmount(amount, unit),
+        });
+      }
+    }
+  }
+
+  const today = parseSub2ApiStatBlock(asObject(asObject(payload.usage)?.today));
+  const total = parseSub2ApiStatBlock(asObject(asObject(payload.usage)?.total));
+
+  let models: Record<string, UsageStatisticsEntry> | null = null;
+  if (Array.isArray(payload.model_stats)) {
+    models = {};
+    for (const entry of payload.model_stats) {
+      const block = asObject(entry);
+      if (!block) continue;
+      const name = asNonEmptyString(block.model);
+      if (!name) continue;
+      const stats = parseSub2ApiStatBlock(block);
+      if (stats) models[name] = stats;
+    }
+    if (Object.keys(models).length === 0) models = null;
+  }
+
+  const statistics = today || total || models
+    ? { today, total, models, unit }
+    : null;
+
+  return {
+    windows,
+    status: asNonEmptyString(payload.status),
+    statistics,
+  };
+};
+
+const fetchSub2ApiQuota = async (): Promise<ProviderResult> => {
+  const baseUrl = readSub2ApiBaseUrl();
+  const entry = normalizeAuthEntry(getAuthEntry(readAuthFile(), ['sub2api']));
+  const apiKey = typeof entry?.key === 'string' ? entry.key : typeof entry?.token === 'string' ? entry.token : null;
+
+  if (!baseUrl || !apiKey) {
+    return buildResult({
+      providerId: 'sub2api',
+      providerName: 'Sub2API',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+  try {
+    const response = await fetch(`${baseUrl}/v1/usage`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'User-Agent': 'OpenChamber quota provider',
+      },
+      signal: timeoutSignal,
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return buildResult({
+        providerId: 'sub2api',
+        providerName: 'Sub2API',
+        ok: false,
+        configured: true,
+        error: 'Sub2API authentication failed',
+      });
+    }
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'sub2api',
+        providerName: 'Sub2API',
+        ok: false,
+        configured: true,
+        error: `Sub2API usage API returned HTTP ${response.status}`,
+      });
+    }
+
+    const payload = await response.json().catch(() => null);
+    if (!payload || typeof payload !== 'object') {
+      return buildResult({
+        providerId: 'sub2api',
+        providerName: 'Sub2API',
+        ok: false,
+        configured: true,
+        error: 'Invalid response from provider',
+      });
+    }
+
+    const { windows, status, statistics } = parseSub2ApiUsage(payload as Record<string, unknown>);
+    if (Object.keys(windows).length === 0) {
+      return buildResult({
+        providerId: 'sub2api',
+        providerName: 'Sub2API',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    return buildResult({
+      providerId: 'sub2api',
+      providerName: 'Sub2API',
+      ok: true,
+      configured: true,
+      usage: { windows },
+      status,
+      statistics,
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'sub2api',
+      providerName: 'Sub2API',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
@@ -2770,6 +3116,8 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
       return fetchDeepseekQuota();
     case 'neuralwatt':
       return fetchNeuralwattQuota();
+    case 'sub2api':
+      return fetchSub2ApiQuota();
     case 'xai':
       return fetchXaiQuota();
     default:

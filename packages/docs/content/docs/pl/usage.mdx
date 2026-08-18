@@ -19,10 +19,11 @@ Możesz wybrać, którzy dostawcy się pojawiają, a to samo podsumowanie jest d
 
 ## Obsługiwani dostawcy
 
-Zużycie działa dla dostawców, którzy publikują limit, w tym Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud i Wafer.
+Zużycie działa dla dostawców, którzy publikują limit, w tym Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud, Wafer oraz Sub2API.
 
 Dostawca pokazuje zużycie dopiero po zalogowaniu się do niego na stronie [Dostawcy](/pl/providers/). Kilku dostawców wymaga dodatkowego kroku — na przykład Ollama Cloud odczytuje plik sesji skonfigurowany osobno. Jeśli dostawca nie pokazuje danych, zwykle oznacza to brak tego dodatkowego poświadczenia.
 
+W przypadku Sub2API połącz niestandardowego dostawcę zgodnego z OpenAI o ID `sub2api` na stronie Dostawcy (dowolny bazowy URL i modele używane do czatu). Zużycie odpyta wtedy `GET <baseUrl>/v1/usage` kluczem API tego dostawcy i pokaże limit kwoty, subskrypcję lub saldo portfela w zależności od klucza, a także opcjonalne 30-dniowe statystyki modeli.
 ## Powiązane
 
 - [Dostawcy, modele i agenci](/pl/providers/) — zaloguj się, zanim pojawi się zużycie

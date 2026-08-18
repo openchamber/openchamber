@@ -19,9 +19,11 @@ You can choose which providers appear, and the same summary is available from a 
 
 ## Supported providers
 
-Usage works for the providers that publish a quota, including Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud, and Wafer.
+Usage works for the providers that publish a quota, including Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud, Wafer, and Sub2API.
 
 A provider only shows usage once you've signed in to it on the [Providers](/providers/) page. A few providers need an extra step — for example, Ollama Cloud reads a session file you set up separately. If a provider shows no data, it usually means that extra credential is missing.
+
+For Sub2API, connect an OpenAI-compatible custom provider with the ID `sub2api` on the Providers page (any base URL and models you use for chat). Usage then queries `GET <baseUrl>/v1/usage` with that provider's API key and shows quota-limited, subscription, or wallet balance depending on your key, plus optional 30-day model statistics.
 
 ## Related
 

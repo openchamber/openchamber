@@ -19,10 +19,11 @@ Du kannst auswählen, welche Provider angezeigt werden, und dieselbe Zusammenfas
 
 ## Unterstützte Provider
 
-Die Nutzung funktioniert für die Provider, die ein Kontingent veröffentlichen, darunter Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud und Wafer.
+Die Nutzung funktioniert für die Provider, die ein Kontingent veröffentlichen, darunter Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud, Wafer und Sub2API.
 
 Ein Anbieter zeigt Nutzung erst dann an, wenn du dich auf der [Seite „Anbieter“](/providers/) dort angemeldet hast. Einige Anbieter brauchen noch einen zusätzlichen Schritt — Ollama Cloud liest zum Beispiel eine Sitzungsdatei, die du separat einrichtest. Wenn ein Anbieter keine Daten anzeigt, fehlt meist diese zusätzliche Anmeldeinformation.
 
+Für Sub2API verbinde auf der Provider-Seite einen OpenAI-kompatiblen Custom-Provider mit der ID `sub2api` (beliebige Base-URL und Modelle für den Chat). Die Nutzung fragt dann `GET <baseUrl>/v1/usage` mit dem API-Schlüssel dieses Providers ab und zeigt je nach Schlüssel Kontingent, Abo oder Wallet-Guthaben sowie optionale 30-Tage-Modellstatistik.
 ## Weiterführend
 
 - [Provider, Modelle & Agents](/providers/) — zuerst anmelden, damit Nutzung angezeigt wird
