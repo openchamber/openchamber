@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 - **Settings/Integrations:** a new Integrations settings page lists Claude Code, Command Code, and Cursor plugins with install, update, setup, and remove actions, plus Discord and Telegram Coming soon placeholders.
+- Chat: accepted messages no longer disappear after a send timeout (thanks to @bashrusakh).
 - Chat: new chats no longer start against a deleted last worktree directory; they fall back to the active project instead of saving the first message and never starting.
 - Chat: opening a busy subagent in the context panel now shows its history instead of only the working-status line (thanks to @makeittech).
 - Projects: project names now match the folder name exactly, so `.ssh` and `opencode-claude` are no longer shown as `.Ssh` and `Opencode Claude`; names you renamed yourself are kept.
