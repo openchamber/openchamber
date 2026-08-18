@@ -174,7 +174,7 @@ describe('model fusion runtime', () => {
     }));
   });
 
-  it('returns partial results when one model fails', async () => {
+  it('returns partial results when one model fails and aborts only that child', async () => {
     const runner = createRunner();
     const runtime = createRuntime(runner);
     runner.runPromptOnSession.mockImplementation(async ({ model }) => {
@@ -188,13 +188,18 @@ describe('model fusion runtime', () => {
       models: ['anthropic/claude-sonnet-4', 'openai/gpt-5'],
     });
 
+    const failedCall = runner.runPromptOnSession.mock.calls.find(([args]) => args.model?.modelID === 'gpt-5');
+    expect(failedCall).toBeTruthy();
+
     expect(result.allOk).toBe(false);
     expect(result.runs).toEqual([
       expect.objectContaining({ model: 'anthropic/claude-sonnet-4', status: 'ok' }),
       expect.objectContaining({ model: 'openai/gpt-5', status: 'error', error: 'rate limited' }),
     ]);
+    // Only the failed run's own child is aborted; the sibling's result is kept.
+    expect(runner.abortSessions).toHaveBeenCalledTimes(1);
     expect(runner.abortSessions).toHaveBeenCalledWith(expect.objectContaining({
-      sessionIDs: expect.arrayContaining([expect.any(String)]),
+      sessionIDs: [failedCall[0].sessionID],
       directory: '/work',
     }));
   });

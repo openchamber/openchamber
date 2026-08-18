@@ -128,6 +128,18 @@ export const createFusionRuntime = (dependencies) => {
       }).catch(() => undefined);
       return abortIncompletePromise;
     };
+    // A failed run must not take its siblings down with it: the documented
+    // contract is partial results ("one failed model never erases the others"),
+    // so only the failed child is aborted here. All-or-nothing cleanup is
+    // reserved for the signal path below, where the whole fusion call ends.
+    const abortChildSession = (sessionID) => {
+      if (!sessionID) return Promise.resolve();
+      return runner.abortSessions({
+        client,
+        sessionIDs: [sessionID],
+        directory: sessionDirectory,
+      }).catch(() => undefined);
+    };
     const onAbort = () => {
       void abortIncompleteChildren();
     };
@@ -162,7 +174,7 @@ export const createFusionRuntime = (dependencies) => {
           };
         } catch (error) {
           if (signal?.aborted) throw error;
-          await abortIncompleteChildren();
+          await abortChildSession(sessionID);
           return {
             model,
             sessionId: sessionID,
