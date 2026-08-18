@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Browser: refreshing a tab now restores busy session status immediately instead of waiting for another event.
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
 
 ## [1.19.0] - 2026-08-19

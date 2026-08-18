@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { createGlobalMessageStreamHub } from './global-hub.js';
 import { createGlobalUiEventBroadcaster, createMessageStreamWsRuntime } from './runtime.js';
 
 class FakeSocket extends EventEmitter {
@@ -127,6 +128,200 @@ describe('event stream broadcaster', () => {
 });
 
 describe('message stream websocket runtime', () => {
+  it('sends a fresh global client the latest buffered status snapshot with directory metadata', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    const buildOpenCodeUrl = vi.fn((path) => `http://127.0.0.1:4096${path}`);
+    const getOpenCodeAuthHeaders = vi.fn(() => ({ Authorization: 'Bearer test-token' }));
+    const fetchCalls = [];
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      processForwardedEventPayload() {},
+      wsClients,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (url, options) => {
+        fetchCalls.push({ url, options });
+        return createSseResponse({
+          signal: options.signal,
+          holdOpen: true,
+          blocks: [
+            'id: evt-one\ndata: {"directory":"/tmp/one","payload":{"type":"session.status","properties":{"sessionID":"ses_one","status":{"type":"busy"}}}}\n\n',
+            'id: evt-two\ndata: {"directory":"/tmp/two","payload":{"type":"session.status","properties":{"sessionID":"ses_two","status":{"type":"retry","attempt":2,"message":"rate limited","next":30}}}}\n\n',
+          ],
+        });
+      },
+    });
+
+    const firstSocket = new FakeSocket();
+    runtime.wsServer.emit('connection', firstSocket, { url: '/api/global/event/ws' });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const socket = new FakeSocket();
+    runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
+
+    expect(fetchCalls).toHaveLength(1);
+    expect(new URL(fetchCalls[0].url).pathname).toBe('/global/event');
+    expect(getOpenCodeAuthHeaders).toHaveBeenCalled();
+
+    const readyIndex = socket.sent.findIndex((frame) => frame.type === 'ready');
+    const statusFrames = socket.sent.filter((frame) => frame.payload?.type === 'session.status');
+    expect(readyIndex).toBeGreaterThanOrEqual(0);
+    expect(statusFrames).toEqual([
+      {
+        type: 'event',
+        payload: {
+          type: 'session.status',
+          properties: {
+            sessionID: 'ses_one',
+            status: { type: 'busy' },
+          },
+        },
+        directory: '/tmp/one',
+      },
+      {
+        type: 'event',
+        payload: {
+          type: 'session.status',
+          properties: {
+            sessionID: 'ses_two',
+            status: { type: 'retry', attempt: 2, message: 'rate limited', next: 30 },
+          },
+        },
+        directory: '/tmp/two',
+      },
+    ]);
+    expect(socket.sent.findIndex((frame) => frame.payload?.type === 'session.status')).toBeGreaterThan(readyIndex);
+    for (const frame of statusFrames) {
+      expect(frame).not.toHaveProperty('eventId');
+    }
+
+    firstSocket.close();
+    socket.close();
+    await runtime.close();
+  });
+
+  it('sends a fresh global client an unscoped direct status snapshot', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    const fetchCalls = [];
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (url, options) => {
+        fetchCalls.push(url);
+        return createSseResponse({
+          signal: options.signal,
+          holdOpen: true,
+          blocks: [
+            'id: evt-direct\ndata: {"type":"session.status","properties":{"sessionID":"ses_direct","status":{"type":"busy"}}}\n\n',
+          ],
+        });
+      },
+    });
+
+    const firstSocket = new FakeSocket();
+    runtime.wsServer.emit('connection', firstSocket, { url: '/api/global/event/ws' });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const socket = new FakeSocket();
+    runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
+
+    expect(fetchCalls).toHaveLength(1);
+    expect(new URL(fetchCalls[0]).pathname).toBe('/global/event');
+    expect(socket.sent.filter((frame) => frame.payload?.type === 'session.status')).toEqual([
+      {
+        type: 'event',
+        payload: {
+          type: 'session.status',
+          properties: {
+            sessionID: 'ses_direct',
+            status: { type: 'busy' },
+          },
+        },
+        directory: 'global',
+      },
+    ]);
+
+    firstSocket.close();
+    socket.close();
+    await runtime.close();
+  });
+
+  it('sends the latest buffered status synchronously after newer live status events', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    const fetchCalls = [];
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (url, options) => {
+        fetchCalls.push(url);
+        return createSseResponse({
+          signal: options.signal,
+          holdOpen: true,
+          blocks: [
+            'id: evt-one\ndata: {"directory":"/tmp/project","payload":{"type":"session.status","properties":{"sessionID":"ses_busy","status":{"type":"busy"}}}}\n\n',
+            'id: evt-two\ndata: {"directory":"/tmp/project","payload":{"type":"session.status","properties":{"sessionID":"ses_busy","status":{"type":"retry","attempt":3,"message":"still working","next":60}}}}\n\n',
+          ],
+        });
+      },
+    });
+
+    const firstSocket = new FakeSocket();
+    runtime.wsServer.emit('connection', firstSocket, { url: '/api/global/event/ws' });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const socket = new FakeSocket();
+    runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
+
+    expect(fetchCalls).toHaveLength(1);
+    expect(socket.sent.filter((frame) => frame.payload?.type === 'session.status')).toEqual([
+      {
+        type: 'event',
+        payload: {
+          type: 'session.status',
+          properties: {
+            sessionID: 'ses_busy',
+            status: { type: 'retry', attempt: 3, message: 'still working', next: 60 },
+          },
+        },
+        directory: '/tmp/project',
+      },
+    ]);
+
+    firstSocket.close();
+    socket.close();
+    await runtime.close();
+  });
+
   it('shares one global upstream SSE reader across multiple websocket clients', async () => {
     const server = new EventEmitter();
     const wsClients = new Set();
@@ -151,8 +346,8 @@ describe('message stream websocket runtime', () => {
           holdOpen: true,
           blocks: [
             'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
-          ],
-        });
+            ],
+          });
       },
     });
 
@@ -203,21 +398,15 @@ describe('message stream websocket runtime', () => {
       upstreamReconnectDelayMs: 0,
       fetchImpl: async (_url, options) => {
         fetchCalls += 1;
-        if (fetchCalls === 1) {
-          return createSseResponse({
-            signal: options.signal,
-            holdOpen: true,
-            blocks: [
-              'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
-              'id: evt-2\ndata: {"type":"session.updated","properties":{"directory":"/tmp/project"}}\n\n',
-            ],
-          });
-        }
-
         return createSseResponse({
           signal: options.signal,
           holdOpen: true,
-          blocks: [],
+          blocks: fetchCalls === 1
+            ? [
+              'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+              'id: evt-2\ndata: {"type":"session.updated","properties":{"directory":"/tmp/project"}}\n\n',
+            ]
+            : [],
         });
       },
     });
@@ -243,6 +432,82 @@ describe('message stream websocket runtime', () => {
 
     secondSocket.close();
     await runtime.close();
+  });
+
+  it('distinguishes a current replay cursor from an evicted cursor and recovers status only for the miss', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    let fetchCalls = 0;
+    const globalHub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      replayLimit: 1,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (_url, options) => {
+        fetchCalls += 1;
+        return createSseResponse({
+          signal: options.signal,
+          holdOpen: true,
+          blocks: [
+            'id: evt-old\ndata: {"type":"server.connected","properties":{}}\n\n',
+            'id: evt-current\ndata: {"directory":"/tmp/project","payload":{"type":"session.status","properties":{"sessionID":"ses_busy","status":{"type":"busy"}}}}\n\n',
+          ],
+        });
+      },
+    });
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      globalEventHub: globalHub,
+      processForwardedEventPayload() {},
+      wsClients,
+      upstreamReconnectDelayMs: 0,
+    });
+
+    const firstSocket = new FakeSocket();
+    runtime.wsServer.emit('connection', firstSocket, { url: '/api/global/event/ws' });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    firstSocket.close();
+
+    const currentCursorSocket = new FakeSocket();
+    runtime.wsServer.emit('connection', currentCursorSocket, {
+      url: '/api/global/event/ws?lastEventId=evt-current',
+    });
+    expect(currentCursorSocket.sent).toContainEqual({ type: 'ready', scope: 'global' });
+    expect(currentCursorSocket.sent.filter((frame) => frame.payload?.type === 'session.status')).toEqual([]);
+
+    const evictedCursorSocket = new FakeSocket();
+    runtime.wsServer.emit('connection', evictedCursorSocket, {
+      url: '/api/global/event/ws?lastEventId=evt-old',
+    });
+    expect(evictedCursorSocket.sent).toContainEqual({ type: 'ready', scope: 'global' });
+    expect(evictedCursorSocket.sent.filter((frame) => frame.payload?.type === 'session.status')).toEqual([
+      {
+        type: 'event',
+        payload: {
+          type: 'session.status',
+          properties: {
+            sessionID: 'ses_busy',
+            status: { type: 'busy' },
+          },
+        },
+        directory: '/tmp/project',
+      },
+    ]);
+    expect(evictedCursorSocket.sent.some((frame) => frame.eventId === 'evt-current')).toBe(false);
+    expect(fetchCalls).toBe(1);
+
+    currentCursorSocket.close();
+    evictedCursorSocket.close();
+    await runtime.close();
+    globalHub.stop();
   });
 
   it('keeps directory websocket streams on separate upstream readers', async () => {
