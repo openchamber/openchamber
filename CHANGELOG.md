@@ -4,7 +4,6 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Chat: copying a partial text selection on mobile now preserves its Markdown formatting in rich clipboard targets instead of copying only rendered plain text. (thanks to @bashrusakh).
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
 
 ## [1.19.0] - 2026-08-19
@@ -24,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Chat: opening a busy subagent in the context panel now shows its history instead of only the working-status line (thanks to @makeittech).
 - Chat: saved chats in the context panel open again instead of staying blank.
 - Chat: the context meter no longer climbs over 100% (330% readouts) after turns with many tool calls and no longer jumps when reopening an older session; it now shows what the window actually holds, everywhere the value appears — header, context sidebar, work status panel, mini chat, and mobile (thanks to @pocharlies).
+- Chat: copying a partial text selection on mobile now preserves its Markdown formatting in rich clipboard targets instead of copying only rendered plain text (thanks to @bashrusakh).
 - Chat/Attachments: extracted Office and OpenDocument content is now capped and presented more compactly, preventing large documents and their images from overwhelming the message context.
 - Projects: project names now match the folder name exactly, so `.ssh` and `opencode-claude` are no longer shown as `.Ssh` and `Opencode Claude` in the sidebar, window title, settings and notifications; names you renamed yourself are kept.
 - Files: files reached through a symlink inside the workspace now open correctly instead of being rejected as outside the workspace.
