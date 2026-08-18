@@ -1,3 +1,4 @@
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Śledzenie użycia OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Połącz panel OpenCode Go, aby wyświetlać limity kroczące, tygodniowe i miesięczne.',
@@ -864,6 +865,9 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentWebTool': 'Narzędzie OpenChamber Web',
   'settings.openchamber.tools.field.agentWebToolAria': 'Włącz narzędzie OpenChamber Web',
   'settings.openchamber.tools.field.agentWebToolInfo': 'Pozwól agentom oglądać stronę w panelu przeglądarki OpenChamber i wchodzić z nią w interakcję: otwierać adres URL, czytać treść, klikać, pisać, przewijać i przełączać między układem mobilnym a desktopowym. Dodaje krótki opis narzędzia do każdej sesji. Zastosowane po ponownym uruchomieniu OpenCode.',
+  'settings.openchamber.tools.field.agentMemoryTool': 'Narzędzie pamięci agenta',
+  'settings.openchamber.tools.field.agentMemoryToolAria': 'Narzędzie pamięci agenta',
+  'settings.openchamber.tools.field.agentMemoryToolInfo': 'Pozwala agentom zachowywać to, czego się nauczyły, pomiędzy sesjami, w dwóch magazynach: co jest prawdą o Tobie i co jest prawdą o danym projekcie. Sesje otrzymują zapisane tytuły, aby agent mógł odczytać wpis, gdy jest istotny. Wyłączenie usuwa narzędzie, kartę Pamięć i indeks sesji. Działa po ponownym uruchomieniu OpenCode.',
   'settings.openchamber.opencodeCli.tooltipPrefix': 'Opcjonalna ścieżka absolutna do',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'pliku binarnego.',
   'settings.openchamber.passkeys.actions.add': 'Dodaj klucz dostępu (passkey)',
@@ -1967,6 +1971,7 @@ export const settingsDict = {
   'settings.usage.pace.waitSeparator': ' · Czekaj ',
   'settings.usage.page.empty.selectProvider': 'Wybierz dostawcę, aby wyświetlić szczegóły użycia.',
   'settings.usage.page.header.lastUpdated': 'Ostatnio aktualizowano: {time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': 'Plan: {plan} · Ostatnia aktualizacja: {time}',
   'settings.usage.page.header.providerUsage': 'Użycie {provider}',
   'settings.usage.page.header.refreshing': 'Odświeżanie użycia...',
   'settings.usage.page.options.showInWorkStatus': 'Pokaż w panelu statusu pracy',
@@ -2130,4 +2135,5 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...thirdPartyIntegrationI18n.pl,
 };

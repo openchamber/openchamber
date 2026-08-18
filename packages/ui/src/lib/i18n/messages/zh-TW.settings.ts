@@ -1,4 +1,5 @@
-﻿export const settingsDict = {
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 用量追蹤',
   'settings.providers.page.openCodeGo.description': '連接 OpenCode Go 控制面板以顯示滾動、每週和每月配額。',
   'settings.providers.page.openCodeGo.workspaceId': '工作區 ID',
@@ -954,6 +955,9 @@
   'settings.openchamber.tools.field.agentWebTool': 'OpenChamber Web 工具',
   'settings.openchamber.tools.field.agentWebToolAria': '啟用 OpenChamber Web 工具',
   'settings.openchamber.tools.field.agentWebToolInfo': '讓代理在 OpenChamber 瀏覽器面板中檢視並操作頁面：開啟網址、讀取內容、點擊、輸入、捲動，以及在行動版與桌面版版面之間切換。會為每個工作階段加入少量工具說明。在 OpenCode 重新啟動後生效。',
+  'settings.openchamber.tools.field.agentMemoryTool': '智慧代理記憶工具',
+  'settings.openchamber.tools.field.agentMemoryToolAria': '智慧代理記憶工具',
+  'settings.openchamber.tools.field.agentMemoryToolInfo': '讓代理把學到的內容跨工作階段保留下來，分為兩個儲存區：關於你的事實，以及關於每個專案的事實。工作階段會收到已儲存項目的標題，代理可在相關時讀取內容。關閉後會一併移除該工具、記憶分頁與工作階段索引。重新啟動 OpenCode 後生效。',
   'settings.openchamber.opencodeCli.tooltipPrefix': '可選的',
   'settings.openchamber.opencodeCli.tooltipSuffix': '二進位檔絕對路徑。',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode 可執行檔路徑',
@@ -1067,6 +1071,7 @@
   'settings.usage.page.header.providerUsage': '{provider} 用量',
   'settings.usage.page.header.refreshing': '正在重新整理用量...',
   'settings.usage.page.header.lastUpdated': '最後更新：{time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': '方案：{plan} · 最後更新：{time}',
   'settings.usage.page.options.showInWorkStatusAria': '在工作狀態面板中顯示',
   'settings.usage.page.options.showInWorkStatus': '在工作狀態面板中顯示',
   'settings.usage.page.options.showInWorkStatusTooltip': '啟用後，該供應商的用量會顯示在工作狀態面板中。',
@@ -2138,4 +2143,5 @@
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...thirdPartyIntegrationI18n['zh-TW'],
 } as const;

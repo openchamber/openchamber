@@ -226,7 +226,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
       ) : null}
       {onAnnotate ? (
         <ToolbarButton
-          icon="cursor"
+          icon="markup"
           label={t('contextPanel.browser.annotate.toggle')}
           onClick={onAnnotate}
           pressed={isAnnotating}

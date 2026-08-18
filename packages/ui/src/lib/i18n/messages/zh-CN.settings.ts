@@ -1,3 +1,4 @@
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 用量跟踪',
   'settings.providers.page.openCodeGo.description': '连接 OpenCode Go 控制面板以显示滚动、每周和每月配额。',
@@ -980,6 +981,9 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentWebTool': 'OpenChamber Web 工具',
   'settings.openchamber.tools.field.agentWebToolAria': '启用 OpenChamber Web 工具',
   'settings.openchamber.tools.field.agentWebToolInfo': '让智能体在 OpenChamber 浏览器面板中查看并操作页面：打开网址、读取内容、点击、输入、滚动，以及在移动端与桌面端布局之间切换。会为每个会话添加少量工具说明。在 OpenCode 重启后生效。',
+  'settings.openchamber.tools.field.agentMemoryTool': '智能体记忆工具',
+  'settings.openchamber.tools.field.agentMemoryToolAria': '智能体记忆工具',
+  'settings.openchamber.tools.field.agentMemoryToolInfo': '让智能体把学到的内容跨会话保留下来，分为两个存储：关于你的事实，以及关于每个项目的事实。会话会收到已存条目的标题，智能体可在相关时读取具体内容。关闭后将同时移除该工具、记忆标签页和会话索引。重启 OpenCode 后生效。',
   'settings.openchamber.opencodeCli.tooltipPrefix': '可选的',
   'settings.openchamber.opencodeCli.tooltipSuffix': '二进制绝对路径。',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode 可执行文件路径',
@@ -1160,6 +1164,7 @@ export const settingsDict = {
   'settings.usage.page.header.providerUsage': '{provider} 用量',
   'settings.usage.page.header.refreshing': '正在刷新用量...',
   'settings.usage.page.header.lastUpdated': '最后更新：{time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': '套餐：{plan} · 最后更新：{time}',
   'settings.usage.page.options.showInWorkStatusAria': '在工作状态面板中显示',
   'settings.usage.page.options.showInWorkStatus': '在工作状态面板中显示',
   'settings.usage.page.options.showInWorkStatusTooltip': '启用后，该提供商的用量会显示在工作状态面板中。',
@@ -2138,4 +2143,5 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...thirdPartyIntegrationI18n['zh-CN'],
 } as const;

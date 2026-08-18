@@ -1015,20 +1015,20 @@ export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIf
   logConnect('auto-connect:start', { hasCandidate: Boolean(candidate), fast });
   if (!candidate) return { status: 'no-candidate' };
 
-  // The runtime transport needs a bearer token; only auto-connect when one is
-  // already saved. A missing/expired token must go through the login UI.
+  // The runtime transport authenticates with a bearer token when the server
+  // issued one. A connection saved WITHOUT a token means its last successful
+  // connect was tokenless (server auth disabled) — probe it the same way; the
+  // probe itself reports needs-login if the server has since enabled auth. Only
+  // an EXPECTED token that cannot be read must go through the login UI.
   let token: string | undefined;
   if (isCapacitorApp()) {
-    if (!candidate.hasToken) {
-      return { status: 'no-candidate' };
-    }
-    token = await readSecureToken(secureTokenKeyOf(candidate));
-    if (!token) {
-      return { status: 'no-candidate' };
+    if (candidate.hasToken) {
+      token = await readSecureToken(secureTokenKeyOf(candidate));
+      if (!token) return { status: 'no-candidate' };
     }
   } else {
     token = candidate.clientToken;
-    if (!token) return { status: 'no-candidate' };
+    if (!token && candidate.hasToken) return { status: 'no-candidate' };
   }
 
   // Fast probe by default: the cold-launch splash should decide in a couple of
@@ -1050,7 +1050,7 @@ export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIf
     return { status: 'no-candidate' };
   }
   await upsertMobileConnection({ id: candidate.id, label: candidate.label, candidates: candidate.candidates }); // bump lastUsedAt (keeps token)
-  switchToTransport(result.transport, token, { runtimeKey: secureTokenKeyOf(candidate) });
+  switchToTransport(result.transport, token ?? null, { runtimeKey: secureTokenKeyOf(candidate) });
   return { status: 'connected' };
 };
 
@@ -1209,11 +1209,15 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
   } else {
     token = active.clientToken;
   }
-  if (!token) {
-    logConnect('reprobe:no-token', { hasToken: Boolean(active.hasToken) });
+  // Tokenless is valid (server auth disabled — the probe reports needs-login if
+  // that changed); bail only when an EXPECTED token cannot be read. 'unreachable'
+  // (not needs-login) so the resume retry ladder re-reads the token — a transient
+  // secure-storage failure must not force a re-login.
+  if (!token && active.hasToken) {
+    logConnect('reprobe:no-token', { hasToken: true });
     return 'unreachable';
   }
-  logConnect('reprobe:start', { candidates: active.candidates.map((c) => c.kind), fast });
+  logConnect('reprobe:start', { candidates: active.candidates.map((c) => c.kind), fast, hasToken: Boolean(token) });
 
   const currentIndex = active.candidates.findIndex(
     (candidate) => transportMatchesCurrentRuntime(candidate.kind === 'relay' ? { kind: 'relay', relay: candidate.relay } : { kind: 'direct', url: candidate.url }),
@@ -1225,7 +1229,7 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
   logConnect('reprobe:better', { status: better.status, probed: higher.length });
   if (better.status === 'ok') {
     await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
-    switchToTransport(better.transport, token, { runtimeKey: secureTokenKeyOf(active) });
+    switchToTransport(better.transport, token ?? null, { runtimeKey: secureTokenKeyOf(active) });
     return 'switched';
   }
   // The shared token was explicitly rejected — no transport will accept it.
@@ -1251,7 +1255,7 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
   logConnect('reprobe:fallback', { status: fallback.status, probed: lower.length });
   if (fallback.status === 'ok') {
     await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
-    switchToTransport(fallback.transport, token, { runtimeKey: secureTokenKeyOf(active) });
+    switchToTransport(fallback.transport, token ?? null, { runtimeKey: secureTokenKeyOf(active) });
     return 'switched';
   }
   if (fallback.status === 'needs-login') return 'needs-login';

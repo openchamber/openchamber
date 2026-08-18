@@ -534,9 +534,13 @@ export const buildAnnotationOverlayScript = (
       event.preventDefault();
       event.stopImmediatePropagation();
       finish(null);
-      return;
     }
-    if (event.key === 'Enter' && !event.shiftKey && event.target === comment) {
+  };
+
+  var onCommentKeyDown = function (event) {
+    // Do not let the annotated page treat typed letters as its own shortcuts.
+    event.stopPropagation();
+    if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       attach();
     }
@@ -551,6 +555,7 @@ export const buildAnnotationOverlayScript = (
   window.addEventListener('scroll', onScrollOrResize, true);
   window.addEventListener('resize', onScrollOrResize, true);
   window.addEventListener('keydown', onKeyDown, true);
+  comment.addEventListener('keydown', onCommentKeyDown);
 
   // ------------------------------------------------------------------ finish
 
@@ -564,6 +569,7 @@ export const buildAnnotationOverlayScript = (
     window.removeEventListener('scroll', onScrollOrResize, true);
     window.removeEventListener('resize', onScrollOrResize, true);
     window.removeEventListener('keydown', onKeyDown, true);
+    comment.removeEventListener('keydown', onCommentKeyDown);
     setCursor('');
     if (cursorStyle.parentNode) cursorStyle.parentNode.removeChild(cursorStyle);
     if (host.parentNode) host.parentNode.removeChild(host);

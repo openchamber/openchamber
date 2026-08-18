@@ -1151,12 +1151,6 @@ html:not(.dark) .chat-scroll {
   color: var(--markdown-link-hover, var(--primary));
 }
 
-[data-openchamber-finalized-assistant-images="true"] [data-openchamber-markdown-image-placeholder="true"],
-[data-openchamber-finalized-assistant-images="true"] p:has(> [data-openchamber-markdown-image-placeholder="true"]:only-child),
-[data-openchamber-finalized-assistant-images="true"] li:has(> [data-openchamber-markdown-image-placeholder="true"]:only-child) {
-  display: none;
-}
-
 .markdown-content [data-openchamber-file-link="true"] {
   color: var(--markdown-link, var(--primary));
   cursor: pointer;

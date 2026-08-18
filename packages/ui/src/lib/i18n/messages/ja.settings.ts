@@ -1,3 +1,4 @@
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 使用量追跡',
   'settings.providers.page.openCodeGo.description': 'OpenCode Go ダッシュボードを接続して、ローリング、週間、月間のクォータを表示します。',
@@ -1013,6 +1014,9 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentWebTool': 'OpenChamber Web ツール',
   'settings.openchamber.tools.field.agentWebToolAria': 'OpenChamber Web ツールを有効にする',
   'settings.openchamber.tools.field.agentWebToolInfo': 'エージェントが OpenChamber のブラウザーパネルでページを確認し操作できるようにします。URL を開く、内容を読む、クリック、入力、スクロール、モバイルとデスクトップのレイアウト切り替えが可能です。各セッションに小さなツール説明が追加されます。OpenCode の再起動後に適用されます。',
+  'settings.openchamber.tools.field.agentMemoryTool': 'エージェントメモリツール',
+  'settings.openchamber.tools.field.agentMemoryToolAria': 'エージェントメモリツール',
+  'settings.openchamber.tools.field.agentMemoryToolInfo': 'エージェントが学んだことをセッションをまたいで保持できるようにします。保存先は 2 つで、ユーザーについての事実と、各プロジェクトについての事実です。セッションには保存済みのタイトルが渡され、関連する項目をエージェントが読み出せます。オフにするとツール、メモリタブ、セッションインデックスがすべてなくなります。OpenCode の再起動後に反映されます。',
   'settings.openchamber.opencodeCli.tooltipPrefix': '以下への絶対パス（任意）:',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'バイナリ。',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode バイナリパス',
@@ -1193,6 +1197,7 @@ export const settingsDict = {
   'settings.usage.page.header.providerUsage': '{provider} の使用量',
   'settings.usage.page.header.refreshing': '使用量を更新中...',
   'settings.usage.page.header.lastUpdated': '最終更新: {time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': 'プラン: {plan} · 最終更新: {time}',
   'settings.usage.page.options.showInWorkStatusAria': '作業ステータスパネルに表示',
   'settings.usage.page.options.showInWorkStatus': '作業ステータスパネルに表示',
   'settings.usage.page.options.showInWorkStatusTooltip': '有効にすると、このプロバイダーの使用量が作業ステータスパネルに表示されます。',
@@ -2138,4 +2143,5 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'エージェントが応答している間にフォローアップメッセージで Enter を押したときの動作を選択します。',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'ステア',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'キュー',
+  ...thirdPartyIntegrationI18n.ja,
 } as const;

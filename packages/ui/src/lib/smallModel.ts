@@ -1,4 +1,4 @@
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { requestSmallModel } from '@/lib/smallModelRequest';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getSessionLastAssistantModel } from '@/sync/session-actions';
 
@@ -34,7 +34,7 @@ export async function summarizeSelectionForNotes(text: string, sessionId?: strin
     const { currentProviderId, currentModelId } = useConfigStore.getState();
     const preferredProviderID = sessionModel?.providerID || currentProviderId || '';
     const preferredModelID = sessionModel?.modelID || currentModelId || '';
-    const response = await runtimeFetch('/api/small-model/generate', {
+    const response = await requestSmallModel({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -77,7 +77,7 @@ const GOAL_OBJECTIVE_SYSTEM_PROMPT = [
 export async function distillGoalObjective(planContent: string): Promise<string | null> {
   try {
     const { currentProviderId, currentModelId } = useConfigStore.getState();
-    const response = await runtimeFetch('/api/small-model/generate', {
+    const response = await requestSmallModel({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

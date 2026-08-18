@@ -19,6 +19,7 @@ import {
 } from '../contextPanelEmbeddedChat';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const appSource = readFileSync(join(__dirname, '..', '..', '..', 'App.tsx'), 'utf-8');
 const contextPanelSource = readFileSync(join(__dirname, '..', 'ContextPanel.tsx'), 'utf-8');
 
 type FixtureTab = {
@@ -117,6 +118,7 @@ describe('issue #2815 active-only chat iframe source guard', () => {
     expect(block).toContain('<iframe');
     expect(block).toContain('key={activeChatTab.id}');
     expect(block).toContain('src={activeChatSrc}');
+    expect(block).toContain('postEmbeddedVisibilityToChats();');
     expect(block).not.toContain("'block' : 'hidden'");
   });
 
@@ -126,6 +128,33 @@ describe('issue #2815 active-only chat iframe source guard', () => {
     );
     expect(contextPanelSource).toContain(
       "const activeChatSessionID = isOpen && activeTab?.mode === 'chat'",
+    );
+  });
+
+  test('answers the mounted iframe visibility handshake from the active tab', () => {
+    expect(contextPanelSource).toContain('data?.type === EMBEDDED_VISIBILITY_REQUEST');
+    expect(contextPanelSource).toContain('frame.contentWindow === event.source');
+    expect(contextPanelSource).toContain('payload: { visible: activeChatTabID === tabID }');
+  });
+
+  test('requests authoritative visibility after installing the iframe listener', () => {
+    const effectStart = appSource.indexOf('const applyVisibility = (payload?: EmbeddedVisibilityPayload) => {');
+    const listenerIndex = appSource.indexOf("window.addEventListener('message', handleMessage);", effectStart);
+    const requestIndex = appSource.indexOf('requestEmbeddedSessionVisibility();', effectStart);
+
+    expect(effectStart).toBeGreaterThan(-1);
+    expect(listenerIndex).toBeGreaterThan(effectStart);
+    expect(requestIndex).toBeGreaterThan(listenerIndex);
+  });
+
+  test('gates embedded chat background work on visibility but keeps message history enabled', () => {
+    expect(appSource).toContain(
+      'const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;',
+    );
+    expect(appSource).toContain('active={embeddedBackgroundWorkEnabled}');
+    expect(appSource).toContain('messagesEnabled={true}');
+    expect(appSource).toContain(
+      'useWebNotificationStream({ enabled: embeddedBackgroundWorkEnabled });',
     );
   });
 });

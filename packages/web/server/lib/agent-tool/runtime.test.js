@@ -181,7 +181,7 @@ describe('managed agent tool runtime', () => {
 
   it('omits a tool the user turned off', async () => {
     const { runtime, dataDir } = await createRuntime();
-    await runtime.prepareManagedOpenCodeEnv({ includeControl: false, includeWeb: true });
+    await runtime.prepareManagedOpenCodeEnv({ includeControl: false, includeWeb: true, includeMemory: false });
     const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
     const pluginModule = await import(`${pathToFileURL(pluginPath).href}?web=${Date.now()}`);
     const { tool } = await pluginModule.OpenChamberPlugin();
@@ -189,15 +189,98 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool)).toEqual(['openchamber_web']);
   });
 
+  it('exposes memory as its own tool carrying only its own inputs', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await runtime.prepareManagedOpenCodeEnv({ includeControl: true, includeWeb: false, includeMemory: true });
+    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?memory=${Date.now()}`);
+    const { tool } = await pluginModule.OpenChamberPlugin();
+
+    expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_memory']);
+    expect(Object.keys(tool.openchamber_memory.args.parameters.properties).sort())
+      .toEqual(['body', 'memoryId', 'scope', 'title', 'type']);
+    // Memory inputs must not leak into the control tool's schema, which the
+    // model pays for on every unrelated call.
+    expect(Object.keys(tool.openchamber.args.parameters.properties)).not.toContain('memoryId');
+  });
+
+  it('omits memory entirely when the user turns it off', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await runtime.prepareManagedOpenCodeEnv({ includeControl: true, includeWeb: false, includeMemory: false });
+    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?nomemory=${Date.now()}`);
+    const { tool } = await pluginModule.OpenChamberPlugin();
+
+    expect(Object.keys(tool)).toEqual(['openchamber']);
+  });
+
+  it('injects the plugin when memory is the only tool left on', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await runtime.prepareManagedOpenCodeEnv({ includeControl: false, includeWeb: false, includeMemory: true });
+    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?onlymemory=${Date.now()}`);
+    const { tool } = await pluginModule.OpenChamberPlugin();
+
+    expect(Object.keys(tool)).toEqual(['openchamber_memory']);
+  });
+
   it('refuses to inject a plugin with no tools in it', async () => {
     const { runtime } = await createRuntime();
     let failed = false;
     try {
-      await runtime.prepareManagedOpenCodeEnv({ includeControl: false, includeWeb: false });
+      await runtime.prepareManagedOpenCodeEnv({ includeControl: false, includeWeb: false, includeMemory: false });
     } catch {
       failed = true;
     }
     expect(failed).toBe(true);
+  });
+
+  it('accepts the bare action a tool name already qualifies', async () => {
+    // Observed: the model called `read` on openchamber_memory, having taken the
+    // tool's own name for the namespace.
+    const executeAction = vi.fn(async () => ({ memory: {} }));
+    const { runtime } = await createRuntime({ executeAction });
+
+    const result = await runtime.execute({
+      input: { action: 'read', title: 'Uses bun' },
+      contextDirectory: '/work/project',
+      tool: 'openchamber_memory',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.action).toBe('memory.read');
+    expect(executeAction).toHaveBeenCalledWith(
+      'memory.read',
+      { action: 'memory.read', title: 'Uses bun' },
+      '/work/project',
+      {},
+    );
+  });
+
+  it('tells an unresolvable action what the calling tool can do', async () => {
+    const { runtime } = await createRuntime();
+
+    const result = await runtime.execute({
+      input: { action: 'get' },
+      tool: 'openchamber_memory',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error.message).toContain('memory.read');
+    expect(result.error.message).not.toContain('browser.open');
+  });
+
+  it('does not let one tool reach another tool\'s actions', async () => {
+    const executeAction = vi.fn(async () => ({}));
+    const { runtime } = await createRuntime({ executeAction });
+
+    const result = await runtime.execute({
+      input: { action: 'open', url: 'https://example.test' },
+      tool: 'openchamber_memory',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(executeAction).not.toHaveBeenCalled();
   });
 
   it('executes actions through the shared control service', async () => {

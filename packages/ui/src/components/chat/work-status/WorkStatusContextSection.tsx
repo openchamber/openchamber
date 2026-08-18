@@ -5,6 +5,12 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSession } from '@/sync/sync-context';
 import { getLinkedIssues } from '@/lib/linkedIssues';
+import { fetchSessionKnowledgeSummary, type SessionKnowledgeSummary } from '@/lib/sessionKnowledgeApi';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { useProjectContextStore } from '@/stores/useProjectContextStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 
@@ -43,6 +49,54 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     void loadSkills();
   }, [directory, loadSkills]);
 
+  /**
+   * What the project sends along with every message. Read from the server
+   * rather than from the notes panel's store, because this must be right
+   * whether or not that panel has ever been opened.
+   */
+  const [knowledge, setKnowledge] = React.useState<SessionKnowledgeSummary>(
+    { notes: [], plans: [], memory: { global: 0, project: 0 } },
+  );
+
+  // Re-read whenever the stores that own pins or memory change, not only when
+  // the directory does. Unpinning is a write those stores make, and a panel
+  // that keeps listing what was just unpinned tells the user it is still going
+  // to the agent when it is not.
+  const contextEntries = useProjectContextStore((state) => state.entries);
+  const memoryProject = useAgentMemoryStore((state) => state.project);
+  const memoryGlobal = useAgentMemoryStore((state) => state.global);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void fetchSessionKnowledgeSummary(directory).then((summary) => {
+      if (!cancelled) setKnowledge(summary);
+    });
+    return () => { cancelled = true; };
+  }, [directory, contextEntries, memoryProject, memoryGlobal]);
+
+  const projects = useProjectsStore((state) => state.projects);
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const setNotePinned = useProjectContextStore((state) => state.setNotePinned);
+  const setPlanPinned = useProjectContextStore((state) => state.setPlanPinned);
+
+  const projectRef = React.useMemo(() => {
+    const resolved = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, directory ?? '');
+    return resolved ? { id: resolved.id, path: resolved.path } : null;
+  }, [availableWorktreesByProject, directory, projects]);
+
+  // Unpinning from here, like the pinned-messages section: a panel that says
+  // what is attached should be able to detach it, or the user has to go find
+  // the surface that can.
+  const unpinNote = React.useCallback((noteId: string) => {
+    if (projectRef) void setNotePinned(projectRef, noteId, false);
+  }, [projectRef, setNotePinned]);
+  const unpinPlan = React.useCallback((planId: string) => {
+    if (projectRef) void setPlanPinned(projectRef, planId, false);
+  }, [projectRef, setPlanPinned]);
+
+  const memoryCount = knowledge.memory.global + knowledge.memory.project;
+  const pinnedCount = knowledge.notes.length + knowledge.plans.length;
+
   const linked = React.useMemo(() => getLinkedIssues(session), [session]);
   // Connected servers only. A disabled server contributes nothing to the
   // context, so counting it here contradicts the MCP section right above,
@@ -52,9 +106,14 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     [mcpStatus],
   );
 
-  useReportWorkStatusPresence('context-sources', linked.length > 0 || skills.length > 0 || mcpCount > 0);
+  useReportWorkStatusPresence(
+    'context-sources',
+    linked.length > 0 || skills.length > 0 || mcpCount > 0 || pinnedCount > 0 || memoryCount > 0,
+  );
 
-  if (linked.length === 0 && skills.length === 0 && mcpCount === 0) return null;
+  if (linked.length === 0 && skills.length === 0 && mcpCount === 0 && pinnedCount === 0 && memoryCount === 0) {
+    return null;
+  }
 
   // The heading names what is distinctive about this session when there is
   // something — an attached thread — and falls back to the ambient counts
@@ -71,6 +130,14 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     summaryParts.push(prCount === 1
       ? t('chat.workStatus.breakdown.prCountSingle', { count: prCount })
       : t('chat.workStatus.breakdown.prCountPlural', { count: prCount }));
+  }
+  // Pinned knowledge outranks the ambient counts in the summary: it is
+  // something the user chose for this project, not something that happens to
+  // be installed.
+  if (summaryParts.length === 0 && pinnedCount > 0) {
+    summaryParts.push(pinnedCount === 1
+      ? t('chat.workStatus.breakdown.pinnedKnowledgeSingle', { count: pinnedCount })
+      : t('chat.workStatus.breakdown.pinnedKnowledgePlural', { count: pinnedCount }));
   }
   if (summaryParts.length === 0) {
     if (skills.length > 0) {
@@ -114,6 +181,63 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           value={<WorkStatusValue tone="muted">{`#${entry.number}`}</WorkStatusValue>}
         />
       ))}
+
+      {/* Named individually: a count alone would not tell the user which note
+          is riding along with every message they send. */}
+      {/* The pin is the control, exactly as in the pinned-messages section
+          above: same icon, same placement, same behaviour. Two pins that look
+          different in one panel would read as two different things. */}
+      {knowledge.notes.map((note) => (
+        <WorkStatusRow
+          key={note.id}
+          muted
+          leading={(
+            <button
+              type="button"
+              disabled={!projectRef}
+              aria-label={t('chat.workStatus.breakdown.unpin')}
+              onClick={(event) => {
+                event.stopPropagation();
+                unpinNote(note.id);
+              }}
+              className="shrink-0 rounded p-0.5 transition-opacity hover:opacity-70 disabled:opacity-40"
+            >
+              <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
+            </button>
+          )}
+          label={note.body.trim().split('\n')[0] || note.body.trim()}
+          value={<WorkStatusValue tone="muted">{t('chat.workStatus.breakdown.pinnedNote')}</WorkStatusValue>}
+        />
+      ))}
+      {knowledge.plans.map((plan) => (
+        <WorkStatusRow
+          key={plan.id}
+          muted
+          leading={(
+            <button
+              type="button"
+              disabled={!projectRef}
+              aria-label={t('chat.workStatus.breakdown.unpin')}
+              onClick={(event) => {
+                event.stopPropagation();
+                unpinPlan(plan.id);
+              }}
+              className="shrink-0 rounded p-0.5 transition-opacity hover:opacity-70 disabled:opacity-40"
+            >
+              <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
+            </button>
+          )}
+          label={plan.title}
+          value={<WorkStatusValue tone="muted">{t('chat.workStatus.breakdown.pinnedPlan')}</WorkStatusValue>}
+        />
+      ))}
+      {memoryCount > 0 ? (
+        <WorkStatusRow
+          muted
+          label={t('chat.workStatus.breakdown.memory')}
+          value={<WorkStatusValue>{memoryCount}</WorkStatusValue>}
+        />
+      ) : null}
 
       <WorkStatusRow
         muted

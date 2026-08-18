@@ -508,8 +508,13 @@ export const PullRequestSection: React.FC<{
   }, [useDetectedUpstream, detectedUpstream?.defaultBranch]);
 
   const pr = status?.pr ?? null;
+  // A closed/merged PR is the branch's history, not its live status: it still
+  // deserves to be shown (you just merged it), but the branch is free again, so
+  // the panel offers creating the next PR instead of a read-only detail view.
+  const isHistoricalPr = pr?.state === 'merged' || pr?.state === 'closed';
+  const livePr = isHistoricalPr ? null : pr;
 
-  const prContextKey = pr ? getPrContextKey(directory, pr.number) : null;
+  const prContextKey = livePr ? getPrContextKey(directory, livePr.number) : null;
   const prContextEntry = usePrContextStore((state) => (prContextKey ? state.entries[prContextKey] : undefined));
   const ensurePrContext = usePrContextStore((state) => state.ensure);
   const prContext = prContextEntry?.result ?? null;
@@ -525,14 +530,14 @@ export const PullRequestSection: React.FC<{
 
   // Load the context the active segment needs; checks include details.
   React.useEffect(() => {
-    if (!pr || !github?.prContext || activeSegment === 'overview') {
+    if (!livePr || !github?.prContext || activeSegment === 'overview') {
       return;
     }
-    void ensurePrContext(github, directory, pr.number, {
+    void ensurePrContext(github, directory, livePr.number, {
       includeCheckDetails: activeSegment === 'checks',
       sourceRepo: status?.repo ?? null,
     });
-  }, [activeSegment, directory, ensurePrContext, github, pr, status?.repo]);
+  }, [activeSegment, directory, ensurePrContext, github, livePr, status?.repo]);
 
   const checks = status?.checks ?? null;
   const checksArePending = (checks?.pending ?? 0) > 0;
@@ -1167,31 +1172,29 @@ export const PullRequestSection: React.FC<{
   }, [remotes, status?.resolvedRemoteName]);
 
   React.useEffect(() => {
-    const isTerminal = status?.pr?.state === 'closed' || status?.pr?.state === 'merged';
-    const lastRefreshAt = statusEntry?.lastRefreshAt ?? 0;
-    const isStale = Date.now() - lastRefreshAt > 60_000;
-    const shouldRefresh = !isTerminal && isStale;
-
-    const onFocus = () => {
-      if (shouldRefresh) {
+    // Coming back to the app is the moment a PR is most likely to have changed
+    // elsewhere — including a merged one being replaced by a newer open PR — so
+    // staleness is read from the store when the event fires, not captured here.
+    const refreshWhenStale = () => {
+      const lastRefreshAt = useGitHubPrStatusStore.getState().entries[prStatusKey]?.lastRefreshAt ?? 0;
+      if (Date.now() - lastRefreshAt > 60_000) {
         void refresh({ force: true, silent: true });
       }
     };
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        if (shouldRefresh) {
-          void refresh({ force: true, silent: true });
-        }
+      if (document.visibilityState !== 'visible') {
+        return;
       }
+      refreshWhenStale();
     };
 
-    window.addEventListener('focus', onFocus);
+    window.addEventListener('focus', refreshWhenStale);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('focus', refreshWhenStale);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [refresh, status?.pr?.state, statusEntry?.lastRefreshAt]);
+  }, [prStatusKey, refresh]);
 
   React.useEffect(() => {
     if (githubAuthChecked && githubAuthStatus?.connected === false) {
@@ -1612,7 +1615,7 @@ export const PullRequestSection: React.FC<{
                 <Icon name="loader-4" className="size-4 animate-spin" />
                 {t('gitView.pr.checkingStatus')}
               </div>
-            ) : pr ? (
+            ) : pr && !isHistoricalPr ? (
               <div className="flex flex-col gap-3">
                 <div className="h-8 min-w-0">
                     <SortableTabsStrip
@@ -1965,6 +1968,30 @@ export const PullRequestSection: React.FC<{
               </div>
             ) : (
               <div className="flex flex-col gap-3">
+                {pr && isHistoricalPr ? (
+                  <div className="flex min-w-0 items-center gap-2 rounded-md border border-border/60 bg-surface-muted/40 px-2.5 py-2">
+                    <Icon
+                      name={pr.state === 'merged' ? 'git-merge' : 'git-close-pull-request'}
+                      className="size-4 shrink-0"
+                      style={{ color: prColorVar }}
+                    />
+                    <div className="min-w-0 flex-1 typography-micro text-muted-foreground">
+                      {pr.state === 'merged'
+                        ? t('gitView.pr.history.merged', { number: pr.number, base: pr.base || targetBaseBranch })
+                        : t('gitView.pr.history.closed', { number: pr.number })}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      className="shrink-0"
+                      onClick={() => void openExternal(pr.url)}
+                      aria-label={t('gitView.pr.actions.openOnGitHubAria')}
+                    >
+                      <Icon name="external-link" className="size-3.5" />
+                    </Button>
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="typography-ui-label text-foreground">{t('gitView.pr.createTitle')}</div>

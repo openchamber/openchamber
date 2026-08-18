@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import yaml from 'yaml';
-import { parse as parseJsonc } from 'jsonc-parser';
+import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
 
 // ============== PATH CONSTANTS ==============
 
@@ -168,6 +168,42 @@ function getPrimaryUserConfigPath(userPaths) {
   return CONFIG_FILE;
 }
 
+const INVALID_JSONC = 'INVALID_JSONC';
+
+function isInvalidJsoncError(error) {
+  return Boolean(error && typeof error === 'object' && error.code === INVALID_JSONC);
+}
+
+function formatJsoncParseError(filePath, errors) {
+  const first = Array.isArray(errors) && errors.length > 0 ? errors[0] : null;
+  const location = first && Number.isFinite(first.offset)
+    ? ` (${printParseErrorCode(first.error)} at offset ${first.offset})`
+    : '';
+  return `OpenCode configuration at ${filePath} contains invalid JSONC and cannot be loaded safely${location}`;
+}
+
+function isCommentOnlyParse(parsed, errors) {
+  // Comment-only / whitespace-only files parse to undefined with nothing but
+  // ValueExpected. Any other error means real content we failed to understand
+  // (YAML, plain text, a stray leading token), which must not read as empty.
+  return parsed === undefined
+    && errors.every((entry) => printParseErrorCode(entry.error) === 'ValueExpected');
+}
+
+function parseConfigObject(content, filePath) {
+  const errors = [];
+  const parsed = parseJsonc(content, errors, { allowTrailingComma: true });
+  if (isCommentOnlyParse(parsed, errors)) {
+    return {};
+  }
+  if (errors.length > 0 || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const error = new Error(formatJsoncParseError(filePath, errors));
+    error.code = INVALID_JSONC;
+    throw error;
+  }
+  return parsed;
+}
+
 function readConfigFile(filePath) {
   if (!filePath || !fs.existsSync(filePath)) {
     return {};
@@ -178,8 +214,13 @@ function readConfigFile(filePath) {
     if (!normalized) {
       return {};
     }
-    return parseJsonc(normalized, [], { allowTrailingComma: true });
+    // Refuse partial jsonc-parser trees. Ignoring errors previously let mutations
+    // rewrite a truncated object (often only `$schema`) over the full config.
+    return parseConfigObject(normalized, filePath);
   } catch (error) {
+    if (isInvalidJsoncError(error)) {
+      throw error;
+    }
     console.error(`Failed to read config file: ${filePath}`, error);
     throw new Error('Failed to read OpenCode configuration');
   }
@@ -209,20 +250,47 @@ function mergeConfigs(base, override) {
   return result;
 }
 
+function readConfigLayer(filePath) {
+  try {
+    return { config: readConfigFile(filePath), error: null };
+  } catch (error) {
+    if (isInvalidJsoncError(error)) {
+      console.error(error.message);
+      return { config: {}, error };
+    }
+    throw error;
+  }
+}
+
 function readConfigLayers(workingDirectory) {
   const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
-  const userConfig = readConfigFile(userPath);
-  const projectConfig = readConfigFile(projectPath);
-  const customConfig = readConfigFile(customPath);
-  const mergedConfig = mergeConfigs(mergeConfigs(userConfig, projectConfig), customConfig);
+  const userLayer = readConfigLayer(userPath);
+  const projectLayer = readConfigLayer(projectPath);
+  const customLayer = readConfigLayer(customPath);
+  const mergedConfig = mergeConfigs(
+    mergeConfigs(userLayer.config, projectLayer.config),
+    customLayer.config,
+  );
+
+  const layerErrors = [];
+  if (userLayer.error) {
+    layerErrors.push({ path: userPath, code: userLayer.error.code, message: userLayer.error.message });
+  }
+  if (projectLayer.error && projectPath) {
+    layerErrors.push({ path: projectPath, code: projectLayer.error.code, message: projectLayer.error.message });
+  }
+  if (customLayer.error && customPath) {
+    layerErrors.push({ path: customPath, code: customLayer.error.code, message: customLayer.error.message });
+  }
 
   return {
-    userConfig,
-    projectConfig,
-    customConfig,
+    userConfig: userLayer.config,
+    projectConfig: projectLayer.config,
+    customConfig: customLayer.config,
     mergedConfig,
-    paths: { userPath, projectPath, customPath }
+    paths: { userPath, projectPath, customPath },
+    layerErrors,
   };
 }
 
@@ -246,6 +314,12 @@ function getConfigForPath(layers, targetPath) {
 function writeConfig(config, filePath = CONFIG_FILE) {
   try {
     if (fs.existsSync(filePath)) {
+      // Defense in depth: never overwrite a file we cannot fully parse.
+      const existing = fs.readFileSync(filePath, 'utf8').trim();
+      if (existing) {
+        parseConfigObject(existing, filePath);
+      }
+
       const backupFile = `${filePath}.openchamber.backup`;
       fs.copyFileSync(filePath, backupFile);
       console.log(`Created config backup: ${backupFile}`);
@@ -255,23 +329,49 @@ function writeConfig(config, filePath = CONFIG_FILE) {
     fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf8');
     console.log(`Successfully wrote config file: ${filePath}`);
   } catch (error) {
+    if (isInvalidJsoncError(error)) {
+      throw error;
+    }
     console.error(`Failed to write config file: ${filePath}`, error);
     throw new Error('Failed to write OpenCode configuration');
   }
 }
 
+function getLayerError(layers, filePath) {
+  if (!filePath || !Array.isArray(layers?.layerErrors)) {
+    return null;
+  }
+  return layers.layerErrors.find((entry) => entry.path === filePath) || null;
+}
+
+function throwIfLayerError(layers, filePath) {
+  const failed = getLayerError(layers, filePath);
+  if (!failed) {
+    return;
+  }
+  const error = new Error(failed.message);
+  error.code = failed.code;
+  throw error;
+}
+
 function getJsonEntrySource(layers, sectionKey, entryName) {
   const { userConfig, projectConfig, customConfig, paths } = layers;
-  const customSection = customConfig?.[sectionKey]?.[entryName];
-  if (customSection !== undefined) {
-    return { section: customSection, config: customConfig, path: paths.customPath, exists: true };
+  if (paths.customPath) {
+    throwIfLayerError(layers, paths.customPath);
+    const customSection = customConfig?.[sectionKey]?.[entryName];
+    if (customSection !== undefined) {
+      return { section: customSection, config: customConfig, path: paths.customPath, exists: true };
+    }
   }
 
-  const projectSection = projectConfig?.[sectionKey]?.[entryName];
-  if (projectSection !== undefined) {
-    return { section: projectSection, config: projectConfig, path: paths.projectPath, exists: true };
+  if (paths.projectPath && !getLayerError(layers, paths.projectPath)) {
+    const projectSection = projectConfig?.[sectionKey]?.[entryName];
+    if (projectSection !== undefined) {
+      return { section: projectSection, config: projectConfig, path: paths.projectPath, exists: true };
+    }
   }
 
+  throwIfLayerError(layers, paths.userPath);
   const userSection = userConfig?.[sectionKey]?.[entryName];
   if (userSection !== undefined) {
     return { section: userSection, config: userConfig, path: paths.userPath, exists: true };
@@ -283,11 +383,14 @@ function getJsonEntrySource(layers, sectionKey, entryName) {
 function getJsonWriteTarget(layers, preferredScope) {
   const { userConfig, projectConfig, customConfig, paths } = layers;
   if (paths.customPath) {
+    throwIfLayerError(layers, paths.customPath);
     return { config: customConfig, path: paths.customPath };
   }
   if (preferredScope === AGENT_SCOPE.PROJECT && paths.projectPath) {
+    throwIfLayerError(layers, paths.projectPath);
     return { config: projectConfig, path: paths.projectPath };
   }
+  throwIfLayerError(layers, paths.userPath);
   return { config: userConfig, path: paths.userPath };
 }
 
@@ -547,6 +650,7 @@ export {
   parseMdFile,
   writeMdFile,
   readConfigFile,
+  readConfigLayer,
   isPlainObject,
   readConfigLayers,
   readConfig,

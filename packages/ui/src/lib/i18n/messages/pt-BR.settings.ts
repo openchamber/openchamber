@@ -1,3 +1,4 @@
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Monitoramento de uso do OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Conecte o painel do OpenCode Go para exibir as cotas móvel, semanal e mensal.',
@@ -980,6 +981,9 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentWebTool": "Ferramenta OpenChamber Web",
   "settings.openchamber.tools.field.agentWebToolAria": "Ativar a ferramenta OpenChamber Web",
   "settings.openchamber.tools.field.agentWebToolInfo": "Permita que agentes vejam a página no painel de navegador do OpenChamber e interajam com ela: abrir uma URL, ler o conteúdo, clicar, digitar, rolar e alternar entre layout móvel e desktop. Adiciona uma pequena descrição de ferramenta a cada sessão. Aplicado após reiniciar o OpenCode.",
+  "settings.openchamber.tools.field.agentMemoryTool": "Ferramenta de memória do agente",
+  "settings.openchamber.tools.field.agentMemoryToolAria": "Ferramenta de memória do agente",
+  "settings.openchamber.tools.field.agentMemoryToolInfo": "Permite que os agentes guardem o que aprendem entre sessões, em dois armazenamentos: o que é verdade sobre você e o que é verdade sobre cada projeto. As sessões recebem os títulos armazenados para que o agente possa ler uma entrada quando for relevante. Desativar remove a ferramenta, a aba Memória e o índice da sessão. Vale após reiniciar o OpenCode.",
   "settings.openchamber.opencodeCli.tooltipPrefix": "Caminho absoluto opcional para o",
   "settings.openchamber.opencodeCli.tooltipSuffix": "executável.",
   "settings.openchamber.opencodeCli.field.binaryPath": "Caminho do executável do OpenCode",
@@ -1160,6 +1164,7 @@ export const settingsDict = {
   "settings.usage.page.header.providerUsage": "Uso de {provider}",
   "settings.usage.page.header.refreshing": "Atualizando uso...",
   "settings.usage.page.header.lastUpdated": "Última atualização: {time}",
+  "settings.usage.page.header.lastUpdatedWithPlan": "Plano: {plan} · Última atualização: {time}",
   "settings.usage.page.options.showInWorkStatusAria": "Mostrar no painel de status do trabalho",
   "settings.usage.page.options.showInWorkStatus": "Mostrar no painel de status do trabalho",
   "settings.usage.page.options.showInWorkStatusTooltip": "Quando habilitado, o uso deste provedor ficará visível no painel de status do trabalho.",
@@ -2138,4 +2143,5 @@ export const settingsDict = {
   "settings.openchamber.visual.field.followUpBehaviorDescription": "Choose what happens when you press Enter on a follow-up message while the agent is still responding.",
   "settings.openchamber.visual.option.followUpBehavior.steer.label": "Steer",
   "settings.openchamber.visual.option.followUpBehavior.queue.label": "Queue",
+  ...thirdPartyIntegrationI18n['pt-BR'],
 } as const;

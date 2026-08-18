@@ -41,7 +41,7 @@ import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
-import { createProjectPlanFile } from '@/lib/openchamberConfig';
+import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
@@ -1509,7 +1509,7 @@ const AssistantMessageBody = React.memo(({
 
             setIsSavingPlan(true);
             try {
-                const created = await createProjectPlanFile(currentProjectRef, {
+                const created = await useProjectContextStore.getState().createPlan(currentProjectRef, {
                     title,
                     body: assistantPlanText,
                 });
@@ -1517,9 +1517,6 @@ const AssistantMessageBody = React.memo(({
                     toast.error(t('chat.messageBody.toast.savePlanFailed'));
                     return;
                 }
-                window.dispatchEvent(new CustomEvent('openchamber:project-plan-saved', {
-                    detail: { projectId: currentProjectRef.id },
-                }));
                 setIsPlanDialogOpen(false);
                 toast.success(t('chat.messageBody.toast.planSaved'));
             } finally {
@@ -1876,7 +1873,6 @@ const AssistantMessageBody = React.memo(({
                             chatRenderMode={chatRenderMode}
                             onContentChange={onContentChange}
                             onShowPopup={onShowPopup}
-                            enableMarkdownImages={isMessageCompleted}
                         />
                     </div>
                 );
@@ -2031,7 +2027,6 @@ const AssistantMessageBody = React.memo(({
         collapsedPreviewCount,
         expandedTools,
         isMobile,
-        isMessageCompleted,
         isActivityOwnerMessage,
         isSortedRenderMode,
         lastRenderableTextPartIndex,
@@ -2244,6 +2239,8 @@ const AssistantMessageBody = React.memo(({
                 </div>
                 <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} />
                 <MarkdownImageGallery
+                    sessionId={sessionId}
+                    messageId={messageId}
                     contents={finalizedAssistantMarkdownContents}
                     onShowPopup={onShowPopup}
                 />

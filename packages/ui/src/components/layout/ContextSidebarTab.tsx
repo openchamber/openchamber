@@ -92,6 +92,7 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
   }
 
   const breakdown = source as {
+    total?: unknown;
     input?: unknown;
     output?: unknown;
     reasoning?: unknown;
@@ -103,6 +104,10 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
   const reasoning = toNonNegativeNumber(breakdown.reasoning);
   const cacheRead = toNonNegativeNumber(breakdown.cache?.read);
   const cacheWrite = toNonNegativeNumber(breakdown.cache?.write);
+  // Multi-step turns accumulate the fields across API round-trips (every tool
+  // call re-reads the whole cached prompt), so summing them overstates the
+  // window. The server-reported total is the final round-trip's window.
+  const reportedTotal = toNonNegativeNumber(breakdown.total);
 
   return {
     input,
@@ -110,7 +115,7 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
     reasoning,
     cacheRead,
     cacheWrite,
-    total: input + output + reasoning + cacheRead + cacheWrite,
+    total: reportedTotal > 0 ? reportedTotal : input + output + reasoning + cacheRead + cacheWrite,
   };
 };
 

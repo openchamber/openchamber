@@ -37,6 +37,14 @@ mock.module('vscode', () => ({
 const { tryHandleLocalFsProxy } = await import('./bridge-localfs-proxy-runtime');
 
 describe('bridge local fs proxy', () => {
+  it('does not forward server-owned Markdown image grant routes to OpenCode', async () => {
+    const response = await tryHandleLocalFsProxy('POST', '/api/openchamber/sessions/ses_1/markdown-image-grants');
+
+    expect(response?.status).toBe(501);
+    expect(Buffer.from(response?.bodyBase64 ?? '', 'base64').toString('utf8'))
+      .toContain('not supported in the VS Code runtime');
+  });
+
   it('returns a quiet optional stat miss for missing files', async () => {
     const response = await tryHandleLocalFsProxy('GET', '/api/fs/stat?path=%2Fmissing.ts&optional=true');
 

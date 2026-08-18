@@ -1,3 +1,4 @@
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 사용량 추적',
   'settings.providers.page.openCodeGo.description': 'OpenCode Go 대시보드를 연결하여 롤링, 주간 및 월간 할당량을 표시합니다.',
@@ -980,6 +981,9 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentWebTool': 'OpenChamber Web 도구',
   'settings.openchamber.tools.field.agentWebToolAria': 'OpenChamber Web 도구 활성화',
   'settings.openchamber.tools.field.agentWebToolInfo': '에이전트가 OpenChamber 브라우저 패널에서 페이지를 확인하고 조작할 수 있습니다. URL 열기, 내용 읽기, 클릭, 입력, 스크롤, 모바일과 데스크톱 레이아웃 전환이 가능합니다. 각 세션에 작은 도구 설명이 추가됩니다. OpenCode를 다시 시작하면 적용됩니다.',
+  'settings.openchamber.tools.field.agentMemoryTool': '에이전트 메모리 도구',
+  'settings.openchamber.tools.field.agentMemoryToolAria': '에이전트 메모리 도구',
+  'settings.openchamber.tools.field.agentMemoryToolInfo': '에이전트가 배운 내용을 세션 간에 유지하도록 합니다. 저장소는 두 개로, 사용자에 대한 사실과 각 프로젝트에 대한 사실입니다. 세션에는 저장된 제목이 전달되어 관련 항목을 에이전트가 읽을 수 있습니다. 끄면 도구와 메모리 탭, 세션 색인이 모두 사라집니다. OpenCode를 다시 시작한 뒤 적용됩니다.',
   'settings.openchamber.opencodeCli.tooltipPrefix': '선택적 절대 경로:',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'binary.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode binary 경로',
@@ -1160,6 +1164,7 @@ export const settingsDict = {
   'settings.usage.page.header.providerUsage': '{provider} 사용량',
   'settings.usage.page.header.refreshing': '사용량 새로고침 중...',
   'settings.usage.page.header.lastUpdated': '마지막 업데이트: {time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': '플랜: {plan} · 마지막 업데이트: {time}',
   'settings.usage.page.options.showInWorkStatusAria': '작업 상태 패널에 표시',
   'settings.usage.page.options.showInWorkStatus': '작업 상태 패널에 표시',
   'settings.usage.page.options.showInWorkStatusTooltip': '활성화하면 이 제공업체의 사용량이 작업 상태 패널에 표시됩니다.',
@@ -2138,4 +2143,5 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  ...thirdPartyIntegrationI18n.ko,
 } as const;

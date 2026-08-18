@@ -1,3 +1,4 @@
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Відстеження використання OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Підключіть панель OpenCode Go, щоб бачити ковзну, тижневу та місячну квоту.',
@@ -980,6 +981,9 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentWebTool": "Інструмент OpenChamber Web",
   "settings.openchamber.tools.field.agentWebToolAria": "Увімкнути інструмент OpenChamber Web",
   "settings.openchamber.tools.field.agentWebToolInfo": "Дозвольте агентам переглядати сторінку в панелі браузера OpenChamber і взаємодіяти з нею: відкривати URL, читати вміст, клікати, вводити текст, гортати та перемикатися між мобільним і десктопним виглядом. Додає невеликий опис інструмента до кожної сесії. Застосовується після перезапуску OpenCode.",
+  "settings.openchamber.tools.field.agentMemoryTool": "Інструмент памʼяті агента",
+  "settings.openchamber.tools.field.agentMemoryToolAria": "Інструмент памʼяті агента",
+  "settings.openchamber.tools.field.agentMemoryToolInfo": "Дозволяє агентам зберігати вивчене між сесіями у двох сховищах: що правдиве про вас і що правдиве про кожен проєкт. Сесії отримують перелік заголовків, щоб агент міг прочитати потрібний запис. Вимкнення прибирає інструмент, вкладку «Памʼять» і індекс у сесії. Діє після перезапуску OpenCode.",
   "settings.openchamber.opencodeCli.tooltipPrefix": "Додатковий абсолютний шлях до",
   "settings.openchamber.opencodeCli.tooltipSuffix": "бінарного файлу.",
   "settings.openchamber.opencodeCli.field.binaryPath": "Шлях до бінарного файлу OpenCode",
@@ -1160,6 +1164,7 @@ export const settingsDict = {
   "settings.usage.page.header.providerUsage": "Використання {provider}",
   "settings.usage.page.header.refreshing": "Оновлення використання...",
   "settings.usage.page.header.lastUpdated": "Останнє оновлення: {time}",
+  "settings.usage.page.header.lastUpdatedWithPlan": "План: {plan} · Останнє оновлення: {time}",
   "settings.usage.page.options.showInWorkStatusAria": "Показувати в панелі статусу роботи",
   "settings.usage.page.options.showInWorkStatus": "Показувати в панелі статусу роботи",
   "settings.usage.page.options.showInWorkStatusTooltip": "Якщо ввімкнути, використання цього провайдера буде видно в панелі статусу роботи.",
@@ -2138,4 +2143,5 @@ export const settingsDict = {
   "settings.openchamber.visual.field.followUpBehaviorDescription": "Choose what happens when you press Enter on a follow-up message while the agent is still responding.",
   "settings.openchamber.visual.option.followUpBehavior.steer.label": "Steer",
   "settings.openchamber.visual.option.followUpBehavior.queue.label": "Queue",
+  ...thirdPartyIntegrationI18n.uk,
 } as const;

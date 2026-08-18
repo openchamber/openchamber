@@ -1,3 +1,4 @@
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go Nutzungsverfolgung',
   'settings.providers.page.openCodeGo.description': 'Verbinden Sie das OpenCode Go Dashboard, um rollierenden, wöchentlichen und monatlichen Verbrauch anzuzeigen.',
@@ -950,6 +951,9 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentWebTool': 'OpenChamber-Web-Werkzeug',
   'settings.openchamber.tools.field.agentWebToolAria': 'Das OpenChamber-Web-Werkzeug aktivieren',
   'settings.openchamber.tools.field.agentWebToolInfo': 'Lässt Agenten die Seite im Browser-Panel von OpenChamber ansehen und bedienen: eine URL öffnen, den Inhalt lesen, klicken, tippen, scrollen und zwischen mobiler und Desktop-Ansicht wechseln. Fügt jeder Sitzung eine kleine Werkzeugbeschreibung hinzu. Gilt nach einem Neustart von OpenCode.',
+  'settings.openchamber.tools.field.agentMemoryTool': 'Agenten-Gedächtniswerkzeug',
+  'settings.openchamber.tools.field.agentMemoryToolAria': 'Agenten-Gedächtniswerkzeug',
+  'settings.openchamber.tools.field.agentMemoryToolInfo': 'Lässt Agenten Gelerntes über Sitzungen hinweg behalten, in zwei Speichern: was über Sie zutrifft und was über das jeweilige Projekt zutrifft. Sitzungen erhalten die gespeicherten Titel, damit der Agent bei Bedarf einen Eintrag lesen kann. Beim Ausschalten entfallen Werkzeug, Gedächtnis-Tab und Sitzungsindex. Gilt nach einem Neustart von OpenCode.',
   'settings.openchamber.opencodeCli.tooltipPrefix': 'Optionaler absoluter Pfad zur',
   'settings.openchamber.opencodeCli.tooltipSuffix': 'Binary.',
   'settings.openchamber.opencodeCli.field.binaryPath': 'OpenCode Binary-Pfad',
@@ -1130,6 +1134,7 @@ export const settingsDict = {
   'settings.usage.page.header.providerUsage': '{provider} Nutzung',
   'settings.usage.page.header.refreshing': 'Aktualisiere Nutzung...',
   'settings.usage.page.header.lastUpdated': 'Zuletzt aktualisiert: {time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': 'Tarif: {plan} · Zuletzt aktualisiert: {time}',
   'settings.usage.page.options.showInWorkStatusAria': 'Im Arbeitsstatusbereich anzeigen',
   'settings.usage.page.options.showInWorkStatus': 'Im Arbeitsstatusbereich anzeigen',
   'settings.usage.page.options.showInWorkStatusTooltip': 'Wenn aktiviert, ist die Nutzung dieses Anbieters im Arbeitsstatusbereich sichtbar.',
@@ -2124,4 +2129,5 @@ export const settingsDict = {
   'settings.openchamber.visual.option.themeMode.light.description': 'Immer helles Erscheinungsbild verwenden',
   'settings.openchamber.visual.option.themeMode.dark.description': 'Immer dunkles Erscheinungsbild verwenden',
   'chat.message.userText.collapseAria': 'Benutzernachricht einklappen',
+  ...thirdPartyIntegrationI18n.de,
 };

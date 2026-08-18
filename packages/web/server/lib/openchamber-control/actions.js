@@ -53,8 +53,86 @@ export const OPENCHAMBER_WEB_ACTIONS = Object.freeze(
   OPENCHAMBER_WEB_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
+/**
+ * Memory is its own tool for the same reason web is: remembering across
+ * sessions is a distinct intent from controlling one, and a shared description
+ * would blur both. It also has to switch off cleanly and completely, which a
+ * shared schema cannot do.
+ *
+ * The session already carries an index of stored titles, so the descriptions
+ * push the model toward reading one entry it can already see rather than
+ * listing everything again — and toward reading it at all, since a title that
+ * reads as a complete fact is exactly the one whose conditions get lost.
+ */
+export const OPENCHAMBER_MEMORY_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'memory.read', title: 'Read a stored memory', description: 'Read the full text of one memory listed in the session index. The index shows titles only, and a title omits the conditions that decide how the memory applies, so read before acting rather than working from the title. Requires title (as the index spells it) or memoryId; scope is optional and both stores are searched without it' },
+  { action: 'memory.list', title: 'List stored memories', description: 'List stored memory titles when the session index is missing or stale; scope is global, project, or both (default)' },
+  { action: 'memory.save', title: 'Remember something', description: 'Store a durable fact, preference, or reference; requires title and body, plus scope global (about the user) or project (about this codebase). Restating something already stored updates it. Do not store secrets, one-off task state, or anything the user asked you not to keep' },
+  { action: 'memory.delete', title: 'Forget a memory', description: 'Delete a memory that turned out to be wrong or obsolete; requires memoryId and scope' },
+]);
+
+export const OPENCHAMBER_MEMORY_ACTIONS = Object.freeze(
+  OPENCHAMBER_MEMORY_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
+ * Which actions each managed tool may ask for.
+ *
+ * The callback needs this because models routinely drop the namespace: asked
+ * for `memory.read` from a tool already called `openchamber_memory`, they send
+ * `read`, since the tool's own name appears to have said "memory" already. The
+ * name is unambiguous inside one tool's action set even when it is not across
+ * all of them (`delete` belongs to both schedule and memory), so resolution
+ * starts from the tool that asked.
+ */
+const ACTIONS_BY_TOOL = Object.freeze({
+  openchamber: OPENCHAMBER_AGENT_TOOL_ACTIONS,
+  openchamber_web: OPENCHAMBER_WEB_ACTIONS,
+  openchamber_memory: OPENCHAMBER_MEMORY_ACTIONS,
+});
+
+const bareName = (action) => {
+  const separator = action.indexOf('.');
+  return separator === -1 ? action : action.slice(separator + 1);
+};
+
+const uniqueMatch = (candidates, requested) => {
+  const matches = candidates.filter((candidate) => bareName(candidate) === requested);
+  return matches.length === 1 ? matches[0] : null;
+};
+
+/**
+ * The canonical action for what a tool asked, or the reason it could not be
+ * resolved. The reason lists what the tool can actually do: an error that only
+ * says "unsupported" leaves the model to guess again, which is how one wrong
+ * name becomes three.
+ */
+export const resolveAgentToolAction = (requested, toolName) => {
+  const value = typeof requested === 'string' ? requested.trim() : '';
+  const scoped = ACTIONS_BY_TOOL[toolName] ?? null;
+  const known = scoped ?? OPENCHAMBER_ALL_ACTIONS;
+
+  if (value && known.includes(value)) {
+    return { action: value };
+  }
+  if (value) {
+    const resolved = uniqueMatch(known, value)
+      // A tool that did not identify itself still gets the benefit when the
+      // bare name means only one thing across every action.
+      ?? (scoped ? null : uniqueMatch(OPENCHAMBER_ALL_ACTIONS, value));
+    if (resolved) {
+      return { action: resolved };
+    }
+  }
+
+  return {
+    error: `Unsupported OpenChamber action: ${value || 'missing'}. Use one of: ${known.join(', ')}`,
+  };
+};
+
 /** Everything the callback route will dispatch, whichever tool asked. */
 export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_CONTROL_ACTIONS,
   ...OPENCHAMBER_WEB_ACTIONS,
+  ...OPENCHAMBER_MEMORY_ACTIONS,
 ]);
