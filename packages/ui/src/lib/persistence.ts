@@ -555,6 +555,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     showOpenCodeUpdateNotifications: defaults.showOpenCodeUpdateNotifications,
     agentControlToolEnabled: defaults.agentControlToolEnabled,
     agentWebToolEnabled: defaults.agentWebToolEnabled,
+    agentMemoryToolEnabled: defaults.agentMemoryToolEnabled,
     showToolFileIcons: defaults.showToolFileIcons,
     codeBlockLineWrap: defaults.codeBlockLineWrap,
     showTurnChangedFiles: defaults.showTurnChangedFiles,
@@ -736,6 +737,19 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     && settings.agentWebToolEnabled !== store.agentWebToolEnabled
   ) {
     store.setAgentWebToolEnabled(settings.agentWebToolEnabled);
+  }
+  if (
+    typeof settings.agentMemoryToolEnabled === 'boolean'
+    && settings.agentMemoryToolEnabled !== store.agentMemoryToolEnabled
+  ) {
+    store.setAgentMemoryToolEnabled(settings.agentMemoryToolEnabled);
+  }
+  // Server-owned: it says whether this build has the feature at all.
+  if (
+    typeof settings.agentMemoryFeatureAvailable === 'boolean'
+    && settings.agentMemoryFeatureAvailable !== store.agentMemoryFeatureAvailable
+  ) {
+    store.setAgentMemoryFeatureAvailable(settings.agentMemoryFeatureAvailable);
   }
   if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
     store.setShowToolFileIcons(settings.showToolFileIcons);
@@ -1381,6 +1395,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.agentWebToolEnabled === 'boolean') {
     result.agentWebToolEnabled = candidate.agentWebToolEnabled;
+  }
+  if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
+    result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
   }
   if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
     result.openCodeUpdateToastDismissedVersion = candidate.openCodeUpdateToastDismissedVersion.trim().slice(0, 128);

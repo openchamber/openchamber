@@ -1,4 +1,5 @@
 import type { I18nKey } from '@/lib/i18n/store';
+import { useUIStore } from '@/stores/useUIStore';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 
@@ -488,6 +489,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.tools.field.agentWebToolInfo',
     keywords: ['agent', 'tool', 'web', 'browser', 'page', 'preview', 'openchamber'],
     isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.agent-memory-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentMemoryTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentMemoryToolInfo',
+    keywords: ['agent', 'tool', 'memory', 'remember', 'recall', 'preferences', 'openchamber'],
+    // Unreleased: searching for a setting that is not rendered would take the
+    // user to an empty spot on the page.
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
   },
   {
     id: 'git.github-account',

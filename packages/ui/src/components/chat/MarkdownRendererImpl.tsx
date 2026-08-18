@@ -835,7 +835,6 @@ const useMorphdomMarkdown = ({
   containerRef,
   text,
   streaming,
-  cacheKey,
   imageMode = 'inline',
   syntaxVars,
   ctx,
@@ -843,7 +842,6 @@ const useMorphdomMarkdown = ({
   containerRef: React.RefObject<HTMLDivElement | null>;
   text: string;
   streaming: boolean;
-  cacheKey: string;
   imageMode?: MarkdownImageMode;
   syntaxVars: Record<string, string>;
   ctx: DecorateContext;
@@ -908,7 +906,7 @@ const useMorphdomMarkdown = ({
     const target = container.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
     let active = true;
 
-    void renderMarkdownBlocks(text, streaming, cacheKey, imageMode).then((blocks) => {
+    void renderMarkdownBlocks(text, streaming, imageMode).then((blocks) => {
       if (!active) return;
       const existing = Array.from(target.children) as HTMLElement[];
 
@@ -959,7 +957,7 @@ const useMorphdomMarkdown = ({
     return () => {
       active = false;
     };
-  }, [containerRef, text, streaming, cacheKey, imageMode, ctx, refreshMermaidViewers]);
+  }, [containerRef, text, streaming, imageMode, ctx, refreshMermaidViewers]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1040,13 +1038,13 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
   const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
-  const cacheKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
+  // Identity for the fade-in wrapper: a new part/message restarts the animation.
+  const fadeKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
   useMorphdomMarkdown({
     containerRef,
     text: content,
     streaming: live,
-    cacheKey,
     imageMode: variant === 'assistant' ? 'label' : 'inline',
     syntaxVars,
     ctx,
@@ -1060,7 +1058,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
 
   if (isAnimated) {
     return (
-      <FadeInOnReveal key={cacheKey} skipAnimation={skipFadeIn}>
+      <FadeInOnReveal key={fadeKey} skipAnimation={skipFadeIn}>
         {markdownContent}
       </FadeInOnReveal>
     );
@@ -1137,7 +1135,6 @@ const SimpleMarkdownRendererImpl: React.FC<{
     containerRef,
     text: renderedContent,
     streaming: false,
-    cacheKey: `simple:${variant}`,
     syntaxVars,
     ctx,
   });

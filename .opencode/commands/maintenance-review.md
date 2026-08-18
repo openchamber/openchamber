@@ -29,7 +29,9 @@ Verify the worktree is clean:
 
 `git status --porcelain`
 
-If the output is not empty, stop immediately and report it. Do not stash, reset, or discard anything.
+If the output is not empty and the repository root contains a `.maintenance-clone` marker file, this is a disposable maintenance clone and the changes are debris from an earlier failed task. Recover it with `git checkout -- .`, `git clean -fd`, `git checkout main`, `git pull`, report exactly which files you discarded, and continue.
+
+If the marker file is absent, stop immediately and report it. Do not stash, reset, or discard anything.
 
 Read `AGENTS.md`, and read `.opencode/commands/as-fixes.md` in full, including the sections "What a good fix looks like" and "Hard prohibitions". Those describe the standard the anti-slop PRs were supposed to meet. Your job includes verifying they actually met it.
 

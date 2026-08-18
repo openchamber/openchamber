@@ -3,6 +3,9 @@ import { pathToFileURL } from 'node:url';
 import {
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
   OPENCHAMBER_AGENT_TOOL_ACTIONS,
+  OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
+  OPENCHAMBER_MEMORY_ACTIONS,
+  resolveAgentToolAction,
   OPENCHAMBER_WEB_ACTION_DEFINITIONS,
   OPENCHAMBER_WEB_ACTIONS,
 } from '../openchamber-control/actions.js';
@@ -10,10 +13,13 @@ import {
 const TOOL_SCHEMA_VERSION = 1;
 // Everything either managed tool may ask for; the agent allowlist stays
 // narrower than the full control surface.
-const ACTIONS = new Set([...OPENCHAMBER_AGENT_TOOL_ACTIONS, ...OPENCHAMBER_WEB_ACTIONS]);
+const ACTIONS = new Set([...OPENCHAMBER_AGENT_TOOL_ACTIONS, ...OPENCHAMBER_WEB_ACTIONS, ...OPENCHAMBER_MEMORY_ACTIONS]);
 const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
-  [...OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS, ...OPENCHAMBER_WEB_ACTION_DEFINITIONS]
-    .map(({ action, title }) => [action, title]),
+  [
+    ...OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_WEB_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
+  ].map(({ action, title }) => [action, title]),
 );
 
 /**
@@ -24,6 +30,21 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
  * on every call.
  */
 const WEB_PARAMETER_NAMES = ['url', 'selector', 'text', 'value', 'submit', 'direction', 'viewport', 'label'];
+// `title` is shared with the control tool, so it is not listed here — only the
+// names memory alone introduces are kept out of the other schemas.
+const MEMORY_ONLY_PARAMETER_NAMES = ['body', 'scope', 'memoryId', 'type'];
+const MEMORY_PARAMETER_NAMES = [...MEMORY_ONLY_PARAMETER_NAMES, 'title'];
+
+/**
+ * `title` is shared with the control tool, where it means a session title, so
+ * it carries no description in the shared map. Left undescribed for memory the
+ * model has nothing to go on and invents a name for it — `name` was sent
+ * repeatedly in practice — so memory states what its own `title` is.
+ */
+const MEMORY_PARAMETER_OVERRIDES = {
+  title: { type: 'string', description: "The memory's title, exactly as the session index lists it. Use this to read an entry you can already see; use memoryId only when a result gave you one" },
+  scope: { type: 'string', enum: ['global', 'project', 'both'], description: 'global is about the user and applies everywhere; project is about this codebase. Required for memory.save and memory.delete. Optional for memory.read and memory.list, which search both stores when it is omitted' },
+};
 
 const ALL_PARAMETER_PROPERTIES = {
   projectId: { type: 'string', description: 'Configured project ID; do not combine with directory' },
@@ -66,6 +87,10 @@ const ALL_PARAMETER_PROPERTIES = {
   direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: 'Scroll direction for browser.scroll' },
   viewport: { type: 'string', enum: ['mobile', 'tablet', 'desktop', 'fill'], description: 'Page layout size; snapshots report which one is in effect' },
   label: { type: 'string', description: 'Short name for a browser.capture image, such as before-fix' },
+  body: { type: 'string', description: 'Full text of the memory; state it so it still makes sense in a session that has none of this conversation' },
+  scope: { type: 'string', enum: ['global', 'project', 'both'], description: 'global is about the user and applies everywhere; project is about this codebase. both is only valid for memory.list' },
+  memoryId: { type: 'string', description: 'Memory ID from a memory.list or memory.read result' },
+  type: { type: 'string', enum: ['fact', 'preference', 'reference'], description: 'fact is something true, preference is how the user wants work done, reference points at a resource that is hard to find again' },
 };
 
 const pickParameters = (names) => Object.fromEntries(
@@ -73,13 +98,21 @@ const pickParameters = (names) => Object.fromEntries(
 );
 
 const CONTROL_PARAMETER_PROPERTIES = pickParameters(
-  Object.keys(ALL_PARAMETER_PROPERTIES).filter((name) => !WEB_PARAMETER_NAMES.includes(name)),
+  Object.keys(ALL_PARAMETER_PROPERTIES).filter((name) => (
+    !WEB_PARAMETER_NAMES.includes(name) && !MEMORY_ONLY_PARAMETER_NAMES.includes(name)
+  )),
 );
 const WEB_PARAMETER_PROPERTIES = pickParameters(WEB_PARAMETER_NAMES);
+const MEMORY_PARAMETER_PROPERTIES = {
+  ...pickParameters(MEMORY_PARAMETER_NAMES),
+  ...MEMORY_PARAMETER_OVERRIDES,
+};
 
 const CONTROL_TOOL_DESCRIPTION = "Control OpenChamber projects, sessions, and scheduled tasks on the user's behalf. Sessions and scheduled tasks you create are for the user to follow and interact with; never use this tool to delegate parts of your own current task. Use one action per call. Scope with projectId or directory; omit both to use the current session directory. Session dispatches return immediately by default and you receive no notification when a dispatched session finishes, so never promise to report back on it; the user follows it in OpenChamber; a dispatched session needs no follow-up from you. If the user later asks how it went, use session.messages (add wait to block until it is idle, lastAssistant for just the final answer) — session.send always sends a NEW prompt and never just waits. Set wait only when the user asks or the next step requires the completed result. Session and worktree deletion are unavailable.";
 
 const WEB_TOOL_DESCRIPTION = "Look at and interact with a web page in OpenChamber's browser panel, so you can check your own work rather than describing what you expect. Use one action per call. Open a page, snapshot it to read its text and its interactive elements, then click, type or scroll using the selectors the snapshot returned; snapshots also report any errors the page logged. Pass a selector to browser.snapshot to read one part of a long page. browser.inspect returns computed styles when the question is how something renders. Set viewport to check a layout at mobile, tablet or desktop size. The page runs with the user's real logins, so treat what you see as their live session.";
+
+const MEMORY_TOOL_DESCRIPTION = "Keep what you learn across sessions, so the user does not have to explain the same thing twice. Use one action per call. The session already lists the titles of what is stored. A title is an abbreviation, not the memory: read the entry with memory.read before acting on it, because titles leave out the conditions and exceptions that decide how the memory applies, and the ones that look self-explanatory hide them most often. Save something only when it will still be true in a later session — a stable preference, a project convention, a decision and its reason, or a hard-won pointer. Do not save one-off task state, anything you can read from the code, secrets or credentials, or anything the user asked you not to keep. Choose the scope deliberately: global is about the user and reaches every project, so put a project's conventions in project scope. What you save is shown to the user as unreviewed until they confirm it, so save plainly and say what you saved when it matters.";
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') return null;
@@ -154,7 +187,7 @@ const createToolEntry = ({ name, description, actions, definitions, parameters }
               authorization: "Bearer " + token,
               "content-type": "application/json",
             },
-            body: JSON.stringify({ input: args, contextDirectory: context.directory }),
+            body: JSON.stringify({ input: args, contextDirectory: context.directory, tool: ${JSON.stringify(name)} }),
             signal: context.abort,
           })
           const output = await response.text()
@@ -182,7 +215,7 @@ const createToolEntry = ({ name, description, actions, definitions, parameters }
     },
 `;
 
-const createPluginSource = ({ includeControl, includeWeb }) => {
+const createPluginSource = ({ includeControl, includeWeb, includeMemory }) => {
   const entries = [];
   if (includeControl) {
     entries.push(createToolEntry({
@@ -200,6 +233,15 @@ const createPluginSource = ({ includeControl, includeWeb }) => {
       actions: OPENCHAMBER_WEB_ACTIONS,
       definitions: OPENCHAMBER_WEB_ACTION_DEFINITIONS,
       parameters: WEB_PARAMETER_PROPERTIES,
+    }));
+  }
+  if (includeMemory) {
+    entries.push(createToolEntry({
+      name: 'openchamber_memory',
+      description: MEMORY_TOOL_DESCRIPTION,
+      actions: OPENCHAMBER_MEMORY_ACTIONS,
+      definitions: OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
+      parameters: MEMORY_PARAMETER_PROPERTIES,
     }));
   }
 
@@ -241,16 +283,16 @@ export const createAgentToolRuntime = (dependencies) => {
   const pluginPath = path.join(pluginDirectory, 'openchamber-plugin.js');
   let activeToken = null;
 
-  const prepareManagedOpenCodeEnv = async ({ includeControl = true, includeWeb = true } = {}) => {
+  const prepareManagedOpenCodeEnv = async ({ includeControl = true, includeWeb = true, includeMemory = true } = {}) => {
     const port = getActivePort();
     if (!Number.isInteger(port) || port <= 0) {
       throw new Error('OpenChamber listener port is unavailable for managed tool injection');
     }
-    if (!includeControl && !includeWeb) {
+    if (!includeControl && !includeWeb && !includeMemory) {
       throw new Error('At least one OpenChamber managed tool must be enabled to inject the plugin');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeWeb }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeWeb, includeMemory }), { mode: 0o600 });
     activeToken = crypto.randomBytes(32).toString('base64url');
     const pluginUrl = pathToFileURL(pluginPath).href;
     return {
@@ -270,15 +312,23 @@ export const createAgentToolRuntime = (dependencies) => {
   };
 
   const execute = async (payload = {}, options = {}) => {
-    const action = asNonEmptyString(payload.input?.action);
-    if (!action || !ACTIONS.has(action)) {
-      return createResult({ ok: false, action, error: { message: `Unsupported OpenChamber action: ${action || 'missing'}`, kind: 'usage' } });
+    const requested = asNonEmptyString(payload.input?.action);
+    // Resolved against the calling tool's own actions: models drop the
+    // namespace that the tool's name already implies, and answering "read" with
+    // a bare "unsupported" leaves them to guess a second wrong name.
+    const resolution = resolveAgentToolAction(requested, asNonEmptyString(payload.tool));
+    if (resolution.error) {
+      return createResult({ ok: false, action: requested, error: { message: resolution.error, kind: 'usage' } });
+    }
+    const action = resolution.action;
+    if (!ACTIONS.has(action)) {
+      return createResult({ ok: false, action, error: { message: `Unsupported OpenChamber action: ${action}`, kind: 'usage' } });
     }
     if (typeof executeAction !== 'function') {
       return createResult({ ok: false, action, error: { message: 'OpenChamber control service is unavailable', kind: 'runtime' } });
     }
     try {
-      const data = await executeAction(action, payload.input, payload.contextDirectory, options);
+      const data = await executeAction(action, { ...payload.input, action }, payload.contextDirectory, options);
       return createResult({ ok: true, action, data });
     } catch (error) {
       return createResult({
