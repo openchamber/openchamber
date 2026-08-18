@@ -1,5 +1,13 @@
 apply plugin: 'com.android.application'
 
+def ciVersionCode = System.getenv('OPENCHAMBER_ANDROID_VERSION_CODE')
+def ciVersionName = System.getenv('OPENCHAMBER_ANDROID_VERSION_NAME')
+def ciKeystorePath = System.getenv('OPENCHAMBER_ANDROID_KEYSTORE_PATH')
+def ciKeystorePassword = System.getenv('OPENCHAMBER_ANDROID_KEYSTORE_PASSWORD')
+def ciKeyAlias = System.getenv('OPENCHAMBER_ANDROID_KEY_ALIAS')
+def ciKeyPassword = System.getenv('OPENCHAMBER_ANDROID_KEY_PASSWORD')
+def hasCiSigning = ciKeystorePath && ciKeystorePassword && ciKeyAlias && ciKeyPassword
+
 android {
     namespace "com.openchamber.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,16 +15,29 @@ android {
         applicationId "com.openchamber.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode ciVersionCode ? ciVersionCode.toInteger() : 1
+        versionName ciVersionName ?: "1.0"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasCiSigning) {
+                storeFile file(ciKeystorePath)
+                storePassword ciKeystorePassword
+                keyAlias ciKeyAlias
+                keyPassword ciKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
+            if (hasCiSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

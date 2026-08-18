@@ -133,6 +133,8 @@ interface StatusRowProps {
   showAssistantStatus?: boolean;
   showTodos?: boolean;
   agentName?: string;
+  modelName?: string | null;
+  providerId?: string | null;
   leftAccessory?: React.ReactNode;
 }
 
@@ -150,11 +152,19 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   showAssistantStatus = true,
   showTodos = true,
   agentName,
+  modelName,
+  providerId,
   leftAccessory,
 }) => {
   const { t } = useI18n();
   const [isExpanded, setIsExpanded] = React.useState(false);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionDirectory = useSessionUIStore(
+    React.useCallback(
+      (state) => (currentSessionId ? state.getDirectoryForSession(currentSessionId) : null),
+      [currentSessionId],
+    ),
+  );
   const liveTodos = useDirectorySync(
     React.useCallback(
       (state) => {
@@ -166,8 +176,10 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   );
   const persistedSessionTodos = useTodosPersistStore(
     React.useCallback(
-      (state) => (showTodos && currentSessionId ? state.sessions[currentSessionId]?.todos : undefined),
-      [currentSessionId, showTodos],
+      (state) => (showTodos && currentSessionId && currentSessionDirectory
+        ? state.getSessionTodos(currentSessionDirectory, currentSessionId)
+        : undefined),
+      [currentSessionDirectory, currentSessionId, showTodos],
     ),
   );
   const todos: TodoItem[] = React.useMemo(() => {
@@ -293,7 +305,13 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   }
 
   return (
-    <div className={cn("mb-1", !hasLeftAccessory && "chat-column")} style={STATUS_ROW_CONTAINER_STYLE}>
+    <div
+      // Mobile: breathing room between the last message and the agent status
+      // line — without it the "<model> is running…" row sits flush against
+      // the message above.
+      className={cn("mb-1", isMobile && "mt-2", !hasLeftAccessory && "chat-column")}
+      style={STATUS_ROW_CONTAINER_STYLE}
+    >
       <div className={cn("flex items-center justify-between py-0.5 gap-2 h-[1.2rem]", hasLeftAccessory && "px-0.5")}>
         {/* Left: Abort status | Working placeholder | leftAccessory */}
         <div className={cn("flex-1 flex items-center min-w-0 gap-2", hasLeftAccessory ? "pl-1.5" : "overflow-x-hidden")}>
@@ -313,6 +331,8 @@ export const StatusRow: React.FC<StatusRowProps> = ({
               isWaitingForPermission={isWaitingForPermission}
               retryInfo={retryInfo}
               agentName={agentName}
+              modelName={modelName}
+              providerId={providerId}
             />
           ) : leftAccessory ? (
             leftAccessory

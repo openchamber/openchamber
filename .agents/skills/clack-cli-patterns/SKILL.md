@@ -1,6 +1,6 @@
 ---
 name: clack-cli-patterns
-description: Use when creating or modifying terminal CLI commands, prompts, or output formatting in OpenChamber. Enforces Clack UX standards with strict parity and safety across TTY/non-TTY, --quiet, and --json modes.
+description: Use when creating or modifying OpenChamber CLI commands, prompts, terminal output, non-TTY behavior, `--quiet`, or `--json` behavior.
 license: MIT
 compatibility: opencode
 ---
@@ -17,36 +17,19 @@ Use this skill for terminal CLI work only (for example `packages/web/bin/*`).
 
 Do not use this skill for web UI or VS Code webview styling work.
 
-## Mandatory Rules
+## Mode Contract
 
-1. **Validation first**
-   - Safety and correctness checks must run in all modes.
-   - Prompts may help collect input, but cannot be the only guard.
+Run safety and correctness validation before presentation in every mode. Prompts collect missing input; they never enforce policy alone.
 
-2. **Mode parity is required**
-   - Behavior must be equivalent in:
-     - Interactive TTY
-     - Non-interactive shells
-     - `--quiet`
-     - `--json`
-     - Fully pre-specified flags
-   - Invalid operations must fail deterministically with non-zero exit code.
+| Mode | Prompt | Output | Failure |
+|---|---|---|---|
+| Interactive TTY | Allowed when input is missing | Framed human output | Concise human error, non-zero exit |
+| Fully specified flags | None required | Human output | Same policy and exit semantics |
+| Non-TTY/piped | Never | Deterministic script-safe output | Non-zero without hanging |
+| `--quiet` | Never | Essential result only | Concise error, non-zero exit |
+| `--json` | Never | JSON only, including warnings/errors | JSON failure payload, non-zero exit |
 
-3. **Prompt guard contract**
-   - Only prompt when all are true:
-     - stdout is TTY
-     - not `--quiet`
-     - not `--json`
-     - not automated/non-interactive context
-
-4. **Output contract**
-   - `--json`: machine-readable output only.
-   - `--quiet`: suppress non-essential output only.
-   - Neither mode weakens policy enforcement.
-
-5. **Cancellation contract**
-   - Handle prompt cancellation with `isCancel` + `cancel(...)`.
-   - Handle SIGINT cleanly and use consistent exit semantics.
+Handle prompt cancellation with `isCancel` + `cancel(...)` and SIGINT with consistent exit semantics.
 
 ## Clack Primitive Standard
 
@@ -140,9 +123,9 @@ Quiet output should still be complete enough for scripts and quick human scannin
 - Prefer this style over boxed notes for routine follow-up actions.
 - Reserve `note`/boxed callouts for rare, high-context guidance where a long paragraph is truly necessary.
 
-## Parity Verification Matrix
+## Completion Criteria
 
-For each command/subcommand, manually verify:
+Every command/subcommand must have a tested answer for:
 
 1. default interactive TTY output
 2. `--quiet` output (minimal but informative)
@@ -150,67 +133,14 @@ For each command/subcommand, manually verify:
 4. non-TTY behavior (e.g. piped)
 5. error path in both human and json modes
 
-## Copy/Paste Snippets
+## Reusable Snippets
 
-### Prompt Guard
+Load `references/snippets.md` when implementing prompt guards, non-interactive fallback, spinner lifecycle, or JSON/human output branching.
 
-```js
-if (canPrompt(options)) {
-  const value = await select({
-    message: 'Choose an option',
-    options: [{ value: 'a', label: 'Option A' }],
-  });
-  if (isCancel(value)) {
-    cancel('Operation cancelled.');
-    return;
-  }
-}
-```
-
-### Non-Interactive Fallback
-
-```js
-if (!resolvedValue) {
-  if (canPrompt(options)) {
-    // prompt path
-  } else {
-    throw new Error('Missing required value. Provide --flag <value>.');
-  }
-}
-```
-
-### Spinner Guard
-
-```js
-const spin = createSpinner(options);
-spin?.start('Running operation...');
-// ...work...
-spin?.stop('Done');
-```
-
-### JSON vs Human Output
-
-```js
-if (options.json) {
-  printJson({ ok: true, data });
-  return;
-}
-
-intro('Operation');
-log.success('Completed');
-outro('done');
-```
-
-## Implementation Checklist
-
-1. Add or update core validators first.
-2. Ensure validators execute in all modes.
-3. Add interactive Clack UX only as enhancement.
-4. Verify parity between interactive and non-interactive flows.
-5. Ensure script-safe deterministic failure behavior.
+Implementation is complete when validators run before every mode branch, interactive Clack UX is only an enhancement, and all five cases above produce deterministic output and exit behavior.
 
 ## References
 
-- Policy source: `AGENTS.md` (CLI Parity and Safety Policy)
+- This skill is the canonical CLI parity and safety policy.
 - Terminal CLI precedent: `packages/web/bin/cli.js`
 - Output adapter precedent: `packages/web/bin/cli-output.js`

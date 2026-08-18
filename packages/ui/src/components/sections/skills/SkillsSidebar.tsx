@@ -26,6 +26,7 @@ import { SettingsProjectSelector } from '@/components/sections/shared/SettingsPr
 import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 
 interface SkillsSidebarProps {
   onItemSelect?: () => void;
@@ -34,6 +35,9 @@ interface SkillsSidebarProps {
 const BUILT_IN_SKILL_LOCATION = '<built-in>';
 
 const isBuiltInSkill = (skill: DiscoveredSkill | null | undefined): boolean => skill?.path === BUILT_IN_SKILL_LOCATION;
+const isRenamableSkill = (skill: DiscoveredSkill | null | undefined): boolean => (
+  !!skill && !isBuiltInSkill(skill) && skill.renamable === true
+);
 
 export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
@@ -48,16 +52,16 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     skills,
     setSelectedSkill,
     setSkillDraft,
-    createSkill,
     deleteSkill,
+    renameSkill,
     getSkillDetail,
   } = useSkillsStore(useShallow((s) => ({
     selectedSkillName: s.selectedSkillName,
     skills: s.skills,
     setSelectedSkill: s.setSelectedSkill,
     setSkillDraft: s.setSkillDraft,
-    createSkill: s.createSkill,
     deleteSkill: s.deleteSkill,
+    renameSkill: s.renameSkill,
     getSkillDetail: s.getSkillDetail,
   })));
 
@@ -139,14 +143,14 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   };
 
   const handleOpenRenameDialog = (skill: DiscoveredSkill) => {
-    if (isBuiltInSkill(skill)) return;
+    if (!isRenamableSkill(skill)) return;
     setRenameNewName(skill.name);
     setRenameDialogSkill(skill);
   };
 
   const handleRenameSkill = async () => {
     if (!renameDialogSkill) return;
-    if (isBuiltInSkill(renameDialogSkill)) {
+    if (!isRenamableSkill(renameDialogSkill)) {
       setRenameDialogSkill(null);
       return;
     }
@@ -168,31 +172,11 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
       return;
     }
 
-    // Get full detail to copy
-    const detail = await getSkillDetail(renameDialogSkill.name);
-    if (!detail) {
-      toast.error(t('settings.skills.sidebar.toast.renameLoadFailed'));
-      setRenameDialogSkill(null);
-      return;
-    }
-
-    // Create new skill with new name
-    const success = await createSkill({
-      name: sanitizedName,
-      description: 'Renamed skill', // Will need proper description
-      scope: renameDialogSkill.scope,
-      source: renameDialogSkill.source,
-    });
-
+    // Rename in place on disk so SKILL.md body and supporting files are preserved.
+    const success = await renameSkill(renameDialogSkill.name, sanitizedName);
     if (success) {
-      // Delete old skill
-      const deleteSuccess = await deleteSkill(renameDialogSkill.name);
-      if (deleteSuccess) {
-        toast.success(`Skill renamed to "${sanitizedName}"`);
-        setSelectedSkill(sanitizedName);
-      } else {
-        toast.error(t('settings.skills.sidebar.toast.removeOldAfterRenameFailed'));
-      }
+      toast.success(t('settings.skills.sidebar.toast.skillRenamed', { name: sanitizedName }));
+      setSelectedSkill(sanitizedName);
     } else {
       toast.error(t('settings.skills.sidebar.toast.renameFailed'));
     }
@@ -232,7 +216,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">{t('settings.skills.sidebar.title')}</h2>
+        <h2 className={`${SETTINGS_PANEL_TITLE_CLASS} mb-3`}>{t('settings.skills.sidebar.title')}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">{t('settings.skills.sidebar.total', { count: skills.length })}</span>
@@ -462,13 +446,16 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
       : t('settings.skills.sidebar.badge.opencode');
   const badgeClassName = 'typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1 rounded flex-shrink-0 leading-none pb-px border border-[var(--interactive-border)]/50';
   const isBuiltIn = isBuiltInSkill(skill);
+  const canRename = isRenamableSkill(skill);
   const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
   const renderMenuItems = (Item: React.ElementType) => (
     <>
-      <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRename(); }}>
-        <Icon name="edit" className="h-4 w-4 mr-px" />
-        {t('settings.common.actions.rename')}
-      </Item>
+      {canRename ? (
+        <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRename(); }}>
+          <Icon name="edit" className="h-4 w-4 mr-px" />
+          {t('settings.common.actions.rename')}
+        </Item>
+      ) : null}
       <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onDuplicate(); }}>
         <Icon name="file-copy" className="h-4 w-4 mr-px" />
         {t('settings.common.actions.duplicate')}

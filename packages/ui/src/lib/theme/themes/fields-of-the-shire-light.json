@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "id": "openchamber-light",
+    "id": "fields-of-the-shire-light",
     "name": "Fields of the Shire",
     "description": "Fields of the Shire theme - light variant",
     "author": "OpenChamber",
@@ -30,7 +30,7 @@
       "elevated": "#fcf9f0",
       "elevatedForeground": "#1a1612",
       "overlay": "#1a161220",
-      "subtle": "#efe8da"
+      "subtle": "#f1ece1"
     },
     "interactive": {
       "border": "#1a16121c",

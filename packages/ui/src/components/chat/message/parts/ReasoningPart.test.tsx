@@ -96,4 +96,20 @@ describe('ReasoningTimelineBlock', () => {
     // The ellipsis character marks that the text was truncated
     expect(markup).toContain('…');
   });
+
+  test('omits trailing empty HTML comments from the header summary', () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <ReasoningTimelineBlock
+          text={'Planning accessible icon labels with translations <!-- -->'}
+          variant="thinking"
+          blockId="reasoning-comment-test"
+          showDuration={false}
+        />
+      </I18nProvider>,
+    );
+
+    expect(markup).toContain('Planning accessible icon labels with translations');
+    expect(markup).not.toContain('&lt;!-- --&gt;');
+  });
 });

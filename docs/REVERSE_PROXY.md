@@ -19,7 +19,6 @@ Use this guide when running OpenChamber behind Nginx, Nginx Proxy Manager, Caddy
   - `/api/global/event`
   - `/api/notifications/stream`
   - `/api/openchamber/events`
-  - `/api/terminal/:sessionId/stream`
 - Large request bodies for attachments and file operations
 - Long-lived read timeouts for live streams and terminal sessions
 
@@ -92,19 +91,6 @@ location = /api/event/ws {
 }
 
 location ~ ^/api/(event|global/event|notifications/stream|openchamber/events)$ {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-}
-
-location ~ ^/api/terminal/.+/stream$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Accept "text/event-stream";
     proxy_set_header Cache-Control "no-cache";
@@ -226,20 +212,6 @@ location = /api/notifications/stream {
 }
 
 location = /api/openchamber/events {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location ~ ^/api/terminal/.+/stream$ {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Accept "text/event-stream";
     proxy_set_header Cache-Control "no-cache";

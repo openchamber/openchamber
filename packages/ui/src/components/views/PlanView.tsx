@@ -29,6 +29,7 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -37,7 +38,8 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { EditorView } from '@codemirror/view';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
-import { parseProjectPlanMarkdown } from '@/lib/openchamberConfig';
+import { fetchProjectPlan, parsePlanMarkdown } from '@/lib/projectContextApi';
+import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
 import { Icon } from "@/components/icon/Icon";
@@ -47,6 +49,12 @@ import { useI18n } from '@/lib/i18n';
 
 type PlanViewProps = {
   targetPath?: string | null;
+  /** Saved project plan to open. Project plans are server-owned and addressed
+      by id; they never carry a client-visible filesystem path. */
+  projectPlanId?: string | null;
+  /** Called after a send action routes the user to the chat — hosts that show
+      PlanView in an overlay (mobile fullscreen surface) close it here. */
+  onNavigatedToChat?: () => void;
 };
 
 type PlanSendAction = 'improve' | 'implement';
@@ -146,7 +154,7 @@ type SelectedLineRange = {
   end: number;
 };
 
-export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
+export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, projectPlanId = null, onNavigatedToChat }) => {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const createSession = useSessionUIStore((state) => state.createSession);
@@ -191,6 +199,12 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const [isPlanSendSubmitting, setIsPlanSendSubmitting] = React.useState(false);
 
   const [resolvedPath, setResolvedPath] = React.useState<string | null>(null);
+  // Set once a saved project plan has actually loaded. Kept separate from
+  // `resolvedPath` so nothing downstream can mistake a project plan for a file
+  // the user could open, edit, or be shown a path for.
+  const [loadedProjectPlanId, setLoadedProjectPlanId] = React.useState<string | null>(null);
+  const savePlan = useProjectContextStore((state) => state.savePlan);
+  const hasDocument = Boolean(resolvedPath) || Boolean(loadedProjectPlanId);
   const displayPath = React.useMemo(() => {
     if (!resolvedPath || !sessionDirectory || !homeDirectory) {
       return resolvedPath;
@@ -208,7 +222,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     if (!content.trim()) {
       return t('planView.title.default');
     }
-    return parseProjectPlanMarkdown(content).title || t('planView.title.default');
+    return parsePlanMarkdown(content, t('planView.title.default')).title;
   }, [content, t]);
   const sendPromptTitle = React.useMemo(() => parsedTitle.trim() || t('planView.title.default'), [parsedTitle, t]);
   const [loading, setLoading] = React.useState(false);
@@ -345,12 +359,14 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     };
   }, [cancel, commentText, editingDraftId, isMobile, lineSelection]);
 
+  const editorFontSize = useUIStore((state) => state.editorFontSize);
+
   const editorExtensions = React.useMemo(() => {
     // Shiki token colors only for code files; markdown keeps the lezer
     // highlighter (markdown-aware bold headings etc., and no Shiki view to match).
     const shikiLanguage = resolvedPath ? getLanguageFromExtension(resolvedPath) : null;
     const useShiki = Boolean(shikiLanguage) && shikiLanguage !== 'markdown';
-    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, useShiki ? { syntaxColors: false } : undefined)];
+    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, useShiki ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
     const language = languageByExtension(resolvedPath || 'plan.md');
     if (language) {
       extensions.push(language);
@@ -364,12 +380,13 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     }
     extensions.push(EditorView.lineWrapping);
     return extensions;
-  }, [currentTheme, resolvedPath]);
+  }, [currentTheme, resolvedPath, editorFontSize]);
 
   React.useEffect(() => {
     // Saved project plans opened via context panel should work even when session plan mode is off.
-    if (!planModeEnabled && !targetPath) {
+    if (!planModeEnabled && !targetPath && !projectPlanId) {
       setResolvedPath(null);
+      setLoadedProjectPlanId(null);
       setContent('');
       setLoading(false);
       return;
@@ -401,8 +418,35 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
 
     const run = async () => {
       setResolvedPath(null);
+      setLoadedProjectPlanId(null);
       setContent('');
       setSaveError(null);
+
+      if (projectPlanId) {
+        if (!currentProjectRef) {
+          return;
+        }
+        setLoading(true);
+        try {
+          const plan = await fetchProjectPlan(currentProjectRef, projectPlanId);
+          if (cancelled) return;
+          if (!plan) {
+            // The plan or its markdown is gone. Leave the view empty and
+            // unsaveable rather than presenting an editor that would recreate
+            // a document the user deleted.
+            setSaveError(t('planView.error.loadFailed'));
+            return;
+          }
+          setContent(plan.raw);
+          setLoadedProjectPlanId(projectPlanId);
+        } catch (error) {
+          if (cancelled) return;
+          setSaveError(error instanceof Error ? error.message : t('planView.error.loadFailed'));
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+        return;
+      }
 
       if (targetPath) {
         setLoading(true);
@@ -476,17 +520,31 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     return () => {
       cancelled = true;
     };
-  }, [homeDirectory, planModeEnabled, runtimeApis.files, sessionDirectory, session?.slug, session?.time?.created, targetPath]);
+  }, [currentProjectRef, homeDirectory, planModeEnabled, projectPlanId, runtimeApis.files, sessionDirectory, session?.slug, session?.time?.created, t, targetPath]);
 
   React.useEffect(() => {
-    if (!resolvedPath) {
-      setSaveError(null);
+    if (!resolvedPath && !loadedProjectPlanId) {
       return;
     }
 
     const controller = window.setTimeout(async () => {
       setSaveError(null);
       try {
+        if (loadedProjectPlanId) {
+          if (!currentProjectRef) {
+            throw new Error(t('planView.error.writeFailed'));
+          }
+          const saved = await savePlan(currentProjectRef, loadedProjectPlanId, content);
+          if (!saved) {
+            throw new Error(t('planView.error.writeFailed'));
+          }
+          return;
+        }
+
+        if (!resolvedPath) {
+          return;
+        }
+
         if (runtimeApis.files?.writeFile) {
           const result = await runtimeApis.files.writeFile(resolvedPath, content);
           if (!result?.success) {
@@ -510,7 +568,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     return () => {
       window.clearTimeout(controller);
     };
-  }, [content, resolvedPath, runtimeApis.files, t]);
+  }, [content, currentProjectRef, loadedProjectPlanId, resolvedPath, runtimeApis.files, savePlan, t]);
 
   React.useEffect(() => {
     return () => {
@@ -523,7 +581,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const routeToChat = React.useCallback(() => {
     setActiveMainTab('chat');
     setSessionSwitcherOpen(false);
-  }, [setActiveMainTab, setSessionSwitcherOpen]);
+    onNavigatedToChat?.();
+  }, [onNavigatedToChat, setActiveMainTab, setSessionSwitcherOpen]);
 
   const handleConfirmPlanSend = React.useCallback(
     async (execution: TodoSendExecution) => {
@@ -592,6 +651,28 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         }
 
         setCurrentSession(sessionId, directoryHint);
+        // "Run as goal" rides the same arm mechanism as the composer target
+        // button; set explicitly either way so a stray armed flag cannot
+        // leak into a non-goal plan send. The objective override carries the
+        // plan substance — "Implement this plan: X" alone would give the
+        // progress audit nothing to judge against. Plans that exceed the
+        // objective limit are distilled into completion criteria by the
+        // small model (the working agent always reads the full plan from
+        // its file); on distillation failure a head+tail excerpt keeps the
+        // intent (top) and acceptance criteria (bottom), sacrificing the
+        // implementation middle the agent reads from the file anyway.
+        // Oversized objectives (huge plans) are distilled into audit
+        // criteria inside setSessionGoal — the shared path for every goal
+        // source. Here we only compose header + full content.
+        const goalObjective = execution.runAsGoal === true
+          ? [
+              `Implement the plan "${sendPromptTitle}" end-to-end${resolvedPath ? ` (plan file: ${resolvedPath})` : ''}.`,
+              'Re-read that file for full details — it is the source of truth.',
+              '',
+              content,
+            ].join('\n')
+          : null;
+        useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true, goalObjective);
         await sendMessage(
           visiblePrompt,
           execution.providerID,
@@ -608,7 +689,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         setIsPlanSendSubmitting(false);
       }
     },
-    [canCreateWorktree, createSession, currentProjectRef, initializeNewOpenChamberSession, pendingPlanSend, resolvedPath, routeToChat, sendMessage, sendPromptTitle, setCurrentSession]
+    [canCreateWorktree, content, createSession, currentProjectRef, initializeNewOpenChamberSession, pendingPlanSend, resolvedPath, routeToChat, sendMessage, sendPromptTitle, setCurrentSession]
   );
 
   const blockWidgets = React.useMemo(() => {
@@ -643,7 +724,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
             </div>
           ) : null}
         </div>
-        {resolvedPath ? (
+        {hasDocument ? (
           <div className="flex items-center gap-1">
             <DropdownMenu>
               <Tooltip>
@@ -776,6 +857,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         target={pendingPlanSend?.target ?? 'session'}
         projectDirectory={currentProjectRef?.path ?? null}
         submitting={isPlanSendSubmitting}
+        allowRunAsGoal
         onConfirm={handleConfirmPlanSend}
       />
 

@@ -12,6 +12,7 @@ import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
@@ -22,9 +23,17 @@ interface ModelSelectorProps {
     onChange: (providerId: string, modelId: string) => void;
     className?: string;
     allowedProviderIds?: string[];
+    isModelAllowed?: (providerId: string, modelId: string) => boolean;
     placeholder?: string;
     tooltipsEnabled?: boolean;
     dropdownPortalToBody?: boolean;
+    /**
+     * Drop the model name and the chevron, leaving the provider logo. For
+     * headers that run out of room before they run out of controls — the logo
+     * still says which provider is answering, which is the part a glance is
+     * usually after.
+     */
+    compact?: boolean;
 }
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
@@ -33,9 +42,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     onChange,
     className,
     allowedProviderIds,
+    isModelAllowed,
     placeholder,
     tooltipsEnabled = true,
     dropdownPortalToBody = false,
+    compact = false,
 }) => {
     const { t } = useI18n();
     const { isReady, isUnavailable } = useOpenCodeReadiness();
@@ -90,7 +101,15 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }), [placeholder, t]);
 
     const selectedModel = providerId && modelId ? { providerID: providerId, modelID: modelId } : null;
-    const triggerLabel = providerId && modelId ? `${providerId}/${modelId}` : (placeholder || t('settings.agents.modelSelector.notSelected'));
+    // Show the model's display name (as in the picker list), not the raw provider/model id.
+    const triggerLabel = React.useMemo(() => {
+        if (!providerId || !modelId) {
+            return placeholder || t('settings.agents.modelSelector.notSelected');
+        }
+        const provider = providers.find((entry) => entry.id === providerId);
+        const model = provider?.models?.find((entry) => entry.id === modelId);
+        return (typeof model?.name === 'string' && model.name.trim()) || modelId;
+    }, [modelId, placeholder, providerId, providers, t]);
 
     const picker = (
         <ModelPickerList
@@ -106,6 +125,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             selectedModel={selectedModel}
             hiddenModels={hiddenModels}
             allowedProviderIds={allowedProviderIds}
+            isModelAllowed={isModelAllowed}
             includeNotSelected
             onSelectNone={handleSelectNone}
             onEscape={closePicker}
@@ -123,8 +143,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     onClick={isReady ? () => setIsMobilePanelOpen(true) : undefined}
                     disabled={!isReady}
                     className={cn(
-                        'flex w-full items-center justify-between gap-2 rounded-lg border border-border/40 bg-[var(--surface-elevated)] px-2 py-1.5 text-left',
-                        !isReady && 'opacity-60 cursor-not-allowed',
+                        dropdownTriggerVariants(),
+                        'w-full',
                         className,
                     )}
                 >
@@ -157,25 +177,35 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     return (
         <DropdownMenu open={isReady && isDropdownOpen} onOpenChange={isReady ? setIsDropdownOpen : undefined}>
             <DropdownMenuTrigger asChild>
-                <div className={cn(
-                    'border-input data-[placeholder]:text-muted-foreground flex min-w-0 items-center justify-between gap-2 rounded-lg border bg-transparent px-2 py-2 typography-ui-label whitespace-nowrap shadow-none outline-none hover:bg-interactive-hover data-[popup-open]:bg-interactive-active h-6 w-fit',
-                    !isReady && 'opacity-60 cursor-not-allowed',
-                    className,
-                )}>
+                <div
+                    className={cn(
+                        dropdownTriggerVariants({ size: 'sm' }),
+                        'min-w-0 w-fit',
+                        !isReady && 'opacity-60 cursor-not-allowed',
+                        className,
+                    )}
+                    // The name is gone from the trigger, so it has to stay
+                    // reachable somewhere.
+                    title={compact && isReady ? triggerLabel : undefined}
+                >
                     {!isReady ? (
                         <>
                             <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
-                            <span className="typography-ui-label font-normal whitespace-nowrap text-muted-foreground">
-                                {isUnavailable ? t('common.unavailable') : t('common.loading')}
-                            </span>
+                            {!compact && (
+                                <span className="typography-ui-label font-normal whitespace-nowrap text-muted-foreground">
+                                    {isUnavailable ? t('common.unavailable') : t('common.loading')}
+                                </span>
+                            )}
                         </>
                     ) : (
                         <>
                             {providerId ? <ProviderLogo providerId={providerId} className="h-3.5 w-3.5 flex-shrink-0" /> : <Icon name="pencil-ai" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
-                            <span className="typography-ui-label min-w-0 flex-1 truncate text-left font-normal text-foreground">{triggerLabel}</span>
+                            {!compact && (
+                                <span className="typography-ui-label min-w-0 flex-1 truncate text-left font-normal text-foreground">{triggerLabel}</span>
+                            )}
                         </>
                     )}
-                    <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
+                    {!compact && <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />}
                 </div>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="start" portalToBody={dropdownPortalToBody}>

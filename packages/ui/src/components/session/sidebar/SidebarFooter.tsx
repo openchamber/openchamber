@@ -25,6 +25,10 @@ export function SidebarFooter({
 }: Props): React.ReactNode {
   const { t } = useI18n();
 
+  if (!showRuntimeButtons && !showUpdateButton) {
+    return null;
+  }
+
   return (
     <div className="flex shrink-0 items-center justify-start gap-1 px-2.5 py-2">
       {showRuntimeButtons ? (
@@ -40,7 +44,7 @@ export function SidebarFooter({
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" onClick={onOpenShortcuts} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.actions.shortcuts')}>
-                <Icon name="question" className="h-4.5 w-4.5" />
+                <Icon name="command" className="h-4.5 w-4.5" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.shortcuts')}</p></TooltipContent>

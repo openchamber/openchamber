@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { execGit } from './bridge-git-process-runtime';
 
-const MAX_FILE_ATTACH_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_ATTACH_SIZE_BYTES = 20 * 1024 * 1024;
 
 const createGitCheckIgnoreTimeoutMs = () => {
   const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
@@ -99,7 +99,7 @@ export const readUriAsAttachment = async (
 
     const size = stat.size ?? 0;
     if (size > MAX_FILE_ATTACH_SIZE_BYTES) {
-      return { skipped: { name, reason: 'File exceeds 10MB limit' } };
+      return { skipped: { name, reason: 'File exceeds 20MB limit' } };
     }
 
     const bytes = await vscode.workspace.fs.readFile(uri);
@@ -538,7 +538,13 @@ export const fetchModelsMetadata = async () => {
   }
 };
 
-const getFsAccessRoot = (): string => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+const getFsAccessRoot = (requestedRoot?: string): string => {
+  const workspaceRoots = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [];
+  const requested = requestedRoot ? path.resolve(requestedRoot) : '';
+  return workspaceRoots.find((root) => path.resolve(root) === requested)
+    || workspaceRoots[0]
+    || os.homedir();
+};
 
 export const getFsMimeType = (filePath: string): string => {
   const ext = path.extname(filePath).toLowerCase();
@@ -564,13 +570,13 @@ export type FsReadPathResolution =
   | { ok: true; resolvedPath: string }
   | { ok: false; status: number; error: string };
 
-export const resolveFileReadPath = async (targetPath: string): Promise<FsReadPathResolution> => {
+export const resolveFileReadPath = async (targetPath: string, requestedRoot?: string): Promise<FsReadPathResolution> => {
   const trimmed = targetPath.trim();
   if (!trimmed) {
     return { ok: false, status: 400, error: 'Path is required' };
   }
 
-  const baseRoot = getFsAccessRoot();
+  const baseRoot = getFsAccessRoot(requestedRoot);
   const resolved = resolveUserPath(trimmed, baseRoot);
   if (!resolved) {
     return { ok: false, status: 400, error: 'Path is required' };

@@ -25,10 +25,12 @@ The following functions are exported and used by the web server:
 
 ### Status and Diff Operations
 - `getStatus(directory)`: Get comprehensive Git status including current branch, tracking, ahead/behind, file changes, diff stats, merge/rebase state.
-- `getDiff(directory, { path, staged, contextLines })`: Get diff output for files or entire working tree.
-- `getRangeDiff(directory, { base, head, path, contextLines })`: Get diff between two refs.
+- `getDiff(directory, { path, staged, contextLines })`: Get diff output for files or entire working tree. Untracked symbolic links are represented as link entries without following their targets.
+- `getRangeDiff(directory, { base, head, path, contextLines })`: Get diff between two refs. Uses three-dot `base...head` semantics, so work merged into `head` from `base` is excluded and only the branch's own changes are returned. Prefers `origin/<base>` when that remote-tracking ref exists, so a stale local base branch does not resurface already-merged commits. Exposed as `GET /api/git/range-diff` (`path` optional; omit it for the whole range).
 - `getRangeFiles(directory, { base, head })`: Get list of changed files between two refs.
-- `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs).
+- `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs and symbolic links as their link-target text).
+- `listUntrackedPaths(directory)`: List individual untracked file paths honoring ignore rules. Much cheaper than `getStatus` when that is all a caller needs. Deliberately not `--directory`: collapsed directory entries end in a slash and are rejected by the per-file diff helpers, so a caller would silently lose every file inside a new directory.
+- `getUntrackedDiffs(directory, filePaths, { concurrency, contextLines })`: Diffs for untracked files against an empty tree. Resolves the repository context once instead of per file (`getDiff` re-resolves every call, costing an extra `rev-parse` each time) and bounds how many diff processes run at once. Returns one entry per input path in order; unreadable paths yield `''` rather than failing the batch.
 - `collectDiffs(directory, files)`: Collect diff output for multiple files.
 - `revertFile(directory, filePath, options)`: Revert a file. Default scope `all` discards staged and working-tree changes; scope `working` discards only unstaged/working-tree changes.
 - `stageFile(directory, filePath)`: Add one file path to the index.
@@ -46,9 +48,17 @@ The following functions are exported and used by the web server:
 ### Worktree Operations
 - `getWorktrees(directory)`: List all git worktrees for a repository.
 - `validateWorktreeCreate(directory, input)`: Validate worktree creation parameters (mode, branchName, startRef, upstream config).
-- `createWorktree(directory, input)`: Create a new worktree (supports 'new' and 'existing' modes, upstream setup).
+- `createWorktree(directory, input)`: Create a new worktree (supports 'new' and 'existing' modes, upstream setup). After populating the worktree, the repository's `post-checkout` hook runs once with git's standard arguments (null ref as previous HEAD, the checked-out HEAD, and flag `1`) from the worktree directory, mirroring `git worktree add` without `--no-checkout`; a missing or non-executable hook is skipped and a failing hook is logged as a warning, never failing worktree creation or the session bootstrap.
 - `removeWorktree(directory, input)`: Remove a worktree (optionally delete local branch).
 - `isLinkedWorktree(directory)`: Check if directory is a linked worktree (not primary).
+
+### Worktree creation from a GitHub pull request
+The UI provisions `pr-<owner>` via `ensureRemoteName`/`ensureRemoteUrl`
+(HTTPS clone URL preferred over SSH) and checks out
+`remotes/pr-<owner>/<head>`. A missing head URL or unreachable fork fails with
+a clear error before a worktree is kept. If upstream fetch fails during
+bootstrap, tracking is left unset rather than writing `branch.*.remote` /
+`branch.*.merge` for a ref that was never fetched.
 
 ### Commit and Remote Operations
 - `commit(directory, message, options)`: Create a commit from the current index. `options.stageFiles` may be provided with `options.files` by older callers to stage only selected unstaged rows before committing, but the shared Git panel now stages/unstages explicitly before commit.
@@ -93,6 +103,7 @@ The following functions are internal helpers used by exported functions:
 - `resolveCandidateDirectory(...)`: Generate unique worktree directory candidates.
 - `resolveBranchForExistingMode(...)`: Resolve branch for existing-mode worktree creation.
 - `applyUpstreamConfiguration(...)`: Set upstream tracking for new branches.
+- `runPostCheckoutHook(directory)`: Invoke the worktree's `post-checkout` hook after population, because `git worktree add --no-checkout` and the bootstrap's `git reset --hard` never run git hooks. Runs with git's standard arguments and the worktree as cwd; skips missing/non-executable hooks and never throws on hook failure.
 - And various other internal helpers for Git command execution and parsing.
 
 ## Response Contracts
@@ -109,6 +120,15 @@ The following functions are internal helpers used by exported functions:
 - `mergeInProgress`: Object with `{ head, message }` if merge in progress.
 - `rebaseInProgress`: Object with `{ headName, onto }` if rebase in progress.
 
+### Branches Response
+- `all`: Local branches plus remote-tracking branches that still exist on their remote. A remote that fails to answer keeps its branches in the list: "we could not ask" must not be reported as "these branches are gone", because callers use this list to decide whether a base branch exists at all.
+- `current`: Current branch name.
+- `branches`: Per-branch detail keyed by branch name, as reported by `git branch`.
+- `defaultBranches`: Each remote's default branch, keyed by remote name. Read from the local `remotes/<name>/HEAD` symbolic ref; for a remote that has none — clone writes it, a hand-added remote may not — the remote itself is asked once with `ls-remote --symref`. A remote that answers neither is absent rather than guessed, and consumers fall back to conventional branch names. Omitted entirely by runtimes that do not provide this Git metadata.
+
+### Runtime availability of range diffs
+- `GET /api/git/range-diff` is served by the OpenChamber web server, so it is available to web, desktop, and mobile clients. The shared `GitAPI.getGitRangeDiff` is therefore optional: web supplies the HTTP implementation, and VS Code does not implement it because the extension host serves Git through its own bridge rather than these routes. Features built on range diffs (currently the AI diff walkthrough) are not offered in VS Code.
+
 ### Staged and unstaged change handling
 - `status.files` exposes both `index` and `working_dir` codes. Shared UI uses these as separate scopes: staged rows are derived from non-empty `index` statuses, while unstaged rows are derived from `working_dir` statuses and untracked files.
 - A file with both staged and unstaged changes can appear in both UI sections. Staged rows request diffs with `staged: true`; unstaged rows request normal working-tree diffs.
@@ -120,8 +140,11 @@ The following functions are internal helpers used by exported functions:
 - `branch`: Local branch name.
 - `path`: Absolute path to worktree directory.
 - `directoryCreated`: Present when create returned after the target directory exists while background Git/bootstrap work continues.
-- `bootstrapStatus`: Background setup status, with `pending`, `ready`, or `failed`.
+- `bootstrapStatus`: Background setup state. The legacy `status` remains `pending`, `ready`, or `failed`, while `phase` reports `directory-created`, `git-ready`, or `setup-ready`. Fast create starts at `pending`/`directory-created`; population and upstream Git completion advances to `pending`/`git-ready` before setup/start scripts; completed setup is `ready`/`setup-ready`. A missing in-memory state falls back to `ready`/`setup-ready`; clients continue to accept legacy status responses that omit `phase`.
 - Fast-create background failures remove OpenCode sandbox metadata for directories that never became Git worktrees, and remove the pre-created directory only if it is still empty. User-created files are never recursively deleted by this cleanup.
+- Worktree removal waits for any active create/bootstrap task for that directory before deleting it, preventing a background Git or setup task from restoring removed state or racing filesystem cleanup.
+- Worktree bootstrap retries transient `index.lock` conflicts. If the lock remains byte-for-byte and metadata-identical across the retry window, it is treated as stale, removed, and population continues automatically; changing locks are left untouched and reported as failures.
+- Worktree population enables Git `core.longpaths` (local repo config plus `-c core.longpaths=true` on `git reset --hard`) so deeply nested checkouts under the managed data-dir worktree root do not fail on Windows MAX_PATH with "Filename too long". Path-component limits that the filesystem itself rejects still fail bootstrap, with a clearer path-length guidance message.
 
 ### Log Response
 - `all`: Array of commit objects with hash, date, message, author info, stats.
@@ -133,7 +156,7 @@ The following functions are internal helpers used by exported functions:
 ### Adding a New Git Operation
 1. Add the function to `packages/web/server/lib/git/service.js`.
 2. Export the function if it's part of the public API.
-3. Use `createGit(directory)` to get a simple-git instance with the correct environment.
+3. Use `createGit(directory)` to get a simple-git instance with the correct environment. `directory` is required (`baseDir`); never omit it so commands cannot inherit `process.cwd()`.
 4. Use `runGitCommand(cwd, args)` for direct git command execution with better error handling.
 5. Use `runGitCommandOrThrow(cwd, args, fallbackMessage)` for commands that must succeed.
 6. Return consistent error messages; use `parseGitErrorText(error)` to extract meaningful git errors.
@@ -143,6 +166,11 @@ The following functions are internal helpers used by exported functions:
 - SSH keys are escaped and validated via `escapeSshKeyPath` to prevent command injection.
 - On Windows, paths are converted to MSYS format (`C:/path` → `/c/path`).
 - SSH_AUTH_SOCK is automatically resolved via `resolveSshAuthSock` (checks GPG agent, gpgconf).
+
+### Working directory (simple-git)
+- Repository operations always pass an explicit `baseDir` (the opened project/directory path) into simple-git. Omitting `baseDir` would default to `process.cwd()`, which breaks when the server was launched from a neutral directory (e.g. `$HOME`) while the opened project lives elsewhere.
+- Global identity reads use the user home directory as `baseDir` (they do not need a repository).
+- A `GitError` / non-repository result from status or check must not abort project/session enumeration: routes return a soft non-repo payload and log a warning.
 
 ### Worktree Naming
 - Worktree names are slugified via `slugWorktreeName`.

@@ -200,6 +200,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  public focusChatInput(): void {
+    if (!this._view) {
+      return;
+    }
+
+    this._view.show(true);
+    void this._view.webview.postMessage({
+      type: 'command',
+      command: 'focusChatInput',
+    });
+  }
+
   public addContextSelection(selection: { filePath: string; filename: string; text: string }) {
     if (!this._view) {
       return;
@@ -315,6 +327,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       type: 'command',
       command: 'settingsSynced',
       payload: settings,
+    });
+  }
+
+  public notifyPermissionAutoAcceptSynced(snapshot: unknown): void {
+    this._view?.webview.postMessage({
+      type: 'command',
+      command: 'permissionAutoAcceptSynced',
+      payload: snapshot,
     });
   }
 
@@ -528,7 +548,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private async _startSseProxy(message: BridgeRequest): Promise<BridgeResponse> {
     const { id, type, payload } = message;
 
-    const { path, headers } = (payload || {}) as { path?: string; headers?: Record<string, string> };
+    const { path, headers, streamId: requestedStreamId } = (payload || {}) as { path?: string; headers?: Record<string, string>; streamId?: string };
     const normalizedPath = typeof path === 'string' && path.trim().length > 0 ? path.trim() : '/event';
 
     if (!this._openCodeManager) {
@@ -540,8 +560,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       };
     }
 
-    const streamId = `sse_${++this._sseCounter}_${Date.now()}`;
+    const streamId = typeof requestedStreamId === 'string' && /^sse_webview_\d+_\d+$/.test(requestedStreamId)
+      ? requestedStreamId
+      : `sse_${++this._sseCounter}_${Date.now()}`;
     const controller = new AbortController();
+    this._sseStreams.set(streamId, { controller, view: this._view });
 
     try {
       const start = await openSseProxy({
@@ -553,8 +576,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this._view?.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk });
         },
       });
-
-      this._sseStreams.set(streamId, { controller, view: this._view });
 
       start.run
         .then(() => {
@@ -581,6 +602,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         },
       };
     } catch (error) {
+      this._sseStreams.delete(streamId);
       const message = error instanceof Error ? error.message : String(error);
       return {
         id,

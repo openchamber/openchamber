@@ -1,0 +1,48 @@
+---
+title: Remote-Instanzen
+description: Verbinde die Desktop-App per SSH mit OpenChamber auf einem anderen Rechner.
+---
+
+# Remote-Instanzen
+
+Die Desktop-App kann per SSH mit OpenChamber auf einem anderen Rechner verbunden werden — einem Arbeitsserver, einer Cloud-Box, einem Homelab — und dessen UI so auf deinen Bildschirm bringen, als wäre sie lokal. Richte das unter **Settings → Remote Instances** ein.
+
+> Remote-Instanzen sind eine Funktion **nur für den Desktop**. Im Web oder in VS Code verbindest du dich stattdessen über die Umgebungsvariablen in [OpenCode Server](/opencode-server/) mit einem Remote-Server.
+
+## Remote-Instanz hinzufügen
+
+1. Öffne **Settings → Remote Instances** und füge eine hinzu.
+2. Gib den SSH-Befehl an, den du normalerweise für den Zugriff auf den Rechner verwendest, plus einen Spitznamen.
+3. Wähle, wie OpenChamber dort läuft:
+   - **managed** — OpenChamber installiert und startet sich auf dem entfernten Rechner selbst
+   - **external** — verbinde dich mit einer Instanz, die bereits läuft
+4. Verbinde dich.
+
+OpenChamber geht die Schritte durch — Verbindung prüfen, Remote einrichten, Server starten und den Port weiterleiten — und zeigt bei jedem Schritt, wo es gerade ist. Wenn **ready** erreicht ist, wird die entfernte UI lokal geladen.
+
+## Anmeldedaten
+
+Du entscheidest, ob SSH- und UI-Passwörter gespeichert werden oder ob du sie jedes Mal eingibst. Wenn die Verbindung abbricht, meldet OpenChamber, welcher Schritt fehlgeschlagen ist, damit du ihn beheben kannst — siehe [Remote access](/troubleshooting/remote-access/).
+
+## Verbindungslinks
+
+Wenn auf einem entfernten Rechner bereits OpenChamber läuft, ist ein Kopplungslink der einfachste Weg, die Desktop-App zu verbinden. Öffne auf der UI des entfernten Servers **Settings → Remote Instances → Connect to this server → Add a device**, erstelle einen Link und importiere ihn auf deinem Desktop unter **Settings → Remote Instances → Other OpenChamber servers → Import Link**. Den vollständigen Ablauf findest du unter [Connect a Device](/connect-devices/).
+
+Ein mit **Anywhere** erstellter Link enthält sowohl eine direkte Adresse als auch eine Route über das [Private Relay](/private-relay/): Die Desktop-App verbindet sich direkt, wenn sie den Server erreichen kann (gleiches Netzwerk), und fällt auf das Ende-zu-Ende-verschlüsselte Relay zurück, wenn du unterwegs bist. Der Status neben jedem gespeicherten Server zeigt, welche Route gerade verwendet wird.
+
+Du kannst einen Link auch in einem Terminal auf dem entfernten Rechner erstellen:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`connect-url` startet den Server zuerst, wenn auf diesem Port nichts läuft. Füge `--api-only` für einen headless Server hinzu, `--lan`, um beim Starten an das LAN zu binden, `--ui-password`, um den Browserzugriff zu schützen, und `--name`, um die gespeicherte Verbindung zu benennen. Füge `--relay` für einen Link hinzu, der auch außerhalb des lokalen Netzwerks funktioniert: Das Gerät bevorzugt die direkte Verbindung, wenn sie erreichbar ist, und fällt auf das [Private Relay](/private-relay/) zurück — die Instanz startet das Relay selbstständig.
+
+Der erzeugte Link enthält ein Einmal-Geheimnis zum Koppeln. Nach dem Import besitzt das Gerät sein eigenes Client-Token — getrennt vom UI password des Browsers —, das Server-Neustarts überdauert, bis du es auf dem ausstellenden Server widerrufst.
+
+## Verwandt
+
+- [Connect a Device](/connect-devices/) — Kopplungslinks, QR-Codes und Geräteverwaltung
+- [Private Relay](/private-relay/) — wie "Anywhere"-Verbindungen funktionieren
+- [OpenCode Server](/opencode-server/) — eine Verbindung zu einem entfernten Server in Web oder VS Code herstellen
+- [Remote access](/troubleshooting/remote-access/) — wenn eine Verbindung nicht zustande kommt

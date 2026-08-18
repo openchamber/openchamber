@@ -32,6 +32,7 @@ import { useI18n } from '@/lib/i18n';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
 import {
     useDraftStarters,
     type ResolvedStarter,
@@ -40,8 +41,8 @@ import {
 } from './useDraftStarters';
 
 type DraftPresetChipsProps = {
-    /** Called with the resolved text (command or skill invocation) when a chip is clicked. */
-    onSubmit: (text: string) => void;
+    /** Called with the resolved starter invocation when a chip is clicked. */
+    onSubmit: (starter: ResolvedStarter) => void;
     /** Extra classes for the wrapper (e.g. width/spacing per surface). */
     className?: string;
 };
@@ -65,7 +66,7 @@ const PICKER_SECTIONS: { key: PinnableSection; headingKey: 'chat.draftStarters.s
 
 const SortableChip: React.FC<{
     item: ResolvedStarter;
-    onSubmit: (text: string) => void;
+    onSubmit: (starter: ResolvedStarter) => void;
     onRemove: () => void;
     /** Hide the per-chip hover "x" (mobile uses the trash drop-zone instead). */
     hideRemove?: boolean;
@@ -90,7 +91,7 @@ const SortableChip: React.FC<{
                 type="button"
                 {...attributes}
                 {...listeners}
-                onClick={() => onSubmit(item.submitText)}
+                onClick={() => onSubmit(item)}
                 className="group inline-flex touch-none select-none items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground"
                 style={chipStyle}
             >
@@ -115,7 +116,7 @@ const SortableChip: React.FC<{
 
 const StarterGroup: React.FC<{
     items: ResolvedStarter[];
-    onSubmit: (text: string) => void;
+    onSubmit: (starter: ResolvedStarter) => void;
     onRemove: (item: ResolvedStarter) => void;
     hideRemove?: boolean;
 }> = ({ items, onSubmit, onRemove, hideRemove }) => (
@@ -254,7 +255,7 @@ const AddStarterPicker: React.FC<{
  * Reorder is constrained to within a chip's own group; cross-group hovers are
  * ignored.
  */
-export const DraftPresetChips: React.FC<DraftPresetChipsProps> = ({ onSubmit, className }) => {
+const DraftPresetChipsContent: React.FC<DraftPresetChipsProps> = ({ onSubmit, className }) => {
     const { global, project, pinnable, ensureLoaded, addStarter, removeStarter, reorder } = useDraftStarters();
     const { isMobile } = useDeviceInfo();
     const [isDragging, setIsDragging] = React.useState(false);
@@ -330,4 +331,9 @@ export const DraftPresetChips: React.FC<DraftPresetChipsProps> = ({ onSubmit, cl
             </div>
         </DndContext>
     );
+};
+
+export const DraftPresetChips: React.FC<DraftPresetChipsProps> = (props) => {
+    const visible = useUIStore((state) => state.draftStartersVisible);
+    return visible ? <DraftPresetChipsContent {...props} /> : null;
 };

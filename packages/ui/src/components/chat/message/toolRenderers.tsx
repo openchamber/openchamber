@@ -11,6 +11,17 @@ const cleanOutput = (output: string) => {
     return cleaned.trim();
 };
 
+export const coerceToText = (value: unknown, fallback = ''): string => {
+    if (typeof value === 'string') return value;
+    if (value === null || value === undefined) return fallback;
+    if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+    try {
+        return JSON.stringify(value);
+    } catch {
+        return fallback;
+    }
+};
+
 const hasLspDiagnostics = (output: string): boolean => {
     if (!output) return false;
     return output.includes('<diagnostics')
@@ -387,8 +398,18 @@ export const renderTodoOutput = (
     options?: { unstyled?: boolean },
 ) => {
     try {
-        const todos = JSON.parse(output) as Todo[];
-        if (!Array.isArray(todos)) {
+        const raw: unknown = JSON.parse(output);
+        if (!Array.isArray(raw)) {
+            return null;
+        }
+        const todos: Todo[] = raw.filter(
+            (t): t is Todo =>
+                !!t &&
+                typeof t === 'object' &&
+                typeof (t as { content?: unknown }).content === 'string' &&
+                typeof (t as { status?: unknown }).status === 'string',
+        );
+        if (todos.length === 0) {
             return null;
         }
 
@@ -446,7 +467,7 @@ export const renderTodoOutput = (
                             {todosByStatus.in_progress.map((todo, idx) => (
                                 <div key={todo.id || idx} className="flex items-start gap-2">
                                     {getPriorityDot(todo.priority)}
-                                    <span className="typography-code text-foreground flex-1 leading-relaxed">{todo.content}</span>
+                                    <span className="typography-code text-foreground flex-1 leading-relaxed">{coerceToText(todo.content)}</span>
                                 </div>
                             ))}
                         </div>
@@ -463,7 +484,7 @@ export const renderTodoOutput = (
                             {todosByStatus.pending.map((todo, idx) => (
                                 <div key={todo.id || idx} className="flex items-start gap-2">
                                     {getPriorityDot(todo.priority)}
-                                    <span className="typography-code text-foreground flex-1 leading-relaxed">{todo.content}</span>
+                                    <span className="typography-code text-foreground flex-1 leading-relaxed">{coerceToText(todo.content)}</span>
                                 </div>
                             ))}
                         </div>
@@ -480,7 +501,7 @@ export const renderTodoOutput = (
                             {todosByStatus.completed.map((todo, idx) => (
                                 <div key={todo.id || idx} className="flex items-start gap-2">
                                     <Icon name="check" className="w-3 h-3 mt-0.5 flex-shrink-0"  style={{ color: 'var(--status-success)', opacity: 0.7 }}/>
-                                    <span className="typography-code text-foreground flex-1 leading-relaxed">{todo.content}</span>
+                                    <span className="typography-code text-foreground flex-1 leading-relaxed">{coerceToText(todo.content)}</span>
                                 </div>
                             ))}
                         </div>
@@ -497,7 +518,7 @@ export const renderTodoOutput = (
                             {todosByStatus.cancelled.map((todo, idx) => (
                                 <div key={todo.id || idx} className="flex items-start gap-2">
                                     <span className="w-3 h-3 text-muted-foreground/50 mt-0.5 flex-shrink-0">×</span>
-                                    <span className="typography-code text-muted-foreground/50 line-through flex-1 leading-relaxed">{todo.content}</span>
+                                    <span className="typography-code text-muted-foreground/50 line-through flex-1 leading-relaxed">{coerceToText(todo.content)}</span>
                                 </div>
                             ))}
                         </div>

@@ -1,0 +1,53 @@
+---
+title: Browser-Panel
+description: Öffne jede Seite in der App, annotiere sie und lass den Agenten sie bedienen.
+---
+
+# Browser-Panel
+
+Das Browser-Panel öffnet jede Seite direkt neben deinem Chat. Öffne es über die Globus-Schaltfläche in der Kopfzeile.
+
+In der Desktop-App ist es ein echter Browser: Deine Logins bleiben erhalten, Hot Reload funktioniert, und die Entwicklerwerkzeuge sind einen Klick entfernt. In einem Browser-Tab zeigt das Panel eine Seite zwar an, kann aber nicht in sie hineinsehen — die Annotationswerkzeuge unten gibt es nur auf dem Desktop.
+
+Seiten, die hier geöffnet werden, bekommen keinen Zugriff auf Kamera, Mikrofon oder Standort: solche Anfragen werden abgelehnt.
+
+## Die Werkzeugleiste
+
+Die Adressleiste merkt sich Seiten, die du in diesem Projekt geöffnet hast, und schlägt sie beim Tippen vor — passend zu einem Teil der Adresse oder des Seitentitels. Mit den Pfeiltasten gehst du durch die Liste, Enter öffnet den markierten Eintrag, und die Schaltfläche in einer Zeile entfernt ihn.
+
+Daneben liegt **Neu laden**, dazu ein **hartes Neuladen**, das den Cache übergeht, wenn eine Änderung partout nicht erscheint, sowie eine Zoomsteuerung, die nur die Seite skaliert.
+
+**Cookies löschen** und **Zwischengespeicherte Daten löschen** gelten allein für dieses Panel. Deine OpenChamber-Sitzung und andere Fenster bleiben unberührt.
+
+## Eine Seite annotieren
+
+Drücke **Annotieren**, und über der Seite erscheint eine Leiste mit drei Werkzeugen:
+
+- **Element** — klicke ein Element an. Ein Klick auf ein anderes verschiebt die Auswahl, ein erneuter Klick auf dasselbe hebt sie auf.
+- **Bereich** — ziehe einen Rahmen um einen Ausschnitt, wenn es um mehr als ein Element geht.
+- **Zeichnen** — skizziere frei über die Seite.
+
+Schreib dein Anliegen in das Feld neben deiner Markierung und drücke **Anhängen** — oder einfach Enter. Deine Chat-Nachricht bekommt eine Karte mit allem Markierten, deiner Notiz und einem Screenshot der sichtbaren Seite mit deinen Markierungen darauf — du kannst also „dieser Button, etwas runder" sagen, statt zu beschreiben, wo er steht.
+
+Die Seite selbst wird nie verändert — Annotieren markiert nur, was da ist. `Esc` bricht ab und schließt die Leiste.
+
+## Den Agenten steuern lassen
+
+Der Agent kann das Browser-Panel selbst benutzen — eine Seite öffnen, lesen, was darauf steht, klicken, tippen, scrollen und zwischen mobiler, Tablet- und Desktop-Ansicht wechseln — um seine eigene Arbeit zu prüfen, statt dich darum zu bitten. Du siehst es im Panel passieren.
+
+Beliebigen Code kann der Agent auf der Seite nicht ausführen. Der Browser behält deine echten Logins, deshalb bleibt er auf die genannten Aktionen beschränkt.
+
+Er kann außerdem ein Bild dessen, was er sieht, in `.openchamber/screenshots/` in deinem Projekt speichern und es dir in seiner Antwort zeigen. Genau das macht ein Vorher-Nachher möglich, und die Datei bleibt danach liegen, um sie an einen Pull Request zu hängen.
+
+Die Browser-Aktionen sind das **OpenChamber-Web-Werkzeug**, das sich unter **Einstellungen → Allgemein → OpenChamber-Werkzeuge** einzeln ein- und ausschalten lässt.
+
+Dafür braucht es die Desktop-App: eine Seite in einem Browser-Tab lässt sich nicht steuern.
+
+## Entwicklerwerkzeuge
+
+Drücke die Terminal-Schaltfläche in der Leiste, um Chromiums eigene Entwicklerwerkzeuge für die Seite zu öffnen — Konsole, Netzwerk, Elemente, alles Gewohnte.
+
+## Verwandt
+
+- [Vorschau & Dev-Server](/preview/) — deine laufende App öffnen, auch auf einem entfernten Rechner
+- [Agenten-Steuerungswerkzeug](/agent-control-tool/) — Sitzungen, Worktrees und geplante Aufgaben aus dem Chat

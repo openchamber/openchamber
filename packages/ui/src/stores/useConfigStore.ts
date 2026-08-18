@@ -19,7 +19,9 @@ import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier } from "@/lib/modelIdentifier";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
+import { normalizePath } from "@/lib/pathNormalization";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
+import { getRuntimeKey } from "@/lib/runtime-switch";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -281,7 +283,7 @@ type DefaultAgentModelSelection = {
 // fresh draft (applyDefaultModelAgentSelection), so the two paths stay identical.
 //
 //   Agent: settings.defaultAgent → opencode default_agent → build → first primary → first
-//   Model: settings.defaultModel → resolved agent's pinned model+variant → opencode config.model
+//   Model: project.defaultModel → settings.defaultModel → resolved agent's pinned model+variant → opencode config.model
 //          → opencode/big-pickle → first
 //
 // The opencode default_agent / default model (config fields on the OpenCode server) are honored
@@ -292,6 +294,7 @@ type DefaultAgentModelSelection = {
 const resolveDefaultAgentModelSelection = ({
     agents,
     providers,
+    projectDefaultModel,
     settingsDefaultAgent,
     settingsDefaultModel,
     settingsDefaultVariant,
@@ -300,6 +303,7 @@ const resolveDefaultAgentModelSelection = ({
 }: {
     agents: Agent[];
     providers: ProviderWithModelList[];
+    projectDefaultModel?: string;
     settingsDefaultAgent?: string;
     settingsDefaultModel?: string;
     settingsDefaultVariant?: string;
@@ -348,12 +352,14 @@ const resolveDefaultAgentModelSelection = ({
     let modelId: string | undefined;
     let variant: string | undefined;
 
-    if (settingsDefaultModel) {
-        const parsed = parseModelString(settingsDefaultModel);
+    const effectiveDefaultModel = projectDefaultModel || settingsDefaultModel;
+
+    if (effectiveDefaultModel) {
+        const parsed = parseModelString(effectiveDefaultModel);
         if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
             providerId = parsed.providerId;
             modelId = parsed.modelId;
-            variant = resolveVariant(providerId, modelId, settingsDefaultVariant);
+            variant = resolveVariant(providerId, modelId, projectDefaultModel ? undefined : settingsDefaultVariant);
         }
     }
 
@@ -435,6 +441,7 @@ interface ModelsDevModelEntry {
     reasoning?: boolean;
     temperature?: boolean;
     attachment?: boolean;
+    structured_output?: boolean;
     modalities?: {
         input?: string[];
         output?: string[];
@@ -571,6 +578,8 @@ const transformModelsDevResponse = (payload: unknown): Map<string, ModelMetadata
                 reasoning: typeof modelValue.reasoning === 'boolean' ? modelValue.reasoning : undefined,
                 temperature: typeof modelValue.temperature === 'boolean' ? modelValue.temperature : undefined,
                 attachment: typeof modelValue.attachment === 'boolean' ? modelValue.attachment : undefined,
+                structured_output:
+                    typeof modelValue.structured_output === 'boolean' ? modelValue.structured_output : undefined,
                 modalities: modelValue.modalities
                     ? {
                           input: isStringArray(modelValue.modalities.input) ? modelValue.modalities.input : undefined,
@@ -712,18 +721,57 @@ const resolveInitialDirectoryKey = (): string => {
 // We cache resolved mappings to localStorage so subsequent launches resolve the
 // project synchronously at init time. worktree→project is effectively immutable,
 // so a cached entry is safe to trust.
-const WORKTREE_PROJECT_MAP_KEY = 'oc.worktreeProjectMap';
-let _worktreeProjectMap: Record<string, string> | null = null;
+const WORKTREE_PROJECT_MAP_KEY = 'oc.worktreeProjectMap.v2';
+const LEGACY_WORKTREE_PROJECT_MAP_KEY = 'oc.worktreeProjectMap';
+const MAX_WORKTREE_PROJECT_RUNTIME_MAPS = 8;
+type WorktreeProjectMapEnvelope = {
+    version: 2;
+    legacyClaimed: boolean;
+    runtimes: Record<string, { updatedAt: number; entries: Record<string, string> }>;
+};
+const _worktreeProjectMaps = new Map<string, Record<string, string>>();
+const readWorktreeProjectEnvelope = (): WorktreeProjectMapEnvelope => {
+    try {
+        const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(WORKTREE_PROJECT_MAP_KEY) : null;
+        if (!raw) return { version: 2, legacyClaimed: false, runtimes: {} };
+        const parsed = JSON.parse(raw) as Partial<WorktreeProjectMapEnvelope>;
+        if (parsed.version !== 2 || !parsed.runtimes || typeof parsed.runtimes !== 'object') {
+            return { version: 2, legacyClaimed: false, runtimes: {} };
+        }
+        return { version: 2, legacyClaimed: parsed.legacyClaimed === true, runtimes: parsed.runtimes };
+    } catch {
+        return { version: 2, legacyClaimed: false, runtimes: {} };
+    }
+};
+const writeWorktreeProjectEnvelope = (envelope: WorktreeProjectMapEnvelope): void => {
+    const runtimes = Object.fromEntries(
+        Object.entries(envelope.runtimes)
+            .sort(([, left], [, right]) => right.updatedAt - left.updatedAt)
+            .slice(0, MAX_WORKTREE_PROJECT_RUNTIME_MAPS),
+    );
+    localStorage.setItem(WORKTREE_PROJECT_MAP_KEY, JSON.stringify({ ...envelope, runtimes }));
+};
 const getWorktreeProjectMap = (): Record<string, string> => {
-    if (_worktreeProjectMap === null) {
+    const runtimeKey = getRuntimeKey() || 'default';
+    const existing = _worktreeProjectMaps.get(runtimeKey);
+    if (existing) return existing;
+    const envelope = readWorktreeProjectEnvelope();
+    let map = envelope.runtimes[runtimeKey]?.entries ?? null;
+    if (!map && !envelope.legacyClaimed) {
         try {
-            const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(WORKTREE_PROJECT_MAP_KEY) : null;
-            _worktreeProjectMap = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+            const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(LEGACY_WORKTREE_PROJECT_MAP_KEY) : null;
+            map = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+            envelope.legacyClaimed = true;
+            envelope.runtimes[runtimeKey] = { updatedAt: Date.now(), entries: map };
+            writeWorktreeProjectEnvelope(envelope);
+            localStorage.removeItem(LEGACY_WORKTREE_PROJECT_MAP_KEY);
         } catch {
-            _worktreeProjectMap = {};
+            map = {};
         }
     }
-    return _worktreeProjectMap;
+    const result = map ?? {};
+    _worktreeProjectMaps.set(runtimeKey, result);
+    return result;
 };
 const rememberWorktreeProject = (worktree: string, project: string): void => {
     if (!worktree || !project || worktree === project) return;
@@ -731,16 +779,21 @@ const rememberWorktreeProject = (worktree: string, project: string): void => {
     if (map[worktree] === project) return;
     map[worktree] = project;
     try {
-        localStorage.setItem(WORKTREE_PROJECT_MAP_KEY, JSON.stringify(map));
+        const runtimeKey = getRuntimeKey() || 'default';
+        const envelope = readWorktreeProjectEnvelope();
+        envelope.legacyClaimed = true;
+        envelope.runtimes[runtimeKey] = { updatedAt: Date.now(), entries: map };
+        writeWorktreeProjectEnvelope(envelope);
+        localStorage.removeItem(LEGACY_WORKTREE_PROJECT_MAP_KEY);
     } catch {
         // localStorage quota exceeded — ignore; live resolution still works.
     }
 };
 
 const normalizeConfigPath = (value: string | null | undefined): string | null => {
-    const trimmed = typeof value === 'string' ? value.trim() : '';
-    if (!trimmed) return null;
-    return trimmed.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+    const result = normalizePath(value);
+    if (result === null) return null;
+    return result || '/';
 };
 
 const getKnownProjectDirectories = (): string[] => {
@@ -1004,7 +1057,7 @@ interface ConfigStore {
     sttLocalModel: string;
     sttLanguage: string;
     showMessageTTSButtons: boolean;
-    ttsInputMode: 'sanitized' | 'raw';
+    ttsInputMode: 'sanitized' | 'raw' | 'summarized';
     // Summarization settings
     summarizeMessageTTS: boolean;
     summarizeVoiceConversation: boolean;
@@ -1030,7 +1083,7 @@ interface ConfigStore {
     setSttLocalModel: (model: string) => void;
     setSttLanguage: (lang: string) => void;
     setShowMessageTTSButtons: (show: boolean) => void;
-    setTtsInputMode: (mode: 'sanitized' | 'raw') => void;
+    setTtsInputMode: (mode: 'sanitized' | 'raw' | 'summarized') => void;
     setSummarizeMessageTTS: (enabled: boolean) => void;
     setSummarizeVoiceConversation: (enabled: boolean) => void;
     setSummarizeCharacterThreshold: (threshold: number) => void;
@@ -1048,7 +1101,7 @@ interface ConfigStore {
     cycleCurrentVariant: () => void;
     getCurrentModelVariants: () => string[];
     setAgent: (agentName: string | undefined) => void;
-    applyDefaultModelAgentSelection: () => void;
+    applyDefaultModelAgentSelection: (options?: { projectDefaultModel?: string }) => void;
     applyOpenCodeConfigDefaults: (directory?: string | null, source?: string, config?: Config) => void;
     setSelectedProvider: (providerId: string) => void;
     setSettingsDefaultModel: (model: string | undefined) => void;
@@ -1299,6 +1352,7 @@ export const useConfigStore = create<ConfigStore>()(
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('ttsInputMode');
                         if (saved === 'raw') return 'raw' as const;
+                        if (saved === 'summarized') return 'summarized' as const;
                     }
                     return 'sanitized' as const;
                 })(),
@@ -2449,20 +2503,13 @@ export const useConfigStore = create<ConfigStore>()(
                             return undefined;
                         };
 
-                        // Prefer the selected agent's configured model when switching agents.
                         const agent = agents.find((candidate) => candidate.name === agentName);
-                        const agentModelSelection = agent?.model;
-                        if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
-                            const { providerID, modelID } = agentModelSelection;
-                            const agentProvider = providers.find((provider) => provider.id === providerID);
-                            const agentModel = agentProvider?.models.find((model) => model.id === modelID);
 
-                            if (agentModel) {
-                                applyResolvedModelSelection(providerID, modelID, resolveVariantForModel(providerID, modelID, agent?.variant));
-                                return;
-                            }
-                        }
-
+                        // Prefer a session-level manual override for this agent over the
+                        // agent's configured default. Re-applying setAgent after subtask
+                        // completion / rematerialization must not clobber the override
+                        // (issue #2404). Explicit agent-picker switches still force the
+                        // agent default via ModelControls' shouldPreferAgentModel path.
                         if (currentSessionId) {
                             const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
                             if (existingAgentModel && hasProviderModel(providers, existingAgentModel.providerId, existingAgentModel.modelId)) {
@@ -2474,6 +2521,19 @@ export const useConfigStore = create<ConfigStore>()(
                                 ) {
                                     applyResolvedModelSelection(existingAgentModel.providerId, existingAgentModel.modelId, resolvedVariant);
                                 }
+                                return;
+                            }
+                        }
+
+                        // No session override — use the agent's configured/pinned model.
+                        const agentModelSelection = agent?.model;
+                        if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
+                            const { providerID, modelID } = agentModelSelection;
+                            const agentProvider = providers.find((provider) => provider.id === providerID);
+                            const agentModel = agentProvider?.models.find((model) => model.id === modelID);
+
+                            if (agentModel) {
+                                applyResolvedModelSelection(providerID, modelID, resolveVariantForModel(providerID, modelID, agent?.variant));
                                 return;
                             }
                         }
@@ -2496,10 +2556,10 @@ export const useConfigStore = create<ConfigStore>()(
 
                 // Re-applies the same priority cascade used at app startup (see loadAgents):
                 //   agent: settings.defaultAgent → build → first primary → first agent
-                //   model: settings.defaultModel → agent's preferred model → opencode/big-pickle → first
+                //   model: project.defaultModel → settings.defaultModel → agent's preferred model → opencode/big-pickle → first
                 // Used when entering a fresh draft session so model/agent reset to defaults
                 // instead of sticking to the previously open session's selection.
-                applyDefaultModelAgentSelection: () => {
+                applyDefaultModelAgentSelection: (options) => {
                     const {
                         agents,
                         providers,
@@ -2522,6 +2582,7 @@ export const useConfigStore = create<ConfigStore>()(
                     } = resolveDefaultAgentModelSelection({
                         agents,
                         providers,
+                        projectDefaultModel: options?.projectDefaultModel,
                         settingsDefaultAgent,
                         settingsDefaultModel,
                         settingsDefaultVariant,
@@ -2925,7 +2986,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
-                setTtsInputMode: (mode: 'sanitized' | 'raw') => {
+                setTtsInputMode: (mode: 'sanitized' | 'raw' | 'summarized') => {
                     set({ ttsInputMode: mode });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('ttsInputMode', mode);

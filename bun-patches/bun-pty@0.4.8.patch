@@ -1,0 +1,77 @@
+diff --git a/src/terminal.ts b/src/terminal.ts
+index ec248d46a939f8a09cd669e853cefb126922c80a..c0473bc625edda7be2ade987e8aa3bd99160ce67 100644
+--- a/src/terminal.ts
++++ b/src/terminal.ts
+@@ -11,6 +11,7 @@ export const DEFAULT_COLS = 80;
+ export const DEFAULT_ROWS = 24;
+ export const DEFAULT_FILE = "sh";
+ export const DEFAULT_NAME = "xterm";
++const INITIAL_OUTPUT_BUFFER_LIMIT = 512 * 1024;
+ 
+ /**
+  * Quote a string for shell-words compatible splitting on the Rust side.
+@@ -136,6 +137,8 @@ export class Terminal implements IPty {
+ 
+ 	private _readLoop = false;
+ 	private _closing = false;
++	private _hasDataSubscriber = false;
++	private _initialOutput = "";
+ 
+ 	// TextDecoder with streaming mode to properly handle UTF-8 across chunk boundaries
+ 	// Without this, multi-byte characters (like box-drawing ─) that span chunks become �
+@@ -191,12 +194,29 @@ export class Terminal implements IPty {
+ 	}
+ 
+ 	get onData() {
+-		return this._onData.event;
++		return (listener: (data: string) => void) => {
++			const disposable = this._onData.event(listener);
++			if (!this._hasDataSubscriber) {
++				this._hasDataSubscriber = true;
++				const initialOutput = this._initialOutput;
++				this._initialOutput = "";
++				if (initialOutput) listener(initialOutput);
++			}
++			return disposable;
++		};
+ 	}
+ 	get onExit() {
+ 		return this._onExit.event;
+ 	}
+ 
++	private _emitData(data: string) {
++		if (this._hasDataSubscriber) {
++			this._onData.fire(data);
++		} else {
++			this._initialOutput = `${this._initialOutput}${data}`.slice(-INITIAL_OUTPUT_BUFFER_LIMIT);
++		}
++	}
++
+ 	/* ------------- IO methods ------------- */
+ 
+ 	write(data: string) {
+@@ -235,13 +255,13 @@ export class Terminal implements IPty {
+ 				// This prevents corruption when multi-byte chars span chunk boundaries
+ 				const decoded = this._decoder.decode(buf.subarray(0, n), { stream: true });
+ 				if (decoded) {
+-					this._onData.fire(decoded);
++					this._emitData(decoded);
+ 				}
+ 			} else if (n === -2) {
+ 				// CHILD_EXITED - flush any remaining bytes in the decoder
+ 				const remaining = this._decoder.decode();
+ 				if (remaining) {
+-					this._onData.fire(remaining);
++					this._emitData(remaining);
+ 				}
+ 				const exitCode = lib.symbols.bun_pty_get_exit_code(this.handle);
+ 				this._onExit.fire({ exitCode });
+@@ -250,7 +270,7 @@ export class Terminal implements IPty {
+ 				// error - flush decoder before breaking
+ 				const remaining = this._decoder.decode();
+ 				if (remaining) {
+-					this._onData.fire(remaining);
++					this._emitData(remaining);
+ 				}
+ 				break;
+ 			} else {

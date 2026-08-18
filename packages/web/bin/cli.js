@@ -9,6 +9,8 @@ import { EXIT_CODE, TunnelCliError } from './lib/cli-errors.js';
 import {
   resolveServeHost,
   hasUiPasswordConfigured,
+  generateUiPassword,
+  resolveServeUiPassword,
   assertAuthenticatedNetworkExposure,
 } from './lib/cli-network.js';
 import {
@@ -22,6 +24,7 @@ import {
 import {
   parseArgs,
   showHelp,
+  showControlHelp,
   showStartupHelp,
   showConnectUrlHelp,
   showTunnelHelp,
@@ -33,6 +36,10 @@ import { resolveExplicitBinary, searchPathFor } from './lib/cli-executables.js';
 import { startupCommand } from './lib/commands-startup.js';
 import { logsCommand } from './lib/commands-logs.js';
 import { statusCommand } from './lib/commands-status.js';
+import { scheduleCommand } from './lib/commands-schedule.js';
+import { sessionCommand } from './lib/commands-session.js';
+import { modelsCommand } from './lib/commands-models.js';
+import { projectsCommand } from './lib/commands-projects.js';
 import { createUpdateCommand } from './lib/commands-update.js';
 import { createConnectUrlCommand } from './lib/commands-connect-url.js';
 import { createLifecycleCommands } from './lib/commands-lifecycle.js';
@@ -176,6 +183,13 @@ const commands = {
 
   status: statusCommand,
 
+  schedule: scheduleCommand,
+
+  session: sessionCommand,
+
+  models: modelsCommand,
+
+  projects: projectsCommand,
 
   logs: logsCommand,
 
@@ -219,7 +233,7 @@ commands.update = createUpdateCommand({
 
 async function main() {
   const parsed = parseArgs();
-  const { command, subcommand, tunnelAction, startupAction, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
+  const { command, subcommand, tunnelAction, startupAction, scheduleAction, sessionAction, controlAction, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
   activeCommandOptions = options;
 
   if (versionRequested) {
@@ -255,6 +269,16 @@ async function main() {
       showStartupHelp();
     } else if (command === 'connect-url') {
       showConnectUrlHelp();
+    } else if (command === 'schedule') {
+      await commands.schedule(options, 'help');
+    } else if (command === 'session') {
+      await commands.session(options, 'help');
+    } else if (command === 'models') {
+      await commands.models(options, 'help');
+    } else if (command === 'projects') {
+      await commands.projects(options, 'help');
+    } else if (command === 'control') {
+      showControlHelp();
     } else {
       showHelp();
     }
@@ -271,8 +295,36 @@ async function main() {
     return;
   }
 
+  if (command === 'schedule') {
+    await commands.schedule(options, scheduleAction);
+    return;
+  }
+
+  if (command === 'session') {
+    await commands.session(options, sessionAction);
+    return;
+  }
+
+  if (command === 'models') {
+    await commands.models(options, 'show');
+    return;
+  }
+
+  if (command === 'projects') {
+    await commands.projects(options, 'list');
+    return;
+  }
+
+  if (command === 'control') {
+    if (controlAction !== 'help') {
+      throw new TunnelCliError(`Unknown control command '${controlAction}'.`, EXIT_CODE.USAGE_ERROR);
+    }
+    showControlHelp();
+    return;
+  }
+
   if (!commands[command]) {
-    const knownCommands = ['serve', 'stop', 'restart', 'status', 'tunnel', 'startup', 'logs', 'update'];
+    const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'session', 'models', 'projects', 'control', 'tunnel', 'startup', 'logs', 'update'];
     const suggestion = findClosestMatch(command, knownCommands);
     const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
     if (isJsonMode(options)) {
@@ -372,11 +424,14 @@ if (isCliExecution) {
 }
 
 export {
+  main,
   commands,
   parseArgs,
   assertAuthenticatedNetworkExposure,
   resolveServeHost,
   hasUiPasswordConfigured,
+  generateUiPassword,
+  resolveServeUiPassword,
   shouldDisplayTunnelQr,
   isValidTunnelDoctorResponse,
   readDesktopLocalPortFromSettings,

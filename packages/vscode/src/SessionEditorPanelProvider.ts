@@ -199,6 +199,16 @@ export class SessionEditorPanelProvider {
     }
   }
 
+  public notifyPermissionAutoAcceptSynced(snapshot: unknown): void {
+    for (const entry of this._panels.values()) {
+      entry.panel.webview.postMessage({
+        type: 'command',
+        command: 'permissionAutoAcceptSynced',
+        payload: snapshot,
+      });
+    }
+  }
+
   public notifyWindowFocusChanged(focused: boolean): void {
     for (const entry of this._panels.values()) {
       entry.panel.webview.postMessage({
@@ -405,7 +415,7 @@ export class SessionEditorPanelProvider {
   private async _startSseProxy(message: BridgeRequest, entry: SessionPanelState): Promise<BridgeResponse> {
     const { id, type, payload } = message;
 
-    const { path, headers } = (payload || {}) as { path?: string; headers?: Record<string, string> };
+    const { path, headers, streamId: requestedStreamId } = (payload || {}) as { path?: string; headers?: Record<string, string>; streamId?: string };
     const normalizedPath = typeof path === 'string' && path.trim().length > 0 ? path.trim() : '/event';
 
     if (!this._openCodeManager) {
@@ -417,8 +427,11 @@ export class SessionEditorPanelProvider {
       };
     }
 
-    const streamId = `sse_${++this._sseCounter}_${Date.now()}`;
+    const streamId = typeof requestedStreamId === 'string' && /^sse_webview_\d+_\d+$/.test(requestedStreamId)
+      ? requestedStreamId
+      : `sse_${++this._sseCounter}_${Date.now()}`;
     const controller = new AbortController();
+    entry.sseStreams.set(streamId, controller);
 
     try {
       const start = await openSseProxy({
@@ -427,20 +440,19 @@ export class SessionEditorPanelProvider {
         headers: this._buildSseHeaders(headers),
         signal: controller.signal,
         onChunk: (chunk) => {
-          entry.panel.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk });
+          // Panel may be disposed before SSE callbacks fire.
+          entry.panel?.webview?.postMessage({ type: 'api:sse:chunk', streamId, chunk });
         },
       });
 
-      entry.sseStreams.set(streamId, controller);
-
       start.run
         .then(() => {
-          entry.panel.webview.postMessage({ type: 'api:sse:end', streamId });
+          entry.panel?.webview?.postMessage({ type: 'api:sse:end', streamId });
         })
         .catch((error) => {
           if (!controller.signal.aborted) {
             const messageText = error instanceof Error ? error.message : String(error);
-            entry.panel.webview.postMessage({ type: 'api:sse:end', streamId, error: messageText });
+            entry.panel?.webview?.postMessage({ type: 'api:sse:end', streamId, error: messageText });
           }
         })
         .finally(() => {
@@ -458,6 +470,7 @@ export class SessionEditorPanelProvider {
         },
       };
     } catch (error) {
+      entry.sseStreams.delete(streamId);
       const messageText = error instanceof Error ? error.message : String(error);
       return {
         id,

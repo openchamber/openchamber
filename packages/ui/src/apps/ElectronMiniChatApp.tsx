@@ -19,7 +19,11 @@ import { useSync } from '@/sync/use-sync';
 import { SyncRuntimeEffects } from './AppEffects';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useMiniChatKeyboardShortcuts } from '@/hooks/useMiniChatKeyboardShortcuts';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import {
+  listProjectWorktrees,
+  partitionWorktreesByRegisteredProject,
+  worktreeMapsEqual,
+} from '@/lib/worktrees/worktreeManager';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
@@ -175,7 +179,6 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
 
     const discoverWorktrees = async () => {
       const worktreesByProject = new Map<string, WorktreeMetadata[]>();
-      const allWorktrees: WorktreeMetadata[] = [];
 
       await Promise.all(projects.map(async (project) => {
         const projectPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -187,17 +190,23 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
           const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
           if (cancelled || worktrees.length === 0) return;
           worktreesByProject.set(projectPath, worktrees);
-          allWorktrees.push(...worktrees);
         } catch {
           // Worktree discovery is best-effort; draft selector falls back to the project root.
         }
       }));
 
       if (cancelled) return;
-      useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
-      });
+
+      const partitionedWorktreesByProject = partitionWorktreesByRegisteredProject(projects, worktreesByProject);
+
+      // Skip update if nothing changed — see worktreeMapsEqual JSDoc.
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      if (!worktreeMapsEqual(partitionedWorktreesByProject, currentByProject)) {
+        useSessionUIStore.setState({
+          availableWorktrees: [...partitionedWorktreesByProject.values()].flat(),
+          availableWorktreesByProject: partitionedWorktreesByProject,
+        });
+      }
     };
 
     void discoverWorktrees();

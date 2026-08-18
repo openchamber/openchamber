@@ -1,40 +1,49 @@
 import React from 'react';
 
 type Args = {
+  enabled?: boolean;
   isDesktopShellRuntime: boolean;
   projectSections: unknown[];
   projectHeaderSentinelRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
 };
 
 export const useStickyProjectHeaders = (args: Args): Set<string> => {
-  const { isDesktopShellRuntime, projectSections, projectHeaderSentinelRefs } = args;
+  const { enabled = true, isDesktopShellRuntime, projectSections, projectHeaderSentinelRefs } = args;
   const [stuckProjectHeaders, setStuckProjectHeaders] = React.useState<Set<string>>(new Set());
 
   React.useEffect(() => {
-    if (!isDesktopShellRuntime) {
+    if (!enabled || !isDesktopShellRuntime) {
+      setStuckProjectHeaders((prev) => (prev.size === 0 ? prev : new Set()));
+      return;
+    }
+
+    const firstSentinel = Array.from(projectHeaderSentinelRefs.current.values()).find((el) => el !== null);
+    const root = firstSentinel?.closest<HTMLElement>('.oc-sidebar-scroller') ?? null;
+    if (!root) {
       return;
     }
 
     const observer = new IntersectionObserver(
       (entries) => {
-        entries.forEach((entry) => {
-          const projectId = (entry.target as HTMLElement).dataset.projectId;
-          if (!projectId) {
-            return;
-          }
+        setStuckProjectHeaders((prev) => {
+          const next = new Set(prev);
+          let changed = false;
+          for (const entry of entries) {
+            const projectId = (entry.target as HTMLElement).dataset.projectId;
+            if (!projectId) continue;
 
-          setStuckProjectHeaders((prev) => {
-            const next = new Set(prev);
-            if (!entry.isIntersecting) {
-              next.add(projectId);
-            } else {
-              next.delete(projectId);
-            }
-            return next;
-          });
+            const rootTop = entry.rootBounds?.top ?? root.getBoundingClientRect().top;
+            const isAboveScroller = !entry.isIntersecting && entry.boundingClientRect.top < rootTop;
+            if (next.has(projectId) === isAboveScroller) continue;
+
+            changed = true;
+            if (isAboveScroller) next.add(projectId);
+            else next.delete(projectId);
+          }
+          return changed ? next : prev;
         });
       },
-      { threshold: 0 },
+      { root, threshold: 0 },
     );
 
     projectHeaderSentinelRefs.current.forEach((el) => {
@@ -44,7 +53,7 @@ export const useStickyProjectHeaders = (args: Args): Set<string> => {
     });
 
     return () => observer.disconnect();
-  }, [isDesktopShellRuntime, projectHeaderSentinelRefs, projectSections]);
+  }, [enabled, isDesktopShellRuntime, projectHeaderSentinelRefs, projectSections]);
 
   return stuckProjectHeaders;
 };

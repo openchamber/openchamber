@@ -25,13 +25,20 @@ Una vez definida una contraseña, puedes añadir passkeys (Face ID, Touch ID, un
 
 Las passkeys están vinculadas a la contraseña actual. Si cambias o eliminas la contraseña, las passkeys guardadas se borran y tendrás que añadirlas de nuevo.
 
+## Tokens de dispositivo
+
+Los dispositivos vinculados mediante [Conectar un dispositivo](/es/connect-devices/) se autentican con sus propios tokens por dispositivo, no con la contraseña de UI. Los enlaces de vinculación son de un solo uso y caducan si no se usan; cada dispositivo vinculado aparece en **Settings → Remote Instances → Conectarse a este servidor**, donde puedes revocar cualquiera en cualquier momento. Las conexiones fuera de casa pasan por el [Private Relay](/es/private-relay/), que está cifrado de extremo a extremo y no puede leer tu tráfico.
+
 ## Antes de exponerlo
 
 - De forma predeterminada, OpenChamber solo escucha en tu propia máquina (`127.0.0.1`). Hace falta un cambio deliberado para escuchar más ampliamente, y deberías definir una contraseña primero.
-- Prefiere un [túnel](/es/tunnels/) o una red privada (como una VPN) antes que abrir un puerto a internet.
+- Para tus propios dispositivos, prefiere la [vinculación](/es/connect-devices/) con el [Private Relay](/es/private-relay/): no se expone nada públicamente.
+- Si necesitas una URL pública, prefiere un [túnel](/es/tunnels/) o una red privada (como una VPN) antes que abrir un puerto a internet.
 - Si pones OpenChamber detrás de tu propio servidor HTTPS, consulta [Proxy inverso](/es/reverse-proxy/).
 
 ## Relacionado
 
-- [Túneles](/es/tunnels/) — la forma recomendada de acceder a una instancia de forma remota
+- [Conectar un dispositivo](/es/connect-devices/) — vinculación de un solo uso y tokens por dispositivo
+- [Private Relay](/es/private-relay/) — acceso cifrado de extremo a extremo desde cualquier lugar
+- [Túneles](/es/tunnels/) — expón una URL pública cuando la necesites
 - [Proxy inverso](/es/reverse-proxy/) — ejecuta OpenChamber detrás de tu propio servidor

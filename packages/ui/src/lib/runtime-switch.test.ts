@@ -1,8 +1,85 @@
 import { describe, expect, test } from 'bun:test';
-import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from './runtime-switch';
+import {
+  getRuntimeApiBaseUrl,
+  getRuntimeKey,
+  subscribeRuntimeEndpointChanged,
+  subscribeRuntimeEndpointWillChange,
+  switchRuntimeEndpoint,
+} from './runtime-switch';
 import { clearRuntimeUrlAuthToken, setRuntimeExtraHeaders } from './runtime-auth';
+import {
+  activateRelayTunnel,
+  deactivateRelayTunnel,
+  getActiveRelayDescriptor,
+} from './relay/runtime-tunnel';
 
 describe('runtime endpoint switching', () => {
+  test('exposes a credential-free copy of the active relay descriptor', () => {
+    const descriptor = {
+      relayUrl: 'wss://relay.example.com',
+      serverId: 'server-1',
+      hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'public-x', y: 'public-y' },
+      grant: 'one-time-secret',
+    };
+
+    try {
+      activateRelayTunnel(descriptor);
+      const exposed = getActiveRelayDescriptor();
+      expect(exposed).toEqual({
+        relayUrl: descriptor.relayUrl,
+        serverId: descriptor.serverId,
+        hostEncPubJwk: descriptor.hostEncPubJwk,
+      });
+      expect(exposed).not.toBe(descriptor);
+      expect(exposed?.hostEncPubJwk).not.toBe(descriptor.hostEncPubJwk);
+    } finally {
+      deactivateRelayTunnel();
+    }
+  });
+
+  test('notifies listeners before and after mutating the active endpoint', () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const previousFetch = globalThis.fetch;
+    const events = new EventTarget();
+    const runtimeWindow = {
+      addEventListener: events.addEventListener.bind(events),
+      removeEventListener: events.removeEventListener.bind(events),
+      dispatchEvent: events.dispatchEvent.bind(events),
+    };
+
+    try {
+      globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: runtimeWindow,
+      });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-a.example', runtimeKey: 'runtime-a' });
+      const observed: Array<[string, string, string]> = [];
+      const unsubscribeWillChange = subscribeRuntimeEndpointWillChange((detail) => {
+        observed.push(['will-change', getRuntimeKey(), detail.previousRuntimeKey]);
+      });
+      const unsubscribeChanged = subscribeRuntimeEndpointChanged((detail) => {
+        observed.push(['changed', getRuntimeKey(), detail.runtimeKey]);
+      });
+
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-b.example', runtimeKey: 'runtime-b' });
+
+      expect(observed).toEqual([
+        ['will-change', 'runtime-a', 'runtime-a'],
+        ['changed', 'runtime-b', 'runtime-b'],
+      ]);
+      unsubscribeWillChange();
+      unsubscribeChanged();
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousWindow) {
+        Object.defineProperty(globalThis, 'window', previousWindow);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
   test('does not throw when Electron preload globals are read-only', () => {
     const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
     const previousFetch = globalThis.fetch;

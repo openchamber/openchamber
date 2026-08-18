@@ -9,6 +9,8 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
+import { commandMatchesSearch, mergeCommandAutocompleteItems } from './commandAutocompleteItems';
 
 type CommandSource = 'openchamber' | 'opencode' | 'skill';
 
@@ -17,6 +19,7 @@ export interface CommandInfo {
   name: string;
   source: CommandSource;
   description?: string;
+  searchAliases?: string[];
   agent?: string;
   model?: string;
   isBuiltIn?: boolean;
@@ -49,7 +52,7 @@ const NEUTRAL_BADGE_CLASS = cn(
 
 interface CommandAutocompleteProps {
   searchQuery: string;
-  onCommandSelect: (command: CommandInfo, options?: { dismissKeyboard?: boolean }) => void;
+  onCommandSelect: (command: CommandInfo) => void;
   onClose: () => void;
   style?: React.CSSProperties;
 }
@@ -81,6 +84,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const keyboardNavigationRef = React.useRef(false);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, isMobile);
   const ignoreClickRef = React.useRef(false);
   const pointerStartRef = React.useRef<{ x: number; y: number } | null>(null);
   const pointerMovedRef = React.useRef(false);
@@ -165,6 +169,14 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             : []
           ),
           ...(canStartSessionCommand
+            ? [{ id: 'openchamber:craft-goal', name: 'craft-goal', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.craftGoalDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:schedule-task', name: 'schedule-task', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.scheduleTaskDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
             ? [{ id: 'openchamber:catch-up', name: 'catch-up', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.catchUpDescription'), isOpenChamber: true }]
             : []
           ),
@@ -181,14 +193,11 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             : []
           ),
         ];
-        const allCommands = [...builtInCommands, ...customCommands, ...skillCommands];
+        const allCommands = mergeCommandAutocompleteItems(builtInCommands, customCommands, skillCommands);
 
         const allowInitCommand = !hasMessagesInCurrentSession;
         const filtered = (searchQuery
-          ? allCommands.filter(cmd =>
-              fuzzyMatch(cmd.name, searchQuery) ||
-              (cmd.description && fuzzyMatch(cmd.description, searchQuery))
-            )
+          ? allCommands.filter(cmd => commandMatchesSearch(cmd, searchQuery))
           : allCommands).filter(cmd => allowInitCommand || cmd.name !== 'init');
 
         filtered.sort((a, b) => {
@@ -231,6 +240,14 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           ),
           ...(canStartSessionCommand
             ? [{ id: 'openchamber:plan-feature', name: 'plan-feature', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.featurePlanDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:craft-goal', name: 'craft-goal', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.craftGoalDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(canStartSessionCommand
+            ? [{ id: 'openchamber:schedule-task', name: 'schedule-task', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.scheduleTaskDescription'), isOpenChamber: true }]
             : []
           ),
           ...(canStartSessionCommand
@@ -346,9 +363,9 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     <div
       ref={containerRef}
       className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-64 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
-      style={style}
+      style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
     >
-      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-0 pb-2">
+      <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0 pb-2">
         {loading ? (
           <div className="flex items-center justify-center py-4">
             <Icon name="refresh" className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -363,9 +380,15 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                   key={command.id}
                   ref={(el) => { itemRefs.current[index] = el; }}
                   className={cn(
-                    "flex items-start gap-2 px-3 py-2 cursor-pointer rounded-lg",
+                    "flex gap-2 px-3 py-2 cursor-pointer rounded-lg",
+                    isMobile ? "items-center" : "items-start",
                     index === selectedIndex && "bg-interactive-selection"
                   )}
+                  // Block the focus transfer the tap would perform: the textarea
+                  // must stay focused so selecting a command doesn't dismiss the
+                  // soft keyboard (the blur raced the keyboard-hide trigger and
+                  // won against the deferred refocus).
+                  onMouseDown={(event) => event.preventDefault()}
                   onPointerDown={(event) => {
                     if (event.pointerType !== 'touch') {
                       return;
@@ -396,7 +419,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                     event.preventDefault();
                     event.stopPropagation();
                     ignoreClickRef.current = true;
-                    onCommandSelect(command, { dismissKeyboard: true });
+                    onCommandSelect(command);
                   }}
                   onPointerCancel={() => {
                     pointerStartRef.current = null;
@@ -414,7 +437,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                     setSelectedIndex(index);
                   }}
                 >
-                  <div className="mt-0.5">
+                  <div className={cn(!isMobile && "mt-0.5")}>
                     {getCommandIcon(command)}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -448,7 +471,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                         </span>
                       )}
                     </div>
-                    {command.description && (
+                    {command.description && !isMobile && (
                       <div className="typography-meta text-muted-foreground mt-0.5 truncate">
                         {command.description}
                       </div>
@@ -465,9 +488,11 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           </div>
         )}
       </ScrollableOverlay>
-      <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
-        {t('chat.autocomplete.keyboardHint')}
-      </div>
+      {!isMobile && (
+        <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
+          {t('chat.autocomplete.keyboardHint')}
+        </div>
+      )}
     </div>
   );
 });

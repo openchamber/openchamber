@@ -22,13 +22,16 @@ const SyncOptimisticBridge: React.FC = () => {
   const sync = useSync();
   const addRef = React.useRef(sync.optimistic.add);
   const removeRef = React.useRef(sync.optimistic.remove);
+  const confirmRef = React.useRef(sync.optimistic.confirm);
   addRef.current = sync.optimistic.add;
   removeRef.current = sync.optimistic.remove;
+  confirmRef.current = sync.optimistic.confirm;
 
   React.useEffect(() => {
     setOptimisticRefs(
       (input) => addRef.current(input),
       (input) => removeRef.current(input),
+      (input) => confirmRef.current(input),
     );
   }, []);
 

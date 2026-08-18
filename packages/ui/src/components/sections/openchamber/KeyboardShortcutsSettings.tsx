@@ -1,15 +1,19 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Icon } from "@/components/icon/Icon";
+import {
+  SettingsSection,
+  SettingsFieldRow,
+} from '@/components/sections/shared/SettingsSection';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import {
   formatShortcutForDisplay,
   getCustomizableShortcutActions,
   getEffectiveShortcutCombo,
+  getEffectiveShortcutPrefix,
   isRiskyBrowserShortcut,
   keyToShortcutToken,
   normalizeCombo,
@@ -46,6 +50,35 @@ const keyboardEventToCombo = (event: React.KeyboardEvent<HTMLInputElement>): Sho
   return normalizeCombo(parts.join('+'));
 };
 
+// Prefix capture for chord-style shortcuts (e.g. "switch context panel
+// surface"): a bare modifier press is accepted so the prefix can be just the
+// primary modifier (default) or a modifier + key chord like `mod+p`.
+const keyboardEventToPrefixCombo = (event: React.KeyboardEvent<HTMLInputElement>): ShortcutCombo | null => {
+  const parts: string[] = [];
+
+  if (event.metaKey || event.ctrlKey) {
+    parts.push('mod');
+  }
+  if (event.shiftKey) {
+    parts.push('shift');
+  }
+  if (event.altKey) {
+    parts.push('alt');
+  }
+
+  if (MODIFIER_KEYS.has(event.key.toLowerCase())) {
+    return parts.length > 0 ? normalizeCombo(parts.join('+')) : null;
+  }
+
+  const keyToken = keyToShortcutToken(event.key);
+  if (!keyToken) {
+    return null;
+  }
+
+  parts.push(keyToken);
+  return parts.length > 0 ? normalizeCombo(parts.join('+')) : null;
+};
+
 export const KeyboardShortcutsSettings: React.FC = () => {
   const { t } = useI18n();
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
@@ -54,7 +87,13 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   const clearShortcutOverride = useUIStore((state) => state.clearShortcutOverride);
   const resetAllShortcutOverrides = useUIStore((state) => state.resetAllShortcutOverrides);
 
-  const actions = React.useMemo(() => getCustomizableShortcutActions(), []);
+  const actions = React.useMemo(() => {
+    const all = getCustomizableShortcutActions();
+    if (!isVSCodeRuntime()) {
+      return all;
+    }
+    return all.filter((action) => action.id !== 'toggle_prompt_navigator');
+  }, []);
   const actionLabel = React.useCallback((id: string, fallbackLabel: string): string => {
     const key = `settings.openchamber.keyboardShortcuts.action.${id}.label`;
     const translated = tUnsafe(key);
@@ -150,41 +189,34 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   }, [clearShortcutOverride, persistShortcutOverrides, shortcutOverrides]);
 
   return (
-    <div data-settings-item="shortcuts.keyboard-shortcuts" className="mb-8">
-      <div className="mb-1 px-1">
-        <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.keyboardShortcuts.title')}</h3>
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            className="!font-normal"
-            onClick={() => {
-              resetAllShortcutOverrides();
-              persistShortcutOverrides({});
-              setDraftByAction({});
-              setPendingOverwrite(null);
-              setErrorText('');
-              setWarningText('');
-            }}
-          >
-            {t('settings.openchamber.keyboardShortcuts.actions.resetAll')}
-          </Button>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent sideOffset={8} className="max-w-xs">
-              {t('settings.openchamber.keyboardShortcuts.tooltip')}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-
+    <SettingsSection
+      settingsItem="shortcuts.keyboard-shortcuts"
+      title={t('settings.openchamber.keyboardShortcuts.title')}
+      divider={false}
+      info={t('settings.openchamber.keyboardShortcuts.tooltip')}
+      headerAction={(
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="!font-normal"
+          onClick={() => {
+            resetAllShortcutOverrides();
+            persistShortcutOverrides({});
+            setDraftByAction({});
+            setPendingOverwrite(null);
+            setErrorText('');
+            setWarningText('');
+          }}
+        >
+          {t('settings.openchamber.keyboardShortcuts.actions.resetAll')}
+        </Button>
+      )}
+    >
       {(errorText || warningText || pendingOverwrite) && (
-        <div className="mb-2 space-y-2 px-1">
+        <div className="mb-2 space-y-2">
           {pendingOverwrite && (
-            <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3 flex flex-col @xl:flex-row @xl:items-center justify-between gap-3">
               <span className="typography-meta text-foreground">
                 {t('settings.openchamber.keyboardShortcuts.overwritePrompt')}
               </span>
@@ -207,22 +239,31 @@ export const KeyboardShortcutsSettings: React.FC = () => {
         </div>
       )}
 
-      <section className="px-2 pb-2 pt-0 space-y-0.5">
+      <div>
         {actions.map((action, index) => {
-          const effective = getEffectiveShortcutCombo(action.id, shortcutOverrides);
+          const isSurfaceSwitch = action.id === 'switch_context_surface';
+          const effective = isSurfaceSwitch
+            ? getEffectiveShortcutPrefix(action.id, shortcutOverrides)
+            : getEffectiveShortcutCombo(action.id, shortcutOverrides);
           const draft = draftByAction[action.id];
           const displayCombo = draft ?? effective;
           const hasDraft = typeof draft === 'string' && normalizeCombo(draft) !== normalizeCombo(effective);
+          const isUnassignedDisplay = displayCombo === '' || normalizeCombo(displayCombo) === UNASSIGNED_SHORTCUT;
+          const displayValue = capturingActionId === action.id
+            ? t('settings.openchamber.keyboardShortcuts.field.pressKeys')
+            : isSurfaceSwitch && !isUnassignedDisplay
+              ? `${formatShortcutForDisplay(displayCombo)}${t('settings.openchamber.keyboardShortcuts.action.switch_context_surface.suffix')}`
+              : formatShortcutForDisplay(displayCombo);
 
           return (
-            <div key={action.id} className={cn("flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8", index > 0 && "border-t border-[var(--surface-subtle)]")}>
-              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                <span className="typography-ui-label text-foreground">{actionLabel(action.id, action.label)}</span>
-              </div>
-              <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+            <div key={action.id} className={cn("py-1.5", index > 0 && "border-t border-border/40")}>
+              <SettingsFieldRow
+                label={actionLabel(action.id, action.label)}
+                alignEnd={false}
+              >
                 <Input
                   readOnly
-                  value={capturingActionId === action.id ? t('settings.openchamber.keyboardShortcuts.field.pressKeys') : formatShortcutForDisplay(displayCombo)}
+                  value={displayValue}
                   onFocus={() => {
                     setCapturingActionId(action.id);
                     setErrorText('');
@@ -241,7 +282,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                       return;
                     }
 
-                    const combo = keyboardEventToCombo(event);
+                    const combo = isSurfaceSwitch ? keyboardEventToPrefixCombo(event) : keyboardEventToCombo(event);
                     if (!combo) {
                       return;
                     }
@@ -276,11 +317,11 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                 <Button type="button" size="xs" className="!font-normal" variant="ghost" onClick={() => resetOne(action.id)}>
                   {t('settings.common.actions.reset')}
                 </Button>
-              </div>
+              </SettingsFieldRow>
             </div>
           );
         })}
-      </section>
-    </div>
+      </div>
+    </SettingsSection>
   );
 };

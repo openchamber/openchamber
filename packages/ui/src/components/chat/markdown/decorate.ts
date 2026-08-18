@@ -1,6 +1,8 @@
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
 import { dropdownMenuItemClass, dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import type { IconName } from '@/components/icon/icons';
+import { getMermaidViewerController } from './mermaidViewer';
 
 // ---------------------------------------------------------------------------
 // Shared decoration context
@@ -11,16 +13,31 @@ export type MermaidRender = { svg?: string; ascii?: string };
 export type DecorateLabels = {
   copy: string;
   copied: string;
+  enableCodeWrap: string;
+  disableCodeWrap: string;
   copyTable: string;
   downloadTable: string;
   copyDiagram: string;
   downloadDiagram: string;
+  zoomInDiagram: string;
+  zoomOutDiagram: string;
+  resetDiagramView: string;
   previewLabel: string;
   previewTitle: string;
 };
 
+export type MermaidControlOptions = {
+  download: boolean;
+  copy: boolean;
+  showPanZoomControls: boolean;
+};
+
 export type DecorateContext = {
   labels: DecorateLabels;
+  mermaidControls: MermaidControlOptions;
+  codeBlockLineWrap: boolean;
+  deferCodeLineNumberSync?: boolean;
+  onToggleCodeBlockLineWrap?: () => void;
   // Renders a mermaid block source to svg/ascii using current theme colors.
   renderMermaid: (source: string) => MermaidRender;
   onPreviewLoopback?: (url: string) => void;
@@ -29,20 +46,37 @@ export type DecorateContext = {
 // Reference the app's icon sprite (injected into <body> by the shared Icon
 // component) so DOM-built controls use the same themed icons as the rest of
 // the app. Sprite symbols are registered under `#oc-<name>`.
-const spriteIcon = (name: string): string =>
+const spriteIcon = (name: IconName): string =>
   `<svg class="remixicon size-3.5" viewBox="0 0 24 24" aria-hidden="true"><use href="#oc-${name}"></use></svg>`;
 
 const ICONS = {
   copy: spriteIcon('file-copy'),
   check: spriteIcon('check'),
   download: spriteIcon('download'),
+  zoomIn: spriteIcon('add'),
+  zoomOut: spriteIcon('subtract'),
+  fit: spriteIcon('refresh'),
+  textWrap: spriteIcon('text-wrap'),
+  image: spriteIcon('file-image'),
 } as const;
 
 const ICON_BTN_CLASS =
-  'p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors';
+  'p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--interactive-focus-ring)]';
 
-const setHtml = (el: Element, html: string): void => {
+const setIconHtml = (el: Element, html: string): void => {
   el.innerHTML = html;
+};
+
+const decorateImageLabels = (root: HTMLElement): void => {
+  for (const label of Array.from(root.querySelectorAll<HTMLElement>('[data-openchamber-markdown-image-label="true"]'))) {
+    if (label.querySelector('[data-openchamber-markdown-image-label-icon]')) continue;
+    const icon = document.createElement('span');
+    icon.className = 'inline-flex shrink-0';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('data-openchamber-markdown-image-label-icon', 'true');
+    setIconHtml(icon, ICONS.image);
+    label.prepend(icon);
+  }
 };
 
 const makeIconButton = (icon: keyof typeof ICONS, title: string, slot: string): HTMLButtonElement => {
@@ -52,16 +86,123 @@ const makeIconButton = (icon: keyof typeof ICONS, title: string, slot: string): 
   button.setAttribute('data-md-action', slot);
   button.setAttribute('title', title);
   button.setAttribute('aria-label', title);
-  setHtml(button, ICONS[icon]);
+  setIconHtml(button, ICONS[icon]);
   return button;
 };
 
+const applyCodeBlockWrapState = (wrapper: HTMLElement, enabled: boolean, labels: DecorateLabels): void => {
+  const body = wrapper.querySelector<HTMLElement>('[data-md-code-body]');
+  const pre = wrapper.querySelector<HTMLElement>('pre');
+  const code = wrapper.querySelector<HTMLElement>('pre code');
+  const lineContents = wrapper.querySelectorAll<HTMLElement>('[data-md-code-line-content]');
+  const wrapButton = wrapper.querySelector<HTMLButtonElement>('[data-md-action="toggle-code-wrap"]');
+  wrapper.setAttribute('data-code-wrap', enabled ? 'true' : 'false');
+  body?.classList.toggle('overflow-x-auto', !enabled);
+  body?.classList.toggle('overflow-x-hidden', enabled);
+  pre?.classList.toggle('whitespace-pre-wrap', enabled);
+  pre?.classList.toggle('break-words', enabled);
+  code?.classList.toggle('whitespace-pre-wrap', enabled);
+  code?.classList.toggle('break-words', enabled);
+  if (pre) {
+    pre.style.whiteSpace = enabled ? 'pre-wrap' : 'pre';
+    pre.style.overflowWrap = enabled ? 'anywhere' : 'normal';
+  }
+  if (code) {
+    code.style.whiteSpace = enabled ? 'pre-wrap' : 'pre';
+    code.style.overflowWrap = enabled ? 'anywhere' : 'normal';
+  }
+  for (const lineContent of Array.from(lineContents)) {
+    lineContent.style.whiteSpace = enabled ? 'pre-wrap' : 'pre';
+    lineContent.style.overflowWrap = enabled ? 'anywhere' : 'normal';
+  }
+  if (wrapButton) {
+    const title = enabled ? labels.disableCodeWrap : labels.enableCodeWrap;
+    wrapButton.setAttribute('title', title);
+    wrapButton.setAttribute('aria-label', title);
+    wrapButton.classList.toggle('text-foreground', enabled);
+    wrapButton.classList.toggle('opacity-100', enabled);
+    wrapButton.classList.toggle('text-muted-foreground', !enabled);
+    wrapButton.classList.toggle('opacity-65', !enabled);
+    wrapButton.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  }
+};
+
+const layoutCodeLines = (pre: HTMLPreElement): void => {
+  const code = pre.querySelector<HTMLElement>(':scope > code');
+  if (!code || code.hasAttribute('data-md-code-lines')) return;
+
+  const text = code.textContent ?? '';
+  const hasTrailingNewline = text.endsWith('\n');
+  const lines = hasTrailingNewline ? text.slice(0, -1).split('\n') : text.split('\n');
+  const sourceLines = lines.length > 0 ? lines : [''];
+  const highlightedLines = Array.from(code.children).filter((child) => child.classList.contains('line'));
+  if (
+    hasTrailingNewline
+    && highlightedLines.length === sourceLines.length + 1
+    && highlightedLines.at(-1)?.textContent === ''
+  ) {
+    highlightedLines.pop();
+  }
+  const preserveHighlighting = highlightedLines.length === sourceLines.length;
+  const fragment = document.createDocumentFragment();
+
+  sourceLines.forEach((sourceLine, index) => {
+    const row = document.createElement('span');
+    row.setAttribute('data-md-code-line', '');
+
+    const number = document.createElement('span');
+    number.setAttribute('data-md-code-line-number', '');
+    number.setAttribute('aria-hidden', 'true');
+    number.textContent = String(index + 1);
+
+    const content = document.createElement('span');
+    content.setAttribute('data-md-code-line-content', '');
+    if (preserveHighlighting) {
+      const highlightedLine = highlightedLines[index];
+      if (highlightedLine) content.append(...Array.from(highlightedLine.childNodes));
+    } else {
+      content.textContent = sourceLine;
+    }
+
+    row.append(number, content);
+    fragment.appendChild(row);
+    if (index < sourceLines.length - 1 || hasTrailingNewline) {
+      const lineBreak = document.createElement('span');
+      lineBreak.setAttribute('data-md-code-line-break', '');
+      lineBreak.textContent = '\n';
+      fragment.appendChild(lineBreak);
+    }
+  });
+
+  code.replaceChildren(fragment);
+  code.setAttribute('data-md-code-lines', '');
+  code.toggleAttribute('data-md-code-trailing-newline', hasTrailingNewline);
+};
+
+export const getMarkdownCodeText = (code: HTMLElement): string => {
+  const lineContents = Array.from(code.querySelectorAll<HTMLElement>('[data-md-code-line-content]'));
+  if (lineContents.length === 0) return code.textContent ?? '';
+  const text = lineContents.map((line) => line.textContent ?? '').join('\n');
+  return code.hasAttribute('data-md-code-trailing-newline') ? `${text}\n` : text;
+};
+
+export const applyMarkdownCodeBlockWrapState = (root: HTMLElement, enabled: boolean, labels: DecorateLabels): void => {
+  const wrappers = root.querySelectorAll<HTMLElement>('[data-component="markdown-code"]');
+  for (const wrapper of Array.from(wrappers)) {
+    const pre = wrapper.querySelector<HTMLPreElement>('pre');
+    if (pre) layoutCodeLines(pre);
+    applyCodeBlockWrapState(wrapper, enabled, labels);
+  }
+};
+
 const flashCopied = (button: HTMLButtonElement, copiedTitle: string, restore: keyof typeof ICONS, restoreTitle: string): void => {
-  setHtml(button, ICONS.check);
+  setIconHtml(button, ICONS.check);
   button.setAttribute('title', copiedTitle);
+  button.setAttribute('aria-label', copiedTitle);
   window.setTimeout(() => {
-    setHtml(button, ICONS[restore]);
+    setIconHtml(button, ICONS[restore]);
     button.setAttribute('title', restoreTitle);
+    button.setAttribute('aria-label', restoreTitle);
   }, 2000);
 };
 
@@ -78,7 +219,7 @@ const decorateInlineCode = (root: HTMLElement): void => {
   }
 };
 
-const decorateCodeBlocks = (root: HTMLElement, labels: DecorateLabels): void => {
+const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
   const blocks = root.querySelectorAll<HTMLPreElement>('pre');
   for (const pre of Array.from(blocks)) {
     // Skip mermaid placeholders (handled separately).
@@ -104,19 +245,29 @@ const decorateCodeBlocks = (root: HTMLElement, labels: DecorateLabels): void => 
     const langLabel = document.createElement('span');
     langLabel.className = 'font-mono text-[13px] text-muted-foreground';
     langLabel.textContent = language;
-    const copyBtn = makeIconButton('copy', labels.copy, 'copy-code');
+    const copyBtn = makeIconButton('copy', ctx.labels.copy, 'copy-code');
+    const wrapBtn = makeIconButton('textWrap', ctx.codeBlockLineWrap ? ctx.labels.disableCodeWrap : ctx.labels.enableCodeWrap, 'toggle-code-wrap');
     header.appendChild(langLabel);
-    header.appendChild(copyBtn);
+    const actions = document.createElement('div');
+    actions.className = 'flex items-center gap-1';
+    actions.setAttribute('data-md-code-actions', '');
+    actions.appendChild(wrapBtn);
+    actions.appendChild(copyBtn);
+    header.appendChild(actions);
 
     const body = document.createElement('div');
+    body.setAttribute('data-md-code-body', '');
     body.className = 'px-3 py-2.5 overflow-x-auto';
 
     parent.replaceChild(wrapper, pre);
     pre.style.margin = '0';
     pre.style.background = 'transparent';
+    pre.classList.add('min-w-0', 'w-full', 'flex-1');
+    if (!ctx.deferCodeLineNumberSync) layoutCodeLines(pre);
     body.appendChild(pre);
     wrapper.appendChild(header);
     wrapper.appendChild(body);
+    applyCodeBlockWrapState(wrapper, ctx.codeBlockLineWrap, ctx.labels);
   }
 };
 
@@ -246,33 +397,52 @@ const decorateMermaid = (root: HTMLElement, ctx: DecorateContext): void => {
 
     const block = document.createElement('div');
     block.setAttribute('data-markdown', 'mermaid-block');
+    block.setAttribute('data-md-source', source);
     block.className = 'group relative';
 
     const scroll = document.createElement('div');
     scroll.setAttribute('data-markdown', 'mermaid-scroll');
 
     const toolbar = document.createElement('div');
-    toolbar.className = 'absolute top-1 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity';
+    toolbar.setAttribute('data-markdown', 'mermaid-toolbar');
+    toolbar.className = 'absolute top-1 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity';
 
     if (rendered.svg) {
+      block.setAttribute('data-mermaid-render', 'svg');
+      const viewport = document.createElement('div');
+      viewport.setAttribute('data-markdown', 'mermaid-viewport');
       const svgHost = document.createElement('div');
       svgHost.setAttribute('data-markdown', 'mermaid');
-      setHtml(svgHost, rendered.svg);
-      scroll.appendChild(svgHost);
-      const copy = makeIconButton('copy', ctx.labels.copyDiagram, 'mermaid-copy');
-      copy.setAttribute('data-md-source', source);
-      const download = makeIconButton('download', ctx.labels.downloadDiagram, 'mermaid-download');
-      download.setAttribute('data-md-svg', '1');
-      toolbar.appendChild(copy);
-      toolbar.appendChild(download);
+      svgHost.setAttribute('data-md-original-svg', rendered.svg);
+      svgHost.innerHTML = rendered.svg;
+      viewport.appendChild(svgHost);
+      scroll.appendChild(viewport);
+      if (ctx.mermaidControls.showPanZoomControls) {
+        toolbar.appendChild(makeIconButton('zoomIn', ctx.labels.zoomInDiagram, 'mermaid-zoom-in'));
+        toolbar.appendChild(makeIconButton('zoomOut', ctx.labels.zoomOutDiagram, 'mermaid-zoom-out'));
+        toolbar.appendChild(makeIconButton('fit', ctx.labels.resetDiagramView, 'mermaid-fit'));
+      }
+      if (ctx.mermaidControls.copy) {
+        const copy = makeIconButton('copy', ctx.labels.copyDiagram, 'mermaid-copy');
+        copy.setAttribute('data-md-source', source);
+        toolbar.appendChild(copy);
+      }
+      if (ctx.mermaidControls.download) {
+        const download = makeIconButton('download', ctx.labels.downloadDiagram, 'mermaid-download');
+        download.setAttribute('data-md-svg', '1');
+        toolbar.appendChild(download);
+      }
     } else {
+      block.setAttribute('data-mermaid-render', 'ascii');
       const asciiPre = document.createElement('pre');
       asciiPre.setAttribute('data-markdown', 'mermaid-ascii');
       asciiPre.textContent = rendered.ascii || source;
       scroll.appendChild(asciiPre);
-      const copy = makeIconButton('copy', ctx.labels.copyDiagram, 'mermaid-copy');
-      copy.setAttribute('data-md-source', rendered.ascii || source);
-      toolbar.appendChild(copy);
+      if (ctx.mermaidControls.copy) {
+        const copy = makeIconButton('copy', ctx.labels.copyDiagram, 'mermaid-copy');
+        copy.setAttribute('data-md-source', rendered.ascii || source);
+        toolbar.appendChild(copy);
+      }
     }
 
     block.appendChild(scroll);
@@ -322,7 +492,7 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
       preview.setAttribute('data-md-url', href);
       preview.setAttribute('title', ctx.labels.previewTitle);
       preview.setAttribute('aria-label', ctx.labels.previewLabel);
-      setHtml(preview, ICONS.download);
+      setIconHtml(preview, ICONS.download);
       anchor.parentNode?.insertBefore(preview, anchor.nextSibling);
     }
   }
@@ -330,9 +500,10 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
 
 /** Run all idempotent DOM decoration passes over freshly-rendered markdown. */
 export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void => {
+  decorateImageLabels(root);
   decorateInlineCode(root);
   decorateMermaid(root, ctx);
-  decorateCodeBlocks(root, ctx.labels);
+  decorateCodeBlocks(root, ctx);
   decorateTables(root, ctx.labels);
   decorateLinks(root, ctx);
 };
@@ -382,8 +553,14 @@ export const attachMarkdownInteractions = (
     // Copy code
     if (action === 'copy-code') {
       const code = actionEl.closest('[data-component="markdown-code"]')?.querySelector('code');
-      const text = code?.textContent ?? '';
+      const text = code ? getMarkdownCodeText(code) : '';
       if (text) void copyTextToClipboard(text).then(() => flashCopied(actionEl as HTMLButtonElement, ctx.labels.copied, 'copy', ctx.labels.copy));
+      return;
+    }
+
+    if (action === 'toggle-code-wrap') {
+      event.preventDefault();
+      ctx.onToggleCodeBlockLineWrap?.();
       return;
     }
 
@@ -430,10 +607,25 @@ export const attachMarkdownInteractions = (
       return;
     }
 
+    // Mermaid local pan/zoom controls
+    if (action === 'mermaid-zoom-in' || action === 'mermaid-zoom-out' || action === 'mermaid-fit') {
+      event.preventDefault();
+      const block = actionEl.closest('[data-markdown="mermaid-block"]');
+      const controller = getMermaidViewerController(block);
+      if (action === 'mermaid-zoom-in') {
+        controller?.zoomIn();
+      } else if (action === 'mermaid-zoom-out') {
+        controller?.zoomOut();
+      } else {
+        controller?.fit();
+      }
+      return;
+    }
+
     // Mermaid download svg
     if (action === 'mermaid-download') {
       const svgHost = actionEl.closest('[data-markdown="mermaid-block"]')?.querySelector('[data-markdown="mermaid"]');
-      const svg = svgHost?.innerHTML ?? '';
+      const svg = svgHost?.getAttribute('data-md-original-svg') ?? svgHost?.innerHTML ?? '';
       if (svg) downloadBlob('diagram.svg', svg, 'image/svg+xml;charset=utf-8');
       return;
     }

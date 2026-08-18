@@ -24,12 +24,14 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
+import { buildLinkedIssue } from '@/lib/linkedIssues';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { validateWorktreeCreate, createWorktree } from '@/lib/worktrees/worktreeManager';
 import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
@@ -40,6 +42,11 @@ import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
+import {
+  LAST_WORKTREE_SOURCE_BRANCH_KEY,
+  resolveWorktreeSourceBranchPreference,
+  resolveWorktreeSourceBranchToPersist,
+} from '@/lib/worktrees/worktreeSourceBranchPreference';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { GitHubIntegrationDialog } from './GitHubIntegrationDialog';
@@ -90,22 +97,6 @@ const normalizeBranchName = (value: string): string => {
     .replace(/\s+/g, '-')
     .replace(/^\/+|\/+$/g, '');
 };
-
-const slugifyWorktreeName = (value: string): string => {
-  return value
-    .trim()
-    .replace(/^refs\/heads\//, '')
-    .replace(/^heads\//, '')
-    .replace(/\s+/g, '-')
-    .replace(/^\/+|\/+$/g, '')
-    .split('/').join('-')
-    .replace(/[^A-Za-z0-9._-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80);
-};
-
-const LAST_SOURCE_BRANCH_KEY = 'oc:lastWorktreeSourceBranch';
 
 const sanitizeRemoteName = (value: string): string => {
   const normalized = String(value || '')
@@ -160,10 +151,14 @@ const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: st
   const ownerFromLabel = String(pr.headLabel || '').split(':')[0]?.trim();
   const remoteSeed = pr.headRepo?.owner || ownerFromLabel || 'pr-head';
   const remoteName = `pr-${sanitizeRemoteName(remoteSeed)}`;
-  const remoteUrl = pr.headRepo?.sshUrl || pr.headRepo?.cloneUrl || '';
+  // Prefer HTTPS so anonymous public fetches do not require SSH agent setup.
+  const remoteUrl = pr.headRepo?.cloneUrl || pr.headRepo?.sshUrl || '';
 
   if (!remoteUrl) {
-    throw new Error('PR head repository URL is unavailable');
+    throw new Error(
+      'PR head repository URL is unavailable. The fork may have been deleted; '
+      + 'push the branch to a reachable repository and try again.'
+    );
   }
 
   return {
@@ -175,6 +170,20 @@ const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: st
     ensureRemoteUrl: remoteUrl,
     sourceLabel: `${remoteName}/${headBranch}`,
   };
+};
+
+const slugifyWorktreeName = (value: string): string => {
+  return value
+    .trim()
+    .replace(/^refs\/heads\//, '')
+    .replace(/^heads\//, '')
+    .replace(/\s+/g, '-')
+    .replace(/^\/+|\/+$/g, '')
+    .split('/').join('-')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
 };
 
 interface NewWorktreeDialogProps {
@@ -496,12 +505,12 @@ export function NewWorktreeDialog({
         return;
       }
 
-      const issueRes = await github.issueGet(projectDirectory, args.issue.number);
+      const issueRes = await github.issueGet(projectDirectory, args.issue.number, { sourceRepo: args.issue.sourceRepo ?? null });
       if (issueRes.connected === false || !issueRes.repo || !issueRes.issue) {
         throw new Error('Failed to load issue context');
       }
 
-      const commentsRes = await github.issueComments(projectDirectory, args.issue.number);
+      const commentsRes = await github.issueComments(projectDirectory, args.issue.number, { sourceRepo: args.issue.sourceRepo ?? null });
       if (commentsRes.connected === false) {
         throw new Error('Failed to load issue comments');
       }
@@ -532,6 +541,22 @@ export function NewWorktreeDialog({
         { sessionId: args.sessionId },
       );
 
+      // Record the thread this worktree session was created for, so it stays
+      // visible as a context source after the opening message scrolls away.
+      void sessionActions.setLinkedIssue(
+        args.sessionId,
+        args.directory,
+        buildLinkedIssue({
+          url: issueRes.issue.url,
+          number: issueRes.issue.number,
+          title: issueRes.issue.title,
+          kind: 'issue',
+          author: issueRes.issue.author,
+          linkedAt: Date.now(),
+        }),
+        true,
+      ).catch(() => undefined);
+
       toast.success(t('session.newWorktree.toast.sessionFromIssue'));
       return;
     }
@@ -542,6 +567,7 @@ export function NewWorktreeDialog({
       }
 
       const prContext = await github.prContext(projectDirectory, args.pr.number, {
+        sourceRepo: args.pr.sourceRepo ?? null,
         includeDiff: args.includeDiff,
         includeCheckDetails: false,
       });
@@ -571,6 +597,20 @@ export function NewWorktreeDialog({
         { sessionId: args.sessionId },
       );
 
+      void sessionActions.setLinkedIssue(
+        args.sessionId,
+        args.directory,
+        buildLinkedIssue({
+          url: prContext.pr.url,
+          number: prContext.pr.number,
+          title: prContext.pr.title,
+          kind: 'pull',
+          author: prContext.pr.author,
+          linkedAt: Date.now(),
+        }),
+        true,
+      ).catch(() => undefined);
+
       toast.success(t('session.newWorktree.toast.sessionFromPr'));
     }
   }, [
@@ -585,25 +625,35 @@ export function NewWorktreeDialog({
   // Get current state based on mode
   const currentState = mode === 'new-branch' ? newBranchState : existingBranchState;
 
-  // Set default source branch when branches become available
+  // Set default source branch when the dialog opens and branches become available
   React.useEffect(() => {
-    if (!branches?.all || !projectDirectory) return;
-    if (newBranchState.sourceBranch) return; // Already set
-    
+    if (!open || !branches?.all || !projectDirectory) return;
+    if (newBranchState.sourceBranch) return;
+
+    const currentSourceBranch = newBranchState.sourceBranch;
+    let cancelled = false;
+
     const loadDefaultSourceBranch = async () => {
       try {
         const rootBranch = await getRootBranch(projectDirectory).catch(() => null);
-        const savedSourceBranch = localStorage.getItem(LAST_SOURCE_BRANCH_KEY);
-        const defaultSourceBranch = savedSourceBranch && branches.all?.includes(savedSourceBranch)
-          ? savedSourceBranch
-          : rootBranch && branches.all?.includes(rootBranch)
-            ? rootBranch
-            : branches.all?.includes('main')
-              ? 'main'
-              : branches.all?.includes('master')
-                ? 'master'
-                : branches.all?.[0] || '';
-        
+        if (cancelled) return;
+
+        const savedSourceBranch = localStorage.getItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
+        const {
+          sourceBranch: defaultSourceBranch,
+          shouldClearSavedSourceBranch,
+        } = resolveWorktreeSourceBranchPreference({
+          branches: branches.all,
+          savedSourceBranch,
+          rootBranch,
+        });
+
+        if (shouldClearSavedSourceBranch) {
+          localStorage.removeItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
+        }
+
+        if (cancelled || currentSourceBranch) return;
+
         if (defaultSourceBranch) {
           setNewBranchState(prev => ({
             ...prev,
@@ -614,13 +664,16 @@ export function NewWorktreeDialog({
         // ignore
       }
     };
-    
+
     void loadDefaultSourceBranch();
-  }, [branches, projectDirectory, newBranchState.sourceBranch]);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, branches?.all, projectDirectory, newBranchState.sourceBranch]);
 
   // Reset state on each open. Resetting on close would empty the form during
   // the close animation, causing visible flicker.
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!open) return;
 
     setMode('new-branch');
@@ -849,7 +902,7 @@ export function NewWorktreeDialog({
           ...(sourceBranch && mode === 'new-branch' ? { startRef: sourceBranch } : {}),
         };
       })();
-      
+
       const resolvedArgs = await withWorktreeUpstreamDefaults(projectDirectory, args);
 
       const metadata = await createWorktree(projectRef, resolvedArgs);
@@ -889,9 +942,16 @@ export function NewWorktreeDialog({
         setIsCreating(false);
       }
       
-      // Save source branch preference (only if not from PR)
-      if (newBranchState.sourceBranch && mode === 'new-branch' && !newBranchState.linkedPr) {
-        localStorage.setItem(LAST_SOURCE_BRANCH_KEY, newBranchState.sourceBranch);
+      // Save the last source-branch choice for the next open.
+      const lastSourceBranch = resolveWorktreeSourceBranchToPersist({
+        mode,
+        sourceBranch: newBranchState.sourceBranch,
+        linkedPr: !!newBranchState.linkedPr,
+        selectedBranch: existingBranchState.selectedBranch,
+      });
+
+      if (lastSourceBranch) {
+        localStorage.setItem(LAST_WORKTREE_SOURCE_BRANCH_KEY, lastSourceBranch);
       }
       
       toast.success(t('session.newWorktree.toast.worktreeCreated'), {
@@ -1560,12 +1620,15 @@ export function NewWorktreeDialog({
                   <div className="flex items-center gap-2">
                     <DropdownMenu open={existingBranchDropdownOpen} onOpenChange={setExistingBranchDropdownOpen}>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" className="h-9 min-w-[220px] max-w-full justify-between gap-2">
+                        <button
+                          type="button"
+                          className={cn(dropdownTriggerVariants({ size: 'default' }), 'min-w-[220px] max-w-full')}
+                        >
                           <span className={cn('truncate', existingBranchState.selectedBranch ? 'text-foreground' : 'text-muted-foreground')}>
                             {existingBranchState.selectedBranch || t('session.newWorktree.chooseBranch')}
                           </span>
                           <Icon name="arrow-down-s" className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        </Button>
+                        </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="start" sideOffset={6} portalToBody className="w-[min(42rem,calc(100vw-2rem))] p-0 max-h-[min(var(--available-height),24rem)] flex flex-col overflow-hidden" ref={existingBranchDropdownContentRef}>
                         <Command shouldFilter={false}>
@@ -1801,12 +1864,15 @@ export function NewWorktreeDialog({
                 </label>
                   <DropdownMenu open={sourceBranchDropdownOpen} onOpenChange={setSourceBranchDropdownOpen}>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" className="h-9 min-w-[220px] max-w-full justify-between gap-2">
+                      <button
+                        type="button"
+                        className={cn(dropdownTriggerVariants({ size: 'default' }), 'min-w-[220px] max-w-full')}
+                      >
                         <span className={cn('truncate', newBranchState.sourceBranch ? 'text-foreground' : 'text-muted-foreground')}>
                             {newBranchState.sourceBranch || t('session.newWorktree.selectSourceBranchPlaceholder')}
                         </span>
                         <Icon name="arrow-down-s" className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      </Button>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" portalToBody className="w-[min(42rem,calc(100vw-2rem))] p-0 max-h-[min(var(--available-height),24rem)] flex flex-col overflow-hidden" ref={sourceBranchDropdownContentRef}>
                       <Command shouldFilter={false}>

@@ -1,11 +1,8 @@
 import React from 'react';
-import { File as PierreFile } from '@pierre/diffs/react';
 import {
   RiArrowLeftLine,
   RiArrowRightSLine,
-  RiClipboardLine,
   RiCloseLine,
-  RiFileCopyLine,
   RiFolder3Fill,
   RiFolderOpenFill,
   RiLoader4Line,
@@ -13,33 +10,27 @@ import {
   RiSearchLine,
 } from '@remixicon/react';
 
-import { toast } from '@/components/ui';
-import { Button } from '@/components/ui/button';
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { Input } from '@/components/ui/input';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
-import { JsonTreeView } from '@/components/ui/JsonTreeView';
-import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { PIERRE_RUNTIME_BASE_CSS } from '@/components/views/PierreDiffViewer';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
-import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
-import { getDefaultTheme } from '@/lib/theme/themes';
-import { getImageMimeType, getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
 import type { FileListEntry, FileSearchResult } from '@/lib/api/types';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
+
+// The full desktop file editor, loaded on demand — it's a heavy chunk and only
+// needed once a file is actually opened.
+const LazyFilesEditor = React.lazy(() =>
+  import('@/components/views/FilesView').then((module) => ({ default: module.FilesView })),
+);
 
 type MobileFilesRoute =
   | { type: 'browser'; directory: string }
   | { type: 'file'; path: string; returnDirectory: string };
-
-const MAX_MOBILE_FILE_CHARS = 250_000;
 
 const normalizePath = (value?: string | null): string => (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
 
@@ -77,24 +68,15 @@ const formatFileSize = (size?: number): string => {
   return '';
 };
 
-const getImageSrc = (path: string): string => {
-  if (path.toLowerCase().endsWith('.svg')) {
-    return '';
-  }
-  return getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path });
-};
-
-const isMarkdownFile = (path: string): boolean => /\.(md|mdx|markdown)$/i.test(path);
-const isJsonFile = (path: string): boolean => /\.(json|jsonc)$/i.test(path);
-
 type MobileFilesSurfaceProps = {
-  /** When provided, header gets a close X that calls this; used when the surface is hosted in MobileSurfaceShell. */
+  /** When provided, the header gets a close X that calls this. */
   onClose?: () => void;
 };
 
 export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose }) => {
   const { t } = useI18n();
   const { files } = useRuntimeAPIs();
+  const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const root = normalizePath(useEffectiveDirectory() ?? null);
   const [route, setRoute] = React.useState<MobileFilesRoute>(() => ({ type: 'browser', directory: root }));
   const [entries, setEntries] = React.useState<FileListEntry[]>([]);
@@ -103,9 +85,6 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
   const [query, setQuery] = React.useState('');
   const [searchResults, setSearchResults] = React.useState<FileSearchResult[]>([]);
   const [isSearching, setIsSearching] = React.useState(false);
-  const [fileContent, setFileContent] = React.useState('');
-  const [fileError, setFileError] = React.useState<string | null>(null);
-  const [isLoadingFile, setIsLoadingFile] = React.useState(false);
   const directoryLoadRequestIdRef = React.useRef(0);
 
   React.useEffect(() => {
@@ -177,79 +156,64 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
     };
   }, [files, query, route]);
 
-  React.useEffect(() => {
-    if (route.type !== 'file') return;
-    setFileContent('');
-    setFileError(null);
-
-    if (isImageFile(route.path) && !route.path.toLowerCase().endsWith('.svg')) {
-      setIsLoadingFile(false);
-      return;
-    }
-
-    if (!files.readFile) {
-      setFileError(t('mobile.files.error.readUnavailable'));
-      setIsLoadingFile(false);
-      return;
-    }
-
-    let cancelled = false;
-    setIsLoadingFile(true);
-    void files.readFile(route.path)
-      .then((result) => {
-        if (cancelled) return;
-        setFileContent(result.content.length > MAX_MOBILE_FILE_CHARS
-          ? `${result.content.slice(0, MAX_MOBILE_FILE_CHARS)}\n\n${t('mobile.files.file.truncated')}`
-          : result.content);
-      })
-      .catch((error) => {
-        if (!cancelled) setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoadingFile(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [files, route, t]);
-
   const openDirectory = (directory: string) => {
     setQuery('');
     setRoute({ type: 'browser', directory });
   };
 
   const openFile = (path: string) => {
+    // FilesView (editor-only) reads its target from the files-view tabs store.
+    setSelectedPath(root, path);
     setRoute({ type: 'file', path, returnDirectory: currentDirectory || root });
   };
 
-  const handleCopyPath = async (path: string) => {
-    const result = await copyTextToClipboard(path);
-    if (result.ok) toast.success(t('mobile.files.toast.pathCopied'));
-    else toast.error(t('mobile.files.toast.copyFailed'));
-  };
-
-  const handleCopyContent = async () => {
-    const result = await copyTextToClipboard(fileContent);
-    if (result.ok) toast.success(t('mobile.files.toast.contentCopied'));
-    else toast.error(t('mobile.files.toast.copyFailed'));
-  };
+  // Chat tool rows (read/skill/edit) stage a pending file focus/navigation in
+  // the UI store — the same channel desktop's context panel consumes. Route
+  // straight to the editor for targets inside this workspace; the editor
+  // itself consumes pendingFileNavigation to jump to the requested line.
+  const pendingFileFocusPath = useUIStore((state) => state.pendingFileFocusPath);
+  const pendingFileNavigation = useUIStore((state) => state.pendingFileNavigation);
+  React.useEffect(() => {
+    const target = normalizePath(pendingFileNavigation?.path ?? pendingFileFocusPath ?? '');
+    if (!target || !root) return;
+    if (target !== root && !target.startsWith(`${root}/`)) return;
+    setSelectedPath(root, target);
+    setRoute({ type: 'file', path: target, returnDirectory: root });
+    if (pendingFileFocusPath) useUIStore.getState().setPendingFileFocusPath(null);
+  }, [pendingFileFocusPath, pendingFileNavigation, root, setSelectedPath]);
 
   if (!root) {
     return <MobileFilesState message={t('mobile.files.empty.noDirectory')} />;
   }
 
   if (route.type === 'file') {
+    // Full desktop file editor (toolbar, dirty/save, wrap, search, md/html
+    // preview, open-file tabs) — FilesView is already mobile-aware (keyboard
+    // nudge, touch menus); this host only adds the back row.
     return (
-      <MobileFileDetail
-        path={route.path}
-        content={fileContent}
-        error={fileError}
-        isLoading={isLoadingFile}
-        onBack={() => setRoute({ type: 'browser', directory: route.returnDirectory })}
-        onCopyPath={() => void handleCopyPath(route.path)}
-        onCopyContent={() => void handleCopyContent()}
-      />
+      <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
+        <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 border-b border-border/70 px-3 text-foreground">
+          <button
+            type="button"
+            className="-ml-1 flex size-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label={t('header.actions.backAria')}
+            onClick={() => setRoute({ type: 'browser', directory: route.returnDirectory })}
+            style={{ touchAction: 'manipulation' }}
+          >
+            <RiArrowLeftLine className="size-5" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate typography-ui-header text-foreground">{getNameFromPath(route.path)}</h2>
+          </div>
+        </header>
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <ErrorBoundary>
+            <React.Suspense fallback={<MobileFilesState loading message={t('filesView.state.loading')} />}>
+              <LazyFilesEditor mode="editor-only" />
+            </React.Suspense>
+          </ErrorBoundary>
+        </div>
+      </div>
     );
   }
 
@@ -320,7 +284,7 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
         ) : query.trim() ? (
           <MobileSearchResults results={visibleSearchResults} isSearching={isSearching} onOpenFile={openFile} />
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-border/40 bg-[var(--surface-elevated)]">
+          <div className="overflow-hidden rounded-2xl border border-border/70 bg-[var(--surface-elevated)]">
             {entries.length === 0 && !isLoadingDirectory ? (
               <div className="px-4 py-8 text-center typography-body text-muted-foreground">{t('mobile.files.empty.directory')}</div>
             ) : null}
@@ -350,7 +314,7 @@ const MobileFileRow: React.FC<{
 }> = ({ name, path, directory, meta, onClick }) => (
   <button
     type="button"
-    className="flex min-h-14 w-full items-center gap-3 border-b border-border/30 px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+    className="flex min-h-14 w-full items-center gap-3 border-b border-border/70 px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
     onClick={onClick}
     style={{ touchAction: 'manipulation' }}
   >
@@ -375,7 +339,7 @@ const MobileSearchResults: React.FC<{
   if (isSearching) return <MobileFilesState loading message={t('common.loading')} />;
   if (results.length === 0) return <MobileFilesState message={t('mobile.files.search.empty')} />;
   return (
-    <div className="overflow-hidden rounded-2xl border border-border/40 bg-[var(--surface-elevated)]">
+    <div className="overflow-hidden rounded-2xl border border-border/70 bg-[var(--surface-elevated)]">
       {results.map((result) => (
         <MobileFileRow
           key={result.path}
@@ -390,139 +354,6 @@ const MobileSearchResults: React.FC<{
   );
 };
 
-const MobileFileDetail: React.FC<{
-  path: string;
-  content: string;
-  error: string | null;
-  isLoading: boolean;
-  onBack: () => void;
-  onCopyPath: () => void;
-  onCopyContent: () => void;
-}> = ({ path, content, error, isLoading, onBack, onCopyPath, onCopyContent }) => {
-  const { t } = useI18n();
-  const imageAuthKey = isImageFile(path) && !path.toLowerCase().endsWith('.svg') ? path : '';
-  const [imageAuthReadyKey, setImageAuthReadyKey] = React.useState('');
-
-  React.useEffect(() => {
-    if (!imageAuthKey) {
-      setImageAuthReadyKey('');
-      return;
-    }
-
-    let cancelled = false;
-    setImageAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) setImageAuthReadyKey(imageAuthKey);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [imageAuthKey]);
-
-  const imageAuthLoading = Boolean(imageAuthKey && imageAuthReadyKey !== imageAuthKey);
-  const imageSrc = imageAuthLoading ? '' : getImageSrc(path);
-
-  return (
-    <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-3 border-b border-border/50 px-3 text-foreground">
-        <button
-          type="button"
-          className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          aria-label={t('header.actions.backAria')}
-          onClick={onBack}
-        >
-          <RiArrowLeftLine className="size-5" />
-        </button>
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate typography-ui-header text-foreground">{getNameFromPath(path)}</h2>
-        </div>
-        {!isImageFile(path) ? (
-          <Button type="button" variant="ghost" size="icon" onClick={onCopyContent} aria-label={t('mobile.files.copyContentAria')}>
-            <RiFileCopyLine className="size-4" />
-          </Button>
-        ) : null}
-        <Button type="button" variant="ghost" size="icon" onClick={onCopyPath} aria-label={t('mobile.files.copyPathAria')}>
-          <RiClipboardLine className="size-4" />
-        </Button>
-      </header>
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {isLoading || imageAuthLoading ? (
-          <MobileFilesState loading message={t('filesView.state.loading')} />
-        ) : error ? (
-          <MobileFilesState message={error} />
-        ) : isImageFile(path) && imageSrc ? (
-          <ScrollShadow className="h-full overflow-auto p-4">
-            <img src={imageSrc} alt={getNameFromPath(path)} className="mx-auto max-h-full max-w-full rounded-lg object-contain" />
-          </ScrollShadow>
-        ) : isImageFile(path) ? (
-          <ScrollShadow className="h-full overflow-auto p-4">
-            <img src={`data:${getImageMimeType(path)};utf8,${encodeURIComponent(content)}`} alt={getNameFromPath(path)} className="mx-auto max-h-full max-w-full rounded-lg object-contain" />
-          </ScrollShadow>
-        ) : (
-          <MobileTextFile path={path} content={content} />
-        )}
-      </div>
-    </div>
-  );
-};
-
-const MobileTextFile: React.FC<{ path: string; content: string }> = ({ path, content }) => {
-  const { currentTheme, availableThemes, lightThemeId, darkThemeId } = useThemeSystem();
-  const lightTheme = React.useMemo(
-    () => availableThemes.find((theme) => theme.metadata.id === lightThemeId) ?? getDefaultTheme(false),
-    [availableThemes, lightThemeId],
-  );
-  const darkTheme = React.useMemo(
-    () => availableThemes.find((theme) => theme.metadata.id === darkThemeId) ?? getDefaultTheme(true),
-    [availableThemes, darkThemeId],
-  );
-
-  React.useEffect(() => {
-    ensurePierreThemeRegistered(lightTheme);
-    ensurePierreThemeRegistered(darkTheme);
-  }, [darkTheme, lightTheme]);
-
-  const pierreTheme = React.useMemo(
-    () => ({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id }),
-    [darkTheme.metadata.id, lightTheme.metadata.id],
-  );
-
-  if (isMarkdownFile(path)) {
-    return (
-      <ScrollShadow className="h-full overflow-y-auto px-4 py-4">
-        <SimpleMarkdownRenderer content={content} enableFileReferences={false} />
-      </ScrollShadow>
-    );
-  }
-  if (isJsonFile(path)) {
-    return <JsonTreeView jsonString={content} className="h-full overflow-auto" />;
-  }
-  return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <ScrollShadow className="min-h-0 flex-1 overflow-auto bg-[var(--syntax-base-background)]">
-        <PierreFile
-          file={{
-            name: getNameFromPath(path),
-            contents: content,
-            lang: getLanguageFromExtension(path) || undefined,
-          }}
-          options={{
-            disableFileHeader: true,
-            overflow: 'wrap',
-            theme: pierreTheme,
-            themeType: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
-            unsafeCSS: PIERRE_RUNTIME_BASE_CSS,
-          }}
-          className="block min-h-full w-full"
-          style={{ minHeight: '100%' }}
-        />
-      </ScrollShadow>
-    </div>
-  );
-};
 
 const MobileFilesState: React.FC<{ message: string; loading?: boolean }> = ({ message, loading = false }) => (
   <div className="flex h-full items-center justify-center px-6 text-center">

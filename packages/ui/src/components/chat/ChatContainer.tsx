@@ -13,8 +13,11 @@ import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
+import { hasActiveQuestionToolInCurrentTurn, recoverPendingQuestionWithRetry } from '@/sync/question-recovery';
 import { StatusRowContainer } from './StatusRowContainer';
+import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
+import { PromptNavigatorRail } from './components/PromptNavigatorRail';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { useChatAutoFollow, type AnimationHandlers, type ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import { useChatTimelineController } from './hooks/useChatTimelineController';
@@ -34,20 +37,29 @@ import { useStreamingStore } from '@/sync/streaming';
 import {
     useSessionMessageCount,
     useSessionMessageRecords,
+    useSessionMessageLoadState,
     useSyncDirectory,
-    useDirectorySync,
+    useSessionRenderable,
     useSessionStatus,
     useScopedBlockingPermissions,
     useScopedBlockingQuestions,
     useParentSession,
+    useSession,
 } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
-import { getSessionPrefetch, subscribeSessionPrefetch } from '@/sync/session-prefetch-cache';
-import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { WorkStatusPanel } from './work-status/WorkStatusPanel';
+import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
+import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
+import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
+import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
+import { findShellCommandForMessage, isUserShellMarkerMessage } from './lib/shellBridge';
+import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { createFirstVisibleSessionPerformanceTracker } from '@/sync/session-load-performance';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -133,6 +145,7 @@ type HydratingToolSkeletonRow = {
 
 type ChatViewportProps = {
     currentSessionId: string;
+    currentSessionKey: string;
     isDesktopExpandedInput: boolean;
     isMobile: boolean;
     stickyUserHeader: boolean;
@@ -160,10 +173,18 @@ type ChatViewportProps = {
     isProgrammaticFollowActive: boolean;
     showLoadOlderButton: boolean;
     onLoadOlder: () => void;
+    turnIds: string[];
+    activeTurnId: string | null;
+    onSelectTurn: (turnId: string) => void;
+    showPromptNavigator: boolean;
+    canLoadEarlierPrompts: boolean;
+    isLoadingOlderPrompts: boolean;
+    onLoadEarlierPrompts: () => void;
 };
 
 const ChatViewport = React.memo(({
     currentSessionId,
+    currentSessionKey,
     isDesktopExpandedInput,
     isMobile,
     stickyUserHeader,
@@ -186,8 +207,99 @@ const ChatViewport = React.memo(({
     isProgrammaticFollowActive,
     showLoadOlderButton,
     onLoadOlder,
+    turnIds,
+    activeTurnId,
+    onSelectTurn,
+    showPromptNavigator,
+    canLoadEarlierPrompts,
+    isLoadingOlderPrompts,
+    onLoadEarlierPrompts,
 }: ChatViewportProps) => {
     const { t } = useI18n();
+    const promptPreviewsByTurnIdRef = React.useRef<Map<string, Part[]>>(new Map());
+    // Cache normalized parts per source array so unchanged messages keep the
+    // same reference and the memo below can bail out to the previous map.
+    const normalizedPromptPartsCache = React.useRef(new WeakMap<Part[], Part[]>());
+    // Shell-mode prompts show their extracted command; cache by message id so
+    // the parts array reference is stable while the command is unchanged.
+    const shellPreviewCache = React.useRef(new Map<string, { command: string; parts: Part[] }>());
+    const shellPreviewSessionRef = React.useRef(currentSessionId);
+    if (shellPreviewSessionRef.current !== currentSessionId) {
+        shellPreviewSessionRef.current = currentSessionId;
+        shellPreviewCache.current.clear();
+    }
+    const promptPreviewsByTurnId = React.useMemo(() => {
+        const next = new Map<string, Part[]>();
+        for (let index = 0; index < renderedMessages.length; index += 1) {
+            const message = renderedMessages[index];
+            if (message.info.role !== 'user') {
+                continue;
+            }
+            if (isUserShellMarkerMessage(message)) {
+                const command = findShellCommandForMessage(renderedMessages, index) ?? '';
+                const cached = shellPreviewCache.current.get(message.info.id);
+                if (cached && cached.command === command) {
+                    next.set(message.info.id, cached.parts);
+                } else {
+                    const parts = [{ type: 'text', text: command ? `$ ${command}` : '/shell' } as Part];
+                    shellPreviewCache.current.set(message.info.id, { command, parts });
+                    next.set(message.info.id, parts);
+                }
+                continue;
+            }
+            // Other fully synthetic user messages (loop continuations,
+            // plan-mode injections) are not prompts the user typed — keep
+            // them out of the navigator entirely.
+            if (isFullySyntheticMessage(message.parts)) {
+                continue;
+            }
+            let displayParts = normalizedPromptPartsCache.current.get(message.parts);
+            if (!displayParts) {
+                displayParts = normalizeUserDisplayParts(message.parts);
+                normalizedPromptPartsCache.current.set(message.parts, displayParts);
+            }
+            if (displayParts.length === 0) {
+                continue;
+            }
+            next.set(message.info.id, displayParts);
+        }
+        const prev = promptPreviewsByTurnIdRef.current;
+        if (prev.size === next.size) {
+            let unchanged = true;
+            for (const [id, parts] of next) {
+                if (prev.get(id) !== parts) {
+                    unchanged = false;
+                    break;
+                }
+            }
+            if (unchanged) {
+                return prev;
+            }
+        }
+        promptPreviewsByTurnIdRef.current = next;
+        return next;
+    }, [renderedMessages]);
+    // Only real (non-synthetic) prompts become rail entries; selection still
+    // targets the same turn anchors as the timeline.
+    const promptTurnIds = React.useMemo(
+        () => turnIds.filter((id) => promptPreviewsByTurnId.has(id)),
+        [promptPreviewsByTurnId, turnIds],
+    );
+    // If the viewport sits in a filtered-out (synthetic) turn, treat the
+    // nearest preceding real prompt as active so the rail doesn't jump.
+    const railActiveTurnId = React.useMemo(() => {
+        if (!activeTurnId || promptPreviewsByTurnId.has(activeTurnId)) {
+            return activeTurnId;
+        }
+        const activeIndex = turnIds.indexOf(activeTurnId);
+        for (let index = activeIndex - 1; index >= 0; index -= 1) {
+            const turnId = turnIds[index];
+            if (promptPreviewsByTurnId.has(turnId)) {
+                return turnId;
+            }
+        }
+        return null;
+    }, [activeTurnId, promptPreviewsByTurnId, turnIds]);
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || shouldIgnoreChatNavigationTarget(event.target)) {
             return;
@@ -240,6 +352,7 @@ const ChatViewport = React.memo(({
                             </div>
                         )}
                         <MessageList
+                            key={currentSessionKey}
                             ref={messageListRef}
                             sessionKey={currentSessionId}
                             disableStaging={pendingRevealWork}
@@ -266,6 +379,8 @@ const ChatViewport = React.memo(({
                             </div>
                         )}
 
+                        <SessionRecapNote sessionId={currentSessionId} directory={directory} isMobile={isMobile} />
+
                         <div className="mb-3">
                             <StatusRowContainer />
                         </div>
@@ -274,11 +389,23 @@ const ChatViewport = React.memo(({
                     </div>
                 </ScrollShadow>
                 <OverlayScrollbar containerRef={scrollRef} suppressVisibility={isProgrammaticFollowActive} userIntentOnly observeMutations={false} />
+                {showPromptNavigator && promptTurnIds.length >= 2 ? (
+                    <PromptNavigatorRail
+                        turnIds={promptTurnIds}
+                        previewsByTurnId={promptPreviewsByTurnId}
+                        activeTurnId={railActiveTurnId}
+                        onSelectTurn={onSelectTurn}
+                        canLoadEarlier={canLoadEarlierPrompts}
+                        isLoadingOlder={isLoadingOlderPrompts}
+                        onLoadEarlier={onLoadEarlierPrompts}
+                    />
+                ) : null}
             </div>
         </div>
     );
 }, (prev, next) => {
     return prev.currentSessionId === next.currentSessionId
+        && prev.currentSessionKey === next.currentSessionKey
         && prev.isDesktopExpandedInput === next.isDesktopExpandedInput
         && prev.isMobile === next.isMobile
         && prev.stickyUserHeader === next.stickyUserHeader
@@ -300,7 +427,14 @@ const ChatViewport = React.memo(({
         && prev.sessionPermissions === next.sessionPermissions
         && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
         && prev.showLoadOlderButton === next.showLoadOlderButton
-        && prev.onLoadOlder === next.onLoadOlder;
+        && prev.onLoadOlder === next.onLoadOlder
+        && prev.turnIds === next.turnIds
+        && prev.activeTurnId === next.activeTurnId
+        && prev.onSelectTurn === next.onSelectTurn
+        && prev.showPromptNavigator === next.showPromptNavigator
+        && prev.canLoadEarlierPrompts === next.canLoadEarlierPrompts
+        && prev.isLoadingOlderPrompts === next.isLoadingOlderPrompts
+        && prev.onLoadEarlierPrompts === next.onLoadEarlierPrompts;
 });
 
 ChatViewport.displayName = 'ChatViewport';
@@ -368,12 +502,58 @@ const renderDraftTitle = (title: string, projectLabel: string | null): React.Rea
     );
 };
 
-type ChatContainerProps = {
-    autoOpenDraft?: boolean;
-    readOnly?: boolean;
+const DraftWelcome: React.FC = () => {
+    const { t } = useI18n();
+    const selectedProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId ?? null);
+    const projectLabel = useProjectsStore(React.useCallback((state) => {
+        const projectId = selectedProjectId ?? state.activeProjectId;
+        const project = (projectId
+            ? state.projects.find((candidate) => candidate.id === projectId)
+            : null) ?? state.projects[0] ?? null;
+        return project ? getProjectDisplayLabel(project) : null;
+    }, [selectedProjectId]));
+
+    return (
+        <div className="oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+            <h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
+                {renderDraftTitle(
+                    projectLabel
+                        ? t('chat.emptyState.draftTitleWithProject', { project: projectLabel })
+                        : t('chat.emptyState.draftTitle'),
+                    projectLabel,
+                )}
+            </h1>
+            <DraftPresetChips
+                onSubmit={(starter) => useInputStore.getState().requestPresetSubmit(starter.submitText, starter.ref.type)}
+                className="oc-draft-starters mt-8 max-w-md"
+            />
+        </div>
+    );
 };
 
-export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = true, readOnly = false }) => {
+type ChatContainerProps = {
+    active?: boolean;
+    /**
+     * When set, controls message-history reads and session-message loads
+     * independently of `active`. Defaults to `active`. Embedded session-chat
+     * panels pass `true` so a delayed/lost visibility handshake cannot hide
+     * an already-materialized transcript (leaving only the working-status
+     * row — issue #2903).
+     */
+    messagesEnabled?: boolean;
+    autoOpenDraft?: boolean;
+    readOnly?: boolean;
+    initialAllowPromptingSubagentSessions?: boolean;
+};
+
+export const ChatContainer: React.FC<ChatContainerProps> = ({
+    active = true,
+    messagesEnabled: messagesEnabledProp,
+    autoOpenDraft = true,
+    readOnly = false,
+    initialAllowPromptingSubagentSessions,
+}) => {
+    const messagesEnabled = messagesEnabledProp ?? active;
     const { t } = useI18n();
     // Session UI state
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
@@ -381,26 +561,30 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
-    const projects = useProjectsStore((s) => s.projects);
-    const activeProjectId = useProjectsStore((s) => s.activeProjectId);
 
     // Sync actions
     const sync = useSync();
     const syncDirectory = useSyncDirectory();
     const effectiveSessionDirectory = currentSessionDirectory ?? syncDirectory;
+    const currentSessionKey = currentSessionId
+        ? JSON.stringify([getRuntimeKey(), effectiveSessionDirectory, currentSessionId])
+        : null;
     const ensureSessionRenderable = React.useCallback(
-        (sessionId: string) => sync.ensureSessionRenderable(sessionId),
-        [sync],
+        (sessionId: string) => sync.ensureSessionRenderable(sessionId, false, effectiveSessionDirectory),
+        [effectiveSessionDirectory, sync],
     );
     const loadMoreMessages = React.useCallback(
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        (sessionId: string, _direction: 'up' | 'down') => sync.loadMore(sessionId),
-        [sync],
+        (sessionId: string, _direction: 'up' | 'down') => sync.loadMore(sessionId, effectiveSessionDirectory),
+        [effectiveSessionDirectory, sync],
     );
 
     // UI store
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
+    const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
+    const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
+    const [embeddedAllowPrompting, setEmbeddedAllowPrompting] = React.useState(initialAllowPromptingSubagentSessions);
     const isTimelineDialogOpen = useUIStore((s) => s.isTimelineDialogOpen);
     const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
 
@@ -421,32 +605,26 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         ),
     );
     const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '', effectiveSessionDirectory);
-    const hasRenderableSessionSnapshot = useDirectorySync(
-        React.useCallback(
-            (state) => (currentSessionId ? getSessionMaterializationStatus(state, currentSessionId).renderable : false),
-            [currentSessionId],
-        ),
-        effectiveSessionDirectory,
-    );
-    // Messages from sync system
+    const hasRenderableSessionSnapshot = useSessionRenderable(currentSessionId ?? '', effectiveSessionDirectory);
+    // Messages from sync system. Keep this gated by `messagesEnabled`, not
+    // `active`, so embedded panels can show history while the composer stays
+    // inactive until the parent confirms visibility.
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', effectiveSessionDirectory, {
+        enabled: messagesEnabled,
         suspendPartUpdates: Boolean(streamingMessageId),
         suspendPartUpdatesForMessageId: streamingMessageId,
     });
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
-    const sessionPrefetchInfo = React.useSyncExternalStore(
-        React.useCallback(
-            (notify) => currentSessionId
-                ? subscribeSessionPrefetch(effectiveSessionDirectory, currentSessionId, notify)
-                : () => undefined,
-            [currentSessionId, effectiveSessionDirectory],
-        ),
-        React.useCallback(
-            () => currentSessionId ? getSessionPrefetch(effectiveSessionDirectory, currentSessionId) : undefined,
-            [currentSessionId, effectiveSessionDirectory],
-        ),
-        React.useCallback(() => undefined, []),
+    const sessionMessageLoadState = useSessionMessageLoadState(
+        currentSessionId ?? '',
+        effectiveSessionDirectory,
     );
+    const [firstVisiblePerformance] = React.useState(createFirstVisibleSessionPerformanceTracker);
+
+    React.useEffect(() => {
+        if (!active || !currentSessionKey || !hasRenderableSessionSnapshot || sessionMessages.length === 0) return;
+        return firstVisiblePerformance.schedule(currentSessionKey, sessionMessages.length);
+    }, [active, currentSessionKey, firstVisiblePerformance, hasRenderableSessionSnapshot, sessionMessages.length]);
 
     // Plan detection - watches messages for plan creation and signals store
     usePlanDetection(currentSessionId ?? '', sessionMessages);
@@ -459,6 +637,26 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     // the directory.
     const sessionPermissions = useScopedBlockingPermissions(currentSessionId, effectiveSessionDirectory);
     const sessionQuestions = useScopedBlockingQuestions(currentSessionId, effectiveSessionDirectory);
+
+    const hasUnreconciledQuestionTool = React.useMemo(
+        () => !sessionQuestions.some((question) => question.sessionID === currentSessionId)
+            && hasActiveQuestionToolInCurrentTurn(sessionMessages),
+        [currentSessionId, sessionMessages, sessionQuestions],
+    );
+
+    React.useEffect(() => {
+        if (!active || !currentSessionId || !effectiveSessionDirectory || !hasUnreconciledQuestionTool) return;
+        let cancelled = false;
+
+        void recoverPendingQuestionWithRetry(
+            () => sync.recoverPendingQuestions(currentSessionId, effectiveSessionDirectory),
+            { isCancelled: () => cancelled },
+        );
+
+        return () => {
+            cancelled = true;
+        };
+    }, [active, currentSessionId, effectiveSessionDirectory, hasUnreconciledQuestionTool, sync]);
 
     const sessionIsWorking = React.useMemo(() => {
         if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
@@ -522,34 +720,82 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     // History metadata — use sync's hasMore/isLoading
     const historyMeta = React.useMemo(() => {
         if (!currentSessionId) return null;
-        const prefetchHasMore = Boolean(sessionPrefetchInfo?.cursor) && sessionPrefetchInfo?.complete !== true;
         return {
             limit: sessionMessages.length,
-            complete: !(sync.hasMore(currentSessionId) || prefetchHasMore),
-            loading: sync.isLoading(currentSessionId),
+            complete: sessionMessageLoadState.complete || !sessionMessageLoadState.cursor,
+            loading: sessionMessageLoadState.status === 'loading',
         };
-    }, [currentSessionId, sessionMessages.length, sessionPrefetchInfo, sync]);
+    }, [currentSessionId, sessionMessageLoadState.complete, sessionMessageLoadState.cursor, sessionMessageLoadState.status, sessionMessages.length]);
 
     const { isMobile } = useDeviceInfo();
     const isVSCode = isVSCodeRuntime();
     const chatSurfaceMode = useChatSurfaceMode();
     const draftOpen = Boolean(newSessionDraft?.open);
+    // A draft can target another project or a pending worktree before it has a
+    // session. Keep the panel on that same directory so its project, MCP, and
+    // usage readouts describe where the draft will run rather than the project
+    // the user came from.
+    const workStatusDirectory = draftOpen
+        ? newSessionDraft?.bootstrapPendingDirectory ?? newSessionDraft?.directoryOverride ?? effectiveSessionDirectory
+        : effectiveSessionDirectory;
     const initError = useGlobalSyncStore((s) => s.error);
-    const isDesktopExpandedInput = isExpandedInput && !isMobile;
+    // Despite the historical name, this now covers mobile too: the mobile
+    // composer enters the same fullscreen-input mode via its drag handle.
+    const isDesktopExpandedInput = isExpandedInput;
     const useCompactDraftLayout = isMobile || isVSCode || chatSurfaceMode === 'mini-chat';
-    const messageListRef = React.useRef<MessageListHandle | null>(null);
-    const draftProjectLabel = React.useMemo(() => {
-        const selectedProject = newSessionDraft?.selectedProjectId
-            ? projects.find((project) => project.id === newSessionDraft.selectedProjectId) ?? null
-            : null;
-        const activeProject = activeProjectId
-            ? projects.find((project) => project.id === activeProjectId) ?? null
-            : null;
-        const project = selectedProject ?? activeProject ?? projects[0] ?? null;
-        return project ? getProjectDisplayLabel(project) : null;
-    }, [activeProjectId, newSessionDraft?.selectedProjectId, projects]);
+    // Work-status panel: a borderless column to the right of the transcript.
+    // It yields to the context panel and to a narrow chat; `rowRef` goes on the
+    // row that holds both columns, so its width never depends on the panel's
+    // own visibility.
+    const { rowRef: workStatusRowRef, visible: workStatusVisible, fits: workStatusFits } = useWorkStatusVisibility({
+        directory: workStatusDirectory,
+        isMobile,
+        isVSCode,
+    });
+    // Surfaces that never host the panel skip it entirely; the rest keep it
+    // mounted so its visibility can animate rather than snap.
+    const workStatusPanelMountable = !isMobile
+        && !isVSCode
+        && chatSurfaceMode !== 'mini-chat'
+        && !isDesktopExpandedInput;
+    const showWorkStatusPanel = workStatusPanelMountable && workStatusVisible;
 
+    // Offered over the chat when there is no room beside it. The panel is still
+    // switched on; only the layout refuses it.
+    const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
+    const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
+    const setWorkStatusPanelFits = useUIStore((state) => state.setWorkStatusPanelFits);
+    // Mounted whenever it could be shown, not only while it is: an element
+    // that appears and disappears with the condition has nothing to animate.
+    const workStatusOverlayMountable = workStatusPanelMountable
+        && workStatusPanelEnabled
+        && !workStatusFits;
+    const showWorkStatusOverlay = workStatusOverlayMountable && workStatusOverlayOpen;
+
+    React.useEffect(() => {
+        setWorkStatusPanelFits(workStatusPanelMountable && workStatusFits);
+        return () => setWorkStatusPanelFits(false);
+    }, [setWorkStatusPanelFits, workStatusFits, workStatusPanelMountable]);
+
+    // Published so the header can drop the readouts the panel already carries.
+    // Cleared on unmount: a chat that goes away is not showing anything.
+    const setWorkStatusPanelVisible = useUIStore((state) => state.setWorkStatusPanelVisible);
+    React.useEffect(() => {
+        setWorkStatusPanelVisible(showWorkStatusPanel);
+        return () => setWorkStatusPanelVisible(false);
+    }, [setWorkStatusPanelVisible, showWorkStatusPanel]);
+    const messageListRef = React.useRef<MessageListHandle | null>(null);
+    const currentSession = useSession(currentSessionId, effectiveSessionDirectory);
     const parentSession = useParentSession(currentSessionId, effectiveSessionDirectory);
+
+    // In the embedded session-chat iframe, hide "Return to parent" when
+    // viewing the panel's anchor session (the one recorded in the URL). Going
+    // up from the anchor would show the primary session that's already in the
+    // main chat. Drilling into a deeper subtask (currentSessionId ≠ anchor)
+    // re-enables the button to navigate back to the embedded session.
+    const embeddedPanelAnchorSessionId = getEmbeddedSessionChatOriginSessionId();
+    const hideReturnToParent =
+        embeddedPanelAnchorSessionId !== null && currentSessionId === embeddedPanelAnchorSessionId;
 
     const handleReturnToParentSession = React.useCallback(() => {
         if (!parentSession) return;
@@ -557,7 +803,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         setCurrentSession(parentSession.id, parentDirectory);
     }, [parentSession, setCurrentSession]);
 
-    const returnToParentButton = parentSession ? (
+    const returnToParentButton = parentSession && !hideReturnToParent ? (
         <Button
             type="button"
             variant="outline"
@@ -573,11 +819,56 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             {t('chat.container.returnToParent.label')}
         </Button>
     ) : null;
-    const promptReadOnly = readOnly || Boolean(parentSession);
+    const promptReadOnly = resolveChatPromptReadOnly(
+        currentSession,
+        embeddedAllowPrompting ?? allowPromptingSubagentSessions,
+        readOnly,
+    );
+
+    React.useEffect(() => {
+        // VS Code/Cursor/Positron webviews delete window.parent (and window.top).
+        // The old `window.parent === window` check does not catch that, so
+        // `window.parent.postMessage(...)` threw on chat open:
+        // TypeError: Cannot read properties of undefined (reading 'postMessage')
+        if (typeof window === 'undefined' || !window.parent || window.parent === window) {
+            return;
+        }
+
+        const parentWindow = window.parent;
+        const applySetting = (value: boolean) => {
+            setEmbeddedAllowPrompting(value);
+            useUIStore.getState().setAllowPromptingSubagentSessions(value);
+        };
+        const scopedWindow = window as typeof window & {
+            __openchamberApplyChatSettingsSync?: (payload: { allowPromptingSubagentSessions: boolean }) => void;
+        };
+        const applySync = (payload: { allowPromptingSubagentSessions: boolean }) => {
+            applySetting(payload.allowPromptingSubagentSessions);
+        };
+        const handleMessage = (event: MessageEvent) => {
+            if (event.source !== parentWindow || event.origin !== window.location.origin) return;
+            const data = event.data as { type?: unknown; payload?: { allowPromptingSubagentSessions?: unknown } };
+            if (data?.type !== 'openchamber:chat-settings-sync'
+                || typeof data.payload?.allowPromptingSubagentSessions !== 'boolean') return;
+            applySetting(data.payload.allowPromptingSubagentSessions);
+        };
+
+        scopedWindow.__openchamberApplyChatSettingsSync = applySync;
+        window.addEventListener('message', handleMessage);
+        parentWindow.postMessage({ type: 'openchamber:chat-settings-request' }, window.location.origin);
+        return () => {
+            window.removeEventListener('message', handleMessage);
+            if (scopedWindow.__openchamberApplyChatSettingsSync === applySync) {
+                delete scopedWindow.__openchamberApplyChatSettingsSync;
+            }
+        };
+    }, []);
 
     React.useEffect(() => {
         if (autoOpenDraft && !currentSessionId && !draftOpen) {
-            openNewSessionDraft();
+            // Programmatic fallback, not user navigation — must not clear the
+            // persisted last-session pointer the cold-launch restore reads.
+            openNewSessionDraft({ automatic: true });
         }
     }, [autoOpenDraft, currentSessionId, draftOpen, openNewSessionDraft]);
 
@@ -599,6 +890,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         showScrollButton,
     } = useChatAutoFollow({
         currentSessionId,
+        currentSessionKey,
         sessionMessageCount,
         sessionIsWorking,
         isMobile,
@@ -609,6 +901,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     const timelineController = useChatTimelineController({
         sessionId: currentSessionId,
+        sessionKey: currentSessionKey,
         messages: viewportMessages,
         historyMeta,
         scrollRef,
@@ -650,6 +943,21 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         scrollToMessage: timelineController.scrollToMessage,
         resumeToBottom: timelineController.resumeToBottomInstant,
     });
+    const handlePromptNavigatorSelect = React.useCallback((turnId: string) => {
+        void navigation.scrollToTurnId(turnId, { behavior: 'smooth' });
+    }, [navigation]);
+    const canLoadEarlierPrompts = timelineController.historySignals.canLoadEarlier;
+    const showPromptNavigator = !isMobile
+        && !isVSCode
+        && !isDesktopExpandedInput
+        && promptNavigatorEnabled
+        && timelineController.turnIds.length >= 2;
+
+    React.useEffect(() => {
+        if (!showPromptNavigator) {
+            useUIStore.getState().setPromptNavigatorPanelOpen(false);
+        }
+    }, [showPromptNavigator]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined' || !currentSessionId) return;
@@ -745,18 +1053,22 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         };
     }, [currentSessionId, isDesktopExpandedInput, scrollRef]);
 
-    const lastScrolledSessionRef = React.useRef<string | null>(null);
+    const lastScrolledSessionKeyRef = React.useRef<string | null>(null);
 
     const isSessionHydrating =
         Boolean(currentSessionId)
         && !hasRenderableSessionSnapshot;
+    const retrySessionLoad = React.useCallback(() => {
+        if (!messagesEnabled || !currentSessionId) return;
+        void sync.ensureSessionRenderable(currentSessionId, true, effectiveSessionDirectory);
+    }, [currentSessionId, effectiveSessionDirectory, messagesEnabled, sync]);
 
     React.useEffect(() => {
-        if (!currentSessionId) return;
-        if (lastScrolledSessionRef.current === currentSessionId) return;
+        if (!active || !currentSessionId) return;
+        if (lastScrolledSessionKeyRef.current === currentSessionKey) return;
 
         const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
-        lastScrolledSessionRef.current = currentSessionId;
+        lastScrolledSessionKeyRef.current = currentSessionKey;
         if (hasHashTarget) {
             // Hash navigation handler will scroll to target; we just release auto-follow.
             releaseAutoFollow();
@@ -771,14 +1083,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         } else {
             window.requestAnimationFrame(run);
         }
-    }, [currentSessionId, releaseAutoFollow, restoreSnapshot]);
+    }, [active, currentSessionId, currentSessionKey, releaseAutoFollow, restoreSnapshot]);
 
     React.useEffect(() => {
-        if (!currentSessionId) return;
+        if (!messagesEnabled || !currentSessionId) return;
         if (hasRenderableSessionSnapshot) return;
-        if (effectiveSessionDirectory !== syncDirectory) return;
         void ensureSessionRenderable(currentSessionId);
-    }, [currentSessionId, effectiveSessionDirectory, ensureSessionRenderable, hasRenderableSessionSnapshot, syncDirectory]);
+    }, [currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot, messagesEnabled]);
 
 	if (!currentSessionId && !draftOpen) {
 		// With auto-open, the draft welcome opens on the next tick (effect below),
@@ -797,35 +1108,40 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
 	if (!currentSessionId && draftOpen) {
 		return (
-			<div className="relative flex h-full flex-col bg-background transform-gpu">
-				{useCompactDraftLayout && !isDesktopExpandedInput ? (
-					<div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-						<h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
-							{renderDraftTitle(
-								draftProjectLabel
-									? t('chat.emptyState.draftTitleWithProject', { project: draftProjectLabel })
-									: t('chat.emptyState.draftTitle'),
-								draftProjectLabel,
-							)}
-						</h1>
-						<DraftPresetChips
-							onSubmit={(text) => useInputStore.getState().requestPresetSubmit(text)}
-							className="mt-8 max-w-md"
-						/>
+			// No transform on this root: it would become the containing block for
+			// the fullscreen composer's position:fixed visual-viewport pinning in
+			// mobile browsers (see ChatInput's composerFormRef effect).
+			<div ref={workStatusRowRef} className="flex h-full min-h-0 bg-background">
+				<div data-composer-bound className="relative flex min-w-0 flex-1 flex-col bg-background">
+					{useCompactDraftLayout && !isDesktopExpandedInput ? <DraftWelcome /> : null}
+					<div
+						className={cn(
+							'relative z-10 flex min-h-0',
+							isDesktopExpandedInput
+								? 'flex-1 bg-background'
+								: useCompactDraftLayout
+									? 'bg-background px-0'
+									: 'flex-1 items-center justify-center bg-background px-0 pb-[6vh]'
+						)}
+					>
+                          {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput active={active} scrollToBottom={scrollToBottomOnSend} />}
 					</div>
-				) : null}
-				<div
-					className={cn(
-						'relative z-10 flex min-h-0',
-						isDesktopExpandedInput
-							? 'flex-1 bg-background'
-							: useCompactDraftLayout
-								? 'bg-background px-0'
-								: 'flex-1 items-center justify-center bg-background px-0 pb-[6vh]'
-					)}
-				>
-						{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+					{workStatusOverlayMountable ? (
+						<WorkStatusPanel
+							overlay
+							visible={showWorkStatusOverlay}
+							sessionId={null}
+							directory={workStatusDirectory ?? null}
+						/>
+					) : null}
 				</div>
+				{workStatusPanelMountable ? (
+					<WorkStatusPanel
+						visible={showWorkStatusPanel}
+						sessionId={null}
+						directory={workStatusDirectory ?? null}
+					/>
+				) : null}
 			</div>
         );
     }
@@ -835,8 +1151,30 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }
 
 	if (isSessionHydrating && sessionMessages.length === 0 && !sessionIsWorking) {
+		if (sessionMessageLoadState.status === 'error') {
+			return (
+				<div data-composer-bound className="relative flex h-full flex-col bg-background">
+					{returnToParentButton}
+					<div className="flex min-h-0 flex-1 items-center justify-center px-6">
+						<div className="max-w-sm text-center">
+							<div className="mx-auto mb-3 flex size-9 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--status-error)_10%,transparent)] text-[var(--status-error)]">
+								<Icon name="error-warning" className="size-4" />
+							</div>
+							<p className="typography-ui-label font-medium text-foreground">{t('chat.container.sessionLoadError.title')}</p>
+							<p className="typography-meta mt-1 text-muted-foreground">{t('chat.container.sessionLoadError.description')}</p>
+							<Button variant="outline" size="sm" className="mt-4" onClick={retrySessionLoad}>
+								{t('chat.container.sessionLoadError.retry')}
+							</Button>
+						</div>
+					</div>
+					<div className="relative z-10 bg-background">
+						{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput active={active} scrollToBottom={scrollToBottomOnSend} />}
+					</div>
+				</div>
+			);
+		}
 		return (
-			<div className="relative flex flex-col h-full bg-background">
+			<div data-composer-bound className="relative flex flex-col h-full bg-background">
 				{returnToParentButton}
 				<div
 					className={cn(
@@ -884,7 +1222,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 							: 'bg-background'
 					)}
 				>
-					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+                    {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput active={active} scrollToBottom={scrollToBottomOnSend} />}
 				</div>
             </div>
         );
@@ -892,7 +1230,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
 	if (sessionMessages.length === 0 && !sessionIsWorking) {
 		return (
-			<div className="relative flex flex-col h-full bg-background transform-gpu">
+			// No transform here either — same fixed-positioning constraint as the
+			// draft branch above.
+			<div data-composer-bound className="relative flex flex-col h-full bg-background">
 				{returnToParentButton}
 				<div
 					className={cn(
@@ -917,18 +1257,19 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 							: 'bg-background'
 					)}
 				>
-					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+                    {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput active={active} scrollToBottom={scrollToBottomOnSend} />}
 				</div>
             </div>
         );
     }
 
 	return (
-		<div className="relative flex flex-col h-full bg-background">
+		<div ref={workStatusRowRef} className="flex h-full min-h-0 bg-background">
+		<div data-composer-bound className="relative flex min-w-0 flex-1 flex-col h-full bg-background">
 			{returnToParentButton}
 			<ChatViewport
-				key={currentSessionId}
 				currentSessionId={currentSessionId}
+                currentSessionKey={currentSessionKey ?? currentSessionId}
                 isDesktopExpandedInput={isDesktopExpandedInput}
                 isMobile={isMobile}
                 stickyUserHeader={stickyUserHeader}
@@ -951,6 +1292,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 isProgrammaticFollowActive={isFollowingProgrammatically}
                 showLoadOlderButton={showLoadOlderButton}
                 onLoadOlder={handleLoadOlderClick}
+                turnIds={timelineController.turnIds}
+                activeTurnId={timelineController.activeTurnId}
+                onSelectTurn={handlePromptNavigatorSelect}
+                showPromptNavigator={showPromptNavigator}
+                canLoadEarlierPrompts={canLoadEarlierPrompts}
+                isLoadingOlderPrompts={timelineController.isLoadingOlder}
+                onLoadEarlierPrompts={handleLoadOlderClick}
             />
 
             <div
@@ -967,8 +1315,20 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                         onClick={navigation.resumeToLatest}
                     />
                 )}
-                {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+                {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput active={active} scrollToBottom={scrollToBottomOnSend} />}
             </div>
+
+            {/* Inside the chat column, not beside it: as a row sibling it took
+                part in the flex layout and pushed the transcript, which is the
+                one thing an overlay must not do. */}
+            {workStatusOverlayMountable ? (
+                <WorkStatusPanel
+                    overlay
+                    visible={showWorkStatusOverlay}
+                    sessionId={currentSessionId ?? null}
+                    directory={workStatusDirectory ?? null}
+                />
+            ) : null}
 
             <TimelineDialog
                 open={isTimelineDialogOpen}
@@ -976,7 +1336,21 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 onScrollToMessage={timelineController.scrollToMessage}
                 onScrollByTurnOffset={navigation.scrollByTurnOffset}
                 onResumeToLatest={resumeToLatestInstant}
+                canLoadEarlier={timelineController.historySignals.canLoadEarlier}
+                isLoadingEarlier={timelineController.isLoadingOlder}
+                onLoadEarlier={handleLoadOlderClick}
             />
+        </div>
+        {/* Kept mounted while it could ever show, so it can animate its own
+            collapse; `visible` drives that. Unmounting on the spot is what made
+            the chat jump wide before easing narrow again. */}
+        {workStatusPanelMountable ? (
+            <WorkStatusPanel
+                visible={showWorkStatusPanel}
+                sessionId={currentSessionId ?? null}
+                directory={workStatusDirectory ?? null}
+            />
+        ) : null}
         </div>
     );
 };

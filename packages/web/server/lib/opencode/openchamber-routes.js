@@ -1,3 +1,21 @@
+const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
+
+function resolveSystemdServiceUnit(environment) {
+  if (!environment.INVOCATION_ID) {
+    return null;
+  }
+
+  const configuredUnit = typeof environment.OPENCHAMBER_SYSTEMD_UNIT === 'string'
+    ? environment.OPENCHAMBER_SYSTEMD_UNIT.trim()
+    : '';
+  const unit = configuredUnit || 'openchamber.service';
+  return SYSTEMD_SERVICE_UNIT_PATTERN.test(unit) ? unit : null;
+}
+
+function quotePosixShell(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
     fs,
@@ -12,9 +30,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     fetchFreeZenModels,
     getCachedZenModels,
   } = dependencies;
-
-  let cachedModelsMetadata = null;
-  let cachedModelsMetadataTimestamp = 0;
 
   app.get('/api/openchamber/update-check', async (req, res) => {
     try {
@@ -42,6 +57,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         arch: parseString(req.query.arch),
         instanceMode: parseString(req.query.instanceMode),
         currentVersion: parseString(req.query.currentVersion),
+        installId: parseString(req.query.installId),
         reportUsage: parseReportUsage(parseString(req.query.reportUsage)),
       });
       res.json(updateInfo);
@@ -56,7 +72,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   app.post('/api/openchamber/update-install', async (_req, res) => {
     try {
-      const { spawn: spawnChild } = await import('child_process');
+      const { spawn: spawnChild, spawnSync } = await import('child_process');
       const {
         checkForUpdates,
         getUpdateCommand,
@@ -112,6 +128,55 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       }
       const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
       const isForegroundService = launchMode === 'foreground';
+      const systemdServiceUnit = isForegroundService ? resolveSystemdServiceUnit(process.env) : null;
+
+      if (isForegroundService) {
+        if (!systemdServiceUnit) {
+          return res.status(409).json({
+            error: 'Foreground servers must be updated by their service manager. Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, or run openchamber update and restart the service.',
+          });
+        }
+
+        const updateJobName = `openchamber-update-${Date.now()}`;
+        const updateLogPath = `journalctl --user-unit ${updateJobName}.service`;
+        const updateScript = [
+          'set -eu',
+          updateCmd,
+          `systemctl --user restart ${quotePosixShell(systemdServiceUnit)}`,
+        ].join('\n');
+        const systemdRun = spawnSync('systemd-run', [
+          '--user',
+          `--unit=${updateJobName}`,
+          '--collect',
+          '--service-type=exec',
+          `--setenv=PATH=${process.env.PATH || ''}`,
+          '/bin/sh',
+          '-c',
+          updateScript,
+        ], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 5000,
+        });
+
+        if (systemdRun.status !== 0) {
+          const detail = (systemdRun.stderr || systemdRun.stdout || '').trim();
+          return res.status(409).json({
+            error: detail || `Could not queue update job for ${systemdServiceUnit}`,
+          });
+        }
+
+        return res.json({
+          success: true,
+          message: 'Update queued; OpenChamber will restart after installation completes',
+          version: updateInfo.version,
+          packageManager: pm,
+          autoRestart: true,
+          restartManager: 'systemd',
+          jobId: updateJobName,
+          logPath: updateLogPath,
+        });
+      }
 
       const isWindows = process.platform === 'win32';
       const quotePosix = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
@@ -254,48 +319,18 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
   });
 
   app.get('/api/openchamber/models-metadata', async (_req, res) => {
-    const now = Date.now();
-
-    if (cachedModelsMetadata && now - cachedModelsMetadataTimestamp < modelsMetadataCacheTtl) {
-      res.setHeader('Cache-Control', 'public, max-age=60');
-      return res.json(cachedModelsMetadata);
-    }
-
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeout = controller ? setTimeout(() => controller.abort(), 8000) : null;
-
     try {
-      const response = await fetch(modelsDevApiUrl, {
-        signal: controller?.signal,
-        headers: {
-          Accept: 'application/json'
-        }
+      const { getModelsMetadata } = await import('./models-metadata.js');
+      const { metadata, fromCache, stale } = await getModelsMetadata({
+        url: modelsDevApiUrl,
+        ttlMs: modelsMetadataCacheTtl,
       });
-
-      if (!response.ok) {
-        throw new Error(`models.dev responded with status ${response.status}`);
-      }
-
-      const metadata = await response.json();
-      cachedModelsMetadata = metadata;
-      cachedModelsMetadataTimestamp = Date.now();
-
-      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.setHeader('Cache-Control', fromCache && !stale ? 'public, max-age=60' : 'public, max-age=300');
       res.json(metadata);
     } catch (error) {
       console.warn('Failed to fetch models.dev metadata via server:', error);
-
-      if (cachedModelsMetadata) {
-        res.setHeader('Cache-Control', 'public, max-age=60');
-        res.json(cachedModelsMetadata);
-      } else {
-        const statusCode = error?.name === 'AbortError' ? 504 : 502;
-        res.status(statusCode).json({ error: 'Failed to retrieve model metadata' });
-      }
-    } finally {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
+      const statusCode = error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 504 : 502;
+      res.status(statusCode).json({ error: 'Failed to retrieve model metadata' });
     }
   });
 

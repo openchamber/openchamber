@@ -3,9 +3,17 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import type { DesktopSettings } from '@/lib/desktop';
 import type { MonoFontOption, UiFontOption } from '@/lib/fontOptions';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import type { TerminalShell } from '@/lib/api/types';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
+  workStatusPanelEnabled: boolean;
+  workStatusHiddenSections: string[];
+  sessionRecapEnabled: boolean;
+  sessionSuggestionEnabled: boolean;
+  sessionGoalEnabled: boolean;
+  sessionGoalDefaultBudgetEnabled: boolean;
+  sessionGoalDefaultBudget: number;
   collapsibleThinkingBlocks: boolean;
   showDeletionDialog: boolean;
   nativeNotificationsEnabled: boolean;
@@ -25,10 +33,14 @@ type AppearanceSlice = {
   summaryLength: number;
   maxLastMessageLength: number;
   autoDeleteEnabled: boolean;
+  autoSaveEnabled: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: 'archive' | 'delete';
   fontSize: number;
   terminalFontSize: number;
+  terminalShell: TerminalShell;
+  terminalLoginShells: TerminalShell[];
+  editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
   padding: number;
@@ -50,6 +62,13 @@ export const startAppearanceAutoSave = (): void => {
 
   let previous: AppearanceSlice = {
     showReasoningTraces: useUIStore.getState().showReasoningTraces,
+    workStatusPanelEnabled: useUIStore.getState().workStatusPanelEnabled,
+    workStatusHiddenSections: useUIStore.getState().workStatusHiddenSections,
+    sessionRecapEnabled: useUIStore.getState().sessionRecapEnabled,
+    sessionSuggestionEnabled: useUIStore.getState().sessionSuggestionEnabled,
+    sessionGoalEnabled: useUIStore.getState().sessionGoalEnabled,
+    sessionGoalDefaultBudgetEnabled: useUIStore.getState().sessionGoalDefaultBudgetEnabled,
+    sessionGoalDefaultBudget: useUIStore.getState().sessionGoalDefaultBudget,
     collapsibleThinkingBlocks: useUIStore.getState().collapsibleThinkingBlocks,
     showDeletionDialog: useUIStore.getState().showDeletionDialog,
     nativeNotificationsEnabled: useUIStore.getState().nativeNotificationsEnabled,
@@ -64,10 +83,14 @@ export const startAppearanceAutoSave = (): void => {
     summaryLength: useUIStore.getState().summaryLength,
     maxLastMessageLength: useUIStore.getState().maxLastMessageLength,
     autoDeleteEnabled: useUIStore.getState().autoDeleteEnabled,
+    autoSaveEnabled: useUIStore.getState().autoSaveEnabled,
     autoDeleteAfterDays: useUIStore.getState().autoDeleteAfterDays,
     sessionRetentionAction: useUIStore.getState().sessionRetentionAction,
     fontSize: useUIStore.getState().fontSize,
     terminalFontSize: useUIStore.getState().terminalFontSize,
+    terminalShell: useUIStore.getState().terminalShell,
+    terminalLoginShells: useUIStore.getState().terminalLoginShells,
+    editorFontSize: useUIStore.getState().editorFontSize,
     uiFont: useUIStore.getState().uiFont,
     monoFont: useUIStore.getState().monoFont,
     padding: useUIStore.getState().padding,
@@ -78,29 +101,16 @@ export const startAppearanceAutoSave = (): void => {
     gitChangesViewMode: useUIStore.getState().gitChangesViewMode,
   };
 
-  let pending: Partial<DesktopSettings> | null = null;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-
-  const flush = () => {
-    const payload = pending;
-    pending = null;
-    timer = null;
-    if (payload && Object.keys(payload).length > 0) {
-      void updateDesktopSettings(payload);
-    }
-  };
-
-  const schedule = (changes: Partial<DesktopSettings>) => {
-    pending = { ...(pending ?? {}), ...changes };
-    if (timer) {
-      return;
-    }
-    timer = setTimeout(flush, 150);
-  };
-
   useUIStore.subscribe((state) => {
     const current: AppearanceSlice = {
       showReasoningTraces: state.showReasoningTraces,
+      workStatusPanelEnabled: state.workStatusPanelEnabled,
+      workStatusHiddenSections: state.workStatusHiddenSections,
+      sessionRecapEnabled: state.sessionRecapEnabled,
+      sessionSuggestionEnabled: state.sessionSuggestionEnabled,
+      sessionGoalEnabled: state.sessionGoalEnabled,
+      sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
+      sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
       collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
       showDeletionDialog: state.showDeletionDialog,
       nativeNotificationsEnabled: state.nativeNotificationsEnabled,
@@ -115,10 +125,14 @@ export const startAppearanceAutoSave = (): void => {
       summaryLength: state.summaryLength,
       maxLastMessageLength: state.maxLastMessageLength,
       autoDeleteEnabled: state.autoDeleteEnabled,
+      autoSaveEnabled: state.autoSaveEnabled,
       autoDeleteAfterDays: state.autoDeleteAfterDays,
       sessionRetentionAction: state.sessionRetentionAction,
       fontSize: state.fontSize,
       terminalFontSize: state.terminalFontSize,
+      terminalShell: state.terminalShell,
+      terminalLoginShells: state.terminalLoginShells,
+      editorFontSize: state.editorFontSize,
       uiFont: state.uiFont,
       monoFont: state.monoFont,
       padding: state.padding,
@@ -131,8 +145,31 @@ export const startAppearanceAutoSave = (): void => {
 
     const diff: Partial<DesktopSettings> = {};
 
+    if (current.workStatusPanelEnabled !== previous.workStatusPanelEnabled) {
+      diff.workStatusPanelEnabled = current.workStatusPanelEnabled;
+    }
+    // Compared by content: the store hands back a new array on every change,
+    // so an identity check would push a write on unrelated store updates.
+    if (current.workStatusHiddenSections.join('\u0000') !== previous.workStatusHiddenSections.join('\u0000')) {
+      diff.workStatusHiddenSections = current.workStatusHiddenSections;
+    }
     if (current.showReasoningTraces !== previous.showReasoningTraces) {
       diff.showReasoningTraces = current.showReasoningTraces;
+    }
+    if (current.sessionRecapEnabled !== previous.sessionRecapEnabled) {
+      diff.sessionRecapEnabled = current.sessionRecapEnabled;
+    }
+    if (current.sessionSuggestionEnabled !== previous.sessionSuggestionEnabled) {
+      diff.sessionSuggestionEnabled = current.sessionSuggestionEnabled;
+    }
+    if (current.sessionGoalEnabled !== previous.sessionGoalEnabled) {
+      diff.sessionGoalEnabled = current.sessionGoalEnabled;
+    }
+    if (current.sessionGoalDefaultBudgetEnabled !== previous.sessionGoalDefaultBudgetEnabled) {
+      diff.sessionGoalDefaultBudgetEnabled = current.sessionGoalDefaultBudgetEnabled;
+    }
+    if (current.sessionGoalDefaultBudget !== previous.sessionGoalDefaultBudget) {
+      diff.sessionGoalDefaultBudget = current.sessionGoalDefaultBudget;
     }
     if (current.collapsibleThinkingBlocks !== previous.collapsibleThinkingBlocks) {
       diff.collapsibleThinkingBlocks = current.collapsibleThinkingBlocks;
@@ -176,6 +213,9 @@ export const startAppearanceAutoSave = (): void => {
     if (current.autoDeleteEnabled !== previous.autoDeleteEnabled) {
       diff.autoDeleteEnabled = current.autoDeleteEnabled;
     }
+    if (current.autoSaveEnabled !== previous.autoSaveEnabled) {
+      diff.autoSaveEnabled = current.autoSaveEnabled;
+    }
     if (current.autoDeleteAfterDays !== previous.autoDeleteAfterDays) {
       diff.autoDeleteAfterDays = current.autoDeleteAfterDays;
     }
@@ -187,6 +227,15 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.terminalFontSize !== previous.terminalFontSize) {
       diff.terminalFontSize = current.terminalFontSize;
+    }
+    if (current.terminalShell !== previous.terminalShell) {
+      diff.terminalShell = current.terminalShell;
+    }
+    if (current.terminalLoginShells !== previous.terminalLoginShells) {
+      diff.terminalLoginShells = current.terminalLoginShells;
+    }
+    if (current.editorFontSize !== previous.editorFontSize) {
+      diff.editorFontSize = current.editorFontSize;
     }
     if (current.uiFont !== previous.uiFont) {
       diff.uiFont = current.uiFont;
@@ -216,7 +265,7 @@ export const startAppearanceAutoSave = (): void => {
     previous = current;
 
     if (Object.keys(diff).length > 0) {
-      schedule(diff);
+      void updateDesktopSettings(diff);
     }
   });
 

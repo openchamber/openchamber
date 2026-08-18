@@ -17,7 +17,7 @@ export type SessionCreateRequest = {
 type DeleteListener = (request: SessionDeleteRequest) => void;
 type CreateListener = (request: SessionCreateRequest) => void;
 type DirectoryListener = () => void;
-type GitRefreshHint = { directory: string };
+type GitRefreshHint = { directory: string; paths?: string[] };
 type GitRefreshListener = (hint: GitRefreshHint) => void;
 
 const deleteListeners = new Set<DeleteListener>();

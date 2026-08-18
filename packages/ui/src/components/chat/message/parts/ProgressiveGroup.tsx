@@ -1,4 +1,5 @@
 import React from 'react';
+import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
@@ -573,6 +574,7 @@ const StaticToolRowInner: React.FC<{
     const icon = getToolIcon(toolName);
     const isReadGroup = toolName.toLowerCase() === 'read';
     const runtime = React.useContext(RuntimeAPIContext);
+    const mobileActions = useMobileAppActions();
     const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
     const skills = useSkillsStore((state) => state.skills);
     const hasRunningActivity = React.useMemo(() => activities.some((activity) => isActivityRunning(activity)), [activities]);
@@ -623,7 +625,7 @@ const StaticToolRowInner: React.FC<{
         return entries;
     }, [activities, currentDirectory, isReadGroup]);
 
-    const handleReadFileClick = React.useCallback((filePath: string, offset?: number) => {
+    const handleFileClick = React.useCallback((filePath: string, offset?: number) => {
         const absolutePath = toAbsoluteFilePath(currentDirectory, filePath);
         if (!absolutePath) {
             return;
@@ -631,6 +633,21 @@ const StaticToolRowInner: React.FC<{
 
         if (runtime?.editor) {
             void runtime.editor.openFile(absolutePath, offset);
+            return;
+        }
+
+        // Dedicated mobile app: stage the same pending file focus/navigation
+        // desktop uses, then surface the Files pane (workspace drawer tab),
+        // which consumes it. Desktop grant flows don't apply here.
+        if (mobileActions) {
+            const uiStore = useUIStore.getState();
+            const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
+            if (offset && Number.isFinite(offset)) {
+                uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(offset)), 1);
+            } else {
+                uiStore.openContextFile(contextDirectory, absolutePath);
+            }
+            mobileActions.openFiles();
             return;
         }
 
@@ -654,15 +671,7 @@ const StaticToolRowInner: React.FC<{
             return;
         }
         uiStore.openContextFile(contextDirectory, absolutePath);
-    }, [currentDirectory, runtime]);
-
-    const handleSkillClick = React.useCallback((skillPath: string) => {
-        if (!skillPath) {
-            return;
-        }
-        const uiStore = useUIStore.getState();
-        uiStore.openContextFile(currentDirectory || getDirectoryForFilePath('', skillPath), skillPath);
-    }, [currentDirectory]);
+    }, [currentDirectory, mobileActions, runtime]);
 
     const normalizedToolName = toolName.toLowerCase();
     const isSearchGroup = normalizedToolName === 'grep'
@@ -675,8 +684,11 @@ const StaticToolRowInner: React.FC<{
 
     return (
         <div
+            // oc-static-tool-row: on touch devices mobile.css raises this to the
+            // same 36px floor the [role="button"] expandable/reasoning rows get,
+            // so static and expandable rows have identical rhythm.
             className={cn(
-                'flex w-full items-center gap-x-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0'
+                'oc-static-tool-row flex w-full items-center gap-x-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0'
             )}
         >
             <div className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
@@ -699,7 +711,7 @@ const StaticToolRowInner: React.FC<{
                         onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            handleReadFileClick(entry.path, entry.offset);
+                            handleFileClick(entry.path, entry.offset);
                         }}
                         className={cn('inline-flex !min-h-0 items-center justify-start gap-1 min-w-0 flex-1 text-left hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
                         style={{ color: 'var(--tools-description)' }}
@@ -751,7 +763,7 @@ const StaticToolRowInner: React.FC<{
                         onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            handleSkillClick(entry.path);
+                            handleFileClick(entry.path);
                         }}
                         className={cn('!min-h-0 min-w-0 flex-1 truncate whitespace-nowrap text-left hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
                         style={{ color: 'var(--tools-description)' }}

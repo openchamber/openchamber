@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useI18n } from '@/lib/i18n';
+import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 
 interface McpSidebarProps {
   onItemSelect?: () => void;
@@ -183,7 +184,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-foreground">{t('settings.mcp.sidebar.title')}</h2>
+          <h2 className={SETTINGS_PANEL_TITLE_CLASS}>{t('settings.mcp.sidebar.title')}</h2>
           <button
             type="button"
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"

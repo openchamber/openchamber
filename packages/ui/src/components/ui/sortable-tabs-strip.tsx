@@ -42,11 +42,19 @@ type SortableTabsStripProps = {
   activePillInsetClassName?: string;
   activePillButtonClassName?: string;
   inactiveTabsIconOnly?: boolean;
-  iconOnlyActiveTab?: boolean;
   animateActivePill?: boolean;
   activePillLowercase?: boolean;
+  /** Position the active-pill indicator with left/top instead of translate3d.
+      Use when the strip lives inside an ancestor that transform-animates
+      (e.g. a sliding mobile drawer): creating a composited layer mid-slide
+      flickers in WKWebView. Tab-switch animation stays (layout transition). */
+  nonCompositedIndicator?: boolean;
   className?: string;
 };
+
+// Keep in sync with `.pill-tabs__indicator--is-animated` in index.css.
+const PILL_SWITCH_ANIMATION_MS = 280;
+const PILL_NUDGE_PX = 4;
 
 const restrictToXAxis: Modifier = ({ transform }) => ({
   ...transform,
@@ -95,9 +103,9 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   activePillInsetClassName,
   activePillButtonClassName,
   inactiveTabsIconOnly = false,
-  iconOnlyActiveTab = false,
   animateActivePill,
   activePillLowercase = true,
+  nonCompositedIndicator = false,
   className,
 }) => {
   const { t } = useI18n();
@@ -116,11 +124,33 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   const usesIndicator = usesActivePillIndicator || useUnderlineIndicator;
   const useIntrinsicPillSizing = isActivePillVariant && isScrollable;
   const showPillTrackBackground = usesActivePillIndicator;
-  const shouldAnimateActivePill = animateActivePill ?? isAnimatedVariant;
+  const shouldAnimateActivePill = animateActivePill ?? usesActivePillIndicator;
   const reorderEnabled = typeof onReorder === 'function';
   const Wrapper = reorderEnabled ? SortableTabWrapper : StaticTabWrapper;
   const tabRefs = React.useRef<Map<string, HTMLElement>>(new Map());
   const [pillRect, setPillRect] = React.useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  // Transitions stay off until the user actually switches tabs, so the initial
+  // measurement (and any container resize) repositions the indicator instantly.
+  const [pillTransitionEnabled, setPillTransitionEnabled] = React.useState(false);
+  const [pressedId, setPressedId] = React.useState<string | null>(null);
+  const pillTransitionReadyRef = React.useRef(false);
+  const lastSwitchAtRef = React.useRef(0);
+  const previousActiveIdRef = React.useRef<string | null>(activeId);
+  const previousOrderKeyRef = React.useRef<string | null>(null);
+
+  // Pressing a neighbouring tab leans the indicator toward it before the selection
+  // commits, which is what makes the control feel physical rather than snappy.
+  const pillNudge = React.useMemo(() => {
+    if (!usesIndicator || !pressedId || !activeId || pressedId === activeId) {
+      return 0;
+    }
+    const pressedIndex = items.findIndex((item) => item.id === pressedId);
+    const activeIndex = items.findIndex((item) => item.id === activeId);
+    if (pressedIndex < 0 || activeIndex < 0) {
+      return 0;
+    }
+    return pressedIndex > activeIndex ? PILL_NUDGE_PX : -PILL_NUDGE_PX;
+  }, [activeId, items, pressedId, usesIndicator]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -236,7 +266,14 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
       return;
     }
 
-    const observer = new ResizeObserver(updateActivePillRect);
+    const observer = new ResizeObserver(() => {
+      // Layout-driven repositioning should snap, not slide — except while a tab
+      // switch is still animating, where the active tab may legitimately resize.
+      if (performance.now() - lastSwitchAtRef.current > PILL_SWITCH_ANIMATION_MS) {
+        setPillTransitionEnabled(false);
+      }
+      updateActivePillRect();
+    });
     observer.observe(element);
 
     if (activeId) {
@@ -254,6 +291,40 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   React.useLayoutEffect(() => {
     updateActivePillRect();
   });
+
+  const itemOrderKey = itemIDs.join(' ');
+
+  React.useLayoutEffect(() => {
+    if (!usesIndicator) {
+      pillTransitionReadyRef.current = false;
+      setPillTransitionEnabled(false);
+      return;
+    }
+
+    const orderChanged = previousOrderKeyRef.current !== itemOrderKey;
+    previousOrderKeyRef.current = itemOrderKey;
+
+    // The first pass only records that an indicator exists; animating it would
+    // slide it in from the track origin on mount.
+    if (!pillTransitionReadyRef.current) {
+      pillTransitionReadyRef.current = true;
+      previousActiveIdRef.current = activeId;
+      return;
+    }
+
+    const switched = previousActiveIdRef.current !== activeId;
+    previousActiveIdRef.current = activeId;
+
+    // Opening, closing, or reordering tabs shifts the indicator without the user
+    // switching tabs; that repositioning should snap rather than glide.
+    if (!switched || orderChanged) {
+      setPillTransitionEnabled(false);
+      return;
+    }
+
+    lastSwitchAtRef.current = performance.now();
+    setPillTransitionEnabled(true);
+  }, [activeId, itemOrderKey, usesIndicator]);
 
   React.useEffect(() => {
     if (!isScrollable || !activeId) {
@@ -327,7 +398,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
           usesActivePillIndicator && 'pill-tabs__track',
           usesActivePillIndicator && (activePillInsetClassName ?? 'gap-0.5 py-0.5'),
           useUnderlineIndicator && 'items-center overflow-y-hidden',
-          showPillTrackBackground && 'rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] bg-[color-mix(in_srgb,var(--foreground)_2%,transparent)] p-0.5 gap-0.5',
+          showPillTrackBackground && 'rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] p-0.5 gap-0.5',
           isScrollable
             ? 'overflow-x-auto scrollbar-none'
             : 'overflow-x-hidden',
@@ -340,23 +411,35 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
           <div
             className={cn(
               'pointer-events-none absolute left-0 top-0 z-0 rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] bg-[var(--surface-elevated)]',
-              'border border-border/60'
+              // Lifted card look: hairline edge plus a soft ambient shadow rather
+              // than a hard border, so the pill reads as raised above the track.
+              'border border-[color-mix(in_srgb,var(--foreground)_7%,transparent)]',
+              'shadow-[0_1px_2px_color-mix(in_srgb,var(--foreground)_10%,transparent),0_2px_6px_color-mix(in_srgb,var(--foreground)_6%,transparent)]',
+              shouldAnimateActivePill && pillTransitionEnabled
+                && (nonCompositedIndicator ? 'pill-tabs__indicator--is-animated-layout' : 'pill-tabs__indicator--is-animated')
             )}
-            style={{
-              transform: `translate3d(${pillRect.left}px, ${pillRect.top}px, 0)`,
-              width: `${pillRect.width}px`,
-              height: `${pillRect.height}px`,
-              transition: shouldAnimateActivePill
-                ? 'transform 300ms cubic-bezier(0.65, 0, 0.35, 1), width 300ms cubic-bezier(0.65, 0, 0.35, 1), height 300ms cubic-bezier(0.65, 0, 0.35, 1)'
-                : undefined,
-            }}
+            style={nonCompositedIndicator
+              ? {
+                  left: `${pillRect.left + pillNudge}px`,
+                  top: `${pillRect.top}px`,
+                  width: `${pillRect.width}px`,
+                  height: `${pillRect.height}px`,
+                }
+              : {
+                  transform: `translate3d(${pillRect.left + pillNudge}px, ${pillRect.top}px, 0)`,
+                  width: `${pillRect.width}px`,
+                  height: `${pillRect.height}px`,
+                }}
           />
         ) : null}
         {useUnderlineIndicator && pillRect ? (
           <div
-            className="pointer-events-none absolute left-0 -bottom-px z-10 h-[3px] rounded-t-[2px] bg-[var(--primary-base)]"
+            className={cn(
+              'pointer-events-none absolute left-0 -bottom-px z-10 h-[3px] rounded-t-[2px] bg-[var(--primary-base)]',
+              pillTransitionEnabled && 'underline-tabs__indicator--is-animated'
+            )}
             style={{
-              transform: `translate3d(${pillRect.left}px, 0, 0)`,
+              transform: `translate3d(${pillRect.left + pillNudge}px, 0, 0)`,
               width: `${pillRect.width}px`,
             }}
             aria-hidden
@@ -366,7 +449,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
           const isActive = item.id === activeId;
           const showInactiveIconOnly = inactiveTabsIconOnly && usesActivePillIndicator && !isActive && Boolean(item.icon);
           const shouldShowLabel = !showInactiveIconOnly;
-          const shouldShowIcon = Boolean(item.icon) && (!iconOnlyActiveTab || isActive);
+          const shouldShowIcon = Boolean(item.icon);
           const useIntrinsicActiveTab = inactiveTabsIconOnly && usesActivePillIndicator && isActive && !isScrollable && !useIntrinsicPillSizing;
           const closable = item.closable !== false && Boolean(onClose);
           const closeReplacesIcon = closable && Boolean(item.icon);
@@ -422,6 +505,13 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   aria-selected={isActive}
                   aria-label={showInactiveIconOnly ? (item.title ?? item.label) : undefined}
                   onClick={() => onSelect(item.id)}
+                  onPointerDown={usesIndicator ? () => {
+                    setPillTransitionEnabled(true);
+                    setPressedId(item.id);
+                  } : undefined}
+                  onPointerUp={usesIndicator ? () => setPressedId(null) : undefined}
+                  onPointerLeave={usesIndicator ? () => setPressedId(null) : undefined}
+                  onPointerCancel={usesIndicator ? () => setPressedId(null) : undefined}
                   className={cn(
                     usesActivePillIndicator
                       ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'

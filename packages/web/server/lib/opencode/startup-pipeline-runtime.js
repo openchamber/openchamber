@@ -1,3 +1,5 @@
+import { recordStartupPerformance } from './startup-performance.js';
+
 export const createStartupPipelineRuntime = (dependencies) => {
   const {
     createTerminalRuntime,
@@ -7,6 +9,8 @@ export const createStartupPipelineRuntime = (dependencies) => {
   } = dependencies;
 
   const run = async (options) => {
+    const pipelineStartedAt = performance.now();
+    recordStartupPerformance('web.pipeline.start');
     const {
       app,
       server,
@@ -98,8 +102,6 @@ export const createStartupPipelineRuntime = (dependencies) => {
     });
 
     setupProxy(app);
-    scheduleOpenCodeApiDetection();
-    void bootstrapOpenCodeAtStartup();
 
     if (apiOnly) {
       staticRoutesRuntime.registerApiOnlyFallbackRoutes(app);
@@ -131,7 +133,12 @@ export const createStartupPipelineRuntime = (dependencies) => {
       startupTunnelRequest,
       onTunnelReady,
     });
+    recordStartupPerformance('web.listener.ready', {
+      durationMs: performance.now() - pipelineStartedAt,
+    });
     tunnelRuntimeContext.setActivePort(startupResult.activePort);
+    scheduleOpenCodeApiDetection();
+    void bootstrapOpenCodeAtStartup();
 
     serverStartupRuntime.attachProcessHandlers({ attachSignals });
 

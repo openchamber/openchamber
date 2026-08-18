@@ -15,6 +15,7 @@ import {
   formatShortcutForDisplay,
 } from "@/lib/shortcuts";
 import { useI18n, type I18nKey } from "@/lib/i18n";
+import { isVSCodeRuntime } from "@/lib/desktop";
 import type { IconName } from "@/components/icon/icons";
 
 type ShortcutItem = {
@@ -40,6 +41,7 @@ export const HelpDialog: React.FC = () => {
   const setHelpDialogOpen = useUIStore((state) => state.setHelpDialogOpen);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const mod = getModifierLabel();
+  const isVSCode = isVSCodeRuntime();
 
   const shortcuts: ShortcutSection[] = [
     {
@@ -61,6 +63,12 @@ export const HelpDialog: React.FC = () => {
           id: 'toggle_sidebar',
           descriptionKey: "helpDialog.item.toggleSessionSidebar",
           icon: "layout-left",
+          keys: '',
+        },
+        {
+          id: 'add_selection_to_chat',
+          descriptionKey: "helpDialog.item.addSelectionToChat",
+          icon: "add",
           keys: '',
         },
         {
@@ -115,6 +123,12 @@ export const HelpDialog: React.FC = () => {
         },
         { id: 'focus_input', descriptionKey: "helpDialog.item.focusChatInput", icon: "text", keys: '' },
         {
+          id: 'toggle_prompt_navigator',
+          descriptionKey: "helpDialog.item.togglePromptNavigator",
+          icon: "list-unordered",
+          keys: '',
+        },
+        {
           id: 'abort_run',
           descriptionKey: "helpDialog.item.abortActiveRun",
           icon: "close-circle",
@@ -144,12 +158,6 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
-          id: 'cycle_right_sidebar_tab',
-          descriptionKey: 'helpDialog.item.cycleRightSidebarTab',
-          icon: "layout-right",
-          keys: '',
-        },
-        {
           id: 'toggle_terminal',
           descriptionKey: 'helpDialog.item.toggleTerminalDock',
           icon: "window",
@@ -167,6 +175,11 @@ export const HelpDialog: React.FC = () => {
           icon: "time",
           keys: '',
         },
+        {
+          keys: [`${mod} + 1...0`],
+          descriptionKey: "helpDialog.item.switchContextSurface",
+          icon: "layout-right",
+        },
       ],
     },
     {
@@ -177,11 +190,6 @@ export const HelpDialog: React.FC = () => {
           descriptionKey: "helpDialog.item.cycleTheme",
           icon: "palette",
           keys: '',
-        },
-        {
-          keys: [`${mod} + 1...9`],
-          descriptionKey: "helpDialog.item.switchProject",
-          icon: "layout-left",
         },
         {
           id: 'toggle_services_menu',
@@ -210,7 +218,7 @@ export const HelpDialog: React.FC = () => {
       <DialogContent className="max-w-2xl w-[min(42rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Icon name="settings-3" className="h-5 w-5" />
+            <Icon name="command" className="h-5 w-5" />
             {t('helpDialog.title')}
           </DialogTitle>
           <DialogDescription>
@@ -226,7 +234,9 @@ export const HelpDialog: React.FC = () => {
                   {t(section.categoryKey)}
                 </h3>
                 <div className="space-y-1">
-                  {section.items.map((shortcut) => {
+                  {section.items
+                    .filter((shortcut) => !(isVSCode && shortcut.id === 'toggle_prompt_navigator'))
+                    .map((shortcut) => {
                     const displayKeys = shortcut.id
                       ? renderShortcut(shortcut.id, Array.isArray(shortcut.keys) ? shortcut.keys[0] : shortcut.keys, shortcutOverrides)
                       : (Array.isArray(shortcut.keys) ? shortcut.keys : shortcut.keys.split(" / "));

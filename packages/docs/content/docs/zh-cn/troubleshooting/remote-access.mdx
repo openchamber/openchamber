@@ -12,6 +12,15 @@ description: 修复隧道、远程实例，以及从另一台设备访问 OpenCh
 - 先在同一台电脑上打开 `http://localhost:3000` — 如果这都失败，那就不是远程问题；参阅 [OpenCode 连接](/zh-cn/troubleshooting/opencode-connection/)
 - 用 `openchamber status` 确认服务器正在运行
 
+## 已配对设备无法连接
+
+- 二维码 / 配对链接**只能使用一次** — 如果它已被扫描过（或已过期），从 **添加设备** 创建一个新的
+- 如果设备是用 **仅家庭网络** 配对的，它无法从该网络之外连接 — 用 **任何地方** 重新配对
+- 对于 **任何地方** 配对，检查服务器上的 **Settings → Remote Instances → OpenChamber Relay**：它应显示 **已连接**；如果不是，停用后再重新启用
+- 如果设备已被**撤销**，它的令牌就永久失效了 — 用新的二维码重新配对
+
+关于这些连接的工作原理，参阅 [连接设备](/zh-cn/connect-devices/) 和 [Private Relay](/zh-cn/private-relay/)。
+
 ## 隧道链接无法使用
 
 - 运行 `openchamber tunnel status --all`
@@ -34,5 +43,5 @@ description: 修复隧道、远程实例，以及从另一台设备访问 OpenCh
 
 ## 相关内容
 
-- [隧道](/zh-cn/tunnels/) · [远程实例](/zh-cn/remote-instances/) · [反向代理](/zh-cn/reverse-proxy/)
+- [连接设备](/zh-cn/connect-devices/) · [Private Relay](/zh-cn/private-relay/) · [隧道](/zh-cn/tunnels/) · [远程实例](/zh-cn/remote-instances/) · [反向代理](/zh-cn/reverse-proxy/)
 - [安全](/zh-cn/security/) — 在公开 UI 之前保护它

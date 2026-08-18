@@ -1,0 +1,68 @@
+---
+title: Connecter un appareil
+description: Associez votre téléphone, votre desktop ou un autre navigateur à votre serveur OpenChamber avec un QR code à usage unique.
+---
+
+# Connecter un appareil
+
+Associez un autre appareil — l’application mobile, l’application desktop ou un navigateur sur une autre machine — à votre serveur OpenChamber en scannant un QR code à usage unique. C’est la méthode recommandée pour connecter des appareils : aucun port à ouvrir, aucune adresse à taper.
+
+## Associer un appareil
+
+1. Sur la machine qui exécute OpenChamber, ouvrez **Paramètres → Instances distantes → Se connecter à ce serveur** et pressez **Ajouter un appareil**.
+2. Donnez un nom à l’appareil (par ex. *Mon iPhone*) pour le reconnaître plus tard.
+3. Choisissez où vous utiliserez l’appareil :
+   - **Cet ordinateur uniquement** — pour les applications sur cette même machine
+   - **Réseau domestique uniquement** — connexion directe via votre Wi-Fi ; ne fonctionne pas hors de ce réseau
+   - **Partout** — fonctionne à la maison et en déplacement ; en déplacement, le trafic passe par le [Relais privé](/private-relay/), un tunnel chiffré de bout en bout sans aucune configuration
+4. Pressez **Créer le code QR**.
+5. Sur l’autre appareil, scannez le code :
+   - **application mobile** — touchez **Scanner le code QR** sur l’écran de connexion (ou dans la liste des instances)
+   - **application desktop** — copiez plutôt le lien de connexion et collez-le dans **Paramètres → Instances distantes → Autres serveurs OpenChamber → Importer le lien**
+
+Le dialogue se ferme tout seul dès que l’appareil se connecte, et l’appareil apparaît dans la liste avec un statut en direct. C’est tout — vous êtes associé.
+
+## Pourquoi l’association reste sûre
+
+- **Le QR code est à usage unique.** Il cesse de fonctionner dès qu’un appareil l’utilise, et il expire de lui-même s’il n’est jamais utilisé.
+- **Chaque appareil reçoit son propre token.** Scanner un code n’expose jamais votre mot de passe UI, et le token d’un appareil ne peut pas servir à en usurper un autre.
+- **Vous gardez le contrôle.** Chaque appareil associé est listé avec son nom, sa plateforme et son état de connexion — révoquez n’importe lequel à tout moment.
+- **Le trafic hors du domicile est chiffré de bout en bout.** Avec **Partout**, le trafic en dehors de votre réseau passe par le [Relais privé](/private-relay/), qui ne peut pas lire ce qui le traverse.
+
+## Gérer les appareils associés
+
+**Paramètres → Instances distantes → Se connecter à ce serveur** liste chaque appareil pouvant joindre ce serveur, avec un point vert quand il est en ligne et l’indication d’une connexion via le réseau local ou le relais.
+
+- **Révoquer** coupe un appareil immédiatement. Associez-le à nouveau avec un nouveau QR code si vous changez d’avis.
+- **Effacer les révocations** nettoie la liste.
+
+Le même appareil physique garde une seule entrée même s’il se reconnecte plus tard — vous n’accumulerez pas de doublons.
+
+## Se connecter depuis la ligne de commande
+
+Si le serveur tourne en headless (aucune UI ouverte), créez un lien de connexion depuis un terminal sur cette machine.
+
+Pour un appareil sur le même réseau :
+
+```bash
+openchamber connect-url --port 3000 --qr
+```
+
+Pour un appareil qui doit se connecter depuis **n’importe où** — l’équivalent du choix **Partout** dans le dialogue :
+
+```bash
+openchamber connect-url --relay --qr
+```
+
+Un lien `--relay` contient les deux routes, exactement comme le dialogue : l’appareil se connecte directement via votre réseau local quand il peut joindre le serveur, et bascule sur le [Relais privé](/private-relay/) en déplacement. Le relais démarre tout seul : une instance en cours d’exécution prend le lien en compte en moins d’une minute, une instance arrêtée au prochain lancement.
+
+> La route directe ne fonctionne que si le serveur écoute réellement sur votre réseau. Par défaut, OpenChamber n’écoute que sur la machine elle-même — démarrez-le avec `--lan` pour le rendre joignable en Wi-Fi. La commande vous prévient (`[LAN_UNREACHABLE]`) quand la route directe du lien ne sera pas utilisable depuis d’autres appareils ; un lien `--relay` fonctionne quand même dans ce cas, simplement toujours via le relais.
+
+Le lien et le QR code affichés fonctionnent exactement comme ceux du dialogue des paramètres — à usage unique, avec expiration, révocables.
+
+## Pages liées
+
+- [Relais privé](/private-relay/) — comment fonctionnent les connexions « Partout » et ce que le relais peut ou ne peut pas voir
+- [Applications mobiles](/mobile/) — installer l’application iOS ou Android
+- [Instances distantes](/remote-instances/) — connecter l’application desktop à des serveurs via SSH ou des liens
+- [Accès distant](/troubleshooting/remote-access/) — quand un appareil ne se connecte pas

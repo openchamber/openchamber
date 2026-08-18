@@ -1,0 +1,40 @@
+---
+title: 智能体控制工具
+description: 让智能体从聊天中管理 OpenChamber 会话、worktree 和计划任务。
+---
+
+# 智能体控制工具
+
+使用 `openchamber` 智能体工具直接从聊天中管理应用内的工作。当 OpenChamber 运行自己的本地 OpenCode 服务器时，此工具默认启用；无需安装单独的工具或运行 shell 命令。
+
+## 可以提出哪些请求
+
+用自然语言告诉智能体即可。例如：
+
+- “在此项目中创建一个新的 OpenChamber 会话，使用 `openai/gpt-5.6-sol` 模型，并向它发送此提示：审查身份验证流程。”
+- “在单独的 worktree 中为此任务创建一个新的 OpenChamber 会话，并让它为登录流程添加测试。”
+- “使用 OpenChamber 列出我最近的 10 个会话，并包含它们的当前状态。”
+- “在 OpenChamber 中创建名为‘工作日审查’的计划任务，每个工作日 09:00 发送此提示：审查自上次运行以来的更改。”
+- “立即运行名为‘工作日审查’的 OpenChamber 计划任务。”
+- “检查名为‘身份验证审查’的 OpenChamber 会话，并显示最新的助手回复。”
+
+该工具可以列出项目和模型偏好、创建和继续会话、分叉会话、创建隔离的 worktree 会话，以及管理计划任务。以这种方式启动的会话会像普通会话一样显示在 OpenChamber 中，因此你可以打开并自行继续工作。
+
+## 注意事项
+
+- 新会话提示默认会立即返回。请在 OpenChamber 中跟进会话，或稍后让智能体检查结果。
+- 只有在你明确要求时才会创建单独的 worktree。当前 worktree 中未提交的更改不会复制过去。
+- 该工具不能删除会话或 worktree、注册项目路径、运行任意 shell 命令或访问任意 URL。
+
+## 开启或关闭工具
+
+打开 **设置 → 常规 → OpenChamber 工具**，更改 **智能体控制工具**。该设置会在托管的 OpenCode 服务器重启后生效，OpenChamber 会以 **Apply & Restart** 的形式提示重启。
+
+当 OpenChamber 通过 `OPENCODE_HOST` 或 skip-start 连接外部 OpenCode 服务器时，或在 VS Code 扩展中，此工具不可用。使用 OpenChamber 托管 OpenCode 服务器的桌面端和 Web 安装会自动支持此工具。
+
+## 相关内容
+
+- [计划任务](/zh-cn/scheduled-tasks/)
+- [Worktree 会话](/zh-cn/worktrees/)
+- [会话目标](/zh-cn/session-goals/)
+- [浏览器面板](/zh-cn/desktop-browser/) — 用于查看并操作页面的 OpenChamber Web 工具

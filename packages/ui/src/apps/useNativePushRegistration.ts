@@ -21,6 +21,19 @@ import { useUIStore } from '@/stores/useUIStore';
 // the Google Services Gradle plugin on Android), so @capacitor/push-notifications' register()
 // returns the right token per platform. The token is sent to the server tagged with its platform
 // so the relay routes it to APNs vs FCM.
+// APNs environment of this build. Xcode/dev-signed installs get sandbox device tokens,
+// TestFlight/App Store installs get production ones; the native iOS shell reports which via
+// a global injected in SceneDelegate (see packages/mobile/ios/App/App/AppDelegate.swift).
+// Undefined when the global is absent (Android, or a shell predating the injection) — the
+// server then defaults to production, matching released builds.
+const getApnsEnvironment = (): 'sandbox' | 'production' | undefined => {
+  if (typeof window === 'undefined') return undefined;
+  const env = (window as typeof window & { __OPENCHAMBER_APNS_ENV__?: string }).__OPENCHAMBER_APNS_ENV__;
+  if (env === 'development') return 'sandbox';
+  if (env === 'production') return 'production';
+  return undefined;
+};
+
 const isNativePushPlatform = (): boolean => {
   if (typeof window === 'undefined') return false;
   const capacitor = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor;
@@ -56,7 +69,11 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
         const registrationHandle = await PushNotifications.addListener('registration', (token) => {
           lastTokenRef.current = token.value;
           const apis = getRegisteredRuntimeAPIs();
-          void apis?.push?.registerApnsToken?.({ token: token.value, platform: getClientPlatform() });
+          void apis?.push?.registerApnsToken?.({
+            token: token.value,
+            platform: getClientPlatform(),
+            environment: getApnsEnvironment(),
+          });
         });
 
         const registrationErrorHandle = await PushNotifications.addListener('registrationError', (error) => {

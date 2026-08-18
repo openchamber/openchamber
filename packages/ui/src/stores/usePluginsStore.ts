@@ -1,14 +1,12 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
-import {
-  startConfigUpdate,
-  finishConfigUpdate,
-} from '@/lib/configUpdate';
+import { startConfigUpdate } from '@/lib/configUpdate';
 import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { noteDeferredRestartFromPayload } from '@/lib/opencode/deferredRestart';
 
 export type PluginScope = 'user' | 'project';
 type PluginParsedKind = 'npm' | 'path';
@@ -43,6 +41,8 @@ export type PluginMutationResult = {
   reloadFailed?: boolean;
   message?: string;
   warning?: string;
+  requiresManualRestart?: boolean;
+  restartDeferred?: boolean;
 };
 
 export type RegistryResult =
@@ -67,7 +67,7 @@ export interface PluginsStore {
   setSelected: (id: string | null) => void;
   setDraft: (draft: PluginDraft | null) => void;
   loadPlugins: (options?: { force?: boolean }) => Promise<boolean>;
-  loadRegistryInfo: (opts?: { specs?: string[]; force?: boolean }) => Promise<void>;
+  loadRegistryInfo: (opts?: { specs?: string[]; force?: boolean }) => Promise<boolean>;
   updateToLatest: (id: string) => Promise<PluginMutationResult>;
   createEntry: (input: { spec: string; options?: Record<string, unknown>; scope: PluginScope }) => Promise<PluginMutationResult>;
   updateEntry: (id: string, input: { spec?: string; options?: Record<string, unknown> }) => Promise<PluginMutationResult>;
@@ -91,6 +91,9 @@ type RegistryInfoResponse = {
 type PluginMutationPayload = {
   success?: boolean;
   requiresReload?: boolean;
+  requiresRestart?: boolean;
+  restartDeferred?: boolean;
+  requiresManualRestart?: boolean;
   message?: string;
   reloadDelayMs?: number;
   reloadFailed?: boolean;
@@ -204,7 +207,7 @@ export const usePluginsStore = create<PluginsStore>()(
           const specs = dedupeSpecs(opts?.specs ?? get().entries.map((entry) => entry.spec));
           if (specs.length === 0) {
             set({ isLoadingRegistry: false });
-            return;
+            return true;
           }
 
           set({ isLoadingRegistry: true });
@@ -224,9 +227,11 @@ export const usePluginsStore = create<PluginsStore>()(
               }
             }
             set({ registryInfo: nextRegistryInfo, isLoadingRegistry: false });
+            return true;
           } catch (error) {
             console.error('[PluginsStore] Failed to load plugin registry info:', error);
             set({ isLoadingRegistry: false });
+            return false;
           }
         },
 
@@ -248,7 +253,7 @@ export const usePluginsStore = create<PluginsStore>()(
               body: JSON.stringify(buildEntryBody(input)),
             });
             return response;
-          }, get);
+          }, get, { restartId: input.spec });
           if (result.ok) {
             void get().loadRegistryInfo({ specs: [input.spec], force: true });
           }
@@ -265,7 +270,7 @@ export const usePluginsStore = create<PluginsStore>()(
               body: JSON.stringify(buildEntryBody(input)),
             });
             return response;
-          }, get);
+          }, get, { restartId: id });
           if (result.ok && nextSpec) {
             void get().loadRegistryInfo({ specs: [nextSpec], force: true });
           }
@@ -280,7 +285,7 @@ export const usePluginsStore = create<PluginsStore>()(
               headers: buildDirectoryHeaders(configDirectory),
             });
             return response;
-          }, get);
+          }, get, { restartId: id });
 
           if (result.ok && get().selectedId === id) {
             set({ selectedId: null });
@@ -317,7 +322,7 @@ export const usePluginsStore = create<PluginsStore>()(
               body: JSON.stringify(input),
             });
             return response;
-          }, get);
+          }, get, { restartId: input.fileName });
         },
 
         updateFile: async (id, input) => {
@@ -328,7 +333,7 @@ export const usePluginsStore = create<PluginsStore>()(
               body: JSON.stringify(input),
             });
             return response;
-          }, get);
+          }, get, { restartId: id });
         },
 
         deleteFile: async (id) => {
@@ -338,7 +343,7 @@ export const usePluginsStore = create<PluginsStore>()(
               headers: buildDirectoryHeaders(configDirectory),
             });
             return response;
-          }, get);
+          }, get, { restartId: id });
 
           if (result.ok && get().selectedId === id) {
             set({ selectedId: null });
@@ -425,9 +430,8 @@ async function runPluginMutation(
   progressMessage: string,
   request: (configDirectory: string | null) => Promise<Response>,
   get: () => PluginsStore,
+  options?: { restartId?: string },
 ): Promise<PluginMutationResult> {
-  startConfigUpdate(progressMessage);
-  let requiresReload = false;
   try {
     const configDirectory = getConfigDirectory();
     const response = await request(configDirectory);
@@ -439,8 +443,30 @@ async function runPluginMutation(
 
     invalidatePluginCache(configDirectory);
 
+    if (payload?.requiresManualRestart) {
+      await get().loadPlugins({ force: true });
+      return {
+        ok: true,
+        requiresManualRestart: true,
+        reloadFailed: payload?.reloadFailed === true,
+        message: payload?.message,
+        warning: payload?.warning,
+      };
+    }
+
+    if (noteDeferredRestartFromPayload(payload, 'plugins', { id: options?.restartId })) {
+      await get().loadPlugins({ force: true });
+      return {
+        ok: true,
+        restartDeferred: true,
+        reloadFailed: payload?.reloadFailed === true,
+        message: payload?.message,
+        warning: payload?.warning,
+      };
+    }
+
     if (payload?.requiresReload) {
-      requiresReload = true;
+      startConfigUpdate(progressMessage);
       await refreshAfterOpenCodeRestart({
         message: payload.message,
         delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
@@ -458,8 +484,6 @@ async function runPluginMutation(
   } catch (error) {
     console.error('[PluginsStore] Failed to update plugin configuration:', error);
     return { ok: false };
-  } finally {
-    if (!requiresReload) finishConfigUpdate();
   }
 }
 

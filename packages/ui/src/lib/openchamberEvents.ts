@@ -10,7 +10,43 @@ type ScheduledTaskRanEvent = {
   sessionId?: string;
 };
 
-type OpenChamberEvent = ScheduledTaskRanEvent;
+type SessionCreatedEvent = {
+  type: 'session-created';
+  sessionId: string;
+  directory: string;
+  projectId?: string;
+  createdAt: number;
+  promptDispatched: boolean;
+  dispatchedAsCommand: boolean;
+};
+
+/**
+ * One in-app browser action requested by the agent tool. Broadcast to every
+ * connected client; only the one owning a browser view answers.
+ */
+type BrowserControlRequestEvent = {
+  type: 'browser-control-request';
+  requestId: string;
+  action: string;
+  parameters: Record<string, unknown>;
+};
+
+/**
+ * The agent changed what it remembers. Carries only which store moved, not the
+ * entries: listeners re-read from the server, so the event cannot go stale
+ * between being sent and being handled.
+ */
+type AgentMemoryChangedEvent = {
+  type: 'agent-memory-changed';
+  scope: 'global' | 'project';
+  projectId?: string;
+};
+
+type OpenChamberEvent =
+  | ScheduledTaskRanEvent
+  | SessionCreatedEvent
+  | BrowserControlRequestEvent
+  | AgentMemoryChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -80,6 +116,13 @@ const parseEnvelope = (raw: string): { type: string; properties: unknown } | nul
   }
 };
 
+const getEventProperties = (properties: unknown): Record<string, unknown> | null => {
+  if (!properties || typeof properties !== 'object') {
+    return null;
+  }
+  return properties as Record<string, unknown>;
+};
+
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
   if (envelope.type === 'openchamber:event-stream-ready') {
     reconnectAttempt = 0;
@@ -90,17 +133,79 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'openchamber:agent-memory-changed') {
+    const properties = getEventProperties(envelope.properties);
+    const scope = properties?.scope === 'project' ? 'project' : 'global';
+    const nextEvent: AgentMemoryChangedEvent = {
+      type: 'agent-memory-changed',
+      scope,
+      ...(typeof properties?.projectId === 'string' && properties.projectId.length > 0
+        ? { projectId: properties.projectId }
+        : {}),
+    };
+    for (const listener of listeners) {
+      listener(nextEvent);
+    }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:session-created') {
+    const properties = getEventProperties(envelope.properties);
+    const sessionId = typeof properties?.sessionId === 'string' ? properties.sessionId : '';
+    const directory = typeof properties?.directory === 'string' ? properties.directory : '';
+    if (!sessionId || !directory) {
+      return;
+    }
+
+    const nextEvent: SessionCreatedEvent = {
+      type: 'session-created',
+      sessionId,
+      directory,
+      createdAt: typeof properties?.createdAt === 'number' ? properties.createdAt : Date.now(),
+      promptDispatched: properties?.promptDispatched === true,
+      dispatchedAsCommand: properties?.dispatchedAsCommand === true,
+      ...(typeof properties?.projectId === 'string' && properties.projectId.length > 0
+        ? { projectId: properties.projectId }
+        : {}),
+    };
+    for (const listener of listeners) {
+      listener(nextEvent);
+    }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:browser-control-request') {
+    const properties = getEventProperties(envelope.properties);
+    const requestId = typeof properties?.requestId === 'string' ? properties.requestId : '';
+    const action = typeof properties?.action === 'string' ? properties.action : '';
+    if (!requestId || !action) {
+      return;
+    }
+
+    const rawParameters = properties?.parameters;
+    const nextEvent: BrowserControlRequestEvent = {
+      type: 'browser-control-request',
+      requestId,
+      action,
+      parameters: rawParameters && typeof rawParameters === 'object' && !Array.isArray(rawParameters)
+        ? rawParameters as Record<string, unknown>
+        : {},
+    };
+    for (const listener of listeners) {
+      listener(nextEvent);
+    }
+    return;
+  }
+
   if (envelope.type !== 'openchamber:scheduled-task-ran') {
     return;
   }
 
-  const parsed = envelope.properties && typeof envelope.properties === 'object'
-    ? envelope.properties as Record<string, unknown>
-    : null;
-  const projectId = typeof parsed?.projectId === 'string' ? parsed.projectId : '';
-  const taskId = typeof parsed?.taskId === 'string' ? parsed.taskId : '';
-  const ranAt = typeof parsed?.ranAt === 'number' ? parsed.ranAt : Date.now();
-  const rawStatus = parsed?.status;
+  const properties = getEventProperties(envelope.properties);
+  const projectId = typeof properties?.projectId === 'string' ? properties.projectId : '';
+  const taskId = typeof properties?.taskId === 'string' ? properties.taskId : '';
+  const ranAt = typeof properties?.ranAt === 'number' ? properties.ranAt : Date.now();
+  const rawStatus = properties?.status;
   const status = rawStatus === 'running' || rawStatus === 'error' ? rawStatus : 'success';
   if (!projectId || !taskId) {
     return;
@@ -112,7 +217,9 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     taskId,
     ranAt,
     status,
-    ...(typeof parsed?.sessionId === 'string' && parsed.sessionId.length > 0 ? { sessionId: parsed.sessionId } : {}),
+    ...(typeof properties?.sessionId === 'string' && properties.sessionId.length > 0
+      ? { sessionId: properties.sessionId }
+      : {}),
   };
   for (const listener of listeners) {
     listener(nextEvent);
@@ -133,7 +240,15 @@ const connect = () => {
 
   cleanupSource();
 
-  const source = new EventSource(getRuntimeUrlResolver().sse('/api/openchamber/events'));
+  // Tell the server what this client can do while the connection lasts. Only a
+  // Chromium host can drive a page; a browser tab can display one but not be
+  // driven, and the agent tool needs to know which it is talking to without a
+  // setting anyone has to remember to change.
+  const canControlBrowser = typeof window !== 'undefined' && Boolean(window.__OPENCHAMBER_ELECTRON__);
+  const source = new EventSource(getRuntimeUrlResolver().sse(
+    '/api/openchamber/events',
+    canControlBrowser ? { browser: '1' } : undefined,
+  ));
   source.onopen = () => {
     resetHeartbeatTimer();
   };

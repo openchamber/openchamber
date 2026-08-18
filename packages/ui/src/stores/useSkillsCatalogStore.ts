@@ -15,8 +15,10 @@ import type {
 
 import { invalidateSkillsLoadCache, refreshSkillsAfterOpenCodeRestart, useSkillsStore } from '@/stores/useSkillsStore';
 import { opencodeClient } from '@/lib/opencode/client';
-import { startConfigUpdate, finishConfigUpdate, updateConfigUpdateMessage } from '@/lib/configUpdate';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { startConfigUpdate } from '@/lib/configUpdate';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { noteDeferredRestartFromPayload } from '@/lib/opencode/deferredRestart';
 
 const FALLBACK_SOURCES: SkillsCatalogSource[] = [
   {
@@ -29,7 +31,7 @@ const FALLBACK_SOURCES: SkillsCatalogSource[] = [
   },
   {
     id: 'clawdhub',
-    label: 'ClawdHub',
+    label: 'ClawHub',
     description: 'Community skill registry with vector search',
     source: 'clawdhub:registry',
     sourceType: 'clawdhub',
@@ -45,20 +47,21 @@ const getSkillsCatalogCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_SKILLS_CATALOG_CACHE_KEY;
 };
 
-const getCurrentDirectory = (): string | null => {
-  const opencodeDirectory = opencodeClient.getDirectory();
-  if (typeof opencodeDirectory === 'string' && opencodeDirectory.trim().length > 0) {
-    return opencodeDirectory;
-  }
-
+const getRequestDirectory = (): string | null => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const store = (window as any).__zustand_directory_store__;
-    if (store) {
-      return store.getState().currentDirectory;
+    const projectsStore = useProjectsStore.getState();
+    const activeProject = projectsStore.getActiveProject?.();
+
+    if (activeProject?.path?.trim()) {
+      return activeProject.path.trim();
     }
-  } catch {
-    // ignore
+
+    const clientDir = opencodeClient.getDirectory();
+    if (clientDir?.trim()) {
+      return clientDir.trim();
+    }
+  } catch (err) {
+    console.warn('[SkillsCatalogStore] Error resolving config directory:', err);
   }
 
   return null;
@@ -118,7 +121,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
       setSelectedSource: (id) => set({ selectedSourceId: id }),
 
       loadCatalog: async (options) => {
-        const currentDirectory = getCurrentDirectory();
+        const currentDirectory = getRequestDirectory();
         const cacheKey = getSkillsCatalogCacheKey(currentDirectory);
         const now = Date.now();
         const loadedAt = skillsCatalogLastLoadedAt.get(cacheKey) ?? 0;
@@ -222,7 +225,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
         set({ isLoadingSource: true, lastCatalogError: null });
 
         try {
-          const currentDirectory = getCurrentDirectory();
+          const currentDirectory = getRequestDirectory();
           const refresh = options?.refresh ? '&refresh=true' : '';
           const queryParams = currentDirectory
             ? `?directory=${encodeURIComponent(currentDirectory)}&sourceId=${encodeURIComponent(sourceId)}${refresh}`
@@ -293,7 +296,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
 
         set({ isLoadingMore: true });
         try {
-          const currentDirectory = getCurrentDirectory();
+          const currentDirectory = getRequestDirectory();
           const parts = [`sourceId=${encodeURIComponent(selectedSourceId)}`];
           if (currentDirectory) {
             parts.push(`directory=${encodeURIComponent(currentDirectory)}`);
@@ -355,7 +358,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
       scanRepo: async (request) => {
         set({ isScanning: true, lastScanError: null, scanResults: null });
         try {
-          const currentDirectory = getCurrentDirectory();
+          const currentDirectory = getRequestDirectory();
           const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
           const response = await runtimeFetch(`/api/config/skills/scan${queryParams}`, {
@@ -384,14 +387,12 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
       },
 
       installSkills: async (request, options) => {
-        startConfigUpdate('Installing skills…');
         set({ isInstalling: true, lastInstallError: null });
-        let requiresReload = false;
         try {
           const directoryOverride = typeof options?.directory === 'string' && options.directory.trim().length > 0
             ? options.directory.trim()
             : null;
-          const currentDirectory = directoryOverride ?? getCurrentDirectory();
+          const currentDirectory = directoryOverride ?? getRequestDirectory();
           const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
           const response = await runtimeFetch(`/api/config/skills/install${queryParams}`, {
@@ -404,26 +405,34 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           if (!payload) {
             const error = { kind: 'unknown', message: 'Failed to install skills' } as SkillsInstallError;
             set({ lastInstallError: error });
-            updateConfigUpdateMessage('Failed to install skills. Please retry.');
             return { ok: false, error };
           }
 
           if (!response.ok || !payload.ok) {
             const error = payload.error || ({ kind: 'unknown', message: 'Failed to install skills' } as SkillsInstallError);
             set({ lastInstallError: error });
-            updateConfigUpdateMessage(error.message || 'Failed to install skills. Please retry.');
             return { ok: false, error };
           }
 
+          invalidateSkillsLoadCache(currentDirectory);
+
+          if (payload.requiresManualRestart) {
+            void get().loadCatalog({ refresh: true });
+            return payload;
+          }
+
+          if (noteDeferredRestartFromPayload(payload, 'skills')) {
+            void get().loadCatalog({ refresh: true });
+            return { ...payload, restartDeferred: true };
+          }
+
           if (payload.requiresReload) {
-            requiresReload = true;
+            startConfigUpdate('Installing skills…');
             await refreshSkillsAfterOpenCodeRestart({
               message: payload.message,
               delayMs: payload.reloadDelayMs,
             });
           } else {
-            updateConfigUpdateMessage(payload.message || 'Refreshing skills…');
-            invalidateSkillsLoadCache(currentDirectory);
             void useSkillsStore.getState().loadSkills();
           }
 
@@ -431,13 +440,9 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
         } catch (error) {
           const err = { kind: 'unknown', message: error instanceof Error ? error.message : String(error) } as SkillsInstallError;
           set({ lastInstallError: err });
-          updateConfigUpdateMessage('Failed to install skills. Please retry.');
           return { ok: false, error: err };
         } finally {
           set({ isInstalling: false });
-          if (!requiresReload) {
-            finishConfigUpdate();
-          }
         }
       },
     }),

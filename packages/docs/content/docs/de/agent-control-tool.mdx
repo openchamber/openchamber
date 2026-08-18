@@ -1,0 +1,40 @@
+---
+title: Agent-Steuerungswerkzeug
+description: Lass einen Agenten OpenChamber-Sitzungen, Worktrees und geplante Aufgaben direkt aus dem Chat verwalten.
+---
+
+# Agent-Steuerungswerkzeug
+
+Verwende das Agentenwerkzeug `openchamber`, um Arbeit in der App direkt aus dem Chat zu verwalten. Es ist standardmäßig aktiviert, wenn OpenChamber seinen eigenen lokalen OpenCode-Server ausführt; du musst kein separates Werkzeug installieren und keinen Shell-Befehl ausführen.
+
+## Was du anfragen kannst
+
+Sprich einfach in natürlicher Sprache mit dem Agenten. Zum Beispiel:
+
+- "Erstelle in diesem Projekt eine neue OpenChamber-Sitzung, verwende das Modell `openai/gpt-5.6-sol` und sende ihr diese Aufforderung: überprüfe den Authentifizierungsfluss."
+- "Erstelle für diese Aufgabe eine neue OpenChamber-Sitzung in einem separaten Worktree und bitte sie, Tests für den Login-Fluss hinzuzufügen."
+- "Verwende OpenChamber, um meine 10 neuesten Sitzungen aufzulisten und ihren aktuellen Status anzuzeigen."
+- "Erstelle eine geplante OpenChamber-Aufgabe mit dem Namen Weekday review, die diese Aufforderung werktags um 09:00 sendet: review changes since the last run."
+- "Führe die geplante OpenChamber-Aufgabe mit dem Namen Weekday review jetzt aus."
+- "Prüfe die OpenChamber-Sitzung mit dem Namen Authentication review und zeige mir die neueste Antwort des Assistenten."
+
+Das Werkzeug kann Projekte und Modelleinstellungen auflisten, Sitzungen erstellen und weiterführen, eine Sitzung forken, isolierte Worktree-Sitzungen erstellen und geplante Aufgaben verwalten. Auf diese Weise gestartete Sitzungen erscheinen in OpenChamber wie jede andere Sitzung auch, sodass du sie öffnen und die Arbeit selbst fortsetzen kannst.
+
+## Beachten
+
+- Neue Sitzungsaufforderungen kehren standardmäßig sofort zurück. Verfolge die Sitzung in OpenChamber oder bitte den Agenten, sie später noch einmal zu prüfen.
+- Ein separater Worktree wird nur erstellt, wenn du ausdrücklich danach fragst. Nicht-committete Änderungen aus deinem aktuellen Worktree werden nicht dorthin kopiert.
+- Das Werkzeug kann keine Sitzungen oder Worktrees löschen, keine Projektpfade registrieren, keine beliebigen Shell-Befehle ausführen und keine beliebigen URLs aufrufen.
+
+## Werkzeug ein- oder ausschalten
+
+Öffne **Einstellungen → Allgemein → OpenChamber-Werkzeuge** und ändere **Agent control tool**. Die Einstellung gilt, sobald der verwaltete OpenCode-Server neu startet — OpenChamber bietet das als **Apply & Restart** an.
+
+Das Werkzeug ist nicht verfügbar, wenn OpenChamber über `OPENCODE_HOST` oder skip-start mit einem externen OpenCode-Server verbunden ist oder innerhalb der VS-Code-Erweiterung läuft. Desktop- und Web-Installationen, die den verwalteten OpenCode-Server von OpenChamber verwenden, unterstützen es automatisch.
+
+## Verwandt
+
+- [Geplante Aufgaben](/scheduled-tasks/)
+- [Worktree-Sitzungen](/worktrees/)
+- [Sitzungsziele](/session-goals/)
+- [Browser-Panel](/desktop-browser/) — das OpenChamber-Web-Werkzeug, um eine Seite anzusehen und zu bedienen

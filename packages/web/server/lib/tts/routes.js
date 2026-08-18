@@ -145,9 +145,10 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
     }
   });
 
-  // macOS 'say' command TTS status endpoint - returns cached capability from startup
-  app.get('/api/tts/say/status', (_req, res) => {
-    res.json(sayTTSCapability);
+  // The startup probe runs concurrently with server bootstrap. An unusually
+  // early status request waits for that same authoritative result.
+  app.get('/api/tts/say/status', async (_req, res) => {
+    res.json(await sayTTSCapability);
   });
 
   // macOS 'say' command TTS speak endpoint

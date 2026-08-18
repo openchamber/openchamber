@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { getGitStatus, gitFetch, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from './gitApiHttp';
+import {
+  getGitBranches,
+  getGitStatus,
+  gitFetch,
+  stageGitFile,
+  stageGitFiles,
+  unstageGitFile,
+  unstageGitFiles,
+} from './gitApiHttp';
 
 type FetchCall = {
   input: RequestInfo | URL;
@@ -155,6 +163,21 @@ describe('gitApiHttp status cache', () => {
         '/api/git/fetch?directory=%2Frepo-cache-fetch',
         '/api/git/status?directory=%2Frepo-cache-fetch',
       ]);
+    } finally {
+      restoreMocks();
+    }
+  });
+});
+
+describe('gitApiHttp request priority', () => {
+  test('leaves low-level reads outside the background policy', async () => {
+    installWindowMock();
+    const calls = installFetchMock();
+    try {
+      await getGitBranches('/repo-interactive');
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].init?.priority).toBe(undefined);
     } finally {
       restoreMocks();
     }

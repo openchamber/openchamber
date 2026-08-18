@@ -6,6 +6,7 @@ import {
   toUsageWindow,
   toNumber,
   toTimestamp,
+  resolveWindowLabel,
   formatMoney
 } from '../utils/index.js';
 
@@ -65,16 +66,18 @@ export const fetchQuota = async () => {
 
     const windows = {};
     if (primary) {
-      windows['5h'] = toUsageWindow({
+      const windowSeconds = toNumber(primary.limit_window_seconds);
+      windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
         usedPercent: toNumber(primary.used_percent),
-        windowSeconds: toNumber(primary.limit_window_seconds),
+        windowSeconds,
         resetAt: toTimestamp(primary.reset_at)
       });
     }
     if (secondary) {
-      windows['weekly'] = toUsageWindow({
+      const windowSeconds = toNumber(secondary.limit_window_seconds);
+      windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
         usedPercent: toNumber(secondary.used_percent),
-        windowSeconds: toNumber(secondary.limit_window_seconds),
+        windowSeconds,
         resetAt: toTimestamp(secondary.reset_at)
       });
     }
@@ -91,6 +94,24 @@ export const fetchQuota = async () => {
         windowSeconds: null,
         resetAt: null,
         valueLabel: label
+      });
+    }
+
+    // Business/enterprise accounts expose a dollar spend cap under
+    // `spend_control.individual_limit`. Surface it as an additive `credits`
+    // window so existing consumers keep working.
+    if (payload?.spend_control?.individual_limit) {
+      const spendLimit = payload.spend_control.individual_limit;
+      const used = toNumber(spendLimit.used);
+      const limit = toNumber(spendLimit.limit);
+      const valueLabel = used !== null && limit !== null
+        ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
+        : null;
+      windows.credits = toUsageWindow({
+        usedPercent: toNumber(spendLimit.used_percent),
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel
       });
     }
 

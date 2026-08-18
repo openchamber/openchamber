@@ -23,10 +23,15 @@ const getTextFromPart = (part: unknown): string | undefined => {
     return undefined;
 };
 
+const isCompactionSummaryMessage = (message: ChatMessageEntry): boolean => {
+    return (message.info as { summary?: unknown }).summary === true;
+};
+
 export const projectTurnSummary = (assistantMessages: ChatMessageEntry[]): TurnSummaryRecord => {
     for (let messageIndex = assistantMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
         const assistantMessage = assistantMessages[messageIndex];
         if (!assistantMessage) continue;
+        if (isCompactionSummaryMessage(assistantMessage)) continue;
 
         const finish = (assistantMessage.info as { finish?: string | null }).finish;
         if (finish !== 'stop') continue;
@@ -49,6 +54,7 @@ export const projectTurnSummary = (assistantMessages: ChatMessageEntry[]): TurnS
     for (let messageIndex = assistantMessages.length - 1; messageIndex >= 0; messageIndex -= 1) {
         const assistantMessage = assistantMessages[messageIndex];
         if (!assistantMessage) continue;
+        if (isCompactionSummaryMessage(assistantMessage)) continue;
 
         for (let partIndex = assistantMessage.parts.length - 1; partIndex >= 0; partIndex -= 1) {
             const part = assistantMessage.parts[partIndex];

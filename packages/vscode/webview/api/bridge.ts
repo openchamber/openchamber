@@ -9,10 +9,24 @@ interface VSCodeAPI {
 }
 
 let vscodeApi: VSCodeAPI | null = null;
+let noopWarned = false;
+
+const noopVSCodeApi: VSCodeAPI = {
+  postMessage: (message) => {
+    // acquireVsCodeApi() can return undefined in broken/non-standard webview slots
+    // (Cursor after extension update, VSCodium, headless). Drop the message instead
+    // of throwing TypeError: Cannot read properties of undefined (reading 'postMessage').
+    if (!noopWarned) {
+      noopWarned = true;
+      console.warn('[openchamber] VS Code API unavailable; dropping postMessage', message);
+    }
+  },
+};
 
 function getVSCodeAPI(): VSCodeAPI {
   if (!vscodeApi) {
-    vscodeApi = acquireVsCodeApi();
+    const acquired = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : undefined;
+    vscodeApi = acquired ?? noopVSCodeApi;
   }
   return vscodeApi;
 }
@@ -175,6 +189,7 @@ export type ProxiedSseStartResponse = {
 export async function startSseProxy(options: {
   path: string;
   headers?: Record<string, string>;
+  streamId?: string;
 }): Promise<ProxiedSseStartResponse> {
   return sendBridgeMessage<ProxiedSseStartResponse>('api:sse:start', options);
 }

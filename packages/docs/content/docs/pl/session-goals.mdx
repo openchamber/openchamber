@@ -1,0 +1,73 @@
+---
+title: Cele sesji
+description: Zamień prompt w cel, nad którym agent pracuje automatycznie.
+---
+
+# Cele sesji
+
+Cel zamienia jeden prompt w linię mety. Zamiast popychać agenta słowem „kontynuuj" po każdej odpowiedzi, ustawiasz cel raz — a OpenChamber automatycznie prowadzi sesję w jego stronę, sprawdzając postęp niezależnym audytorem po każdej turze. Praca trwa nawet pod twoją nieobecność.
+
+## Rozpoczęcie celu
+
+1. Naciśnij przycisk celu (tarczę) w kompozytorze. Zapala się — tryb celu jest uzbrojony.
+2. Napisz prompt i wyślij. Ta wiadomość staje się treścią celu.
+
+Działa to tak samo w istniejącej sesji i w szkicu nowej: uzbrój tarczę, napisz pierwszą wiadomość, wyślij — nowa sesja startuje z już aktywnym celem.
+
+### Inne sposoby rozpoczęcia celu
+
+- **Z odpowiedzi agenta**: w oknie „Start new session from this answer" zaznacz **Uruchom jako cel** — odpowiedź zostaje przekazana jako zadanie, które nowa sesja wykonuje do końca (połącz z **Create worktree**, aby uzyskać izolowane uruchomienie).
+- **Z planu**: implementując zapisany plan w nowej sesji lub worktree, zaznacz **Uruchom jako cel** w oknie dialogowym. Treścią celu staje się zawartość planu, więc audytor ocenia postęp względem samego planu.
+- **Według harmonogramu**: zaznacz **Uruchom jako cel** w [zaplanowanym zadaniu](/scheduled-tasks/), aby cykliczne uruchomienia doprowadzały prompt do końca.
+
+## Formułuj cel samowystarczalnie
+
+Audytor postępu widzi tylko treść celu i ostatnią odpowiedź agenta — bez historii czatu. Sformułuj więc wiadomość-cel tak, aby osoba bez kontekstu rozmowy zrozumiała, jak wygląda stan końcowy.
+
+- Dobrze: „Dodaj testy dla modułu eksportu i doprowadź cały zestaw testów do zielonego stanu."
+- Słabiej: „Napraw to" albo „Kontynuuj z tamtym pomysłem."
+
+Do drobnych kontekstowych poleceń cel nie jest potrzebny — wyślij zwykłą wiadomość.
+
+## Jak to działa
+
+Gdy agent się zatrzyma i sesja na chwilę ucichnie, OpenChamber:
+
+1. Prosi mały, tani model o audyt ostatniej tury względem celu: kontynuować, gotowe czy utknięto?
+2. Jeśli werdykt to „kontynuować", wysyła prompt kontynuacji i agent wraca do pracy.
+3. Jeśli cel jest weryfikowalnie osiągnięty, cel się kończy, a ty dostajesz powiadomienie.
+4. Jeśli agent naprawdę utknął (potrzebuje twojego udziału), cel zatrzymuje się jako zablokowany — ale dopiero gdy audytor powie to trzy razy z rzędu, więc jednorazowa przeszkoda nigdy nie kończy celu.
+
+Są też twarde bezpieczniki: opcjonalny budżet tokenów, limit automatycznych kontynuacji i stop przy błędzie tury. Jeśli kontekst sesji zostanie skompaktowany w trakcie pracy, cel po prostu trwa dalej — uderzenie w okno kontekstu to dowód, że praca nie była skończona.
+
+### Zatrzymywanie i wznawianie
+
+- **Przycisk stop** przerywa bieżącą turę i wstrzymuje cel — twoje wyraźne „stop" zawsze wygrywa z pętlą.
+- **Wstrzymaj** na pasku celu robi to samo z drugiej strony: wstrzymuje cel i zatrzymuje bieżącą turę.
+- Podczas wstrzymania rozmawiaj normalnie — pętla nie przeszkadza.
+- **Wznów** ponownie uzbraja pętlę: w bezczynnej sesji zachęta do kontynuacji wychodzi natychmiast; jeśli agent akurat pracuje, pętla po cichu podłącza się przy jego następnej przerwie.
+
+## Podgląd i zarządzanie
+
+- Pasek nad kompozytorem pokazuje ostatnią notatkę postępu, status i zużycie tokenów, wraz z przyciskiem wstrzymaj/wznów. Gdy agent się zatrzymał, a cel jest aktywny, pasek pokazuje wirujące **Ocenianie…** — to okno ciszy i trwający audyt.
+- Przycisk-tarcza świeci, póki cel działa (niebieski), zielenieje po ukończeniu, a czerwienieje przy zablokowaniu lub wyczerpaniu budżetu. Naciśnij go, aby otworzyć okno celu: edytuj treść lub budżet albo usuń cel. Ukończony cel jest tylko do odczytu — usuń go, a potem uzbrój nowy.
+- W panelu bocznym sesji obok daty sesji pojawia się mała tarcza w kolorze stanu celu.
+
+## Powiadomienia
+
+Póki cel jest aktywny, powiadomienia „agent gotowy" po każdej turze są wyciszone — powtarzałyby tylko kontynuacje samej pętli. Gdy cel się rozstrzygnie (ukończony, zablokowany lub budżet wyczerpany), dostajesz zamiast tego jedno końcowe powiadomienie — na desktopie i jako push mobilny. Respektuje to samo ustawienie „powiadamiaj o ukończeniu"; prośby o uprawnienia, pytania i powiadomienia o błędach działają jak zwykle.
+
+## Budżet tokenów
+
+W **Ustawienia → Czat → Cel** możesz ustawić domyślny budżet tokenów dla nowych celów. Po osiągnięciu budżetu cel zatrzymuje się jako „budżet wyczerpany" zamiast wydawać więcej — możesz podnieść budżet i wznowić z okna celu.
+
+## Miej na uwadze
+
+- Pętla celu działa na serwerze OpenChamber, nie w karcie przeglądarki. Zamknij kartę, zablokuj telefon — agent pracuje dalej, a gdy cel się rozstrzygnie, dostaniesz powiadomienie. Serwer (aplikacja desktopowa lub proces `openchamber`) musi pozostać uruchomiony.
+- Cele używają dostawcy i modelu twojej własnej sesji, łącznie z wywołaniami audytora — nic nie trafia do dostawców, których już nie używasz.
+- Jeden cel na sesję naraz.
+
+## Powiązane
+
+- [Zaplanowane zadania](/scheduled-tasks/) — uruchamianie promptu według harmonogramu; włącz tam „Uruchom jako cel", aby zaplanowane uruchomienie doprowadziło prompt do końca
+- [Powiadomienia](/notifications/) — jak dowiadujesz się o ukończonym celu

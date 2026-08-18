@@ -1,6 +1,9 @@
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
+import { stripAppImageArgv0Leak } from '../inherited-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
+import { applyProviderEnvAliases } from './provider-env-aliases.js';
+import { recordStartupPerformance } from './startup-performance.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -15,6 +18,10 @@ const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
 const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
 const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
 const OPENCODE_HEALTH_PATH = '/global/health';
+// Last-used directory plus the three most recently opened projects — deeper
+// tails are unlikely to be the user's first click and just add background work.
+const WARMUP_DIRECTORY_LIMIT = 4;
+const WARMUP_REQUEST_TIMEOUT_MS = 30000;
 
 export const createOpenCodeLifecycleRuntime = (deps) => {
   const {
@@ -38,7 +45,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     buildAugmentedPath,
     buildManagedOpenCodePath,
     getManagedOpenCodeShellEnvSnapshot,
+    getManagedOpenCodeEnv = async () => ({}),
     getActiveSessionCount = () => 0,
+    reapManagedOrphanedProcesses = reapOrphanedProcesses,
+    getWarmupDirectories = async () => [],
+    onOpenCodeRestarted = null,
+    now = Date.now,
   } = deps;
 
   const killProcessOnPort = (port) => {
@@ -60,7 +72,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
-  const hasChildProcessExited = (child) => !child || child.exitCode !== null || child.signalCode !== null;
+  const hasChildProcessExited = (child) => !child
+    || (child.exitCode !== null && child.exitCode !== undefined)
+    || (child.signalCode !== null && child.signalCode !== undefined);
 
   const isManagedOpenCodeProcessAlive = () => {
     const child = state.openCodeProcess;
@@ -239,6 +253,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
   const createManagedOpenCodeServerProcess = async ({ hostname, port, timeout, cwd, env: processEnv, shellEnvKeysCount = 0 }) => {
     let binary = (process.env.OPENCODE_BINARY || 'opencode').trim() || 'opencode';
+    const sourceBinary = binary;
     let args = ['serve', '--hostname', hostname, '--port', String(port)];
     let launchWrapperType = null;
 
@@ -262,6 +277,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const pathEntryCount = pathValue ? pathValue.split(process.platform === 'win32' ? ';' : ':').filter(Boolean).length : 0;
     state.lastOpenCodeLaunchDiagnostics = {
       launchedAt: new Date().toISOString(),
+      sourceBinary,
       binary,
       args,
       cwd,
@@ -354,6 +370,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     return {
       url,
       pid: child.pid || null,
+      get exitCode() {
+        return child.exitCode;
+      },
+      get signalCode() {
+        return child.signalCode;
+      },
       async close() {
         await closeManagedOpenCodeChild(child);
       },
@@ -462,7 +484,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  const startOpenCodeOnce = async () => {
+  const startOpenCodeOnce = async (attempt) => {
+    const attemptStartedAt = performance.now();
+    let phaseStartedAt = attemptStartedAt;
+    recordStartupPerformance('opencode.attempt.start', { attempt });
     const desiredPort = env.ENV_CONFIGURED_OPENCODE_PORT ?? 0;
     const spawnPort = await resolveManagedOpenCodePort(desiredPort, env.ENV_CONFIGURED_OPENCODE_HOSTNAME);
     console.log(
@@ -473,15 +498,29 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     await applyOpencodeBinaryFromSettings({ strict: true });
     ensureOpencodeCliEnv();
+    recordStartupPerformance('opencode.binary.ready', {
+      attempt,
+      durationMs: performance.now() - phaseStartedAt,
+      totalDurationMs: performance.now() - attemptStartedAt,
+    });
+    phaseStartedAt = performance.now();
     const openCodePassword = await ensureLocalOpenCodeServerPassword({ rotateManaged: true });
-    const envPath = typeof buildManagedOpenCodePath === 'function'
-      ? buildManagedOpenCodePath()
-      : typeof buildAugmentedPath === 'function'
-        ? buildAugmentedPath()
-      : process.env.PATH;
+    let envPath = process.env.PATH;
+    if (typeof buildManagedOpenCodePath === 'function') {
+      envPath = buildManagedOpenCodePath();
+    } else if (typeof buildAugmentedPath === 'function') {
+      envPath = buildAugmentedPath();
+    }
     const shellEnv = typeof getManagedOpenCodeShellEnvSnapshot === 'function'
       ? getManagedOpenCodeShellEnvSnapshot() || {}
       : {};
+    const managedOpenCodeEnv = await getManagedOpenCodeEnv();
+    recordStartupPerformance('opencode.environment.ready', {
+      attempt,
+      durationMs: performance.now() - phaseStartedAt,
+      totalDurationMs: performance.now() - attemptStartedAt,
+    });
+    phaseStartedAt = performance.now();
 
     try {
       const serverInstance = await createManagedOpenCodeServerProcess({
@@ -490,17 +529,24 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         timeout: 30000,
         cwd: state.openCodeWorkingDirectory,
         shellEnvKeysCount: Object.keys(shellEnv).length,
-        env: {
+        env: stripAppImageArgv0Leak(applyProviderEnvAliases({
           ...shellEnv,
           ...process.env,
+          ...managedOpenCodeEnv,
           PATH: envPath,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
-        },
+        })),
       });
 
       if (!serverInstance || !serverInstance.url) {
         throw new Error('OpenCode server started but URL is missing');
       }
+      recordStartupPerformance('opencode.process.ready', {
+        attempt,
+        durationMs: performance.now() - phaseStartedAt,
+        totalDurationMs: performance.now() - attemptStartedAt,
+      });
+      phaseStartedAt = performance.now();
 
       const url = new URL(serverInstance.url);
       const port = parseInt(url.port, 10);
@@ -513,6 +559,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         state.isOpenCodeReady = true;
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;
+
+        recordStartupPerformance('opencode.health.ready', {
+          attempt,
+          durationMs: performance.now() - phaseStartedAt,
+          totalDurationMs: performance.now() - attemptStartedAt,
+          outcome: 'ready',
+        });
 
         return serverInstance;
       }
@@ -527,6 +580,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       state.lastOpenCodeError = message;
       state.openCodePort = null;
       syncToHmrState();
+      recordStartupPerformance('opencode.attempt.error', {
+        attempt,
+        totalDurationMs: performance.now() - attemptStartedAt,
+        outcome: 'error',
+      });
       console.error(`Failed to start OpenCode: ${message}`);
       throw error;
     }
@@ -536,7 +594,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     let lastError = null;
     for (let attempt = 1; attempt <= START_OPEN_CODE_MAX_ATTEMPTS; attempt += 1) {
       try {
-        return await startOpenCodeOnce();
+        return await startOpenCodeOnce(attempt);
       } catch (error) {
         lastError = error;
         if (error?.code === 'OPENCODE_BINARY_INVALID') {
@@ -637,6 +695,17 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (state.expressApp) {
         setupProxy(state.expressApp);
         ensureOpenCodeApiPrefix();
+      }
+
+      // The restart may have landed on a NEW port (the old one can remain
+      // occupied by an orphaned process, e.g. Windows killProcessOnPort is a
+      // no-op). Upstream event readers pinned to the old process would keep
+      // the UI silent forever, so rebind them to the current port. Best
+      // effort: a failure here must not fail the restart itself.
+      try {
+        onOpenCodeRestarted?.();
+      } catch (error) {
+        console.warn('Failed to rebind event stream after OpenCode restart:', error?.message ?? error);
       }
     })();
 
@@ -785,12 +854,20 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   const bootstrapOpenCodeAtStartup = async () => {
+    const bootstrapStartedAt = performance.now();
+    let bootstrapError = null;
+    recordStartupPerformance('opencode.bootstrap.start');
     try {
       // Before doing anything, reap any OpenCode process WE spawned in a prior
       // run that was orphaned by a crash/hard-exit. Verified + scoped to our own
       // pids, so it never touches a live instance's or the user's own server.
       try {
-        const { reaped } = await reapOrphanedProcesses({ log: (msg) => console.log(msg) });
+        const orphanReapStartedAt = performance.now();
+        const { reaped } = await reapManagedOrphanedProcesses({ log: (msg) => console.log(msg) });
+        recordStartupPerformance('opencode.orphan-reap.ready', {
+          durationMs: performance.now() - orphanReapStartedAt,
+          totalDurationMs: performance.now() - bootstrapStartedAt,
+        });
         if (reaped > 0) console.log(`[lifecycle] startup reaped ${reaped} orphaned OpenCode process(es)`);
       } catch (error) {
         console.warn('[lifecycle] orphan reap failed:', error?.message ?? error);
@@ -844,12 +921,63 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       try {
         await waitForOpenCodeReady();
       } catch (error) {
+        bootstrapError = error;
         console.error(`OpenCode readiness check failed: ${error.message}`);
       }
     } catch (error) {
+      bootstrapError = error;
       console.error(`Failed to start OpenCode: ${error.message}`);
       console.log('Continuing without OpenCode integration...');
       state.lastOpenCodeError = error.message;
+    }
+    recordStartupPerformance(
+      bootstrapError ? 'opencode.bootstrap.error' : 'opencode.bootstrap.ready',
+      {
+        totalDurationMs: performance.now() - bootstrapStartedAt,
+        outcome: bootstrapError ? 'error' : 'ready',
+      },
+    );
+    if (!bootstrapError) {
+      void warmOpenCodeDirectories();
+    }
+  };
+
+  // OpenCode initializes each project directory lazily on its first
+  // directory-scoped request, and that initialization takes seconds on large
+  // session stores. Without warming, the user's first session open pays it
+  // interactively (the chat waits on the message fetch until the directory
+  // finishes initializing). Warm the most recently used directories right
+  // after readiness so the work overlaps UI startup instead. Sequential and
+  // best-effort: a failed or slow directory never blocks the others for long,
+  // and a restart invalidates the pass via the port/readiness guard.
+  const warmOpenCodeDirectories = async () => {
+    let directories = [];
+    try {
+      directories = await getWarmupDirectories();
+    } catch {
+      return;
+    }
+    if (!Array.isArray(directories) || directories.length === 0) return;
+
+    const warmedPort = state.openCodePort;
+    for (const directory of directories.slice(0, WARMUP_DIRECTORY_LIMIT)) {
+      if (typeof directory !== 'string' || !directory) continue;
+      if (!state.isOpenCodeReady || state.openCodePort !== warmedPort) return;
+      let timeout = null;
+      try {
+        const controller = new AbortController();
+        timeout = setTimeout(() => controller.abort(), WARMUP_REQUEST_TIMEOUT_MS);
+        const url = `${buildOpenCodeUrl('/session/status', '')}?directory=${encodeURIComponent(directory)}`;
+        await fetch(url, {
+          method: 'GET',
+          headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+          signal: controller.signal,
+        });
+      } catch {
+        // Best-effort — the directory stays lazy and the UI's own request warms it.
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
     }
   };
 
@@ -867,18 +995,21 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   const STALE_BUSY_GRACE_MS = 2 * 60 * 1000;
   let lastUnhealthyWithBusySessionsAt = 0;
   let consecutiveHealthFailures = 0;
+  let lastCountedHealthFailureAt = 0;
   let healthProbePromise = null;
   let healthCheckCyclePromise = null;
   let lastHealthProbeResult = null;
+  let healthFailureCountIntervalMs = 15_000;
 
   const resetHealthFailureState = () => {
     consecutiveHealthFailures = 0;
     lastUnhealthyWithBusySessionsAt = 0;
+    lastCountedHealthFailureAt = 0;
   };
 
   const probeOpenCodeHealth = async () => {
-    const now = Date.now();
-    if (lastHealthProbeResult && now - lastHealthProbeResult.at < HEALTH_CHECK_RESULT_CACHE_MS) {
+    const checkedAt = now();
+    if (lastHealthProbeResult && checkedAt - lastHealthProbeResult.at < HEALTH_CHECK_RESULT_CACHE_MS) {
       return lastHealthProbeResult.healthy;
     }
 
@@ -888,7 +1019,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     healthProbePromise = isOpenCodeProcessHealthy()
       .then((healthy) => {
-        lastHealthProbeResult = { at: Date.now(), healthy };
+        lastHealthProbeResult = { at: now(), healthy };
         return healthy;
       })
       .finally(() => {
@@ -905,13 +1036,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       return false;
     }
 
-    const now = Date.now();
+    const checkedAt = now();
     if (!lastUnhealthyWithBusySessionsAt) {
-      lastUnhealthyWithBusySessionsAt = now;
+      lastUnhealthyWithBusySessionsAt = checkedAt;
       return true;
     }
 
-    if (now - lastUnhealthyWithBusySessionsAt >= STALE_BUSY_GRACE_MS) {
+    if (checkedAt - lastUnhealthyWithBusySessionsAt >= STALE_BUSY_GRACE_MS) {
       console.warn(
         `[lifecycle] OpenCode unhealthy with ${activeCount} busy session(s) for > 2 min — forcing restart`
       );
@@ -936,6 +1067,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           await restartOpenCode();
           return;
         }
+        const checkedAt = now();
+        if (lastCountedHealthFailureAt && checkedAt - lastCountedHealthFailureAt < healthFailureCountIntervalMs) {
+          return;
+        }
+        lastCountedHealthFailureAt = checkedAt;
         consecutiveHealthFailures += 1;
         console.warn(
           `[lifecycle] ${source} health check failed (${consecutiveHealthFailures}/${HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES})`
@@ -970,6 +1106,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
 
     const effectiveIntervalMs = HEALTH_CHECK_INTERVAL_OVERRIDE_MS || healthCheckIntervalMs;
+    healthFailureCountIntervalMs = effectiveIntervalMs;
 
     state.healthCheckInterval = setInterval(async () => {
       try {

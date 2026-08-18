@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import yaml from 'yaml';
-import { parse as parseJsonc } from 'jsonc-parser';
+import { parse as parseJsonc, printParseErrorCode, type ParseError } from 'jsonc-parser';
 
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
@@ -10,9 +10,6 @@ const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
 const GLOBAL_SNIPPET_DIR = path.join(OPENCODE_CONFIG_DIR, 'snippet');
 const GLOBAL_SNIPPET_DIR_ALT = path.join(OPENCODE_CONFIG_DIR, 'snippets');
 const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'config.json');
-const CUSTOM_CONFIG_FILE = process.env.OPENCODE_CONFIG
-  ? path.resolve(process.env.OPENCODE_CONFIG)
-  : null;
 const PROMPT_FILE_PATTERN = /^\{file:(.+)\}$/i;
 const SNIPPET_EXTENSION = '.md';
 const SNIPPET_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
@@ -541,7 +538,10 @@ const getConfigPaths = (workingDirectory?: string) => ({
     path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
   ],
   projectPath: getProjectConfigPath(workingDirectory),
-  customPath: CUSTOM_CONFIG_FILE
+  // Resolve at call time so OPENCODE_CONFIG changes (and tests) take effect.
+  customPath: process.env.OPENCODE_CONFIG
+    ? path.resolve(process.env.OPENCODE_CONFIG)
+    : null,
 });
 
 const getPrimaryUserConfigPath = (userPaths: string[]): string => {
@@ -554,12 +554,46 @@ const getPrimaryUserConfigPath = (userPaths: string[]): string => {
   return CONFIG_FILE;
 };
 
+const INVALID_JSONC = 'INVALID_JSONC';
+
+const formatJsoncParseError = (filePath: string, errors: ParseError[]): string => {
+  const first = errors.length > 0 ? errors[0] : null;
+  const location = first && Number.isFinite(first.offset)
+    ? ` (${printParseErrorCode(first.error)} at offset ${first.offset})`
+    : '';
+  return `OpenCode configuration at ${filePath} contains invalid JSONC and cannot be loaded safely${location}`;
+};
+
+const isInvalidJsoncError = (error: unknown): error is Error & { code: string } =>
+  Boolean(error && typeof error === 'object' && 'code' in error && error.code === INVALID_JSONC);
+
+// Comment-only / whitespace-only files parse to undefined with nothing but
+// ValueExpected. Any other error means real content we failed to understand
+// (YAML, plain text, a stray leading token), which must not read as empty.
+const isCommentOnlyParse = (parsed: unknown, errors: ParseError[]): boolean =>
+  parsed === undefined
+  && errors.every((entry) => printParseErrorCode(entry.error) === 'ValueExpected');
+
+const parseConfigObject = (content: string, filePath: string): Record<string, unknown> => {
+  const errors: ParseError[] = [];
+  const parsed = parseJsonc(content, errors, { allowTrailingComma: true });
+  if (isCommentOnlyParse(parsed, errors)) {
+    return {};
+  }
+  if (errors.length > 0 || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw codedError(formatJsoncParseError(filePath, errors), INVALID_JSONC);
+  }
+  return parsed as Record<string, unknown>;
+};
+
 const readConfigFile = (filePath?: string | null): Record<string, unknown> => {
   if (!filePath || !fs.existsSync(filePath)) return {};
   const content = fs.readFileSync(filePath, 'utf8');
   const normalized = content.trim();
   if (!normalized) return {};
-  return parseJsonc(normalized, [], { allowTrailingComma: true }) as Record<string, unknown>;
+  // Refuse partial jsonc-parser trees. Ignoring errors previously let mutations
+  // rewrite a truncated object (often only `$schema`) over the full config.
+  return parseConfigObject(normalized, filePath);
 };
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
@@ -582,20 +616,50 @@ const mergeConfigs = (base: Record<string, unknown>, override: Record<string, un
   return result;
 };
 
+const readConfigLayer = (filePath?: string | null): {
+  config: Record<string, unknown>;
+  error: (Error & { code: string }) | null;
+} => {
+  try {
+    return { config: readConfigFile(filePath), error: null };
+  } catch (error) {
+    if (isInvalidJsoncError(error)) {
+      console.error(error.message);
+      return { config: {}, error };
+    }
+    throw error;
+  }
+};
+
 const readConfigLayers = (workingDirectory?: string) => {
   const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
-  const userConfig = readConfigFile(userPath);
-  const projectConfig = readConfigFile(projectPath);
-  const customConfig = readConfigFile(customPath);
-  const mergedConfig = mergeConfigs(mergeConfigs(userConfig, projectConfig), customConfig);
+  const userLayer = readConfigLayer(userPath);
+  const projectLayer = readConfigLayer(projectPath);
+  const customLayer = readConfigLayer(customPath);
+  const mergedConfig = mergeConfigs(
+    mergeConfigs(userLayer.config, projectLayer.config),
+    customLayer.config,
+  );
+
+  const layerErrors: Array<{ path: string; code: string; message: string }> = [];
+  if (userLayer.error) {
+    layerErrors.push({ path: userPath, code: userLayer.error.code, message: userLayer.error.message });
+  }
+  if (projectLayer.error && projectPath) {
+    layerErrors.push({ path: projectPath, code: projectLayer.error.code, message: projectLayer.error.message });
+  }
+  if (customLayer.error && customPath) {
+    layerErrors.push({ path: customPath, code: customLayer.error.code, message: customLayer.error.message });
+  }
 
   return {
-    userConfig,
-    projectConfig,
-    customConfig,
+    userConfig: userLayer.config,
+    projectConfig: projectLayer.config,
+    customConfig: customLayer.config,
     mergedConfig,
-    paths: { userPath, projectPath, customPath }
+    paths: { userPath, projectPath, customPath },
+    layerErrors,
   };
 };
 
@@ -695,6 +759,11 @@ const getConfigForPath = (layers: ReturnType<typeof readConfigLayers>, targetPat
 
 const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_FILE) => {
   if (fs.existsSync(filePath)) {
+    // Defense in depth: never overwrite a file we cannot fully parse.
+    const existing = fs.readFileSync(filePath, 'utf8').trim();
+    if (existing) {
+      parseConfigObject(existing, filePath);
+    }
     const backupFile = `${filePath}.openchamber.backup`;
     try {
       fs.copyFileSync(filePath, backupFile);
@@ -862,10 +931,10 @@ const getPluginConfigSources = (workingDirectory?: string | null): Array<{ scope
   const projectPath = getProjectConfigPath(workingDirectory || undefined);
   return [
     customPath
-      ? { scope: 'user', path: customPath, config: readConfigFile(customPath) }
-      : { scope: 'user', path: userPath, config: readConfigFile(userPath) },
+      ? { scope: 'user', path: customPath, config: readConfigLayer(customPath).config }
+      : { scope: 'user', path: userPath, config: readConfigLayer(userPath).config },
     ...(projectPath
-      ? [{ scope: 'project' as const, path: projectPath, config: readConfigFile(projectPath) }]
+      ? [{ scope: 'project' as const, path: projectPath, config: readConfigLayer(projectPath).config }]
       : []),
   ];
 };
@@ -1376,22 +1445,45 @@ export const deleteMcpConfig = (name: string, workingDirectory?: string): void =
   writeConfig(config, targetPath);
 };
 
+const getLayerError = (
+  layers: ReturnType<typeof readConfigLayers>,
+  filePath?: string | null,
+) => {
+  if (!filePath) return null;
+  return layers.layerErrors.find((entry) => entry.path === filePath) || null;
+};
+
+const throwIfLayerError = (
+  layers: ReturnType<typeof readConfigLayers>,
+  filePath?: string | null,
+) => {
+  const failed = getLayerError(layers, filePath);
+  if (!failed) return;
+  throw codedError(failed.message, failed.code);
+};
+
 const getJsonEntrySource = (
   layers: ReturnType<typeof readConfigLayers>,
   sectionKey: 'agent' | 'command' | 'mcp',
   entryName: string
 ) => {
   const { userConfig, projectConfig, customConfig, paths } = layers;
-  const customSection = (customConfig as Record<string, unknown>)?.[sectionKey] as Record<string, unknown> | undefined;
-  if (customSection?.[entryName] !== undefined) {
-    return { section: customSection[entryName], config: customConfig, path: paths.customPath, exists: true };
+  if (paths.customPath) {
+    throwIfLayerError(layers, paths.customPath);
+    const customSection = (customConfig as Record<string, unknown>)?.[sectionKey] as Record<string, unknown> | undefined;
+    if (customSection?.[entryName] !== undefined) {
+      return { section: customSection[entryName], config: customConfig, path: paths.customPath, exists: true };
+    }
   }
 
-  const projectSection = (projectConfig as Record<string, unknown>)?.[sectionKey] as Record<string, unknown> | undefined;
-  if (projectSection?.[entryName] !== undefined) {
-    return { section: projectSection[entryName], config: projectConfig, path: paths.projectPath, exists: true };
+  if (paths.projectPath && !getLayerError(layers, paths.projectPath)) {
+    const projectSection = (projectConfig as Record<string, unknown>)?.[sectionKey] as Record<string, unknown> | undefined;
+    if (projectSection?.[entryName] !== undefined) {
+      return { section: projectSection[entryName], config: projectConfig, path: paths.projectPath, exists: true };
+    }
   }
 
+  throwIfLayerError(layers, paths.userPath);
   const userSection = (userConfig as Record<string, unknown>)?.[sectionKey] as Record<string, unknown> | undefined;
   if (userSection?.[entryName] !== undefined) {
     return { section: userSection[entryName], config: userConfig, path: paths.userPath, exists: true };
@@ -1406,11 +1498,14 @@ const getJsonWriteTarget = (
 ) => {
   const { userConfig, projectConfig, customConfig, paths } = layers;
   if (paths.customPath) {
+    throwIfLayerError(layers, paths.customPath);
     return { config: customConfig, path: paths.customPath };
   }
   if (preferredScope === AGENT_SCOPE.PROJECT && paths.projectPath) {
+    throwIfLayerError(layers, paths.projectPath);
     return { config: projectConfig, path: paths.projectPath };
   }
+  throwIfLayerError(layers, paths.userPath);
   return { config: userConfig, path: paths.userPath };
 };
 
@@ -1666,6 +1761,9 @@ export const updateAgent = (agentName: string, updates: Record<string, unknown>,
   const creatingNewMd = isBuiltinOverride;
 
   for (const [field, value] of Object.entries(updates || {})) {
+    // Skip undefined values — they would overwrite existing frontmatter fields with nothing
+    if (value === undefined) continue;
+
     if (field === 'prompt') {
       if (value === null) {
         if (mdExists || creatingNewMd) {
@@ -2163,6 +2261,163 @@ export const removeProviderConfig = (providerId: string, workingDirectory?: stri
 
   writeConfig(targetConfig as Record<string, unknown>, targetPath || CONFIG_FILE);
   return true;
+};
+
+const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
+const BASE_URL_PATTERN = /^https?:\/\//;
+const OPENAI_COMPATIBLE_NPM = '@ai-sdk/openai-compatible';
+
+export const validateCustomProviderConfig = (
+  providerId: string,
+  config: unknown,
+  options: { hasStoredAuth?: boolean } = {},
+) => {
+  if (!providerId || typeof providerId !== 'string' || !PROVIDER_ID_PATTERN.test(providerId)) {
+    return { ok: false as const, error: 'Provider ID must match /^[a-z0-9][a-z0-9-_]*$/' };
+  }
+
+  if (!isPlainObject(config)) {
+    return { ok: false as const, error: 'Provider config must be an object' };
+  }
+
+  const name = typeof config.name === 'string' ? config.name.trim() : '';
+  if (!name) {
+    return { ok: false as const, error: 'Provider name is required' };
+  }
+
+  const npm = typeof config.npm === 'string' ? config.npm.trim() : OPENAI_COMPATIBLE_NPM;
+  if (npm !== OPENAI_COMPATIBLE_NPM) {
+    return { ok: false as const, error: `Custom providers must use npm package ${OPENAI_COMPATIBLE_NPM}` };
+  }
+
+  const optionsBlock = isPlainObject(config.options) ? config.options : null;
+  if (!optionsBlock) {
+    return { ok: false as const, error: 'Provider options are required' };
+  }
+
+  const baseURL = typeof optionsBlock.baseURL === 'string' ? optionsBlock.baseURL.trim() : '';
+  if (!baseURL) {
+    return { ok: false as const, error: 'Base URL is required' };
+  }
+  if (!BASE_URL_PATTERN.test(baseURL)) {
+    return { ok: false as const, error: 'Base URL must start with http:// or https://' };
+  }
+
+  const models = isPlainObject(config.models) ? config.models : null;
+  if (!models || Object.keys(models).length === 0) {
+    return { ok: false as const, error: 'At least one model is required' };
+  }
+
+  const normalizedModels: Record<string, { name: string }> = {};
+  for (const [modelId, modelValue] of Object.entries(models)) {
+    const trimmedId = typeof modelId === 'string' ? modelId.trim() : '';
+    if (!trimmedId) {
+      return { ok: false as const, error: 'Model id is required' };
+    }
+    if (!isPlainObject(modelValue)) {
+      return { ok: false as const, error: `Model "${trimmedId}" must be an object` };
+    }
+    const modelName = typeof modelValue.name === 'string' ? modelValue.name.trim() : '';
+    if (!modelName) {
+      return { ok: false as const, error: `Model "${trimmedId}" requires a name` };
+    }
+    normalizedModels[trimmedId] = { name: modelName };
+  }
+
+  const normalized: Record<string, unknown> = {
+    npm: OPENAI_COMPATIBLE_NPM,
+    name,
+    options: {
+      baseURL,
+    },
+    models: normalizedModels,
+  };
+
+  let env: string[] = [];
+  if (Array.isArray(config.env)) {
+    env = config.env
+      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      .map((entry) => entry.trim());
+    if (env.length > 0) {
+      normalized.env = env;
+    }
+  }
+
+  if (env.length === 0 && !options.hasStoredAuth) {
+    return { ok: false as const, error: 'API key or {env:VAR} credentials are required' };
+  }
+
+  if (isPlainObject(optionsBlock.headers)) {
+    const headers: Record<string, string> = {};
+    for (const [headerKey, headerValue] of Object.entries(optionsBlock.headers)) {
+      if (typeof headerKey !== 'string' || !headerKey.trim()) {
+        continue;
+      }
+      if (typeof headerValue !== 'string' || !headerValue.trim()) {
+        return { ok: false as const, error: `Header "${headerKey}" requires a non-empty value` };
+      }
+      headers[headerKey.trim()] = headerValue.trim();
+    }
+    if (Object.keys(headers).length > 0) {
+      (normalized.options as Record<string, unknown>).headers = headers;
+    }
+  }
+
+  return { ok: true as const, value: { providerId, config: normalized } };
+};
+
+export const upsertProviderConfig = (
+  providerId: string,
+  config: unknown,
+  workingDirectory?: string,
+  scope: 'user' | 'project' | 'custom' = 'user',
+  options: { hasStoredAuth?: boolean } = {},
+) => {
+  const validated = validateCustomProviderConfig(providerId, config, options);
+  if (!validated.ok) {
+    const error = new Error(validated.error) as Error & { statusCode?: number };
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const layers = readConfigLayers(workingDirectory);
+  let targetPath: string | null | undefined = layers.paths.userPath;
+
+  if (scope === 'project') {
+    if (!workingDirectory) {
+      throw new Error('Working directory is required for project scope');
+    }
+    targetPath = layers.paths.projectPath ?? targetPath;
+  } else if (scope === 'custom') {
+    if (!layers.paths.customPath) {
+      throw new Error('Custom config path (OPENCODE_CONFIG) is not set');
+    }
+    targetPath = layers.paths.customPath;
+  } else if (scope !== 'user') {
+    throw new Error('Invalid scope');
+  }
+
+  const targetConfig = getConfigForPath(layers, targetPath) as Record<string, unknown>;
+  const providerConfig = isPlainObject(targetConfig.provider)
+    ? { ...(targetConfig.provider as Record<string, unknown>) }
+    : {};
+  providerConfig[validated.value.providerId] = validated.value.config;
+  targetConfig.provider = providerConfig;
+
+  if (Array.isArray(targetConfig.disabled_providers)) {
+    targetConfig.disabled_providers = targetConfig.disabled_providers.filter(
+      (entry) => entry !== validated.value.providerId,
+    );
+  }
+
+  const writePath = targetPath || CONFIG_FILE;
+  writeConfig(targetConfig, writePath);
+
+  return {
+    providerId: validated.value.providerId,
+    path: writePath,
+    config: validated.value.config,
+  };
 };
 
 export const deleteCommand = (commandName: string, workingDirectory?: string) => {
@@ -2758,7 +3013,7 @@ export const updateSkill = (skillName: string, updates: Record<string, unknown>,
   let mdModified = false;
   
   for (const [field, value] of Object.entries(updates || {})) {
-    if (field === 'scope') continue;
+    if (field === 'scope' || field === 'source' || field === 'targetPath' || field === 'renameTo') continue;
     
     if (field === 'instructions') {
       const normalizedValue = typeof value === 'string' ? value : value == null ? '' : String(value);
@@ -2828,5 +3083,125 @@ export const deleteSkill = (skillName: string, workingDirectory?: string): void 
   
   if (!deleted) {
     throw new Error(`Skill "${skillName}" not found`);
+  }
+};
+
+const isPathInside = (candidatePath: string, parentPath: string): boolean => {
+  const resolvedCandidate = path.resolve(candidatePath);
+  const resolvedParent = path.resolve(parentPath);
+  return resolvedCandidate === resolvedParent
+    || resolvedCandidate.startsWith(`${resolvedParent}${path.sep}`);
+};
+
+const getManagedSkillRoots = (workingDirectory?: string): string[] => {
+  const roots: string[] = [];
+  const pushRoot = (dir?: string | null) => {
+    if (!dir) return;
+    const resolved = path.resolve(dir);
+    if (!roots.includes(resolved)) {
+      roots.push(resolved);
+    }
+  };
+
+  pushRoot(SKILL_DIR);
+  pushRoot(path.join(OPENCODE_CONFIG_DIR, 'skill'));
+  pushRoot(path.join(os.homedir(), '.opencode', 'skills'));
+  pushRoot(path.join(os.homedir(), '.opencode', 'skill'));
+  pushRoot(path.join(os.homedir(), '.claude', 'skills'));
+  pushRoot(path.join(os.homedir(), '.agents', 'skills'));
+
+  const customConfigDir = process.env.OPENCODE_CONFIG_DIR
+    ? path.resolve(process.env.OPENCODE_CONFIG_DIR)
+    : null;
+  pushRoot(customConfigDir ? path.join(customConfigDir, 'skills') : null);
+  pushRoot(customConfigDir ? path.join(customConfigDir, 'skill') : null);
+
+  if (workingDirectory) {
+    const worktreeRoot = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
+    for (const ancestor of getAncestors(workingDirectory, worktreeRoot)) {
+      pushRoot(path.join(ancestor, '.opencode', 'skills'));
+      pushRoot(path.join(ancestor, '.opencode', 'skill'));
+      pushRoot(path.join(ancestor, '.claude', 'skills'));
+      pushRoot(path.join(ancestor, '.agents', 'skills'));
+    }
+  }
+
+  return roots;
+};
+
+const isManagedSkillPath = (skillMdPath: string, workingDirectory?: string): boolean => {
+  if (!skillMdPath || skillMdPath === BUILT_IN_SKILL_LOCATION) {
+    return false;
+  }
+  const skillDir = path.dirname(path.resolve(skillMdPath));
+  return getManagedSkillRoots(workingDirectory).some((root) => isPathInside(skillDir, root));
+};
+
+export { isManagedSkillPath };
+
+export const renameSkill = (oldName: string, newName: string, workingDirectory?: string): void => {
+  ensureSkillDirs();
+  validateSkillName(newName);
+
+  if (oldName === newName) {
+    return;
+  }
+
+  const existing = getSkillScope(oldName, workingDirectory);
+  if (!existing.path) {
+    throw new Error(`Skill "${oldName}" not found`);
+  }
+  if (existing.path === BUILT_IN_SKILL_LOCATION || !fs.existsSync(existing.path)) {
+    throw new Error(`Skill "${oldName}" cannot be renamed`);
+  }
+  if (path.basename(existing.path) !== 'SKILL.md') {
+    throw new Error(`Skill "${oldName}" target must be a SKILL.md file`);
+  }
+  if (!isManagedSkillPath(existing.path, workingDirectory)) {
+    throw new Error(`Skill "${oldName}" is outside managed skill directories and cannot be renamed`);
+  }
+
+  const mdDataBeforeMove = parseMdFile(existing.path);
+  const frontmatterName = typeof mdDataBeforeMove.frontmatter?.name === 'string'
+    ? mdDataBeforeMove.frontmatter.name
+    : oldName;
+  if (frontmatterName !== oldName) {
+    throw new Error(`Skill "${oldName}" does not match ${existing.path}`);
+  }
+
+  const conflict = getSkillScope(newName, workingDirectory);
+  if (conflict.path) {
+    throw new Error(`Skill ${newName} already exists at ${conflict.path}`);
+  }
+
+  const oldDir = path.dirname(existing.path);
+  const newDir = path.join(path.dirname(oldDir), newName);
+  const directoriesDiffer = path.resolve(oldDir) !== path.resolve(newDir);
+
+  if (directoriesDiffer && fs.existsSync(newDir)) {
+    throw new Error(`Skill directory already exists at ${newDir}`);
+  }
+
+  if (directoriesDiffer) {
+    fs.renameSync(oldDir, newDir);
+  }
+
+  const newPath = path.join(newDir, 'SKILL.md');
+  try {
+    const mdData = parseMdFile(newPath);
+    mdData.frontmatter = {
+      ...mdData.frontmatter,
+      name: newName,
+    };
+    writeMdFile(newPath, mdData.frontmatter, mdData.body);
+  } catch (error) {
+    if (directoriesDiffer && fs.existsSync(newDir) && !fs.existsSync(oldDir)) {
+      try {
+        fs.renameSync(newDir, oldDir);
+      } catch {
+        // Best-effort rollback; surface the original write failure.
+      }
+    }
+    throw error;
   }
 };

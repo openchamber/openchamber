@@ -5,6 +5,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import {
   Command,
   CommandEmpty,
@@ -49,6 +50,8 @@ export const IntegrateCommitsSection: React.FC<{
   defaultTargetBranch: string;
   refreshKey?: number;
   onRefresh?: () => void;
+  /** Hide the built-in section heading when a dialog already provides one. */
+  showHeader?: boolean;
 }> = ({
   repoRoot,
   sourceBranch,
@@ -57,6 +60,7 @@ export const IntegrateCommitsSection: React.FC<{
   defaultTargetBranch,
   refreshKey,
   onRefresh,
+  showHeader = true,
 }) => {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
@@ -331,22 +335,24 @@ export const IntegrateCommitsSection: React.FC<{
 
   return (
     <section className={containerClassName}>
-      <div className={headerClassName}>
-        <div className="flex items-center gap-2 min-w-0">
-          <Icon name="split-cells-horizontal" className="size-4 text-muted-foreground" />
-          <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('gitView.integrate.title')}</h3>
-          {ui.kind === 'ready' && ui.plan.commits.length > 0 ? (
-            <span className="typography-meta text-muted-foreground truncate">
-              {t('gitView.integrate.toMoveCount', { count: ui.plan.commits.length })}
-            </span>
-          ) : null}
+      {showHeader ? (
+        <div className={headerClassName}>
+          <div className="flex items-center gap-2 min-w-0">
+            <Icon name="split-cells-horizontal" className="size-4 text-muted-foreground" />
+            <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('gitView.integrate.title')}</h3>
+            {ui.kind === 'ready' && ui.plan.commits.length > 0 ? (
+              <span className="typography-meta text-muted-foreground truncate">
+                {t('gitView.integrate.toMoveCount', { count: ui.plan.commits.length })}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            {ui.kind === 'loading' || ui.kind === 'running' ? (
+              <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
+            ) : null}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {ui.kind === 'loading' || ui.kind === 'running' ? (
-            <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
-          ) : null}
-        </div>
-      </div>
+      ) : null}
 
       <div className={bodyClassName}>
         <div className="flex flex-wrap items-center gap-2">
@@ -361,11 +367,14 @@ export const IntegrateCommitsSection: React.FC<{
 
             <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen}>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1.5">
+                <button
+                  type="button"
+                  className={dropdownTriggerVariants({ size: 'default' })}
+                >
                   {t('gitView.integrate.target')}
                   <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
                   <Icon name="arrow-down-s" className="size-4 opacity-60" />
-                </Button>
+                </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"

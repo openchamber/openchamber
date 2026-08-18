@@ -1,0 +1,68 @@
+---
+title: Connect a Device
+description: Pair your phone, desktop, or another browser with your OpenChamber server using a one-time QR code.
+---
+
+# Connect a Device
+
+Pair another device — the mobile app, the desktop app, or a browser on another machine — with your OpenChamber server by scanning a one-time QR code. This is the recommended way to connect devices; there are no ports to open and no addresses to type.
+
+## Pair a device
+
+1. On the machine running OpenChamber, open **Settings → Remote Instances → Connect to this server** and press **Add a device**.
+2. Give the device a name (e.g. *My iPhone*) so you can recognize it later.
+3. Pick where you'll use the device:
+   - **This computer only** — for apps running on this same machine
+   - **Home network only** — connects directly over your Wi-Fi; does not work away from this network
+   - **Anywhere** — works at home and away; away traffic goes through the [Private Relay](/private-relay/), an end-to-end encrypted tunnel with no setup needed
+4. Press **Create QR code**.
+5. On the other device, scan the code:
+   - **mobile app** — tap **Scan QR code** on the connect screen (or in the instances list)
+   - **desktop app** — copy the connection link instead and paste it in **Settings → Remote Instances → Other OpenChamber servers → Import Link**
+
+The dialog closes on its own as soon as the device connects, and the device appears in the list with a live status. That's it — you're paired.
+
+## How pairing stays safe
+
+- **The QR code is single-use.** It stops working the moment a device redeems it, and it expires on its own if never used.
+- **Each device gets its own token.** Scanning a code never exposes your UI password, and one device's token can't be used to impersonate another.
+- **You stay in control.** Every paired device is listed with its name, platform, and connection status — revoke any of them at any time.
+- **Away-from-home traffic is end-to-end encrypted.** With **Anywhere**, traffic outside your network rides the [Private Relay](/private-relay/), which cannot read what passes through it.
+
+## Manage paired devices
+
+**Settings → Remote Instances → Connect to this server** lists every device that can reach this server, with a green dot when it's online and whether it's connected over the local network or the relay.
+
+- **Revoke** cuts a device off immediately. Pair it again with a new QR code if you change your mind.
+- **Clear revoked** tidies up the list.
+
+The same physical device keeps one entry even if it signs in again later — you won't collect duplicates.
+
+## Connect from the command line
+
+If the server runs headless (no UI open), create a connection link from a terminal on that machine.
+
+For a device on the same network:
+
+```bash
+openchamber connect-url --port 3000 --qr
+```
+
+For a device that should connect from **anywhere** — the equivalent of picking **Anywhere** in the dialog:
+
+```bash
+openchamber connect-url --relay --qr
+```
+
+A `--relay` link carries both routes, just like the dialog: the device connects directly over your local network when it can reach the server, and falls back to the [Private Relay](/private-relay/) when away. The relay starts on its own: a running instance picks the link up within a minute, a stopped one on its next launch.
+
+> The direct route only works if the server actually listens on your network. By default OpenChamber listens on the machine itself only — start it with `--lan` to make it reachable over Wi-Fi. The command warns you (`[LAN_UNREACHABLE]`) when the link's direct route won't be usable from other devices; a `--relay` link still works then, just always through the relay.
+
+The printed link and QR code work exactly like the ones from the settings dialog — single-use, expiring, revocable.
+
+## Related
+
+- [Private Relay](/private-relay/) — how "Anywhere" connections work and what the relay can and cannot see
+- [Mobile Apps](/mobile/) — install the iOS or Android app
+- [Remote Instances](/remote-instances/) — connect the desktop app to servers over SSH or links
+- [Remote access](/troubleshooting/remote-access/) — when a device won't connect

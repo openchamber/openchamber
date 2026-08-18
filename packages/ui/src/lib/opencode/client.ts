@@ -1,4 +1,5 @@
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
 import type { FilesAPI } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
 import type {
@@ -11,8 +12,21 @@ import type {
   TextPartInput,
   FilePartInput,
 } from "@opencode-ai/sdk/v2";
+import { isAmbiguousTransportFailure, markAmbiguousTransportFailure } from "@/lib/relay/transport-error";
+import { FilesystemError, parseFilesystemErrorReason } from "@/lib/api/files-errors";
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
+
+/**
+ * Tagged result of `OpencodeService.fetchPermission()`. The caller can
+ * distinguish a server-confirmed "no longer pending" permission (HTTP
+ * 404) from a fetch failure (network error, malformed response, or a
+ * pre-v1.17.12 server without the V2 endpoint).
+ */
+export type FetchPermissionResult =
+  | { state: "ok"; permission: PermissionV2Request }
+  | { state: "resolved" }
+  | { state: "unknown" };
 import { getRuntimeUrlResolver } from "@/lib/runtime-url";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { getRuntimeKey } from "@/lib/runtime-switch";
@@ -22,8 +36,6 @@ import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
   recordProviderError,
-  shouldRetry,
-  getRetryDelayMs,
 } from "./provider-tracker";
 
 // Use relative path by default (works with both dev and nginx proxy server)
@@ -54,6 +66,21 @@ type SdkResult<T> = {
   data?: T;
   error?: unknown;
   response?: { status?: number };
+};
+
+type DirectoryAvailability = "available" | "missing" | "unknown";
+
+const isMissingDirectoryError = (error: unknown): boolean => {
+  if (error instanceof FilesystemError) {
+    return error.reason === "not-found" || error.reason === "not-directory";
+  }
+  if (error && typeof error === "object") {
+    const code = (error as { code?: unknown }).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return true;
+    }
+  }
+  return /\bENOENT\b|\bENOTDIR\b|no such file or directory/i.test(formatSdkError(error));
 };
 
 function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
@@ -118,12 +145,6 @@ const ascendingId = (prefix: "msg"): string => {
   }
   const hex = Array.from(timeBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   return `${prefix}_${hex}${randomBase62(ID_RANDOM_LENGTH)}`;
-};
-
-const isRetryableFetchError = (error: unknown): boolean => {
-  if (error instanceof DOMException && error.name === 'AbortError') return true;
-  if (error instanceof TypeError) return true;
-  return false;
 };
 
 const ensureAbsoluteBaseUrl = (candidate: string): string => {
@@ -262,6 +283,12 @@ class OpencodeService {
     const requestedBaseUrl = runtimeBase || baseUrl;
     this.baseUrl = ensureAbsoluteBaseUrl(requestedBaseUrl);
     this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
+  }
+
+  private assertRuntimeUnchanged(runtimeKey?: string): void {
+    if (runtimeKey && runtimeKey !== getRuntimeKey()) {
+      throw new Error('Message was not sent because the runtime changed.');
+    }
   }
 
   getBaseUrl(): string {
@@ -494,17 +521,28 @@ class OpencodeService {
    * This is intentionally NOT the same as local filesystem access in the UI runtime.
    */
   async probeDirectory(directory: string): Promise<boolean> {
+    return (await this.getDirectoryAvailability(directory)) === "available";
+  }
+
+  /**
+   * Distinguishes a confirmed-missing directory from an unavailable probe.
+   * Offline, permission, and other transport failures stay `unknown` so callers
+   * do not treat a temporary outage as proof the path was deleted.
+   */
+  async getDirectoryAvailability(directory: string): Promise<DirectoryAvailability> {
     const normalized = this.normalizeCandidatePath(directory);
     if (!normalized) {
-      return false;
+      return "unknown";
     }
     try {
-      const response = await this.client.path.get({ directory: normalized });
-      const info = response.data as { directory?: unknown } | undefined;
-      const returned = typeof info?.directory === 'string' ? info.directory : null;
-      return Boolean(returned && returned.trim().length > 0);
-    } catch {
-      return false;
+      const response = await this.client.path.get({ directory: normalized }) as SdkResult<{ directory?: unknown }>;
+      if (response.error) {
+        return isMissingDirectoryError(response.error) ? "missing" : "unknown";
+      }
+      const returned = typeof response.data?.directory === "string" ? response.data.directory.trim() : "";
+      return returned ? "available" : "unknown";
+    } catch (error) {
+      return isMissingDirectoryError(error) ? "missing" : "unknown";
     }
   }
 
@@ -739,6 +777,7 @@ class OpencodeService {
   }
 
   async sendMessage(params: {
+    runtimeKey?: string;
     id: string;
     providerID: string;
     modelID: string;
@@ -764,8 +803,10 @@ class OpencodeService {
     };
     directory?: string | null;
   }): Promise<string> {
-    // Reuse one client-side message ID across retries. The server accepts this
-    // as the real user message ID, making ambiguous network retries idempotent.
+    this.assertRuntimeUnchanged(params.runtimeKey);
+
+    // Use the optimistic/client-generated ID as the real user message ID so SSE
+    // can reconcile the echoed server message in-place.
     const messageId = params.messageId ?? ascendingId("msg");
 
     // Build parts array using SDK types (TextPartInput | FilePartInput) plus lightweight agent parts
@@ -847,78 +888,74 @@ class OpencodeService {
     }
 
     assertProviderCircuitClosed(params.providerID);
+    this.assertRuntimeUnchanged(params.runtimeKey);
 
-    let response!: Response;
+    let response: Response;
 
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const result = await this.client.session.promptAsync({
-          sessionID: params.id,
-          ...(requestDirectory ? { directory: requestDirectory } : {}),
-          model: {
-            providerID: params.providerID,
-            modelID: params.modelID,
-          },
-          agent: params.agent,
-          variant: params.variant,
-          messageID: messageId,
-          ...(params.delivery ? { delivery: params.delivery } : {}),
-          ...(params.format ? { format: params.format } : {}),
-          parts,
-        });
-        if (result.response instanceof Response) {
-          response = result.response;
-        } else if (result.error) {
-          const status = (result as SdkResult<unknown>).response?.status || 500;
-          response = new Response(JSON.stringify(result.error), { status });
-        } else {
-          response = new Response(JSON.stringify(result.data ?? true), { status: 200 });
+    try {
+      const result = await this.client.session.promptAsync({
+        sessionID: params.id,
+        ...(requestDirectory ? { directory: requestDirectory } : {}),
+        model: {
+          providerID: params.providerID,
+          modelID: params.modelID,
+        },
+        agent: params.agent,
+        variant: params.variant,
+        messageID: messageId,
+        ...(params.delivery ? { delivery: params.delivery } : {}),
+        ...(params.format ? { format: params.format } : {}),
+        parts,
+      });
+      if (result.response instanceof Response) {
+        response = result.response;
+      } else if (result.error) {
+        const status = (result as SdkResult<unknown>).response?.status;
+        if (!status) {
+          // The SDK caught a thrown fetch error (network/tunnel transport
+          // failure) — there is no HTTP response to report. Never fabricate a
+          // status: surface it as a transport error so callers treat it like
+          // any other network failure instead of a server 500.
+          // Preserve the transport's "dispatched, outcome unknown" tag through
+          // the wrap: without it the caller cannot tell a lost response from a
+          // send that never reached the server, and re-sends a running prompt.
+          const transportError = new Error(`Message send transport failure: ${formatSdkError(result.error)}`);
+          throw isAmbiguousTransportFailure(result.error)
+            ? markAmbiguousTransportFailure(transportError)
+            : transportError;
         }
-      } catch (error) {
-        if (attempt < 2 && isRetryableFetchError(error)) {
-          const delay = getRetryDelayMs(attempt);
-          console.warn(
-            `[prompt] fetch failed for ${params.providerID}/${params.modelID} (attempt ${attempt + 1}/3), retrying in ${delay}ms`,
-            (error as Error)?.message
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
-        recordProviderError(params.providerID);
-        throw error;
+        response = new Response(JSON.stringify(result.error), { status });
+      } else {
+        response = new Response(JSON.stringify(result.data ?? true), { status: 200 });
       }
-
-      if (response.ok) {
-        recordProviderSuccess(params.providerID);
-        return messageId;
-      }
-
-      if (shouldRetry(params.providerID, response.status, attempt)) {
-        const delay = getRetryDelayMs(attempt);
-        console.warn(
-          `[prompt] ${response.status} for ${params.providerID}/${params.modelID} (attempt ${attempt + 1}/3), retrying in ${delay}ms`
-        );
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        continue;
-      }
-
-      let detail = '';
-      try {
-        detail = await response.text();
-      } catch {
-        // ignore
-      }
-      const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
-      const error = new Error(`Failed to send message (${response.status})${suffix}`);
-      recordProviderError(params.providerID, response.status);
+    } catch (error) {
+      // Do not retry prompt_async after a transport failure: through a remote
+      // tunnel the POST may already be running server-side even though the
+      // client lost the response.
+      recordProviderError(params.providerID);
       throw error;
     }
-    // Defensive fallback — all loop paths return/throw, but TypeScript
-    // control flow analysis cannot prove exhaustiveness without this.
-    throw new Error('Failed to send message after retries');
+
+    if (response.ok) {
+      recordProviderSuccess(params.providerID);
+      return messageId;
+    }
+
+    let detail = '';
+    try {
+      detail = await response.text();
+    } catch {
+      // ignore
+    }
+    const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
+    const error = new Error(`Failed to send message (${response.status})${suffix}`) as Error & { status?: number };
+    error.status = response.status;
+    recordProviderError(params.providerID, response.status);
+    throw error;
   }
 
   async sendCommand(params: {
+    runtimeKey?: string;
     id: string;
     providerID: string;
     modelID: string;
@@ -930,6 +967,8 @@ class OpencodeService {
     messageId?: string;
     directory?: string | null;
   }): Promise<string> {
+    this.assertRuntimeUnchanged(params.runtimeKey);
+
     const tempMessageId = params.messageId ?? ascendingId("msg");
 
     const parts: FilePartInput[] = [];
@@ -940,6 +979,7 @@ class OpencodeService {
     }
 
     const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
+    this.assertRuntimeUnchanged(params.runtimeKey);
 
     const response = await this.client.session.command({
       sessionID: params.id,
@@ -969,6 +1009,7 @@ class OpencodeService {
   }
 
   async shellSession(params: {
+    runtimeKey?: string;
     sessionId: string;
     command: string;
     agent: string;
@@ -976,6 +1017,7 @@ class OpencodeService {
     messageId?: string;
     directory?: string | null;
   }): Promise<{ info: Message; parts: Part[] }> {
+    this.assertRuntimeUnchanged(params.runtimeKey);
     const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
     const response = await this.client.session.shell({
       sessionID: params.sessionId,
@@ -1126,6 +1168,107 @@ class OpencodeService {
       ...(options?.message ? { message: options.message } : {}),
     });
     return unwrapSdkOptional(response, 'permission.reply') === true;
+  }
+
+  /**
+   * Programmatically evaluate and (when approval is required) create a
+   * permission request for a session via the V2 endpoint introduced in
+   * OpenCode SDK v1.17.12. Wraps `session.permission.create`.
+   *
+   * Returns `{ id, effect }` on success, or `null` on any failure
+   * (network error, 4xx/5xx response, malformed payload, or pre-v1.17.12
+   * server without the V2 endpoint). Callers driving authoritative state
+   * must treat `null` as "unknown — do not act" rather than "permission
+   * allowed."
+   *
+   * Thin wrapper for future programmatic permission creation. The V1
+   * `permission.list` / `permission.reply` flow used by the auto-accept
+   * path is unchanged.
+   */
+  async createPermission(
+    sessionID: string,
+    action: string,
+    resources: string[],
+    options?: {
+      id?: string;
+      save?: string[];
+      metadata?: Record<string, unknown>;
+      source?: PermissionV2Source;
+      agent?: string;
+    }
+  ): Promise<{ id: string; effect: PermissionV2Effect } | null> {
+    try {
+      const response = await this.client.v2.session.permission.create({
+        sessionID,
+        action,
+        resources,
+        ...(options?.id ? { id: options.id } : {}),
+        ...(options?.save ? { save: options.save } : {}),
+        ...(options?.metadata ? { metadata: options.metadata } : {}),
+        ...(options?.source ? { source: options.source } : {}),
+        ...(options?.agent ? { agent: options.agent } : {}),
+      });
+      // Discriminated union narrowing on `error` (see fetchPermission).
+      if (response.error !== undefined) return null;
+      const payload = response.data?.data;
+      if (payload === undefined) return null;
+      return { id: payload.id, effect: payload.effect };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetch a pending permission request owned by a session via the V2
+   * endpoint introduced in OpenCode SDK v1.17.12. Wraps
+   * `session.permission.get`.
+   *
+   * Returns a tagged `FetchPermissionResult` so the caller can distinguish
+   * a confirmed-resolved permission (HTTP 404) from a fetch failure
+   * (network error, malformed response, or pre-v1.17.12 server without
+   * the V2 endpoint). The auto-accept flow uses this distinction to drop
+   * resolved permissions from the resync output, preventing stale
+   * `permission.list` entries from sticking around in the UI.
+   */
+  async fetchPermission(
+    sessionID: string,
+    requestID: string,
+    directory?: string,
+  ): Promise<FetchPermissionResult> {
+    try {
+      // The V2 endpoint does not accept a directory parameter. Callers that
+      // reconcile a known project must therefore select its scoped SDK client.
+      const client = directory ? this.getScopedSdkClient(directory) : this.client;
+      const response = await client.v2.session.permission.get({
+        sessionID,
+        requestID,
+      });
+      // The SDK returns a discriminated union on `error`/`data` (HeyApi
+      // `RequestResult` with `ThrowOnError = false`). The error branch
+      // collapses `data` to `undefined`; the data branch returns the
+      // 200-response payload as `{ data: PermissionV2Request }`. Narrow
+      // via `error` first, then unwrap the inner `data` field.
+      if (response.error === undefined) {
+        const payload = response.data?.data;
+        if (payload !== undefined) {
+          return { state: "ok", permission: payload };
+        }
+      }
+      // On the error branch the server has answered but the request was
+      // not found. V2SessionPermissionGetErrors maps 404 to
+      // `PermissionNotFoundError`, so the only server-confirmed
+      // "no longer pending" signal we have is HTTP 404.
+      if (response.response?.status === 404) {
+        return { state: "resolved" };
+      }
+      return { state: "unknown" };
+    } catch {
+      // Network failure, pre-v1.17.12 server, or runtimeFetch throwing.
+      // Treat as "unknown" — caller must decide what to do (auto-accept
+      // fails closed, but the permission stays in the resync output so
+      // the user can still act on it).
+      return { state: "unknown" };
+    }
   }
 
   /**
@@ -1488,9 +1631,10 @@ class OpencodeService {
     }));
   }
 
-  async listCommandsWithDetails(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
+  async listCommandsWithDetails(directory?: string | null): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
+    const requestDirectory = this.normalizeCandidatePath(directory ?? null) ?? this.currentDirectory;
     const response = await this.client.command.list(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
+      requestDirectory ? { directory: requestDirectory } : undefined
     );
     const commands = unwrapSdkData(response, 'command.list');
     // Return full command details including template
@@ -1583,7 +1727,7 @@ class OpencodeService {
   // File System Operations
   async createDirectory(
     dirPath: string,
-    options?: { allowOutsideWorkspace?: boolean }
+    options?: { allowOutsideWorkspace?: boolean; asProject?: boolean }
   ): Promise<{ success: boolean; path: string }> {
     const desktopFiles = getDesktopFilesApi();
     if (desktopFiles?.createDirectory) {
@@ -1593,6 +1737,24 @@ class OpencodeService {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(message || 'Failed to create directory');
       }
+    }
+
+    if (options?.asProject) {
+      const response = await runtimeFetch(`${this.baseUrl}/opencode/directory`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ path: dirPath, create: true }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Failed to create project directory' }));
+        throw new Error(error.error || 'Failed to create project directory');
+      }
+
+      const result = await response.json();
+      return { success: true, path: result.path };
     }
 
     const payload = {
@@ -1650,20 +1812,55 @@ class OpencodeService {
     }
 
     const task = (async () => {
-    const desktopFiles = getDesktopFilesApi();
-    if (desktopFiles) {
+      const desktopFiles = getDesktopFilesApi();
       try {
-        const result = await desktopFiles.listDirectory(directoryPath || '', options);
-        if (!result || !Array.isArray(result.entries)) {
-          return [];
+        if (desktopFiles) {
+          const result = await desktopFiles.listDirectory(directoryPath || '', options);
+          if (!result || !Array.isArray(result.entries)) {
+            throw new FilesystemError('Directory listing returned an invalid response', {
+              reason: 'invalid-response',
+            });
+          }
+          const entries = result.entries.map<FilesystemEntry>((entry) => ({
+            name: entry.name,
+            path: normalizeFsPath(entry.path),
+            isDirectory: !!entry.isDirectory,
+            isFile: !entry.isDirectory,
+            isSymbolicLink: false,
+          }));
+          this.listDirectoryCache.set(cacheKey, {
+            entries,
+            expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS,
+          });
+          return entries;
         }
-        const entries = result.entries.map<FilesystemEntry>((entry) => ({
-          name: entry.name,
-          path: normalizeFsPath(entry.path),
-          isDirectory: !!entry.isDirectory,
-          isFile: !entry.isDirectory,
-          isSymbolicLink: false,
-        }));
+
+        const params = new URLSearchParams();
+        if (directoryPath && directoryPath.trim().length > 0) {
+          params.set('path', directoryPath);
+        }
+        if (options?.respectGitignore) {
+          params.set('respectGitignore', 'true');
+        }
+        const query = params.toString();
+        const response = await runtimeFetch(`${this.baseUrl}/fs/list${query ? `?${query}` : ''}`);
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          const message = typeof error.error === 'string' ? error.error : 'Failed to list directory';
+          throw new FilesystemError(message, {
+            reason: parseFilesystemErrorReason((error as { reason?: unknown }).reason),
+            status: response.status,
+          });
+        }
+
+        const result = await response.json();
+        if (!result || !Array.isArray(result.entries)) {
+          throw new FilesystemError('Directory listing returned an invalid response', {
+            reason: 'invalid-response',
+          });
+        }
+
+        const entries = result.entries as FilesystemEntry[];
         this.listDirectoryCache.set(cacheKey, {
           entries,
           expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS,
@@ -1673,39 +1870,6 @@ class OpencodeService {
         console.error('Failed to list directory contents:', error);
         throw error;
       }
-    }
-
-    try {
-      const params = new URLSearchParams();
-      if (directoryPath && directoryPath.trim().length > 0) {
-        params.set('path', directoryPath);
-      }
-      if (options?.respectGitignore) {
-        params.set('respectGitignore', 'true');
-      }
-      const query = params.toString();
-      const response = await runtimeFetch(`${this.baseUrl}/fs/list${query ? `?${query}` : ''}`);
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        const message = typeof error.error === 'string' ? error.error : 'Failed to list directory';
-        throw new Error(message);
-      }
-
-      const result = await response.json();
-      if (!result || !Array.isArray(result.entries)) {
-        return [];
-      }
-
-      const entries = result.entries as FilesystemEntry[];
-      this.listDirectoryCache.set(cacheKey, {
-        entries,
-        expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS,
-      });
-      return entries;
-    } catch (error) {
-      console.error('Failed to list directory contents:', error);
-      throw error;
-    }
     })();
 
     const trackedTask = task.finally(() => {

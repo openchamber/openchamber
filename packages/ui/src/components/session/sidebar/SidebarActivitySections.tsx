@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import type { SessionNode } from './types';
 import { useI18n } from '@/lib/i18n';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { Icon } from "@/components/icon/Icon";
 import {
   collectSubtreeContainingId,
@@ -38,29 +39,31 @@ type Props = {
     renderContext?: 'project' | 'recent',
     renderExtras?: SessionNodeRenderExtras,
   ) => React.ReactNode;
-  currentSessionId: string | null;
   editingId: string | null;
   openSidebarMenuKey: string | null;
+  expansionState?: ReadonlySet<string>;
   variant?: 'section' | 'flat';
   initialVisibleCount?: number;
   batchSize?: number;
+  isDesktopShellRuntime: boolean;
 };
 
 type RenderExtras = SessionNodeRenderExtras;
 
 const MAX_VISIBLE_RECENT_SESSIONS = 7;
 
-export function SidebarActivitySections({
-  sections,
-  renderSessionNode,
-  currentSessionId,
-  editingId,
-  openSidebarMenuKey,
-  variant = 'section',
-  initialVisibleCount = MAX_VISIBLE_RECENT_SESSIONS,
-  batchSize = MAX_VISIBLE_RECENT_SESSIONS,
-}: Props): React.ReactNode {
+export function SidebarActivitySections(props: Props): React.ReactNode {
+  const {
+    sections,
+    renderSessionNode,
+    editingId,
+    openSidebarMenuKey,
+    variant = 'section',
+    initialVisibleCount = MAX_VISIBLE_RECENT_SESSIONS,
+    batchSize = MAX_VISIBLE_RECENT_SESSIONS,
+  } = props;
   const { t } = useI18n();
+  const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
   const [visibleCountBySection, setVisibleCountBySection] = React.useState<Map<string, number>>(new Map());
   const flatVariant = variant === 'flat';
@@ -101,8 +104,6 @@ export function SidebarActivitySections({
   }, [batchSize]);
 
   const buildRenderExtras = React.useCallback((nodes: SessionNode[]) => {
-    const subtreeContainsActive = new Set<string>();
-    collectSubtreeContainingId(nodes, currentSessionId, subtreeContainsActive);
     const subtreeContainsEditing = new Set<string>();
     collectSubtreeContainingId(nodes, editingId, subtreeContainsEditing);
     const menuOpenSessionId = resolveMenuOpenSessionId(nodes, openSidebarMenuKey, 'recent', false);
@@ -114,7 +115,6 @@ export function SidebarActivitySections({
     nodes.forEach(visit);
 
     const childRenderExtrasFor = (child: SessionNode): RenderExtras => ({
-      subtreeContainsActive,
       subtreeContainsEditing,
       menuOpenSessionId,
       nodeStructureKey: nodeStructureKeyByNode.get(child) ?? '',
@@ -122,13 +122,12 @@ export function SidebarActivitySections({
     });
 
     return (node: SessionNode): RenderExtras => ({
-      subtreeContainsActive,
       subtreeContainsEditing,
       menuOpenSessionId,
       nodeStructureKey: nodeStructureKeyByNode.get(node) ?? '',
       childRenderExtrasFor,
     });
-  }, [currentSessionId, editingId, openSidebarMenuKey]);
+  }, [editingId, openSidebarMenuKey]);
 
   const visibleSections = sections.filter((section) => section.items.length > 0);
   if (visibleSections.length === 0) {
@@ -136,7 +135,9 @@ export function SidebarActivitySections({
   }
 
   return (
-    <div className={cn(flatVariant ? 'space-y-0.5 pb-2' : 'space-y-2 pb-2 pt-1')}>
+    // No top padding: the recent header must start flush with the scroll
+    // edge, otherwise it visually "bumps" a few pixels before sticking.
+    <div className={cn(flatVariant ? 'space-y-0.5 pb-2' : 'space-y-2 pb-2')}>
       {visibleSections.map((section) => {
         const isCollapsed = collapsed.has(section.key);
         const visibleLimit = Math.max(
@@ -166,7 +167,7 @@ export function SidebarActivitySections({
                 <button
                   type="button"
                   onClick={() => showMoreSessions(section.key, visibleItems.length, section.items.length)}
-                  className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
+                  className="mt-0.5 flex items-center justify-start rounded-md pl-[26px] pr-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
                 >
                   {t('sessions.sidebar.group.showMore')}
                 </button>
@@ -176,26 +177,34 @@ export function SidebarActivitySections({
         }
 
         return (
-          <div key={section.key} className="space-y-1">
-            <button
-              type="button"
-              onClick={() => toggleSection(section.key)}
-              className="group flex w-full items-center gap-1 rounded-md px-0.5 py-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-              aria-expanded={!isCollapsed}
-            >
-              <span className="inline-flex h-4 w-4 items-center justify-center text-muted-foreground">
-                {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
-              </span>
-              <span className="text-[14px] font-normal text-foreground/95">{section.title}</span>
-            </button>
+          <div key={section.key} className="relative space-y-1">
+            <div className={cn(
+              '-ml-2.5 -mr-2',
+              stickyZoneHeaders && 'sticky top-0 z-20 bg-sidebar',
+            )} data-sidebar-sticky-header={stickyZoneHeaders ? 'true' : undefined}>
+              <button
+                type="button"
+                onClick={() => toggleSection(section.key)}
+                className="group flex w-full items-center gap-1.5 py-1 pl-4 pr-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                aria-expanded={!isCollapsed}
+              >
+                <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
+                  <Icon name="history" className={cn('h-3.5 w-3.5 text-muted-foreground/80', 'group-hover:hidden')} />
+                  <span className="hidden h-3.5 w-3.5 items-center justify-center text-muted-foreground group-hover:inline-flex">
+                    {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
+                  </span>
+                </span>
+                <span className="text-[14px] font-semibold lowercase text-foreground">{section.title}</span>
+              </button>
+            </div>
             {!isCollapsed ? (
-              <div className={cn('space-y-0.5 pl-7')}>
+              <div className={cn('space-y-0.5')}>
                 {visibleItems.map(renderItem)}
                 {remainingCount > 0 ? (
                   <button
                     type="button"
                     onClick={() => showMoreSessions(section.key, visibleItems.length, section.items.length)}
-                    className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
+                    className="mt-0.5 flex items-center justify-start rounded-md pl-[26px] pr-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
                   >
                     {t('sessions.sidebar.group.showMore')}
                   </button>
@@ -204,7 +213,7 @@ export function SidebarActivitySections({
                   <button
                     type="button"
                     onClick={() => resetSectionLimit(section.key)}
-                    className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
+                    className="mt-0.5 flex items-center justify-start rounded-md pl-[26px] pr-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
                   >
                     {t('sessions.sidebar.group.showFewer')}
                   </button>

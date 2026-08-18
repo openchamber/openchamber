@@ -5,9 +5,7 @@ const SETTINGS_ENDPOINT = '/api/config/settings';
 const RELOAD_ENDPOINT = '/api/config/reload';
 
 const sanitizePayload = (data: unknown): SettingsPayload => {
-  if (!data || typeof data !== 'object') {
-    return {};
-  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid settings response');
   return data as SettingsPayload;
 };
 
@@ -22,7 +20,7 @@ export const createWebSettingsAPI = (): SettingsAPI => ({
       throw new Error(`Failed to load settings: ${response.statusText}`);
     }
 
-    const payload = sanitizePayload(await response.json().catch(() => ({})));
+    const payload = sanitizePayload(await response.json());
     return {
       settings: payload,
       source: 'web',
@@ -44,7 +42,7 @@ export const createWebSettingsAPI = (): SettingsAPI => ({
       throw new Error(error.error || 'Failed to save settings');
     }
 
-    const payload = sanitizePayload(await response.json().catch(() => ({})));
+    const payload = sanitizePayload(await response.json());
     return payload;
   },
 

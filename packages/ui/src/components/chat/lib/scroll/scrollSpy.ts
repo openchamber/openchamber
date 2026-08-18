@@ -1,10 +1,4 @@
-export type VisibleTurn = {
-    id: string;
-    ratio: number;
-    top: number;
-};
-
-export type OffsetTurn = {
+type OffsetTurn = {
     id: string;
     top: number;
 };
@@ -13,31 +7,24 @@ type ScrollSpyInput = {
     onActive: (id: string) => void;
     raf?: (cb: FrameRequestCallback) => number;
     caf?: (id: number) => void;
-    IntersectionObserver?: typeof globalThis.IntersectionObserver;
     ResizeObserver?: typeof globalThis.ResizeObserver;
     MutationObserver?: typeof globalThis.MutationObserver;
 };
 
-const pickVisibleTurnId = (list: VisibleTurn[], line: number): string | undefined => {
-    if (list.length === 0) {
-        return undefined;
-    }
+// Reading line offset below the container top. The active turn is the last
+// one whose top edge sits at or above this line — a monotonic rule that stays
+// stable while scrolling inside a long turn (no visibility-ratio flip-flop).
+const READ_LINE_OFFSET_PX = 100;
 
-    const sorted = [...list].sort((a, b) => {
-        if (b.ratio !== a.ratio) {
-            return b.ratio - a.ratio;
-        }
+// The chat treats its bottom spacer as part of the pinned zone. Match that
+// boundary here so the rail reaches the final prompt even when its top never
+// crosses the reading line before the viewport enters that spacer.
+const BOTTOM_ANCHOR_MIN_PX = 48;
+const BOTTOM_ANCHOR_VIEWPORT_FACTOR = 0.1;
 
-        const distanceA = Math.abs(a.top - line);
-        const distanceB = Math.abs(b.top - line);
-        if (distanceA !== distanceB) {
-            return distanceA - distanceB;
-        }
-
-        return a.top - b.top;
-    });
-
-    return sorted[0]?.id;
+const isInBottomAnchorZone = (container: HTMLDivElement): boolean => {
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return distanceFromBottom <= Math.max(BOTTOM_ANCHOR_MIN_PX, container.clientHeight * BOTTOM_ANCHOR_VIEWPORT_FACTOR);
 };
 
 const pickOffsetTurnId = (list: OffsetTurn[], cutoff: number): string | undefined => {
@@ -71,12 +58,10 @@ const pickOffsetTurnId = (list: OffsetTurn[], cutoff: number): string | undefine
 export const createScrollSpy = (input: ScrollSpyInput) => {
     const raf = input.raf ?? requestAnimationFrame;
     const caf = input.caf ?? cancelAnimationFrame;
-    const CtorIO = input.IntersectionObserver ?? globalThis.IntersectionObserver;
     const CtorRO = input.ResizeObserver ?? globalThis.ResizeObserver;
     const CtorMO = input.MutationObserver ?? globalThis.MutationObserver;
 
     let root: HTMLDivElement | undefined;
-    let io: IntersectionObserver | undefined;
     let ro: ResizeObserver | undefined;
     let mo: MutationObserver | undefined;
     let frame: number | undefined;
@@ -85,8 +70,6 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
     let dirty = true;
 
     const nodes = new Map<string, HTMLElement>();
-    const idByElement = new WeakMap<HTMLElement, string>();
-    const visible = new Map<string, { ratio: number; top: number }>();
     let offsets: OffsetTurn[] = [];
 
     const schedule = () => {
@@ -122,23 +105,13 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
             return;
         }
 
-        const line = container.getBoundingClientRect().top + 100;
-        const next =
-            pickVisibleTurnId(
-                [...visible].map(([id, value]) => ({
-                    id,
-                    ratio: value.ratio,
-                    top: value.top,
-                })),
-                line,
-            )
-            ?? (() => {
-                if (dirty) {
-                    refreshOffsets();
-                }
-                return pickOffsetTurnId(offsets, container.scrollTop + 100);
-            })();
+        if (dirty) {
+            refreshOffsets();
+        }
 
+        const next = isInBottomAnchorZone(container)
+            ? offsets[offsets.length - 1]?.id
+            : pickOffsetTurnId(offsets, container.scrollTop + READ_LINE_OFFSET_PX);
         if (!next || next === active) {
             return;
         }
@@ -151,52 +124,6 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         const container = root;
         if (!container) {
             return;
-        }
-
-        io?.disconnect();
-        io = undefined;
-        if (CtorIO) {
-            try {
-                io = new CtorIO(
-                    (entries) => {
-                        for (const entry of entries) {
-                            const element = entry.target;
-                            if (!(element instanceof HTMLElement)) {
-                                continue;
-                            }
-
-                            const key = idByElement.get(element);
-                            if (!key) {
-                                continue;
-                            }
-
-                            if (!entry.isIntersecting || entry.intersectionRatio <= 0) {
-                                visible.delete(key);
-                                continue;
-                            }
-
-                            visible.set(key, {
-                                ratio: entry.intersectionRatio,
-                                top: entry.boundingClientRect.top,
-                            });
-                        }
-
-                        schedule();
-                    },
-                    {
-                        root: container,
-                        threshold: [0, 0.25, 0.5, 0.75, 1],
-                    },
-                );
-            } catch {
-                io = undefined;
-            }
-        }
-
-        if (io) {
-            for (const element of nodes.values()) {
-                io.observe(element);
-            }
         }
 
         clearTimeout(roDebounce);
@@ -245,7 +172,6 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         }
 
         root = element;
-        visible.clear();
         active = undefined;
         observe();
     };
@@ -253,15 +179,10 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
     const register = (element: HTMLElement, key: string) => {
         const previous = nodes.get(key);
         if (previous && previous !== element) {
-            io?.unobserve(previous);
             ro?.unobserve(previous);
         }
 
         nodes.set(key, element);
-        idByElement.set(element, key);
-        if (io) {
-            io.observe(element);
-        }
         if (ro) {
             ro.observe(element);
         }
@@ -275,10 +196,8 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
             return;
         }
 
-        io?.unobserve(element);
         ro?.unobserve(element);
         nodes.delete(key);
-        visible.delete(key);
         dirty = true;
         schedule();
     };
@@ -290,12 +209,10 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
 
     const clear = () => {
         for (const element of nodes.values()) {
-            io?.unobserve(element);
             ro?.unobserve(element);
         }
 
         nodes.clear();
-        visible.clear();
         offsets = [];
         active = undefined;
         dirty = true;
@@ -309,10 +226,8 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         clearTimeout(roDebounce);
         roDebounce = undefined;
         clear();
-        io?.disconnect();
         ro?.disconnect();
         mo?.disconnect();
-        io = undefined;
         ro = undefined;
         mo = undefined;
         root = undefined;

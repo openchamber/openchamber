@@ -1,21 +1,24 @@
 import React, { useRef, useEffect } from 'react';
 import { animate, motion, useMotionValue } from 'motion/react';
 import { Header } from './Header';
-import { BottomTerminalDock } from './BottomTerminalDock';
 import { Sidebar } from './Sidebar';
 import { SidebarTopBar } from './SidebarTopBar';
 import { TitlebarLeftControls } from './TitlebarLeftControls';
-import { RightSidebar } from './RightSidebar';
-import { ProjectContextPanel, RightSidebarTabs } from './RightSidebarTabs';
+import { ProjectContextPanel } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
+import { ContextPanelRail } from './ContextPanelRail';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
 import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
+import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
+import { ArchiveView } from '@/components/views/ArchiveView';
+import { WorktreesView } from '@/components/views/WorktreesView';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { MultiRunLauncher } from '@/components/multirun';
+import { TerminalView } from '@/components/views/TerminalView';
 import { DrawerProvider } from '@/contexts/DrawerContext';
 
 import { useUIStore } from '@/stores/useUIStore';
@@ -26,39 +29,68 @@ import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 import { ChatView } from '@/components/views/ChatView';
-import { DiffView } from '@/components/views/DiffView';
-import { FilesView } from '@/components/views/FilesView';
-import { GitView } from '@/components/views/GitView';
-import { PlanView } from '@/components/views/PlanView';
 
-// Heavy views loaded on-demand to reduce initial bundle parse time.
-const TerminalView = lazyWithChunkRecovery(() => import('@/components/views/TerminalView').then(m => ({ default: m.TerminalView })));
+// Keep TerminalView eager: the bottom dock reserves its height immediately, so
+// suspending here leaves a large blank panel on slower machines.
+// Other heavy views stay on-demand to reduce initial bundle parse time:
+// DiffView/FilesView pull the CodeMirror and @pierre/diffs stacks into the
+// startup graph when imported statically.
+const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then(m => ({ default: m.PlanView })));
+const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then(m => ({ default: m.GitView })));
+const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then(m => ({ default: m.DiffView })));
+const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then(m => ({ default: m.FilesView })));
 const DiagramView = lazyWithChunkRecovery(() => import('@/components/views/DiagramView').then(m => ({ default: m.DiagramView })));
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
-const MultiRunWindow = lazyWithChunkRecovery(() => import('@/components/views/MultiRunWindow').then(m => ({ default: m.MultiRunWindow })));
 
 export const MainLayout: React.FC = () => {
-    const RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH = 1140;
-    const RIGHT_SIDEBAR_AUTO_OPEN_WIDTH = 1220;
-    const BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT = 640;
-    const BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT = 700;
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
-    const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
-    const isBottomTerminalOpen = useUIStore((state) => state.isBottomTerminalOpen);
-    const setRightSidebarOpen = useUIStore((state) => state.setRightSidebarOpen);
-    const setBottomTerminalOpen = useUIStore((state) => state.setBottomTerminalOpen);
     const activeMainTab = useUIStore((state) => state.activeMainTab);
     const setIsMobile = useUIStore((state) => state.setIsMobile);
     const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
     const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
+    // Mount the windowed settings dialog only after its first open: rendering
+    // the lazy component (even closed) makes React fetch the SettingsView
+    // chunk graph (CodeMirror editor, vim mode, theme tooling) on startup.
+    // Once opened it stays mounted so the close animation and state behave as
+    // before.
+    const [settingsWindowMounted, setSettingsWindowMounted] = React.useState(false);
+    React.useEffect(() => {
+        if (isSettingsDialogOpen) {
+            setSettingsWindowMounted(true);
+        }
+    }, [isSettingsDialogOpen]);
     const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
-    const { isMobile, isTablet } = useDeviceInfo();
-    const rightSidebarAutoClosedRef = React.useRef(false);
-    const bottomTerminalAutoClosedRef = React.useRef(false);
+    const isScheduledTasksPageOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
+    const isArchivePageOpen = useUIStore((state) => state.isArchivePageOpen);
+    const worktreesPageProjectId = useUIStore((state) => state.worktreesPageProjectId);
+    // Any full-page surface replacing the chat area. While open, the chat and
+    // secondary views are fully hidden (not just covered) so none of their
+    // floating chrome bleeds through, and selecting a session / draft / main
+    // tab anywhere closes the surface.
+    const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || Boolean(worktreesPageProjectId) || isMultiRunLauncherOpen;
+
+    React.useEffect(() => {
+        const closeSurfacePages = () => useUIStore.getState().closeMainSurfaces();
+        const unsubscribeSession = useSessionUIStore.subscribe((state, prev) => {
+            const sessionSelected = Boolean(state.currentSessionId) && state.currentSessionId !== prev.currentSessionId;
+            // Draft identity change covers re-opening a draft while one is
+            // already open (the boolean alone never transitions then).
+            const draftOpened = Boolean(state.newSessionDraft?.open) && state.newSessionDraft !== prev.newSessionDraft;
+            if (sessionSelected || draftOpened) closeSurfacePages();
+        });
+        const unsubscribeTab = useUIStore.subscribe((state, prev) => {
+            if (state.activeMainTab !== prev.activeMainTab) closeSurfacePages();
+        });
+        return () => {
+            unsubscribeSession();
+            unsubscribeTab();
+        };
+    }, []);
+    const { isMobile } = useDeviceInfo();
     const mobilePanelsResetRef = React.useRef(false);
 
     // Mobile drawer state
@@ -70,7 +102,6 @@ export const MainLayout: React.FC = () => {
         setMobileLeftDrawerOpen(open);
         useUIStore.getState().setSessionSwitcherOpen(open);
     }, []);
-    const mobileRightDrawerOpenRef = React.useRef(false);
     const initialDrawerWidthRef = React.useRef(typeof window === 'undefined' ? 0 : window.innerWidth);
 
     // Left drawer motion value
@@ -112,7 +143,6 @@ export const MainLayout: React.FC = () => {
             setMobileRightDrawerVisible(false);
             return;
         }
-        mobileRightDrawerOpenRef.current = mobileRightSidebarOpen;
         if (mobileRightSidebarOpen) {
             setMobileRightDrawerVisible(true);
         }
@@ -162,10 +192,7 @@ export const MainLayout: React.FC = () => {
         mobilePanelsResetRef.current = true;
         setMobileSessionPanelOpen(false);
         setMobileRightSidebarOpen(false);
-        if (useUIStore.getState().isRightSidebarOpen) {
-            setRightSidebarOpen(false);
-        }
-    }, [isMobile, setMobileSessionPanelOpen, setRightSidebarOpen]);
+    }, [isMobile, setMobileSessionPanelOpen]);
 
     useEffect(() => {
         if (!isMobile || activeMainTab !== 'chat' || mobileLeftDrawerOpen || mobileRightSidebarOpen || isSettingsDialogOpen) {
@@ -192,7 +219,7 @@ export const MainLayout: React.FC = () => {
                     return;
                 }
 
-                sessionState.openNewSessionDraft();
+                sessionState.openNewSessionDraft({ automatic: true });
             }, delayMs);
         };
 
@@ -214,10 +241,7 @@ export const MainLayout: React.FC = () => {
 
         setMobileSessionPanelOpen(false);
         setMobileRightSidebarOpen(false);
-        if (isRightSidebarOpen) {
-            setRightSidebarOpen(false);
-        }
-    }, [isMobile, isSettingsDialogOpen, isRightSidebarOpen, setMobileSessionPanelOpen, setRightSidebarOpen]);
+    }, [isMobile, isSettingsDialogOpen, setMobileSessionPanelOpen]);
 
     useUpdatePolling();
 
@@ -228,127 +252,6 @@ export const MainLayout: React.FC = () => {
         }
     }, [isMobile, setIsMobile]);
 
-    React.useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
-
-        let frameId: number | undefined;
-
-        const handleResize = () => {
-            if (frameId !== undefined) {
-                return;
-            }
-            frameId = window.requestAnimationFrame(() => {
-                frameId = undefined;
-                useUIStore.getState().updateProportionalSidebarWidths();
-            });
-        };
-
-        window.addEventListener('resize', handleResize);
-
-        return () => {
-            window.removeEventListener('resize', handleResize);
-            if (frameId !== undefined) {
-                window.cancelAnimationFrame(frameId);
-            }
-        };
-    }, []);
-
-    React.useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
-
-        let frameId: number | undefined;
-
-        const handleResponsivePanels = () => {
-            const state = useUIStore.getState();
-            const width = window.innerWidth;
-            const height = window.innerHeight;
-
-            // Touch devices frequently resize when the on-screen keyboard opens.
-            // Treat panel auto-collapse/restore as desktop-only so keyboard
-            // viewport changes do not churn drawer or terminal layout state.
-            if (!isMobile && !isTablet) {
-                const shouldCloseRightSidebar = width < RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH;
-                const canAutoOpenRightSidebar = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
-
-                if (shouldCloseRightSidebar) {
-                    if (state.isRightSidebarOpen) {
-                        setRightSidebarOpen(false);
-                        rightSidebarAutoClosedRef.current = true;
-                    }
-                } else if (canAutoOpenRightSidebar && rightSidebarAutoClosedRef.current) {
-                    setRightSidebarOpen(true);
-                    rightSidebarAutoClosedRef.current = false;
-                }
-
-                const shouldCloseBottomTerminal =
-                    height < BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT;
-                const canAutoOpenBottomTerminal =
-                    height >= BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT;
-
-                if (shouldCloseBottomTerminal) {
-                    if (state.isBottomTerminalOpen) {
-                        setBottomTerminalOpen(false);
-                        bottomTerminalAutoClosedRef.current = true;
-                    }
-                } else if (canAutoOpenBottomTerminal && bottomTerminalAutoClosedRef.current) {
-                    setBottomTerminalOpen(true);
-                    bottomTerminalAutoClosedRef.current = false;
-                }
-            }
-        };
-
-        const handleResize = () => {
-            if (frameId !== undefined) {
-                return;
-            }
-            frameId = window.requestAnimationFrame(() => {
-                frameId = undefined;
-                handleResponsivePanels();
-            });
-        };
-
-        handleResponsivePanels();
-        window.addEventListener('resize', handleResize);
-
-        return () => {
-            window.removeEventListener('resize', handleResize);
-            if (frameId !== undefined) {
-                window.cancelAnimationFrame(frameId);
-            }
-        };
-    }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);
-
-    React.useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
-
-        const unsubscribe = useUIStore.subscribe((state, prevState) => {
-            const width = window.innerWidth;
-            const height = window.innerHeight;
-
-            const rightCanAutoOpen = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
-            const bottomCanAutoOpen =
-                height >= BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT;
-
-            if (state.isRightSidebarOpen !== prevState.isRightSidebarOpen && rightCanAutoOpen) {
-                rightSidebarAutoClosedRef.current = false;
-            }
-
-            if (state.isBottomTerminalOpen !== prevState.isBottomTerminalOpen && bottomCanAutoOpen) {
-                bottomTerminalAutoClosedRef.current = false;
-            }
-        });
-
-        return () => {
-            unsubscribe();
-        };
-    }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);
-
     const handleToggleMobileRightDrawer = React.useCallback(() => {
         if (mobileLeftDrawerOpen) {
             setMobileSessionPanelOpen(false);
@@ -357,6 +260,12 @@ export const MainLayout: React.FC = () => {
     }, [mobileLeftDrawerOpen, mobileRightSidebarOpen, setMobileSessionPanelOpen]);
 
     const secondaryView = React.useMemo(() => {
+        // Desktop surfaces live in the context panel; the only full-view
+        // overlays left there are the terminal (promoted by project actions)
+        // and the diagram viewer. Mobile keeps the full tab set.
+        if (!isMobile && activeMainTab !== 'terminal' && activeMainTab !== 'diagram') {
+            return null;
+        }
         switch (activeMainTab) {
             case 'plan':
                 return <React.Suspense fallback={null}><PlanView /></React.Suspense>;
@@ -365,7 +274,7 @@ export const MainLayout: React.FC = () => {
             case 'diff':
                 return <React.Suspense fallback={null}><DiffView /></React.Suspense>;
             case 'terminal':
-                return <React.Suspense fallback={null}><TerminalView /></React.Suspense>;
+                return <TerminalView />;
             case 'files':
                 return <React.Suspense fallback={null}><FilesView /></React.Suspense>;
             case 'context':
@@ -375,7 +284,7 @@ export const MainLayout: React.FC = () => {
             default:
                 return null;
         }
-    }, [activeMainTab, mobileRightSidebarOpen]);
+    }, [activeMainTab, isMobile, mobileRightSidebarOpen]);
 
     const isChatActive = activeMainTab === 'chat';
 
@@ -438,11 +347,11 @@ export const MainLayout: React.FC = () => {
                         )}
                     >
                         <main className="w-full h-full overflow-hidden bg-background relative" data-page-scroll-lock="true">
-                            <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
-                                <ErrorBoundary><ChatView /></ErrorBoundary>
+                            <div className={cn('absolute inset-0', (!isChatActive || isSurfacePageOpen) && 'invisible')}>
+                                <ErrorBoundary><ChatView active={isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
                             </div>
                             {secondaryView && (
-                                <div className="absolute inset-0">
+                                <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
                                     <ErrorBoundary>{secondaryView}</ErrorBoundary>
                                 </div>
                             )}
@@ -457,13 +366,33 @@ export const MainLayout: React.FC = () => {
                                     </ErrorBoundary>
                                 </div>
                             )}
-                            {mobileLeftDrawerVisible && (
-                                <motion.div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true" style={{ x: leftDrawerX }} aria-hidden={!mobileLeftDrawerOpen}>
-                                    <ErrorBoundary>
-                                        <SessionSidebar mobileVariant />
-                                    </ErrorBoundary>
-                                </motion.div>
-                            )}
+                            <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
+                            <ErrorBoundary><ArchiveView /></ErrorBoundary>
+                            <ErrorBoundary><WorktreesView /></ErrorBoundary>
+                            {/* Always mount SessionSidebar on mobile to match desktop behavior.
+                                Conditional mount (mobileLeftDrawerVisible && ...) caused a
+                                data-loading cascade on every drawer open: paginated sessions
+                                fetch, worktree discovery, repo status, PR status, and 10+ memo
+                                recomputations. On Android PWA this manifested as a >10s delay
+                                before the drawer became interactive (issue #1695). Visibility is
+                                controlled by the leftDrawerX transform (off-screen when closed).
+                                The invisible class matters when fully hidden: leftDrawerWidth is
+                                not recomputed on resize/rotation, so a closed drawer translated by
+                                the old width could otherwise peek into the viewport; it also keeps
+                                the off-screen sidebar out of the tab order and skips painting it. */}
+                            <motion.div
+                                className={cn(
+                                    'absolute inset-0 z-20 bg-sidebar',
+                                    !mobileLeftDrawerVisible && 'pointer-events-none invisible',
+                                )}
+                                data-page-scroll-lock="true"
+                                style={{ x: leftDrawerX }}
+                                aria-hidden={!mobileLeftDrawerOpen}
+                            >
+                                <ErrorBoundary>
+                                    <SessionSidebar mobileVariant isVisible={mobileLeftDrawerVisible} />
+                                </ErrorBoundary>
+                            </motion.div>
                             {mobileRightDrawerVisible && (
                                 <motion.div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true" style={{ x: rightDrawerX }} aria-hidden={!mobileRightSidebarOpen}>
                                     <ErrorBoundary>
@@ -498,64 +427,68 @@ export const MainLayout: React.FC = () => {
                         <Sidebar
                             isOpen={isSidebarOpen}
                             isMobile={isMobile}
-                            className="border-border/50"
+                            className="border-border"
                             topBar={<SidebarTopBar />}
                         >
-                            <SessionSidebar />
+                            <SessionSidebar isVisible={isSidebarOpen} />
                         </Sidebar>
                         <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
                             <Header />
                             <div className="relative flex flex-1 min-h-0 overflow-hidden bg-background" data-page-scroll-lock="true">
-                                <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden border-t border-border/50 bg-background" data-page-scroll-lock="true">
+                                <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden border-t border-border bg-background" data-page-scroll-lock="true">
                                     <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
-                                        <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
+                                        {/* Holds the chat and the context panel together, so its
+                                            width does not move when the context panel opens. The
+                                            work-status panel measures this rather than the chat,
+                                            which the context panel animates. */}
+                                        <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true" data-chat-area="true">
                                             <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
-                                                <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
-                                                    <ErrorBoundary><ChatView /></ErrorBoundary>
+                                                <div className={cn('absolute inset-0', (!isChatActive || isSurfacePageOpen) && 'invisible')}>
+                                                    <ErrorBoundary><ChatView active={isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
                                                 </div>
                                                 {secondaryView && (
-                                                    <div className="absolute inset-0">
+                                                    <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
                                                         <ErrorBoundary>{secondaryView}</ErrorBoundary>
                                                     </div>
                                                 )}
+                                                {isMultiRunLauncherOpen && (
+                                                    <div className="absolute inset-0 z-10 bg-background">
+                                                        <ErrorBoundary>
+                                                            {/* isWindowed: the app Header already shows the surface
+                                                                title, so skip the launcher's own title bar. */}
+                                                            <MultiRunLauncher
+                                                                isWindowed
+                                                                initialPrompt={multiRunLauncherPrefillPrompt}
+                                                                onCreated={() => setMultiRunLauncherOpen(false)}
+                                                                onCancel={() => setMultiRunLauncherOpen(false)}
+                                                            />
+                                                        </ErrorBoundary>
+                                                    </div>
+                                                )}
+                                                <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
+                                                <ErrorBoundary><ArchiveView /></ErrorBoundary>
+                                                <ErrorBoundary><WorktreesView /></ErrorBoundary>
                                             </main>
                                             <ContextPanel />
                                         </div>
                                     </div>
-                                    <BottomTerminalDock isOpen={isBottomTerminalOpen} isMobile={isMobile}>
-                                        {isBottomTerminalOpen ? (
-                                            <ErrorBoundary>
-                                                <React.Suspense fallback={null}>
-                                                    <TerminalView />
-                                                </React.Suspense>
-                                            </ErrorBoundary>
-                                        ) : null}
-                                    </BottomTerminalDock>
                                 </div>
-                                <RightSidebar
-                                    isOpen={isRightSidebarOpen}
-                                    className="bg-background border-t border-border/50"
-                                >
-                                    <ErrorBoundary><RightSidebarTabs /></ErrorBoundary>
-                                </RightSidebar>
+                                <div className="border-t border-border" data-page-scroll-lock="true">
+                                    <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
+                                </div>
                             </div>
                         </div>
                     </div>
 
                     {/* Desktop settings: windowed dialog with blur */}
-                    <React.Suspense fallback={null}>
-                        <SettingsWindow
-                            open={isSettingsDialogOpen}
-                            onOpenChange={setSettingsDialogOpen}
-                        />
-                    </React.Suspense>
-                    <React.Suspense fallback={null}>
-                        <MultiRunWindow
-                            open={isMultiRunLauncherOpen}
-                            onOpenChange={setMultiRunLauncherOpen}
-                            initialPrompt={multiRunLauncherPrefillPrompt}
-                        />
-                    </React.Suspense>
+                    {settingsWindowMounted ? (
+                        <React.Suspense fallback={null}>
+                            <SettingsWindow
+                                open={isSettingsDialogOpen}
+                                onOpenChange={setSettingsDialogOpen}
+                            />
+                        </React.Suspense>
+                    ) : null}
                 </>
             )}
 

@@ -123,9 +123,6 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     const isDark = theme.metadata.variant === 'dark';
     const strongAlpha = isDark ? 0.15 : 0.5;
     const softAlpha = isDark ? 0.1 : 0.3;
-    // Translucent fill painted over the native macOS vibrancy layer for the
-    // left sidebar — high enough alpha to stay legible, low enough to frost.
-    const vibrancyAlpha = isDark ? 0.66 : 0.76;
 
     if (sidebarBaseRgb) {
       vars.push(
@@ -134,9 +131,6 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
       vars.push(
         `  --sidebar-overlay-soft: rgb(${sidebarBaseRgb} / ${softAlpha}) !important;`,
       );
-      vars.push(
-        `  --sidebar-vibrancy-overlay: rgb(${sidebarBaseRgb} / ${vibrancyAlpha}) !important;`,
-      );
     } else {
       const base = theme.colors.surface.muted;
       vars.push(
@@ -144,9 +138,6 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
       );
       vars.push(
         `  --sidebar-overlay-soft: ${this.opacity(base, softAlpha)} !important;`,
-      );
-      vars.push(
-        `  --sidebar-vibrancy-overlay: ${this.opacity(base, vibrancyAlpha)} !important;`,
       );
     }
 
@@ -196,18 +187,6 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
 
     document.documentElement.setAttribute('data-theme', theme.metadata.variant);
 
-    const hasMacVibrancy = typeof window !== 'undefined'
-      && window.__OPENCHAMBER_ELECTRON__?.runtime === 'electron'
-      && window.__OPENCHAMBER_ELECTRON__?.macVibrancy === true;
-    document.documentElement.toggleAttribute('data-oc-vibrancy', hasMacVibrancy);
-    // Default the "ready" flag here (DOM is guaranteed to exist) rather than
-    // relying on the preload, which sets it at document-start when
-    // documentElement may not exist yet — that race left the sidebar stuck
-    // un-frosted on cold launch until a minimize/restore re-sent ready=true.
-    // The minimize/restore IPC continues to toggle this afterwards.
-    if (hasMacVibrancy) {
-      document.documentElement.toggleAttribute('data-oc-vibrancy-ready', true);
-    }
   }
 
   private generatePrimaryColors(primary: Theme['colors']['primary']): string[] {
@@ -564,6 +543,8 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push(`  --text-meta: ${typography.meta};`);
     vars.push('  /* Micro text - badges, shortcuts, indicators */');
     vars.push(`  --text-micro: ${typography.micro};`);
+    vars.push('  /* Settings page titles - larger than section headers */');
+    vars.push(`  --text-settings-page-title: ${typography.settingsPageTitle};`);
 
      vars.push('  /* Heading line height and letter spacing */');
      vars.push('  --h1-line-height: 1.25rem;');
@@ -627,7 +608,9 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push('  --code-inline-line-height: 1rem;');
     vars.push('  --code-inline-letter-spacing: 0;');
     vars.push('  --code-inline-font-weight: 400;');
-    vars.push('  --code-block-line-height: 1.4rem;');
+    // Tool and Markdown code output can stream. Keep its used line height on
+    // the pixel grid so incremental content growth cannot accumulate remainders.
+    vars.push('  --code-block-line-height: round(1.4rem, 1px);');
     vars.push('  --code-block-letter-spacing: 0;');
     vars.push('  --code-block-font-weight: 400;');
     vars.push('  --code-line-numbers-line-height: 1.25rem;');
@@ -657,7 +640,7 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push('  --markdown-link-line-height: 1.5rem;');
     vars.push('  --markdown-link-letter-spacing: 0;');
     vars.push('  --markdown-link-font-weight: var(--ui-regular-font-weight, 400);');
-    vars.push('  --markdown-code-line-height: 1.35;');
+    vars.push('  --markdown-code-line-height: round(1.35em, 1px);');
     vars.push('  --markdown-code-letter-spacing: 0;');
     vars.push('  --markdown-code-font-weight: 400;');
     vars.push('  --markdown-code-block-letter-spacing: 0;');

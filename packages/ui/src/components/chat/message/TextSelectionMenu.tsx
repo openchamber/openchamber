@@ -9,11 +9,15 @@ import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
-import { OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH, getProjectNotesAndTodos, saveProjectNotesAndTodos } from '@/lib/openchamberConfig';
+import { PROJECT_NOTE_BODY_MAX_LENGTH } from '@/lib/projectContextApi';
+import { useProjectContextStore } from '@/stores/useProjectContextStore';
+import { summarizeSelectionForNotes } from '@/lib/smallModel';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
+import { focusChatInput } from '@/components/chat/composer/editor/dom';
 
 interface TextSelectionMenuProps {
   containerRef: React.RefObject<HTMLElement | null>;
@@ -31,179 +35,12 @@ interface SelectionPayload {
   rect: DOMRect;
 }
 
-const appendDistilledInsightToNotes = (existingNotes: string, insight: string): string => {
-  const trimmedInsight = insight.trim().replace(/^[-*+]\s+/, '').slice(0, OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH);
-  if (!trimmedInsight) {
-    return existingNotes;
-  }
-
-  const trimmedNotes = existingNotes.trimEnd();
-  return trimmedNotes ? `${trimmedNotes}\n${trimmedInsight}` : trimmedInsight;
-};
+const normalizeDistilledInsight = (insight: string): string => (
+  insight.trim().replace(/^[-*+]\s+/, '').slice(0, PROJECT_NOTE_BODY_MAX_LENGTH)
+);
 
 const DESKTOP_MENU_SIDE_MARGIN_PX = 8;
 const DESKTOP_MENU_FALLBACK_WIDTH_PX = 280;
-const BLOCK_TAGS = new Set([
-  'address', 'article', 'aside', 'blockquote', 'dd', 'div', 'dl', 'dt',
-  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3',
-  'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main', 'nav', 'ol', 'p', 'pre',
-  'section', 'table', 'ul',
-]);
-
-const normalizeLineBreaks = (value: string): string => value.replace(/\r\n?/g, '\n');
-
-const trimSelectionValue = (value: string): string => normalizeLineBreaks(value).trim();
-
-const textToMarkdownInline = (value: string): string => value.replace(/\s+/g, ' ').trim();
-
-const renderInlineMarkdownNode = (node: Node): string => {
-  if (node.nodeType === Node.TEXT_NODE) {
-    return textToMarkdownInline(node.textContent || '');
-  }
-
-  if (node.nodeType !== Node.ELEMENT_NODE) {
-    return '';
-  }
-
-  const element = node as HTMLElement;
-  const tag = element.tagName.toLowerCase();
-  const childText = Array.from(element.childNodes)
-    .map((child) => renderInlineMarkdownNode(child))
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (!childText && tag !== 'br') {
-    return '';
-  }
-
-  if (tag === 'br') return '\n';
-  if (tag === 'strong' || tag === 'b') return `**${childText}**`;
-  if (tag === 'em' || tag === 'i') return `*${childText}*`;
-  if (tag === 'code') return `\`${childText.replace(/`/g, '\\`')}\``;
-  if (tag === 'a') {
-    const href = element.getAttribute('href');
-    return href ? `[${childText}](${href})` : childText;
-  }
-
-  return childText;
-};
-
-const renderListMarkdown = (list: HTMLElement, ordered: boolean): string => {
-  const items = Array.from(list.children).filter(
-    (child): child is HTMLElement => child instanceof HTMLElement && child.tagName.toLowerCase() === 'li'
-  );
-
-  return items
-    .map((item, index) => {
-      const prefix = ordered ? `${index + 1}. ` : '- ';
-      const body = Array.from(item.childNodes)
-        .map((child) => renderInlineMarkdownNode(child))
-        .join('')
-        .replace(/\s+/g, ' ')
-        .trim();
-      return body ? `${prefix}${body}` : '';
-    })
-    .filter(Boolean)
-    .join('\n');
-};
-
-const renderBlockMarkdownNode = (node: Node): string => {
-  if (node.nodeType === Node.TEXT_NODE) {
-    return trimSelectionValue(node.textContent || '');
-  }
-
-  if (node.nodeType !== Node.ELEMENT_NODE) {
-    return '';
-  }
-
-  const element = node as HTMLElement;
-  const tag = element.tagName.toLowerCase();
-
-  if (tag === 'pre') {
-    const codeElement = element.querySelector('code');
-    const languageClass = codeElement?.className || '';
-    const language = (languageClass.match(/language-([\w-]+)/)?.[1] || '').trim();
-    const code = normalizeLineBreaks(codeElement?.textContent || element.textContent || '').replace(/\n$/, '');
-    return `\`\`\`${language}\n${code}\n\`\`\``;
-  }
-
-  if (tag === 'code') {
-    const code = normalizeLineBreaks(element.textContent || '').trim();
-    return code ? `\`${code.replace(/`/g, '\\`')}\`` : '';
-  }
-
-  if (tag === 'ul') return renderListMarkdown(element, false);
-  if (tag === 'ol') return renderListMarkdown(element, true);
-
-  if (tag === 'blockquote') {
-    const content = trimSelectionValue(
-      Array.from(element.childNodes).map((child) => renderBlockMarkdownNode(child)).join('\n')
-    );
-    return content
-      .split('\n')
-      .filter((line) => line.length > 0)
-      .map((line) => `> ${line}`)
-      .join('\n');
-  }
-
-  if (/^h[1-6]$/.test(tag)) {
-    const level = Number.parseInt(tag[1], 10);
-    const text = trimSelectionValue(Array.from(element.childNodes).map((child) => renderInlineMarkdownNode(child)).join(''));
-    return text ? `${'#'.repeat(level)} ${text}` : '';
-  }
-
-  if (tag === 'p' || tag === 'div' || tag === 'li') {
-    return trimSelectionValue(Array.from(element.childNodes).map((child) => renderInlineMarkdownNode(child)).join(''));
-  }
-
-  const blockChildren = Array.from(element.childNodes)
-    .map((child) => renderBlockMarkdownNode(child))
-    .filter((child) => child.length > 0);
-  if (blockChildren.length > 0) {
-    return blockChildren.join('\n\n');
-  }
-
-  return trimSelectionValue(Array.from(element.childNodes).map((child) => renderInlineMarkdownNode(child)).join(''));
-};
-
-const isInlineSelectionFragment = (fragment: DocumentFragment): boolean => {
-  return Array.from(fragment.childNodes).every((node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      return true;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) {
-      return true;
-    }
-
-    const element = node as HTMLElement;
-    return !BLOCK_TAGS.has(element.tagName.toLowerCase());
-  });
-};
-
-const rangeToMarkdown = (range: Range, plainText: string): string => {
-  const fragment = range.cloneContents();
-
-  if (isInlineSelectionFragment(fragment)) {
-    const inlineMarkdown = trimSelectionValue(
-      Array.from(fragment.childNodes)
-        .map((node) => renderInlineMarkdownNode(node))
-        .join('')
-    );
-    if (inlineMarkdown) {
-      return inlineMarkdown;
-    }
-  }
-
-  const markdown = Array.from(fragment.childNodes)
-    .map((node) => renderBlockMarkdownNode(node))
-    .filter((value) => value.length > 0)
-    .join('\n\n')
-    .trim();
-
-  return markdown || trimSelectionValue(plainText);
-};
-
 export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerRef }) => {
   const { t } = useI18n();
   const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, show: false });
@@ -461,13 +298,16 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const handleAddToChat = React.useCallback(() => {
     if (!selectedTextMarkdown) return;
 
-    const markdownBlock = `\`\`\`md\n${selectedTextMarkdown}\n\`\`\``;
+    const markdownBlock = wrapMarkdownSelectionForChat(selectedTextMarkdown);
     setPendingInputText(markdownBlock, 'append');
     
     hideMenu();
     
     // Clear selection
     window.getSelection()?.removeAllRanges();
+    queueMicrotask(() => {
+      focusChatInput();
+    });
   }, [selectedTextMarkdown, setPendingInputText, hideMenu]);
 
   const handleCreateNewSession = React.useCallback(async () => {
@@ -518,20 +358,25 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
     try {
       setIsAddingToNotes(true);
-      const noteText = selectedTextMarkdown || selectedText;
-      const projectData = await getProjectNotesAndTodos(currentProjectRef);
-      const nextNotes = appendDistilledInsightToNotes(projectData.notes, noteText);
-      const saved = await saveProjectNotesAndTodos(currentProjectRef, {
-        notes: nextNotes,
-        todos: projectData.todos,
+      // Long selections are distilled into a compact note by the small model;
+      // short ones (and any generation failure) go in verbatim.
+      const noteText = await summarizeSelectionForNotes(selectedTextMarkdown || selectedText, currentSessionId);
+      const insight = normalizeDistilledInsight(noteText);
+      if (!insight) {
+        toast.error(t('chat.textSelection.toast.addToNotesFailed'));
+        return;
+      }
+      // Recorded as its own note with provenance, so the distilled insight can
+      // later be traced back to the conversation it came from.
+      const saved = await useProjectContextStore.getState().createNote(currentProjectRef, {
+        body: insight,
+        source: 'selection',
+        ...(currentSessionId ? { origin: { sessionId: currentSessionId } } : {}),
       });
       if (!saved) {
         toast.error(t('chat.textSelection.toast.addToNotesFailed'));
         return;
       }
-      window.dispatchEvent(new CustomEvent('openchamber:project-notes-updated', {
-        detail: { projectId: currentProjectRef.id },
-      }));
       toast.success(t('chat.textSelection.toast.addToNotesSuccess'));
       hideMenu();
       window.getSelection()?.removeAllRanges();
@@ -541,7 +386,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     } finally {
       setIsAddingToNotes(false);
     }
-  }, [currentProjectRef, hideMenu, selectedText, selectedTextMarkdown, t]);
+  }, [currentProjectRef, currentSessionId, hideMenu, selectedText, selectedTextMarkdown, t]);
 
   if (!position.show) return null;
 

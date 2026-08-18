@@ -52,7 +52,7 @@ interface PierreDiffViewerProps {
  * and enables touch-friendly line interactions. Re-exported so plain
  * <PierreFile> consumers (e.g. `MobileFilesSurface`) can inject the same.
  */
-export const PIERRE_RUNTIME_BASE_CSS = `
+const PIERRE_RUNTIME_BASE_CSS = `
   :host {
     font-family: var(--font-mono);
     font-size: var(--text-code);

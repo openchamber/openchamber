@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- usesCleartextTraffic: OpenChamber connects to user-hosted servers over
+         plain http:// on the local network (LAN transport). Android blocks all
+         cleartext HTTP by default (targetSdk >= 28), which silently failed every
+         LAN probe and forced Android onto relay-only. This mirrors the iOS ATS
+         exceptions (NSAllowsArbitraryLoadsInWebContent + NSAllowsLocalNetworking). -->
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
@@ -28,13 +34,6 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
-
-        <!-- Tell Play Services to download the ML Kit barcode "code scanner" module (used by
-             @capacitor-mlkit/barcode-scanning's scan()) at install time, so the QR pairing scan
-             works without a per-scan module download. -->
-        <meta-data
-            android:name="com.google.mlkit.vision.DEPENDENCIES"
-            android:value="barcode_ui" />
 
         <!-- Small icon shown in the status bar / notification shade for FCM notifications the
              system displays while the app is backgrounded. Must be a monochrome silhouette. -->

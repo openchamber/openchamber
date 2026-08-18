@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { GitStatus } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -39,7 +40,7 @@ const createDirectoryState = (status: GitStatus): DirectoryGitState => ({
   identity: null,
   diffCache: new Map(),
   indexRevision: 0,
-  lastRepoCheckAt: 0,
+  lastRepoCheckAt: Date.now(),
   lastStatusFetch: 0,
   lastStatusChange: 0,
   lastLogFetch: 0,
@@ -70,13 +71,11 @@ const createGitApi = (getGitStatus: GitAPI['getGitStatus']): GitAPI => ({
 
 describe('useGitStore', () => {
   beforeEach(() => {
-    useGitStore.setState({
-      directories: new Map(),
-      activeDirectory: null,
-    });
+    useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
   });
 
   test('does not reuse an in-flight light status request for full status', async () => {
+    setDirectoryStatus(createStatus());
     const requests: Deferred<GitStatus>[] = [];
     const statusCalls: Array<{ directory: string; options?: { mode?: 'light' } }> = [];
     const git = createGitApi((directory, options) => {
@@ -95,12 +94,18 @@ describe('useGitStore', () => {
       { directory: '/repo', options: undefined },
     ]);
 
-    requests[0].resolve(createStatus());
     requests[1].resolve(createStatus({ 'src/index.ts': { insertions: 1, deletions: 0 } }));
-    await Promise.all([lightPromise, fullPromise]);
+    await fullPromise;
+    requests[0].resolve(createStatus());
+    await lightPromise;
+
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.diffStats).toEqual({
+      'src/index.ts': { insertions: 1, deletions: 0 },
+    });
   });
 
   test('reuses an in-flight full status request for light status', async () => {
+    setDirectoryStatus(createStatus());
     const requests: Deferred<GitStatus>[] = [];
     const statusCalls: Array<{ directory: string; options?: { mode?: 'light' } }> = [];
     const git = createGitApi((directory, options) => {
@@ -119,6 +124,85 @@ describe('useGitStore', () => {
     requests[0].resolve(createStatus({ 'src/index.ts': { insertions: 1, deletions: 0 } }));
     const [fullResult, lightResult] = await Promise.all([fullPromise, lightPromise]);
     expect(lightResult).toBe(fullResult);
+  });
+
+  test('does not let an older status fetch undo an optimistic mutation', async () => {
+    const initial = createStatus(undefined, [{ path: 'src/index.ts', index: ' ', working_dir: 'M' }]);
+    setDirectoryStatus(initial);
+    const request = createDeferred<GitStatus>();
+    const git = createGitApi(() => request.promise);
+
+    const loading = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+    useGitStore.getState().moveStatusPathsOptimistically('/repo', ['src/index.ts'], 'stage');
+    request.resolve(initial);
+    await loading;
+
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.files).toEqual([
+      { path: 'src/index.ts', index: 'M', working_dir: ' ' },
+    ]);
+  });
+
+  test('rejects an old runtime completion after reset', async () => {
+    setDirectoryStatus(createStatus());
+    const request = createDeferred<GitStatus>();
+    const git = createGitApi(() => request.promise);
+    const loading = useGitStore.getState().fetchStatus('/repo', git, { silent: true });
+
+    useGitStore.getState().resetForRuntimeSwitch('runtime-b');
+    request.resolve(createStatus(undefined, [{ path: 'stale.ts', index: 'M', working_dir: ' ' }]));
+    await loading;
+
+    expect(useGitStore.getState().runtimeKey).toBe('runtime-b');
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status ?? null).toBe(null);
+  });
+
+  test('rejects direct diff commits captured for another runtime', () => {
+    useGitStore.getState().setDiff('/repo', 'stale.ts', { original: 'a', modified: 'b' }, 'runtime-a');
+    expect(useGitStore.getState().getDiff('/repo', 'stale.ts')).toBe(null);
+  });
+
+  test('clears cached file contents when a git refresh hint invalidates diffs', () => {
+    setDirectoryStatus(createStatus(
+      { 'src/index.ts': { insertions: 1, deletions: 1 } },
+      [{ path: 'src/index.ts', index: ' ', working_dir: 'M' }],
+    ));
+    useGitStore.getState().setDiff('/repo', 'src/index.ts', { original: 'old', modified: 'stale' });
+
+    useGitStore.getState().clearDiffCache('/repo');
+
+    expect(useGitStore.getState().getDiff('/repo', 'src/index.ts')).toBe(null);
+  });
+
+  test('invalidates only the requested cached file contents', () => {
+    setDirectoryStatus(createStatus(undefined, [
+      { path: 'src/first.ts', index: ' ', working_dir: 'M' },
+      { path: 'src/second.ts', index: ' ', working_dir: 'M' },
+    ]));
+    useGitStore.getState().setDiff('/repo', 'src/first.ts', { original: 'a', modified: 'b' });
+    useGitStore.getState().setDiff('/repo', 'src/second.ts', { original: 'c', modified: 'd' });
+
+    useGitStore.getState().clearDiffCache('/repo', ['src/first.ts']);
+
+    expect(useGitStore.getState().getDiff('/repo', 'src/first.ts')).toBe(null);
+    expect(useGitStore.getState().getDiff('/repo', 'src/second.ts')?.modified).toBe('d');
+  });
+
+  test('keeps the newest branch request when completions are reversed', async () => {
+    const requests = [createDeferred<Awaited<ReturnType<GitAPI['getGitBranches']>>>(), createDeferred<Awaited<ReturnType<GitAPI['getGitBranches']>>>()];
+    let index = 0;
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitBranches: () => requests[index++].promise,
+    };
+    const first = useGitStore.getState().fetchBranches('/repo', git);
+    const second = useGitStore.getState().fetchBranches('/repo', git);
+
+    requests[1].resolve({ all: ['new'], current: 'new', branches: {} });
+    await second;
+    requests[0].resolve({ all: ['old'], current: 'old', branches: {} });
+    await first;
+
+    expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.current).toBe('new');
   });
 
   test('optimistically stages modified files and preserves untouched file references', () => {

@@ -8,6 +8,7 @@ export interface QuotaProviderMeta {
 export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'claude', name: 'Claude' },
   { id: 'codex', name: 'Codex' },
+  { id: 'command-code', name: 'Command Code' },
   { id: 'cursor', name: 'Cursor' },
   { id: 'github-copilot', name: 'GitHub Copilot' },
   { id: 'google', name: 'Google' },
@@ -20,4 +21,9 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'minimax-coding-plan', name: 'MiniMax Coding Plan (minimax.io)' },
   { id: 'ollama-cloud', name: 'Ollama Cloud' },
   { id: 'wafer', name: 'Wafer.ai' },
+  { id: 'opencode-go', name: 'OpenCode Go' },
+  { id: 'crof', name: 'CrofAI' },
+  { id: 'deepseek', name: 'DeepSeek' },
+  { id: 'neuralwatt', name: 'NeuralWatt' },
+  { id: 'xai', name: 'xAI' },
 ];

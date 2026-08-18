@@ -14,6 +14,7 @@ import {
   type PasskeyStatus,
   type StoredPasskey,
 } from '@/lib/passkeys';
+import { SettingsSection, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
@@ -172,39 +173,30 @@ export const PasskeySettings: React.FC = () => {
   }, [t]);
 
   return (
-    <div className="mb-8">
-      <div className="mb-1 px-1">
-        <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.passkeys.title')}</h3>
-      </div>
-
-      <section className="px-2 pb-2 pt-0 space-y-2">
-        <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-          <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.passkeys.field.currentDevice')}</span>
-          </div>
-          <div className="flex items-center gap-2 sm:w-fit">
-            <Button
-              type="button"
-              variant={isRegistering ? 'secondary' : 'outline'}
-              size="xs"
-              onClick={() => void handleRegisterPasskey()}
-              disabled={isLoading || isResetting}
-              className="!font-normal"
-            >
-              {isRegistering ? t('settings.openchamber.passkeys.actions.cancelSetup') : t('settings.openchamber.passkeys.actions.add')}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => void handleResetAllAuth()}
-              disabled={isLoading || isRegistering || isResetting}
-              className="!font-normal text-muted-foreground hover:text-foreground"
-            >
-              {isResetting ? t('settings.openchamber.passkeys.actions.signingOut') : t('settings.openchamber.passkeys.actions.signOutEverywhere')}
-            </Button>
-          </div>
-        </div>
+    <SettingsSection title={t('settings.openchamber.passkeys.title')}>
+      <div className="space-y-2">
+        <SettingsFieldRow label={t('settings.openchamber.passkeys.field.currentDevice')}>
+          <Button
+            type="button"
+            variant={isRegistering ? 'secondary' : 'outline'}
+            size="xs"
+            onClick={() => void handleRegisterPasskey()}
+            disabled={isLoading || isResetting}
+            className="!font-normal"
+          >
+            {isRegistering ? t('settings.openchamber.passkeys.actions.cancelSetup') : t('settings.openchamber.passkeys.actions.add')}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={() => void handleResetAllAuth()}
+            disabled={isLoading || isRegistering || isResetting}
+            className="!font-normal text-muted-foreground hover:text-foreground"
+          >
+            {isResetting ? t('settings.openchamber.passkeys.actions.signingOut') : t('settings.openchamber.passkeys.actions.signOutEverywhere')}
+          </Button>
+        </SettingsFieldRow>
 
         {!status.enabled && (
           <p className="typography-meta text-muted-foreground">
@@ -225,42 +217,42 @@ export const PasskeySettings: React.FC = () => {
         ) : (
           <div className="space-y-1 pt-1">
             {passkeys.map((passkey) => (
-              <div key={passkey.id} className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-                <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                  <span className="typography-ui-label text-foreground truncate">{passkey.label}</span>
-                </div>
-                <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                  <span className="typography-meta text-muted-foreground truncate">
-                    {passkey.lastUsedAt
-                      ? t('settings.openchamber.passkeys.item.lastUsed', {
-                          time: formatTimestamp(passkey.lastUsedAt, t('settings.openchamber.passkeys.time.neverUsed'), timeFormatPreference),
-                        })
-                      : t('settings.openchamber.passkeys.item.added', {
-                          time: formatTimestamp(passkey.createdAt, t('settings.openchamber.passkeys.time.neverUsed'), timeFormatPreference),
-                        })}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => void handleRevokePasskey(passkey.id)}
-                    disabled={revokingId === passkey.id}
-                    className="!font-normal text-muted-foreground hover:text-foreground"
-                  >
-                    {revokingId === passkey.id ? t('settings.openchamber.passkeys.actions.removing') : t('settings.common.actions.delete')}
-                  </Button>
-                </div>
-              </div>
+              <SettingsFieldRow
+                key={passkey.id}
+                label={<span className="truncate">{passkey.label}</span>}
+                alignEnd={false}
+                controlClassName="justify-between sm:flex-1"
+              >
+                <span className="typography-meta text-muted-foreground truncate">
+                  {passkey.lastUsedAt
+                    ? t('settings.openchamber.passkeys.item.lastUsed', {
+                        time: formatTimestamp(passkey.lastUsedAt, t('settings.openchamber.passkeys.time.neverUsed'), timeFormatPreference),
+                      })
+                    : t('settings.openchamber.passkeys.item.added', {
+                        time: formatTimestamp(passkey.createdAt, t('settings.openchamber.passkeys.time.neverUsed'), timeFormatPreference),
+                      })}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => void handleRevokePasskey(passkey.id)}
+                  disabled={revokingId === passkey.id}
+                  className="!font-normal text-muted-foreground hover:text-foreground"
+                >
+                  {revokingId === passkey.id ? t('settings.openchamber.passkeys.actions.removing') : t('settings.common.actions.delete')}
+                </Button>
+              </SettingsFieldRow>
             ))}
           </div>
         )}
-      </section>
+      </div>
 
       {errorMessage && (
-        <div className="mt-1 px-2 py-1.5">
+        <div className="mt-1 py-1.5">
           <p className="typography-meta text-[var(--status-error)]">{errorMessage}</p>
         </div>
       )}
-    </div>
+    </SettingsSection>
   );
 };

@@ -16,6 +16,12 @@
     --oc-scrollbar-thumb: oklch(0.32 0.03 50 / 0.4);
     --oc-scrollbar-thumb-hover: oklch(0.32 0.03 50 / 0.6);
     --padding-scale: 1;
+    /* Shared glass surfaces. Semantic surface tokens provide each tint. */
+    --oc-glass-blur: 22px;
+    --oc-glass-opacity: 52%;
+    --oc-glass-popover-opacity: 50%;
+    --oc-glass-tooltip-opacity: 62%;
+    --oc-glass-saturation: 1.24;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */
     --text-markdown: 0.9375rem;
@@ -24,6 +30,7 @@
     --text-ui-label: 0.8750rem;
     --text-meta: 0.875rem;
     --text-micro: 0.875rem;
+    --text-settings-page-title: 1.125rem;
 
     /* Default Light Theme */
     --background: oklch(0.97 0.02 85); /* Warm sand background */
@@ -45,7 +52,7 @@
     --border: oklch(0.85 0.02 70); /* Warm border */
     --input: oklch(0.88 0.02 75); /* Input background */
     --ring: oklch(0.65 0.2 55); /* Focus ring color */
-    --radius: 0.625rem;
+    --radius: 0.5625rem;
     --chart-1: oklch(0.58 0.15 230); /* Blue */
     --chart-2: oklch(0.58 0.15 145); /* Oasis green */
     --chart-3: oklch(0.65 0.2 55); /* Orange */
@@ -59,10 +66,14 @@
     --sidebar-accent-foreground: oklch(0.25 0.02 40); /* Dark warm text */
     --sidebar-border: oklch(0.85 0.02 70); /* Warm border */
     --sidebar-ring: oklch(0.65 0.2 55); /* Focus ring */
-    --sidebar-stuck-bg: var(--sidebar); /* Desktop sidebar sticky header background (match sidebar) */
   }
 
   .dark {
+    --oc-glass-blur: 26px;
+    --oc-glass-opacity: 50%;
+    --oc-glass-popover-opacity: 52%;
+    --oc-glass-tooltip-opacity: 64%;
+    --oc-glass-saturation: 1.16;
     /* Default Dark Theme - using OKLCH color space */
     --background: oklch(0.16 0.01 30); /* #151313 */
     --foreground: oklch(0.85 0.02 90); /* #cdccc3 */
@@ -96,19 +107,10 @@
     --sidebar-accent-foreground: oklch(0.85 0.02 90); /* #cdccc3 */
     --sidebar-border: oklch(0.31 0.01 35); /* #393836 */
     --sidebar-ring: oklch(0.77 0.17 85); /* #edb449 */
-    --sidebar-stuck-bg: var(--sidebar); /* Desktop sidebar sticky header background (match sidebar) */
   }
 
   * {
-    border-color: hsl(var(--border));
-  }
-
-  :root * {
-    border-color: rgba(194, 151, 77, 0.2); /* Warm golden sand borders for light mode */
-  }
-
-  .dark * {
-    border-color: rgba(57, 56, 54, 0.5); /* #393836 at 50% opacity */
+    border-color: var(--border); /* Theme border token (interactive.border) — opaque and theme-aware */
   }
 
   body {
@@ -140,13 +142,6 @@
   :root.desktop-runtime #root {
     background: var(--background) !important;
     background-color: var(--background) !important;
-  }
-
-  :root.desktop-runtime[data-oc-vibrancy],
-  :root.desktop-runtime[data-oc-vibrancy] body,
-  :root.desktop-runtime[data-oc-vibrancy] #root {
-    background: transparent !important;
-    background-color: transparent !important;
   }
 
   .font-sans {
@@ -189,25 +184,123 @@
     display: list-item !important;
   }
 
-  /* Remove focus rings globally (except inputs/textareas/dropdowns/selects) */
-  *:focus:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]) {
+  /* Remove focus rings globally (except inputs/textareas/dropdowns/selects/explicit accent rings) */
+  *:focus:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]):not(.focus-ring-accent):not([data-focus-ring="accent"]) {
     outline: none !important;
     box-shadow: none !important;
   }
 
-  *:focus-visible:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]) {
+  *:focus-visible:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]):not(.focus-ring-accent):not([data-focus-ring="accent"]) {
     outline: none !important;
+    box-shadow: none !important;
+  }
+
+  .focus-ring-accent:focus-visible,
+  [data-focus-ring="accent"]:focus-visible {
+    outline: 2px solid var(--primary-base) !important;
+    outline-offset: 2px !important;
     box-shadow: none !important;
   }
 }
 
+@layer components {
+  /* Shared translucent surfaces. Each variant only chooses its semantic tint;
+     blur, accessibility fallbacks, and floating-surface elevation stay common.
+     Utilities remain able to opt an individual consumer out. */
+  .oc-glass-popover,
+.oc-glass-tooltip,
+.oc-glass-panel {
+  background-color: color-mix(in srgb, var(--oc-glass-color) var(--oc-glass-opacity), transparent);
+  -webkit-backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
+  backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
+}
+
+.oc-glass-popover {
+  --oc-glass-color: var(--surface-elevated);
+  --oc-glass-opacity: var(--oc-glass-popover-opacity);
+}
+
+.oc-glass-tooltip {
+  --oc-glass-color: var(--surface-elevated);
+  --oc-glass-opacity: var(--oc-glass-tooltip-opacity);
+}
+
+.oc-glass-panel {
+  --oc-glass-color: var(--surface-muted);
+}
+
+.oc-glass-floating {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.8),
+    inset 0 0 0 1px rgb(0 0 0 / 0.04),
+    0 0 0 1px rgb(0 0 0 / 0.1),
+    0 1px 2px -0.5px rgb(0 0 0 / 0.08),
+    0 4px 8px -2px rgb(0 0 0 / 0.08),
+    0 12px 20px -4px rgb(0 0 0 / 0.08);
+}
+
+.dark .oc-glass-floating {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.12),
+    inset 0 0 0 1px rgb(255 255 255 / 0.08),
+    0 0 0 1px rgb(0 0 0 / 0.36),
+    0 1px 1px -0.5px rgb(0 0 0 / 0.22),
+    0 3px 3px -1.5px rgb(0 0 0 / 0.2),
+    0 6px 6px -3px rgb(0 0 0 / 0.16);
+}
+
+.oc-glass-backdrop {
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .oc-glass-popover,
+  .oc-glass-tooltip,
+  .oc-glass-panel {
+    background-color: var(--oc-glass-color);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .oc-glass-popover,
+  .oc-glass-tooltip,
+  .oc-glass-panel,
+  .oc-glass-backdrop {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .oc-glass-popover,
+  .oc-glass-tooltip,
+  .oc-glass-panel {
+    background-color: var(--oc-glass-color);
+  }
+}
+}
+
 @theme inline {
   --radius-none: 0;
-  --radius-sm: 0.25rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.625rem;
-  --radius-xl: 0.75rem;
+  --radius-sm: 0.25rem; /* 4px */
+  --radius-md: 0.4375rem; /* 7px */
+  --radius-lg: 0.5625rem; /* 9px */
+  --radius-xl: 0.75rem; /* 12px */
   --radius-full: 9999px;
+
+  /* Semantic spacing aliases (4/8px grid) */
+  --space-1: var(--spacing-1); /* 4px */
+  --space-2: var(--spacing-2); /* 8px */
+  --space-3: var(--spacing-3); /* 12px */
+  --space-4: var(--spacing-4); /* 16px */
+  --space-6: var(--spacing-6); /* 24px */
+  --space-8: var(--spacing-8); /* 32px */
+
+  /* Elevation / stacking */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --transition-fast: 150ms ease-in-out;
 
   /* Override Tailwind spacing scale with custom properties that respect --padding-scale */
   --spacing-0: 0;
@@ -280,6 +373,16 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Surface layer tokens (Theme.colors.surface.*) */
+  --color-surface-background: var(--surface-background);
+  --color-surface-foreground: var(--surface-foreground);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-muted-foreground: var(--surface-muted-foreground);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-elevated-foreground: var(--surface-elevated-foreground);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-surface-subtle: var(--surface-subtle);
 
   /* Interactive state tokens (Theme.colors.interactive.*) */
   --color-interactive-hover: var(--interactive-hover);

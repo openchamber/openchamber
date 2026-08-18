@@ -212,6 +212,56 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
+  /**
+   * Merge the server-owned `context.json` (notes/todos/plans) across a project
+   * id change.
+   *
+   * `moveDirectoryContents` only renames a file when the destination is free,
+   * so without this step an existing `<newId>/context.json` would silently
+   * discard everything stored under `<oldId>`. Every list is merged by identity
+   * so neither side loses entries.
+   *
+   * A version 1 context stored notes as a single string. It is left untouched
+   * here: `project-context` converts it on read, and converting in two places
+   * would mean two definitions of the same migration.
+   */
+  const mergeProjectContextFiles = async (oldStorageDir, newStorageDir) => {
+    const oldContextPath = path.join(oldStorageDir, 'context.json');
+    const newContextPath = path.join(newStorageDir, 'context.json');
+
+    const [oldContext, newContext] = await Promise.all([
+      readJsonFile(oldContextPath).catch(() => null),
+      readJsonFile(newContextPath).catch(() => null),
+    ]);
+
+    if (!oldContext || !newContext) {
+      // Nothing to reconcile: the plain directory move handles a single side.
+      return;
+    }
+
+    const mergeNotes = () => {
+      // One side may still be a version 1 string; keep whichever is a list, and
+      // prefer the destination when both are strings.
+      const oldIsList = Array.isArray(oldContext.notes);
+      const newIsList = Array.isArray(newContext.notes);
+      if (oldIsList && newIsList) {
+        return mergeByKey(oldContext.notes, newContext.notes, (item) => item.id);
+      }
+      if (newIsList) return newContext.notes;
+      if (oldIsList) return oldContext.notes;
+      return newContext.notes || oldContext.notes || '';
+    };
+
+    await writeJsonFile(newContextPath, {
+      ...oldContext,
+      ...newContext,
+      notes: mergeNotes(),
+      todos: mergeByKey(oldContext.todos, newContext.todos, (item) => item.id),
+      plans: mergeByKey(oldContext.plans, newContext.plans, (item) => item.id || item.file),
+    });
+    await fsPromises.rm(oldContextPath, { force: true });
+  };
+
   const migrateProjectScopedStorage = async ({ oldId, newId, projectPath }) => {
     if (!oldId || !newId || oldId === newId) {
       return;
@@ -232,6 +282,7 @@ export const createSettingsRuntime = (deps) => {
       await writeJsonFile(newConfigPath, merged);
     }
 
+    await mergeProjectContextFiles(oldStorageDir, newStorageDir);
     await moveDirectoryContents(oldStorageDir, newStorageDir);
     await fsPromises.rm(oldConfigPath, { force: true });
   };
@@ -438,6 +489,30 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
+  // Strict variant for callers that REGENERATE persisted identity when a key is
+  // absent (relay signing/encryption keys). The lenient reader above maps every
+  // failure — corrupt JSON, EACCES, transient I/O — to `{}`, which such callers
+  // cannot distinguish from "first run": they would mint a NEW identity, orphan
+  // every paired device and push binding, and overwrite the settings file with
+  // the empty spread. Here only a genuinely missing file means "no settings";
+  // any other failure (including a non-object payload) throws.
+  const readSettingsFromDiskStrict = async () => {
+    let raw;
+    try {
+      raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
+    } catch (error) {
+      if (error && typeof error === 'object' && error.code === 'ENOENT') {
+        return {};
+      }
+      throw error;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Settings file is malformed (non-object payload)');
+    }
+    return parsed;
+  };
+
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const isTransientWindowsReplaceError = (error) => {
@@ -478,14 +553,18 @@ export const createSettingsRuntime = (deps) => {
 
   const writeSettingsToDisk = async (settings) => {
     try {
-      await fsPromises.mkdir(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
+      const settingsDirectory = path.dirname(SETTINGS_FILE_PATH);
+      await fsPromises.mkdir(settingsDirectory, { recursive: true, mode: 0o700 });
+      if (process.platform !== 'win32') await fsPromises.chmod(settingsDirectory, 0o700);
       // Atomic write: Electron main and ssh-manager read this file via plain
       // readFile + JSON.parse and silently coerce parse errors to {}. A
       // partial read during a non-atomic writeFile would make their next
       // read-modify-write wipe the settings file.
       const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), 'utf8');
+      await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
+      if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
       await replaceFile(tmp, SETTINGS_FILE_PATH);
+      if (process.platform !== 'win32') await fsPromises.chmod(SETTINGS_FILE_PATH, 0o600);
     } catch (error) {
       console.warn('Failed to write settings file:', error);
       throw error;
@@ -870,6 +949,7 @@ export const createSettingsRuntime = (deps) => {
 
   return {
     readSettingsFromDisk,
+    readSettingsFromDiskStrict,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     persistSettings,

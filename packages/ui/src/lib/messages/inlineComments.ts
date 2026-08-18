@@ -1,4 +1,5 @@
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import { appendTerminalContexts } from './terminalContext';
 
 /**
  * Format a single inline comment draft into the standard message format
@@ -18,6 +19,14 @@ function formatInlineCommentDraft(draft: InlineCommentDraft): string {
 
   if (draft.source === 'preview-annotation') {
     return text ? `${code}\n\n${text}` : code;
+  }
+
+  if (draft.source === 'pr-comment') {
+    return `Attached GitHub PR comment (${fileLabel}):\n\n${code}${text ? `\n\n${text}` : ''}`;
+  }
+
+  if (draft.source === 'pr-check') {
+    return `Attached failed GitHub PR check (${fileLabel}):\n\`\`\`\n${code}\n\`\`\`${text ? `\n\n${text}` : ''}`;
   }
   
   // Plan and file format (no side)
@@ -45,13 +54,19 @@ function formatInlineCommentDrafts(drafts: InlineCommentDraft[]): string {
  */
 export function appendInlineComments(text: string, drafts: InlineCommentDraft[]): string {
   if (drafts.length === 0) return text;
-  
-  const formattedComments = formatInlineCommentDrafts(drafts);
-  
-  if (!text.trim()) {
-    return formattedComments;
+  const terminalDrafts = drafts.filter((draft) => draft.source === 'terminal');
+  const otherDrafts = drafts.filter((draft) => draft.source !== 'terminal');
+  const withComments = otherDrafts.length > 0
+    ? (text.trim() ? `${text}\n\n${formatInlineCommentDrafts(otherDrafts)}` : formatInlineCommentDrafts(otherDrafts))
+    : text;
+  if (terminalDrafts.length > 0) {
+    return appendTerminalContexts(withComments, terminalDrafts.map((draft) => ({
+      terminalId: draft.language,
+      terminalLabel: draft.fileLabel,
+      startLine: draft.startLine,
+      endLine: draft.endLine,
+      text: draft.code,
+    })));
   }
-  
-  return `${text}\n\n${formattedComments}`;
+  return withComments;
 }
-

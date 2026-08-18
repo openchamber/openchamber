@@ -288,6 +288,9 @@ const SortableProviderSection: React.FC<{
 };
 
 const STICKY_HEADER_OFFSET = 32;
+const STICKY_FADE_MAX_SIZE = 52;
+const STICKY_FADE_MIN_SIZE = 36;
+const STICKY_FADE_CLEAR_MAX_SIZE = 28;
 
 const scrollIntoView = (container: HTMLElement | null, node: HTMLElement | null) => {
   if (!node) return;
@@ -339,6 +342,11 @@ interface ModelPickerListProps {
   selectedModel?: { providerID: string; modelID: string } | null;
   hiddenModels?: HiddenModel[];
   allowedProviderIds?: string[];
+  /**
+   * Per-model gate, for callers whose feature needs a capability rather than a
+   * provider (e.g. structured output). Applied on top of `allowedProviderIds`.
+   */
+  isModelAllowed?: (providerID: string, modelID: string) => boolean;
   includeNotSelected?: boolean;
   onSelectNone?: () => void;
   selectionCount?: (entry: ModelPickerEntry) => number;
@@ -379,6 +387,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   selectedModel,
   hiddenModels = [],
   allowedProviderIds,
+  isModelAllowed,
   includeNotSelected = false,
   onSelectNone,
   selectionCount,
@@ -411,6 +420,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   const selectionStore = selectionStoreRef.current;
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const scrollRef = React.useRef<HTMLElement | null>(null);
+  const stickyFadeSizeRef = React.useRef(0);
+  const sectionHeaderSentinelRefs = React.useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const [stuckSectionHeaders, setStuckSectionHeaders] = React.useState<Set<string>>(new Set());
   const keyboardOwnsSelectionRef = React.useRef(false);
   const lastMousePositionRef = React.useRef<{ x: number; y: number } | null>(null);
   const collapsedRecord = useModelPickerSectionsStore((state) => state.collapsedSections);
@@ -430,7 +442,10 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   );
 
   const allowedProviderSet = React.useMemo(() => {
-    if (!allowedProviderIds || allowedProviderIds.length === 0) return null;
+    // undefined = no restriction; [] = allow none. Treating empty like
+    // "unrestricted" would resurface providers without a login in pickers that
+    // intentionally pass the authenticated-only list.
+    if (!allowedProviderIds) return null;
     return new Set(allowedProviderIds);
   }, [allowedProviderIds]);
 
@@ -448,17 +463,19 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
   const filteredFavorites = React.useMemo(() => favoriteModels.filter(({ model, providerID, modelID }) => {
     if (allowedProviderSet && !allowedProviderSet.has(providerID)) return false;
+    if (isModelAllowed && !isModelAllowed(providerID, modelID)) return false;
     if (isHidden(providerID, modelID)) return false;
     const providerName = providerById.get(providerID)?.name || providerID;
     return matchesQuery(getModelDisplayName(model), providerName);
-  }), [allowedProviderSet, favoriteModels, isHidden, matchesQuery, providerById]);
+  }), [allowedProviderSet, favoriteModels, isHidden, isModelAllowed, matchesQuery, providerById]);
 
   const filteredRecents = React.useMemo(() => recentModels.filter(({ model, providerID, modelID }) => {
     if (allowedProviderSet && !allowedProviderSet.has(providerID)) return false;
+    if (isModelAllowed && !isModelAllowed(providerID, modelID)) return false;
     if (isHidden(providerID, modelID)) return false;
     const providerName = providerById.get(providerID)?.name || providerID;
     return matchesQuery(getModelDisplayName(model), providerName);
-  }), [allowedProviderSet, isHidden, matchesQuery, providerById, recentModels]);
+  }), [allowedProviderSet, isHidden, isModelAllowed, matchesQuery, providerById, recentModels]);
 
   const orderedProviders = React.useMemo(() => {
     if (!providerOrder || providerOrder.length === 0) return providers;
@@ -477,11 +494,76 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       const filteredModels = models.filter((model) => {
         const modelID = typeof model.id === 'string' ? model.id : '';
         if (!modelID || isHidden(provider.id, modelID)) return false;
+        if (isModelAllowed && !isModelAllowed(provider.id, modelID)) return false;
         return matchesQuery(getModelDisplayName(model), provider.name || provider.id);
       });
       return { ...provider, models: filteredModels };
     })
-    .filter((provider) => provider.models.length > 0), [allowedProviderSet, isHidden, matchesQuery, orderedProviders]);
+    .filter((provider) => provider.models.length > 0), [allowedProviderSet, isHidden, isModelAllowed, matchesQuery, orderedProviders]);
+
+  const visibleSectionKeys = React.useMemo(() => [
+    ...(filteredFavorites.length > 0 ? ['favorites'] : []),
+    ...(filteredRecents.length > 0 ? ['recent'] : []),
+    ...filteredProviders.map((provider) => `provider:${provider.id}`),
+  ], [filteredFavorites.length, filteredProviders, filteredRecents.length]);
+
+  React.useEffect(() => {
+    if (!stickyHeaders || !scrollRef.current) {
+      setStuckSectionHeaders((previous) => previous.size === 0 ? previous : new Set());
+      return;
+    }
+
+    const root = scrollRef.current;
+    const observer = new IntersectionObserver((entries) => {
+      setStuckSectionHeaders((previous) => {
+        const next = new Set(previous);
+        let changed = false;
+        for (const entry of entries) {
+          const sectionKey = (entry.target as HTMLElement).dataset.modelSectionKey;
+          if (!sectionKey) continue;
+          const rootTop = entry.rootBounds?.top ?? root.getBoundingClientRect().top;
+          const isAboveScroller = !entry.isIntersecting && entry.boundingClientRect.top < rootTop;
+          if (next.has(sectionKey) === isAboveScroller) continue;
+          changed = true;
+          if (isAboveScroller) next.add(sectionKey);
+          else next.delete(sectionKey);
+        }
+        return changed ? next : previous;
+      });
+    }, { root, threshold: 0 });
+
+    sectionHeaderSentinelRefs.current.forEach((element) => {
+      if (element) observer.observe(element);
+    });
+    return () => observer.disconnect();
+  }, [stickyHeaders, visibleSectionKeys]);
+
+  const syncStickyFade = React.useCallback((scroller: HTMLElement) => {
+    const hasTopScroll = scroller.scrollTop > 1;
+    const fadeSize = hasTopScroll
+      ? Math.min(STICKY_FADE_MIN_SIZE + scroller.scrollTop, STICKY_FADE_MAX_SIZE)
+      : 0;
+    stickyFadeSizeRef.current = fadeSize;
+    scroller.style.setProperty('--scroll-shadow-top-size', `${fadeSize}px`);
+    scroller.style.setProperty(
+      '--scroll-shadow-top-clear-size',
+      `${Math.min(Math.max(fadeSize - 8, 0), STICKY_FADE_CLEAR_MAX_SIZE)}px`,
+    );
+  }, []);
+
+  const blockStickyFadeInteraction = React.useCallback((
+    event: React.MouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if ((event.target as Element).closest('[data-overlay-scrollbar-thumb], [data-model-picker-sticky-header]')) return;
+    const eventY = event.clientY - event.currentTarget.getBoundingClientRect().top;
+    if (eventY >= stickyFadeSizeRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (stickyHeaders && scrollRef.current) syncStickyFade(scrollRef.current);
+  }, [stickyHeaders, syncStickyFade, visibleSectionKeys]);
 
   const flatModelList = React.useMemo(() => {
     const items: ModelPickerEntry[] = [];
@@ -559,7 +641,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
   const headerClassName = cn(
     'typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 px-2 py-1.5',
-    stickyHeaders && 'sticky top-0 z-10 [background:linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))]',
+    stickyHeaders && 'sticky top-0 z-20',
     sectionHeaderClassName,
   );
 
@@ -666,6 +748,15 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   const isSectionCollapsed = (key: string) => collapsedSections.has(key);
   const toggleSectionCollapsed = (key: string) => toggleSection(key);
 
+  const renderSectionSentinel = (key: string) => stickyHeaders ? (
+    <div
+      ref={(element) => { sectionHeaderSentinelRefs.current.set(key, element); }}
+      data-model-section-key={key}
+      className="pointer-events-none absolute top-0 h-px w-full"
+      aria-hidden="true"
+    />
+  ) : null;
+
   const renderSectionHeader = (key: string, icon: React.ReactNode, label: React.ReactNode, headerDragProps?: SortableFavoriteHandleProps) => {
     const collapsed = isSectionCollapsed(key);
     const toggleKeyDown = (event: React.KeyboardEvent) => {
@@ -691,6 +782,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           tabIndex={0}
           aria-expanded={!collapsed}
           title={reorderProviderTitle}
+          data-model-picker-sticky-header={stickyHeaders ? 'true' : undefined}
           className={cn(headerClassName, 'w-full text-left cursor-grab select-none active:cursor-grabbing')}
           onClick={() => toggleSectionCollapsed(key)}
           onKeyDown={toggleKeyDown}
@@ -708,6 +800,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return (
       <button
         type="button"
+        data-model-picker-sticky-header={stickyHeaders ? 'true' : undefined}
         className={cn(headerClassName, 'w-full text-left cursor-pointer')}
         onClick={() => toggleSectionCollapsed(key)}
         aria-expanded={!collapsed}
@@ -725,15 +818,43 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     provider: (typeof filteredProviders)[number],
     providerIndex: number,
     headerDragProps?: SortableFavoriteHandleProps,
-  ) => (
-    <>
-      {providerIndex > 0 ? <div className="h-px bg-border/40 my-1" /> : null}
-      {renderSectionHeader(`provider:${provider.id}`, <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />, provider.name || provider.id, headerDragProps)}
-      {!isSectionCollapsed(`provider:${provider.id}`)
-        ? provider.models.map((model) => renderRow({ model, providerID: provider.id, modelID: model.id as string }, 'provider', false, currentFlatIndex++))
-        : null}
-    </>
-  );
+  ) => {
+    const sectionKey = `provider:${provider.id}`;
+    return (
+      <>
+        {providerIndex > 0 ? <div className="h-px bg-border/40 my-1" /> : null}
+        <div className="relative">
+          {renderSectionSentinel(sectionKey)}
+          {renderSectionHeader(sectionKey, <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />, provider.name || provider.id, headerDragProps)}
+          {!isSectionCollapsed(sectionKey)
+            ? provider.models.map((model) => renderRow({ model, providerID: provider.id, modelID: model.id as string }, 'provider', false, currentFlatIndex++))
+            : null}
+        </div>
+      </>
+    );
+  };
+
+  let stuckSectionKey: string | null = null;
+  for (const sectionKey of visibleSectionKeys) {
+    if (stuckSectionHeaders.has(sectionKey)) stuckSectionKey = sectionKey;
+  }
+  // The sidebar can seed its overlay with the first section because its first
+  // header starts flush with the scroller. `Not selected` may precede the
+  // first model section here, so wait for that section's sentinel rather than
+  // showing its identity while the leading action is still visible.
+  const leadingSectionKey = stuckSectionKey ?? (!includeNotSelected ? visibleSectionKeys[0] ?? null : null);
+  const renderSectionIdentity = (sectionKey: string): React.ReactNode => {
+    if (sectionKey === 'favorites') {
+      return <><Icon name="star-fill" className="h-4 w-4 flex-shrink-0 text-primary" /><span className="min-w-0 truncate">{labels.favorites}</span></>;
+    }
+    if (sectionKey === 'recent') {
+      return <><Icon name="time" className="h-4 w-4 flex-shrink-0" /><span className="min-w-0 truncate">{labels.recent}</span></>;
+    }
+    const providerId = sectionKey.startsWith('provider:') ? sectionKey.slice('provider:'.length) : '';
+    const provider = providerById.get(providerId);
+    if (!provider) return null;
+    return <><ProviderLogo providerId={providerId} className="h-4 w-4 flex-shrink-0" /><span className="min-w-0 truncate">{provider.name || provider.id}</span></>;
+  };
 
   return (
     <>
@@ -752,7 +873,25 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
         </div>
       </div>
 
-      <ScrollableOverlay ref={scrollRef} outerClassName={maxHeightClassName} className="overlay-scrollbar-target--no-gutter" style={maxHeightStyle}>
+      <div
+        className="oc-sticky-fade-root relative flex min-h-0 flex-1"
+        onPointerDownCapture={stickyHeaders ? blockStickyFadeInteraction : undefined}
+        onClickCapture={stickyHeaders ? blockStickyFadeInteraction : undefined}
+        onContextMenuCapture={stickyHeaders ? blockStickyFadeInteraction : undefined}
+      >
+      <ScrollableOverlay
+        ref={scrollRef}
+        useScrollShadow={stickyHeaders}
+        hideBottomScrollShadow
+        scrollShadowSize={12}
+        outerClassName={maxHeightClassName}
+        className="oc-sticky-fade-scroller overlay-scrollbar-target--no-gutter"
+        style={{
+          ...(stickyHeaders ? { '--scroll-shadow-top-size': '0px' } as React.CSSProperties : {}),
+          ...maxHeightStyle,
+        }}
+        onScroll={stickyHeaders ? (event) => syncStickyFade(event.currentTarget) : undefined}
+      >
         <div className="px-1">
           {includeNotSelected ? (
             <>
@@ -774,7 +913,8 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           ) : null}
 
           {filteredFavorites.length > 0 ? (
-            <div>
+            <div className="relative">
+              {renderSectionSentinel('favorites')}
               {renderSectionHeader('favorites', <Icon name="star-fill" className="h-4 w-4 text-primary" />, labels.favorites)}
               {!isSectionCollapsed('favorites') && (favoriteSortingEnabled ? (
                 <DndContext sensors={favoriteRowSensors} collisionDetection={closestCenter} onDragEnd={handleFavoriteDragEnd}>
@@ -794,11 +934,14 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           ) : null}
 
           {filteredRecents.length > 0 ? (
-            <div>
+            <>
               {filteredFavorites.length > 0 ? <div className="h-px bg-border/40 my-1" /> : null}
-              {renderSectionHeader('recent', <Icon name="time" className="h-4 w-4" />, labels.recent)}
-              {!isSectionCollapsed('recent') ? filteredRecents.map((entry) => renderRow(entry, 'recent', true, currentFlatIndex++)) : null}
-            </div>
+              <div className="relative">
+                {renderSectionSentinel('recent')}
+                {renderSectionHeader('recent', <Icon name="time" className="h-4 w-4" />, labels.recent)}
+                {!isSectionCollapsed('recent') ? filteredRecents.map((entry) => renderRow(entry, 'recent', true, currentFlatIndex++)) : null}
+              </div>
+            </>
           ) : null}
 
           {(filteredFavorites.length > 0 || filteredRecents.length > 0) && filteredProviders.length > 0 ? <div className="h-px bg-border/40 my-1" /> : null}
@@ -822,6 +965,15 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           )}
         </div>
       </ScrollableOverlay>
+      {stickyHeaders && leadingSectionKey ? (
+        <div
+          className="oc-sticky-fade-overlay pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 py-1.5 typography-micro font-semibold uppercase tracking-wider text-muted-foreground"
+          aria-hidden="true"
+        >
+          {renderSectionIdentity(leadingSectionKey)}
+        </div>
+      ) : null}
+      </div>
 
       <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
         <ModelPickerFooter store={selectionStore} flatModelList={flatModelList} footerContent={footerContent} fallback={labels.keyboardHint} />

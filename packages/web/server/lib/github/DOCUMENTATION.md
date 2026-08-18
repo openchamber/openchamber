@@ -7,7 +7,7 @@
 
 ## Entrypoints and structure
 
-- `packages/web/server/lib/github/index.js`: public server entrypoint.
+- `packages/web/server/lib/github/index.js`: public server entrypoint. `routes.js` loads it lazily with `await import('./index.js')` and destructures the handler it needs, so a re-export removed from here breaks a route at request time rather than at build time. Static "unused export" reports do not see these consumers.
 - `packages/web/server/lib/github/routes.js`: Express route registration for `/api/github/*` endpoints.
 - `packages/web/server/lib/github/auth.js`: auth storage, multi-account support, client id, scope config.
 - `packages/web/server/lib/github/device-flow.js`: OAuth device flow.
@@ -75,8 +75,14 @@
 - It resolves those remotes into GitHub repos.
 - It expands each repo through `parent` and `source` so PRs in upstream repos can still be found.
 - It skips PR lookup when the current branch matches that repo's default branch.
-- It first searches for PRs by likely source owner plus exact head branch.
-- If that fails, it falls back to broader GitHub search for the branch name.
+- It first searches for **open** PRs by likely source owner plus exact head branch.
+- If that fails, it falls back to broader GitHub search for open PRs on the branch name.
+- An **open PR from any candidate repo always wins** over a closed/merged one, so a merged fork PR can never hide an open upstream PR for the same head.
+- Only when no target has an open PR does it return the branch's newest closed/merged PR, as history.
+- History is looked up **only for the ranked-first remote and the branch's own name** — the repo it actually pushes to. Live status is worth searching the whole fork network for; history is not, and asking every target for it multiplies serial GitHub calls until the route hits its `12s` resolve timeout and returns no status at all.
+- The history answer is remembered per repo+branch so discovery polls do not re-query it: a found closed/merged record for `6h`, and "no history yet" for `10m`. A found record only changes if a second PR appears on the same head, and while that one is open the open-PR path wins without ever reading this cache.
+- Creating, merging, or closing a PR invalidates both the shared repo pull list and that remembered history.
+- The route skips the checks summary and the merge-permission lookup for a closed/merged PR: neither is actionable, and both cost extra GitHub calls.
 - `403` and `404` during repo lookups are treated as expected gaps, not hard errors.
 
 ## Shared client state model
@@ -108,9 +114,15 @@
 - Open PR with pending checks -> refresh about every `1m`.
 - Open PR with non-pending checks -> refresh about every `5m`.
 - Open PR without a stable checks signal -> refresh about every `2m`.
-- Closed or merged PR -> stop regular polling.
+- Closed or merged PR -> discovery refresh every `5m` (do not permanently stop polling).
 - Hidden tab -> skip polling.
 - Non-forced refreshes use a `90s` TTL.
+- Failed non-forced attempts also observe the `90s` TTL so transient server or rate-limit failures cannot retry on every sidebar update. Forced user/action refreshes bypass this guard.
+
+## Persistence notes for terminal PRs
+
+- Closed/merged branch associations are persisted like open ones, so a reload still shows that the branch's PR was merged.
+- Hydrate resets `lastDiscoveryPollAt` for them, so restored history revalidates on the first watcher tick instead of waiting out a discovery interval.
 
 ## Background tracking rules
 

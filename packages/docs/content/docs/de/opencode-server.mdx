@@ -1,0 +1,97 @@
+---
+title: OpenCode-Server
+description: Verbinde OpenChamber mit einem lokalen oder entfernten OpenCode-Server.
+---
+
+# OpenCode-Server
+
+OpenChamber läuft auf einem OpenCode-Server auf. Standardmäßig startet es einen für dich, sodass du nichts tun musst. Diese Seite brauchst du nur, wenn du OpenChamber auf einen Server zeigen lassen willst, den du bereits betreibst, oder den Server verwalten willst, den es startet.
+
+## Wie OpenChamber einen Server findet
+
+Wenn OpenChamber startet, sucht es in dieser Reihenfolge nach einem Server:
+
+1. einen Server wiederverwenden, den es bereits gestartet hat
+2. zu einem externen verbinden, wenn du es so angegeben hast (siehe unten)
+3. einen Server am Standard-Port automatisch erkennen (`4096`)
+4. andernfalls den eigenen starten und verwalten
+
+Wenn nichts konfiguriert ist, geschieht Schritt 4 automatisch und du bist startklar.
+
+## Mit einem Server verbinden, den du bereits betreibst
+
+Setze diese Variablen, bevor du OpenChamber startest:
+
+```bash
+OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
+```
+
+- `OPENCODE_HOST` — die vollständige Adresse deines OpenCode-Servers einschließlich des Ports (ein Wert wie `http://localhost:4096`). Sie darf am Ende keinen Pfad haben.
+- `OPENCODE_SKIP_START=true` — weist OpenChamber an, keinen eigenen Server zu starten.
+
+Wenn du nur den Port ändern musst, setze `OPENCODE_PORT` statt `OPENCODE_HOST`.
+
+Wenn `OPENCODE_HOST` keinen Port hat oder einen Pfad enthält, ignoriert OpenChamber ihn und fällt darauf zurück, den eigenen Server zu starten. Achte beim Start auf eine `[config]`-Warnung in den Logs, wenn eine erwartete Verbindung nicht zustande kam.
+
+## Den Server über das CLI verwalten
+
+```bash
+openchamber status
+openchamber logs
+openchamber restart
+openchamber stop
+```
+
+`openchamber` allein startet den Server im Hintergrund. Füge `--foreground` hinzu, damit er an dein Terminal gebunden bleibt.
+
+## OpenChamber beim Anmelden starten
+
+Verwende `startup enable`, um einen nativen Benutzerdienst zu installieren. OpenChamber nutzt `launchd` auf macOS, `systemd --user` auf Linux und den Taskplaner auf Windows.
+
+```bash
+openchamber startup enable
+openchamber startup status
+openchamber startup disable
+```
+
+Um die UI zu schützen, setze das Passwort beim Aktivieren des Dienstes:
+
+```bash
+OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
+```
+
+Für einen headless Server, der sich beim Anmelden startet und für Desktop- oder Mobile-Clients gedacht ist, füge `--api-only` und einen erreichbaren Host hinzu:
+
+```bash
+openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
+```
+
+`startup enable` speichert deine aktuelle Umgebung als Schnappschuss im Dienst, damit er sich eher so verhält, als würdest du `openchamber` aus derselben Shell starten. So bleiben Provider-Tokens, `PATH`, SSH-Agent-Einstellungen und andere CLI-Auth-/Konfigurationsvariablen verfügbar. Verwende `--no-env-snapshot`, wenn du eine minimale Dienstenumgebung willst.
+
+Der Startup-Dienst merkt sich `--port`, `--host`, `--ui-password` und `--api-only`. CLI-Neustarts und Update-Neustarts verwenden diese gespeicherten Einstellungen wieder.
+
+Um einen Verbindungslink für eine andere OpenChamber-App zu erstellen, verwende:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+Führe `openchamber connect-url --help` aus, um alle Link-Optionen zu sehen, einschließlich `--name`, `--lan`, `--server`, `--api-only`, `--ui-password` und `--qr`.
+
+Du kannst Tunnel für diesen laufenden Dienst weiterhin unabhängig verwalten:
+
+```bash
+openchamber tunnel start --port 3000
+openchamber tunnel stop --port 3000
+```
+
+Das Stoppen des Tunnels startet weder den Dienst noch die App neu.
+
+## „OpenCode wird neu gestartet“
+
+Während der Server startet oder neu startet, zeigt OpenChamber den Status „OpenCode wird neu gestartet“ an und pausiert Anfragen, bis er bereit ist. Das ist direkt nach dem Start oder einem Neustart normal. Wenn er nie verschwindet, siehe [OpenCode-Verbindung](/troubleshooting/opencode-connection/).
+
+## Verwandtes
+
+- [Providers, Models & Agents](/providers/) — festlegen, womit der Server spricht
+- [OpenCode-Verbindung](/troubleshooting/opencode-connection/) — falls keine Verbindung möglich ist

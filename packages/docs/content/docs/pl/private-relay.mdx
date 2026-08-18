@@ -1,0 +1,44 @@
+---
+title: Private Relay
+description: Dotrzyj do swojego serwera OpenChamber z dowolnego miejsca przez szyfrowany end-to-end relay — bez portów, tuneli i konfiguracji.
+---
+
+# Private Relay
+
+OpenChamber Private Relay pozwala Twoim sparowanym urządzeniom dotrzeć do serwera z dowolnego miejsca — z sieci komórkowej, kawiarnianego Wi-Fi, innego miasta — bez otwierania portów, konfigurowania tunelu czy wystawiania maszyny do internetu. Zarządza sobą sam: wystarczy sparować urządzenie z opcją **Wszędzie** w [Połącz urządzenie](/pl/connect-devices/).
+
+## Jak to działa
+
+Twój serwer otwiera wychodzące połączenie do infrastruktury relay OpenChamber i utrzymuje je aktywne. Gdy jedno z Twoich urządzeń jest poza Twoją siecią, również łączy się z relayem, a relay przekazuje zaszyfrowany ruch między nimi. Nic na Twojej maszynie nie nasłuchuje na połączenia przychodzące z internetu.
+
+Gdy dostępne jest połączenie bezpośrednie — jesteś z powrotem w domu, w tej samej sieci Wi-Fi — Twoje urządzenia wybierają je i całkowicie pomijają relay.
+
+## Co relay może, a czego nie może zobaczyć
+
+Relay to ślepy kurier, a nie pośrednik:
+
+- **Szyfrowanie end-to-end.** Twoje urządzenie i Twój serwer uzgadniają klucze szyfrujące bezpośrednio między sobą. Relay przekazuje zapieczętowany ruch, do którego nie ma kluczy — nie może odczytać Twojego kodu, promptów ani haseł.
+- **Połączyć się mogą tylko Twoje urządzenia.** Urządzenie musi mieć token wydany przez *Twój* serwer w ramach [jednorazowego parowania](/pl/connect-devices/). Nikt nie odkryje Twojego serwera przez relay ani nie połączy się bez tokenu, który sam utworzyłeś — a każdy token możesz unieważnić w dowolnej chwili.
+- **Linki parowania są jednorazowe.** Kod QR do parowania działa dokładnie raz i wygasa, jeśli nie zostanie użyty, więc stary link, który wyciekł, jest bezwartościowy.
+- **Nic nie jest udostępniane, dopóki się nie zdecydujesz.** Relay pozostaje wyłączony, dopóki go nie włączysz lub nie sparujesz przez niego urządzenia, i możesz wyłączyć go w każdej chwili — urządzenia połączone przez relay są odcinane natychmiast.
+
+## Kiedy działa
+
+Relay sam zarządza swoim cyklem życia — nie ma przełącznika, o którym trzeba pamiętać:
+
+- **Uruchamia się na żądanie.** Utworzenie parowania **Wszędzie** włącza relay, a po restarcie wraca on tak długo, jak długo korzysta z niego jakiekolwiek sparowane urządzenie.
+- **Zatrzymuje się sam.** Gdy żadne urządzenie ani oczekujące parowanie nie używa relaya — na przykład po unieważnieniu ostatniego sparowanego przez relay urządzenia — wyłącza się automatycznie.
+
+**Settings → Remote Instances → OpenChamber Relay** pokazuje bieżący stan (Połączono, Ponowne łączenie, …) oraz liczbę aktualnie połączonych przez relay urządzeń. Możesz tam też nacisnąć **Wyłącz**, aby natychmiast odciąć dostęp przez relay; urządzenia w Twojej sieci lokalnej pozostają bez zmian.
+
+## Relay czy tunel?
+
+- Użyj **relaya**, aby docierać do własnego serwera z własnych sparowanych urządzeń. Zero konfiguracji i nic nie jest wystawione publicznie.
+- Użyj [tunelu](/pl/tunnels/), gdy potrzebujesz zwykłego **publicznego adresu URL** — na przykład by otworzyć OpenChamber w zwykłej przeglądarce na maszynie, której nie możesz sparować, albo udostępnić dostęp za [hasłem UI](/pl/security/).
+
+## Powiązane
+
+- [Połącz urządzenie](/pl/connect-devices/) — sparuj urządzenie jednorazowym kodem QR
+- [Aplikacje mobilne](/pl/mobile/) — zainstaluj aplikację na iOS lub Androida
+- [Bezpieczeństwo](/pl/security/) — hasła, klucze dostępu i podstawy udostępniania
+- [Dostęp zdalny](/pl/troubleshooting/remote-access/) — gdy połączenie nie chce się nawiązać

@@ -1,6 +1,8 @@
 import UIKit
 import Capacitor
+import GameController
 import UserNotifications
+import WebKit
 import WidgetKit
 
 @UIApplicationMain
@@ -60,6 +62,111 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 }
 
+/// APNs environment of this build: "development" for Xcode/dev-signed installs,
+/// "production" for TestFlight/App Store. Read from the embedded provisioning profile's
+/// aps-environment entitlement; App Store builds carry no embedded profile and are
+/// production. Exposed to the web layer so the server can deliver each device token to
+/// the APNs endpoint that actually knows it (sandbox vs production).
+let apnsEnvironment: String = {
+    guard let path = Bundle.main.path(forResource: "embedded", ofType: "mobileprovision"),
+          let data = FileManager.default.contents(atPath: path),
+          // isoLatin1, not ascii/utf8: the profile is a binary CMS envelope around the XML
+          // plist, and only Latin-1 decodes arbitrary bytes without returning nil.
+          let profile = String(data: data, encoding: .isoLatin1) else {
+        return "production"
+    }
+    let pattern = "<key>aps-environment</key>\\s*<string>development</string>"
+    return profile.range(of: pattern, options: .regularExpression) != nil ? "development" : "production"
+}()
+
+/// Bridge subclass (referenced from Main.storyboard) whose job is to expose native-only
+/// facts to the web layer as document-start user scripts. These run before any page JS,
+/// so consumers always see them — injecting later from the scene lifecycle raced the
+/// consumer (push registration) and lost on first launch.
+///
+/// The scripts must be added in capacitorDidLoad(), NOT webViewConfiguration(for:): Capacitor's
+/// prepareWebView replaces the configuration's userContentController with its own right after
+/// calling webViewConfiguration(for:), which silently discards any user script added there.
+/// capacitorDidLoad() runs after that swap but before loadWebView() starts the initial page load.
+class BridgeViewController: CAPBridgeViewController {
+    private var keyboardObservers: [NSObjectProtocol] = []
+
+    override func capacitorDidLoad() {
+        super.capacitorDidLoad()
+        // GCKeyboard is the only authoritative answer to "is a hardware keyboard
+        // attached?". The web layer can otherwise only INFER it from a keyboard
+        // that never appears, which costs the user one focus before the layout
+        // settles — so the state is stamped at document start and kept live.
+        //
+        // At this point GameController has usually NOT finished discovery yet, so
+        // an already-attached keyboard still reads as nil here. The stamp is only
+        // the optimistic first answer; refreshHardwareKeyboardState() below is
+        // what actually settles it once the page exists.
+        let attached = GCKeyboard.coalesced != nil
+        let source = """
+        window.__OPENCHAMBER_APNS_ENV__ = '\(apnsEnvironment)';
+        window.__OPENCHAMBER_HARDWARE_KEYBOARD__ = \(attached ? "true" : "false");
+        """
+        webView?.configuration.userContentController.addUserScript(
+            WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        )
+        observeHardwareKeyboard()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Two races make a single early publish unreliable for a keyboard that was
+        // ALREADY attached at launch, which is why it only ever worked when the
+        // user plugged one in afterwards:
+        //  - GCKeyboardDidConnect for a pre-attached keyboard fires during launch,
+        //    before the web page exists, so its evaluateJavaScript lands in a
+        //    context the page load then throws away;
+        //  - GameController can populate `coalesced` a beat after launch anyway.
+        // Re-publishing across the first seconds covers both; the web side adopts
+        // idempotently, so repeats are free.
+        refreshHardwareKeyboardState()
+        for delay in [0.3, 1.0, 2.5] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.refreshHardwareKeyboardState()
+            }
+        }
+    }
+
+    /// Re-read GameController and push the current answer to the web layer.
+    /// Also called when the app returns to the foreground — a keyboard can be
+    /// attached or detached while backgrounded, with no notification delivered.
+    func refreshHardwareKeyboardState() {
+        publishHardwareKeyboardState(GCKeyboard.coalesced != nil)
+    }
+
+    private func observeHardwareKeyboard() {
+        let center = NotificationCenter.default
+        keyboardObservers = [
+            center.addObserver(forName: .GCKeyboardDidConnect, object: nil, queue: .main) { [weak self] _ in
+                self?.publishHardwareKeyboardState(true)
+            },
+            center.addObserver(forName: .GCKeyboardDidDisconnect, object: nil, queue: .main) { [weak self] _ in
+                // A second keyboard may still be attached (Stage Manager, dock swaps).
+                self?.publishHardwareKeyboardState(GCKeyboard.coalesced != nil)
+            },
+        ]
+    }
+
+    private func publishHardwareKeyboardState(_ attached: Bool) {
+        let value = attached ? "true" : "false"
+        webView?.evaluateJavaScript("""
+        window.__OPENCHAMBER_HARDWARE_KEYBOARD__ = \(value);
+        window.dispatchEvent(new CustomEvent('oc:hardware-keyboard', { detail: { attached: \(value) } }));
+        """)
+    }
+
+    deinit {
+        for observer in keyboardObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+}
+
 // iOS 26 (TN3187) requires apps built with the latest SDK to adopt the UIScene
 // lifecycle. Capacitor 7's template still uses the legacy window setup, so we host a
 // minimal scene delegate here that loads the Main storyboard (CAPBridgeViewController)
@@ -99,6 +206,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         } else {
             UIApplication.shared.applicationIconBadgeNumber = 0
         }
+
+        // A keyboard can be attached or detached while the app is backgrounded,
+        // with no GameController notification delivered to it.
+        (window?.rootViewController as? BridgeViewController)?.refreshHardwareKeyboardState()
 
         // Refresh the widgets' session overview now that the WebView is loaded and state is fresh.
         writeWidgetSnapshot()
@@ -146,8 +257,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
         if #available(iOS 26.0, *) {
-            webView.scrollView.topEdgeEffect.isHidden = true
-            webView.scrollView.bottomEdgeEffect.isHidden = true
+            // KVC keeps this compiling with pre-26 SDKs, but the effect object is a
+            // UIScrollEdgeEffect — NOT a UIView — so it must be handled as a plain
+            // NSObject ("hidden" is the ObjC key behind isHidden). The previous
+            // `as? UIView` cast silently returned nil and left the system's dark
+            // edge band visible behind the status bar.
+            for key in ["topEdgeEffect", "bottomEdgeEffect"] {
+                guard webView.scrollView.responds(to: NSSelectorFromString(key)) else { continue }
+                (webView.scrollView.value(forKey: key) as? NSObject)?.setValue(true, forKey: "hidden")
+            }
         }
     }
 

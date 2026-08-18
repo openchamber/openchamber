@@ -14,6 +14,7 @@ import { useTraySync } from '@/hooks/useTraySync';
 import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
+import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -54,6 +55,11 @@ import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/mcpOAuth';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import {
+  EMBEDDED_VISIBILITY_UPDATE,
+  isEmbeddedSessionChat,
+  requestEmbeddedSessionVisibility,
+} from '@/components/layout/contextPanelEmbeddedChat';
 import { SyncAppEffects } from '@/apps/AppEffects';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
@@ -105,6 +111,7 @@ type EmbeddedSessionChatConfig = {
   sessionId: string;
   directory: string | null;
   readOnly: boolean;
+  allowPromptingSubagentSessions?: boolean;
 };
 
 type EmbeddedVisibilityPayload = {
@@ -117,15 +124,11 @@ const normalizeEmbeddedDirectory = (value: string | null | undefined): string =>
 };
 
 const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || !isEmbeddedSessionChat()) {
     return null;
   }
 
   const params = new URLSearchParams(window.location.search);
-  if (params.get('ocPanel') !== 'session-chat') {
-    return null;
-  }
-
   const sessionIdRaw = params.get('sessionId');
   const sessionId = typeof sessionIdRaw === 'string' ? sessionIdRaw.trim() : '';
   if (!sessionId) {
@@ -141,6 +144,9 @@ const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
     sessionId,
     directory,
     readOnly: params.get('readOnly') === '1' || params.get('readOnly') === 'true',
+    allowPromptingSubagentSessions: params.has('allowPromptingSubagentSessions')
+      ? params.get('allowPromptingSubagentSessions') === '1'
+      : undefined,
   };
 };
 
@@ -171,7 +177,12 @@ const EmbeddedSessionChatContent: React.FC<{
     if (expectedDirectory && activeDirectory !== expectedDirectory) return;
 
     const bootstrapKey = `${expectedDirectory}\n${embeddedSessionChat.sessionId}`;
-    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId === embeddedSessionChat.sessionId) {
+    // Skip if this session was already bootstrapped and a session is still
+    // active — allows in-place navigation (e.g. "Open subtask") to change
+    // currentSessionId without this effect forcing it back. Only re-bootstrap
+    // when currentSessionId was cleared (store init, draft, delete/archive,
+    // runtime-switch remount).
+    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId) {
       return;
     }
 
@@ -197,7 +208,16 @@ const EmbeddedSessionChatContent: React.FC<{
     <>
       <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
       <OpenCodeUpdateToast />
-      <ChatView readOnly={embeddedSessionChat.readOnly} />
+      <ChatView
+        active={embeddedBackgroundWorkEnabled}
+        // Always subscribe to message history in the mounted session-chat
+        // iframe. Visibility still gates composer focus and background work so
+        // a boot-inactive / lost-handshake race cannot leave a busy subagent
+        // showing only its status row (#2903 / #2892).
+        messagesEnabled={true}
+        readOnly={embeddedSessionChat.readOnly}
+        initialAllowPromptingSubagentSessions={embeddedSessionChat.allowPromptingSubagentSessions}
+      />
       <Toaster />
     </>
   );
@@ -226,7 +246,10 @@ function App({ apis }: AppProps) {
   const [showMemoryDebug, setShowMemoryDebug] = React.useState(false);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
-  const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
+  // Embedded chats start inactive until the parent panel identifies the active
+  // tab. Otherwise a newly loaded background tab can focus its composer first
+  // and steal keyboard input from the main chat.
+  const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(false);
   const [initRetryExhausted, setInitRetryExhausted] = React.useState(false);
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
@@ -525,17 +548,16 @@ function App({ apis }: AppProps) {
     }
 
     const applyVisibility = (payload?: EmbeddedVisibilityPayload) => {
-      const nextVisible = payload?.visible === true;
-      setIsEmbeddedVisible(nextVisible);
+      setIsEmbeddedVisible(payload?.visible === true);
     };
 
     const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) {
+      if (event.origin !== window.location.origin || event.source !== window.parent) {
         return;
       }
 
       const data = event.data as { type?: unknown; payload?: EmbeddedVisibilityPayload };
-      if (data?.type !== 'openchamber:embedded-visibility') {
+      if (data?.type !== EMBEDDED_VISIBILITY_UPDATE) {
         return;
       }
 
@@ -548,6 +570,7 @@ function App({ apis }: AppProps) {
 
     scopedWindow.__openchamberSetEmbeddedVisibility = applyVisibility;
     window.addEventListener('message', handleMessage);
+    requestEmbeddedSessionVisibility();
 
     return () => {
       window.removeEventListener('message', handleMessage);
@@ -668,26 +691,6 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ projectPath?: string }>).detail;
-      const projectPath = typeof detail?.projectPath === 'string' ? detail.projectPath.trim() : '';
-      if (!projectPath) return;
-      const projectsStore = useProjectsStore.getState();
-      const existing = projectsStore.projects.find((project) => project.path === projectPath);
-      if (existing) {
-        projectsStore.setActiveProject(existing.id);
-      } else {
-        projectsStore.addProject(projectPath);
-      }
-    };
-
-    window.addEventListener('openchamber:open-project', handler as EventListener);
-    return () => window.removeEventListener('openchamber:open-project', handler as EventListener);
-  }, []);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
     if (!isInitialized || isSwitchingDirectory) return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;
@@ -701,6 +704,10 @@ function App({ apis }: AppProps) {
 
   usePushVisibilityBeacon({ enabled: embeddedBackgroundWorkEnabled });
   useWebNotificationStream({ enabled: embeddedBackgroundWorkEnabled });
+  // Loaded here rather than by the Memory tab: the session index is built from
+  // this snapshot, so leaving it to the panel meant a user who never opened
+  // Project notes sent every message with no memory index at all.
+  useAgentMemorySync(currentDirectory || null);
   usePwaInstallPrompt();
 
   useWindowTitle();
@@ -851,10 +858,11 @@ function App({ apis }: AppProps) {
     if (bootView.screen === 'chooser') {
       return (
         <ErrorBoundary>
-          <div className="h-full text-foreground bg-transparent">
+          <div className="h-full text-foreground bg-background">
             <React.Suspense fallback={<div className="h-full" />}>
               <OnboardingScreen
                 mode="first-launch"
+                localAvailable={bootView.localAvailable !== false}
                 onCliAvailable={handleDesktopBootDismiss}
                 onChooseRemote={() => {
                   // Switch to remote tab - handled internally by OnboardingScreen
@@ -872,13 +880,14 @@ function App({ apis }: AppProps) {
 
     return (
       <ErrorBoundary>
-        <div className="h-full text-foreground bg-transparent">
+        <div className="h-full text-foreground bg-background">
           <React.Suspense fallback={<div className="h-full" />}>
             <OnboardingScreen
               mode="recovery"
               recoveryVariant={recoveryVariant}
               recoveryHostUrl={hostUrl}
               recoveryHostLabel={undefined}
+              localAvailable={bootView.localAvailable !== false}
               onCliAvailable={handleDesktopBootDismiss}
             />
           </React.Suspense>

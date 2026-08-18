@@ -1,6 +1,6 @@
 import { useUIStore } from '@/stores/useUIStore';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { isVSCodeRuntime } from '@/lib/desktop';
+import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 
 type ModelRef = { providerID: string; modelID: string };
 type ModelPrefsPayload = {
@@ -72,16 +72,17 @@ export const startModelPrefsAutoSave = () => {
   if (typeof window === 'undefined') {
     return () => {};
   }
-  if (isVSCodeRuntime()) {
-    return () => {};
-  }
 
   let timer: number | null = null;
   let lastSent: ModelPrefsPayload | null = null;
   let didSkipInitial = false;
+  let scheduledRuntimeKey: string | null = null;
 
   const flush = () => {
     timer = null;
+    const runtimeKey = scheduledRuntimeKey;
+    scheduledRuntimeKey = null;
+    if (!runtimeKey || runtimeKey !== getRuntimeKey()) return;
     const payload = snapshotModelPrefs();
 
     if (lastSent && modelPrefsEqual(lastSent, payload)) {
@@ -101,8 +102,16 @@ export const startModelPrefsAutoSave = () => {
     if (timer !== null) {
       window.clearTimeout(timer);
     }
+    scheduledRuntimeKey = getRuntimeKey();
     timer = window.setTimeout(flush, 1200);
   };
+
+  const unsubscribeRuntime = subscribeRuntimeEndpointWillChange(() => {
+    if (timer !== null) window.clearTimeout(timer);
+    timer = null;
+    scheduledRuntimeKey = null;
+    lastSent = null;
+  });
 
   const unsubscribe = useUIStore.subscribe((state, prevState) => {
     const next = {
@@ -129,6 +138,7 @@ export const startModelPrefsAutoSave = () => {
 
   return () => {
     unsubscribe();
+    unsubscribeRuntime();
     if (timer !== null) {
       window.clearTimeout(timer);
     }
