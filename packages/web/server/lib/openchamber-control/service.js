@@ -144,6 +144,7 @@ export const createOpenChamberControlService = (dependencies) => {
     sessionService,
     scheduledTaskService,
     browserControl = null,
+    agentMemoryActions = null,
     createClient = createOpencodeClient,
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
     now = Date.now,
@@ -457,6 +458,12 @@ export const createOpenChamberControlService = (dependencies) => {
     try {
       if (!CONTROL_ACTIONS.has(action)) {
         throw new OpenChamberControlError(`Unsupported OpenChamber action: ${action || 'missing'}`, 400);
+      }
+      if (action.startsWith('memory.')) {
+        if (!agentMemoryActions) {
+          throw new OpenChamberControlError('Agent memory is not available on this server', 503);
+        }
+        return agentMemoryActions.execute(action, input, contextDirectory);
       }
       if (action.startsWith('browser.')) {
         if (!browserControl) {

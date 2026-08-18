@@ -212,6 +212,56 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
+  /**
+   * Merge the server-owned `context.json` (notes/todos/plans) across a project
+   * id change.
+   *
+   * `moveDirectoryContents` only renames a file when the destination is free,
+   * so without this step an existing `<newId>/context.json` would silently
+   * discard everything stored under `<oldId>`. Every list is merged by identity
+   * so neither side loses entries.
+   *
+   * A version 1 context stored notes as a single string. It is left untouched
+   * here: `project-context` converts it on read, and converting in two places
+   * would mean two definitions of the same migration.
+   */
+  const mergeProjectContextFiles = async (oldStorageDir, newStorageDir) => {
+    const oldContextPath = path.join(oldStorageDir, 'context.json');
+    const newContextPath = path.join(newStorageDir, 'context.json');
+
+    const [oldContext, newContext] = await Promise.all([
+      readJsonFile(oldContextPath).catch(() => null),
+      readJsonFile(newContextPath).catch(() => null),
+    ]);
+
+    if (!oldContext || !newContext) {
+      // Nothing to reconcile: the plain directory move handles a single side.
+      return;
+    }
+
+    const mergeNotes = () => {
+      // One side may still be a version 1 string; keep whichever is a list, and
+      // prefer the destination when both are strings.
+      const oldIsList = Array.isArray(oldContext.notes);
+      const newIsList = Array.isArray(newContext.notes);
+      if (oldIsList && newIsList) {
+        return mergeByKey(oldContext.notes, newContext.notes, (item) => item.id);
+      }
+      if (newIsList) return newContext.notes;
+      if (oldIsList) return oldContext.notes;
+      return newContext.notes || oldContext.notes || '';
+    };
+
+    await writeJsonFile(newContextPath, {
+      ...oldContext,
+      ...newContext,
+      notes: mergeNotes(),
+      todos: mergeByKey(oldContext.todos, newContext.todos, (item) => item.id),
+      plans: mergeByKey(oldContext.plans, newContext.plans, (item) => item.id || item.file),
+    });
+    await fsPromises.rm(oldContextPath, { force: true });
+  };
+
   const migrateProjectScopedStorage = async ({ oldId, newId, projectPath }) => {
     if (!oldId || !newId || oldId === newId) {
       return;
@@ -232,6 +282,7 @@ export const createSettingsRuntime = (deps) => {
       await writeJsonFile(newConfigPath, merged);
     }
 
+    await mergeProjectContextFiles(oldStorageDir, newStorageDir);
     await moveDirectoryContents(oldStorageDir, newStorageDir);
     await fsPromises.rm(oldConfigPath, { force: true });
   };

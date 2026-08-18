@@ -1,7 +1,11 @@
 /**
  * OpenChamber project-level configuration service.
- * Stores per-project settings in ~/.config/openchamber/<projectId>.json.
+ * Stores per-project settings in ~/.config/openchamber/projects/<projectId>.json.
  * Migrates from legacy <project>/.openchamber/openchamber.json.
+ *
+ * Notes, todos, and plan files used to live here too. They are now server-owned
+ * (`packages/web/server/lib/project-context`) and reached through
+ * `@/lib/projectContextApi`; what remains here is the client-owned rest.
  */
 
 import type { FilesAPI } from './api/types';
@@ -34,9 +38,6 @@ interface OpenChamberConfig {
   projectPath?: string;
   'setup-worktree'?: string[];
   'setup-worktree-wait'?: boolean;
-  projectNotes?: string;
-  projectTodos?: OpenChamberProjectTodoItem[];
-  projectPlanFiles?: OpenChamberProjectPlanFileLink[];
   projectActions?: OpenChamberProjectAction[];
   projectActionsPrimaryId?: string;
   draftStarters?: DraftStarterRef[];
@@ -60,42 +61,10 @@ export interface OpenChamberProjectActionsState {
   primaryActionId: string | null;
 }
 
-export interface OpenChamberProjectTodoItem {
-  id: string;
-  text: string;
-  completed: boolean;
-  createdAt: number;
-}
-
-export interface OpenChamberProjectPlanFileLink {
-  id: string;
-  path: string;
-  createdAt: number;
-}
-
-export interface OpenChamberProjectPlanFile {
-  title: string;
-  body: string;
-  raw: string;
-  path: string;
-}
-
-export interface OpenChamberProjectNotesTodos {
-  notes: string;
-  todos: OpenChamberProjectTodoItem[];
-}
-
-export interface OpenChamberProjectContextData extends OpenChamberProjectNotesTodos {
-  plans: OpenChamberProjectPlanFileLink[];
-}
-
-export const OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH = 3000;
-export const OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH = 120;
 const OPENCHAMBER_PROJECT_ACTION_NAME_MAX_LENGTH = 80;
 const OPENCHAMBER_PROJECT_ACTION_COMMAND_MAX_LENGTH = 4000;
 const OPENCHAMBER_PROJECT_ACTION_OPEN_URL_MAX_LENGTH = 2000;
 const OPENCHAMBER_PROJECT_ACTION_DESKTOP_FORWARD_MAX_LENGTH = 300;
-const OPENCHAMBER_PROJECT_PLAN_TITLE_MAX_LENGTH = 160;
 
 const OPENCHAMBER_ACTION_PLATFORM_SET = new Set<OpenChamberProjectActionPlatform>(['macos', 'linux', 'windows']);
 
@@ -271,93 +240,6 @@ const trimToMaxLength = (value: string, maxLength: number): string => {
   return value.slice(0, maxLength);
 };
 
-const sanitizeProjectNotes = (value: unknown): string => {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  return trimToMaxLength(value, OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH);
-};
-
-const sanitizeProjectTodoItems = (value: unknown): OpenChamberProjectTodoItem[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const sanitized: OpenChamberProjectTodoItem[] = [];
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') {
-      continue;
-    }
-
-    const record = entry as {
-      id?: unknown;
-      text?: unknown;
-      completed?: unknown;
-      createdAt?: unknown;
-    };
-
-    const id = typeof record.id === 'string' ? record.id.trim() : '';
-    const textRaw = typeof record.text === 'string' ? record.text : '';
-    const text = trimToMaxLength(textRaw.trim(), OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH);
-    if (!id || !text) {
-      continue;
-    }
-
-    const completed = Boolean(record.completed);
-    const createdAt =
-      typeof record.createdAt === 'number' && Number.isFinite(record.createdAt) && record.createdAt >= 0
-        ? record.createdAt
-        : Date.now();
-
-    sanitized.push({
-      id,
-      text,
-      completed,
-      createdAt,
-    });
-
-  }
-
-  return sanitized;
-};
-
-const sanitizeProjectPlanFileLinks = (value: unknown): OpenChamberProjectPlanFileLink[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const sanitized: OpenChamberProjectPlanFileLink[] = [];
-  const seenIds = new Set<string>();
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') {
-      continue;
-    }
-
-    const record = entry as {
-      id?: unknown;
-      path?: unknown;
-      createdAt?: unknown;
-    };
-
-    const id = typeof record.id === 'string' ? record.id.trim() : '';
-    const path = typeof record.path === 'string' ? record.path.trim() : '';
-    const createdAt =
-      typeof record.createdAt === 'number' && Number.isFinite(record.createdAt) && record.createdAt >= 0
-        ? record.createdAt
-        : Date.now();
-
-    if (!id || !path || seenIds.has(id)) {
-      continue;
-    }
-
-    seenIds.add(id);
-    sanitized.push({ id, path, createdAt });
-  }
-
-  return sanitized.sort((a, b) => b.createdAt - a.createdAt);
-};
-
 const sanitizeProjectActionPlatforms = (value: unknown): OpenChamberProjectActionPlatform[] => {
   if (!Array.isArray(value)) {
     return [];
@@ -454,97 +336,6 @@ const sanitizeProjectActionsState = (value: {
   return {
     actions,
     primaryActionId,
-  };
-};
-
-const sanitizeProjectNotesAndTodos = (value: {
-  notes?: unknown;
-  todos?: unknown;
-} | null | undefined): OpenChamberProjectNotesTodos => {
-  return {
-    notes: sanitizeProjectNotes(value?.notes),
-    todos: sanitizeProjectTodoItems(value?.todos),
-  };
-};
-
-const sanitizeProjectContextData = (value: {
-  notes?: unknown;
-  todos?: unknown;
-  plans?: unknown;
-} | null | undefined): OpenChamberProjectContextData => {
-  const notesAndTodos = sanitizeProjectNotesAndTodos(value);
-  return {
-    ...notesAndTodos,
-    plans: sanitizeProjectPlanFileLinks(value?.plans),
-  };
-};
-
-const slugifyPlanTitle = (value: string): string => {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[`*_#>[\](){}.!?,:;"']/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
-
-  return normalized || 'plan';
-};
-
-const sanitizePlanTitle = (value: string): string => {
-  return trimToMaxLength(value.trim(), OPENCHAMBER_PROJECT_PLAN_TITLE_MAX_LENGTH);
-};
-
-const createProjectPlanId = (): string => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `plan_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-};
-
-const getProjectStorageDirectory = async (project: ProjectRef): Promise<string | null> => {
-  const base = await getUserProjectsDirectory();
-  const safeId = resolveConfigProjectId(project);
-  if (!base || !safeId) {
-    return null;
-  }
-  return joinPath(base, safeId);
-};
-
-const getProjectPlansDirectory = async (project: ProjectRef): Promise<string | null> => {
-  const projectDirectory = await getProjectStorageDirectory(project);
-  if (!projectDirectory) {
-    return null;
-  }
-  return joinPath(projectDirectory, 'plans');
-};
-
-const formatProjectPlanMarkdown = (title: string, body: string): string => {
-  const normalizedTitle = sanitizePlanTitle(title) || 'Plan';
-  const normalizedBody = body.trim();
-  return normalizedBody
-    ? `# ${normalizedTitle}\n\n${normalizedBody}`
-    : `# ${normalizedTitle}\n`;
-};
-
-export const parseProjectPlanMarkdown = (raw: string): { title: string; body: string } => {
-  const text = typeof raw === 'string' ? raw : '';
-  const normalized = text.replace(/\r\n?/g, '\n');
-  const match = normalized.match(/^\s*#\s+(.+?)\s*(?:\n+|$)/);
-  if (match) {
-    const title = sanitizePlanTitle(match[1]);
-    const body = normalized.slice(match[0].length).replace(/^\n+/, '');
-    return {
-      title: title || 'Plan',
-      body,
-    };
-  }
-
-  const firstNonEmptyLine = normalized.split('\n').map((line) => line.trim()).find(Boolean) || 'Plan';
-  return {
-    title: sanitizePlanTitle(firstNonEmptyLine.replace(/^#+\s*/, '')) || 'Plan',
-    body: normalized.trim(),
   };
 };
 
@@ -719,171 +510,6 @@ export async function getProjectDraftStarters(project: ProjectRef): Promise<Draf
 
 export async function saveProjectDraftStarters(project: ProjectRef, starters: DraftStarterRef[]): Promise<boolean> {
   return updateOpenChamberConfig(project, { draftStarters: sanitizeStarterRefs(starters) });
-}
-
-export async function getProjectNotesAndTodos(project: ProjectRef): Promise<OpenChamberProjectNotesTodos> {
-  const config = await readOpenChamberConfig(project);
-  return sanitizeProjectNotesAndTodos({
-    notes: config?.projectNotes,
-    todos: config?.projectTodos,
-  });
-}
-
-export async function saveProjectNotesAndTodos(
-  project: ProjectRef,
-  value: OpenChamberProjectNotesTodos
-): Promise<boolean> {
-  const sanitized = sanitizeProjectNotesAndTodos({
-    notes: value.notes,
-    todos: value.todos,
-  });
-
-  return updateOpenChamberConfig(project, {
-    projectNotes: sanitized.notes,
-    projectTodos: sanitized.todos,
-  });
-}
-
-export async function getProjectContextData(project: ProjectRef): Promise<OpenChamberProjectContextData> {
-  const config = await readOpenChamberConfig(project);
-  return sanitizeProjectContextData({
-    notes: config?.projectNotes,
-    todos: config?.projectTodos,
-    plans: config?.projectPlanFiles,
-  });
-}
-
-async function getProjectPlanFiles(project: ProjectRef): Promise<OpenChamberProjectPlanFileLink[]> {
-  const config = await readOpenChamberConfig(project);
-  return sanitizeProjectPlanFileLinks(config?.projectPlanFiles);
-}
-
-async function saveProjectPlanFiles(
-  project: ProjectRef,
-  value: OpenChamberProjectPlanFileLink[]
-): Promise<boolean> {
-  const sanitized = sanitizeProjectPlanFileLinks(value);
-  return updateOpenChamberConfig(project, {
-    projectPlanFiles: sanitized,
-  });
-}
-
-export async function readProjectPlanFile(path: string): Promise<OpenChamberProjectPlanFile | null> {
-  const trimmedPath = typeof path === 'string' ? path.trim() : '';
-  if (!trimmedPath) {
-    return null;
-  }
-
-  const raw = await readTextFile(trimmedPath);
-  if (raw === null) {
-    return null;
-  }
-
-  const parsed = parseProjectPlanMarkdown(raw);
-  return {
-    title: parsed.title,
-    body: parsed.body,
-    raw,
-    path: trimmedPath,
-  };
-}
-
-const deleteFile = async (path: string): Promise<boolean> => {
-  const runtimeFiles = getRuntimeFilesAPI();
-  if (runtimeFiles?.delete) {
-    try {
-      const result = await runtimeFiles.delete(path);
-      if (result?.success !== false) {
-        return true;
-      }
-    } catch {
-      // fall through
-    }
-  }
-
-  const res = await postJson<{ success?: boolean }>(`${getBaseUrl()}/fs/delete`, { path });
-  return Boolean(res.ok);
-};
-
-export async function deleteProjectPlanFile(
-  project: ProjectRef,
-  planId: string
-): Promise<boolean> {
-  const trimmedId = typeof planId === 'string' ? planId.trim() : '';
-  if (!trimmedId) {
-    return false;
-  }
-
-  const existing = await getProjectPlanFiles(project);
-  const target = existing.find((entry) => entry.id === trimmedId);
-  if (!target) {
-    return false;
-  }
-
-  const next = existing.filter((entry) => entry.id !== trimmedId);
-  const saved = await saveProjectPlanFiles(project, next);
-  if (!saved) {
-    return false;
-  }
-
-  // Best-effort: remove underlying markdown file, ignore failure.
-  await deleteFile(target.path).catch(() => false);
-  return true;
-}
-
-export async function importProjectPlanFileFromContent(
-  project: ProjectRef,
-  content: string,
-  fallbackTitle?: string
-): Promise<OpenChamberProjectPlanFileLink | null> {
-  const raw = typeof content === 'string' ? content : '';
-  if (!raw.trim()) {
-    return null;
-  }
-
-  const parsed = parseProjectPlanMarkdown(raw);
-  const title = parsed.title || sanitizePlanTitle(fallbackTitle ?? '') || 'Plan';
-  return createProjectPlanFile(project, { title, body: parsed.body });
-}
-
-export async function createProjectPlanFile(
-  project: ProjectRef,
-  value: { title: string; body: string }
-): Promise<OpenChamberProjectPlanFileLink | null> {
-  const plansDirectory = await getProjectPlansDirectory(project);
-  if (!plansDirectory) {
-    return null;
-  }
-
-  const title = sanitizePlanTitle(value.title) || 'Plan';
-  const createdAt = Date.now();
-  const id = createProjectPlanId();
-  const filePath = joinPath(plansDirectory, `${createdAt}-${slugifyPlanTitle(title)}.md`);
-
-  const projectDirectory = await getProjectStorageDirectory(project);
-  if (!projectDirectory) {
-    return null;
-  }
-
-  const createdProjectDir = await mkdirp(projectDirectory);
-  const createdPlansDir = createdProjectDir ? await mkdirp(plansDirectory) : false;
-  if (!createdProjectDir || !createdPlansDir) {
-    return null;
-  }
-
-  const wrote = await writeTextFile(filePath, formatProjectPlanMarkdown(title, value.body));
-  if (!wrote) {
-    return null;
-  }
-
-  const existing = await getProjectPlanFiles(project);
-  const nextEntry = { id, path: filePath, createdAt };
-  const saved = await saveProjectPlanFiles(project, [nextEntry, ...existing]);
-  if (!saved) {
-    return null;
-  }
-
-  return nextEntry;
 }
 
 export async function getProjectActionsState(project: ProjectRef): Promise<OpenChamberProjectActionsState> {
