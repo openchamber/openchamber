@@ -4,6 +4,7 @@ import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { contentFingerprint, HighlightResultCache, utf16Bytes } from './highlightResultCache';
 import { highlightCodeInWorker } from './markdown-worker';
 import { escapeRawMarkdownHtml, isLocalFileUrl, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
 
@@ -415,32 +416,37 @@ const highlightCodeBlocks = async (html: string): Promise<string> => {
 
   const lineLimit = isVSCodeRuntime() ? VSCODE_CODE_HIGHLIGHT_LINE_LIMIT : CODE_HIGHLIGHT_LINE_LIMIT;
 
-  let result = html;
-  for (const match of matches) {
-    const [full, rawLang, escapedCode] = match;
-    const requested = (rawLang || 'text').toLowerCase();
-    // Leave mermaid fences untouched so the decorate pass can render them as
-    // diagrams (highlighting would strip the `language-mermaid` class).
-    if (requested === 'mermaid') continue;
+  // Highlight all eligible fences concurrently — sequential await was O(n)
+  // worker round-trips for messages with multiple code blocks.
+  const replacements = await Promise.all(
+    matches.map(async (match) => {
+      const [full, rawLang, escapedCode] = match;
+      const requested = (rawLang || 'text').toLowerCase();
+      // Leave mermaid fences untouched so the decorate pass can render them as
+      // diagrams (highlighting would strip the `language-mermaid` class).
+      if (requested === 'mermaid') return null;
 
-    const code = unescapeHtml(escapedCode ?? '');
+      const code = unescapeHtml(escapedCode ?? '');
 
-    // Oversized block: skip highlight, keep plain code but stamp the language.
-    if (exceedsLineLimit(code, lineLimit)) {
-      result = result.replace(full, () => full.replace('<pre', `<pre data-md-lang="${requested}"`));
-      continue;
-    }
+      // Oversized block: skip highlight, keep plain code but stamp the language.
+      if (exceedsLineLimit(code, lineLimit)) {
+        return { full, next: full.replace('<pre', `<pre data-md-lang="${requested}"`) };
+      }
 
-    // Tokenize off the main thread. On failure the worker resolves to null and
-    // we keep the original escaped <pre><code> (no main-thread highlight).
-    const highlighted = await highlightCodeInWorker(code, requested);
-    if (highlighted) {
+      // Tokenize off the main thread. On failure the worker resolves to null and
+      // we keep the original escaped <pre><code> (no main-thread highlight).
+      const highlighted = await highlightCodeInWorker(code, requested);
+      if (!highlighted) return null;
       // Stamp the language so the decorate pass can show a header label.
-      const stamped = highlighted.replace(/^<pre/, `<pre data-md-lang="${requested}"`);
-      result = result.replace(full, () => stamped);
-    }
-  }
+      return { full, next: highlighted.replace(/^<pre/, `<pre data-md-lang="${requested}"`) };
+    }),
+  );
 
+  let result = html;
+  for (const replacement of replacements) {
+    if (!replacement) continue;
+    result = result.replace(replacement.full, () => replacement.next);
+  }
   return result;
 };
 
@@ -483,29 +489,60 @@ const sanitize = (html: string): string => {
 
 
 // ---------------------------------------------------------------------------
-// Per-block HTML cache (LRU, mirrors OpenCode's checksum cache)
+// Per-block HTML cache (content-addressed LRU)
 // ---------------------------------------------------------------------------
+//
+// Keyed by content hash + mode + highlight flag + image mode — NOT by renderer
+// instance id. `SimpleMarkdownRenderer` historically used a shared
+// `simple:${variant}` key, so every same-variant instance fought over one cache
+// slot and re-highlighted unchanged content on every pass
+// (openchamber/openchamber#2769). Content addressing makes identical blocks
+// share one entry and stops that thrash. Bounds are high enough for long
+// sessions; byte cap keeps memory bounded.
+//
+// `full` (settled) and `live` (trailing, still streaming) blocks get separate
+// caches. A live block's content changes on every stream step, so under one
+// shared content-addressed cache each step would insert a new entry and a long
+// streaming message would evict the settled blocks this fix exists to keep
+// warm. The live cache is small on purpose: it only has to absorb repeat
+// renders of the *same* step.
 
-const CACHE_MAX = 240;
-const htmlCache = new Map<string, { hash: string; html: string }>();
+const FULL_CACHE_MAX_ENTRIES = 2000;
+const FULL_CACHE_MAX_BYTES = 24 * 1024 * 1024;
+const LIVE_CACHE_MAX_ENTRIES = 32;
+const LIVE_CACHE_MAX_BYTES = 2 * 1024 * 1024;
 
-// FNV-1a 32-bit hash of the block content.
-const hash = (value: string): string => {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < value.length; i += 1) {
-    h ^= value.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(36);
+const fullBlockCache = new HighlightResultCache<string>({
+  maxEntries: FULL_CACHE_MAX_ENTRIES,
+  maxBytes: FULL_CACHE_MAX_BYTES,
+});
+const liveBlockCache = new HighlightResultCache<string>({
+  maxEntries: LIVE_CACHE_MAX_ENTRIES,
+  maxBytes: LIVE_CACHE_MAX_BYTES,
+});
+
+const cacheForMode = (mode: MarkdownBlock['mode']): HighlightResultCache<string> =>
+  (mode === 'live' ? liveBlockCache : fullBlockCache);
+
+/** Content-addressed cache key for a markdown block. */
+const markdownBlockCacheKey = (
+  contentHash: string,
+  mode: MarkdownBlock['mode'],
+  highlight: boolean,
+  imageMode: MarkdownImageMode,
+): string => `${contentHash}:${mode}:${highlight ? 1 : 0}:${imageMode}`;
+
+/** Test-only: clear the render HTML caches between cases. */
+export const resetMarkdownHtmlCacheForTests = (): void => {
+  fullBlockCache.clear();
+  liveBlockCache.clear();
 };
 
-const touch = (key: string, entry: { hash: string; html: string }): void => {
-  htmlCache.delete(key);
-  htmlCache.set(key, entry);
-  if (htmlCache.size <= CACHE_MAX) return;
-  const oldest = htmlCache.keys().next().value;
-  if (oldest) htmlCache.delete(oldest);
-};
+/** Test-only: entry counts per block cache, for churn/eviction assertions. */
+export const __markdownBlockCacheSizesForTests = (): { full: number; live: number } => ({
+  full: fullBlockCache.size,
+  live: liveBlockCache.size,
+});
 
 const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): Promise<string> => {
   const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
@@ -545,28 +582,29 @@ export type RenderedBlock = {
  * splits into blocks, caches per-block, heals incomplete syntax. Returning
  * blocks (instead of one joined string) lets the renderer re-morph only the
  * block that changed, keeping per-step streaming cost ~O(last block).
+ *
+ * Lookup is content-addressed: distinct renderers holding identical blocks
+ * share one entry and cannot evict each other by identity collision.
  */
 export const renderMarkdownBlocks = async (
   text: string,
   streaming: boolean,
-  cacheKey: string,
   imageMode: MarkdownImageMode = 'inline',
 ): Promise<RenderedBlock[]> => {
   if (!text) return [];
 
   const blocks = streamBlocks(text, streaming);
   return Promise.all(
-    blocks.map(async (block, index) => {
-      const contentHash = hash(block.raw);
-      const id = `${contentHash}:${block.mode}:${block.highlight ? 1 : 0}:${imageMode}`;
-      const key = `${cacheKey}:${index}:${block.mode}:${imageMode}`;
-      const cached = htmlCache.get(key);
-      if (cached && cached.hash === contentHash) {
-        touch(key, cached);
-        return { id, html: cached.html };
+    blocks.map(async (block) => {
+      const contentHash = contentFingerprint(block.raw);
+      const id = markdownBlockCacheKey(contentHash, block.mode, block.highlight, imageMode);
+      const cache = cacheForMode(block.mode);
+      const cached = cache.get(id);
+      if (cached !== undefined) {
+        return { id, html: cached };
       }
       const html = await parseBlock(block, imageMode);
-      touch(key, { hash: contentHash, html });
+      cache.set(id, html, utf16Bytes(id) + utf16Bytes(html));
       return { id, html };
     }),
   );

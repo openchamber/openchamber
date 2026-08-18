@@ -8,6 +8,7 @@ import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { contextTokensFromBreakdown } from '@/stores/utils/tokenUtils';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { McpDropdown } from '@/components/mcp/McpDropdown';
 import { ArchiveAllDropdown } from '@/components/session/ArchiveAllDropdown';
@@ -702,7 +703,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       }
 
       if (!lastTokens && message.tokens) {
-        const total = message.tokens.input + message.tokens.output + message.tokens.reasoning + (message.tokens.cache?.read ?? 0) + (message.tokens.cache?.write ?? 0);
+        const total = contextTokensFromBreakdown(message.tokens);
         if (total > 0) {
           lastTokens = message.tokens;
           lastMessageId = (currentSessionMessages[i] as { id?: string }).id;
@@ -730,7 +731,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     }
 
     const lastTokens = headerMessageSummary.lastTokens;
-    const totalTokens = lastTokens.input + lastTokens.output + lastTokens.reasoning + (lastTokens.cache?.read ?? 0) + (lastTokens.cache?.write ?? 0);
+    const totalTokens = contextTokensFromBreakdown(lastTokens);
     const thresholdLimit = contextLimit > 0 ? contextLimit : 200000;
     const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0;
     const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined;

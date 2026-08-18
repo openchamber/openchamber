@@ -1,4 +1,5 @@
 import { sanitizeGitProviders } from '../git-providers/config.js';
+import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
 
 export const createSettingsHelpers = (dependencies) => {
   const {
@@ -517,6 +518,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.agentControlToolEnabled === 'boolean') {
       result.agentControlToolEnabled = candidate.agentControlToolEnabled;
     }
+    if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
+      result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
+    }
     if (typeof candidate.optimizeSystemPrompt === 'boolean') {
       result.optimizeSystemPrompt = candidate.optimizeSystemPrompt;
     }
@@ -914,6 +918,9 @@ export const createSettingsHelpers = (dependencies) => {
     return {
       ...sanitized,
       hasManagedRemoteTunnelToken,
+      // Tells the client whether agent memory exists in this build at all, so
+      // its settings row and panel tab can be absent rather than merely off.
+      agentMemoryFeatureAvailable: isAgentMemoryFeatureAvailable(),
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
       mobileKeyboardMode,

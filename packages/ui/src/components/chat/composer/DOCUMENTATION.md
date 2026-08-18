@@ -61,20 +61,46 @@ question of design, not of feasibility.
 Selection rendering: every device runs CodeMirror's `drawSelection()` — it
 keeps typing on the drawn-selection code path, and removing it makes
 CodeMirror enforce cursor association on the native selection, which iOS
-answers with severe input lag. Every device also layers
-`composerNativeSelectionExtension` (`editor/theme.ts`) on top: it re-shows
+answers with severe input lag. **That much is not platform-specific and must
+not be undone.** What differs is who paints the selection, and
+`composerSelectionExtension` (`editor/theme.ts`) picks that per platform.
+
+When CodeMirror 6.43.9's iOS predicate does not match,
+`composerNativeSelectionExtension` layers over `drawSelection()`: it re-shows
 the native selection, and — only while a range is selected — the native caret,
 hiding the painted layers those replace. The native selection is the one that
 shows for two reasons: the painted layer sits behind the content, so tokens
-with their own background (inline code, fences) cover it completely; and
-iOS's selection drag handles attach to the visible native selection and take
-their colour from the caret, so a transparent caret means invisible handles.
-The range-only caret scoping is load-bearing — a native caret visible while
-typing makes WebKit re-render its caret UI after every keystroke, felt as
-severe input lag. The selection tint comes from `--primary`, not the selection
-token:
-themes define `--interactive-selection` with its own alpha, so a translucent
-mix of it is nearly invisible.
+with their own background (inline code, fences) cover it completely; and the
+platform's selection drag handles attach to the visible native selection and
+take their colour from the caret, so a transparent caret means invisible
+handles. The range-only caret scoping is load-bearing — a native caret visible
+while typing makes the browser re-render its caret UI after every keystroke,
+felt as severe input lag.
+
+When CodeMirror 6.43.9's exact iOS predicate matches,
+`composerIOSSelectionExtension` leaves selection-handle geometry and appearance
+to CodeMirror. CodeMirror puts the handles in `.cm-selectionLayer`, normally at
+`z-index: -1`; the extension raises that layer above the content so opaque
+token backgrounds cannot cover them, and leaves it transparent to touch.
+The handle dots extend 8px past their range; matching scroller padding and
+negative margin expand the clip area without moving the text or changing the
+composer height. iOS still paints its taller system selection overlay even
+when CSS makes `::selection` transparent. The extension therefore suppresses
+CodeMirror's synthetic selection rectangles on iOS while leaving its handles,
+cursor path and `nativeSelectionHidden` facet active. Otherwise the grey system
+highlight and themed rectangle overlap with visibly different heights.
+Do not add a second custom layer or custom handles here: overlapping translucent
+rectangles make selection darker at their seams and imitated handles drift from
+the geometry WebKit actually manipulates. What iOS avoids is installing the
+native-selection workaround above: explicitly restoring native paint and caret
+makes WebKit re-measure them after every decoration redraw, and the composer
+rebuilds every decoration on every keystroke. That cost is felt worst during
+IME composition.
+
+The non-iOS native selection tint comes from `--primary`, not the selection
+token: themes define `--interactive-selection` with its own alpha, so mixing it
+with transparent again is nearly invisible. The iOS system overlay owns its
+visible selection fill.
 
 `composerLanguage.ts` retokenizes the whole document on every change. The
 composer holds a prompt, not a source file: it is short enough that a full pass

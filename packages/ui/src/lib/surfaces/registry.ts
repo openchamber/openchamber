@@ -104,9 +104,12 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'notes',
     descriptionKey: 'contextRail.surface.notes.description',
-    defaultWidthFraction: 1 / 3,
+    // As wide as the files surface: this panel now carries a sidebar and a
+    // content column, and a third of the window leaves the content column too
+    // narrow to read a note in.
+    defaultWidthFraction: 3 / 5,
     mode: 'notes',
-    icon: 'sticky-note',
+    icon: 'book-marked',
     labelKey: 'contextRail.surface.notes',
     availability: 'always',
   },

@@ -13,7 +13,20 @@ First, verify the worktree is safe to use:
 
 `git status --porcelain`
 
-If the output is not empty, stop immediately and report that the worktree has uncommitted changes. Do not stash, reset, discard, commit, or switch branches. Local work in progress must never end up in a maintenance PR.
+If the output is not empty, decide which of two situations you are in.
+
+If the repository root contains a `.maintenance-clone` marker file, this working copy is a disposable clone dedicated to unattended maintenance. Nothing in it is human work in progress, so leftover changes are debris from an earlier task that failed to clean up after itself. Recover the clone rather than stopping:
+
+```
+git checkout -- .
+git clean -fd
+git checkout main
+git pull
+```
+
+Report exactly which files you discarded, then continue with the task. A failed predecessor must not be able to jam the pipeline for every later run.
+
+If the marker file is absent, this is a working copy a person uses. Stop immediately and report that the worktree has uncommitted changes. Do not stash, reset, discard, commit, or switch branches.
 
 Then run:
 
@@ -295,7 +308,18 @@ So, before you consider a selected file done:
 - A group of findings sharing one root cause counts as one reason, and that root cause is usually worth fixing. If eleven findings in a file all come from one untyped parser, fixing that parser is the point of the batch, not a reason to skip.
 - Leaving more than roughly a quarter of a file's findings behind means you have not finished. Either finish them or explain, per group, why the file was a bad selection in the first place.
 
-Skip a finding only when the fix would require unclear behavior changes, or a change so large it would stop the pull request from being reviewable. Difficulty alone is not a reason. If skipped, give the specific reason in the PR body under `## Non-goals`.
+Skip a finding when the fix would require unclear behavior changes, when the change would be so large that the pull request stops being reviewable, or when the only way you can see to close it is one of the forbidden patterns. That last case is not a loophole, it is the required outcome: an honest skip is always better than a laundered fix, and choosing the forbidden pattern to satisfy "finish the file" is the worse failure of the two. Ordinary difficulty, on its own, is still not a reason. If skipped, give the specific reason in the PR body under `## Non-goals`.
+
+### When the whole file is an external-data boundary
+
+Some files exist to receive data from outside the program: provider APIs, quota endpoints, extension host messages, configuration on disk. In such a file, most or all findings can share one root cause, and the honest fix is a real parsed boundary with named contracts, which is a substantial piece of work rather than a lint cleanup.
+
+Recognize this early, before editing. Read the file first and ask whether closing its findings means designing a data contract that does not exist yet. If it does, choose one of two outcomes, and never a third:
+
+- Do the work properly for a coherent part of the file: define the contract for one provider, one endpoint, or one message, parse it at its boundary, and leave the rest with a clear explanation of the remaining root cause. A correct partial fix with a named boundary is a good pull request.
+- Conclude that the file is a poor batch selection, abort per "Aborting cleanly", and say in your report that the file needs a deliberate data-contract change rather than an unattended cleanup.
+
+What you must not do is invent a generic JSON contract to make the findings disappear. Generic record types, primitive unions, and `unknown`-based aliases over external data are exactly the patterns these rules exist to reject, and reintroducing them under time pressure defeats the purpose of the whole task.
 
 Hard prohibitions. Each of these makes the lint output greener while making the code worse, and each is grounds for rejecting the whole PR:
 - Do not disable, downgrade, or ignore anti-slop rules, in configuration or with inline comments.
@@ -310,6 +334,21 @@ Hard prohibitions. Each of these makes the lint output greener while making the 
 - Do not edit `oxlint.config.ts` or `tools/oxlint/anti-slop/`.
 - Do not edit `CHANGELOG.md`, package versions, or release metadata. This is internal maintenance with no user-facing change.
 - Do not fix findings outside the selected files.
+
+## Aborting cleanly
+
+You may reach a point where the batch cannot be completed correctly: validation keeps failing, or the only remaining way to close the findings is a pattern this task forbids. Stopping there is the right decision. Stopping there and walking away from a modified working copy is not.
+
+Whatever edits exist in the working copy at that moment are your own, made minutes ago in this session. They are not human work in progress, and nothing is lost by removing them. Leaving them behind jams every scheduled run that follows, because those runs correctly refuse to operate on a dirty worktree.
+
+So when you abort, in this order:
+
+1. Revert every file you modified: `git checkout -- <paths>`, plus `git clean -fd` for files you created. Verify with `git status --porcelain` that the result is empty.
+2. Release the claim so the files return to the pool: ``bun run deslop -- release --run <run-id>``.
+3. Return to `main`.
+4. Report what you attempted, precisely why you stopped, and confirm that both the worktree is clean and the claim is released.
+
+Never leave a partially fixed working copy as a message to the next run. If a file resists a correct fix, that belongs in your report, not on disk.
 
 After edits, run:
 

@@ -13,7 +13,20 @@ First, verify the worktree is safe to use:
 
 `git status --porcelain`
 
-If the output is not empty, stop immediately and report that the worktree has uncommitted changes. Do not stash, reset, discard, commit, or switch branches. Local work in progress must never end up in a maintenance PR.
+If the output is not empty, decide which of two situations you are in.
+
+If the repository root contains a `.maintenance-clone` marker file, this working copy is a disposable clone dedicated to unattended maintenance. Nothing in it is human work in progress, so leftover changes are debris from an earlier task that failed to clean up after itself. Recover the clone rather than stopping:
+
+```
+git checkout -- .
+git clean -fd
+git checkout main
+git pull
+```
+
+Report exactly which files you discarded, then continue with the task. A failed predecessor must not be able to jam the pipeline for every later run.
+
+If the marker file is absent, this is a working copy a person uses. Stop immediately and report that the worktree has uncommitted changes. Do not stash, reset, discard, commit, or switch branches.
 
 Then run:
 
@@ -36,9 +49,25 @@ Workflow:
 - Finish each selected file. A file is finished when it has zero React Doctor diagnostics, or when every remaining diagnostic has an individual, specific reason to stay. A half-fixed file will be selected again later and cost a second pull request, a second review, and a second merge over the same code.
 - Before considering a file done, re-run `bun run doctor -- file <path>` and read what is left. Leaving more than roughly a quarter of a file's diagnostics behind means you have not finished.
 - A group of diagnostics sharing one root cause counts as one reason, and that root cause is usually worth fixing rather than deferring.
-- Skip a diagnostic only when the fix would require unclear behavior changes, or a change so large it would stop the pull request from being reviewable. Difficulty alone is not a reason. If skipped, give the specific reason in the PR body under `## Non-goals`.
+- Skip a diagnostic when the fix would require unclear behavior changes, when the change would be so large that the pull request stops being reviewable, or when the only way you can see to close it is a change you would not defend in review. An honest skip is always better than a forced fix. Ordinary difficulty, on its own, is still not a reason. If skipped, give the specific reason in the PR body under `## Non-goals`.
+- If a whole selected file turns out to need a deliberate architectural change rather than a cleanup, abort per "Aborting cleanly" and report that the file was a poor batch selection.
 - Do not suppress React Doctor diagnostics unless there is a clear false positive.
 - If a listed diagnostic requires changes outside the selected files, make only the minimal required supporting change. Do not expand the cleanup scope.
+
+## Aborting cleanly
+
+You may reach a point where the batch cannot be completed correctly: validation keeps failing, or the only remaining way to close the findings is a pattern this task forbids. Stopping there is the right decision. Stopping there and walking away from a modified working copy is not.
+
+Whatever edits exist in the working copy at that moment are your own, made minutes ago in this session. They are not human work in progress, and nothing is lost by removing them. Leaving them behind jams every scheduled run that follows, because those runs correctly refuse to operate on a dirty worktree.
+
+So when you abort, in this order:
+
+1. Revert every file you modified: `git checkout -- <paths>`, plus `git clean -fd` for files you created. Verify with `git status --porcelain` that the result is empty.
+2. Release the claim so the files return to the pool: ``bun run doctor -- release --run <run-id>``.
+3. Return to `main`.
+4. Report what you attempted, precisely why you stopped, and confirm that both the worktree is clean and the claim is released.
+
+Never leave a partially fixed working copy as a message to the next run. If a file resists a correct fix, that belongs in your report, not on disk.
 
 After edits, run:
 

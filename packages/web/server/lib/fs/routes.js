@@ -139,6 +139,29 @@ const FILE_MIME_MAP = Object.freeze({
 });
 
 const MAX_SERVE_BYTES = 100 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+
+const readUploadBody = async (req) => {
+  const declaredSize = Number.parseInt(req.headers?.['content-length'] || '0', 10);
+  if (Number.isFinite(declaredSize) && declaredSize > MAX_UPLOAD_BYTES) {
+    req.resume?.();
+    return null;
+  }
+
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > MAX_UPLOAD_BYTES) {
+      req.resume?.();
+      return null;
+    }
+    chunks.push(buffer);
+  }
+
+  return Buffer.concat(chunks, size);
+};
 
 // Only deterministic, side-effect-free git plumbing path queries are cacheable.
 // Anything outside this allowlist (including any non-git command) runs normally
@@ -766,14 +789,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
-      ]);
-
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access to file denied' });
-      }
+      const canonicalPath = await fsPromises.realpath(resolved.resolved);
 
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
@@ -823,14 +839,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
-      ]);
-
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access to file denied' });
-      }
+      const canonicalPath = await fsPromises.realpath(resolved.resolved);
 
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
@@ -894,14 +903,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
-      ]);
-
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access to file denied' });
-      }
+      const canonicalPath = await fsPromises.realpath(resolved.resolved);
 
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
@@ -979,14 +981,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
-      ]);
-
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access to file denied' });
-      }
+      const canonicalPath = await fsPromises.realpath(resolved.resolved);
 
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
@@ -1074,6 +1069,83 @@ export const registerFsRoutes = (app, dependencies) => {
       }
       console.error('Failed to write file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to write file' });
+    }
+  });
+
+  app.post('/api/fs/upload', async (req, res) => {
+    const filePath = typeof req.query?.path === 'string' ? req.query.path.trim() : '';
+    const overwrite = req.query?.overwrite === 'true';
+    if (!filePath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+    if (!String(req.headers?.['content-type'] || '').toLowerCase().startsWith('application/octet-stream')) {
+      return res.status(415).json({ error: 'Content-Type must be application/octet-stream' });
+    }
+
+    try {
+      const resolved = await resolveWorkspacePathFromContext({
+        req,
+        targetPath: filePath,
+        resolveProjectDirectory,
+        path,
+        os,
+        normalizeDirectoryPath,
+        openchamberUserConfigRoot,
+      });
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      const canonicalBase = await fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base));
+      const requestedParent = path.dirname(resolved.resolved);
+      const canonicalParent = await fsPromises.realpath(requestedParent);
+      if (!isPathWithinRoot(canonicalParent, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const existingPath = await fsPromises.realpath(resolved.resolved).catch((error) => {
+        if (error && typeof error === 'object' && error.code === 'ENOENT') {
+          return null;
+        }
+        throw error;
+      });
+      const writePath = existingPath || path.join(canonicalParent, path.basename(resolved.resolved));
+      if (!isPathWithinRoot(writePath, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const body = await readUploadBody(req);
+      if (!body) {
+        return res.status(413).json({ error: `File exceeds maximum size of ${MAX_UPLOAD_BYTES} bytes` });
+      }
+
+      if (!overwrite) {
+        await fsPromises.writeFile(writePath, body, { flag: 'wx' });
+      } else {
+        const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        try {
+          await fsPromises.writeFile(tmp, body, { flag: 'wx' });
+          await fsPromises.rename(tmp, writePath);
+        } catch (error) {
+          await fsPromises.unlink(tmp).catch(() => {});
+          throw error;
+        }
+      }
+
+      return res.json({ success: true, path: resolved.resolved });
+    } catch (error) {
+      const err = error;
+      if (err && typeof err === 'object' && err.code === 'EEXIST') {
+        return res.status(409).json({ error: 'File already exists', reason: 'already-exists' });
+      }
+      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        return res.status(404).json({ error: 'Destination directory not found', reason: 'not-found' });
+      }
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access denied');
+      }
+      console.error('Failed to upload file:', error);
+      return res.status(500).json({ error: (error && error.message) || 'Failed to upload file' });
     }
   });
 

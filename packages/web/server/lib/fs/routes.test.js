@@ -140,6 +140,26 @@ const registerWrite = (fsPromises) => {
   return getRoute('POST', '/api/fs/write');
 };
 
+const registerUpload = (fsPromises) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      ...fsPromises,
+    },
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('POST', '/api/fs/upload');
+};
+
 const registerRead = (fsPromises) => {
   const { app, getRoute } = createRouteRegistry();
   registerFsRoutes(app, {
@@ -230,6 +250,22 @@ const callExec = async (handler, body) => {
 const callWrite = async (handler, body) => {
   const res = createMockResponse();
   await handler({ body }, res);
+  return res;
+};
+
+const callUpload = async (handler, { body = Buffer.from('upload'), path: filePath = '/repo/file.bin', overwrite = false } = {}) => {
+  const res = createMockResponse();
+  const req = {
+    headers: {
+      'content-type': 'application/octet-stream',
+      'content-length': String(body.length),
+    },
+    query: { path: filePath, overwrite: overwrite ? 'true' : undefined },
+    async *[Symbol.asyncIterator]() {
+      yield body;
+    },
+  };
+  await handler(req, res);
   return res;
 };
 
@@ -366,7 +402,114 @@ describe('fs write', () => {
   });
 });
 
+describe('fs upload', () => {
+  it('creates a binary file without overwriting existing content', async () => {
+    const fsPromises = {
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, { body: Buffer.from([0, 1, 2, 255]) });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.bin' });
+    expect(fsPromises.writeFile).toHaveBeenCalledWith(
+      '/repo/file.bin',
+      Buffer.from([0, 1, 2, 255]),
+      { flag: 'wx' },
+    );
+    expect(fsPromises.rename).not.toHaveBeenCalled();
+  });
+
+  it('returns a conflict instead of silently replacing an existing file', async () => {
+    const error = Object.assign(new Error('exists'), { code: 'EEXIST' });
+    const fsPromises = {
+      writeFile: vi.fn(async () => { throw error; }),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'File already exists', reason: 'already-exists' });
+  });
+
+  it('atomically replaces a file only when overwrite is explicit', async () => {
+    const fsPromises = {
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, { overwrite: true });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.bin' });
+    const tmp = fsPromises.writeFile.mock.calls[0][0];
+    expect(tmp).toMatch(/^\/repo\/file\.bin\.tmp-/);
+    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, Buffer.from('upload'), { flag: 'wx' });
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.bin');
+  });
+
+  it('rejects a destination parent that resolves outside the workspace', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath === '/repo/link' ? '/outside' : targetPath),
+      writeFile: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, { path: '/repo/link/file.bin' });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Access denied' });
+    expect(fsPromises.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('rejects streamed bodies larger than 100 MB', async () => {
+    const fsPromises = {
+      writeFile: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+    const chunk = Buffer.alloc(1024 * 1024);
+    const req = {
+      headers: { 'content-type': 'application/octet-stream' },
+      query: { path: '/repo/file.bin' },
+      async *[Symbol.asyncIterator]() {
+        for (let index = 0; index < 101; index += 1) {
+          yield chunk;
+        }
+      },
+    };
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(413);
+    expect(res.body).toEqual({ error: `File exceeds maximum size of ${100 * 1024 * 1024} bytes` });
+    expect(fsPromises.writeFile).not.toHaveBeenCalled();
+  });
+});
+
 describe('fs read', () => {
+  it('reads workspace files through symlinks that resolve outside the workspace', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => {
+        if (targetPath === '/repo/link.txt') return '/shared/target.txt';
+        return targetPath;
+      }),
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      readFile: vi.fn(async () => 'shared'),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/repo/link.txt' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('shared');
+    expect(fsPromises.readFile).toHaveBeenCalledWith('/shared/target.txt', 'utf8');
+  });
+
   it('rejects outside workspace reads without a grant', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fsPromises = {
