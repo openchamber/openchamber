@@ -10,8 +10,10 @@ import {
 } from '@/lib/terminalOutput';
 import {
   getTerminalCellFromPoint,
+  getSingleCellSelectionOffset,
   getTerminalWordRange,
   type TerminalCellPosition,
+  type TerminalSelectionPixelOffset,
 } from '@/lib/terminalTouchSelection';
 import type { TerminalChunk } from '@/stores/useTerminalStore';
 
@@ -401,27 +403,10 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       if (!canvas) return null;
       return getTerminalCellFromPoint(clientX, clientY, canvas.getBoundingClientRect(), terminal.cols, terminal.rows);
     };
-    type SelectionPixelOffset = { x: number; y: number };
-    const getSingleCellSelectionOffset = (): SelectionPixelOffset | undefined => {
-      const canvas = container.querySelector('canvas');
-      if (!canvas) return undefined;
-      const bounds = canvas.getBoundingClientRect();
-      const cellWidth = bounds.width / terminal.cols;
-      const cellHeight = bounds.height / terminal.rows;
-      if (cellWidth <= 0 || cellHeight <= 0) return undefined;
-
-      // Move diagonally inside the cell far enough to cross Ghostty's half-cell
-      // threshold, without changing the cell used for the selection endpoint.
-      const halfWidth = cellWidth / 2;
-      const halfHeight = cellHeight / 2;
-      const cellDiagonal = Math.hypot(halfWidth, halfHeight);
-      const scale = (halfWidth / cellDiagonal + 1) / 2;
-      return { x: halfWidth * scale, y: halfHeight * scale };
-    };
     const dispatchSelectionMouseEvent = (
       type: 'mousedown' | 'mousemove',
       cell: TerminalCellPosition,
-      pixelOffset?: SelectionPixelOffset,
+      pixelOffset?: TerminalSelectionPixelOffset,
     ) => {
       const canvas = container.querySelector('canvas');
       if (!canvas) return;
@@ -472,7 +457,12 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
         selectionFocus = { column: word.endColumn, row: cell.row };
         const singleCellOffset =
           word.startColumn === word.endColumn && Boolean(cells[cell.column]?.trim())
-            ? getSingleCellSelectionOffset()
+            ? (() => {
+                const canvas = container.querySelector('canvas');
+                return canvas
+                  ? getSingleCellSelectionOffset(canvas.getBoundingClientRect(), terminal.cols, terminal.rows)
+                  : undefined;
+              })()
             : undefined;
         gesture = 'selecting';
         dispatchSelectionMouseEvent('mousedown', selectionAnchor);
