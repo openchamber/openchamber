@@ -265,10 +265,8 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
       const number = gitLabMr.mr?.number;
       return number ? { kind: 'pr', number } : null;
     }
-    if (gitProvider === 'gitea') {
-      const number = giteaPr.pr?.number;
-      return number ? { kind: 'pr', number } : null;
-    }
+    // Gitea PR diff is not yet supported server-side; omit the source to
+    // avoid offering a review that would fail with "no GitHub remote".
     return branchPrNumber ? { kind: 'pr', number: branchPrNumber } : null;
   }, [branchPrNumber, giteaPr.pr, gitLabMr.mr, gitProvider, source]);
 

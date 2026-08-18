@@ -222,8 +222,10 @@ export function createGitLabClient({ token, baseUrl }) {
 
     // Follow a project-move redirect exactly once. GitLab redirects
     // (301/302/308) come with a `Location` for the new project URL; a manual
-    // redirect keeps our PRIVATE-TOKEN header across the hop.
+    // redirect keeps our PRIVATE-TOKEN header across the hop. Only follow
+    // same-origin redirects to avoid leaking the token to a different host.
     let redirects = 0;
+    const baseHost = new URL(url).host;
     while (
       (response.status === 301 || response.status === 302 || response.status === 308)
       && headerValue(response.headers, 'location')
@@ -231,6 +233,7 @@ export function createGitLabClient({ token, baseUrl }) {
     ) {
       const location = headerValue(response.headers, 'location');
       const nextUrl = new URL(location, url).toString();
+      if (new URL(nextUrl).host !== baseHost) break;
       response = await conditionalFetch(nextUrl, fetchOptions);
       redirects += 1;
     }

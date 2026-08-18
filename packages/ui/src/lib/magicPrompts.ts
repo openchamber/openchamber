@@ -443,7 +443,7 @@ Do not implement changes until I confirm; end with: "Next actions: <1 sentence>"
     placeholders: [
       { key: 'pr_number', description: 'Pull request number.' },
     ],
-    template: 'Review this pull request !{{pr_number}} using the provided PR context',
+    template: 'Review this pull request #{{pr_number}} using the provided PR context',
   },
   {
     id: 'gitea.pr.review.instructions',

@@ -1,6 +1,9 @@
 import { getOctokitOrNull } from '../github/octokit.js';
 import { resolveGitHubRepoFromDirectory } from '../github/repo/index.js';
 import { getGitLabClientOrNull } from '../gitlab/client.js';
+import { createGitLabClient } from '../gitlab/client.js';
+import { getGitLabAuth, getGitLabDefaultBaseUrl } from '../gitlab/auth.js';
+import { getEffectiveProviderApiBaseUrl } from '../git-providers/project-config.js';
 import { resolveGitLabRepoFromDirectory } from '../gitlab/repo.js';
 
 // GitLab diff pagination cap: never loop more than 10 pages of 100 files,
@@ -60,7 +63,18 @@ async function getGitHubPullRequestDiff(directory, number) {
  * here.
  */
 async function getGitLabMergeRequestDiff(repo, number) {
-  const client = getGitLabClientOrNull();
+  // Resolve per-project API base override, mirroring getClient() in routes.js.
+  const auth = getGitLabAuth();
+  if (!auth?.accessToken) {
+    throw Object.assign(new Error('Connect a GitLab account to review merge requests'), {
+      statusCode: 401,
+      code: 'gitlab-not-connected',
+    });
+  }
+  const effectiveBaseUrl = getEffectiveProviderApiBaseUrl('gitlab', directory) || getGitLabDefaultBaseUrl();
+  const client = effectiveBaseUrl !== getGitLabDefaultBaseUrl()
+    ? createGitLabClient({ token: auth.accessToken, baseUrl: effectiveBaseUrl })
+    : getGitLabClientOrNull();
   if (!client) {
     throw Object.assign(new Error('Connect a GitLab account to review merge requests'), {
       statusCode: 401,

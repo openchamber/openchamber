@@ -132,7 +132,7 @@ export const deriveLinkedIssueProvider = (url: string): ForgeProviderKind | null
 
   if (host === 'github.com') return 'github';
   if (host === 'gitlab.com') return 'gitlab';
-  if (host === 'gitea.com') return 'gitea';
+  if (host === 'gitea.com' || host === 'codeberg.org') return 'gitea';
 
   const { domains, apiBaseUrls } = useGitProviderDomainsStore.getState();
   const gitlabAccounts = useGitLabAuthStore.getState().status?.accounts;

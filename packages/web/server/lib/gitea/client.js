@@ -227,7 +227,9 @@ export function createGiteaClient({ token, baseUrl }) {
 
     // Follow redirects (301/302/308) exactly once. Gitea serves them for moved
     // repos/users; a manual redirect keeps our Authorization header across the hop.
+    // Only follow same-origin redirects to avoid leaking the token to a different host.
     let redirects = 0;
+    const baseHost = new URL(url).host;
     while (
       (response.status === 301 || response.status === 302 || response.status === 308)
       && headerValue(response.headers, 'location')
@@ -235,6 +237,7 @@ export function createGiteaClient({ token, baseUrl }) {
     ) {
       const location = headerValue(response.headers, 'location');
       const nextUrl = new URL(location, url).toString();
+      if (new URL(nextUrl).host !== baseHost) break;
       response = await conditionalFetch(nextUrl, fetchOptions);
       redirects += 1;
     }
