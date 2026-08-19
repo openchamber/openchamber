@@ -749,6 +749,16 @@ interface UIStore {
     subtask: { title: string; message: string };
   };
 
+  // Per-channel sound effects (which events play which sound, and whether at all)
+  soundsAgentEnabled: boolean;
+  soundsAgentSoundId: string;
+  soundsPermissionsEnabled: boolean;
+  soundsPermissionsSoundId: string;
+  soundsErrorsEnabled: boolean;
+  soundsErrorsSoundId: string;
+  soundsQuestionsEnabled: boolean;
+  soundsQuestionsSoundId: string;
+
   // Summarization settings
   summarizeLastMessage: boolean;
   summaryThreshold: number;   // chars — messages longer than this get summarized
@@ -778,6 +788,10 @@ interface UIStore {
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
+  /** Whether the pet companion may render at all. Persisted, cross-runtime. */
+  showPet: boolean;
+  /** Scale factor for the pet companion and its speech bubbles. 0.5-1.5. */
+  petSize: number;
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
   showExpandedBashTools: boolean;
@@ -940,6 +954,14 @@ interface UIStore {
   setNotificationTemplates: (
     templates: UIStore['notificationTemplates'] | ((current: UIStore['notificationTemplates']) => UIStore['notificationTemplates']),
   ) => void;
+  setSoundsAgentEnabled: (value: boolean) => void;
+  setSoundsAgentSoundId: (value: string) => void;
+  setSoundsPermissionsEnabled: (value: boolean) => void;
+  setSoundsPermissionsSoundId: (value: string) => void;
+  setSoundsErrorsEnabled: (value: boolean) => void;
+  setSoundsErrorsSoundId: (value: string) => void;
+  setSoundsQuestionsEnabled: (value: boolean) => void;
+  setSoundsQuestionsSoundId: (value: string) => void;
   setSummarizeLastMessage: (value: boolean) => void;
   setSummaryThreshold: (value: number) => void;
   setSummaryLength: (value: number) => void;
@@ -956,6 +978,8 @@ interface UIStore {
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
+  setShowPet: (value: boolean) => void;
+  setPetSize: (value: number) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
   setShowExpandedBashTools: (value: boolean) => void;
@@ -1005,6 +1029,8 @@ export const useUIStore = create<UIStore>()(
         workStatusExpandedSections: {},
         workStatusScrollTop: 0,
         workStatusPanelEnabled: true,
+        showPet: true,
+        petSize: 1,
         workStatusPanelVisible: false,
         workStatusPanelFits: false,
         workStatusOverlayOpen: false,
@@ -1099,6 +1125,16 @@ export const useUIStore = create<UIStore>()(
           question: { ...EMPTY_NOTIFICATION_TEMPLATES.question },
           subtask: { ...EMPTY_NOTIFICATION_TEMPLATES.subtask },
         },
+
+        // Per-channel sound effects — defaults match opencode's sound system.
+        soundsAgentEnabled: true,
+        soundsAgentSoundId: 'staplebops-01',
+        soundsPermissionsEnabled: true,
+        soundsPermissionsSoundId: 'staplebops-02',
+        soundsErrorsEnabled: true,
+        soundsErrorsSoundId: 'nope-03',
+        soundsQuestionsEnabled: true,
+        soundsQuestionsSoundId: 'alert-01',
 
         // Summarization settings
         summarizeLastMessage: false,
@@ -2321,6 +2357,15 @@ export const useUIStore = create<UIStore>()(
               : templates,
           }));
         },
+
+        setSoundsAgentEnabled: (value) => { set({ soundsAgentEnabled: value }); },
+        setSoundsAgentSoundId: (value) => { set({ soundsAgentSoundId: value }); },
+        setSoundsPermissionsEnabled: (value) => { set({ soundsPermissionsEnabled: value }); },
+        setSoundsPermissionsSoundId: (value) => { set({ soundsPermissionsSoundId: value }); },
+        setSoundsErrorsEnabled: (value) => { set({ soundsErrorsEnabled: value }); },
+        setSoundsErrorsSoundId: (value) => { set({ soundsErrorsSoundId: value }); },
+        setSoundsQuestionsEnabled: (value) => { set({ soundsQuestionsEnabled: value }); },
+        setSoundsQuestionsSoundId: (value) => { set({ soundsQuestionsSoundId: value }); },
         setSummarizeLastMessage: (value) => { set({ summarizeLastMessage: value }); },
         setSummaryThreshold: (value) => { set({ summaryThreshold: value }); },
         setSummaryLength: (value) => { set({ summaryLength: value }); },
@@ -2366,6 +2411,12 @@ export const useUIStore = create<UIStore>()(
         },
         setCodeBlockLineWrap: (value) => {
           set({ codeBlockLineWrap: value });
+        },
+        setShowPet: (value) => {
+          set({ showPet: value });
+        },
+        setPetSize: (value) => {
+          set({ petSize: Math.max(0.5, Math.min(1.5, value)) });
         },
         setShowToolFileIcons: (value) => {
           set({ showToolFileIcons: value });
@@ -2654,6 +2705,16 @@ export const useUIStore = create<UIStore>()(
             state.autoSaveEnabled = true;
           }
 
+          if (typeof state.showPet !== 'boolean') {
+            state.showPet = true;
+          }
+
+          if (typeof state.petSize !== 'number' || !Number.isFinite(state.petSize)) {
+            state.petSize = 1;
+          } else {
+            state.petSize = Math.max(0.5, Math.min(1.5, state.petSize));
+          }
+
           state.contextRailOrder = Array.isArray(state.contextRailOrder)
             ? (state.contextRailOrder as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
             : [];
@@ -2729,6 +2790,14 @@ export const useUIStore = create<UIStore>()(
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,
           notificationTemplates: state.notificationTemplates,
+          soundsAgentEnabled: state.soundsAgentEnabled,
+          soundsAgentSoundId: state.soundsAgentSoundId,
+          soundsPermissionsEnabled: state.soundsPermissionsEnabled,
+          soundsPermissionsSoundId: state.soundsPermissionsSoundId,
+          soundsErrorsEnabled: state.soundsErrorsEnabled,
+          soundsErrorsSoundId: state.soundsErrorsSoundId,
+          soundsQuestionsEnabled: state.soundsQuestionsEnabled,
+          soundsQuestionsSoundId: state.soundsQuestionsSoundId,
           summarizeLastMessage: state.summarizeLastMessage,
           summaryThreshold: state.summaryThreshold,
           summaryLength: state.summaryLength,
@@ -2744,6 +2813,8 @@ export const useUIStore = create<UIStore>()(
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,
           showToolFileIcons: state.showToolFileIcons,
+          showPet: state.showPet,
+          petSize: state.petSize,
           showTurnChangedFiles: state.showTurnChangedFiles,
           showExpandedBashTools: state.showExpandedBashTools,
           showExpandedEditTools: state.showExpandedEditTools,

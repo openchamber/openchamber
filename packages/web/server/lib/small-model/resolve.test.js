@@ -194,4 +194,32 @@ describe('resolveSmallModel', () => {
     });
     expect(result).toEqual({ providerID: 'mistral', modelID: 'mistral-large-latest', source: 'session-model' });
   });
+
+  it('accepts a config apiKey provider as authenticated for the session provider', () => {
+    const result = resolveSmallModel({
+      auth: {},
+      catalog,
+      configSmallModel: null,
+      configProviders: { slowcom: true },
+      preferredProviderID: 'slowcom',
+      preferredModelID: 'deepseek-v4-flash',
+    });
+    // slowcom has no catalog families, so it falls through to the session
+    // model.
+    expect(result).toEqual({ providerID: 'slowcom', modelID: 'deepseek-v4-flash', source: 'session-model' });
+  });
+
+  it('includes config apiKey providers in the cross-provider scan', () => {
+    const result = resolveSmallModel({
+      auth: { google: { type: 'api', key: 'g-key' } },
+      catalog,
+      configSmallModel: null,
+      configProviders: { slowcom: true },
+      // preferred has no credential, so the scan picks the best family hit
+      // from the union of google (auth) and slowcom (config).
+      preferredProviderID: 'opencode',
+    });
+    // slowcom is not in the catalog, so the scan matches google/gemini-flash.
+    expect(result).toEqual({ providerID: 'google', modelID: 'gemini-2.5-flash', source: 'family-scan' });
+  });
 });

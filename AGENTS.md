@@ -128,6 +128,18 @@ Before adding guidance to a skill, identify its canonical owner. If another skil
 - For docs-only or isolated config changes, run the narrowest relevant validation.
 - Report exactly what was and was not validated. Static checks alone do not prove runtime, relay, performance, or platform correctness.
 
+### Test entrypoints
+
+- Web: `bun run --cwd packages/web test` (Vitest; its `vitest.config.ts` provides a `bun:test` shim and the `@openchamber/ui` alias).
+- Electron: `node --test` suites via `bun run --cwd packages/electron test:architecture` / `test:updater` / `test:linux-desktop`; CI runs only the first two plus `type-check`.
+- `packages/ui` has no test script despite `.test.ts` files, and `packages/vscode` has `*.runtime.test.js` files without a runner script.
+- In `packages/electron`, `type-check` is only `node --check` syntax checking and `lint` is a no-op; use its `node --test` suites for real behavior checks.
+
+### Build and install quirks
+
+- `bun install` runs postinstall side effects: `fix-deprecation.js`, `patch-package`, and `ensure-electron.mjs` (repairs the Electron binary when Node 24's `extract-zip` silently under-installs it). Re-run `bun install` if the Electron binary misbehaves.
+- Root `bun run build` excludes `@openchamber/mobile` (`--filter '!@openchamber/mobile'`), then runs its `build:assets` separately. Mobile builds reuse `packages/web/dist` and need local Xcode, JDK 21, and Android SDK tooling (see `packages/mobile/README.md`).
+
 ## Pull Request Handoff
 
 Before creating or updating a pull request, read `CONTRIBUTING.md` and

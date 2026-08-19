@@ -160,6 +160,10 @@ export type DesktopSettings = {
   optimizeSystemPrompt?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
+  /** Whether the pet companion may render. Defaults differ by platform. */
+  showPet?: boolean;
+  /** Scale factor for the pet companion. */
+  petSize?: number;
   codeBlockLineWrap?: boolean;
   showTurnChangedFiles?: boolean;
   showExpandedBashTools?: boolean;
@@ -249,9 +253,9 @@ const getElectronRuntime = (): ElectronRuntimeGlobal | null => {
   return (window as unknown as { __OPENCHAMBER_ELECTRON__?: ElectronRuntimeGlobal }).__OPENCHAMBER_ELECTRON__ ?? null;
 };
 
-const getDesktopBridge = (): DesktopBridgeGlobal | null => {
-  if (typeof window === 'undefined') return null;
-  return (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__ ?? null;
+export const getDesktopBridge = (): DesktopBridgeGlobal | null => {
+    if (typeof window === 'undefined') return null;
+    return (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__ ?? null;
 };
 
 export const isElectronShell = (): boolean => getElectronRuntime()?.runtime === 'electron';

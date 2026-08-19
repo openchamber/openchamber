@@ -74,6 +74,24 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: 'true' })).toEqual({});
   });
 
+  it('accepts only booleans for the pet companion setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ showPet: true })).toEqual({ showPet: true });
+    expect(helpers.sanitizeSettingsUpdate({ showPet: false })).toEqual({ showPet: false });
+    expect(helpers.sanitizeSettingsUpdate({ showPet: 'true' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ showPet: 1 })).toEqual({});
+  });
+
+  it('clamps the pet companion size to the supported range', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ petSize: 1.25 })).toEqual({ petSize: 1.25 });
+    expect(helpers.sanitizeSettingsUpdate({ petSize: 2 })).toEqual({ petSize: 1.5 });
+    expect(helpers.sanitizeSettingsUpdate({ petSize: 0.1 })).toEqual({ petSize: 0.5 });
+    expect(helpers.sanitizeSettingsUpdate({ petSize: '1' })).toEqual({});
+  });
+
   it('accepts only booleans for collapsible user messages', () => {
     const helpers = createTestHelpers();
 

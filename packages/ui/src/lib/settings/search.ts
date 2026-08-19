@@ -938,6 +938,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['completion', 'subtasks', 'errors', 'questions'],
   },
   {
+    id: 'notifications.sounds',
+    page: 'notifications',
+    titleKey: 'settings.notifications.page.sounds.title',
+    keywords: ['sound', 'sound effect', 'alert', 'chime', 'audio'],
+  },
+  {
     id: 'notifications.push',
     page: 'notifications',
     titleKey: 'settings.notifications.page.push.title',

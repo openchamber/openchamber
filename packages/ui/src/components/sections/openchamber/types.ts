@@ -8,4 +8,5 @@ export type OpenChamberSection =
   | 'github'
   | 'notifications'
   | 'voice'
-  | 'tunnel';
+  | 'tunnel'
+  | 'pets';

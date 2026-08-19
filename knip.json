@@ -31,6 +31,7 @@
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
         "src/main.tsx",
+        "src/pet-overlay-main.tsx",
         "src/sw.ts",
         "bin/**/*.{test,spec}.{js,cjs,mjs}",
         "server/**/*.{test,spec}.{js,cjs,mjs}",

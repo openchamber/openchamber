@@ -52,6 +52,8 @@ import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
+import { playSoundById } from "@/utils/sound"
+import { useUIStore } from "@/stores/useUIStore"
 import { applyGlobalSessionStatusEvent, applyGlobalSessionStatusSnapshot, useGlobalSessionStatusStore } from "./global-session-status"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
@@ -1387,7 +1389,16 @@ async function resyncDirectoryAfterReconnect(
 ) {
   const current = store.getState()
   const candidateSessionIds = getActiveSessionCandidateIds(directory, current)
-  if (candidateSessionIds.length === 0) return
+  if (candidateSessionIds.length === 0) {
+    // No live session candidates (no busy status, trailing turn, or parent
+    // links), but locally known blocking requests still need reconciliation
+    // against the server: a pending question/permission asked during the gap
+    // must not strand its session. Skip the heavier session snapshot work;
+    // resync blocking requests with its own candidate aggregation (session /
+    // message / status / question / permission keys, no-op when empty).
+    await resyncBlockingRequestsForDirectory(directory, store)
+    return
+  }
 
   await resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "authoritative")
 
@@ -1584,6 +1595,15 @@ export function handleEvent(
       return
     }
 
+    // Sound effects are gated on the app being visible: hidden windows rely on
+    // system notifications (visibility-gated by the notification runtime) instead.
+    if (typeof document === "undefined" || document.visibilityState === "visible") {
+      const sounds = useUIStore.getState()
+      if (sounds.soundsPermissionsEnabled) {
+        void playSoundById(sounds.soundsPermissionsSoundId)
+      }
+    }
+
     const isViewed = isViewedInCurrentSession(resolvedDirectory, permission.sessionID)
     showPermissionNeededToast({
       permission,
@@ -1609,6 +1629,14 @@ export function handleEvent(
   if (payload.type === "question.asked") {
     const question = payload.properties as QuestionRequest
     const sessionID = question.sessionID
+    // Sound effects are gated on the app being visible: hidden windows rely on
+    // system notifications (visibility-gated by the notification runtime) instead.
+    if (typeof document === "undefined" || document.visibilityState === "visible") {
+      const sounds = useUIStore.getState()
+      if (sounds.soundsQuestionsEnabled) {
+        void playSoundById(sounds.soundsQuestionsSoundId)
+      }
+    }
     const toastKey = getQuestionToastKey(sessionID, question.id)
     const isViewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
     if (!isViewed && toastKey && !pendingQuestionToastIds.has(toastKey)) {
@@ -1647,6 +1675,16 @@ export function handleEvent(
     if (session && (session as { parentID?: string }).parentID) {
       // subtask — skip notification
     } else if (sessionID) {
+      // Play the matching sound effect for top-level sessions only, and only
+      // while the app is visible; hidden windows rely on system notifications.
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        const sounds = useUIStore.getState()
+        if (payload.type === "session.idle" && sounds.soundsAgentEnabled) {
+          void playSoundById(sounds.soundsAgentSoundId)
+        } else if (payload.type === "session.error" && sounds.soundsErrorsEnabled) {
+          void playSoundById(sounds.soundsErrorsSoundId)
+        }
+      }
       appendNotification({
         directory: resolvedDirectory,
         session: sessionID,

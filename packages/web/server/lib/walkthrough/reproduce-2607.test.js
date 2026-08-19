@@ -68,6 +68,10 @@ let walkthrough;
 let callSmallModel;
 
 describe('issue 2607 — walkthrough blocks unauthenticated providers', () => {
+  // These cases exercise real git commands plus the model catalog pipeline;
+  // the default 5s budget is too tight on slower machines.
+  vi.setConfig({ testTimeout: 15_000 });
+
   beforeAll(async () => {
     setupGitRepo();
     fs.writeFileSync(
@@ -85,6 +89,8 @@ describe('issue 2607 — walkthrough blocks unauthenticated providers', () => {
     fs.rmSync(REPO_DIR, { recursive: true, force: true });
   });
 
+  // These exercise real git commands plus the model catalog pipeline; the
+  // default 5s budget is too tight on slower machines.
   it('resolves the deepseek model but reports not ready without a login', async () => {
     const result = await walkthrough.getWalkthrough({ directory: REPO_DIR, source: SOURCE });
 

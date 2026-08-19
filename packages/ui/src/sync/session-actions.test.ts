@@ -43,7 +43,8 @@ const mockScopedClient = {
     reject: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reject", params })
       if (questionRejectError) {
-        return Promise.resolve({ error: questionRejectError, response: { status: 404 } })
+        const status = (questionRejectError as { status?: number })?.status ?? 404
+        return Promise.resolve({ error: questionRejectError, response: { status } })
       }
       return Promise.resolve({ data: true })
     }),
@@ -110,7 +111,8 @@ const mockSdk = {
     reject: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reject", params })
       if (questionRejectError) {
-        return Promise.resolve({ error: questionRejectError, response: { status: 404 } })
+        const status = (questionRejectError as { status?: number })?.status ?? 404
+        return Promise.resolve({ error: questionRejectError, response: { status } })
       }
       return Promise.resolve({ data: true })
     }),
@@ -1650,9 +1652,10 @@ describe("dismissOpenQuestionsForSession", () => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
     questionReplyError = null
+    questionRejectError = null
   })
 
-  test("returns false and rejects nothing when no questions are pending", async () => {
+  test("returns no dismiss and rejects nothing when no questions are pending", async () => {
     const store = createStore({}, { session: [{ id: "session-a", time: { created: 1 } } as Session] })
     const childStores = createChildStores([["/test/project", store]])
 
@@ -1661,7 +1664,7 @@ describe("dismissOpenQuestionsForSession", () => {
 
     const dismissed = await dismissOpenQuestionsForSession("session-a")
 
-    expect(dismissed).toBe(false)
+    expect(dismissed).toEqual({ dismissed: false, failed: false })
     expect(replyCalls.filter((call) => call.method === "question.reject")).toHaveLength(0)
   })
 
@@ -1685,7 +1688,7 @@ describe("dismissOpenQuestionsForSession", () => {
 
     const dismissed = await dismissOpenQuestionsForSession("session-a")
 
-    expect(dismissed).toBe(true)
+    expect(dismissed).toEqual({ dismissed: true, failed: false })
     const rejectCalls = replyCalls.filter((call) => call.method === "question.reject")
     expect(rejectCalls).toHaveLength(2)
     const rejectedIds = rejectCalls.map((call) => call.params.requestID).sort()
@@ -1696,7 +1699,7 @@ describe("dismissOpenQuestionsForSession", () => {
     expect(store.getState().question["session-child"]).toBe(undefined)
   })
 
-  test("swallows QuestionNotFoundError so a stranded question never blocks the send", async () => {
+  test("treats QuestionNotFoundError as success so a stale question never blocks the send", async () => {
     const staleQuestion = buildQuestion("q-stale", "session-a")
     const store = createStore({}, {
       session: [{ id: "session-a", time: { created: 1 } } as Session],
@@ -1710,12 +1713,38 @@ describe("dismissOpenQuestionsForSession", () => {
 
     const dismissed = await dismissOpenQuestionsForSession("session-a")
 
-    expect(dismissed).toBe(true)
+    expect(dismissed).toEqual({ dismissed: true, failed: false })
     const rejectCalls = replyCalls.filter((call) => call.method === "question.reject")
     expect(rejectCalls).toHaveLength(1)
     expect(rejectCalls[0].params.requestID).toBe("q-stale")
     // The stale entry is cleared from the store even though the server reported not-found.
     expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("restores the optimistic removal when the reject fails without not-found", async () => {
+    const question = buildQuestion("q-500", "session-a")
+    const store = createStore({}, {
+      session: [{ id: "session-a", time: { created: 1 } } as Session],
+      question: { "session-a": [question] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+    questionRejectError = Object.assign(new Error("question.reject failed (500)"), { status: 500 })
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    // The failure is surfaced so the caller must not queue a send that would
+    // wait forever for an idle state the still-pending question never allows.
+    expect(dismissed).toEqual({ dismissed: true, failed: true })
+    const rejectCalls = replyCalls.filter((call) => call.method === "question.reject")
+    expect(rejectCalls).toHaveLength(1)
+    expect(rejectCalls[0].params.requestID).toBe("q-500")
+    // The rollback restores the prompt so the user can answer it: the server
+    // still holds the question and its turn stays busy.
+    expect(store.getState().question["session-a"]).toHaveLength(1)
+    expect(store.getState().question["session-a"]?.[0].id).toBe("q-500")
   })
 })
 
@@ -1763,7 +1792,7 @@ describe("dismissOpenPermissionsForSession", () => {
     permissionReplyError = null
   })
 
-  test("returns false and rejects nothing when no permissions are pending", async () => {
+  test("returns no dismiss and rejects nothing when no permissions are pending", async () => {
     const store = createStore({}, { session: [{ id: "session-a", time: { created: 1 } } as Session] })
     const childStores = createChildStores([["/test/project", store]])
 
@@ -1772,7 +1801,7 @@ describe("dismissOpenPermissionsForSession", () => {
 
     const dismissed = await dismissOpenPermissionsForSession("session-a")
 
-    expect(dismissed).toBe(false)
+    expect(dismissed).toEqual({ dismissed: false, failed: false })
     expect(replyCalls.filter((call) => call.method === "permission.reply")).toHaveLength(0)
   })
 
@@ -1795,7 +1824,7 @@ describe("dismissOpenPermissionsForSession", () => {
 
     const dismissed = await dismissOpenPermissionsForSession("session-a")
 
-    expect(dismissed).toBe(true)
+    expect(dismissed).toEqual({ dismissed: true, failed: false })
     const replyCallsForPermissions = replyCalls.filter((call) => call.method === "permission.reply")
     expect(replyCallsForPermissions).toHaveLength(2)
     const rejectedIds = replyCallsForPermissions.map((call) => call.params.requestID).sort()
@@ -1807,7 +1836,7 @@ describe("dismissOpenPermissionsForSession", () => {
     expect(store.getState().permission["session-child"]).toBe(undefined)
   })
 
-  test("swallows PermissionNotFoundError so a stranded permission never blocks the send", async () => {
+  test("treats PermissionNotFoundError as success so a stale permission never blocks the send", async () => {
     const stalePermission = buildPermission("perm-stale", "session-a")
     const store = createStore({ "session-a": [stalePermission] }, {
       session: [{ id: "session-a", time: { created: 1 } } as Session],
@@ -1820,7 +1849,7 @@ describe("dismissOpenPermissionsForSession", () => {
 
     const dismissed = await dismissOpenPermissionsForSession("session-a")
 
-    expect(dismissed).toBe(true)
+    expect(dismissed).toEqual({ dismissed: true, failed: false })
     const replyCallsForPermissions = replyCalls.filter((call) => call.method === "permission.reply")
     expect(replyCallsForPermissions).toHaveLength(1)
     expect(replyCallsForPermissions[0].params.requestID).toBe("perm-stale")
@@ -1828,7 +1857,7 @@ describe("dismissOpenPermissionsForSession", () => {
     expect(store.getState().permission["session-a"]).toBe(undefined)
   })
 
-  test("swallows and logs a non-not-found reject failure so the send is never blocked", async () => {
+  test("restores the optimistic removal when the dismissal fails without not-found", async () => {
     const permission = buildPermission("perm-500", "session-a")
     const store = createStore({ "session-a": [permission] }, {
       session: [{ id: "session-a", time: { created: 1 } } as Session],
@@ -1845,12 +1874,18 @@ describe("dismissOpenPermissionsForSession", () => {
     try {
       const dismissed = await dismissOpenPermissionsForSession("session-a")
 
-      expect(dismissed).toBe(true)
+      // The failure is surfaced so the caller must not queue a send that would
+      // wait forever for an idle state the still-pending permission never allows.
+      expect(dismissed).toEqual({ dismissed: true, failed: true })
       const replyCallsForPermissions = replyCalls.filter((call) => call.method === "permission.reply")
       expect(replyCallsForPermissions).toHaveLength(1)
       expect(replyCallsForPermissions[0].params.requestID).toBe("perm-500")
       expect(errors).toHaveLength(1)
       expect(String(errors[0]?.[0])).toContain("[session-actions]")
+      // The rollback restores the prompt so the user can handle it: the server
+      // still holds the permission and its turn stays busy.
+      expect(store.getState().permission["session-a"]).toHaveLength(1)
+      expect(store.getState().permission["session-a"]?.[0].id).toBe("perm-500")
     } finally {
       console.error = originalError
     }

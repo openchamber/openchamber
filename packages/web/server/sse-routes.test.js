@@ -23,6 +23,9 @@ const createRouteRegistry = () => {
       delete(path, handler) {
         routes.set(`DELETE ${path}`, handler);
       },
+      patch(path, handler) {
+        routes.set(`PATCH ${path}`, handler);
+      },
     },
     getRoute(method, path) {
       return routes.get(`${method} ${path}`);
