@@ -265,6 +265,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.relativeTime.durationAgo': '{duration} ago',
   'sessions.scheduledTasks.dialog.status.success': 'Success',
   'sessions.scheduledTasks.dialog.status.error': 'Error',
+  'sessions.scheduledTasks.dialog.status.denied': 'Denied',
   'sessions.scheduledTasks.dialog.status.running': 'Running',
   'sessions.scheduledTasks.dialog.status.idle': 'Idle',
   'sessions.scheduledTasks.dialog.nextRun.label': 'Next',

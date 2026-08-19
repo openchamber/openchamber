@@ -393,6 +393,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.relativeTime.durationAgo': '{duration} temu',
   'sessions.scheduledTasks.dialog.status.success': 'Sukces',
   'sessions.scheduledTasks.dialog.status.error': 'Błąd',
+  'sessions.scheduledTasks.dialog.status.denied': 'Odmówiono',
   'sessions.scheduledTasks.dialog.status.running': 'Uruchomione',
   'sessions.scheduledTasks.dialog.status.idle': 'Bezczynne',
   'sessions.scheduledTasks.dialog.nextRun.label': 'Następne',
