@@ -281,4 +281,25 @@ describe('scheduled-task service run', () => {
     expect(result.sessionId).toBe('sess-1');
     expect(result.persistError).toMatch(/timeout acquiring project config lock/);
   });
+
+  it('surfaces a preflight denial as a 403 carrying the task and denied flag', async () => {
+    const deniedTask = { id: 'task-1', state: { lastStatus: 'denied', lastError: 'blocked by policy' } };
+    const { service } = createService({
+      scheduledTasksRuntime: {
+        runNow: vi.fn(async () => ({
+          ok: false,
+          status: 'denied',
+          error: 'blocked by policy',
+          task: deniedTask,
+        })),
+      },
+    });
+
+    await expect(service.run('project-test', 'task-1')).rejects.toMatchObject({
+      statusCode: 403,
+      message: 'blocked by policy',
+      task: deniedTask,
+      denied: true,
+    });
+  });
 });
