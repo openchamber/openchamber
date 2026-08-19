@@ -29,7 +29,9 @@ Verify the worktree is clean:
 
 `git status --porcelain`
 
-If the output is not empty, stop immediately and report it. Do not stash, reset, or discard anything.
+If the output is not empty and the repository root contains a `.maintenance-clone` marker file, this is a disposable maintenance clone and the changes are debris from an earlier failed task. Recover it with `git checkout -- .`, `git clean -fd`, `git checkout main`, `git pull`, report exactly which files you discarded, and continue.
+
+If the marker file is absent, stop immediately and report it. Do not stash, reset, or discard anything.
 
 Read `AGENTS.md`, and read `.opencode/commands/as-fixes.md` in full, including the sections "What a good fix looks like" and "Hard prohibitions". Those describe the standard the anti-slop PRs were supposed to meet. Your job includes verifying they actually met it.
 
@@ -114,7 +116,7 @@ If a check fails for a reason unrelated to this PR, verify that claim by checkin
 
 - Commit your fixes with concise messages describing what was actually wrong.
 - Push to the PR branch. Never force-push.
-- Update the PR description so it describes the final state: what the batch did, what you corrected and why, every behavior change with the decision you made, every remaining skipped finding with its reason, and the exact validation commands you ran with their results.
+- Update the PR description so it describes the final state, using every heading of `.github/PULL_REQUEST_TEMPLATE.md` in the template's order. `## Intent` covers what the batch did and what you corrected; `## Non-goals` covers what you deliberately left alone; `## Affected surfaces` must reflect the final diff, including files you added beyond the batch scope; `## Repository guidance` must list the rules, skills, and module documentation that applied to your own edits, not only the batch's; `## Validation` must contain the exact commands you re-ran and their results; `## Risks and failure behavior` must carry every behavior change you accepted or introduced. A description that still describes only the batch's original work is incomplete.
 - Preserve any content the repository owner added to the description by hand, including screenshots. Read the live description before editing it and merge your changes into it rather than overwriting.
 - Add one PR comment summarizing your review pass, so the history shows what was examined and what was changed.
 - Do not merge, do not close, do not approve, and do not request review.

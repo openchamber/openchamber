@@ -13,7 +13,20 @@ First, verify the worktree is safe to use:
 
 `git status --porcelain`
 
-If the output is not empty, stop immediately and report that the worktree has uncommitted changes. Do not stash, reset, discard, or switch branches.
+If the output is not empty, decide which of two situations you are in.
+
+If the repository root contains a `.maintenance-clone` marker file, this working copy is a disposable clone dedicated to unattended maintenance. Nothing in it is human work in progress, so leftover changes are debris from an earlier task that failed to clean up after itself. Recover the clone rather than stopping:
+
+```
+git checkout -- .
+git clean -fd
+git checkout main
+git pull
+```
+
+Report exactly which files you discarded, then continue with the task. A failed predecessor must not be able to jam the pipeline for every later run.
+
+If the marker file is absent, this is a working copy a person uses. Stop immediately and report that the worktree has uncommitted changes. Do not stash, reset, discard, commit, or switch branches.
 
 List the active batches:
 
@@ -51,6 +64,7 @@ Delivery:
 - Reply to addressed review comments using `gh`.
 - For each specific review comment you addressed, reply with what was changed and the follow-up commit hash.
 - If the feedback was a general PR comment, add one general PR comment summarizing what was addressed, commit hashes, and validation results.
+- Update the PR description so it stays true for the final HEAD: refresh `## Validation` with the checks you re-ran, and move any new behavior change into `## Risks and failure behavior`. Keep every heading of `.github/PULL_REQUEST_TEMPLATE.md` intact, and preserve content the repository owner added by hand, including screenshots. Read the live description before editing and merge into it rather than overwriting.
 - If a comment is intentionally not addressed, reply with a concise reason.
 - Do not release the batch while its PR is still open and awaiting review. The claim is what keeps parallel batches off these files.
 - Release the batch only once its PR has been merged or closed: `bun run doctor -- release --run <run-id>`.

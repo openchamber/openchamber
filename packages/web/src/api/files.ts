@@ -7,6 +7,7 @@ import type {
 import {
   FilesystemError,
   parseFilesystemErrorReason,
+  type FilesystemErrorReason,
 } from '@openchamber/ui/lib/api/files-errors';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 
@@ -29,6 +30,13 @@ type WebDirectoryListResponse = {
   directory?: string;
   path?: string;
   entries?: WebDirectoryEntry[];
+};
+
+type WebFileUploadResponse = {
+  success?: boolean;
+  path?: string;
+  error?: string;
+  reason?: FilesystemErrorReason;
 };
 
 const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryListResponse): DirectoryListResult => {
@@ -219,6 +227,36 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     return {
       success: Boolean((result as { success?: boolean }).success),
       path: typeof (result as { path?: string }).path === 'string' ? normalizePath((result as { path: string }).path) : target,
+    };
+  },
+
+  async uploadFile(path: string, file: Blob, options): Promise<{ success: boolean; path: string }> {
+    const target = normalizePath(path);
+    const response = await runtimeFetch('/api/fs/upload', {
+      method: 'POST',
+      query: {
+        path: target,
+        overwrite: options?.overwrite ? 'true' : undefined,
+      },
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        ...directoryHeaders(getDirectory, options?.directory),
+      },
+      body: file,
+    });
+
+    if (!response.ok) {
+      const error: WebFileUploadResponse = await response.json().catch(() => ({ error: response.statusText }));
+      throw new FilesystemError(error.error || 'Failed to upload file', {
+        reason: parseFilesystemErrorReason(error.reason),
+        status: response.status,
+      });
+    }
+
+    const result: WebFileUploadResponse = await response.json().catch(() => ({}));
+    return {
+      success: Boolean(result.success),
+      path: result.path ? normalizePath(result.path) : target,
     };
   },
 

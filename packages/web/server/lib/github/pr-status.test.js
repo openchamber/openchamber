@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test, vi } from 'bun:test';
 
 const listMock = mock(async () => ({ data: [] }));
 
@@ -63,7 +63,7 @@ describe('findBranchPrCandidates', () => {
   });
 
   afterEach(() => {
-    setSystemTime();
+    vi.useRealTimers();
   });
 
   test('an open PR wins and no history lookup is spent', async () => {
@@ -156,7 +156,8 @@ describe('findBranchPrCandidates', () => {
 
     // Past the "no history" expiry, but far short of the found-record one. The
     // shared open list is re-fetched; the history answer is not re-queried.
-    setSystemTime(new Date(startedAt + 30 * 60 * 1000));
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(startedAt + 30 * 60 * 1000));
     const { historical } = await call({ force: false });
 
     expect(historical?.number).toBe(12);
@@ -171,7 +172,8 @@ describe('findBranchPrCandidates', () => {
     await call();
     const callsAfterFirst = listMock.mock.calls.length;
 
-    setSystemTime(new Date(startedAt + 30 * 60 * 1000));
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(startedAt + 30 * 60 * 1000));
     await call({ force: false });
 
     expect(listMock.mock.calls.some((entry) => entry[0]?.state === 'all')).toBe(true);

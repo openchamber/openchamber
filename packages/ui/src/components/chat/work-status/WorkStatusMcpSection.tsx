@@ -97,6 +97,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
     >
       {mcpServers.map(([name, entry]) => {
         const connected = entry?.status === 'connected';
+        const busy = busyServer === name;
         const needsAuth = entry?.status === 'needs_auth' || entry?.status === 'needs_client_registration';
         const failed = entry?.status === 'failed';
         return (
@@ -105,8 +106,9 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
             leading={(
               <Switch
                 checked={connected}
-                disabled={busyServer === name}
-                className="scale-75 data-[checked]:bg-status-info"
+                disabled={busy}
+                loading={busy}
+                className="scale-75 disabled:opacity-100 data-[checked]:bg-status-info"
                 aria-label={t('chat.workStatus.mcp.toggle', { name })}
                 onCheckedChange={(checked) => { void handleToggle(name, checked); }}
               />
@@ -118,7 +120,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
             value={needsAuth ? (
               <WorkStatusRowAction
                 tone="warning"
-                disabled={busyServer === name}
+                disabled={busy}
                 onClick={() => { void handleAuthorize(name); }}
               >
                 {t('chat.workStatus.mcp.needsAuth')}
@@ -126,7 +128,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
             ) : failed ? (
               <WorkStatusRowAction
                 tone="error"
-                disabled={busyServer === name}
+                disabled={busy}
                 onClick={() => { void handleToggle(name, true); }}
               >
                 {t('chat.workStatus.mcp.failed')}

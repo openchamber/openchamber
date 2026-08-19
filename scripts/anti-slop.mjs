@@ -16,7 +16,7 @@ import {
 const PIPELINE = "as";
 // Resolved before command dispatch so every command shares one claims location.
 const { runsDir: RUNS_DIR, shared: SHARED_CLAIMS } = resolveRunsDir(parseArgs(process.argv.slice(2))["claims-dir"]);
-const DEFAULT_MAX_ACTIVE = 10;
+const DEFAULT_MAX_ACTIVE = 20;
 const DEFAULT_CLAIM_TTL_DAYS = 3;
 
 // Rules ordered by how mechanical and behavior-safe their fixes are. Higher
@@ -46,7 +46,7 @@ const NOISY_RULES = new Set(["no-runtime-typeof", "require-safety-comment-for-ty
 function usage(exitCode = 0) {
   const out = exitCode === 0 ? console.log : console.error;
   out(`Usage:
-  bun run deslop -- next-batch [--min-issues 25] [--max-issues 60] [--max-files 4]
+  bun run deslop -- next-batch [--min-issues 60] [--max-issues 120] [--max-files 4]
                               [--max-active ${DEFAULT_MAX_ACTIVE}] [--claim-ttl ${DEFAULT_CLAIM_TTL_DAYS}] [--include-noisy]
   bun run deslop -- check-batch --run <run-id>
   bun run deslop -- active [--claim-ttl ${DEFAULT_CLAIM_TTL_DAYS}]
@@ -62,7 +62,7 @@ pipeline. Claims are shared across clones by default. A batch stays active until
 it is released.
 
 Examples:
-  bun run deslop -- next-batch --min-issues 25 --max-issues 60
+  bun run deslop -- next-batch --min-issues 60 --max-issues 120
   bun run deslop -- file packages/ui/src/lib/settings/metadata.ts
   bun run deslop -- check-batch --run 2026-08-16T10-12-44Z
   bun run deslop -- release --run 2026-08-16T10-12-44Z`);
@@ -311,8 +311,8 @@ function printReportHeader(report) {
 }
 
 function commandNextBatch(args) {
-  const minIssues = asPositiveInt(args["min-issues"], 25, "min-issues");
-  const maxIssues = asPositiveInt(args["max-issues"], 60, "max-issues");
+  const minIssues = asPositiveInt(args["min-issues"], 60, "min-issues");
+  const maxIssues = asPositiveInt(args["max-issues"], 120, "max-issues");
   const maxFiles = asPositiveInt(args["max-files"], 4, "max-files");
   if (minIssues > maxIssues) throw new Error("--min-issues cannot be greater than --max-issues.");
   const maxActive = asPositiveInt(args["max-active"], DEFAULT_MAX_ACTIVE, "max-active");

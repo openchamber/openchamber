@@ -76,6 +76,7 @@ import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
+import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createScheduledTaskPreflight } from './lib/scheduled-tasks/preflight.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
@@ -91,6 +92,12 @@ import { createNotificationTemplateRuntime } from './lib/notifications/template-
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
+import { createProjectContextRuntime } from './lib/project-context/runtime.js';
+import { createAgentMemoryRuntime } from './lib/agent-memory/runtime.js';
+import { createAgentMemoryActions } from './lib/agent-memory/actions.js';
+import { createMemoryProjectResolver } from './lib/agent-memory/project-resolution.js';
+import { isAgentMemoryFeatureAvailable } from './lib/agent-memory/feature-flag.js';
+import { resolvePrimaryWorktreeRoot } from './lib/git/service.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
@@ -105,6 +112,7 @@ import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
+import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import webPush from 'web-push';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -473,6 +481,34 @@ const projectConfigRuntime = createProjectConfigRuntime({
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
 });
 
+const projectContextRuntime = createProjectContextRuntime({
+  fsPromises,
+  path,
+  projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+});
+
+const agentMemoryRuntime = createAgentMemoryRuntime({
+  fsPromises,
+  path,
+  projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+  userConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
+});
+
+/**
+ * One switch for everything memory-related. It gates the tool, these routes,
+ * and the session index alike, so turning memory off leaves nothing behind
+ * that still reads or writes the store.
+ */
+const isAgentMemoryEnabled = async () => {
+  // The feature gate comes first: unreleased means absent, not merely switched
+  // off, so no stored setting can bring it back.
+  if (!isAgentMemoryFeatureAvailable()) {
+    return false;
+  }
+  const settings = await readSettingsFromDiskMigrated().catch(() => null);
+  return settings?.agentMemoryToolEnabled === true;
+};
+
 // HMR-persistent state via globalThis
 // These values survive Vite HMR reloads to prevent zombie OpenCode processes
 const hmrStateRuntime = createHmrStateRuntime({
@@ -775,9 +811,41 @@ const sessionGoalRuntime = createSessionGoalRuntime({
     });
   },
 });
+/**
+ * Owns what a session must be told about the project's knowledge. Every sender
+ * asks it — the UI over HTTP, scheduled tasks and agent-dispatched sessions in
+ * process — so the answer cannot differ between them.
+ */
+const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
+  projectContextRuntime,
+  agentMemoryRuntime,
+  // Called, not captured: the resolver is declared further down, and taking a
+  // reference here would read it before it exists.
+  resolveProjectId: (directory) => resolveMemoryProjectId(directory),
+  isAgentMemoryEnabled,
+  openCodeFetch: async (fetchPath, { directory, method = 'GET', body } = {}) => {
+    const params = new URLSearchParams();
+    if (directory) params.set('directory', directory);
+    const search = params.toString();
+    const response = await fetch(`${buildOpenCodeUrl(fetchPath, '')}${search ? `?${search}` : ''}`, {
+      method,
+      headers: {
+        Accept: 'application/json',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...getOpenCodeAuthHeaders(),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) throw new Error(`OpenCode ${method} ${fetchPath} failed with ${response.status}`);
+    return response.json().catch(() => null);
+  },
+});
+
 const contextObligatoryRuntime = createContextObligatoryRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
+  sessionKnowledgeRuntime,
 });
 
 const globalMessageStreamHub = createGlobalMessageStreamHub({
@@ -1101,8 +1169,9 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     // injected while at least one of them is on.
     const includeControl = settings?.agentControlToolEnabled !== false;
     const includeWeb = settings?.agentWebToolEnabled !== false;
-    const managedEnv = includeControl || includeWeb
-      ? await (agentToolRuntime?.prepareManagedOpenCodeEnv({ includeControl, includeWeb }) || {})
+    const includeMemory = isAgentMemoryFeatureAvailable() && settings?.agentMemoryToolEnabled === true;
+    const managedEnv = includeControl || includeWeb || includeMemory
+      ? await (agentToolRuntime?.prepareManagedOpenCodeEnv({ includeControl, includeWeb, includeMemory }) || {})
       : {};
     if (settings?.optimizeSystemPrompt !== true) return managedEnv;
 
@@ -1139,6 +1208,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
+  sessionKnowledgeRuntime,
   setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
   preflight: createScheduledTaskPreflight(),
   emitTaskRunEvent: (event) => {
@@ -1181,6 +1251,37 @@ const emitSessionCreatedEvent = (event) => {
     }
   }
 };
+/**
+ * Maps a session directory onto the project whose memory it belongs to, so a
+ * session running in a worktree writes to the project the panel shows.
+ */
+const resolveMemoryProjectId = createMemoryProjectResolver({
+  listProjectPaths: async () => {
+    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    return sanitizeProjects(settings?.projects || []).map((project) => project.path);
+  },
+  resolvePrimaryWorktreeRoot,
+});
+
+/**
+ * Tells open panels that the agent changed what it remembers, so what it just
+ * stored is visible without reopening anything.
+ */
+const emitAgentMemoryChangedEvent = (event) => {
+  for (const client of uiOpenChamberEventClients) {
+    try {
+      writeSseEvent(client, {
+        type: 'openchamber:agent-memory-changed',
+        properties: {
+          scope: event.scope,
+          ...(event.projectId ? { projectId: event.projectId } : {}),
+        },
+      });
+    } catch {
+      uiOpenChamberEventClients.delete(client);
+    }
+  }
+};
 const scheduledTaskService = createScheduledTaskService({
   readSettingsFromDiskMigrated,
   sanitizeProjects,
@@ -1195,6 +1296,7 @@ const openChamberSessionService = createOpenChamberSessionService({
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
   emitSessionCreatedEvent,
+  sessionKnowledgeRuntime,
 });
 // Browser actions are published to whichever OpenChamber clients are connected;
 // the one owning the browser panel answers. `emitRequest` returns the number of
@@ -1236,6 +1338,13 @@ const openChamberControlService = createOpenChamberControlService({
   sessionService: openChamberSessionService,
   scheduledTaskService,
   browserControl: browserControlBroker,
+  agentMemoryActions: createAgentMemoryActions({
+    agentMemoryRuntime,
+    createError: (message, status) => new OpenChamberControlError(message, status),
+    onMemoryChanged: emitAgentMemoryChangedEvent,
+    isAgentMemoryEnabled,
+    resolveProjectId: resolveMemoryProjectId,
+  }),
 });
 
 const ensureGlobalWatcherStarted = async () => {
@@ -1501,7 +1610,7 @@ async function main(options = {}) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
       res.setHeader('Vary', 'Origin');
       if (req.method === 'OPTIONS') {
@@ -1746,6 +1855,10 @@ async function main(options = {}) {
     devServerScanner,
     buildAugmentedPath,
     projectConfigRuntime,
+    projectContextRuntime,
+    agentMemoryRuntime,
+    isAgentMemoryEnabled,
+    sessionKnowledgeRuntime,
     scheduledTasksRuntime,
     scheduledTaskService,
     openChamberSessionService,

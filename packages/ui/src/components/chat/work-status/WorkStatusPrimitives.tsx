@@ -25,7 +25,7 @@ const SECTION_CLASS = cn(
   '[&:not(:first-child)]:border-[var(--interactive-border)] [&:not(:first-child)]:pt-3',
 );
 
-const HEADING_CLASS = 'text-xs font-normal text-muted-foreground';
+const HEADING_CLASS = 'text-xs font-semibold text-foreground';
 
 export const WorkStatusSection: React.FC<{
   title: string;
@@ -158,7 +158,10 @@ export const WorkStatusRow: React.FC<RowProps> = ({
     </>
   );
 
-  const shared = cn('flex h-7 w-full items-center gap-2 rounded-md px-1 text-left', className);
+  const shared = cn(
+    'flex h-7 w-full items-center gap-2 rounded-md px-1 text-left text-muted-foreground',
+    className,
+  );
 
   if (!onClick) return <div className={shared}>{body}</div>;
 
