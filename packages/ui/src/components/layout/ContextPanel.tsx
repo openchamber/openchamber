@@ -940,7 +940,7 @@ export const ContextPanel: React.FC = () => {
             : activeTab?.mode === 'notes'
                 ? <ProjectContextPanel />
         : activeTab?.mode === 'plan'
-            ? <React.Suspense fallback={null}><PlanView targetPath={activeTab.targetPath} /></React.Suspense>
+            ? <React.Suspense fallback={null}><PlanView targetPath={activeTab.targetPath} projectPlanId={activeTab.projectPlanId} /></React.Suspense>
             : null;
 
   const browserTabs = React.useMemo(

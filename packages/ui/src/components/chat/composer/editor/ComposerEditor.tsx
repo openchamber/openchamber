@@ -36,7 +36,7 @@ import { cn } from '@/lib/utils';
 import type { ComposerLanguageContext } from '../language/tokenize';
 import { composerLanguage, setLanguageContext } from './composerLanguage';
 import type { ComposerEditorViewStore } from './viewStore';
-import { composerEditorTheme, composerNativeSelectionExtension } from './theme';
+import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
 
 export interface ComposerSelection {
@@ -234,14 +234,13 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                     doc: handlersRef.current.value,
                     extensions: [
                         history(),
-                        // `drawSelection()` must stay even though the native
-                        // selection is what actually shows (see the theme's
-                        // comment on `composerNativeSelectionExtension`):
-                        // removing it makes CodeMirror enforce cursor
-                        // association on the native selection, which iOS
-                        // answers with severe input lag.
+                        // `drawSelection()` must stay on every platform.
+                        // `composerSelectionExtension()` changes only who
+                        // paints the selection; removing `drawSelection()`
+                        // makes CodeMirror enforce cursor association on the
+                        // native selection, which iOS answers with severe lag.
                         drawSelection(),
-                        composerNativeSelectionExtension,
+                        composerSelectionExtension(),
                         EditorView.lineWrapping,
                         // Highest precedence: the composer's own keys must win
                         // over CodeMirror's defaults (Enter sends, ArrowUp

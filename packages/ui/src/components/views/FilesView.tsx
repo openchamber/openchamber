@@ -48,8 +48,9 @@ import { getLanguageFromExtension, getImageMimeType, isBinaryFile, isDrawioFile,
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, subscribeRuntimeUrlAuthToken } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getOutsideFileGrant } from '@/lib/outsideFileGrants';
+import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
 import { DiagramEditor } from '@/components/diagram';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
@@ -920,6 +921,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const activeFileLoadIdRef = React.useRef(0);
   const loadingFilePathRef = React.useRef<string | null>(null);
+  const [fileContentRevision, setFileContentRevision] = React.useState(0);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
   const [diagramSaved, setDiagramSaved] = React.useState(false);
   const [contentDetectedBinary, setContentDetectedBinary] = React.useState(false);
@@ -2046,12 +2048,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         loadingFilePathRef.current = null;
       }
     });
-  }, [loadSelectedFile, loadedFilePath, selectedFile]);
+  }, [fileContentRevision, loadSelectedFile, loadedFilePath, selectedFile]);
 
   // Sync isDirty to a ref so the polling interval can read the latest value
   // without isDirty in its dependency array (avoids interval restart on every edit/save).
   const isDirtyRef = React.useRef(isDirty);
   isDirtyRef.current = isDirty;
+
+  React.useEffect(() => subscribeToFileContentInvalidation(({ runtimeKey, paths }) => {
+    const selectedPath = selectedFile?.path;
+    if (
+      runtimeKey !== getRuntimeKey()
+      || !selectedPath
+      || isDirtyRef.current
+      || !paths.includes(normalizePath(selectedPath))
+    ) {
+      return;
+    }
+
+    activeFileLoadIdRef.current += 1;
+    loadingFilePathRef.current = null;
+    lastLoadedFileStatRef.current = null;
+    setDesktopImageSrc('');
+    setFileError(null);
+    setLoadedFilePath(null);
+    setFileContentRevision((revision) => revision + 1);
+  }), [selectedFile?.path]);
 
   // Poll open file for external changes.
   // When a change is detected, reset loadedFilePath so the effect above
@@ -3006,11 +3028,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   );
 
   const pdfAssetAuthKey = selectedFile?.path && isSelectedPdf
-    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${selectedFileReadOptions.outsideFileGrant ?? ''}`
+    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${selectedFileReadOptions.outsideFileGrant ?? ''}|${fileContentRevision}`
     : '';
 
   const htmlAssetAuthKey = selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode
-    ? selectedFile.path
+    ? `${selectedFile.path}|${fileContentRevision}`
     : '';
 
   const assetAuthErrorFallback = t('filesView.error.readFileFailed');
@@ -3113,7 +3135,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [files, isSelectedImage, isSelectedSvg, root, selectedFile?.path, selectedFileReadOptions, t]);
+  }, [fileContentRevision, files, isSelectedImage, isSelectedSvg, root, selectedFile?.path, selectedFileReadOptions, t]);
 
   const handleCloseDialog = React.useCallback(() => setActiveDialog(null), []);
 

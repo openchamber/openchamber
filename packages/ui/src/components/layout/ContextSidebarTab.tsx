@@ -11,6 +11,7 @@ import { computeCacheHitRate } from '@/stores/utils/tokenUtils';
 import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { formatMoney } from '@/lib/money';
 import {
   derivePartsLabel,
   deriveUserSnippet,
@@ -92,6 +93,7 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
   }
 
   const breakdown = source as {
+    total?: unknown;
     input?: unknown;
     output?: unknown;
     reasoning?: unknown;
@@ -103,6 +105,10 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
   const reasoning = toNonNegativeNumber(breakdown.reasoning);
   const cacheRead = toNonNegativeNumber(breakdown.cache?.read);
   const cacheWrite = toNonNegativeNumber(breakdown.cache?.write);
+  // Multi-step turns accumulate the fields across API round-trips (every tool
+  // call re-reads the whole cached prompt), so summing them overstates the
+  // window. The server-reported total is the final round-trip's window.
+  const reportedTotal = toNonNegativeNumber(breakdown.total);
 
   return {
     input,
@@ -110,7 +116,7 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
     reasoning,
     cacheRead,
     cacheWrite,
-    total: input + output + reasoning + cacheRead + cacheWrite,
+    total: reportedTotal > 0 ? reportedTotal : input + output + reasoning + cacheRead + cacheWrite,
   };
 };
 
@@ -230,16 +236,6 @@ const computeContextBreakdown = (
 };
 
 const formatNumber = (value: number): string => value.toLocaleString(getCurrentIntlLocale());
-
-const formatMoney = (value: number): string => {
-  if (!Number.isFinite(value) || value <= 0) return new Intl.NumberFormat(getCurrentIntlLocale(), { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(0);
-  return new Intl.NumberFormat(getCurrentIntlLocale(), {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: value < 0.01 ? 4 : 2,
-    maximumFractionDigits: value < 0.01 ? 4 : 2,
-  }).format(value);
-};
 
 const formatDateTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference): string => {
   if (!timestamp || !Number.isFinite(timestamp)) return '-';

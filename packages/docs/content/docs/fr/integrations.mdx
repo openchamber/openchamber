@@ -1,0 +1,62 @@
+---
+title: Intégrations
+description: Utilise ton abonnement Claude, Command Code ou Cursor comme fournisseur.
+---
+
+# Intégrations
+
+Une intégration est un petit plugin qui ajoute un fournisseur à OpenChamber à partir d'un abonnement que tu possèdes déjà. Tu les gères dans **Settings → Integrations**.
+
+Intégrations disponibles :
+
+- **Claude Code** — ton plan Claude Pro ou Max, sans clés API
+- **Command Code** — ton plan Command Code
+- **Cursor** — les limites de modèles de ton plan Cursor
+
+## Installer une intégration
+
+1. Ouvre **Settings → Integrations**.
+2. Trouve l'intégration et choisis **Install**.
+3. Redémarre OpenCode quand c'est demandé — le fournisseur apparaît après le redémarrage.
+4. Choisis **Set up** et connecte-toi. Les modèles apparaissent ensuite dans le sélecteur de modèles du chat.
+
+Les intégrations s'installent pour ton utilisateur et fonctionnent donc dans tous les projets. Tu peux les mettre à jour ou les retirer à tout moment depuis la même carte.
+
+## Claude Code
+
+Claude Code utilise ton plan Claude Pro ou Max — sans clés API et sans application Claude séparée.
+
+1. Installe l'intégration (ci-dessus).
+2. Choisis **Set up** et connecte-toi. Si tu n'as pas encore la CLI Claude Code, la configuration propose de l'installer d'abord, puis de te connecter.
+
+Claude Code est la seule intégration ici qui exige que la CLI de son fournisseur soit installée et connectée. Command Code et Cursor n'exigent pas leurs CLIs.
+
+**Comment ton compte Claude reste protégé :** cette intégration utilise le Claude Agent SDK officiel d'Anthropic et ta CLI Claude Code installée. Elle ne détourne pas l'OAuth, n'extrait ni rejoue de tokens de navigateur, ne se fait pas passer pour un client non pris en charge et ne contourne pas l'authentification d'Anthropic. Elle reste sur la voie d'accès prise en charge par Anthropic et ne porte donc pas le risque de bannissement associé au détournement de tokens ou aux contournements d'authentification non autorisés.
+
+## Command Code
+
+Command Code utilise ton plan Command Code.
+
+1. Installe l'intégration (ci-dessus).
+2. Choisis **Set up** — une page s'ouvre dans le navigateur. Autorise l'accès, puis reviens dans OpenChamber.
+
+Sur une machine sans interface graphique ou en CI, définis la variable d'environnement `COMMAND_CODE_API_KEY` au lieu de te connecter via le navigateur.
+
+## Cursor
+
+Cursor rend disponibles dans OpenChamber les modèles inclus dans ton plan Cursor.
+
+1. Installe l'intégration (ci-dessus).
+2. Choisis **Set up**, ouvre le lien et autorise l'accès dans ton navigateur. Aucune clé API n'est nécessaire. La liste des modèles se charge automatiquement après la connexion.
+
+## Mettre à jour ou retirer
+
+- **Update** installe la dernière version publiée du plugin.
+- **Remove** supprime le plugin de ta configuration OpenCode. Le fournisseur cesse d'être chargé au prochain rechargement d'OpenCode.
+
+Si une carte indique que les entrées nécessitent une gestion manuelle, choisis **Manage plugins** et nettoie les doublons à cet endroit.
+
+## À voir aussi
+
+- [Fournisseurs, modèles et agents](/fr/providers/) — connecter d'autres fournisseurs et choisir des modèles
+- [Utilisation et quotas](/fr/usage/) — suis ta consommation

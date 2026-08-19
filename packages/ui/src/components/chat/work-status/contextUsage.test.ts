@@ -14,8 +14,8 @@ describe('computeContextUsage', () => {
   });
 
   test('reports the latest turn rather than a sum across turns', () => {
-    // Each assistant turn reports the whole window it saw, so adding them up
-    // would report several times the real fill.
+    // A turn's tokens describe that turn's window, so adding turns up would
+    // report several times the real fill.
     const usage = computeContextUsage(
       [
         assistant({ input: 400, output: 0, reasoning: 0 }, 'old'),
@@ -60,5 +60,25 @@ describe('computeContextUsage', () => {
   test('tolerates partial token payloads', () => {
     const usage = computeContextUsage([assistant({ input: 10 })], 100);
     expect(usage?.totalTokens).toBe(10);
+  });
+
+  test('prefers the server-reported total over summing round-trip fields', () => {
+    // Real payload from opencode 1.18.18: ~14 tool-call round-trips accumulated
+    // cache.read to 3.29M while the 1M window really held 232,872. Summing
+    // rendered 330.6%; the reported total renders the real 23.3%.
+    const usage = computeContextUsage(
+      [assistant({ total: 232_872, input: 0, output: 14_523, reasoning: 0, cache: { read: 3_291_956, write: 0 } })],
+      1_000_000,
+    );
+    expect(usage?.totalTokens).toBe(232_872);
+    expect(usage?.percent.toFixed(4)).toBe('23.2872');
+  });
+
+  test('selects a message whose only signal is the reported total', () => {
+    const usage = computeContextUsage(
+      [assistant({ total: 5_000, input: 0, output: 0, reasoning: 0 })],
+      100_000,
+    );
+    expect(usage?.totalTokens).toBe(5_000);
   });
 });

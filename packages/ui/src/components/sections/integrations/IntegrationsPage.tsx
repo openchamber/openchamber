@@ -1,7 +1,6 @@
 import React from 'react';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { useI18n } from '@/lib/i18n';
-import { ComingSoonMessengersSection } from './ComingSoonMessengersSection';
 import { ThirdPartyIntegrationsSection } from './ThirdPartyIntegrationsSection';
 
 interface IntegrationsPageProps {
@@ -21,8 +20,8 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
       description={t('settings.page.integrations.description')}
       showSaveStatus={false}
     >
-      <ComingSoonMessengersSection />
       <ThirdPartyIntegrationsSection
+        divider={false}
         onOpenProviderSetup={onOpenProviderSetup}
         onOpenPluginManager={onOpenPluginManager}
       />

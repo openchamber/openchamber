@@ -1,4 +1,5 @@
 import type { I18nKey } from '@/lib/i18n/store';
+import { useUIStore } from '@/stores/useUIStore';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 
@@ -490,6 +491,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.agent-memory-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentMemoryTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentMemoryToolInfo',
+    keywords: ['agent', 'tool', 'memory', 'remember', 'recall', 'preferences', 'openchamber'],
+    // Unreleased: searching for a setting that is not rendered would take the
+    // user to an empty spot on the page.
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
+  },
+  {
     id: 'git.github-account',
     page: 'git',
     titleKey: 'settings.github.page.actions.connect',
@@ -934,26 +945,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
   },
 
-  {
-    id: 'integrations.messengers',
-    page: 'integrations',
-    titleKey: 'settings.integrations.messengers.title',
-    keywords: ['messenger', 'discord', 'telegram', 'bot', 'coming soon'],
-  },
-  {
-    id: 'integrations.messengers.discord',
-    page: 'integrations',
-    titleKey: 'settings.integrations.messengers.discord.name',
-    descriptionKey: 'settings.integrations.messengers.discord.description',
-    keywords: ['discord', 'bot', 'messenger', 'coming soon'],
-  },
-  {
-    id: 'integrations.messengers.telegram',
-    page: 'integrations',
-    titleKey: 'settings.integrations.messengers.telegram.name',
-    descriptionKey: 'settings.integrations.messengers.telegram.description',
-    keywords: ['telegram', 'bot', 'messenger', 'coming soon'],
-  },
   {
     id: 'integrations.third-party',
     page: 'integrations',

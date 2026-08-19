@@ -38,15 +38,4 @@ describe('settings search', () => {
 
     expect(results.some((result) => result.id === 'integrations.third-party.opencode-cursor-oauth')).toBe(true);
   });
-
-  test('finds coming-soon messenger placeholders', () => {
-    const results = buildSettingsSearchResults({
-      query: 'discord',
-      runtimeCtx,
-      t,
-      getPageTitle: (page) => page,
-    });
-
-    expect(results.some((result) => result.id === 'integrations.messengers.discord')).toBe(true);
-  });
 });
