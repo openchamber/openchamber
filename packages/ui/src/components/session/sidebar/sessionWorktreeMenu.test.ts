@@ -197,6 +197,10 @@ describe('startSessionWorktreeMenuLoad', () => {
           { id: 'linked', path: '/repo-linked' },
           { id: 'other', path: '/repo-other' },
         ],
+        getCurrentProjects: () => [
+          { id: 'linked', path: '/repo-linked' },
+          { id: 'other', path: '/repo-other' },
+        ],
         rawWorktreesByProjectRef: rawRef,
         getPublishedWorktreesByProject: () => new Map(),
         resolveProject: () => null,
@@ -259,6 +263,7 @@ describe('startSessionWorktreeMenuLoad', () => {
       },
       {
         projects: [{ id: 'linked', path: '/repo-linked' }],
+        getCurrentProjects: () => [{ id: 'linked', path: '/repo-linked' }],
         rawWorktreesByProjectRef: rawRef,
         getPublishedWorktreesByProject: () => new Map([['/repo-linked', [existing]]]),
         resolveProject: () => null,
@@ -303,6 +308,7 @@ describe('startSessionWorktreeMenuLoad', () => {
       },
       {
         projects: [{ id: 'linked', path: '/repo-linked' }],
+        getCurrentProjects: () => [{ id: 'linked', path: '/repo-linked' }],
         rawWorktreesByProjectRef: rawRef,
         getPublishedWorktreesByProject: () => publishedTopology,
         resolveProject: () => null,
@@ -352,6 +358,10 @@ describe('startSessionWorktreeMenuLoad', () => {
           { id: 'owner', path: '/repo' },
           { id: 'linked', path: '/repo-linked' },
         ],
+        getCurrentProjects: () => [
+          { id: 'owner', path: '/repo' },
+          { id: 'linked', path: '/repo-linked' },
+        ],
         rawWorktreesByProjectRef: rawRef,
         getPublishedWorktreesByProject: () => new Map([['/repo', [ownerExisting]]]),
         resolveProject: () => null,
@@ -398,6 +408,7 @@ describe('startSessionWorktreeMenuLoad', () => {
       },
       {
         projects: [{ id: 'linked', path: '/repo-linked' }],
+        getCurrentProjects: () => [{ id: 'linked', path: '/repo-linked' }],
         rawWorktreesByProjectRef: rawRef,
         getPublishedWorktreesByProject: () => publishedCurrentRuntime,
         resolveProject: () => null,
@@ -433,6 +444,53 @@ describe('startSessionWorktreeMenuLoad', () => {
     expect(published).toEqual([]);
   });
 
+  test('rejects a deferred refresh when the owning project is removed before commit', async () => {
+    const refreshDeferred = createDeferred<WorktreeMetadata[]>();
+    const existing = worktree({ path: '/repo-existing', branch: 'existing', label: 'existing', name: 'existing' });
+    const published: Array<{ availableWorktreesByProject: Map<string, WorktreeMetadata[]> }> = [];
+    const rawRef = rawScope('runtime-1', [
+      ['/repo-linked', [existing]],
+    ]);
+    let currentProjects = [{ id: 'linked', path: '/repo-linked' }];
+
+    const load = startSessionWorktreeMenuLoad(
+      {
+        projectId: 'linked',
+        sourceDirectory: '/repo-current',
+        currentWorktree: worktree({ path: '/repo-current', branch: 'current', label: 'current' }),
+      },
+      {
+        projects: currentProjects,
+        rawWorktreesByProjectRef: rawRef,
+        getPublishedWorktreesByProject: () => new Map([['/repo-linked', [existing]]]),
+        resolveProject: () => null,
+        listProjectWorktrees: async () => refreshDeferred.promise,
+        partitionWorktreesByRegisteredProject: (_projects, worktreesByProject) => new Map(worktreesByProject),
+        worktreeMapsEqual: () => false,
+        recordWorktreesSeen: () => {},
+        publishTopology: (next) => {
+          published.push({ availableWorktreesByProject: next.availableWorktreesByProject });
+        },
+        getCurrentProjects: () => currentProjects,
+        getRuntimeKey: () => 'runtime-1',
+        now: () => 123,
+        projectRootBranch: null,
+      },
+    );
+
+    currentProjects = [];
+    refreshDeferred.resolve([
+      worktree({ path: '/repo-new', projectDirectory: '/repo', branch: 'new', label: 'new', name: 'new' }),
+    ]);
+
+    const refreshError = await load.refreshTargets.catch((error) => error);
+
+    expect(refreshError).toBeInstanceOf(Error);
+    expect(refreshError.message).toBe('Project removed during worktree refresh');
+    expect(rawRef.current.worktreesByProject.get('/repo-linked')).toEqual([existing]);
+    expect(published).toEqual([]);
+  });
+
   test('falls back to resolving the owning configured project from the source directory when projectId is missing', async () => {
     const calls: string[] = [];
     const load = startSessionWorktreeMenuLoad(
@@ -443,6 +501,7 @@ describe('startSessionWorktreeMenuLoad', () => {
       },
       {
         projects: [{ id: 'owner', path: '/repo' }],
+        getCurrentProjects: () => [{ id: 'owner', path: '/repo' }],
         rawWorktreesByProjectRef: rawScope('runtime-1', []),
         getPublishedWorktreesByProject: () => new Map(),
         resolveProject: (directory) => {

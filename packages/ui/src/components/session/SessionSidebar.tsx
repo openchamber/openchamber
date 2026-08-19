@@ -968,6 +968,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       : (args.sourceDirectory ? resolveProjectRef(args.sourceDirectory) : null);
     return startSessionWorktreeMenuLoad(args, {
       projects,
+      getCurrentProjects: () => useProjectsStore.getState().projects,
       rawWorktreesByProjectRef,
       getPublishedWorktreesByProject: () => useSessionUIStore.getState().availableWorktreesByProject,
       resolveProject: (directory) => resolveProjectRef(directory),

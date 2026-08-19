@@ -61,15 +61,39 @@ const assertSessionsIdle = (sessions: Session[], sourceDirectory: string): void 
   if (hasActiveSession) throw new Error('Session is not idle');
 };
 
+type RollbackFailure = {
+  sessionId: string;
+  error: Error;
+};
+
+const createIncompleteRollbackError = (moveError: Error, rollbackFailures: RollbackFailure[]): Error => {
+  const rollbackSummary = rollbackFailures
+    .map(({ sessionId, error }) => `${sessionId}: ${error.message}`)
+    .join(', ');
+  return new Error(
+    `Session move partially failed and could not be fully rolled back: ${moveError.message}. Rollback failures: ${rollbackSummary}`,
+    { cause: { moveError, rollbackFailures } },
+  );
+};
+
+const isSessionBusyOrRetrying = (session: Session, directory: string): boolean => {
+  const status = getDirectoryState(directory)?.session_status[session.id]?.type;
+  return status === 'busy' || status === 'retry';
+};
+
 const rollbackMovedSessions = async (
   sessions: Session[],
   rootSessionId: string,
   sourceDirectory: string,
   worktreeDirectory: string,
   previousMetadata: ReadonlyMap<string, WorktreeMetadata | undefined>,
-): Promise<unknown[]> => {
-  const failures: unknown[] = [];
+): Promise<RollbackFailure[]> => {
+  const failures: RollbackFailure[] = [];
   for (const session of [...sessions].reverse()) {
+    if (isSessionBusyOrRetrying(session, worktreeDirectory)) {
+      failures.push({ sessionId: session.id, error: new Error('Session is not idle') });
+      continue;
+    }
     try {
       await moveSessionToDirectory(
         session,
@@ -79,7 +103,10 @@ const rollbackMovedSessions = async (
       );
       useSessionUIStore.getState().setWorktreeMetadata(session.id, previousMetadata.get(session.id) ?? null);
     } catch (error) {
-      failures.push(error);
+      failures.push({
+        sessionId: session.id,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
     }
   }
   return failures;
@@ -149,7 +176,7 @@ const moveSessionTreeTransaction = async (
         previousMetadata,
       );
       if (rollbackFailures.length > 0) {
-        throw new Error(`Session move partially failed and could not be fully rolled back: ${moveError.message}`);
+        throw createIncompleteRollbackError(moveError, rollbackFailures);
       }
       if (destination?.onMoveFailure) {
         return destination.onMoveFailure(moveError);

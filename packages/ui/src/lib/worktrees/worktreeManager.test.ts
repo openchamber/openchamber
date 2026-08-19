@@ -12,6 +12,7 @@ type WorktreeListEntry = {
 const listCalls: string[] = [];
 const listResolvers: Array<(value: WorktreeListEntry[]) => void> = [];
 const listRejecters: Array<(reason: Error) => void> = [];
+let listImplementation: ((directory: string) => Promise<WorktreeListEntry[]>) | undefined;
 const createPayloads: unknown[] = [];
 const validatePayloads: unknown[] = [];
 const createdWorktree = {
@@ -79,6 +80,9 @@ mock.module('@/lib/gitApi', () => ({
     worktree: {
       list: (directory: string) => {
         listCalls.push(directory);
+        if (listImplementation) {
+          return listImplementation(directory);
+        }
         return new Promise<WorktreeListEntry[]>((resolve, reject) => {
           listResolvers.push(resolve);
           listRejecters.push((reason: Error) => reject(reason));
@@ -121,6 +125,7 @@ describe('worktreeManager list invalidation', () => {
     listCalls.length = 0;
     listResolvers.length = 0;
     listRejecters.length = 0;
+    listImplementation = undefined;
     createPayloads.length = 0;
     validatePayloads.length = 0;
     bootstrapWatcherCalls.length = 0;
@@ -232,6 +237,64 @@ describe('worktreeManager list invalidation', () => {
     listRejecters[0](new Error('git failed'));
 
     await expect(listing).rejects.toThrow('git failed');
+  });
+
+  test('rejects sustained invalidation explicitly, preserves the last cached result, and allows a later retry', async () => {
+    const project = { id: 'project-force-convergence', path: '/repo-force-convergence' };
+    const oldWorktree = [{ path: '/repo-old', branch: 'old', name: 'old' } satisfies WorktreeListEntry];
+    const scriptedResolvers = new Map<number, (value: WorktreeListEntry[]) => void>();
+    let recoveryReadsAllowed = false;
+
+    listImplementation = () => {
+      const callNumber = listCalls.length;
+      if (callNumber === 8 && !recoveryReadsAllowed) {
+        return Promise.reject(new Error('unexpected extra read'));
+      }
+      return new Promise<WorktreeListEntry[]>((resolve) => {
+        scriptedResolvers.set(callNumber, resolve);
+      });
+    };
+
+    const seededListing = listProjectWorktrees(project);
+    await waitForListCallCount(1);
+    scriptedResolvers.get(1)?.(oldWorktree);
+    expect((await seededListing).map((entry) => entry.path)).toEqual(['/repo-old']);
+
+    const unstableListing = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(2);
+
+    const forcedRefreshA = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(3);
+    scriptedResolvers.get(3)?.([createdWorktree]);
+    expect((await forcedRefreshA).map((entry) => entry.path)).toEqual(['/repo-feature']);
+    scriptedResolvers.get(2)?.([{ path: '/repo-stale-a', branch: 'stale-a', name: 'stale-a' }]);
+    await waitForListCallCount(4);
+
+    const forcedRefreshB = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(5);
+    scriptedResolvers.get(5)?.([createdWorktree]);
+    expect((await forcedRefreshB).map((entry) => entry.path)).toEqual(['/repo-feature']);
+    scriptedResolvers.get(4)?.([{ path: '/repo-stale-b', branch: 'stale-b', name: 'stale-b' }]);
+    await waitForListCallCount(6);
+
+    const forcedRefreshC = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(7);
+    scriptedResolvers.get(7)?.([createdWorktree]);
+    expect((await forcedRefreshC).map((entry) => entry.path)).toEqual(['/repo-feature']);
+    scriptedResolvers.get(6)?.([{ path: '/repo-stale-c', branch: 'stale-c', name: 'stale-c' }]);
+
+    await expect(unstableListing).rejects.toThrow('Worktree list did not converge');
+    expect(listCalls).toHaveLength(7);
+
+    const cachedResult = await listProjectWorktrees(project);
+    expect(cachedResult.map((entry) => entry.path)).toEqual(['/repo-feature']);
+    expect(listCalls).toHaveLength(7);
+
+    recoveryReadsAllowed = true;
+    const recoveredListing = listProjectWorktrees(project, { force: true });
+    await waitForListCallCount(8);
+    scriptedResolvers.get(8)?.([createdWorktree]);
+    expect((await recoveredListing).map((entry) => entry.path)).toEqual(['/repo-feature']);
   });
 
   test('marks fast-created worktrees pending until bootstrap settles', async () => {

@@ -26,6 +26,7 @@ type SessionWorktreeMenuState = {
 
 type StartSessionWorktreeMenuLoadDependencies = {
   projects: ReadonlyArray<ProjectRef>;
+  getCurrentProjects: () => ReadonlyArray<ProjectRef>;
   rawWorktreesByProjectRef: { current: RawWorktreesByProjectScope };
   getPublishedWorktreesByProject: () => Map<string, WorktreeMetadata[]>;
   resolveProject: (directory: string) => ProjectRef | null;
@@ -285,6 +286,12 @@ export const startSessionWorktreeMenuLoad = (
         throw new Error('Runtime changed during worktree refresh');
       }
 
+      const currentProjects = deps.getCurrentProjects();
+      const currentProject = currentProjects.find((candidate) => candidate.id === project.id) ?? null;
+      if (!currentProject || normalizePath(currentProject.path ?? null) !== normalizedProjectPath) {
+        throw new Error('Project removed during worktree refresh');
+      }
+
       const currentRawScope = ensureRawWorktreesByProjectScope({
         rawWorktreesByProjectRef: deps.rawWorktreesByProjectRef,
         publishedWorktreesByProject: deps.getPublishedWorktreesByProject(),
@@ -327,7 +334,7 @@ export const startSessionWorktreeMenuLoad = (
         worktreesByProject: nextRawTopology,
       };
 
-      const partitionedWorktreesByProject = deps.partitionWorktreesByRegisteredProject(deps.projects, nextRawTopology);
+      const partitionedWorktreesByProject = deps.partitionWorktreesByRegisteredProject(currentProjects, nextRawTopology);
       const allWorktrees = [...partitionedWorktreesByProject.values()].flat();
       deps.recordWorktreesSeen(allWorktrees.map((worktree) => worktree.path), deps.now());
 

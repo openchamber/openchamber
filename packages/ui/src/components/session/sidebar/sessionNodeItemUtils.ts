@@ -77,6 +77,16 @@ export type QuestionBadgeSessionScope = {
   sessionIDs: string[];
 };
 
+export const getSessionWorktreeMenuDisabled = ({
+  sessionDirectory,
+  isStreaming,
+  isMovingToWorktree,
+}: {
+  sessionDirectory: string | null;
+  isStreaming: boolean;
+  isMovingToWorktree: boolean;
+}): boolean => !sessionDirectory || isStreaming || isMovingToWorktree;
+
 /**
  * Choose which (directory, sessionIDs) scopes a sidebar row's pending-question
  * badge should count. An expanded row counts only its own session; a collapsed

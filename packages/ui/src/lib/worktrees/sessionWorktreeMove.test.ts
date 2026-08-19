@@ -11,11 +11,10 @@ const moveCalls: Array<{
   moveChanges: boolean;
 }> = [];
 const refreshCalls: string[][] = [];
-type RemoveProjectWorktreeOptions = { deleteLocalBranch: boolean };
 type RemoveProjectWorktreeCall = {
-  project: ProjectRef;
-  worktree: WorktreeMetadata;
-  options: RemoveProjectWorktreeOptions;
+  projectDirectory: string;
+  directory: string;
+  deleteLocalBranch: boolean;
 };
 type MoveSessionImplementation = (
   session: Session,
@@ -37,15 +36,38 @@ type DeferredVoid = {
   resolve: () => void;
   reject: (error: Error) => void;
 };
+type IncompleteRollbackCause = {
+  moveError: Error;
+  rollbackFailures: Array<{ sessionId: string; error: Error }>;
+};
 
 const removeWorktreeCalls: RemoveProjectWorktreeCall[] = [];
 const metadataWrites: Array<{ sessionId: string; metadata: WorktreeMetadata | null }> = [];
-const latestMetadataInputs: WorktreeMetadata[] = [];
 const toastSuccesses: string[] = [];
 const toastErrors: Array<{ title: string; description?: string }> = [];
 const directoryStates = new Map<string, DirectoryState>();
 const storedMetadata = new Map<string, WorktreeMetadata | null>();
 const originalConsoleWarn = console.warn;
+type SessionUIState = {
+  availableWorktrees: WorktreeMetadata[];
+  availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
+  worktreeMetadata: Map<string, WorktreeMetadata | null>;
+  getWorktreeMetadata: (sessionId: string) => WorktreeMetadata | null;
+  setWorktreeMetadata: (sessionId: string, metadata: WorktreeMetadata | null) => void;
+};
+
+type SessionUIStatePatch = Partial<SessionUIState> | ((state: SessionUIState) => Partial<SessionUIState>);
+
+const sessionUIState: SessionUIState = {
+  availableWorktrees: [],
+  availableWorktreesByProject: new Map<string, WorktreeMetadata[]>(),
+  worktreeMetadata: new Map<string, WorktreeMetadata | null>(),
+  getWorktreeMetadata: (sessionId: string) => storedMetadata.get(sessionId) ?? null,
+  setWorktreeMetadata: (sessionId: string, metadata: WorktreeMetadata | null) => {
+    storedMetadata.set(sessionId, metadata);
+    metadataWrites.push({ sessionId, metadata });
+  },
+};
 
 let moveSessionImplementation: MoveSessionImplementation = async () => {};
 let refreshImplementation: RefreshImplementation = async () => {};
@@ -74,6 +96,26 @@ mock.module('@/components/ui', () => ({
 
 mock.module('@/lib/gitApi', () => ({
   getGitStatus: mock(() => Promise.resolve({ current: 'feature' })),
+  deleteRemoteBranch: mock(),
+  git: {
+    worktree: {
+      list: mock(() => Promise.resolve([])),
+      create: mock(() => Promise.resolve(null)),
+      validate: mock(() => Promise.resolve({ ok: true, errors: [] })),
+      remove: mock((projectDirectory: string, options: { directory: string; deleteLocalBranch?: boolean }) => {
+        removeWorktreeCalls.push({
+          projectDirectory,
+          directory: options.directory,
+          deleteLocalBranch: options.deleteLocalBranch === true,
+        });
+        return Promise.resolve({ success: true });
+      }),
+    },
+  },
+}));
+
+mock.module('@/lib/openchamberConfig', () => ({
+  substituteCommandVariables: (command: string) => command,
 }));
 
 mock.module('@/lib/worktreeSessionCreator', () => ({
@@ -83,17 +125,15 @@ mock.module('@/lib/worktreeSessionCreator', () => ({
 
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
   waitForWorktreeGitReady: mock((directory: string) => waitForWorktreeGitReadyImplementation(directory)),
+  clearWorktreeBootstrapState: mock(),
+  markWorktreeBootstrapPending: mock(),
+  setWorktreeBootstrapState: mock(),
+  startWorktreeBootstrapWatcher: mock(),
 }));
 
-mock.module('@/lib/worktrees/worktreeManager', () => ({
-  getLatestWorktreeMetadata: (metadata: WorktreeMetadata) => {
-    latestMetadataInputs.push(metadata);
-    return latestMetadataResult;
-  },
-  removeProjectWorktree: (project: ProjectRef, worktree: WorktreeMetadata, options: RemoveProjectWorktreeOptions) => {
-    removeWorktreeCalls.push({ project, worktree, options });
-    return Promise.resolve();
-  },
+mock.module('@/lib/worktrees/worktreeStatus', () => ({
+  invalidateResolvedProjectRootCache: mock(),
+  resolveProjectRoot: (directory: string) => Promise.resolve(directory),
 }));
 
 mock.module('@/stores/useGlobalSessionsStore', () => ({
@@ -112,15 +152,17 @@ mock.module('@/sync/session-actions', () => ({
 
 mock.module('@/sync/session-ui-store', () => ({
   useSessionUIStore: {
-    getState: () => ({
-      availableWorktrees: [],
-      availableWorktreesByProject: new Map<string, WorktreeMetadata[]>(),
-      getWorktreeMetadata: (sessionId: string) => storedMetadata.get(sessionId) ?? null,
-      setWorktreeMetadata: (sessionId: string, metadata: WorktreeMetadata | null) => {
-        storedMetadata.set(sessionId, metadata);
-        metadataWrites.push({ sessionId, metadata });
-      },
-    }),
+    getState: () => sessionUIState,
+    setState: (patch: SessionUIStatePatch) => {
+      const next = patch instanceof Function ? patch(sessionUIState) : patch;
+      Object.assign(sessionUIState, next);
+    },
+  },
+}));
+
+mock.module('@/sync/session-worktree-store', () => ({
+  useSessionWorktreeStore: {
+    setState: mock(),
   },
 }));
 
@@ -193,18 +235,54 @@ const deferred = (): DeferredVoid => {
   return { promise, resolve, reject };
 };
 
+const getIncompleteRollbackCause = (error: Error): IncompleteRollbackCause => {
+  const cause = error.cause;
+  if (!cause || !(cause instanceof Object)) {
+    throw new Error('Expected rollback error cause details');
+  }
+
+  const parsed = cause as Partial<IncompleteRollbackCause>;
+  if (!(parsed.moveError instanceof Error)) {
+    throw new Error('Expected rollback moveError cause');
+  }
+  if (!Array.isArray(parsed.rollbackFailures)) {
+    throw new Error('Expected rollback failures in cause');
+  }
+
+  const rollbackFailures = parsed.rollbackFailures.map((entry) => {
+    if (!entry || !(entry instanceof Object)) {
+      throw new Error('Expected rollback failure entry');
+    }
+    const failure = entry as { sessionId?: unknown; error?: unknown };
+    if (typeof failure.sessionId !== 'string') {
+      throw new Error('Expected rollback failure session ID');
+    }
+    if (!(failure.error instanceof Error)) {
+      throw new Error('Expected rollback failure error');
+    }
+    return { sessionId: failure.sessionId, error: failure.error };
+  });
+
+  return {
+    moveError: parsed.moveError,
+    rollbackFailures,
+  };
+};
+
 describe('moveSessionTreeToExistingWorktree', () => {
   beforeEach(() => {
     moveCalls.length = 0;
     refreshCalls.length = 0;
     removeWorktreeCalls.length = 0;
     metadataWrites.length = 0;
-    latestMetadataInputs.length = 0;
     toastSuccesses.length = 0;
     toastErrors.length = 0;
     directoryStates.clear();
     storedMetadata.clear();
+    sessionUIState.worktreeMetadata = new Map();
+    sessionUIState.availableWorktreesByProject = new Map();
     latestMetadataResult = makeWorktreeMetadata({ label: 'Latest destination' });
+    sessionUIState.availableWorktrees = [latestMetadataResult];
     moveSessionImplementation = async () => {};
     refreshImplementation = async () => {};
     createQuickWorktreeImplementation = async () => makeWorktreeMetadata({ path: '/created-worktree', worktreeSource: 'created-for-session' });
@@ -243,7 +321,6 @@ describe('moveSessionTreeToExistingWorktree', () => {
       { sessionId: 'root', metadata: latestMetadataResult },
       { sessionId: 'child', metadata: latestMetadataResult },
     ]);
-    expect(latestMetadataInputs).toEqual([destination, destination]);
     expect(refreshCalls).toEqual([['/source', '/destination']]);
     expect(removeWorktreeCalls).toEqual([]);
   });
@@ -390,6 +467,40 @@ describe('moveSessionTreeToExistingWorktree', () => {
       }
     };
 
+    const error = await moveSessionTreeToExistingWorktree({
+      root,
+      descendants: [child],
+      sourceDirectory: '/source',
+      destination: makeWorktreeMetadata(),
+    }).catch((rejection) => rejection);
+
+    expect(error).toBeInstanceOf(Error);
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+    expect(error.message.includes('could not be fully rolled back')).toBe(true);
+    const cause = getIncompleteRollbackCause(error);
+    expect(cause.moveError.message).toBe('child failed');
+    expect(cause.rollbackFailures).toEqual([{ sessionId: 'root', error: new Error('rollback failed') }]);
+
+    expect(removeWorktreeCalls).toEqual([]);
+  });
+
+  const expectBusyOrRetryRollbackBlock = async (status: Extract<SessionStatus['type'], 'busy' | 'retry'>): Promise<void> => {
+    const root = makeSession('root');
+    const child = makeSession('child');
+    setStatuses('/source', { root: 'idle', child: 'idle' });
+    setStatuses('/destination', {});
+    moveSessionImplementation = async (session, sourceDirectory) => {
+      if (sourceDirectory === '/source' && session.id === 'root') {
+        setStatuses('/destination', { root: status });
+        return;
+      }
+      if (sourceDirectory === '/source' && session.id === 'child') {
+        throw new Error('child failed');
+      }
+    };
+
     await expect(moveSessionTreeToExistingWorktree({
       root,
       descendants: [child],
@@ -397,7 +508,19 @@ describe('moveSessionTreeToExistingWorktree', () => {
       destination: makeWorktreeMetadata(),
     })).rejects.toThrow('could not be fully rolled back');
 
+    expect(moveCalls).toEqual([
+      { sessionId: 'root', sourceDirectory: '/source', destinationDirectory: '/destination', moveChanges: true },
+      { sessionId: 'child', sourceDirectory: '/source', destinationDirectory: '/destination', moveChanges: false },
+    ]);
     expect(removeWorktreeCalls).toEqual([]);
+  };
+
+  test('does not attempt rollback for a moved root that becomes busy in the destination', async () => {
+    await expectBusyOrRetryRollbackBlock('busy');
+  });
+
+  test('does not attempt rollback for a moved root that becomes retry in the destination', async () => {
+    await expectBusyOrRetryRollbackBlock('retry');
   });
 
   test('keeps the move successful when the post-move refresh fails', async () => {
@@ -435,9 +558,9 @@ describe('moveSessionTreeToExistingWorktree', () => {
     await waitFor(() => toastErrors.length === 1);
     expect(toastErrors).toEqual([{ title: 'failed', description: 'git-ready failed' }]);
     expect(removeWorktreeCalls).toEqual([{
-      project: { id: 'project-1', path: '/repo' },
-      worktree: makeWorktreeMetadata({ path: '/created-worktree', worktreeSource: 'created-for-session', label: 'Destination' }),
-      options: { deleteLocalBranch: true },
+      projectDirectory: '/repo',
+      directory: '/created-worktree',
+      deleteLocalBranch: true,
     }]);
     expect(moveCalls).toEqual([]);
   });
@@ -458,9 +581,9 @@ describe('moveSessionTreeToExistingWorktree', () => {
 
     await waitFor(() => toastErrors.length === 1);
     expect(removeWorktreeCalls).toEqual([{
-      project: { id: 'project-1', path: '/repo' },
-      worktree: makeWorktreeMetadata({ path: '/created-worktree', worktreeSource: 'created-for-session', label: 'Destination' }),
-      options: { deleteLocalBranch: true },
+      projectDirectory: '/repo',
+      directory: '/created-worktree',
+      deleteLocalBranch: true,
     }]);
     expect(moveCalls).toEqual([]);
   });
