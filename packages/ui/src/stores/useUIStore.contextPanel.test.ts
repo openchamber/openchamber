@@ -449,3 +449,18 @@ describe('context panel tab limits', () => {
     expect(tabs.some((tab) => tab.targetPath === 'http://localhost:3019/')).toBe(true);
   });
 });
+
+describe('useUIStore persistence migrations', () => {
+  test('migrates the legacy chat width toggle from a version 14 snapshot', async () => {
+    const migrate = useUIStore.persist.getOptions().migrate;
+    const migrated = await migrate?.({ wideChatLayoutEnabled: true }, 14);
+
+    expect(migrated).toEqual({
+      autoSaveEnabled: true,
+      chatMessageWidthMode: 'wide',
+      contextPanelByDirectory: {},
+      contextRailOrder: [],
+      fileEditorKeymap: 'default',
+    });
+  });
+});
