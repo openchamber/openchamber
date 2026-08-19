@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Git/Worktrees: session menus can now move an idle session and its sub-sessions into an existing worktree, and opening the target list discovers worktrees created outside OpenChamber without a restart (thanks to @mattv8).
 
 ## [1.19.0] - 2026-08-19
 
@@ -18,7 +19,6 @@ All notable changes to this project will be documented in this file.
 - Usage/Command Code: Command Code plan limits now appear in the Usage page and work status panel.
 - Git: the pull request panel now follows the branch's current open PR, and an open PR always wins over an older merged or closed one. After a PR is merged or closed the panel keeps showing it as the branch's last PR and offers creating the next one right below it (thanks to @makeittech).
 - Git/Worktrees: creating a worktree from a pull request now falls back to GitHub's pull-request reference when the source fork was deleted or cannot be reached, instead of failing before creating the worktree (thanks to @makeittech).
-- Git/Worktrees: session menus can now move an idle session and its sub-sessions into an existing worktree, and opening the target list discovers worktrees created outside OpenChamber without a restart (thanks to @mattv8).
 - Chat: new chats no longer start against a deleted last worktree directory; they fall back to the active project instead of saving the first message and never starting.
 - Chat: typing with Chinese, Japanese, or Korean input methods no longer interrupts composition or jumps the cursor to the end of the composer (thanks to @makeittech).
 - Chat: opening a busy subagent in the context panel now shows its history instead of only the working-status line (thanks to @makeittech).
