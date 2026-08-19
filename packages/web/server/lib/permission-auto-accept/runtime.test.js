@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPermissionAutoAcceptRuntime } from './runtime.js';
 
-const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0] } = {}) => {
+const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], protocol = 'legacy', authHeaders = {} } = {}) => {
   let settings = stored ?? { permissionAutoAccept: { sessions: {} } };
   let eventHandler;
   let statusHandler;
@@ -11,7 +11,8 @@ const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0] } = {}) => {
       subscribeStatus(handler) { statusHandler = handler; return () => {}; },
     },
     buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
-    getOpenCodeAuthHeaders: () => ({}),
+    getOpenCodeAuthHeaders: () => authHeaders,
+    getOpenCodeProtocol: () => protocol,
     readSettingsFromDiskMigrated: async () => settings,
     persistSettings: async (changes) => { settings = { ...settings, ...changes }; },
     fetchImpl: fetchImpl ?? vi.fn(async () => new Response('[]')),
@@ -75,6 +76,79 @@ describe('permission auto-accept runtime', () => {
     });
     await expect(runtime.processPermission({ id: 'perm', sessionID: 'child' }, '/project')).resolves.toBe(true);
     expect(fetchImpl.mock.calls.some(([url, init]) => new URL(url).pathname === '/permission/perm/reply' && init.method === 'POST')).toBe(true);
+  });
+
+  it('replies to opencode2 permission events through the authoritative session route', async () => {
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      if (new URL(url).pathname === '/api/permission/request') return new Response('[]');
+      return Response.json({});
+    });
+    const { emit } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { 'session/root': true } } },
+      protocol: 'opencode2',
+      authHeaders: { Authorization: 'Bearer upstream-secret' },
+      fetchImpl,
+    });
+
+    emit({
+      type: 'permission.asked',
+      properties: { id: 'permission/one', sessionID: 'session/root' },
+    });
+    await flush();
+
+    const replyCall = fetchImpl.mock.calls.find(([, init]) => init?.method === 'POST');
+    expect(new URL(replyCall[0]).pathname).toBe('/api/session/session%2Froot/permission/permission%2Fone/reply');
+    expect(Array.from(new URL(replyCall[0]).searchParams.entries())).toEqual([]);
+    expect(replyCall[1].body).toBe('{"reply":"once"}');
+    expect(replyCall[1].headers.Authorization).toBe('Bearer upstream-secret');
+    expect(String(replyCall[0])).not.toContain('upstream-secret');
+    expect(replyCall[1].body).not.toContain('upstream-secret');
+    expect(fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === '/api/permission/request')).toBe(true);
+  });
+
+  it('uses opencode2 session lookup while resolving missing lineage', async () => {
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      const path = new URL(url).pathname;
+      if (path === '/api/permission/request') return Response.json([]);
+      if (path === '/api/session/child') return Response.json({ id: 'child', parentID: 'root', directory: '/project' });
+      if (path === '/api/session/child/permission/perm/reply' && init.method === 'POST') return Response.json({});
+      return new Response('', { status: 404 });
+    });
+    const { runtime } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: true } } },
+      protocol: 'opencode2',
+      fetchImpl,
+    });
+
+    await expect(runtime.processPermission({ id: 'perm', sessionID: 'child' }, '/project')).resolves.toBe(true);
+    const sessionCall = fetchImpl.mock.calls.find(([url]) => new URL(url).pathname === '/api/session/child');
+    const replyCall = fetchImpl.mock.calls.find(([, init]) => init?.method === 'POST');
+    expect(Array.from(new URL(sessionCall[0]).searchParams.entries())).toEqual([]);
+    expect(Array.from(new URL(replyCall[0]).searchParams.entries())).toEqual([]);
+  });
+
+  it('uses the generated-client location query shape for scoped opencode2 pending requests', async () => {
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (parsed.pathname === '/api/permission/request') {
+        return parsed.searchParams.get('location[directory]') === '/project'
+          ? Response.json([{ id: 'pending', sessionID: 'root' }])
+          : Response.json([]);
+      }
+      if (init.method === 'POST') return Response.json({});
+      return new Response('', { status: 404 });
+    });
+    const { runtime } = createRuntime({ protocol: 'opencode2', fetchImpl });
+
+    await runtime.setSessionPolicy('root', true, '/project');
+
+    const pendingCall = fetchImpl.mock.calls.find(([url]) =>
+      new URL(url).searchParams.has('location[directory]'));
+    const replyCall = fetchImpl.mock.calls.find(([, init]) => init?.method === 'POST');
+    expect(Array.from(new URL(pendingCall[0]).searchParams.entries())).toEqual([
+      ['location[directory]', '/project'],
+    ]);
+    expect(Array.from(new URL(replyCall[0]).searchParams.entries())).toEqual([]);
   });
 
   it('retries a transient reply failure and deduplicates concurrent events', async () => {

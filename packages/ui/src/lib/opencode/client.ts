@@ -16,6 +16,11 @@ import { isAmbiguousTransportFailure, markAmbiguousTransportFailure } from "@/li
 import { FilesystemError, parseFilesystemErrorReason } from "@/lib/api/files-errors";
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
+import { z } from 'zod';
+import {
+  createOpencode2Adapter,
+  type OpenCodeProtocol,
+} from './opencode2-adapter';
 
 /**
  * Tagged result of `OpencodeService.fetchPermission()`. The caller can
@@ -43,6 +48,10 @@ import {
 const DEFAULT_BASE_URL = import.meta.env.VITE_OPENCODE_URL || "/api";
 const CONFIG_CACHE_TTL_MS = 10_000;
 const OPENCODE_HEALTH_TIMEOUT_MS = 4_000;
+const runtimeHealthSchema = z.object({
+  openCodeProtocol: z.enum(['legacy', 'opencode2']).nullable().optional(),
+});
+const opencode2HealthSchema = z.object({ healthy: z.literal(true) });
 
 /**
  * Render an SDK error payload into a short string for Error messages.
@@ -267,6 +276,7 @@ const getDesktopFilesApi = (): FilesAPI | null => {
 class OpencodeService {
   private client: OpencodeClient;
   private baseUrl: string;
+  private protocolPromise: Promise<OpenCodeProtocol> | null = null;
   private scopedClients: Map<string, OpencodeClient> = new Map();
   private currentDirectory: string | undefined = undefined;
   private directoryContextQueue: Promise<void> = Promise.resolve();
@@ -282,7 +292,44 @@ class OpencodeService {
     const runtimeBase = resolveRuntimeBaseUrl();
     const requestedBaseUrl = runtimeBase || baseUrl;
     this.baseUrl = ensureAbsoluteBaseUrl(requestedBaseUrl);
-    this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
+    this.client = this.createProtocolClient();
+  }
+
+  private createProtocolClient(directory?: string): OpencodeClient {
+    const legacy = createRuntimeOpencodeClient({ baseUrl: this.baseUrl, ...(directory ? { directory } : {}) });
+    return createOpencode2Adapter(legacy, this.baseUrl, directory, runtimeFetch, () => this.detectProtocol());
+  }
+
+  private async detectProtocol(): Promise<OpenCodeProtocol> {
+    if (this.protocolPromise) return this.protocolPromise;
+    const pending = (async (): Promise<OpenCodeProtocol> => {
+      const healthTimeout = createTimeoutSignal(OPENCODE_HEALTH_TIMEOUT_MS);
+      try {
+        const healthResponse = await runtimeFetch('/health', { signal: healthTimeout.signal });
+        if (!healthResponse.ok) throw new Error(`OpenChamber health check failed (${healthResponse.status})`);
+        const health = runtimeHealthSchema.safeParse(await healthResponse.json().catch(() => null));
+        if (health.success && health.data.openCodeProtocol) return health.data.openCodeProtocol;
+      } finally {
+        healthTimeout.cleanup();
+      }
+
+      const v2Timeout = createTimeoutSignal(OPENCODE_HEALTH_TIMEOUT_MS);
+      try {
+        const v2Response = await runtimeFetch('/api/api/health', { signal: v2Timeout.signal });
+        if (!v2Response.ok) return 'legacy';
+        const v2Health = opencode2HealthSchema.safeParse(await v2Response.json().catch(() => null));
+        return v2Health.success ? 'opencode2' : 'legacy';
+      } finally {
+        v2Timeout.cleanup();
+      }
+    })();
+    this.protocolPromise = pending;
+    try {
+      return await pending;
+    } catch (error) {
+      if (this.protocolPromise === pending) this.protocolPromise = null;
+      throw error;
+    }
   }
 
   private assertRuntimeUnchanged(runtimeKey?: string): void {
@@ -298,11 +345,12 @@ class OpencodeService {
   reconnectToRuntimeBaseUrl(): void {
     const runtimeBase = resolveRuntimeBaseUrl();
     const nextBaseUrl = ensureAbsoluteBaseUrl(runtimeBase || DEFAULT_BASE_URL);
+    this.protocolPromise = null;
     if (nextBaseUrl === this.baseUrl) {
       return;
     }
     this.baseUrl = nextBaseUrl;
-    this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
+    this.client = this.createProtocolClient();
     this.scopedClients.clear();
     this.listDirectoryInFlight.clear();
     this.configProvidersInFlight.clear();
@@ -332,7 +380,7 @@ class OpencodeService {
     if (existing) {
       return existing;
     }
-    const scoped = createRuntimeOpencodeClient({ baseUrl: this.baseUrl, directory: normalized });
+    const scoped = this.createProtocolClient(normalized);
     this.scopedClients.set(key, scoped);
     return scoped;
   }

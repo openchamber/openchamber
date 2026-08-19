@@ -670,6 +670,9 @@ export async function activate(context: vscode.ExtensionContext) {
           ? `OpenCode API prefix: ${debug.apiPrefixDetected ? (debug.apiPrefix || '(root)') : '(unknown)'}`
           : `OpenCode API prefix: (unknown)`,
         debug
+          ? `OpenCode protocol: ${debug.protocol ?? '(unknown)'}`
+          : `OpenCode protocol: (unknown)`,
+        debug
           ? `Last start: ${formatIso(debug.lastStartAt)}`
           : `Last start: (unknown)`,
         debug

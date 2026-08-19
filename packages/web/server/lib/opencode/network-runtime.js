@@ -1,3 +1,47 @@
+const OPEN_CODE_HEALTH_PATHS = {
+  legacy: '/global/health',
+  opencode2: '/api/health',
+};
+const HEALTH_PROBE_ATTEMPT_TIMEOUT_MS = 1000;
+
+export const detectOpenCodeProtocol = async (baseUrl, options = {}) => {
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+  const protocols = options.preferredProtocol && OPEN_CODE_HEALTH_PATHS[options.preferredProtocol]
+    ? [options.preferredProtocol, ...Object.keys(OPEN_CODE_HEALTH_PATHS).filter((protocol) => protocol !== options.preferredProtocol)]
+    : Object.keys(OPEN_CODE_HEALTH_PATHS);
+
+  for (const protocol of protocols) {
+    if (options.signal?.aborted) return null;
+
+    const controller = new AbortController();
+    const abortFromCaller = () => controller.abort(options.signal.reason);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      options.attemptTimeoutMs ?? HEALTH_PROBE_ATTEMPT_TIMEOUT_MS
+    );
+    options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+    try {
+      const response = await fetch(`${normalizedBaseUrl}${OPEN_CODE_HEALTH_PATHS[protocol]}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...(options.headers ?? {}) },
+        signal: controller.signal,
+      });
+      if (!response.ok) continue;
+      const body = await response.json().catch(() => null);
+      if (body?.healthy === true) {
+        return { protocol };
+      }
+    } catch {
+      if (options.signal?.aborted) return null;
+    } finally {
+      clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', abortFromCaller);
+    }
+  }
+
+  return null;
+};
+
 export const createOpenCodeNetworkRuntime = (deps) => {
   const {
     state,
@@ -46,22 +90,17 @@ export const createOpenCodeNetworkRuntime = (deps) => {
       try {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), 3000);
-        const response = await fetch(`${url.replace(/\/+$/, '')}/global/health`, {
-          method: 'GET',
-          headers: {
-            Accept: 'application/json',
-            ...getOpenCodeAuthHeaders(),
-          },
+        const result = await detectOpenCodeProtocol(url, {
+          headers: getOpenCodeAuthHeaders(),
+          preferredProtocol: state.openCodeProtocol,
           signal: controller.signal,
         });
         clearTimeout(timeout);
         timeout = null;
 
-        if (response.ok) {
-          const body = await response.json().catch(() => null);
-          if (body?.healthy === true) {
-            return true;
-          }
+        if (result) {
+          state.openCodeProtocol = result.protocol;
+          return true;
         }
       } catch {
       } finally {
@@ -106,11 +145,14 @@ export const createOpenCodeNetworkRuntime = (deps) => {
     return;
   };
 
+  const getOpenCodeHealthPath = () => OPEN_CODE_HEALTH_PATHS[state.openCodeProtocol] ?? OPEN_CODE_HEALTH_PATHS.legacy;
+
   return {
     waitForReady,
     normalizeApiPrefix,
     setDetectedOpenCodeApiPrefix,
     buildOpenCodeUrl,
+    getOpenCodeHealthPath,
     ensureOpenCodeApiPrefix,
     scheduleOpenCodeApiDetection,
   };

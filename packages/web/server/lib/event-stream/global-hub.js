@@ -11,6 +11,7 @@ export function createGlobalMessageStreamHub({
   upstreamStallTimeoutMs,
   upstreamReconnectDelayMs,
   replayLimit = MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT,
+  getOpenCodeProtocol = () => 'legacy',
 }) {
   const eventSubscribers = new Set();
   const statusSubscribers = new Set();
@@ -42,6 +43,21 @@ export function createGlobalMessageStreamHub({
   };
 
   const normalizeEvent = ({ envelope, payload }) => {
+    if (getOpenCodeProtocol() === 'opencode2' && payload) {
+      const directory = payload.location?.directory || 'global';
+      const eventId = payload.id || envelope?.eventId || undefined;
+      const legacyPayload = {
+        type: payload.type,
+        properties: payload.data,
+      };
+      return {
+        envelope: { eventId, directory, payload: legacyPayload },
+        payload: legacyPayload,
+        directory,
+        eventId,
+      };
+    }
+
     const directory =
       typeof envelope?.directory === 'string' && envelope.directory.length > 0 ? envelope.directory : 'global';
     const eventId = typeof envelope?.eventId === 'string' && envelope.eventId.length > 0 ? envelope.eventId : undefined;
@@ -67,7 +83,8 @@ export function createGlobalMessageStreamHub({
       buildUrl: () => {
         buildUrlFailed = false;
         try {
-          return new URL(buildOpenCodeUrl('/global/event', ''));
+          const eventPath = getOpenCodeProtocol() === 'opencode2' ? '/api/event' : '/global/event';
+          return new URL(buildOpenCodeUrl(eventPath, ''));
         } catch {
           buildUrlFailed = true;
           throw new Error('OpenCode service unavailable');

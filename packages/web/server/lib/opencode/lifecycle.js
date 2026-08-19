@@ -17,7 +17,6 @@ const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
 );
 const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
 const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
-const OPENCODE_HEALTH_PATH = '/global/health';
 // Last-used directory plus the three most recently opened projects — deeper
 // tails are unlikely to be the user's first click and just add background work.
 const WARMUP_DIRECTORY_LIMIT = 4;
@@ -91,6 +90,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     getOpenCodeAuthHeaders,
     buildOpenCodeUrl,
     waitForReady,
+    getOpenCodeHealthPath,
     normalizeApiPrefix,
     applyOpencodeBinaryFromSettings,
     ensureOpencodeCliEnv,
@@ -434,12 +434,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         stdout += chunk.toString();
         const lines = stdout.split('\n');
         for (const line of lines) {
-          if (!line.startsWith('opencode server listening')) continue;
-          const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
-          if (!match) {
-            finish(reject, new Error(`Failed to parse server url from output: ${line}`));
-            return;
-          }
+          const match = line.match(/^(?:opencode )?server listening on\s+(https?:\/\/[^\s]+)/);
+          if (!match) continue;
           attachRuntimeStderrCapture();
           finish(resolve, match[1]);
           return;
@@ -549,7 +545,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
 
     try {
-      const response = await fetch(buildOpenCodeUrl(OPENCODE_HEALTH_PATH, ''), {
+      if (!state.openCodeProtocol) {
+        return await waitForReady(buildOpenCodeUrl('/', ''), HEALTH_CHECK_TIMEOUT_MS);
+      }
+      const response = await fetch(buildOpenCodeUrl(getOpenCodeHealthPath(), ''), {
         method: 'GET',
         headers: {
           Accept: 'application/json',
@@ -604,21 +603,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
 
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
       const base = origin ?? `http://127.0.0.1:${port}`;
-      const response = await fetch(`${base}${OPENCODE_HEALTH_PATH}`, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          ...getOpenCodeAuthHeaders(),
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-      if (!response.ok) return false;
-      const body = await response.json().catch(() => null);
-      return body?.healthy === true;
+      return await waitForReady(base, 3000);
     } catch {
       return false;
     }
@@ -844,6 +830,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       state.openCodeApiPrefixDetected = true;
       state.openCodeApiPrefix = '';
+      state.openCodeProtocol = null;
       if (state.openCodeApiDetectionTimer) {
         clearTimeout(state.openCodeApiDetectionTimer);
         state.openCodeApiDetectionTimer = null;
@@ -881,6 +868,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
       state.openCodeApiPrefixDetected = true;
       state.openCodeApiPrefix = '';
+      state.openCodeProtocol = null;
       throw error;
     } finally {
       state.currentRestartPromise = null;
@@ -888,57 +876,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
-  const waitForOpenCodeReady = async (timeoutMs = 20000, intervalMs = 400) => {
+  const waitForOpenCodeReady = async (timeoutMs = 20000) => {
     if (!state.openCodePort) {
       throw new Error('OpenCode port is not available');
     }
 
-    const deadline = Date.now() + timeoutMs;
-    let lastError = null;
-
-    while (Date.now() < deadline) {
-      let timeout = null;
-      try {
-        const controller = new AbortController();
-        timeout = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
-        const response = await fetch(buildOpenCodeUrl(OPENCODE_HEALTH_PATH, ''), {
-          method: 'GET',
-          headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-        timeout = null;
-
-        if (!response.ok) {
-          lastError = new Error(`OpenCode health endpoint responded with status ${response.status}`);
-          await new Promise((resolve) => setTimeout(resolve, intervalMs));
-          continue;
-        }
-
-        const body = await response.json().catch(() => null);
-        if (body?.healthy !== true) {
-          lastError = new Error('OpenCode health endpoint returned unhealthy response');
-          await new Promise((resolve) => setTimeout(resolve, intervalMs));
-          continue;
-        }
-
-        state.isOpenCodeReady = true;
-        state.lastOpenCodeError = null;
-        return;
-      } catch (error) {
-        lastError = error;
-      } finally {
-        if (timeout) {
-          clearTimeout(timeout);
-        }
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    }
-
-    if (lastError) {
-      state.lastOpenCodeError = lastError.message || String(lastError);
-      throw lastError;
+    if (await waitForReady(buildOpenCodeUrl('/', ''), timeoutMs)) {
+      state.isOpenCodeReady = true;
+      state.lastOpenCodeError = null;
+      return;
     }
 
     const timeoutError = new Error('Timed out waiting for OpenCode to become ready');
@@ -1112,6 +1058,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   // best-effort: a failed or slow directory never blocks the others for long,
   // and a restart invalidates the pass via the port/readiness guard.
   const warmOpenCodeDirectories = async () => {
+    if (state.openCodeProtocol === 'opencode2') return;
     let directories = [];
     try {
       directories = await getWarmupDirectories();

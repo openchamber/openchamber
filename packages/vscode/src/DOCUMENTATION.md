@@ -53,7 +53,7 @@ The webview CSP permits `blob:` only for `worker-src` so shared UI parsers can r
 
 - `bridge-proxy-runtime.ts`
   - Proxy route handlers (`api:proxy`, `api:session:message`) with injected helper dependencies.
-  - SSE routes are intentionally excluded from the generic proxy and use `sseProxy.ts`, whose upstream-only stall watchdog closes a quiet OpenCode stream so the webview can reconnect instead of trusting an open but silent response.
+  - SSE routes are intentionally excluded from the generic proxy and use `sseProxy.ts`, whose exact route mapping preserves legacy `/event` and `/global/event` while forwarding opencode2 `/api/event`; its upstream-only stall watchdog closes a quiet OpenCode stream so the webview can reconnect instead of trusting an open but silent response.
   - The webview allocates each SSE stream ID and installs its listener before requesting the upstream stream, so immediate OpenCode replay events cannot race the bridge start response.
 
 - `bridge-config-runtime.ts`
@@ -73,6 +73,8 @@ The webview CSP permits `blob:` only for `worker-src` so shared UI parsers can r
 
 - `opencode-upgrade-runtime.ts`
   - Owns managed-versus-external capability decisions, latest-version checks, serialized OpenCode self-upgrades, and restart-after-upgrade behavior.
+  - `opencode.ts` detects legacy `/global/health` versus opencode2 `/api/health` with an independent bounded timeout per probe before reporting a managed or external server connected; opencode2 is not offered the legacy self-upgrade route.
+  - Managed CLI discovery prefers legacy `opencode`, then discovers separately named `opencode2` through PATH, known install locations, `where.exe`, and login-shell lookup. Windows npm `opencode2.cmd` shims launch their packaged native executable directly when available; OpenCode desktop GUI executables remain excluded.
 
 - `bridge-permission-auto-accept-runtime.ts`
   - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.

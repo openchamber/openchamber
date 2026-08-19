@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 
+import { createGlobalMessageStreamHub } from './global-hub.js';
 import { createGlobalUiEventBroadcaster, createMessageStreamWsRuntime } from './runtime.js';
 
 class FakeSocket extends EventEmitter {
@@ -127,6 +128,52 @@ describe('event stream broadcaster', () => {
 });
 
 describe('message stream websocket runtime', () => {
+  it('bridges normalized opencode2 events with the upstream replay ID', async () => {
+    const server = new EventEmitter();
+    const globalEventHub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      getOpenCodeProtocol: () => 'opencode2',
+      upstreamReconnectDelayMs: 100,
+      fetchImpl: async (_url, options) => createSseResponse({
+        signal: options.signal,
+        holdOpen: true,
+        blocks: [
+          'data: {"id":"evt-v2","type":"session.updated","data":{"info":{"id":"ses-1"}},"location":{"directory":"/tmp/project"}}\n\n',
+        ],
+      }),
+    });
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {},
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      globalEventHub,
+      processForwardedEventPayload() {},
+      wsClients: new Set(),
+    });
+    const socket = new FakeSocket();
+
+    runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(socket.sent).toContainEqual({
+      type: 'event',
+      payload: {
+        type: 'session.updated',
+        properties: { info: { id: 'ses-1' } },
+      },
+      eventId: 'evt-v2',
+      directory: '/tmp/project',
+    });
+
+    socket.close();
+    await runtime.close();
+    globalEventHub.stop();
+  });
+
   it('shares one global upstream SSE reader across multiple websocket clients', async () => {
     const server = new EventEmitter();
     const wsClients = new Set();
