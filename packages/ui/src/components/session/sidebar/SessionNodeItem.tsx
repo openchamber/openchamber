@@ -924,7 +924,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     }
   };
 
-  const handleWorktreeSubmenuOpenChange = React.useCallback((open: boolean) => {
+  const handleWorktreeSubmenuOpenChange = (open: boolean) => {
     worktreeSubmenuOpenRef.current = open;
     worktreeLoadSequenceRef.current += 1;
     const loadSequence = worktreeLoadSequenceRef.current;
@@ -957,7 +957,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         setWorktreeTargetsLoading(false);
         setWorktreeTargetsLoadFailed(true);
       });
-  }, [currentWorktreeMetadata, projectId, sessionDirectory, startSessionWorktreeMenuLoad]);
+  };
 
   const renderSessionMenuItems = ({
     Item,
