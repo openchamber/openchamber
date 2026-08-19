@@ -77,6 +77,8 @@ type OptimisticConfirmInput = OptimisticRemoveInput
 let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
 let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 let _optimisticConfirm: ((input: OptimisticConfirmInput) => void) | null = null
+const pendingProjectAutoCloseDirectories = new Set<string>()
+let pendingProjectAutoCloseEvaluation: Promise<void> | null = null
 
 function sessionMutationPatch(
   state: ReturnType<DirectoryStoreApi["getState"]>,
@@ -996,16 +998,10 @@ export async function deleteSession(sessionId: string, options?: DeleteSessionOp
   }
 }
 
-export async function closeProjectsWithoutActiveSessionsForDirectories(
-  directories: Iterable<string | null | undefined>,
-): Promise<void> {
-  if (!useSessionDisplayStore.getState().autoCloseEmptyProjects) return
-  const changedDirectories = [...directories].filter((directory): directory is string => Boolean(directory))
-  if (changedDirectories.length === 0) return
-
+async function evaluateProjectsWithoutActiveSessions(directories: string[]): Promise<void> {
   const projectsState = useProjectsStore.getState()
   const availableWorktrees = useSessionUIStore.getState().availableWorktreesByProject
-  if (!changedDirectories.some((directory) => resolveProjectForSessionDirectory(
+  if (!directories.some((directory) => resolveProjectForSessionDirectory(
     projectsState.projects,
     availableWorktrees,
     directory,
@@ -1019,11 +1015,44 @@ export async function closeProjectsWithoutActiveSessionsForDirectories(
     projectsState.projects,
     useSessionUIStore.getState().availableWorktreesByProject,
     globalSessions.activeSessions,
-    changedDirectories,
+    directories,
   )
   for (const project of emptyProjects) {
     projectsState.removeProject(project.id)
   }
+}
+
+export function closeProjectsWithoutActiveSessionsForDirectories(
+  directories: Iterable<string | null | undefined>,
+): Promise<void> {
+  if (!useSessionDisplayStore.getState().autoCloseEmptyProjects) return Promise.resolve()
+  const changedDirectories = [...directories].filter((directory): directory is string => Boolean(directory))
+  if (changedDirectories.length === 0) return Promise.resolve()
+
+  for (const directory of changedDirectories) {
+    pendingProjectAutoCloseDirectories.add(directory)
+  }
+
+  if (pendingProjectAutoCloseEvaluation) return pendingProjectAutoCloseEvaluation
+
+  pendingProjectAutoCloseEvaluation = (async () => {
+    // Let action and event-router callers from the same mutation join before
+    // the authoritative refresh begins.
+    await Promise.resolve()
+    const evaluatedDirectories = new Set<string>()
+    while (pendingProjectAutoCloseDirectories.size > 0) {
+      const directoriesToEvaluate = [...pendingProjectAutoCloseDirectories]
+        .filter((directory) => !evaluatedDirectories.has(directory))
+      pendingProjectAutoCloseDirectories.clear()
+      if (directoriesToEvaluate.length === 0) break
+      for (const directory of directoriesToEvaluate) evaluatedDirectories.add(directory)
+      await evaluateProjectsWithoutActiveSessions(directoriesToEvaluate)
+    }
+  })().finally(() => {
+    pendingProjectAutoCloseEvaluation = null
+  })
+
+  return pendingProjectAutoCloseEvaluation
 }
 
 /** Delete a session specifying which directory it lives in. Used by agent groups for cross-directory deletes. */

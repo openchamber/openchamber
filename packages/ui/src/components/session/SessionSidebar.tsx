@@ -7,7 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { cn } from '@/lib/utils';
+import { cn, formatDirectoryName } from '@/lib/utils';
 import { deriveProjectLabelFromPath } from '@/lib/projectResolution';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useChildStoreManager } from '@/sync/sync-context';
@@ -1305,7 +1305,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       setCollapsedGroups((prev) => new Set([...prev, ...archivedGroupKeys]));
     }
     hasInitializedArchivedCollapseRef.current = true;
-  }, [projectSections]);
+  }, [homeDirectory, projectSections]);
 
   const sessionSidebarMetaById = React.useMemo(() => {
     const meta = new Map<string, {
@@ -1322,6 +1322,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     projectSections.forEach((section) => {
       const projectLabel = formatProjectLabel(
         section.project.label?.trim()
+        || formatDirectoryName(section.project.normalizedPath, homeDirectory)
         || deriveProjectLabelFromPath(section.project.normalizedPath, true),
       );
       section.groups.forEach((group) => {
@@ -1356,7 +1357,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     });
 
     return meta;
-  }, [projectSections]);
+  }, [homeDirectory, projectSections]);
 
   const recentSessions = React.useMemo(() => {
     if (!shouldShowRecentSection || isVSCode) {

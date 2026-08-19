@@ -20,6 +20,9 @@ const globalUpsertedSessions: unknown[] = []
 const globalRemovedSessionIds: string[] = []
 const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
+let autoCloseEmptyProjects = false
+let autoCloseProjects: Array<{ id: string; path: string }> = []
+let globalSessionRefreshCalls = 0
 
 const mockScopedClient = {
   permission: {
@@ -177,15 +180,17 @@ mock.module("@/stores/useConfigStore", () => ({
 mock.module("@/stores/useProjectsStore", () => ({
   useProjectsStore: {
     getState: () => ({
-      projects: [],
-      removeProject: () => undefined,
+      projects: autoCloseProjects,
+      removeProject: (id: string) => {
+        autoCloseProjects = autoCloseProjects.filter((project) => project.id !== id)
+      },
     }),
   },
 }))
 
 mock.module("@/stores/useSessionDisplayStore", () => ({
   useSessionDisplayStore: {
-    getState: () => ({ autoCloseEmptyProjects: false }),
+    getState: () => ({ autoCloseEmptyProjects }),
   },
 }))
 
@@ -198,6 +203,7 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-b") return "/other/project"
         return null
       },
+      availableWorktreesByProject: new Map(),
       currentSessionId: null,
       setCurrentSession: () => {},
       setWorktreeMetadata: () => {},
@@ -230,7 +236,10 @@ mock.module("./input-store", () => ({
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
   resolveGlobalSessionDirectory: (session: SessionWithDirectory) => session.directory ?? session.project?.worktree ?? null,
-  refreshGlobalSessionsAfterPending: async () => ({ activeSessions: [], archivedSessions: [] }),
+  refreshGlobalSessionsAfterPending: async () => {
+    globalSessionRefreshCalls += 1
+    return { activeSessions: [], archivedSessions: [] }
+  },
   mergeSessionDirectoryMetadata: (incoming: Session, existing?: SessionWithDirectory | null): SessionWithDirectory => {
     if (!existing) return incoming as SessionWithDirectory
     const next = { ...(incoming as SessionWithDirectory) }
@@ -245,6 +254,8 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
     getState: () => ({
       activeSessions: [],
       archivedSessions: [],
+      hasLoaded: true,
+      status: "ready",
       upsertSession: (session: unknown) => {
         globalUpsertedSessions.push(session)
       },
@@ -634,6 +645,26 @@ describe("confirmed session removal", () => {
 
     expect(result).toEqual({ archivedIds: ["session-a", "session-b"], failedIds: [] })
     expect(source.getState().session).toEqual([])
+  })
+})
+
+describe("empty-project auto-close", () => {
+  beforeEach(() => {
+    autoCloseEmptyProjects = true
+    autoCloseProjects = [{ id: "project-a", path: "/test/project" }]
+    globalSessionRefreshCalls = 0
+  })
+
+  test("coalesces concurrent evaluations for the same directory", async () => {
+    const { closeProjectsWithoutActiveSessionsForDirectories } = await import("./session-actions")
+
+    const first = closeProjectsWithoutActiveSessionsForDirectories(["/test/project"])
+    const second = closeProjectsWithoutActiveSessionsForDirectories(["/test/project"])
+
+    await Promise.all([first, second])
+
+    expect(globalSessionRefreshCalls).toBe(1)
+    autoCloseEmptyProjects = false
   })
 })
 
