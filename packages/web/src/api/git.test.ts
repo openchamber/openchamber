@@ -18,5 +18,8 @@ describe('createWebGitAPI', () => {
     expect(typeof api.stageGitHunk).toBe('function');
     expect(typeof api.unstageGitHunk).toBe('function');
     expect(typeof api.revertGitHunk).toBe('function');
+    expect(typeof api.getGitHistoryRefs).toBe('function');
+    expect(typeof api.getGitHistory).toBe('function');
+    expect(typeof api.getGitHistoryMergeBase).toBe('function');
   });
 });

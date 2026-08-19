@@ -27,6 +27,11 @@ import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { getWorkingTreeDiffDestination } from '@/lib/getWorkingTreeDiffDestination';
+import { useI18n } from '@/lib/i18n';
+import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/icon/Icon';
 
 import { ChatView } from '@/components/views/ChatView';
 
@@ -44,9 +49,12 @@ const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/Sett
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
 
 export const MainLayout: React.FC = () => {
+    const { t } = useI18n();
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const activeSurface = useUIStore((state) => state.activeSurface);
+    const gitReviewLayout = useUIStore((state) => state.gitReviewLayout);
     const setIsMobile = useUIStore((state) => state.setIsMobile);
+    const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
     const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
     const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
@@ -91,6 +99,14 @@ export const MainLayout: React.FC = () => {
         };
     }, []);
     const { isMobile } = useDeviceInfo();
+    const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+    const allowDesktopMainDiff = React.useMemo(() => {
+        return getWorkingTreeDiffDestination({
+            reviewLayout: gitReviewLayout,
+            isMobile,
+            isVSCode,
+        }) === 'main';
+    }, [gitReviewLayout, isMobile, isVSCode]);
     const mobilePanelsResetRef = React.useRef(false);
 
     // Mobile drawer state
@@ -263,7 +279,7 @@ export const MainLayout: React.FC = () => {
         // Desktop surfaces live in the context panel; the only full-view
         // overlays left there are the terminal (promoted by project actions)
         // and the diagram viewer. Mobile keeps the full tab set.
-        if (!isMobile && activeSurface !== 'terminal' && activeSurface !== 'diagram') {
+        if (!isMobile && activeSurface !== 'terminal' && activeSurface !== 'diagram' && !(allowDesktopMainDiff && activeSurface === 'diff')) {
             return null;
         }
         switch (activeSurface) {
@@ -272,6 +288,35 @@ export const MainLayout: React.FC = () => {
             case 'git':
                 return <React.Suspense fallback={null}><GitView isActive={!mobileRightSidebarOpen} /></React.Suspense>;
             case 'diff':
+                if (!isMobile && allowDesktopMainDiff) {
+                    return (
+                        <div id="main-diff-review-surface" className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
+                            <div className="flex items-center border-b border-border px-3 py-2">
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="gap-1.5"
+                                    onClick={() => setActiveMainTab('chat')}
+                                    aria-label={t('diffView.actions.backToChat')}
+                                >
+                                    <Icon name="arrow-left-s" className="size-4" />
+                                    <span>{t('diffView.actions.backToChat')}</span>
+                                </Button>
+                            </div>
+                            <div className="min-h-0 flex-1">
+                                <React.Suspense fallback={null}>
+                                    <DiffView
+                                        hideStackedFileSidebar
+                                        stackedDefaultCollapsedAll
+                                        pinSelectedFileHeaderToTopOnNavigate
+                                        flushContent
+                                    />
+                                </React.Suspense>
+                            </div>
+                        </div>
+                    );
+                }
                 return <React.Suspense fallback={null}><DiffView /></React.Suspense>;
             case 'terminal':
                 return <TerminalView />;
@@ -284,7 +329,7 @@ export const MainLayout: React.FC = () => {
             default:
                 return null;
         }
-    }, [activeSurface, isMobile, mobileRightSidebarOpen]);
+    }, [activeSurface, allowDesktopMainDiff, isMobile, mobileRightSidebarOpen, setActiveMainTab, t]);
 
     const isChatActive = activeSurface === 'chat';
 

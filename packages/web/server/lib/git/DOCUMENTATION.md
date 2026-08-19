@@ -70,6 +70,7 @@ bootstrap, tracking is left unset rather than writing `branch.*.remote` /
 
 ### Log Operations
 - `getLog(directory, options)`: Get commit history with stats (supports maxCount, from, to, file filters).
+- `getGitHistory(directory, options)`: Graph history pages. Explicit requests require at least one validated ref and remain capped at 32 refs; `{ all: true }` is the only supported all-refs selector and maps to an internally authored `--all` argument instead of enumerating refs.
 - `getCommitFiles(directory, commitHash)`: Get file changes for a specific commit.
 - `getCommitFileDiff(directory, hash, filePath, isBinary)`: Get before/after content for a specific file in a commit. Returns `{ original, modified, isBinary }`. Runs `git show <hash>^:<path>` and `git show <hash>:<path>` in parallel; returns empty strings on failure (added/deleted/root-commit edge cases).
 

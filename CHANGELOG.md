@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - **Skills catalog:** browse curated GitHub skill collections in a card-based catalog with cross-source search, skill counts, stars, recent updates, and links back to each skill's repository.
 - **Diff:** the context-panel diff can now show every change on the current branch against its base branch. OpenChamber detects the base when Git knows it, or lets you choose one once when it does not.
 - **Dictation:** speech is now transcribed after you stop recording. The composer shows a live waveform and timer, and long recordings split at pauses instead of cutting words.
+- **Git review:** an optional Combined Git + Changes layout keeps Git visible beside changed-file diffs and adds a collapsible history graph with branch and tag filters, incoming and outgoing markers, and paged history (thanks to @mattv8).
 - Chat: file paths in messages now open from the session's project, even if you last browsed files in another project (thanks to @tomzx).
 - Diff: creating an inline comment now opens the chat and focuses the composer for your follow-up.
 - Providers: expanded support for custom providers.

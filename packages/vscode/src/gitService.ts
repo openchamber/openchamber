@@ -2988,6 +2988,449 @@ export interface GitLogEntry {
   parents: string[];
 }
 
+type GitHistoryRefKind = 'head' | 'local' | 'remote' | 'tag';
+
+interface GitHistoryRef {
+  id: string;
+  name: string;
+  revision: string | null;
+  kind: GitHistoryRefKind;
+  category: 'branches' | 'remote-branches' | 'tags';
+}
+
+interface GitHistoryRefsResponse {
+  refs: GitHistoryRef[];
+  current: GitHistoryRef | null;
+  upstream: GitHistoryRef | null;
+  base: GitHistoryRef | null;
+  snapshot: string;
+}
+
+interface GitHistoryItem {
+  id: string;
+  parentIds: string[];
+  subject: string;
+  message: string;
+  author: string;
+  authorEmail: string;
+  timestamp: string;
+  statistics: { files: number; insertions: number; deletions: number };
+  references: GitHistoryRef[];
+}
+
+type GitHistoryStatistics = GitHistoryItem['statistics'];
+
+interface GitHistoryPage {
+  items: GitHistoryItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  refsSnapshot: string;
+}
+
+interface GitHistoryOptions {
+  refs?: string[];
+  all?: boolean;
+  cursor?: string;
+  limit?: number;
+}
+
+interface GitHistoryMergeBaseResponse {
+  mergeBase: string | null;
+}
+
+type GitHistoryCursor = {
+  offset: number;
+  snapshot: string;
+};
+
+type GitHistoryError = Error & {
+  statusCode: number;
+  code: string;
+};
+
+const GIT_HISTORY_DEFAULT_LIMIT = 50;
+const GIT_HISTORY_MAX_LIMIT = 100;
+const GIT_HISTORY_MAX_REFS = 32;
+
+const createGitHistoryError = (message: string, statusCode = 400, code = 'invalid_git_history_request'): GitHistoryError => Object.assign(
+  new Error(message),
+  { statusCode, code },
+);
+
+const isGitHistoryCursorOffset = (value: number | undefined): value is number => value != null && Number.isInteger(value) && value >= 0;
+
+const isGitHistoryCursorSnapshot = (value: string | undefined): value is string => value != null && Object.prototype.toString.call(value) === '[object String]';
+
+const encodeGitHistoryCursor = (payload: GitHistoryCursor): string => Buffer.from(JSON.stringify(payload)).toString('base64url');
+
+const decodeGitHistoryCursor = (cursor: string): GitHistoryCursor => {
+  try {
+    const parsed: Partial<GitHistoryCursor> = Object.fromEntries(Object.entries(JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'))));
+    const { offset, snapshot } = parsed;
+    if (!isGitHistoryCursorOffset(offset) || !isGitHistoryCursorSnapshot(snapshot)) {
+      throw new Error('invalid');
+    }
+    return { offset, snapshot };
+  } catch {
+    throw createGitHistoryError('stale cursor', 409, 'stale_git_history_cursor');
+  }
+};
+
+const normalizeGitHistoryLimit = (value: number | undefined): number => {
+  if (value == null) {
+    return GIT_HISTORY_DEFAULT_LIMIT;
+  }
+  if (!Number.isInteger(value) || value < 1 || value > GIT_HISTORY_MAX_LIMIT) {
+    throw createGitHistoryError(`limit must be between 1 and ${GIT_HISTORY_MAX_LIMIT}`);
+  }
+  return value;
+};
+
+const mapGitHistoryRef = (id: string, name: string, revision: string | null): GitHistoryRef => {
+  if (id.startsWith('refs/heads/')) {
+    return { id, name, revision, kind: 'local', category: 'branches' };
+  }
+  if (id.startsWith('refs/remotes/')) {
+    return { id, name, revision, kind: 'remote', category: 'remote-branches' };
+  }
+  return { id, name, revision, kind: 'tag', category: 'tags' };
+};
+
+const buildGitHistorySnapshot = (refs: GitHistoryRef[], current: GitHistoryRef | null): string => [
+  ...refs,
+  ...(current ? [current] : []),
+]
+  .map((ref) => `${ref.id}:${ref.revision || ''}`)
+  .sort((left, right) => left.localeCompare(right))
+  .join('|');
+
+const buildGitHistoryBaseRef = ({
+  refsById,
+  refs,
+  headBranch,
+  upstream,
+  defaultBranches,
+}: {
+  refsById: Map<string, GitHistoryRef>;
+  refs: GitHistoryRef[];
+  headBranch: string;
+  upstream: GitHistoryRef | null;
+  defaultBranches: Record<string, string>;
+}): GitHistoryRef | null => {
+  if (!upstream && Object.keys(defaultBranches).length === 0) {
+    return null;
+  }
+
+  const remoteName = upstream?.name.includes('/')
+    ? upstream.name.split('/')[0]
+    : 'origin';
+  const candidates = [defaultBranches[remoteName], defaultBranches.origin, 'main', 'master', 'develop']
+    .map((candidate) => String(candidate || '').trim())
+    .filter(Boolean)
+    .filter((candidate) => candidate !== headBranch);
+
+  for (const candidate of candidates) {
+    const localRef = refsById.get(`refs/heads/${candidate}`);
+    if (localRef) {
+      return localRef;
+    }
+    const remoteRef = refs.find((ref) => ref.kind === 'remote' && ref.name.endsWith(`/${candidate}`));
+    if (remoteRef) {
+      return remoteRef;
+    }
+  }
+
+  return null;
+};
+
+const parseGitHistoryRefs = async (directory: string): Promise<GitHistoryRef[]> => {
+  const result = await execGit([
+    'for-each-ref',
+    '--format=%(refname)\t%(refname:short)\t%(objectname)',
+    'refs/heads',
+    'refs/remotes',
+    'refs/tags',
+  ], directory);
+
+  if (result.exitCode !== 0) {
+    throw createGitHistoryError(result.stderr.trim() || result.stdout.trim() || 'Failed to get git history refs', 500, 'git_history_refs_failed');
+  }
+
+  return String(result.stdout || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [id, name, revision] = line.split('\t');
+      return { id, name, revision: revision || null };
+    })
+    .filter((ref) => ref.id && ref.name && !ref.id.endsWith('/HEAD'))
+    .map((ref) => mapGitHistoryRef(ref.id, ref.name, ref.revision));
+};
+
+const parseGitHistoryStatistics = (lines: string[]): GitHistoryStatistics => {
+  let files = 0;
+  let insertions = 0;
+  let deletions = 0;
+
+  for (const line of lines) {
+    const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
+    const insertionsMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+    const deletionsMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+    if (filesMatch) files = Number.parseInt(filesMatch[1], 10);
+    if (insertionsMatch) insertions = Number.parseInt(insertionsMatch[1], 10);
+    if (deletionsMatch) deletions = Number.parseInt(deletionsMatch[1], 10);
+  }
+
+  return { files, insertions, deletions };
+};
+
+const buildGitHistoryDecorations = (
+  value: string,
+  refsById: Map<string, GitHistoryRef>,
+  current: GitHistoryRef | null,
+  itemId: string,
+): GitHistoryRef[] => {
+  const references: GitHistoryRef[] = [];
+  const seen = new Set<string>();
+  const pushRef = (ref: GitHistoryRef | undefined | null) => {
+    if (!ref) {
+      return;
+    }
+    const key = `${ref.id}:${ref.kind}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    references.push(ref);
+  };
+  const pushHead = () => pushRef({
+    id: 'HEAD',
+    name: current?.name || 'HEAD',
+    revision: current?.revision || itemId,
+    kind: 'head',
+    category: 'branches',
+  });
+
+  for (const token of String(value || '').split(',').map((entry) => entry.trim()).filter(Boolean)) {
+    if (token === 'HEAD') {
+      pushHead();
+      continue;
+    }
+    if (token.startsWith('HEAD -> ')) {
+      pushHead();
+      const name = token.slice('HEAD -> '.length).trim();
+      pushRef(refsById.get(`refs/heads/${name}`) || refsById.get(name));
+      continue;
+    }
+    if (token.startsWith('tag: ')) {
+      const name = token.slice('tag: '.length).trim();
+      pushRef(refsById.get(`refs/tags/${name}`) || refsById.get(name));
+      continue;
+    }
+    pushRef(
+      refsById.get(token.startsWith('refs/') ? token : `refs/remotes/${token}`)
+      || refsById.get(`refs/heads/${token}`)
+      || refsById.get(`refs/tags/${token}`),
+    );
+  }
+
+  return references;
+};
+
+const getRemoteDefaultBranches = async (directory: string): Promise<Record<string, string>> => {
+  let defaults: Record<string, string> = {};
+
+  const refsResult = await execGit(['for-each-ref', '--format=%(refname) %(symref)', 'refs/remotes'], directory);
+  if (refsResult.exitCode === 0) {
+    defaults = Object.fromEntries(
+      String(refsResult.stdout || '').trim().split('\n').flatMap((line) => {
+        const [ref, symbolicRef] = line.split(' ');
+        const match = ref?.match(/^refs\/remotes\/([^/]+)\/HEAD$/);
+        const prefix = match ? `refs/remotes/${match[1]}/` : '';
+        const symbolicRefName = symbolicRef ?? '';
+        return match && symbolicRefName.startsWith(prefix)
+          ? [[match[1], symbolicRefName.slice(prefix.length)]]
+          : [];
+      })
+    );
+  }
+
+  const remotes = await getRemotes(directory).catch(() => []);
+  const missing = remotes.filter((remote) => remote?.name && !defaults[remote.name]);
+  for (const remote of missing) {
+    const output = await execGit(['ls-remote', '--symref', remote.name, 'HEAD'], directory);
+    if (output.exitCode !== 0) {
+      continue;
+    }
+    const match = String(output.stdout || '').match(/^ref:\s+refs\/heads\/(.+?)\s+HEAD$/m);
+    if (match) {
+      defaults[remote.name] = match[1];
+    }
+  }
+
+  return defaults;
+};
+
+const resolveGitHistoryRequest = async (directory: string): Promise<GitHistoryRefsResponse & { refsById: Map<string, GitHistoryRef> }> => {
+  const refs = await parseGitHistoryRefs(directory);
+  const refsById = new Map(refs.map((ref) => [ref.id, ref]));
+  const defaultBranches = await getRemoteDefaultBranches(directory);
+
+  const headRefResult = await execGit(['symbolic-ref', '-q', 'HEAD'], directory);
+  const headRef = headRefResult.exitCode === 0 ? String(headRefResult.stdout || '').trim() : '';
+  const headRevisionResult = await execGit(['rev-parse', 'HEAD'], directory);
+  const headRevision = headRevisionResult.exitCode === 0 ? String(headRevisionResult.stdout || '').trim() : '';
+  const headBranch = headRef.startsWith('refs/heads/') ? headRef.slice('refs/heads/'.length) : '';
+  const current: GitHistoryRef | null = headRevision ? {
+    id: 'HEAD',
+    name: headBranch || 'HEAD',
+    revision: headRevision,
+    kind: 'head',
+    category: 'branches',
+  } : null;
+
+  const upstreamResult = await execGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], directory);
+  const upstreamName = upstreamResult.exitCode === 0 ? String(upstreamResult.stdout || '').trim() : '';
+  const upstream = upstreamName
+    ? refsById.get(upstreamName.startsWith('refs/') ? upstreamName : `refs/remotes/${upstreamName}`) || null
+    : null;
+  const base = buildGitHistoryBaseRef({ refsById, refs, headBranch, upstream, defaultBranches });
+
+  return {
+    refs,
+    refsById,
+    current,
+    upstream,
+    base,
+    snapshot: buildGitHistorySnapshot(refs, current),
+  };
+};
+
+const validateGitHistoryRequestedRefs = (refsResponse: GitHistoryRefsResponse, requestedRefs: string[]): string[] => {
+  if (!Array.isArray(requestedRefs) || requestedRefs.length === 0) {
+    throw createGitHistoryError('at least one ref is required');
+  }
+  if (requestedRefs.length > GIT_HISTORY_MAX_REFS) {
+    throw createGitHistoryError(`refs must contain at most ${GIT_HISTORY_MAX_REFS} values`);
+  }
+
+  const allowed = new Set(refsResponse.refs.map((ref) => ref.id));
+  if (refsResponse.current) {
+    allowed.add('HEAD');
+  }
+
+  return Array.from(new Set(requestedRefs.map((ref) => String(ref || '').trim()))).map((ref) => {
+    if (!ref) {
+      throw createGitHistoryError('refs must not be empty');
+    }
+    if (ref.startsWith('-') || ref.includes('\0')) {
+      throw createGitHistoryError('refs must not contain option-like values');
+    }
+    if (!allowed.has(ref)) {
+      throw createGitHistoryError(`Unknown ref: ${ref}`);
+    }
+    return ref;
+  });
+};
+
+const validateGitHistorySelection = (
+  refsResponse: GitHistoryRefsResponse,
+  options: GitHistoryOptions,
+): { all: true; refs: [] } | { all: false; refs: string[] } => {
+  const refs = Array.isArray(options.refs) ? options.refs : [];
+  const all = options.all === true;
+
+  if (all && refs.length > 0) {
+    throw createGitHistoryError('all cannot be combined with explicit refs');
+  }
+  if (all) {
+    return { all: true, refs: [] };
+  }
+
+  return {
+    all: false,
+    refs: validateGitHistoryRequestedRefs(refsResponse, refs),
+  };
+};
+
+export async function getGitHistoryRefs(directory: string): Promise<GitHistoryRefsResponse> {
+  const refsResponse = await resolveGitHistoryRequest(directory);
+  return {
+    refs: refsResponse.refs,
+    current: refsResponse.current,
+    upstream: refsResponse.upstream,
+    base: refsResponse.base,
+    snapshot: refsResponse.snapshot,
+  };
+}
+
+export async function getGitHistory(directory: string, options: GitHistoryOptions): Promise<GitHistoryPage> {
+  const refsResponse = await resolveGitHistoryRequest(directory);
+  const selection = validateGitHistorySelection(refsResponse, options);
+  const limit = normalizeGitHistoryLimit(options.limit);
+  const cursor = options.cursor ? decodeGitHistoryCursor(options.cursor) : { offset: 0, snapshot: refsResponse.snapshot };
+  if (cursor.snapshot !== refsResponse.snapshot) {
+    throw createGitHistoryError('stale cursor', 409, 'stale_git_history_cursor');
+  }
+
+  const result = await execGit([
+    'log',
+    '--topo-order',
+    '--decorate=full',
+    '--date=iso-strict',
+    `--skip=${cursor.offset}`,
+    `--max-count=${limit + 1}`,
+    '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
+    '--shortstat',
+    ...(selection.all ? ['--all'] : selection.refs),
+  ], directory);
+
+  if (result.exitCode !== 0) {
+    throw createGitHistoryError(result.stderr.trim() || result.stdout.trim() || 'Failed to get git history', 500, 'git_history_failed');
+  }
+
+  const entries = String(result.stdout || '')
+    .split('\x1e')
+    .map((record) => record.replace(/^\n+/, '').trimEnd())
+    .filter(Boolean)
+    .map((record) => {
+      const lines = record.split(/\r?\n/).filter(Boolean);
+      const [id, parentsRaw = '', author = '', authorEmail = '', timestamp = '', subject = '', decorations = ''] = (lines.shift() || '').split('\x1f');
+      return {
+        id,
+        parentIds: parentsRaw ? parentsRaw.split(' ').filter(Boolean) : [],
+        subject,
+        message: subject,
+        author,
+        authorEmail,
+        timestamp,
+        statistics: parseGitHistoryStatistics(lines),
+        references: buildGitHistoryDecorations(decorations, refsResponse.refsById, refsResponse.current, id),
+      };
+    });
+
+  const hasMore = entries.length > limit;
+  const items = hasMore ? entries.slice(0, limit) : entries;
+  return {
+    items,
+    nextCursor: hasMore ? encodeGitHistoryCursor({ offset: cursor.offset + limit, snapshot: refsResponse.snapshot }) : null,
+    hasMore,
+    refsSnapshot: refsResponse.snapshot,
+  };
+}
+
+export async function getGitHistoryMergeBase(directory: string, options: { refs: string[] }): Promise<GitHistoryMergeBaseResponse> {
+  const refsResponse = await resolveGitHistoryRequest(directory);
+  const refs = validateGitHistoryRequestedRefs(refsResponse, options.refs);
+  if (refs.length < 2) {
+    return { mergeBase: null };
+  }
+
+  const result = await execGit(['merge-base', ...refs], directory);
+  return { mergeBase: result.exitCode === 0 ? String(result.stdout || '').trim() || null : null };
+}
+
 /**
  * Resolve a log base ref using local-first semantics (mirrors web service.js).
  *

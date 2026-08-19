@@ -1,0 +1,61 @@
+import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
+
+describe('VS Code webview git API', () => {
+  test('exposes git history methods and transports the all selector', async () => {
+    const originalWindow = globalThis.window;
+    const originalAcquire = (globalThis as typeof globalThis & { acquireVsCodeApi?: unknown }).acquireVsCodeApi;
+    const messages: Array<{ id: string; type: string; payload?: Record<string, unknown> }> = [];
+
+    try {
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: new EventTarget(),
+      });
+      Object.defineProperty(globalThis, 'acquireVsCodeApi', {
+        configurable: true,
+        value: () => ({
+          postMessage: (message: { id: string; type: string; payload?: Record<string, unknown> }) => messages.push(message),
+          getState: () => undefined,
+          setState: () => undefined,
+        }),
+      });
+
+      const { createVSCodeGitAPI } = await import(`./git?history-api-${Date.now()}`);
+      const api = createVSCodeGitAPI();
+      assert.equal(typeof api.getGitHistoryRefs, 'function');
+      assert.equal(typeof api.getGitHistory, 'function');
+      assert.equal(typeof api.getGitHistoryMergeBase, 'function');
+
+      const refsPromise = api.getGitHistoryRefs?.('/repo');
+      const refsRequest = messages.at(-1);
+      assert.equal(refsRequest?.type, 'api:git/history/refs');
+      assert.deepEqual(refsRequest?.payload, { directory: '/repo' });
+      globalThis.window.dispatchEvent(new MessageEvent('message', {
+        data: { id: refsRequest?.id, type: refsRequest?.type, success: true, data: { refs: [], current: null, upstream: null, base: null, snapshot: 'snap' } },
+      }));
+      await refsPromise;
+
+      const historyPromise = api.getGitHistory?.('/repo', { all: true, limit: 25 });
+      const historyRequest = messages.at(-1);
+      assert.equal(historyRequest?.type, 'api:git/history');
+      assert.deepEqual(historyRequest?.payload, { directory: '/repo', all: true, limit: 25 });
+      globalThis.window.dispatchEvent(new MessageEvent('message', {
+        data: { id: historyRequest?.id, type: historyRequest?.type, success: true, data: { items: [], nextCursor: null, hasMore: false, refsSnapshot: 'snap' } },
+      }));
+      await historyPromise;
+
+      const mergeBasePromise = api.getGitHistoryMergeBase?.('/repo', { refs: ['HEAD', 'refs/heads/main'] });
+      const mergeBaseRequest = messages.at(-1);
+      assert.equal(mergeBaseRequest?.type, 'api:git/history/merge-base');
+      assert.deepEqual(mergeBaseRequest?.payload, { directory: '/repo', refs: ['HEAD', 'refs/heads/main'] });
+      globalThis.window.dispatchEvent(new MessageEvent('message', {
+        data: { id: mergeBaseRequest?.id, type: mergeBaseRequest?.type, success: true, data: { mergeBase: 'abc1234' } },
+      }));
+      await mergeBasePromise;
+    } finally {
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
+      Object.defineProperty(globalThis, 'acquireVsCodeApi', { configurable: true, value: originalAcquire });
+    }
+  });
+});

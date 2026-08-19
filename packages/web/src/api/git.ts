@@ -8,6 +8,9 @@ import type {
 export const createWebGitAPI = (): GitAPI => ({
   checkIsGitRepository: gitApiHttp.checkIsGitRepository,
   getGitStatus: gitApiHttp.getGitStatus,
+  getGitHistoryRefs: gitApiHttp.getGitHistoryRefs,
+  getGitHistory: gitApiHttp.getGitHistory,
+  getGitHistoryMergeBase: gitApiHttp.getGitHistoryMergeBase,
   getGitDiff: gitApiHttp.getGitDiff,
   getGitFileDiff: gitApiHttp.getGitFileDiff,
   getGitRangeDiff: gitApiHttp.getGitRangeDiff,

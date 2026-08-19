@@ -7,6 +7,8 @@ type BridgeMessageInput = {
   payload?: unknown;
 };
 
+type BridgePayloadRecord = Record<string, unknown>;
+
 const requireDirectory = (id: string, type: string, directory?: string): BridgeResponse | null => {
   if (!directory) {
     return { id, type, success: false, error: 'Directory is required' };
@@ -18,8 +20,48 @@ const isValidCommitHash = (hash: string | undefined): hash is string => (
   typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
 );
 
+const asRecord = (payload: unknown): BridgePayloadRecord => (
+  payload && typeof payload === 'object' ? payload as BridgePayloadRecord : {}
+);
+
+const readString = (payload: BridgePayloadRecord, key: string): string | undefined => (
+  typeof payload[key] === 'string' ? payload[key] as string : undefined
+);
+
+const readStringArray = (payload: BridgePayloadRecord, key: string): string[] | null => {
+  const value = payload[key];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    return null;
+  }
+  return value;
+};
+
+const readOptionalStringArray = (payload: BridgePayloadRecord, key: string): string[] | null | undefined => {
+  if (!(key in payload) || payload[key] == null) {
+    return undefined;
+  }
+  return readStringArray(payload, key);
+};
+
+const readOptionalBoolean = (payload: BridgePayloadRecord, key: string): boolean | null | undefined => {
+  if (!(key in payload) || payload[key] == null) {
+    return undefined;
+  }
+  const value = payload[key];
+  return typeof value === 'boolean' ? value : null;
+};
+
+const readOptionalNumber = (payload: BridgePayloadRecord, key: string): number | null | undefined => {
+  const value = payload[key];
+  if (value == null) {
+    return undefined;
+  }
+  return typeof value === 'number' ? value : null;
+};
+
 export async function handleStandardGitBridgeMessage(message: BridgeMessageInput): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
+  const payloadRecord = asRecord(payload);
 
   switch (type) {
     case 'api:git/check': {
@@ -44,6 +86,58 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (dirError) return dirError;
       const status = await gitService.getGitStatus(directory!, mode === 'light' ? { mode } : undefined);
       return { id, type, success: true, data: status };
+    }
+
+    case 'api:git/history/refs': {
+      const directory = readString(payloadRecord, 'directory');
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      const refs = await gitService.getGitHistoryRefs(directory!);
+      return { id, type, success: true, data: refs };
+    }
+
+    case 'api:git/history': {
+      const directory = readString(payloadRecord, 'directory');
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+
+      const refs = readOptionalStringArray(payloadRecord, 'refs');
+      if (refs === null) {
+        return { id, type, success: false, error: 'refs must be an array of strings' };
+      }
+      const all = readOptionalBoolean(payloadRecord, 'all');
+      if (all === null) {
+        return { id, type, success: false, error: 'all must be a boolean' };
+      }
+      if (all === true && refs && refs.length > 0) {
+        return { id, type, success: false, error: 'all cannot be combined with explicit refs' };
+      }
+      if (all !== true && !refs) {
+        return { id, type, success: false, error: 'refs must be an array of strings' };
+      }
+
+      const cursor = readString(payloadRecord, 'cursor');
+      const limit = readOptionalNumber(payloadRecord, 'limit');
+      if (limit === null) {
+        return { id, type, success: false, error: 'limit must be a number' };
+      }
+
+      const history = await gitService.getGitHistory(directory!, all === true ? { all: true, cursor, limit } : { refs, cursor, limit });
+      return { id, type, success: true, data: history };
+    }
+
+    case 'api:git/history/merge-base': {
+      const directory = readString(payloadRecord, 'directory');
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+
+      const refs = readStringArray(payloadRecord, 'refs');
+      if (!refs) {
+        return { id, type, success: false, error: 'refs must be an array of strings' };
+      }
+
+      const mergeBase = await gitService.getGitHistoryMergeBase(directory!, { refs });
+      return { id, type, success: true, data: mergeBase };
     }
 
     case 'api:git/branches': {

@@ -14,6 +14,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `bridge-git-runtime.ts`
   - Standard Git message handlers.
+  - Git history bridge payloads accept either validated explicit refs or the canonical `{ all: true }` selector; the bridge stays thin and the service still owns ref validation plus `--all` construction.
 
 - `bridge-git-special-runtime.ts`
   - Specialized Git flows (`pr-description`, `conflict-details`) and generation helpers.

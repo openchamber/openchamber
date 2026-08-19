@@ -9,17 +9,17 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
-import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
+import type { GitLogEntry, CommitFileEntry, GitHistoryItem } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { getCommitFileDiff, type CommitFileDiffResponse } from '@/lib/gitApi';
 import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
-import type { LanedCommit } from './gitGraph';
 import { GitGraphSegment } from './GitGraphSegment';
 import * as git from '@/lib/gitApi';
 import { toast } from '@/components/ui/toast';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import type { GitHistoryGraphRef, GitHistoryItemViewModel } from './gitGraph';
 
 const HISTORY_DIFF_REQUEST_TIMEOUT_MS = 15000;
 const HISTORY_DIFF_LARGE_CHANGED_LINES = 500;
@@ -28,8 +28,31 @@ const HISTORY_DIFF_CACHE_MAX_TOTAL_SIZE_BYTES = 8 * 1024 * 1024;
 
 type HistoryDiffCacheValue = CommitFileDiffResponse | 'loading' | 'error';
 
+const PENDING_ACTION_CONFIRM_LABELS = {
+  checkout: 'gitView.history.actions.checkoutConfirm',
+  cherryPick: 'gitView.history.actions.cherryPickConfirm',
+  revert: 'gitView.history.actions.revertConfirm',
+  merge: 'gitView.history.actions.mergeConfirm',
+  rebase: 'gitView.history.actions.rebaseConfirm',
+  resetSoft: 'gitView.history.actions.resetSoftConfirm',
+  resetMixed: 'gitView.history.actions.resetMixedConfirm',
+  resetHard: 'gitView.history.actions.resetHardConfirm',
+} as const;
+
+const RESET_PENDING_ACTIONS = {
+  soft: 'resetSoft',
+  mixed: 'resetMixed',
+  hard: 'resetHard',
+} as const;
+
+const RESET_LABELS = {
+  soft: 'gitView.history.actions.resetSoft',
+  mixed: 'gitView.history.actions.resetMixed',
+  hard: 'gitView.history.actions.resetHard',
+} as const;
+
 const getHistoryDiffCacheSize = (value: HistoryDiffCacheValue): number => {
-  if (typeof value === 'string') {
+  if (value === 'loading' || value === 'error') {
     return 0;
   }
   return (value.original?.length ?? 0) + (value.modified?.length ?? 0);
@@ -65,10 +88,10 @@ const trimHistoryDiffCache = (cache: Map<string, HistoryDiffCacheValue>): Map<st
 };
 
 interface HistoryCommitRowProps {
-  entry: GitLogEntry;
+  entry: GitLogEntry | GitHistoryItem;
   mode?: 'history' | 'graph';
-  laned?: LanedCommit;
-  totalLanes?: number;
+  viewModel?: GitHistoryItemViewModel;
+  totalColumns?: number;
   isExpanded: boolean;
   onToggle: () => void;
   files: CommitFileEntry[];
@@ -78,6 +101,13 @@ interface HistoryCommitRowProps {
   onConflict?: (result: { conflict: boolean; conflictFiles?: string[]; operation: 'cherry-pick' | 'revert' | 'merge' | 'rebase' }) => void;
   onActionSuccess?: () => void;
 }
+
+const isGitHistoryItemEntry = (entry: GitLogEntry | GitHistoryItem): entry is GitHistoryItem => 'subject' in entry;
+
+const getEntryHash = (entry: GitLogEntry | GitHistoryItem): string => (isGitHistoryItemEntry(entry) ? entry.id : entry.hash);
+const getEntryMessage = (entry: GitLogEntry | GitHistoryItem): string => (isGitHistoryItemEntry(entry) ? entry.subject : entry.message);
+const getEntryAuthorName = (entry: GitLogEntry | GitHistoryItem): string => (isGitHistoryItemEntry(entry) ? entry.author : entry.author_name);
+const getEntryDate = (entry: GitLogEntry | GitHistoryItem): string => (isGitHistoryItemEntry(entry) ? entry.timestamp : entry.date);
 
 function formatCommitDate(date: string, timeFormatPreference: TimeFormatPreference) {
   const value = new Date(date);
@@ -109,34 +139,23 @@ function getChangeTypeColor(changeType: string) {
   }
 }
 
-interface RefBadge {
-  label: string;
-  isHead: boolean;
-  isTag: boolean;
-}
+function getRefBadgeClasses(ref: GitHistoryGraphRef): string {
+  if (ref.color) {
+    return 'border-transparent text-[var(--primary-foreground)]';
+  }
 
-function parseRefBadges(refs: string): RefBadge[] {
-  if (!refs) return [];
-  return refs
-    .split(',')
-    .map((r) => r.trim())
-    .filter(Boolean)
-    .map((r) => {
-      const isHead = r.startsWith('HEAD ->');
-      const label = isHead ? r.replace('HEAD -> ', '') : r.replace('tag: ', '');
-      return {
-        label,
-        isHead,
-        isTag: r.startsWith('tag: '),
-      };
-    });
+  if (ref.kind === 'tag') {
+    return 'border-border/60 bg-muted/40 text-foreground';
+  }
+
+  return 'border-border/60 bg-background/80 text-foreground';
 }
 
 export const HistoryCommitRow = React.memo(({
   entry,
   mode = 'history',
-  laned,
-  totalLanes,
+  viewModel,
+  totalColumns,
   isExpanded,
   onToggle,
   files,
@@ -166,12 +185,12 @@ export const HistoryCommitRow = React.memo(({
   const handleCheckout = async () => {
     if (!directory) return;
     setActionLoading('checkout');
-    try {
-      await git.checkoutCommit(directory, entry.hash);
+      try {
+        await git.checkoutCommit(directory, getEntryHash(entry));
       toast.success(t('gitView.history.actions.detachedHead'));
       onActionSuccess?.();
     } catch (e: unknown) {
-      toast.error(String((e as Error).message));
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setActionLoading(null);
     }
@@ -181,12 +200,12 @@ export const HistoryCommitRow = React.memo(({
     if (!directory || !newBranchName.trim()) return;
     setActionLoading('createBranch');
     try {
-      await git.createBranch(directory, newBranchName.trim(), entry.hash);
+      await git.createBranch(directory, newBranchName.trim(), getEntryHash(entry));
       setShowCreateBranch(false);
       setNewBranchName('');
       onActionSuccess?.();
     } catch (e: unknown) {
-      toast.error(String((e as Error).message));
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setActionLoading(null);
     }
@@ -196,14 +215,14 @@ export const HistoryCommitRow = React.memo(({
     if (!directory) return;
     setActionLoading('cherryPick');
     try {
-      const result = await git.cherryPick(directory, entry.hash);
+      const result = await git.cherryPick(directory, getEntryHash(entry));
       if (result.conflict) {
         onConflict?.({ conflict: true, conflictFiles: result.conflictFiles, operation: 'cherry-pick' });
       } else {
         onActionSuccess?.();
       }
     } catch (e: unknown) {
-      toast.error(String((e as Error).message));
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setActionLoading(null);
     }
@@ -213,14 +232,14 @@ export const HistoryCommitRow = React.memo(({
     if (!directory) return;
     setActionLoading('revert');
     try {
-      const result = await git.revertCommit(directory, entry.hash);
+      const result = await git.revertCommit(directory, getEntryHash(entry));
       if (result.conflict) {
         onConflict?.({ conflict: true, conflictFiles: result.conflictFiles, operation: 'revert' });
       } else {
         onActionSuccess?.();
       }
     } catch (e: unknown) {
-      toast.error(String((e as Error).message));
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setActionLoading(null);
     }
@@ -230,10 +249,10 @@ export const HistoryCommitRow = React.memo(({
     if (!directory || actionLoading !== null) return;
     setActionLoading('reset');
     try {
-      await git.resetToCommit(directory, entry.hash, mode, force);
+      await git.resetToCommit(directory, getEntryHash(entry), mode, force);
       onActionSuccess?.();
     } catch (e: unknown) {
-      toast.error(String((e as Error).message));
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setActionLoading(null);
     }
@@ -260,14 +279,14 @@ export const HistoryCommitRow = React.memo(({
     if (!directory) return;
     setActionLoading('merge');
     try {
-      const result = await git.merge(directory, { branch: entry.hash });
+      const result = await git.merge(directory, { branch: getEntryHash(entry) });
       if (result.conflict) {
         onConflict?.({ conflict: true, conflictFiles: result.conflictFiles, operation: 'merge' });
       } else {
         onActionSuccess?.();
       }
     } catch (e: unknown) {
-      toast.error(String((e as Error).message));
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setActionLoading(null);
     }
@@ -277,14 +296,14 @@ export const HistoryCommitRow = React.memo(({
     if (!directory) return;
     setActionLoading('rebase');
     try {
-      const result = await git.rebase(directory, { onto: entry.hash });
+      const result = await git.rebase(directory, { onto: getEntryHash(entry) });
       if (result.conflict) {
         onConflict?.({ conflict: true, conflictFiles: result.conflictFiles, operation: 'rebase' });
       } else {
         onActionSuccess?.();
       }
     } catch (e: unknown) {
-      toast.error(String((e as Error).message));
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setActionLoading(null);
     }
@@ -299,7 +318,7 @@ export const HistoryCommitRow = React.memo(({
 
     setDiffCache(prev => trimHistoryDiffCache(new Map(prev).set(key, 'loading')));
     try {
-      const fetchPromise = getCommitFileDiff(directory, entry.hash, file.path, false);
+      const fetchPromise = getCommitFileDiff(directory, getEntryHash(entry), file.path, false);
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(`Timed out after ${HISTORY_DIFF_REQUEST_TIMEOUT_MS}ms`)), HISTORY_DIFF_REQUEST_TIMEOUT_MS);
       });
@@ -308,7 +327,7 @@ export const HistoryCommitRow = React.memo(({
     } catch {
       setDiffCache(prev => new Map(prev).set(key, 'error'));
     }
-  }, [directory, entry.hash]);
+  }, [directory, entry]);
 
   const toggleFileDiff = React.useCallback(async (file: CommitFileEntry) => {
     const key = file.path;
@@ -345,7 +364,7 @@ export const HistoryCommitRow = React.memo(({
   }, [diffCache, forceRenderLargePaths, loadFileDiff, openDiffPaths]);
 
   return (
-    <li>
+    <li data-history-commit-row={getEntryHash(entry)}>
       <button
         type="button"
         onClick={onToggle}
@@ -355,10 +374,10 @@ export const HistoryCommitRow = React.memo(({
             ? 'hover:bg-[var(--interactive-hover)]/40'
             : isExpanded ? 'bg-sidebar/90' : 'hover:bg-sidebar/40'
         )}
-      >
-        {isGraphMode && laned && totalLanes !== undefined ? (
+        >
+        {isGraphMode && viewModel ? (
           <div className="-my-2 shrink-0 self-stretch">
-            <GitGraphSegment laned={laned} totalLanes={totalLanes} isExpanded={isExpanded} />
+            <GitGraphSegment viewModel={viewModel} totalColumns={totalColumns} />
           </div>
         ) : (
           <div
@@ -370,20 +389,20 @@ export const HistoryCommitRow = React.memo(({
         <div className="min-w-0 flex-1">
           {/* Ref badges */}
           {isGraphMode ? (() => {
-            const badges = parseRefBadges(entry.refs);
+            const badges: GitHistoryGraphRef[] = viewModel?.historyItem.references ?? [];
             return badges.length > 0 ? (
               <div className="flex flex-wrap gap-1 mb-0.5">
                 {badges.map((badge) => (
-                  <span key={badge.label}
+                  <span
+                    key={badge.id}
                     className={cn(
-                      'inline-flex items-center px-1.5 py-0 typography-micro rounded font-medium',
-                      badge.isHead
-                        ? 'bg-[var(--chart-1)] text-[var(--primary-foreground)]'
-                        : badge.isTag
-                        ? 'bg-[var(--chart-5)] text-[var(--primary-foreground)]'
-                        : 'bg-[var(--interactive-hover)] text-[var(--foreground)]'
-                    )}>
-                    {badge.label}
+                      'inline-flex items-center gap-1 rounded-full border px-1.5 py-0 typography-micro font-medium',
+                      getRefBadgeClasses(badge),
+                    )}
+                    style={badge.color ? { backgroundColor: badge.color } : undefined}
+                  >
+                    {badge.kind === 'local' || badge.kind === 'remote' || badge.kind === 'head' ? <Icon name="git-branch" className="size-3" /> : null}
+                    {badge.name}
                   </span>
                 ))}
               </div>
@@ -391,21 +410,21 @@ export const HistoryCommitRow = React.memo(({
           })() : null}
 
           <p className="typography-ui-label font-medium text-foreground line-clamp-1">
-            {entry.message}
+            {getEntryMessage(entry)}
           </p>
           <div className="flex items-center gap-1 typography-meta text-muted-foreground">
             <div className="flex items-center gap-1 min-w-0 truncate">
-              <span className="truncate min-w-[3ch]" title={entry.author_name}>
-                {entry.author_name}
+              <span className="truncate min-w-[3ch]" title={getEntryAuthorName(entry)}>
+                {getEntryAuthorName(entry)}
               </span>
               <span className="shrink-0">·</span>
-              <span className="truncate min-w-0" title={formatCommitDate(entry.date, timeFormatPreference)}>
-                {formatCommitDate(entry.date, timeFormatPreference)}
+              <span className="truncate min-w-0" title={formatCommitDate(getEntryDate(entry), timeFormatPreference)}>
+                {formatCommitDate(getEntryDate(entry), timeFormatPreference)}
               </span>
             </div>
             <span className="shrink-0">·</span>
             <code className="shrink-0 font-mono">
-              {entry.hash.slice(0, 8)}
+              {getEntryHash(entry).slice(0, 8)}
             </code>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -415,7 +434,7 @@ export const HistoryCommitRow = React.memo(({
                   className="h-5 px-1 shrink-0"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onCopyHash(entry.hash);
+                    onCopyHash(getEntryHash(entry));
                   }}
                 >
                   <Icon name="file-copy" className="size-3" />
@@ -434,7 +453,7 @@ export const HistoryCommitRow = React.memo(({
             /* Confirmation banner — replaces the button row while an action is pending */
             <div className="flex items-center gap-2 py-2 border-b border-border/30 mb-2">
               <span className="typography-micro text-muted-foreground flex-1 min-w-0">
-                {t(`gitView.history.actions.${pendingAction}Confirm` as never)}
+                {t(PENDING_ACTION_CONFIRM_LABELS[pendingAction])}
               </span>
               <Button
                 variant="destructive" size="xs" className="h-6 shrink-0"
@@ -527,14 +546,14 @@ export const HistoryCommitRow = React.memo(({
                   {(['soft', 'mixed', 'hard'] as const).map((mode) => (
                     <DropdownMenuItem
                       key={mode}
-                      disabled={actionLoading !== null}
-                      onSelect={(e) => {
-                        e.stopPropagation();
-                        setPendingAction(`reset${mode.charAt(0).toUpperCase() + mode.slice(1)}` as PendingAction);
-                      }}
-                    >
-                      {t(`gitView.history.actions.reset${mode.charAt(0).toUpperCase() + mode.slice(1)}` as never)}
-                    </DropdownMenuItem>
+                        disabled={actionLoading !== null}
+                        onSelect={(e) => {
+                          e.stopPropagation();
+                          setPendingAction(RESET_PENDING_ACTIONS[mode]);
+                        }}
+                      >
+                        {t(RESET_LABELS[mode])}
+                      </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>

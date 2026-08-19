@@ -22,8 +22,17 @@ export const GitSettings: React.FC = () => {
   const showGitignored = useFilesViewShowGitignored();
   const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
   const setGitChangesViewMode = useUIStore((state) => state.setGitChangesViewMode);
+  const gitReviewLayout = useUIStore((state) => state.gitReviewLayout);
+  const setGitReviewLayout = useUIStore((state) => state.setGitReviewLayout);
 
   const [isLoading, setIsLoading] = React.useState(true);
+  const reviewLayoutOptions = React.useMemo(
+    () => [
+      { id: 'separate' as const, label: t('settings.openchamber.git.reviewLayout.option.separate') },
+      { id: 'combined' as const, label: t('settings.openchamber.git.reviewLayout.option.combined') },
+    ],
+    [t]
+  );
   const viewOptions = React.useMemo(
     () => [
       { id: 'flat' as const, label: t('settings.openchamber.git.option.flatList') },
@@ -35,6 +44,7 @@ export const GitSettings: React.FC = () => {
   type GitSettingsPayload = {
     gitmojiEnabled?: boolean;
     gitChangesViewMode?: 'flat' | 'tree';
+    gitReviewLayout?: 'separate' | 'combined';
   };
 
   // Load current settings
@@ -59,6 +69,11 @@ export const GitSettings: React.FC = () => {
                     (settings as Record<string, unknown>).gitChangesViewMode === 'flat'
                     || (settings as Record<string, unknown>).gitChangesViewMode === 'tree'
                       ? ((settings as Record<string, unknown>).gitChangesViewMode as 'flat' | 'tree')
+                      : undefined,
+                  gitReviewLayout:
+                    (settings as Record<string, unknown>).gitReviewLayout === 'separate'
+                    || (settings as Record<string, unknown>).gitReviewLayout === 'combined'
+                      ? ((settings as Record<string, unknown>).gitReviewLayout as 'separate' | 'combined')
                       : undefined,
                 };
               }
@@ -86,6 +101,9 @@ export const GitSettings: React.FC = () => {
           if (data.gitChangesViewMode === 'flat' || data.gitChangesViewMode === 'tree') {
             setGitChangesViewMode(data.gitChangesViewMode);
           }
+          if (data.gitReviewLayout === 'separate' || data.gitReviewLayout === 'combined') {
+            setGitReviewLayout(data.gitReviewLayout);
+          }
         }
 
       } catch (error) {
@@ -95,7 +113,7 @@ export const GitSettings: React.FC = () => {
       }
     };
     loadSettings();
-  }, [setGitChangesViewMode, setSettingsGitmojiEnabled]);
+  }, [setGitChangesViewMode, setGitReviewLayout, setSettingsGitmojiEnabled]);
 
   const handleGitmojiChange = React.useCallback(async (enabled: boolean) => {
     setSettingsGitmojiEnabled(enabled);
@@ -117,6 +135,15 @@ export const GitSettings: React.FC = () => {
     void updateDesktopSettings({ gitChangesViewMode: mode });
   }, [gitChangesViewMode, setGitChangesViewMode]);
 
+  const handleGitReviewLayoutChange = React.useCallback((layout: 'separate' | 'combined') => {
+    if (layout === gitReviewLayout) {
+      return;
+    }
+
+    setGitReviewLayout(layout);
+    void updateDesktopSettings({ gitReviewLayout: layout });
+  }, [gitReviewLayout, setGitReviewLayout]);
+
   if (isLoading) {
     return null;
   }
@@ -124,6 +151,25 @@ export const GitSettings: React.FC = () => {
   return (
     <SettingsSection title={t('settings.openchamber.git.title')}>
       <div className={SETTINGS_OPTION_STACK_CLASS}>
+        <SettingsControlGroup
+          settingsItem="git.review-layout"
+          title={t('settings.openchamber.git.reviewLayoutTitle')}
+        >
+          <SettingsRadioGroup aria-label={t('settings.openchamber.git.reviewLayoutAria')}>
+            {reviewLayoutOptions.map((option) => (
+              <SettingsRadioOption
+                key={option.id}
+                selected={gitReviewLayout === option.id}
+                onSelect={() => {
+                  handleGitReviewLayoutChange(option.id);
+                }}
+                label={option.label}
+                ariaLabel={t('settings.openchamber.git.reviewLayout.optionAria', { option: option.label })}
+              />
+            ))}
+          </SettingsRadioGroup>
+        </SettingsControlGroup>
+
         <SettingsControlGroup
           settingsItem="git.changes-view"
           title={t('settings.openchamber.git.changesViewTitle')}

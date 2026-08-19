@@ -9,6 +9,9 @@ const gitService = {
   resetToCommit: mock(),
   createWorktree: mock(),
   getWorktreeBootstrapStatus: mock(),
+  getGitHistoryRefs: mock(),
+  getGitHistory: mock(),
+  getGitHistoryMergeBase: mock(),
 };
 
 mock.module('./gitService', () => gitService);
@@ -25,6 +28,9 @@ describe('bridge git runtime index mutations', () => {
     gitService.resetToCommit.mockReset();
     gitService.createWorktree.mockReset();
     gitService.getWorktreeBootstrapStatus.mockReset();
+    gitService.getGitHistoryRefs.mockReset();
+    gitService.getGitHistory.mockReset();
+    gitService.getGitHistoryMergeBase.mockReset();
   });
 
   it('accepts legacy stage path payloads', async () => {
@@ -174,5 +180,134 @@ describe('bridge git runtime index mutations', () => {
     expect(gitService.createWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({
       returnAfterDirectoryCreated: true,
     }));
+  });
+
+  it('forwards git history refs requests to the git service', async () => {
+    const refsResponse = {
+      refs: [{ id: 'refs/heads/main', name: 'main', revision: 'abc1234', kind: 'local', category: 'branches' }],
+      current: null,
+      upstream: null,
+      base: null,
+      snapshot: 'refs/heads/main:abc1234',
+    };
+    gitService.getGitHistoryRefs.mockResolvedValue(refsResponse);
+
+    const response = await handleStandardGitBridgeMessage({
+      id: 'history-refs',
+      type: 'api:git/history/refs',
+      payload: { directory: '/repo' },
+    });
+
+    expect(response).toEqual({
+      id: 'history-refs',
+      type: 'api:git/history/refs',
+      success: true,
+      data: refsResponse,
+    });
+    expect(gitService.getGitHistoryRefs).toHaveBeenCalledWith('/repo');
+  });
+
+  it('parses git history payloads at the bridge boundary', async () => {
+    gitService.getGitHistory.mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+      refsSnapshot: 'snapshot',
+    });
+
+    const invalidRefsResponse = await handleStandardGitBridgeMessage({
+      id: 'invalid-history-refs',
+      type: 'api:git/history',
+      payload: { directory: '/repo', refs: 'HEAD' },
+    });
+    expect(invalidRefsResponse).toEqual({
+      id: 'invalid-history-refs',
+      type: 'api:git/history',
+      success: false,
+      error: 'refs must be an array of strings',
+    });
+    expect(gitService.getGitHistory).not.toHaveBeenCalled();
+
+    const invalidLimitResponse = await handleStandardGitBridgeMessage({
+      id: 'invalid-history-limit',
+      type: 'api:git/history',
+      payload: { directory: '/repo', refs: ['HEAD'], limit: '2' },
+    });
+    expect(invalidLimitResponse).toEqual({
+      id: 'invalid-history-limit',
+      type: 'api:git/history',
+      success: false,
+      error: 'limit must be a number',
+    });
+    expect(gitService.getGitHistory).not.toHaveBeenCalled();
+
+    const validResponse = await handleStandardGitBridgeMessage({
+      id: 'valid-history',
+      type: 'api:git/history',
+      payload: { directory: '/repo', refs: ['HEAD', 'refs/heads/main'], cursor: 'cursor-token', limit: 25 },
+    });
+    expect(validResponse?.success).toBe(true);
+    expect(gitService.getGitHistory).toHaveBeenCalledWith('/repo', {
+      refs: ['HEAD', 'refs/heads/main'],
+      cursor: 'cursor-token',
+      limit: 25,
+    });
+
+    const ambiguousResponse = await handleStandardGitBridgeMessage({
+      id: 'ambiguous-history',
+      type: 'api:git/history',
+      payload: { directory: '/repo', all: true, refs: ['HEAD'] },
+    });
+    expect(ambiguousResponse).toEqual({
+      id: 'ambiguous-history',
+      type: 'api:git/history',
+      success: false,
+      error: 'all cannot be combined with explicit refs',
+    });
+
+    const allResponse = await handleStandardGitBridgeMessage({
+      id: 'all-history',
+      type: 'api:git/history',
+      payload: { directory: '/repo', all: true, limit: 25 },
+    });
+    expect(allResponse?.success).toBe(true);
+    expect(gitService.getGitHistory).toHaveBeenCalledWith('/repo', {
+      all: true,
+      cursor: undefined,
+      limit: 25,
+    });
+  });
+
+  it('parses merge-base payloads at the bridge boundary', async () => {
+    gitService.getGitHistoryMergeBase.mockResolvedValue({ mergeBase: 'abc1234' });
+
+    const invalidResponse = await handleStandardGitBridgeMessage({
+      id: 'invalid-merge-base',
+      type: 'api:git/history/merge-base',
+      payload: { directory: '/repo', refs: [null, 'HEAD'] },
+    });
+    expect(invalidResponse).toEqual({
+      id: 'invalid-merge-base',
+      type: 'api:git/history/merge-base',
+      success: false,
+      error: 'refs must be an array of strings',
+    });
+    expect(gitService.getGitHistoryMergeBase).not.toHaveBeenCalled();
+
+    const validResponse = await handleStandardGitBridgeMessage({
+      id: 'valid-merge-base',
+      type: 'api:git/history/merge-base',
+      payload: { directory: '/repo', refs: ['HEAD', 'refs/heads/main'] },
+    });
+
+    expect(validResponse).toEqual({
+      id: 'valid-merge-base',
+      type: 'api:git/history/merge-base',
+      success: true,
+      data: { mergeBase: 'abc1234' },
+    });
+    expect(gitService.getGitHistoryMergeBase).toHaveBeenCalledWith('/repo', {
+      refs: ['HEAD', 'refs/heads/main'],
+    });
   });
 });

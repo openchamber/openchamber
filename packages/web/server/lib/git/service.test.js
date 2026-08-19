@@ -9,6 +9,9 @@ import {
   checkoutCommit,
   cherryPick,
   createWorktree,
+  getGitHistory,
+  getGitHistoryMergeBase,
+  getGitHistoryRefs,
   getWorktreeBootstrapStatus,
   getBranches,
   getRangeDiff,
@@ -1427,5 +1430,188 @@ describe.runIf(canRunGit())('getRangeFiles', () => {
     const copyEntry = files.find((file) => file.status === 'C');
     expect(copyEntry).toBeDefined();
     expect(copyEntry.path).toBe('copied destination.md');
+  });
+});
+
+const createHistoryRepository = ({ withRemote = true } = {}) => {
+  const repository = createTempDir();
+  const remote = withRemote ? createTempDir() : null;
+
+  if (remote) {
+    runGit(remote, ['init', '--bare', '--initial-branch=main']);
+  }
+
+  runGit(repository, ['init', '-b', 'main']);
+  runGit(repository, ['config', 'user.email', 'test@example.com']);
+  runGit(repository, ['config', 'user.name', 'Test User']);
+  fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+  runGit(repository, ['add', 'README.md']);
+  runGit(repository, ['commit', '-m', 'Initial commit']);
+  const initialCommit = runGit(repository, ['rev-parse', 'HEAD']).trim();
+  runGit(repository, ['tag', 'v1.0.0']);
+
+  if (remote) {
+    runGit(repository, ['remote', 'add', 'origin', remote]);
+    runGit(repository, ['push', '-u', 'origin', 'main']);
+  }
+
+  runGit(repository, ['checkout', '-b', 'topic']);
+  fs.writeFileSync(path.join(repository, 'topic.txt'), 'topic\n');
+  runGit(repository, ['add', 'topic.txt']);
+  runGit(repository, ['commit', '-m', 'Topic commit']);
+  const topicCommit = runGit(repository, ['rev-parse', 'HEAD']).trim();
+
+  runGit(repository, ['checkout', 'main']);
+  runGit(repository, ['checkout', '-b', 'feature']);
+  fs.writeFileSync(path.join(repository, 'feature.txt'), 'feature\n');
+  runGit(repository, ['add', 'feature.txt']);
+  runGit(repository, ['commit', '-m', 'Feature commit']);
+  const featureCommit = runGit(repository, ['rev-parse', 'HEAD']).trim();
+  runGit(repository, ['merge', '--no-ff', 'topic', '-m', 'Merge topic']);
+  const mergeCommit = runGit(repository, ['rev-parse', 'HEAD']).trim();
+  runGit(repository, ['tag', 'release/feature']);
+
+  if (remote) {
+    runGit(repository, ['push', '-u', 'origin', 'feature']);
+    runGit(repository, ['fetch', 'origin']);
+    runGit(repository, ['remote', 'set-head', 'origin', '--auto']);
+  }
+
+  return {
+    repository,
+    remote,
+    commits: { initialCommit, featureCommit, topicCommit, mergeCommit },
+  };
+};
+
+describe.runIf(canRunGit())('git history graph service', () => {
+  it('classifies refs and resolves HEAD, upstream, and base refs', async () => {
+    const { repository, commits } = createHistoryRepository();
+
+    const refs = await getGitHistoryRefs(repository);
+
+    expect(refs.current).toMatchObject({ id: 'HEAD', kind: 'head', name: 'feature' });
+    expect(refs.upstream).toMatchObject({ id: 'refs/remotes/origin/feature', kind: 'remote', category: 'remote-branches' });
+    expect(refs.base).toMatchObject({ id: 'refs/heads/main', kind: 'local', category: 'branches' });
+    expect(refs.refs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'refs/heads/main', name: 'main', kind: 'local', category: 'branches' }),
+      expect.objectContaining({ id: 'refs/heads/feature', name: 'feature', kind: 'local', category: 'branches' }),
+      expect.objectContaining({ id: 'refs/remotes/origin/main', name: 'origin/main', kind: 'remote', category: 'remote-branches' }),
+      expect.objectContaining({ id: 'refs/tags/v1.0.0', name: 'v1.0.0', kind: 'tag', category: 'tags' }),
+    ]));
+    expect(refs.snapshot.split('|')).toEqual(expect.arrayContaining([
+      `refs/heads/feature:${commits.mergeCommit}`,
+      `refs/heads/main:${commits.initialCommit}`,
+      `refs/remotes/origin/main:${commits.initialCommit}`,
+    ]));
+  });
+
+  it('returns topological history pages with structured decorations and cursor continuation', async () => {
+    const { repository, commits } = createHistoryRepository();
+
+    const firstPage = await getGitHistory(repository, { refs: ['HEAD'], limit: 2 });
+
+    expect(firstPage.items.map((item) => item.id)).toEqual([commits.mergeCommit, commits.topicCommit]);
+    expect(firstPage.items[0]).toMatchObject({
+      parentIds: expect.arrayContaining([commits.featureCommit, commits.topicCommit]),
+      subject: 'Merge topic',
+      statistics: { files: expect.any(Number), insertions: expect.any(Number), deletions: expect.any(Number) },
+    });
+    expect(firstPage.items[0].references).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'HEAD', kind: 'head' }),
+      expect.objectContaining({ id: 'refs/heads/feature', kind: 'local' }),
+      expect.objectContaining({ id: 'refs/tags/release/feature', kind: 'tag' }),
+    ]));
+    expect(firstPage.hasMore).toBe(true);
+    expect(JSON.parse(Buffer.from(firstPage.nextCursor, 'base64url').toString('utf8'))).toEqual({
+      offset: 2,
+      snapshot: firstPage.refsSnapshot,
+    });
+
+    const secondPage = await getGitHistory(repository, {
+      refs: ['HEAD'],
+      limit: 2,
+      cursor: firstPage.nextCursor,
+    });
+
+    expect(secondPage.items.map((item) => item.id)).toEqual([commits.featureCommit, commits.initialCommit]);
+    expect(secondPage.hasMore).toBe(false);
+    expect(secondPage.nextCursor).toBeNull();
+    expect(secondPage.refsSnapshot).toBe(firstPage.refsSnapshot);
+  });
+
+  it('rejects stale history cursors after refs change', async () => {
+    const { repository } = createHistoryRepository();
+    const firstPage = await getGitHistory(repository, { refs: ['HEAD'], limit: 2 });
+
+    fs.writeFileSync(path.join(repository, 'after.txt'), 'after\n');
+    runGit(repository, ['add', 'after.txt']);
+    runGit(repository, ['commit', '-m', 'After cursor']);
+
+    await expect(getGitHistory(repository, {
+      refs: ['HEAD'],
+      limit: 2,
+      cursor: firstPage.nextCursor,
+    })).rejects.toThrow(/stale cursor/i);
+  });
+
+  it('rejects stale history cursors after detached HEAD moves without named ref changes', async () => {
+    const { repository, commits } = createHistoryRepository();
+
+    runGit(repository, ['checkout', commits.topicCommit]);
+    const firstPage = await getGitHistory(repository, { refs: ['HEAD'], limit: 1 });
+
+    runGit(repository, ['checkout', commits.featureCommit]);
+
+    await expect(getGitHistory(repository, {
+      refs: ['HEAD'],
+      limit: 1,
+      cursor: firstPage.nextCursor,
+    })).rejects.toThrow(/stale cursor/i);
+  });
+
+  it('returns a merge base for validated refs', async () => {
+    const { repository, commits } = createHistoryRepository();
+
+    await expect(getGitHistoryMergeBase(repository, { refs: ['HEAD', 'refs/heads/main'] })).resolves.toEqual({
+      mergeBase: commits.initialCommit,
+    });
+  });
+
+  it('uses --all history without truncating discovered refs while keeping the explicit-ref bound', async () => {
+    const { repository } = createHistoryRepository({ withRemote: false });
+
+    for (let index = 0; index < 35; index += 1) {
+      runGit(repository, ['checkout', 'main']);
+      runGit(repository, ['checkout', '-b', `branch-${index + 1}`]);
+      fs.writeFileSync(path.join(repository, `branch-${index + 1}.txt`), `branch-${index + 1}\n`);
+      runGit(repository, ['add', `branch-${index + 1}.txt`]);
+      runGit(repository, ['commit', '-m', `Branch ${index + 1}`]);
+    }
+    runGit(repository, ['checkout', 'main']);
+
+    const page = await getGitHistory(repository, { all: true, limit: 100 });
+    expect(page.items.some((item) => item.subject === 'Branch 35')).toBe(true);
+
+    const refs = Array.from({ length: 33 }, (_, index) => `refs/heads/branch-${index + 1}`);
+    await expect(getGitHistory(repository, { refs })).rejects.toThrow(/at most 32/i);
+  });
+
+  it('reports detached HEAD and omits remote-derived refs when no remote exists', async () => {
+    const withRemote = createHistoryRepository();
+    runGit(withRemote.repository, ['checkout', withRemote.commits.initialCommit]);
+
+    const detachedRefs = await getGitHistoryRefs(withRemote.repository);
+    expect(detachedRefs.current).toMatchObject({
+      id: 'HEAD',
+      kind: 'head',
+      revision: withRemote.commits.initialCommit,
+    });
+
+    const noRemote = createHistoryRepository({ withRemote: false });
+    const localOnlyRefs = await getGitHistoryRefs(noRemote.repository);
+    expect(localOnlyRefs.upstream).toBeNull();
+    expect(localOnlyRefs.base).toBeNull();
+    expect(localOnlyRefs.refs.some((ref) => ref.kind === 'remote')).toBe(false);
   });
 });

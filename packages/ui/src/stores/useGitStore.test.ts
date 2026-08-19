@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { GitStatus } from '@/lib/api/types';
+import type { GitHistoryItem, GitHistoryOptions, GitHistoryPage, GitHistoryRefsResponse, GitStatus } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
@@ -39,6 +39,12 @@ const createDirectoryState = (status: GitStatus): DirectoryGitState => ({
   log: null,
   identity: null,
   diffCache: new Map(),
+  history: {
+    refs: null,
+    refsError: null,
+    isLoadingRefs: false,
+    queries: new Map(),
+  },
   indexRevision: 0,
   lastRepoCheckAt: Date.now(),
   lastStatusFetch: 0,
@@ -67,6 +73,39 @@ const createGitApi = (getGitStatus: GitAPI['getGitStatus']): GitAPI => ({
   getGitLog: async () => ({ all: [], latest: null, total: 0 }),
   getCurrentGitIdentity: async () => null,
   getGitFileDiff: async (_directory, options) => ({ original: '', modified: '', path: options.path }),
+});
+
+const createHistoryRefs = (): GitHistoryRefsResponse => ({
+  refs: [
+    { id: 'HEAD', name: 'HEAD', revision: 'head-sha', kind: 'head', category: 'branches' },
+    { id: 'refs/heads/main', name: 'main', revision: 'head-sha', kind: 'local', category: 'branches' },
+    { id: 'refs/remotes/origin/main', name: 'origin/main', revision: 'upstream-sha', kind: 'remote', category: 'remote-branches' },
+    { id: 'refs/tags/v1', name: 'v1', revision: 'tag-sha', kind: 'tag', category: 'tags' },
+  ],
+  current: { id: 'refs/heads/main', name: 'main', revision: 'head-sha', kind: 'local', category: 'branches' },
+  upstream: { id: 'refs/remotes/origin/main', name: 'origin/main', revision: 'upstream-sha', kind: 'remote', category: 'remote-branches' },
+  base: null,
+  snapshot: 'snapshot-a',
+});
+
+const createHistoryItem = (id: string): GitHistoryItem => ({
+  id,
+  parentIds: [],
+  subject: id,
+  message: id,
+  author: 'Author',
+  authorEmail: 'author@example.com',
+  timestamp: '2026-01-01T00:00:00.000Z',
+  statistics: { files: 1, insertions: 1, deletions: 0 },
+  references: [],
+});
+
+const createHistoryPage = (items: string[], overrides?: Partial<GitHistoryPage>): GitHistoryPage => ({
+  items: items.map(createHistoryItem),
+  nextCursor: null,
+  hasMore: false,
+  refsSnapshot: 'snapshot-a',
+  ...overrides,
 });
 
 describe('useGitStore', () => {
@@ -333,5 +372,187 @@ describe('useGitStore', () => {
     useGitStore.getState().restoreStatus('/repo', previousStatus);
 
     expect(useGitStore.getState().getDirectoryState('/repo')?.status).toBe(initialStatus);
+  });
+
+  test('dedupes in-flight history refs loads', async () => {
+    const request = createDeferred<GitHistoryRefsResponse>();
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitHistoryRefs: async () => request.promise,
+    };
+
+    const first = useGitStore.getState().ensureHistoryRefs('/repo', git);
+    const second = useGitStore.getState().ensureHistoryRefs('/repo', git);
+
+    request.resolve(createHistoryRefs());
+    const [left, right] = await Promise.all([first, second]);
+
+    expect(left).toEqual(right);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.history.refs?.snapshot).toBe('snapshot-a');
+  });
+
+  test('isolates history cache by filter and directory', async () => {
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitHistoryRefs: async () => createHistoryRefs(),
+      getGitHistory: async (directory: string, options: GitHistoryOptions) => createHistoryPage([
+        `${directory}:${(options.refs ?? []).join(',')}`,
+      ]),
+    };
+
+    await useGitStore.getState().fetchHistoryPage('/repo-a', git, { mode: 'auto' });
+    await useGitStore.getState().fetchHistoryPage('/repo-a', git, { mode: 'manual', refIds: ['refs/tags/v1'] });
+    await useGitStore.getState().fetchHistoryPage('/repo-b', git, { mode: 'auto' });
+
+    expect(useGitStore.getState().getHistoryQueryState('/repo-a', { mode: 'auto' })?.items[0]?.id).toContain('/repo-a');
+    expect(useGitStore.getState().getHistoryQueryState('/repo-a', { mode: 'manual', refIds: ['refs/tags/v1'] })?.items[0]?.id).toContain('refs/tags/v1');
+    expect(useGitStore.getState().getHistoryQueryState('/repo-b', { mode: 'auto' })?.items[0]?.id).toContain('/repo-b');
+  });
+
+  test('appends history pages and preserves prior items on append failure', async () => {
+    let call = 0;
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitHistoryRefs: async () => createHistoryRefs(),
+      getGitHistory: async (_directory: string, options: GitHistoryOptions) => {
+        call += 1;
+        if (call === 1) {
+          expect(options.cursor ?? null).toBeNull();
+          return createHistoryPage(['a', 'b'], { nextCursor: 'cursor-1', hasMore: true });
+        }
+        throw new Error('append failed');
+      },
+    };
+
+    await useGitStore.getState().fetchHistoryPage('/repo', git, { mode: 'auto' });
+    await useGitStore.getState().fetchHistoryPage('/repo', git, { mode: 'auto' }, { append: true });
+
+    const query = useGitStore.getState().getHistoryQueryState('/repo', { mode: 'auto' });
+    expect(query?.items.map((item) => item.id)).toEqual(['a', 'b']);
+    expect(query?.error).toBe('append failed');
+    expect(query?.outdated).toBe(true);
+  });
+
+  test('restarts from the first page after a stale cursor append failure', async () => {
+    let call = 0;
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitHistoryRefs: async () => createHistoryRefs(),
+      getGitHistory: async () => {
+        call += 1;
+        if (call === 1) {
+          return createHistoryPage(['first'], { nextCursor: 'cursor-1', hasMore: true });
+        }
+        if (call === 2) {
+          throw new Error('stale cursor');
+        }
+        return createHistoryPage(['replacement']);
+      },
+    };
+
+    await useGitStore.getState().fetchHistoryPage('/repo', git, { mode: 'auto' });
+    await useGitStore.getState().fetchHistoryPage('/repo', git, { mode: 'auto' }, { append: true });
+
+    expect(useGitStore.getState().getHistoryQueryState('/repo', { mode: 'auto' })?.items.map((item) => item.id)).toEqual(['replacement']);
+  });
+
+  test('keeps only the newest filter response', async () => {
+    const autoRequest = createDeferred<GitHistoryPage>();
+    const manualRequest = createDeferred<GitHistoryPage>();
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitHistoryRefs: async () => createHistoryRefs(),
+      getGitHistory: async (_directory: string, options: GitHistoryOptions) => (
+        (options.refs ?? []).includes('refs/tags/v1') ? manualRequest.promise : autoRequest.promise
+      ),
+    };
+
+    const auto = useGitStore.getState().fetchHistoryPage('/repo', git, { mode: 'auto' });
+    const manual = useGitStore.getState().fetchHistoryPage('/repo', git, { mode: 'manual', refIds: ['refs/tags/v1'] });
+    manualRequest.resolve(createHistoryPage(['manual']));
+    await manual;
+    autoRequest.resolve(createHistoryPage(['auto']));
+    await auto;
+
+    expect(useGitStore.getState().getHistoryQueryState('/repo', { mode: 'manual', refIds: ['refs/tags/v1'] })?.items[0]?.id).toBe('manual');
+  });
+
+  test('marks loaded history as outdated on invalidation without clearing rows', async () => {
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitHistoryRefs: async () => createHistoryRefs(),
+      getGitHistory: async () => createHistoryPage(['a']),
+    };
+
+    await useGitStore.getState().fetchHistoryPage('/repo', git, { mode: 'auto' });
+    useGitStore.getState().invalidateHistory('/repo');
+
+    const query = useGitStore.getState().getHistoryQueryState('/repo', { mode: 'auto' });
+    expect(query?.items.map((item) => item.id)).toEqual(['a']);
+    expect(query?.outdated).toBe(true);
+  });
+
+  test('rejects stale history completion after runtime reset', async () => {
+    const historyRequest = createDeferred<GitHistoryPage>();
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitHistoryRefs: async () => createHistoryRefs(),
+      getGitHistory: async () => historyRequest.promise,
+    };
+
+    const loading = useGitStore.getState().fetchHistoryPage('/repo', git, { mode: 'auto' });
+    useGitStore.getState().resetForRuntimeSwitch('runtime-b');
+    historyRequest.resolve(createHistoryPage(['stale']));
+    await loading;
+
+    expect(useGitStore.getState().getHistoryQueryState('/repo', { mode: 'auto' })).toBe(null);
+  });
+
+  test('normalizes manual history query keys across ref ordering and duplicates', async () => {
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitHistoryRefs: async () => createHistoryRefs(),
+      getGitHistory: async () => createHistoryPage(['manual']),
+    };
+
+    await useGitStore.getState().fetchHistoryPage('/repo', git, {
+      mode: 'manual',
+      refIds: ['refs/tags/v1', 'refs/heads/main', 'refs/tags/v1'],
+    });
+
+    expect(useGitStore.getState().getHistoryQueryState('/repo', {
+      mode: 'manual',
+      refIds: ['refs/heads/main', 'refs/tags/v1'],
+    })?.items.map((item) => item.id)).toEqual(['manual']);
+  });
+
+  test('uses the all selector instead of explicit refs for all-mode history', async () => {
+    const manyRefs = Array.from({ length: 40 }, (_, index) => ({
+      id: `refs/heads/branch-${index + 1}`,
+      name: `branch-${index + 1}`,
+      revision: `sha-${index + 1}`,
+      kind: 'local' as const,
+      category: 'branches' as const,
+    }));
+    const historyRequests: Array<{ all?: boolean; refs?: string[]; cursor?: string; limit?: number }> = [];
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitHistoryRefs: async () => ({
+        refs: manyRefs,
+        current: manyRefs[0],
+        upstream: null,
+        base: null,
+        snapshot: 'snapshot-many',
+      }),
+      getGitHistory: async (_directory: string, options: { all?: boolean; refs?: string[]; cursor?: string; limit?: number }) => {
+        historyRequests.push(options);
+        return createHistoryPage(['all']);
+      },
+    };
+
+    await useGitStore.getState().fetchHistoryPage('/repo', git, { mode: 'all' });
+
+    expect(historyRequests).toEqual([{ all: true, cursor: undefined, limit: 50 }]);
+    expect(useGitStore.getState().getHistoryQueryState('/repo', { mode: 'all' })?.items.map((item) => item.id)).toEqual(['all']);
   });
 });

@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  getGitHistory,
+  getGitHistoryMergeBase,
+  getGitHistoryRefs,
   getGitBranches,
   getGitStatus,
   gitFetch,
@@ -178,6 +181,36 @@ describe('gitApiHttp request priority', () => {
 
       expect(calls).toHaveLength(1);
       expect(calls[0].init?.priority).toBe(undefined);
+    } finally {
+      restoreMocks();
+    }
+  });
+});
+
+describe('gitApiHttp history requests', () => {
+  test('serializes repeated refs without comma ambiguity', async () => {
+    installWindowMock();
+    const calls = installFetchMock();
+    try {
+      await getGitHistoryRefs('/repo');
+      await getGitHistory('/repo', { refs: ['HEAD', 'refs/heads/main'], cursor: 'cursor', limit: 25 });
+      await getGitHistoryMergeBase('/repo', { refs: ['HEAD', 'refs/heads/main'] });
+
+      expect(String(calls[0].input)).toBe('/api/git/history/refs?directory=%2Frepo');
+      expect(String(calls[1].input)).toBe('/api/git/history?directory=%2Frepo&refs=HEAD&refs=refs%2Fheads%2Fmain&cursor=cursor&limit=25');
+      expect(String(calls[2].input)).toBe('/api/git/history/merge-base?directory=%2Frepo&refs=HEAD&refs=refs%2Fheads%2Fmain');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('serializes the all selector without explicit refs', async () => {
+    installWindowMock();
+    const calls = installFetchMock();
+    try {
+      await getGitHistory('/repo', { all: true, cursor: 'cursor', limit: 25 });
+
+      expect(String(calls[0].input)).toBe('/api/git/history?directory=%2Frepo&all=true&cursor=cursor&limit=25');
     } finally {
       restoreMocks();
     }

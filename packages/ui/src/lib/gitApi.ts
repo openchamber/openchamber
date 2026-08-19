@@ -78,6 +78,30 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
   return gitHttp.getGitStatus(directory, options);
 }
 
+export async function getGitHistoryRefs(directory: string): Promise<import('./api/types').GitHistoryRefsResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getGitHistoryRefs) return runtime.getGitHistoryRefs(directory);
+  return gitHttp.getGitHistoryRefs(directory);
+}
+
+export async function getGitHistory(
+  directory: string,
+  options: import('./api/types').GitHistoryOptions,
+): Promise<import('./api/types').GitHistoryPage> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getGitHistory) return runtime.getGitHistory(directory, options);
+  return gitHttp.getGitHistory(directory, options);
+}
+
+export async function getGitHistoryMergeBase(
+  directory: string,
+  options: { refs: string[] },
+): Promise<import('./api/types').GitHistoryMergeBaseResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getGitHistoryMergeBase) return runtime.getGitHistoryMergeBase(directory, options);
+  return gitHttp.getGitHistoryMergeBase(directory, options);
+}
+
 export async function resolveGitPrimaryRoot(directory: string): Promise<string> {
   const result = await gitHttp.resolveGitPrimaryRoot(directory);
   return result.root;

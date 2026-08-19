@@ -16,6 +16,42 @@ export function registerGitRoutes(app) {
     return trimmed || null;
   };
 
+  const resolveStringArrayQuery = (value) => {
+    const values = Array.isArray(value) ? value : value == null ? [] : [value];
+    return values
+      .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+      .filter(Boolean);
+  };
+
+  const parseGitHistoryLimit = (value) => {
+    if (value == null || value === '') return undefined;
+    const parsed = Number.parseInt(String(Array.isArray(value) ? value[0] : value), 10);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+      throw new Error('limit must be between 1 and 100');
+    }
+    return parsed;
+  };
+
+  const parseGitHistoryCursor = (value) => {
+    if (value == null || value === '') return undefined;
+    const raw = Array.isArray(value) ? value[0] : value;
+    if (typeof raw !== 'string') {
+      throw new Error('cursor is malformed');
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(raw)) {
+      throw new Error('cursor is malformed');
+    }
+    return raw;
+  };
+
+  const parseGitHistoryAll = (value) => {
+    if (value == null || value === '') {
+      return false;
+    }
+    const raw = Array.isArray(value) ? value[0] : value;
+    return raw === 'true';
+  };
+
   const extractGitErrorText = (error) => {
     const message = typeof error?.message === 'string' ? error.message : '';
     const stderr = typeof error?.stderr === 'string' ? error.stderr : '';
@@ -290,6 +326,68 @@ export function registerGitRoutes(app) {
     } catch (error) {
       console.error('Failed to get git commit summaries:', error);
       res.status(400).json({ error: error.message || 'Failed to get git commit summaries' });
+    }
+  });
+
+  app.get('/api/git/history/refs', async (req, res) => {
+    const { getGitHistoryRefs } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      res.json(await getGitHistoryRefs(directory));
+    } catch (error) {
+      console.error('Failed to get git history refs:', error);
+      res.status(error?.statusCode || 500).json({ error: error.message || 'Failed to get git history refs' });
+    }
+  });
+
+  app.get('/api/git/history', async (req, res) => {
+    const { getGitHistory } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const refs = resolveStringArrayQuery(req.query.refs);
+      const all = parseGitHistoryAll(req.query.all);
+      if (all && refs.length > 0) {
+        return res.status(400).json({ error: 'all cannot be combined with explicit refs' });
+      }
+      if (!all && refs.length === 0) {
+        return res.status(400).json({ error: 'at least one ref is required' });
+      }
+      if (!all && refs.some((ref) => ref.startsWith('-') || ref.includes('\0'))) {
+        return res.status(400).json({ error: 'refs must not contain option-like values' });
+      }
+      const cursor = parseGitHistoryCursor(req.query.cursor);
+      const limit = parseGitHistoryLimit(req.query.limit);
+      res.json(await getGitHistory(directory, all ? { all: true, cursor, limit } : { refs, cursor, limit }));
+    } catch (error) {
+      console.error('Failed to get git history:', error);
+      res.status(error?.statusCode || 400).json({ error: error.message || 'Failed to get git history' });
+    }
+  });
+
+  app.get('/api/git/history/merge-base', async (req, res) => {
+    const { getGitHistoryMergeBase } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const refs = resolveStringArrayQuery(req.query.refs);
+      if (refs.length === 0) {
+        return res.status(400).json({ error: 'at least one ref is required' });
+      }
+      if (refs.some((ref) => ref.startsWith('-') || ref.includes('\0'))) {
+        return res.status(400).json({ error: 'refs must not contain option-like values' });
+      }
+      res.json(await getGitHistoryMergeBase(directory, { refs }));
+    } catch (error) {
+      console.error('Failed to get git history merge base:', error);
+      res.status(error?.statusCode || 400).json({ error: error.message || 'Failed to get git history merge base' });
     }
   });
 

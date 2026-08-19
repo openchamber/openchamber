@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
+import { z } from 'zod';
 import type { SidebarSection } from '@/constants/sidebar';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
+import type { GitReviewLayout } from '@/lib/getWorkingTreeDiffDestination';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { TerminalShell } from '@/lib/api/types';
@@ -32,6 +34,15 @@ export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
 export type DesktopWindowControlsPosition = 'left' | 'right';
 export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 export type FileEditorKeymap = 'default' | 'vim';
+export type GitGraphFilterMode = 'auto' | 'all' | 'manual';
+
+export type GitRepositoryPaneState = {
+  changesCollapsed: boolean;
+  graphCollapsed: boolean;
+  graphHeight: number;
+  graphFilterMode: GitGraphFilterMode;
+  graphManualRefIds: string[];
+};
 
 function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
   return value === 'vim' ? 'vim' : 'default';
@@ -148,6 +159,62 @@ const runtimeMemoryKey = (value?: string | null): string => {
 
 // Shared with rail/panel consumers so contextPanelByDirectory lookups agree on keys.
 export const normalizeContextPanelDirectoryKey = (value: string): string => normalizeDirectoryPath(value);
+const normalizeRepositoryScopedDirectoryKey = (value: string): string => normalizeDirectoryPath(value);
+
+const GIT_REPOSITORY_PANE_GRAPH_HEIGHT_MIN = 180;
+const GIT_REPOSITORY_PANE_GRAPH_HEIGHT_MAX = 720;
+const gitGraphFilterModeSchema = z.enum(['auto', 'all', 'manual']);
+const gitRepositoryPaneManualRefIdsSchema = z.array(z.string().catch('')).catch([]).transform((ids) => Array.from(
+  new Set(ids.map((item) => item.trim()).filter((item) => item !== ''))
+).sort());
+
+export const DEFAULT_GIT_REPOSITORY_PANE_STATE: GitRepositoryPaneState = {
+  changesCollapsed: false,
+  graphCollapsed: true,
+  graphHeight: 280,
+  graphFilterMode: 'auto',
+  graphManualRefIds: [],
+};
+
+const createDefaultGitRepositoryPaneState = (): GitRepositoryPaneState => ({ ...DEFAULT_GIT_REPOSITORY_PANE_STATE });
+
+const clampGitRepositoryPaneGraphHeight = (value: number): number => {
+  if (!Number.isFinite(value)) {
+    return createDefaultGitRepositoryPaneState().graphHeight;
+  }
+
+  return Math.min(GIT_REPOSITORY_PANE_GRAPH_HEIGHT_MAX, Math.max(GIT_REPOSITORY_PANE_GRAPH_HEIGHT_MIN, Math.round(value)));
+};
+
+const gitRepositoryPaneStateSchema = z.object({
+  changesCollapsed: z.boolean().catch(DEFAULT_GIT_REPOSITORY_PANE_STATE.changesCollapsed),
+  graphCollapsed: z.boolean().catch(DEFAULT_GIT_REPOSITORY_PANE_STATE.graphCollapsed),
+  graphHeight: z.coerce.number().catch(DEFAULT_GIT_REPOSITORY_PANE_STATE.graphHeight).transform(clampGitRepositoryPaneGraphHeight),
+  graphFilterMode: gitGraphFilterModeSchema.catch(DEFAULT_GIT_REPOSITORY_PANE_STATE.graphFilterMode),
+  graphManualRefIds: gitRepositoryPaneManualRefIdsSchema,
+}).catch(DEFAULT_GIT_REPOSITORY_PANE_STATE);
+const gitRepositoryPaneStatesSchema = z.record(z.string(), z.any()).catch({});
+
+const sanitizeGitRepositoryPaneState = (value: z.input<typeof gitRepositoryPaneStateSchema>): GitRepositoryPaneState => {
+  const parsed = gitRepositoryPaneStateSchema.parse(value);
+  return { ...parsed };
+};
+
+const sanitizeGitRepositoryPaneStates = (value: z.output<typeof gitRepositoryPaneStatesSchema>) => {
+  const nextEntries: Array<[string, GitRepositoryPaneState]> = [];
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    if (rawKey.trim() === '') {
+      continue;
+    }
+    nextEntries.push([rawKey, sanitizeGitRepositoryPaneState(rawValue)]);
+  }
+  return Object.fromEntries(nextEntries);
+};
+
+export const gitRepositoryPanePreferenceKey = (directory: string, runtimeKey?: string | null): string => JSON.stringify([
+  runtimeMemoryKey(runtimeKey),
+  normalizeRepositoryScopedDirectoryKey(directory),
+]);
 
 const normalizeDirectoryPath = (value: string): string => {
   if (!value) return '';
@@ -739,6 +806,8 @@ interface UIStore {
   /** Width of the walkthrough table of contents, in pixels. */
   walkthroughTocWidth: number;
   gitChangesViewMode: 'flat' | 'tree';
+  gitReviewLayout: GitReviewLayout;
+  gitRepositoryPaneStates: Record<string, GitRepositoryPaneState>;
   isTimelineDialogOpen: boolean;
   isPromptNavigatorPanelOpen: boolean;
   isImagePreviewOpen: boolean;
@@ -940,6 +1009,13 @@ interface UIStore {
   setDiffWrapLines: (wrap: boolean) => void;
   setWalkthroughTocWidth: (width: number) => void;
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
+  setGitReviewLayout: (layout: GitReviewLayout) => void;
+  getGitRepositoryPaneState: (directory: string, runtimeKey?: string | null) => GitRepositoryPaneState;
+  setGitRepositoryPaneState: (
+    directory: string,
+    updates: Partial<GitRepositoryPaneState> | ((current: GitRepositoryPaneState) => Partial<GitRepositoryPaneState>),
+    runtimeKey?: string | null,
+  ) => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
   setPromptNavigatorPanelOpen: (open: boolean) => void;
@@ -1099,6 +1175,8 @@ export const useUIStore = create<UIStore>()(
         diffWrapLines: false,
         walkthroughTocWidth: 224,
         gitChangesViewMode: 'flat',
+        gitReviewLayout: 'separate',
+        gitRepositoryPaneStates: {},
         isTimelineDialogOpen: false,
         isPromptNavigatorPanelOpen: false,
         isImagePreviewOpen: false,
@@ -2040,7 +2118,40 @@ export const useUIStore = create<UIStore>()(
         setGitChangesViewMode: (mode) => {
           set({ gitChangesViewMode: mode });
         },
- 
+
+        setGitReviewLayout: (layout) => {
+          set({ gitReviewLayout: layout });
+        },
+        getGitRepositoryPaneState: (directory, runtimeKey) => {
+          const key = gitRepositoryPanePreferenceKey(directory, runtimeKey);
+          return get().gitRepositoryPaneStates[key] ?? createDefaultGitRepositoryPaneState();
+        },
+        setGitRepositoryPaneState: (directory, updates, runtimeKey) => {
+          const key = gitRepositoryPanePreferenceKey(directory, runtimeKey);
+          set((state) => {
+            const current = state.gitRepositoryPaneStates[key] ?? createDefaultGitRepositoryPaneState();
+            const patch = typeof updates === 'function' ? updates(current) : updates;
+            const next = sanitizeGitRepositoryPaneState({ ...current, ...patch });
+            if (
+              next.changesCollapsed === current.changesCollapsed
+              && next.graphCollapsed === current.graphCollapsed
+              && next.graphHeight === current.graphHeight
+              && next.graphFilterMode === current.graphFilterMode
+              && next.graphManualRefIds.length === current.graphManualRefIds.length
+              && next.graphManualRefIds.every((id, index) => id === current.graphManualRefIds[index])
+            ) {
+              return state;
+            }
+
+            return {
+              gitRepositoryPaneStates: {
+                ...state.gitRepositoryPaneStates,
+                [key]: next,
+              },
+            };
+          });
+        },
+
         setInputBarOffset: (offset) => {
           set({ inputBarOffset: offset });
         },
@@ -2484,7 +2595,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 15,
+        version: 17,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -2677,6 +2788,16 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
+          if (version < 16) {
+            if (state.gitReviewLayout !== 'separate' && state.gitReviewLayout !== 'combined') {
+              state.gitReviewLayout = 'separate';
+            }
+          }
+
+          if (version < 17) {
+            state.gitRepositoryPaneStates = sanitizeGitRepositoryPaneStates(gitRepositoryPaneStatesSchema.parse(state.gitRepositoryPaneStates));
+          }
+
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
 
           if (typeof state.autoSaveEnabled !== 'boolean') {
@@ -2686,6 +2807,7 @@ export const useUIStore = create<UIStore>()(
           state.contextRailOrder = Array.isArray(state.contextRailOrder)
             ? (state.contextRailOrder as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
             : [];
+          state.gitRepositoryPaneStates = sanitizeGitRepositoryPaneStates(gitRepositoryPaneStatesSchema.parse(state.gitRepositoryPaneStates));
 
           return state;
         },
@@ -2751,6 +2873,8 @@ export const useUIStore = create<UIStore>()(
           diffWrapLines: state.diffWrapLines,
           walkthroughTocWidth: state.walkthroughTocWidth,
           gitChangesViewMode: state.gitChangesViewMode,
+          gitReviewLayout: state.gitReviewLayout,
+          gitRepositoryPaneStates: state.gitRepositoryPaneStates,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,

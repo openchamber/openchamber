@@ -47,6 +47,7 @@ import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { formatTimeForPreference } from '@/lib/timeFormat';
+import { getWorkingTreeDiffDestination } from '@/lib/getWorkingTreeDiffDestination';
 import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import {
   getAllModelFamilies,
@@ -495,6 +496,7 @@ export const Header: React.FC<HeaderProps> = ({
   const openContextPlan = useUIStore((state) => state.openContextPlan);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
+  const gitReviewLayout = useUIStore((state) => state.gitReviewLayout);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
@@ -1730,13 +1732,18 @@ export const Header: React.FC<HeaderProps> = ({
   }, [shortcutOverrides]);
 
   useEffect(() => {
+    const allowDesktopMainDiff = getWorkingTreeDiffDestination({
+      reviewLayout: gitReviewLayout,
+      isMobile,
+      isVSCode,
+    }) === 'main';
     // Project actions may intentionally promote the terminal to the desktop
     // main view, and diagram clicks open the diagram viewer; every other
     // legacy main tab now lives in the context panel on desktop.
-    if (!isMobile && activeMainTab !== 'chat' && activeMainTab !== 'terminal' && activeMainTab !== 'diagram') {
+    if (!isMobile && activeMainTab !== 'chat' && activeMainTab !== 'terminal' && activeMainTab !== 'diagram' && !(allowDesktopMainDiff && activeMainTab === 'diff')) {
       setActiveMainTab('chat');
     }
-  }, [activeMainTab, isMobile, setActiveMainTab]);
+  }, [activeMainTab, gitReviewLayout, isMobile, isVSCode, setActiveMainTab]);
 
   // Desktop keeps instances only: quota and MCP now live in the work-status
   // panel, which reports them per session rather than per window. The mobile

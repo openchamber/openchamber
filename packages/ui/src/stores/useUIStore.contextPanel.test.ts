@@ -3,7 +3,7 @@ import { CONTEXT_SURFACES, sortContextSurfaces } from '../lib/surfaces/registry'
 import { useUIStore } from './useUIStore';
 
 beforeEach(() => {
-  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
+  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [], gitRepositoryPaneStates: {} });
 });
 
 describe('useUIStore context panel tabs', () => {
@@ -201,5 +201,56 @@ describe('context panel tab limits', () => {
     const tabs = state?.tabs ?? [];
     expect(tabs.some((tab) => tab.id === state?.activeTabId)).toBe(true);
     expect(tabs.some((tab) => tab.targetPath === 'http://localhost:3019/')).toBe(true);
+  });
+});
+
+describe('useUIStore git repository pane state', () => {
+  test('stores repository-scoped pane state by runtime and normalized directory', () => {
+    useUIStore.getState().setGitRepositoryPaneState('/repo///', {
+      graphCollapsed: false,
+      graphHeight: 999,
+      graphFilterMode: 'manual',
+      graphManualRefIds: ['refs/tags/v1', 'refs/tags/v1', ' refs/heads/main '],
+    }, 'runtime-a');
+
+    const runtimeA = useUIStore.getState().getGitRepositoryPaneState('/repo', 'runtime-a');
+    const runtimeB = useUIStore.getState().getGitRepositoryPaneState('/repo', 'runtime-b');
+
+    expect(runtimeA.graphCollapsed).toBe(false);
+    expect(runtimeA.graphHeight).toBe(720);
+    expect(runtimeA.graphFilterMode).toBe('manual');
+    expect(runtimeA.graphManualRefIds).toEqual(['refs/heads/main', 'refs/tags/v1']);
+    expect(runtimeB).toEqual({
+      changesCollapsed: false,
+      graphCollapsed: true,
+      graphHeight: 280,
+      graphFilterMode: 'auto',
+      graphManualRefIds: [],
+    });
+  });
+
+  test('sanitizes persisted repository pane state during migration', () => {
+    const migrated = useUIStore.persist.getOptions().migrate?.({
+      gitRepositoryPaneStates: {
+        '["runtime-a","/repo"]': {
+          graphCollapsed: false,
+          graphHeight: 10,
+          graphFilterMode: 'manual',
+          graphManualRefIds: ['refs/tags/v1', '', 'refs/tags/v1'],
+        },
+      },
+    }, 15);
+
+    const paneStates = JSON.parse(JSON.stringify(migrated)).gitRepositoryPaneStates;
+
+    expect(paneStates).toEqual({
+      '["runtime-a","/repo"]': {
+        changesCollapsed: false,
+        graphCollapsed: false,
+        graphHeight: 180,
+        graphFilterMode: 'manual',
+        graphManualRefIds: ['refs/tags/v1'],
+        },
+    });
   });
 });
