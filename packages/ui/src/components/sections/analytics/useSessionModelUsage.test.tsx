@@ -6,6 +6,8 @@
  *     refetching.
  *  4. Cache freshness: a session whose `time.updated` advanced is re-fetched
  *     and its stale breakdown replaced (change detection via fingerprints).
+ *  5. Eviction self-healing: a session whose cached breakdown was FIFO-evicted
+ *     while its fingerprint survived is re-fetched on the next page open.
  *
  * The hook is mounted via createRoot against a minimal DOM stub (Bun's test
  * runner does not provide a DOM by default) — same pattern as
@@ -19,7 +21,7 @@ import React from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { Session } from "@opencode-ai/sdk/v2";
-import { clearSessionModelUsageCache } from "@/lib/analytics/session-model-usage-cache";
+import { clearSessionModelUsageCache, sessionModelUsageCache } from "@/lib/analytics/session-model-usage-cache";
 
 // --- Minimal DOM stub ----------------------------------------------------
 
@@ -499,6 +501,38 @@ describe("useSessionModelUsage", () => {
     expect(third.value.modelUsage.get("s-stale")!.get("kimi/k3")!.tokens).toBe(100);
 
     third.unmount();
+  });
+
+  test("refetches a session whose cached breakdown was evicted while its fingerprint survived", async () => {
+    // --- First visit: fetch s-evict at time.updated = 1. ---
+    const handle = mountHook([makeSession("s-evict", 1)]);
+    await resolveSession("s-evict", {
+      data: [makeAssistantMessage("zai", "glm-5.2", { input: 10, output: 20, reasoning: 0, cache: { read: 0, write: 0 } }, 0.01)],
+    });
+    await flush();
+    expect(handle.value.modelUsage.size).toBe(1);
+    const fetchesAfterFirstVisit = messagesCallCount;
+    handle.unmount();
+
+    // Simulate independent FIFO eviction: the result cache dropped the
+    // breakdown while the processed fingerprint ("s-evict:1") survived.
+    sessionModelUsageCache.delete("s-evict");
+
+    // --- Re-open: same session, same time.updated. The guard must treat
+    // "processed but no longer cached" as a refetch — the breakdown is
+    // restored instead of the session silently losing per-model attribution.
+    const reopened = mountHook([makeSession("s-evict", 1)]);
+    await resolveSession("s-evict", {
+      data: [makeAssistantMessage("kimi", "k3", { input: 50, output: 50, reasoning: 0, cache: { read: 0, write: 0 } }, 0.02)],
+    });
+    await flush();
+
+    expect(messagesCallCount).toBe(fetchesAfterFirstVisit + 1);
+    const breakdown = reopened.value.modelUsage.get("s-evict");
+    expect(breakdown).toBeDefined();
+    expect(breakdown!.get("kimi/k3")!.tokens).toBe(100);
+
+    reopened.unmount();
   });
 
   test("retries a session whose fetch failed on the next mount", async () => {

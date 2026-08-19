@@ -21,9 +21,11 @@ export const processedSessionFingerprints = new Set<string>();
 /**
  * Upper bound on cached sessions. Both structures evict the oldest entry
  * (FIFO) once this size is reached, so a long-lived desktop/VS Code host that
- * views many sessions over days cannot grow the cache without limit. Eviction
- * is graceful: an evicted session falls back to session-level attribution (or
- * reloads on the next page open) instead of leaking memory.
+ * views many sessions over days cannot grow the cache without limit. The two
+ * structures evict independently, so a fingerprint can outlive its breakdown
+ * (and vice versa); the hook's load guard treats "processed but no longer
+ * cached" as a refetch, making eviction self-healing: an evicted session
+ * reloads on the next page open instead of losing per-model attribution.
  */
 const MAX_CACHED_SESSIONS = 1000;
 

@@ -515,21 +515,22 @@ export const ContextPanelContent: React.FC = () => {
     }
     let cancelled = false;
     void opencodeClient
-      .listTools(providerID, modelID)
+      .listTools(providerID, modelID, currentSessionDirectory)
       .then((tools) => {
         if (!cancelled) setToolSchemas(tools);
       })
       .catch(() => {
         // tool.list unavailable (e.g. transient upstream failure): reset to an
         // empty schema list so segment estimation does not inherit a stale tool
-        // set from a previous provider/model. The estimate stays coarse here
-        // rather than masquerading a failure as an authoritative tool count.
+        // set from a previous provider/model/directory. The estimate stays
+        // coarse here rather than masquerading a failure as an authoritative
+        // tool count.
         if (!cancelled) setToolSchemas([]);
       });
     return () => {
       cancelled = true;
     };
-  }, [viewModel.providerID, viewModel.modelID]);
+  }, [viewModel.providerID, viewModel.modelID, currentSessionDirectory]);
   const segmentRows = React.useMemo(() => {
     const segments = computeContextSegments({
       inputTokens: viewModel.tokenBreakdown.input,

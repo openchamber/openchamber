@@ -36,7 +36,10 @@ type SdkMessagesResponse = {
  * Breakdowns are cached module-wide by session id; a separate
  * `sessionId:time.updated` fingerprint set drives change detection, so
  * re-opening the page reuses unchanged sessions' breakdowns and re-fetches
- * sessions whose `time.updated` advanced.
+ * sessions whose `time.updated` advanced. The two structures evict
+ * independently (FIFO, capped), so a session whose breakdown was evicted
+ * while its fingerprint survived is re-fetched on the next page open —
+ * eviction degrades to a refetch, never to silent attribution loss.
  */
 export function useSessionModelUsage(
   sessions: readonly Session[],
@@ -59,10 +62,15 @@ export function useSessionModelUsage(
     const toLoad: Session[] = [];
     for (const session of sessions) {
       const fp = `${session.id}:${session.time?.updated ?? 0}`;
-      // Change detection is driven by the processed-fingerprint set alone:
-      // an unchanged session is skipped (cache served), while a session whose
-      // `time.updated` advanced is re-fetched and its cache entry replaced.
-      if (!processed.has(fp)) {
+      // Skip only when this exact version was already processed AND its
+      // breakdown is still cached. The fingerprint set is the change-
+      // detection authority (a session whose `time.updated` advanced
+      // re-fetches and overwrites its cache entry), while the `cache.has`
+      // check self-heals FIFO eviction: the fingerprint set and the result
+      // cache evict independently, so an evicted breakdown is re-fetched
+      // on the next page open instead of silently dropping that session's
+      // per-model attribution.
+      if (!processed.has(fp) || !cache.has(session.id)) {
         toLoad.push(session);
       }
     }
