@@ -439,7 +439,7 @@ describe('OpenCode env runtime', () => {
     fs.writeFileSync(nativeBinary, '');
     fs.writeFileSync(shim, '@ECHO off\r\n"%dp0%\\node_modules\\@opencode-ai\\cli\\bin\\opencode2.exe" %*\r\n');
     isolateWindowsDiscovery(root, npmDir);
-    process.env.PATHEXT = '.EXE;.CMD';
+    process.env.PATHEXT = '.exe;.cmd';
     const { runtime, state } = createRuntime({}, {
       spawnSync: () => ({ status: 1, stdout: '', stderr: '' }),
       homedir: () => path.join(root, 'home'),
@@ -461,7 +461,7 @@ describe('OpenCode env runtime', () => {
     fs.writeFileSync(legacy, '');
     fs.writeFileSync(path.join(pathDir, 'opencode2.cmd'), '');
     isolateWindowsDiscovery(pathDir, pathDir);
-    process.env.PATHEXT = '.CMD';
+    process.env.PATHEXT = '.cmd';
     const { runtime } = createRuntime({}, { homedir: () => path.join(pathDir, 'home') });
 
     expect(runtime.resolveOpencodeCliPath().toLowerCase()).toBe(legacy.toLowerCase());
