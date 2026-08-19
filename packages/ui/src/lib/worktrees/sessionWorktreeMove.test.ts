@@ -454,6 +454,50 @@ describe('moveSessionTreeToExistingWorktree', () => {
     expect(refreshCalls).toEqual([]);
   });
 
+  test('rolls back the root and never moves a child that becomes busy after the root move starts', async () => {
+    const root = makeSession('root');
+    const child = makeSession('child');
+    const rootMove = deferred();
+    const previousRootMetadata = makeWorktreeMetadata({ path: '/old-root', label: 'Old root' });
+    const previousChildMetadata = makeWorktreeMetadata({ path: '/old-child', label: 'Old child' });
+    setStatuses('/source', { root: 'idle', child: 'idle' });
+    setStatuses('/destination', {});
+    storedMetadata.set(root.id, previousRootMetadata);
+    storedMetadata.set(child.id, previousChildMetadata);
+    moveSessionImplementation = async (session, sourceDirectory) => {
+      if (session.id === 'root' && sourceDirectory === '/source') {
+        return rootMove.promise;
+      }
+    };
+
+    const movePromise = moveSessionTreeToExistingWorktree({
+      root,
+      descendants: [child],
+      sourceDirectory: '/source',
+      destination: makeWorktreeMetadata(),
+    });
+
+    await waitFor(() => moveCalls.length === 1);
+    setStatuses('/source', { root: 'idle', child: 'busy' });
+    setStatuses('/destination', { root: 'idle' });
+    rootMove.resolve();
+
+    await expect(movePromise).rejects.toThrow('Session is not idle');
+
+    expect(moveCalls).toEqual([
+      { sessionId: 'root', sourceDirectory: '/source', destinationDirectory: '/destination', moveChanges: true },
+      { sessionId: 'root', sourceDirectory: '/destination', destinationDirectory: '/source', moveChanges: true },
+    ]);
+    expect(metadataWrites).toEqual([
+      { sessionId: 'root', metadata: latestMetadataResult },
+      { sessionId: 'root', metadata: previousRootMetadata },
+    ]);
+    expect(storedMetadata.get(root.id)).toBe(previousRootMetadata);
+    expect(storedMetadata.get(child.id)).toBe(previousChildMetadata);
+    expect(removeWorktreeCalls).toEqual([]);
+    expect(refreshCalls).toEqual([]);
+  });
+
   test('reports an incomplete rollback explicitly and still does not remove the existing destination', async () => {
     const root = makeSession('root');
     const child = makeSession('child');

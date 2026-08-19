@@ -156,10 +156,11 @@ const moveSessionTreeTransaction = async (
     const moved: Session[] = [];
     try {
       destination = await prepareDestination();
-      // Setup can take long enough for one of the sessions to start running, so
-      // verify the whole tree again immediately before the first move.
-      assertSessionsIdle(sessions, input.sourceDirectory);
       for (const [index, session] of sessions.entries()) {
+        // Setup and earlier moves can take long enough for a not-yet-moved
+        // descendant to start running, so re-check the remaining source tree
+        // immediately before each move.
+        assertSessionsIdle(sessions.slice(index), input.sourceDirectory);
         // Transfer the checkout changes once with the root. Descendants only
         // need their execution location updated.
         await moveSessionToDirectory(session, input.sourceDirectory, destination.directory, index === 0);
