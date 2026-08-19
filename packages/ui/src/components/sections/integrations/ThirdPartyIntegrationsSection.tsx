@@ -13,6 +13,7 @@ import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
@@ -35,6 +36,7 @@ type PendingAction = 'install' | 'update' | 'setup' | 'remove';
 type RemoveTarget = ThirdPartyPluginDefinition | null;
 
 interface ThirdPartyIntegrationsSectionProps {
+  divider?: boolean;
   onOpenProviderSetup: (providerId: string) => Promise<boolean>;
   onOpenPluginManager: () => void;
 }
@@ -45,6 +47,7 @@ const requiresRestart = (result: PluginMutationResult): boolean =>
   || result.reloadFailed === true;
 
 export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSectionProps> = ({
+  divider = true,
   onOpenProviderSetup,
   onOpenPluginManager,
 }) => {
@@ -327,7 +330,11 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
             className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left hover:bg-[var(--interactive-hover)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--interactive-focus-ring)]"
           >
             <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
-              <Icon name={plugin.icon} className={cn('size-5', plugin.brandClassName)} />
+              {plugin.providerId === 'command-code' ? (
+                <ProviderLogo providerId={plugin.providerId} className="size-5" />
+              ) : (
+                <Icon name={plugin.icon} className={cn('size-5', plugin.brandClassName)} />
+              )}
             </div>
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-foreground">{t(plugin.nameKey)}</div>
@@ -408,6 +415,7 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
       <SettingsSection
         title={t('settings.integrations.thirdParty.title')}
         info={t('settings.integrations.thirdParty.info')}
+        divider={divider}
         settingsItem="integrations.third-party"
         contentClassName="space-y-3"
       >

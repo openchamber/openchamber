@@ -1,5 +1,6 @@
 export type FilesystemErrorReason =
   | 'os-permission'
+  | 'already-exists'
   | 'not-found'
   | 'not-directory'
   | 'invalid-response'
@@ -30,6 +31,7 @@ export const isFilesystemError = (error: unknown): error is FilesystemError => (
 export const parseFilesystemErrorReason = (value: unknown): FilesystemErrorReason => {
   switch (value) {
     case 'os-permission':
+    case 'already-exists':
     case 'not-found':
     case 'not-directory':
     case 'invalid-response':

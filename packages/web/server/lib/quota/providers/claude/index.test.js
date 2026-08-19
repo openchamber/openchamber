@@ -67,6 +67,24 @@ describe('Claude quota provider', () => {
     expect(result.usage.windows['5h'].usedPercent).toBe(5);
   });
 
+  it('coalesces concurrent refreshes into one Anthropic request', async () => {
+    let resolveResponse;
+    const fetchMock = vi.fn().mockReturnValue(new Promise((resolve) => {
+      resolveResponse = resolve;
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = fetchQuota();
+    const second = fetchQuota();
+    resolveResponse(jsonResponse(PAYLOAD));
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(firstResult.ok).toBe(true);
+    expect(secondResult.ok).toBe(true);
+  });
+
   it('keeps serving the last good values while Anthropic rate limits', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(PAYLOAD))

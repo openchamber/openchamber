@@ -20,6 +20,7 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useProjectsStore } from "@/stores/useProjectsStore"
+import { fetchSessionKnowledge, reportSessionKnowledgeDelivered } from "@/lib/sessionKnowledgeApi"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
@@ -86,6 +87,7 @@ import { getRuntimeKey } from "@/lib/runtime-switch"
 import { clearLastActiveSession, persistLastActiveSession, readLastActiveSession } from "./last-session-cache"
 import { persistWorktreeTopology, readPersistedWorktreeTopology } from "./worktree-topology-cache"
 import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
+import { contextTokensFromBreakdown } from "@/stores/utils/tokenUtils"
 
 export type { AttachedFile }
 
@@ -268,6 +270,7 @@ export type NewSessionDraftState = {
   initialPrompt?: string
   syntheticParts?: SyntheticContextPart[]
   targetFolderId?: string
+  projectContextPins?: { notes: string[]; plans: string[] }
 }
 
 export type ViewportAnchor = {
@@ -317,6 +320,7 @@ export type SessionUIState = {
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
   setDraftPreserveDirectoryOverride: (value: boolean) => void
   setDraftPermissionAutoAcceptEnabled: (enabled: boolean) => void
+  setDraftProjectContextPin: (kind: "note" | "plan", id: string, pinned: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
   armAbortPrompt: (durationMs?: number) => number | null
@@ -724,7 +728,15 @@ export async function materializeOpenDraftSession(selection: {
 
   await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
 
-  const created = await store.createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null)
+  const draftPins = draft.projectContextPins ?? { notes: [], plans: [] }
+  const created = await store.createSession(
+    draft.title,
+    draftDirectoryOverride,
+    draft.parentID ?? null,
+    draftPins.notes.length > 0 || draftPins.plans.length > 0
+      ? { openchamber: { project_context_pins: draftPins } }
+      : undefined,
+  )
   if (!created?.id) throw new Error("Failed to create session")
 
   // The server response is authoritative. It may canonicalize a requested
@@ -1024,6 +1036,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       initialPrompt: options?.initialPrompt,
       syntheticParts: options?.syntheticParts,
       targetFolderId: options?.targetFolderId,
+      projectContextPins: options?.projectContextPins,
     }
 
     set({
@@ -1136,6 +1149,22 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return { newSessionDraft: { ...s.newSessionDraft, permissionAutoAcceptEnabled: enabled } }
     }),
 
+  setDraftProjectContextPin: (kind, id, pinned) =>
+    set((s) => {
+      if (!s.newSessionDraft?.open) return s
+      const pins = s.newSessionDraft.projectContextPins ?? { notes: [], plans: [] }
+      const key = kind === "note" ? "notes" : "plans"
+      const next = new Set(pins[key])
+      if (pinned) next.add(id)
+      else next.delete(id)
+      return {
+        newSessionDraft: {
+          ...s.newSessionDraft,
+          projectContextPins: { ...pins, [key]: [...next] },
+        },
+      }
+    }),
+
   acknowledgeSessionAbort: (sessionId) =>
     set((s) => {
       const flags = new Map(s.sessionAbortFlags)
@@ -1173,7 +1202,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const messages = getSyncMessages(sessionId)
     if (messages.length === 0) return null
 
-    type AssistantTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
+    type AssistantTokens = { total?: number; input: number; output: number; reasoning: number; cache: { read: number; write: number } }
     let lastTokens: AssistantTokens | undefined
     let lastMessageId: string | undefined
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -1181,7 +1210,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (msg.role !== "assistant") continue
       const tokens = (msg as { tokens?: AssistantTokens }).tokens
       if (!tokens) continue
-      const total = tokens.input + tokens.output + tokens.reasoning + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0)
+      const total = contextTokensFromBreakdown(tokens)
       if (total > 0) {
         lastTokens = tokens
         lastMessageId = msg.id
@@ -1191,7 +1220,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     if (!lastTokens) return null
 
-    const totalTokens = lastTokens.input + lastTokens.output + lastTokens.reasoning + (lastTokens.cache?.read ?? 0) + (lastTokens.cache?.write ?? 0)
+    const totalTokens = contextTokensFromBreakdown(lastTokens)
     const thresholdLimit = contextLimit > 0 ? contextLimit : 200000
     const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0
     const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined
@@ -1383,9 +1412,22 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }, options?.draftSnapshot)
       if (!createdDraftSession) throw new Error("Failed to create session")
 
-      const mergedAdditionalParts = createdDraftSession.syntheticParts?.length
+      const draftParts = createdDraftSession.syntheticParts?.length
         ? [...(additionalParts || []), ...createdDraftSession.syntheticParts]
         : additionalParts
+      // The server decides what this session still owes and assembles it; the
+      // client only carries it and reports it delivered.
+      const draftKnowledge = await fetchSessionKnowledge(
+        createdDraftSession.directory,
+        createdDraftSession.sessionId,
+      )
+      const draftPrefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> =
+        draftKnowledge.text ? [{ text: draftKnowledge.text, synthetic: true }] : []
+      // Left undefined when nothing was added, as before: an empty array is not
+      // the same as no additional parts to everything downstream.
+      const mergedAdditionalParts = draftPrefixParts.length > 0
+        ? [...draftPrefixParts, ...(draftParts || [])]
+        : draftParts
 
       notifyMessageSent(createdDraftSession.sessionId)
 
@@ -1422,6 +1464,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           })),
         })),
       })
+      // Recorded only after the send resolves: a failed send must carry the
+      // pinned context again rather than assume the agent already saw it.
+      if (draftKnowledge.text) {
+        void reportSessionKnowledgeDelivered(
+          createdDraftSession.directory,
+          createdDraftSession.sessionId,
+          draftKnowledge.signature,
+        )
+      }
       return
     }
 
@@ -1481,6 +1532,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (targetSessionId) {
       await applyArmedGoal(targetSessionId, currentSessionDirectory)
     }
+
+    // Standing project context — pinned notes and plans, and the memory index.
+    // Prepended so it reads as background before the message it accompanies,
+    // and empty unless the session is actually missing it.
+    const knowledge = await fetchSessionKnowledge(currentSessionDirectory, targetSessionId || "")
+    const prefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> =
+      knowledge.text ? [{ text: knowledge.text, synthetic: true }] : []
+    const partsWithPinnedContext = prefixParts.length > 0
+      ? [...prefixParts, ...(additionalParts || [])]
+      : additionalParts
+
     await routeMessage({
       runtimeKey: capturedTarget?.runtimeKey,
       sessionId: targetSessionId || "",
@@ -1494,7 +1556,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       inputMode,
       files,
       delivery: options?.delivery,
-      additionalParts: additionalParts?.map((p) => ({
+      additionalParts: partsWithPinnedContext?.map((p) => ({
         text: p.text,
         synthetic: p.synthetic,
         files: p.attachments?.map((a) => ({
@@ -1505,6 +1567,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         })),
       })),
     })
+    if (knowledge.text) {
+      void reportSessionKnowledgeDelivered(currentSessionDirectory, targetSessionId || "", knowledge.signature)
+    }
   },
 
   // ---------------------------------------------------------------------------
@@ -1540,9 +1605,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // deleteSession — calls SDK, SSE event updates child store
   // ---------------------------------------------------------------------------
-  deleteSession: (id, options) => deleteSessionAction(id, options),
+  deleteSession: async (id, options) => deleteSessionAction(id, options),
 
-  deleteSessions: (ids, options) => deleteSessionsAction(ids, options),
+  deleteSessions: async (ids, options) => {
+    const result = await deleteSessionsAction(ids, options)
+
+    return result
+  },
 
   archiveSession: (id) => archiveSessionAction(id),
 
