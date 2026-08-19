@@ -213,8 +213,8 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
   };
 
   return (
-    <section id="git-graph-panel" className="flex h-full min-h-0 flex-col rounded-xl border border-border/60 bg-background/70">
-      <div className="flex flex-wrap items-center gap-2 border-b border-border/50 px-3 py-2">
+    <section id="git-graph-panel" className="flex h-full min-h-0 flex-col">
+      <div className="flex flex-wrap items-center gap-1 border-b border-border/50 px-2 py-1">
         <Button type="button" size="xs" variant={paneState.graphFilterMode === 'auto' ? 'secondary' : 'ghost'} onClick={() => setPaneState(directory, { graphFilterMode: 'auto', graphManualRefIds: [] })} disabled={areFilterControlsDisabled}>
           {t('quota.window.auto')}
         </Button>
@@ -224,14 +224,13 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
         <Button type="button" size="xs" variant={paneState.graphFilterMode === 'manual' ? 'secondary' : 'ghost'} onClick={() => setPaneState(directory, { graphFilterMode: 'manual' })} disabled={areFilterControlsDisabled}>
           {t('sessions.sidebar.header.projectSort.manual')}
         </Button>
-        <Button type="button" size="xs" variant="ghost" className="ml-auto" onClick={() => void refresh()} disabled={isLoadingRefs || queryState?.isLoading || queryState?.isLoadingMore}>
-          <Icon name="refresh" className="mr-1 size-3" />
-          {t('gitView.history.refresh')}
+        <Button type="button" size="xs" variant="ghost" className="ml-auto" aria-label={t('gitView.history.refresh')} onClick={() => void refresh()} disabled={isLoadingRefs || queryState?.isLoading || queryState?.isLoadingMore}>
+          <Icon name="refresh" className="size-3" />
         </Button>
       </div>
 
       {paneState.graphFilterMode === 'manual' ? (
-        <div className="flex flex-col gap-2 border-b border-border/50 px-3 py-2">
+        <div className="flex flex-col gap-2 border-b border-border/50 px-2.5 py-1.5">
           <div className="typography-micro text-muted-foreground">{t('gitView.graph.manualSelection')}</div>
           {renderRefGroup(t('gitView.graph.localBranches'), groupedRefs.branches)}
           {renderRefGroup(t('gitView.branch.remoteBranches'), groupedRefs.remoteBranches)}
@@ -240,21 +239,21 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
       ) : null}
 
       {queryState?.outdated ? (
-        <div className="border-b border-border/50 px-3 py-2 typography-micro text-muted-foreground">{t('gitView.graph.outdated')}</div>
+        <div className="border-b border-border/50 px-2.5 py-1.5 typography-micro text-muted-foreground">{t('gitView.graph.outdated')}</div>
       ) : null}
 
       {renderState.showInlineMergeBaseError ? (
         <div
           id="git-graph-merge-base-error"
           role="alert"
-          className="border-b border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-3 py-2"
+          className="border-b border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-2.5 py-1.5"
         >
           <p className="typography-micro text-[var(--status-warning-foreground)]">{t('gitView.graph.mergeBaseLookupFailed')}</p>
         </div>
       ) : null}
 
       {refsError && refs ? (
-        <div id="git-graph-retained-refs-error" role="alert" className="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2">
+        <div id="git-graph-retained-refs-error" role="alert" className="flex items-center justify-between gap-2 border-b border-border/50 px-2.5 py-1.5">
           <p className="typography-micro text-muted-foreground">{refsError}</p>
           <Button type="button" size="xs" onClick={() => void refresh()} disabled={isLoadingRefs || queryState?.isLoading || queryState?.isLoadingMore}>
             {t('contextPanel.preview.actions.retry')}
@@ -269,13 +268,13 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
         </div>
       ) : renderState.showRows ? (
         <div className="min-h-0 flex-1 overflow-auto">
-          <ul className="divide-y divide-border/60">
+          <ul>
             {viewModels.map((viewModel) => {
               if (viewModel.kind === 'incoming-changes' || viewModel.kind === 'outgoing-changes') {
                 return (
                   <li key={viewModel.historyItem.id} data-history-commit-row={viewModel.historyItem.id}>
-                    <div className="flex items-start gap-3 px-3 py-2">
-                      <div className="-my-2 shrink-0 self-stretch">
+                    <div className="flex h-[22px] items-center gap-1.5 px-2">
+                      <div className="h-[22px] shrink-0">
                         <GitGraphSegment viewModel={viewModel} totalColumns={totalColumns} />
                       </div>
                       <div className="min-w-0 flex-1">
@@ -303,6 +302,7 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
                   isLoadingFiles={loadingCommitHashes.has(viewModel.historyItem.id)}
                   onCopyHash={onCopyHash}
                   directory={directory}
+                  compactGraph={true}
                   onConflict={onConflict}
                   onActionSuccess={onActionSuccess}
                 />
@@ -317,7 +317,7 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
       )}
 
       {queryState?.hasMore ? (
-        <div className="border-t border-border/50 px-3 py-2">
+        <div className="border-t border-border/50 px-2.5 py-1.5">
           <Button type="button" variant="ghost" size="xs" onClick={() => void fetchHistoryPage(directory, git, query, { append: true })} disabled={queryState.isLoadingMore}>
             {queryState.isLoadingMore ? t('gitView.history.loadingMore') : t('gitView.history.loadMore')}
           </Button>

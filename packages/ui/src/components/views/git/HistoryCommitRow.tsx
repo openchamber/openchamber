@@ -90,6 +90,7 @@ const trimHistoryDiffCache = (cache: Map<string, HistoryDiffCacheValue>): Map<st
 interface HistoryCommitRowProps {
   entry: GitLogEntry | GitHistoryItem;
   mode?: 'history' | 'graph';
+  compactGraph?: boolean;
   viewModel?: GitHistoryItemViewModel;
   totalColumns?: number;
   isExpanded: boolean;
@@ -154,6 +155,7 @@ function getRefBadgeClasses(ref: GitHistoryGraphRef): string {
 export const HistoryCommitRow = React.memo(({
   entry,
   mode = 'history',
+  compactGraph = false,
   viewModel,
   totalColumns,
   isExpanded,
@@ -168,6 +170,7 @@ export const HistoryCommitRow = React.memo(({
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const isGraphMode = mode === 'graph';
+  const isCompactGraph = isGraphMode && compactGraph;
   type PendingAction =
     | 'checkout' | 'cherryPick' | 'revert'
     | 'merge' | 'rebase'
@@ -363,20 +366,28 @@ export const HistoryCommitRow = React.memo(({
     await loadFileDiff(file);
   }, [diffCache, forceRenderLargePaths, loadFileDiff, openDiffPaths]);
 
+  const graphBadges: GitHistoryGraphRef[] = viewModel?.historyItem.references ?? [];
+  const compactGraphBadges = graphBadges.some((badge) => badge.kind === 'head')
+    ? graphBadges.filter((badge) => badge.kind === 'head' || badge.kind === 'tag')
+    : graphBadges;
+
   return (
     <li data-history-commit-row={getEntryHash(entry)}>
       <button
         type="button"
         onClick={onToggle}
         className={cn(
-          'w-full flex items-start gap-3 px-3 py-2 text-left transition-colors',
+          'w-full text-left transition-colors',
+          isCompactGraph
+            ? 'flex h-[22px] items-center gap-1.5 px-2'
+            : 'flex items-start gap-3 px-3 py-2',
           isGraphMode
             ? 'hover:bg-[var(--interactive-hover)]/40'
             : isExpanded ? 'bg-sidebar/90' : 'hover:bg-sidebar/40'
         )}
         >
         {isGraphMode && viewModel ? (
-          <div className="-my-2 shrink-0 self-stretch">
+          <div className={cn('shrink-0 self-stretch', isCompactGraph ? 'h-[22px]' : '-my-2')}>
             <GitGraphSegment viewModel={viewModel} totalColumns={totalColumns} />
           </div>
         ) : (
@@ -387,62 +398,92 @@ export const HistoryCommitRow = React.memo(({
           />
         )}
         <div className="min-w-0 flex-1">
-          {/* Ref badges */}
-          {isGraphMode ? (() => {
-            const badges: GitHistoryGraphRef[] = viewModel?.historyItem.references ?? [];
-            return badges.length > 0 ? (
-              <div className="flex flex-wrap gap-1 mb-0.5">
-                {badges.map((badge) => (
-                  <span
-                    key={badge.id}
-                    className={cn(
-                      'inline-flex items-center gap-1 rounded-full border px-1.5 py-0 typography-micro font-medium',
-                      getRefBadgeClasses(badge),
-                    )}
-                    style={badge.color ? { backgroundColor: badge.color } : undefined}
-                  >
-                    {badge.kind === 'local' || badge.kind === 'remote' || badge.kind === 'head' ? <Icon name="git-branch" className="size-3" /> : null}
-                    {badge.name}
-                  </span>
-                ))}
-              </div>
-            ) : null;
-          })() : null}
-
-          <p className="typography-ui-label font-medium text-foreground line-clamp-1">
-            {getEntryMessage(entry)}
-          </p>
-          <div className="flex items-center gap-1 typography-meta text-muted-foreground">
-            <div className="flex items-center gap-1 min-w-0 truncate">
-              <span className="truncate min-w-[3ch]" title={getEntryAuthorName(entry)}>
+          {isCompactGraph ? (
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className={cn(
+                'min-w-0 flex-1 truncate typography-ui-label text-foreground',
+                viewModel?.kind === 'HEAD' ? 'font-semibold' : 'font-normal',
+              )}>
+                {getEntryMessage(entry)}
+              </span>
+              {compactGraphBadges.length > 0 ? (
+                <div className="flex max-w-[50%] shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap">
+                  {compactGraphBadges.map((badge) => (
+                    <span
+                      key={badge.id}
+                      className={cn(
+                        'inline-flex min-w-0 max-w-40 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0 typography-micro font-medium',
+                        getRefBadgeClasses(badge),
+                      )}
+                      style={badge.color ? { backgroundColor: badge.color } : undefined}
+                    >
+                      {badge.kind === 'local' || badge.kind === 'remote' || badge.kind === 'head' ? <Icon name="git-branch" className="size-3" /> : null}
+                      <span className="truncate">{badge.name}</span>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <span className="min-w-0 max-w-[35%] shrink truncate typography-meta text-muted-foreground" title={getEntryAuthorName(entry)}>
                 {getEntryAuthorName(entry)}
               </span>
-              <span className="shrink-0">·</span>
-              <span className="truncate min-w-0" title={formatCommitDate(getEntryDate(entry), timeFormatPreference)}>
-                {formatCommitDate(getEntryDate(entry), timeFormatPreference)}
-              </span>
             </div>
-            <span className="shrink-0">·</span>
-            <code className="shrink-0 font-mono">
-              {getEntryHash(entry).slice(0, 8)}
-            </code>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-5 px-1 shrink-0"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCopyHash(getEntryHash(entry));
-                  }}
-                >
-                  <Icon name="file-copy" className="size-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent sideOffset={8}>{t('gitView.history.copySha')}</TooltipContent>
-            </Tooltip>
-          </div>
+          ) : (
+            <>
+              {/* Ref badges */}
+              {isGraphMode && graphBadges.length > 0 ? (
+                <div className="mb-0.5 flex flex-wrap gap-1">
+                  {graphBadges.map((badge) => (
+                    <span
+                      key={badge.id}
+                      className={cn(
+                        'inline-flex items-center gap-1 rounded-full border px-1.5 py-0 typography-micro font-medium',
+                        getRefBadgeClasses(badge),
+                      )}
+                      style={badge.color ? { backgroundColor: badge.color } : undefined}
+                    >
+                      {badge.kind === 'local' || badge.kind === 'remote' || badge.kind === 'head' ? <Icon name="git-branch" className="size-3" /> : null}
+                      {badge.name}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              <p className="typography-ui-label font-medium text-foreground line-clamp-1">
+                {getEntryMessage(entry)}
+              </p>
+              <div className="flex items-center gap-1 typography-meta text-muted-foreground">
+                <div className="flex items-center gap-1 min-w-0 truncate">
+                  <span className="truncate min-w-[3ch]" title={getEntryAuthorName(entry)}>
+                    {getEntryAuthorName(entry)}
+                  </span>
+                  <span className="shrink-0">·</span>
+                  <span className="truncate min-w-0" title={formatCommitDate(getEntryDate(entry), timeFormatPreference)}>
+                    {formatCommitDate(getEntryDate(entry), timeFormatPreference)}
+                  </span>
+                </div>
+                <span className="shrink-0">·</span>
+                <code className="shrink-0 font-mono">
+                  {getEntryHash(entry).slice(0, 8)}
+                </code>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 px-1 shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCopyHash(getEntryHash(entry));
+                      }}
+                    >
+                      <Icon name="file-copy" className="size-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent sideOffset={8}>{t('gitView.history.copySha')}</TooltipContent>
+                </Tooltip>
+              </div>
+            </>
+          )}
         </div>
       </button>
 

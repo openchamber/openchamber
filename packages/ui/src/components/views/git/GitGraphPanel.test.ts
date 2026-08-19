@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { createRoot, type Root } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { I18nProvider } from '@/lib/i18n';
 import type { GitAPI } from '@/lib/api/types';
 import type { GitRepositoryPaneState } from '@/stores/useUIStore';
@@ -78,8 +79,19 @@ mock.module('./GitGraphSegment', () => ({
   },
 }));
 
+const renderedHistoryRows: Array<{ id: string; compactGraph?: boolean }> = [];
+
 mock.module('./HistoryCommitRow', () => ({
-  HistoryCommitRow: ({ entry }: { entry: { id: string } }) => React.createElement('li', { 'data-history-id': entry.id }),
+  HistoryCommitRow: ({
+    entry,
+    compactGraph,
+  }: {
+    entry: { id: string };
+    compactGraph?: boolean;
+  }) => {
+    renderedHistoryRows.push({ id: entry.id, compactGraph });
+    return React.createElement('li', { 'data-history-id': entry.id });
+  },
 }));
 
 let gitPaneState: GitRepositoryPaneState = {
@@ -277,6 +289,7 @@ const settleMergeBaseLookupCount = async (getLookupCallCount: () => number) => {
 describe('GitGraphPanel component regression', () => {
   beforeEach(() => {
     renderedGraphSegmentIds.length = 0;
+    renderedHistoryRows.length = 0;
     gitPaneState = {
       changesCollapsed: false,
       graphCollapsed: true,
@@ -514,6 +527,65 @@ describe('GitGraphPanel component regression', () => {
       await flushEffects();
     });
     dom.restore();
+  });
+
+  test('requests compact graph rows for graph commit entries', async () => {
+    const dom = installMinimalDom();
+    const root: Root = createRoot(dom.container);
+    // SAFETY: This regression path does not read any git API methods.
+    const panelGitApi = {} as GitAPI;
+
+    await act(async () => {
+      root.render(
+        React.createElement(
+          I18nProvider,
+          null,
+          React.createElement(GitGraphPanel, {
+            directory: '/repo',
+            git: panelGitApi,
+            expandedCommitHashes: new Set<string>(),
+            onToggleCommit: () => {},
+            commitFilesMap: new Map(),
+            loadingCommitHashes: new Set<string>(),
+            onCopyHash: () => {},
+          }),
+        ),
+      );
+      await flushEffects();
+    });
+
+    expect(renderedHistoryRows.some((row) => row.id === 'commit-a' && row.compactGraph === true)).toBe(true);
+
+    await act(async () => {
+      root.unmount();
+      await flushEffects();
+    });
+    dom.restore();
+  });
+
+  test('uses the existing graph pane instead of nesting another card', () => {
+    // SAFETY: Server rendering does not execute effects or read git API methods.
+    const panelGitApi = {} as GitAPI;
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        I18nProvider,
+        null,
+        React.createElement(GitGraphPanel, {
+          directory: '/repo',
+          git: panelGitApi,
+          expandedCommitHashes: new Set<string>(),
+          onToggleCommit: () => {},
+          commitFilesMap: new Map(),
+          loadingCommitHashes: new Set<string>(),
+          onCopyHash: () => {},
+        }),
+      ),
+    );
+
+    const panelClass = markup.match(/<section id="git-graph-panel" class="([^"]+)"/)?.[1];
+    expect(panelClass).toBe('flex h-full min-h-0 flex-col');
+    expect(markup).toContain('aria-label="Refresh"');
+    expect(markup).not.toContain('>Refresh</button>');
   });
 });
 
