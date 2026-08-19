@@ -298,6 +298,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.relativeTime.durationAgo': '{duration} 前',
   'sessions.scheduledTasks.dialog.status.success': '成功',
   'sessions.scheduledTasks.dialog.status.error': '錯誤',
+  'sessions.scheduledTasks.dialog.status.denied': '已拒絕',
   'sessions.scheduledTasks.dialog.status.running': '執行中',
   'sessions.scheduledTasks.dialog.status.idle': '閒置',
   'sessions.scheduledTasks.dialog.nextRun.label': '下次',

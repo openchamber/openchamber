@@ -5,7 +5,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
-import type { IconName } from "@/components/icon/icons";
 import { useUIStore } from '@/stores/useUIStore';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
@@ -27,11 +26,11 @@ import {
   setLoopScheduledTaskEnabled,
   upsertScheduledTask,
   type ScheduledTask,
-  type ScheduledTaskStatus,
 } from '@/lib/scheduledTasksApi';
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
 import { canonicalizeTimezone } from '@/lib/timezones';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { STATUS_META, getScheduledTaskStatusLabel, type StatusTone } from './scheduledTaskStatusPresentation';
 
 const scheduleTimes = (task: ScheduledTask): string[] => {
   const raw = Array.isArray(task.schedule.times)
@@ -140,22 +139,6 @@ const formatRelativeTime = (value: number | undefined, t: ReturnType<typeof useI
   return future
     ? t('sessions.scheduledTasks.dialog.relativeTime.inDuration', { duration: body })
     : t('sessions.scheduledTasks.dialog.relativeTime.durationAgo', { duration: body });
-};
-
-type StatusTone = 'success' | 'error' | 'warning' | 'muted';
-
-const STATUS_META: Record<
-  ScheduledTaskStatus,
-  {
-    tone: StatusTone;
-    Icon: IconName;
-    spin?: boolean;
-  }
-> = {
-  success: { tone: 'success', Icon: 'checkbox-circle' },
-  error: { tone: 'error', Icon: 'error-warning' },
-  running: { tone: 'warning', Icon: 'loader-4', spin: true },
-  idle: { tone: 'muted', Icon: 'pulse' },
 };
 
 const toneStyle = (tone: StatusTone): React.CSSProperties => {
@@ -463,15 +446,9 @@ export function ScheduledTasksDialog() {
         <div className="space-y-2.5">
           {tasks.map((task) => {
             const isBusy = mutatingTaskID === task.id;
-            const status = (task.state?.lastStatus || 'idle') as ScheduledTaskStatus;
+            const status = task.state?.lastStatus || 'idle';
             const meta = STATUS_META[status];
-            const statusLabel = status === 'success'
-              ? t('sessions.scheduledTasks.dialog.status.success')
-              : status === 'error'
-                ? t('sessions.scheduledTasks.dialog.status.error')
-                : status === 'running'
-                  ? t('sessions.scheduledTasks.dialog.status.running')
-                  : t('sessions.scheduledTasks.dialog.status.idle');
+            const statusLabel = getScheduledTaskStatusLabel(status, t);
             const nextAt = task.state?.nextRunAt;
             const lastAt = task.state?.lastRunAt;
 
