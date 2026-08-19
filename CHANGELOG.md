@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Session assist: recaps and suggested follow-ups now work when the Anthropic provider is configured to use a custom endpoint; they previously failed every time instead of using that configured connection.
 
 ## [1.19.0] - 2026-08-19
 
