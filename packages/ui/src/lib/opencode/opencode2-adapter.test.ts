@@ -167,6 +167,78 @@ describe('OpenCode V2 adapter', () => {
     expect(requestCount).toBe(0);
   });
 
+  test('restores the session agent when switching the model fails', async () => {
+    const agentSelections: string[] = [];
+    const client = adapter(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      if (request.method === 'GET') return json({ data: v2Session('session-1') });
+      if (request.url.endsWith('/agent')) {
+        // SAFETY: the generated switch-agent request body is asserted by this focused transport fixture.
+        agentSelections.push((await request.json() as { agent: string }).agent);
+        return new Response(null, { status: 204 });
+      }
+      if (request.url.endsWith('/model')) throw new Error('model switch failed');
+      return json({});
+    });
+    // SAFETY: the adapter intentionally accepts the V2 compatibility input tested here.
+    const send = client.session.promptAsync as PromptAsyncCall;
+
+    const result = await send({
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      delivery: 'steer',
+      agent: 'review',
+      model: { providerID: 'provider-2', modelID: 'model-2' },
+      parts: [{ type: 'text', text: 'Review this' }],
+    }, { signal: new AbortController().signal, headers: {} });
+
+    expect(result.error).toBeDefined();
+    expect(agentSelections).toEqual(['review', 'build']);
+  });
+
+  test('reports partial state and refreshes the session when agent rollback fails', async () => {
+    const agentSelections: string[] = [];
+    let sessionReads = 0;
+    let promptSent = false;
+    const client = adapter(async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      if (request.method === 'GET') {
+        sessionReads += 1;
+        return json({ data: v2Session('session-1') });
+      }
+      if (request.url.endsWith('/agent')) {
+        // SAFETY: the generated switch-agent request body is asserted by this focused transport fixture.
+        const agent = (await request.json() as { agent: string }).agent;
+        agentSelections.push(agent);
+        if (agent === 'build') throw new Error('agent rollback failed');
+        return new Response(null, { status: 204 });
+      }
+      if (request.url.endsWith('/model')) throw new Error('model switch failed');
+      if (request.url.endsWith('/prompt')) promptSent = true;
+      return json({});
+    });
+    // SAFETY: the adapter intentionally accepts the V2 compatibility input tested here.
+    const send = client.session.promptAsync as PromptAsyncCall;
+
+    const result = await send({
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      delivery: 'steer',
+      agent: 'review',
+      model: { providerID: 'provider-2', modelID: 'model-2' },
+      parts: [{ type: 'text', text: 'Review this' }],
+    }, { signal: new AbortController().signal, headers: {} });
+
+    expect(result.error).toBeInstanceOf(AggregateError);
+    if (!(result.error instanceof AggregateError)) throw new Error('Expected an AggregateError');
+    expect(result.error.message).toContain('session state was refreshed');
+    expect(result.error.errors).toHaveLength(2);
+    expect(result.error.errors.every((error) => error instanceof Error)).toBe(true);
+    expect(agentSelections).toEqual(['review', 'build']);
+    expect(sessionReads).toBe(2);
+    expect(promptSent).toBe(false);
+  });
+
   test('normalizes sessions and traverses descendants with bounded parent pages', async () => {
     const parents: Array<string | null> = [];
     const client = adapter(async (input) => {

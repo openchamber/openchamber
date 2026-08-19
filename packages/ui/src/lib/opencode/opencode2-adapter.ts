@@ -767,27 +767,53 @@ export function createOpencode2Adapter(
       }
     }],
     ['session.promptAsync', async (input: SessionPromptInput, options?: LegacyOptions) => guarded('session.promptAsync', async () => {
-      if (input.format) throw new Error('OpenCode V2 does not support structured prompt output');
-      if (input.agent) await v2.session.switchAgent({ sessionID: input.sessionID, agent: input.agent }, requestOptions(options));
-      if (input.model) {
-        if (input.variant) await v2.session.switchModel({ sessionID: input.sessionID, model: { providerID: input.model.providerID, id: input.model.modelID, variant: input.variant } }, requestOptions(options));
-        else await v2.session.switchModel({ sessionID: input.sessionID, model: { providerID: input.model.providerID, id: input.model.modelID } }, requestOptions(options));
-      }
-      const text = (input.parts ?? []).filter((part) => part.type === 'text').map((part) => part.text).join('\n');
-      const files = (input.parts ?? []).filter((part) => part.type === 'file').map((part) => {
-        if (part.filename) return { uri: part.url, name: part.filename } satisfies PromptFile;
-        return { uri: part.url } satisfies PromptFile;
-      });
-      const agents = (input.parts ?? []).filter((part) => part.type === 'agent').map((part) => {
-        if (part.source) return { name: part.name, mention: { start: part.source.start, end: part.source.end, text: part.source.value } } satisfies PromptAgent;
-        return { name: part.name } satisfies PromptAgent;
-      });
-      const prompt: MutableSessionPromptInput = { sessionID: input.sessionID, id: input.messageID, text };
-      if (files.length) prompt.files = files;
-      if (agents.length) prompt.agents = agents;
-      if (input.delivery) prompt.delivery = input.delivery;
-      await v2.session.prompt(prompt, requestOptions(options));
-      return true;
+        if (input.format) throw new Error('OpenCode V2 does not support structured prompt output');
+        const previousSession = input.agent && input.model
+          ? await v2.session.get({ sessionID: input.sessionID }, requestOptions(options))
+          : undefined;
+        if (input.agent) await v2.session.switchAgent({ sessionID: input.sessionID, agent: input.agent }, requestOptions(options));
+        try {
+          if (input.model) {
+            if (input.variant) await v2.session.switchModel({ sessionID: input.sessionID, model: { providerID: input.model.providerID, id: input.model.modelID, variant: input.variant } }, requestOptions(options));
+            else await v2.session.switchModel({ sessionID: input.sessionID, model: { providerID: input.model.providerID, id: input.model.modelID } }, requestOptions(options));
+          }
+        } catch (error) {
+          if (previousSession?.agent) {
+            try {
+              await v2.session.switchAgent({ sessionID: input.sessionID, agent: previousSession.agent }, requestOptions(options));
+            } catch (rollbackError) {
+              sessions.delete(input.sessionID);
+              try {
+                rememberSession(normalizeSession(await v2.session.get({ sessionID: input.sessionID }, requestOptions(options))));
+              } catch (refreshError) {
+                throw new AggregateError(
+                  [error, rollbackError, refreshError],
+                  'OpenCode V2 model switch failed, agent rollback failed, and session state could not be refreshed',
+                );
+              }
+              throw new AggregateError(
+                [error, rollbackError],
+                'OpenCode V2 model switch failed and agent rollback failed; session state was refreshed',
+              );
+            }
+          }
+          throw error;
+        }
+        const text = (input.parts ?? []).filter((part) => part.type === 'text').map((part) => part.text).join('\n');
+        const files = (input.parts ?? []).filter((part) => part.type === 'file').map((part) => {
+          if (part.filename) return { uri: part.url, name: part.filename } satisfies PromptFile;
+          return { uri: part.url } satisfies PromptFile;
+        });
+        const agents = (input.parts ?? []).filter((part) => part.type === 'agent').map((part) => {
+          if (part.source) return { name: part.name, mention: { start: part.source.start, end: part.source.end, text: part.source.value } } satisfies PromptAgent;
+          return { name: part.name } satisfies PromptAgent;
+        });
+        const prompt: MutableSessionPromptInput = { sessionID: input.sessionID, id: input.messageID, text };
+        if (files.length) prompt.files = files;
+        if (agents.length) prompt.agents = agents;
+        if (input.delivery) prompt.delivery = input.delivery;
+        await v2.session.prompt(prompt, requestOptions(options));
+        return true;
     })],
     ['session.command', async (input: SessionCommandInput, options?: LegacyOptions) => {
       const separator = input.model?.indexOf('/') ?? -1;
