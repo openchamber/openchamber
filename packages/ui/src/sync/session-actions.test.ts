@@ -23,6 +23,7 @@ const movedSessionDirectories: Array<{ sessionID: string; directory: string }> =
 let autoCloseEmptyProjects = false
 let autoCloseProjects: Array<{ id: string; path: string }> = []
 let globalSessionRefreshCalls = 0
+let beforeGlobalSessionRefresh: (() => void) | null = null
 
 const mockScopedClient = {
   permission: {
@@ -238,6 +239,7 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
   resolveGlobalSessionDirectory: (session: SessionWithDirectory) => session.directory ?? session.project?.worktree ?? null,
   refreshGlobalSessionsAfterPending: async () => {
     globalSessionRefreshCalls += 1
+    beforeGlobalSessionRefresh?.()
     return { activeSessions: [], archivedSessions: [] }
   },
   mergeSessionDirectoryMetadata: (incoming: Session, existing?: SessionWithDirectory | null): SessionWithDirectory => {
@@ -653,6 +655,7 @@ describe("empty-project auto-close", () => {
     autoCloseEmptyProjects = true
     autoCloseProjects = [{ id: "project-a", path: "/test/project" }]
     globalSessionRefreshCalls = 0
+    beforeGlobalSessionRefresh = null
   })
 
   test("coalesces concurrent evaluations for the same directory", async () => {
@@ -665,6 +668,21 @@ describe("empty-project auto-close", () => {
 
     expect(globalSessionRefreshCalls).toBe(1)
     autoCloseEmptyProjects = false
+  })
+
+  test("does not remove a project after the runtime changes during refresh", async () => {
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://auto-close-a.test", runtimeKey: "auto-close-a" })
+    beforeGlobalSessionRefresh = () => {
+      switchRuntimeEndpoint({ apiBaseUrl: "http://auto-close-b.test", runtimeKey: "auto-close-b" })
+    }
+    const { closeProjectsWithoutActiveSessionsForDirectories } = await import("./session-actions")
+
+    await closeProjectsWithoutActiveSessionsForDirectories(["/test/project"])
+
+    expect(autoCloseProjects).toEqual([{ id: "project-a", path: "/test/project" }])
+    autoCloseEmptyProjects = false
+    beforeGlobalSessionRefresh = null
   })
 })
 
