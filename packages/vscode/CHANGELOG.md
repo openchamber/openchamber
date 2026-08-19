@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 - If OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Recalling or restoring composer text with Windows line endings no longer crashes the conversation (thanks to @mattv8).
 
 ## [1.19.0] - 2026-08-19
 
