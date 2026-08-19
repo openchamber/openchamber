@@ -223,11 +223,7 @@ const buildHistoryRequestOptions = (
   return { refs: resolveHistoryQueryRefs(refsResponse, query) };
 };
 
-const isStaleHistoryCursorError = (error: unknown): boolean => {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
+const isStaleHistoryCursorError = (error: Error): boolean => {
   const message = error.message.toLowerCase();
   return message.includes('stale') && message.includes('cursor');
 };
@@ -874,7 +870,8 @@ export const useGitStore = create<GitStore>()(
         try {
           await commitPage(append && !shouldRestart && nextCursor !== null, nextCursor);
         } catch (error) {
-          if (append && nextCursor && isStaleHistoryCursorError(error)) {
+          const historyError = error instanceof Error ? error : new Error('Failed to load graph history');
+          if (append && nextCursor && isStaleHistoryCursorError(historyError)) {
             await commitPage(false, null);
             return;
           }
@@ -891,7 +888,7 @@ export const useGitStore = create<GitStore>()(
             refIds,
             isLoading: false,
             isLoadingMore: false,
-            error: error instanceof Error ? error.message : 'Failed to load graph history',
+            error: historyError.message,
             outdated: currentQueryState.items.length > 0,
           });
           errorDirectories.set(directory, {
