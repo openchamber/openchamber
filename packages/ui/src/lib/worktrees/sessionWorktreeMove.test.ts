@@ -137,6 +137,10 @@ mock.module('@/lib/worktrees/worktreeStatus', () => ({
 }));
 
 mock.module('@/stores/useGlobalSessionsStore', () => ({
+  resolveGlobalSessionDirectory: (session: Session & {
+    directory?: string | null;
+    project?: { worktree?: string | null } | null;
+  }) => session.directory ?? session.project?.worktree ?? null,
   refreshGlobalSessionsForDirectories: (directories: string[]) => {
     refreshCalls.push(directories);
     return refreshImplementation(directories);
