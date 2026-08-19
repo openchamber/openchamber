@@ -17,7 +17,9 @@ mock.module("../session-actions", () => ({
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
   isGlobalSessionRecencyOnlyUpdate: (existing: Session, incoming: Session) => (
-    existing.title === incoming.title && existing.time?.updated !== incoming.time?.updated
+    existing.title === incoming.title
+    && existing.time?.updated !== incoming.time?.updated
+    && !incoming.time?.archived
   ),
   resolveGlobalSessionDirectory: (session: Session) => (session as Session & { directory?: string }).directory ?? null,
   useGlobalSessionsStore: {
