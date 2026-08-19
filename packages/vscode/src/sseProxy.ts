@@ -44,14 +44,35 @@ const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) =
 
 const getAbortReason = (signal: AbortSignal) => signal.reason ?? new DOMException('Aborted', 'AbortError');
 
-const normalizeSsePath = (path: string): { pathname: '/event' | '/global/event'; searchParams: URLSearchParams; directory: string | null } => {
-  const parsed = new URL(path, 'https://openchamber.invalid');
-  const pathname = parsed.pathname === '/global/event' ? '/global/event' : '/event';
-  const directory = parsed.searchParams.get('directory');
+type UpstreamSsePath = '/event' | '/global/event' | '/api/event';
+type NormalizedSsePath = {
+  pathname: UpstreamSsePath;
+  searchParams: URLSearchParams;
+  directory: string | null;
+};
+
+const normalizeSsePath = (path: string): NormalizedSsePath => {
+  const base = new URL('https://openchamber.invalid');
+  const parsed = new URL(path, base);
+  if (parsed.origin !== base.origin) {
+    throw new Error('Invalid OpenCode SSE path');
+  }
+
+  const pathname: UpstreamSsePath = (() => {
+    switch (parsed.pathname) {
+      case '/api/api/event': return '/api/event';
+      case '/api/global/event': return '/global/event';
+      case '/api/event':
+      case '/event': return '/event';
+      case '/global/event': return '/global/event';
+      default: throw new Error(`Unsupported OpenCode SSE path: ${parsed.pathname}`);
+    }
+  })();
+  const directory = parsed.searchParams.get('directory')?.trim() || null;
   return {
     pathname,
     searchParams: new URLSearchParams(parsed.searchParams),
-    directory: typeof directory === 'string' && directory.trim().length > 0 ? directory.trim() : null,
+    directory,
   };
 };
 
@@ -59,13 +80,13 @@ const resolveDefaultDirectory = (manager: OpenCodeManager): string => {
   return manager.getWorkingDirectory() || 'global';
 };
 
-const createSseUrl = (baseUrl: string, pathname: '/event' | '/global/event', searchParams: URLSearchParams, directory: string): URL => {
+const createSseUrl = (baseUrl: string, pathname: UpstreamSsePath, searchParams: URLSearchParams, directory: string): URL => {
   const base = `${baseUrl.replace(/\/+$/, '')}/`;
   const url = new URL(pathname.replace(/^\/+/, ''), base);
   for (const [key, value] of searchParams) {
     url.searchParams.append(key, value);
   }
-  if (pathname === '/event' && !url.searchParams.has('directory')) {
+  if (pathname !== '/global/event' && !url.searchParams.has('directory')) {
     url.searchParams.set('directory', directory);
   }
   return url;
@@ -205,6 +226,7 @@ export const openSseProxy = async ({
   onChunk,
   stallTimeoutMs,
 }: OpenSseProxyOptions): Promise<OpenSseProxyResult> => {
+  normalizeSsePath(path);
   // Reconnect logic with exponential backoff
   let reconnectAttempts = 0;
 

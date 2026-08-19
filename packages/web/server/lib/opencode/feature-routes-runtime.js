@@ -113,6 +113,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       sanitizeSkillCatalogs,
       isUnsafeSkillRelativePath,
       buildOpenCodeUrl,
+      getOpenCodeHealthPath,
       getOpenCodeAuthHeaders,
       getOpenCodePort,
       getOwnPorts,
@@ -159,6 +160,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       upsertProviderConfig,
       refreshOpenCodeAfterConfigChange,
       buildOpenCodeUrl,
+      getOpenCodeHealthPath,
       getOpenCodeAuthHeaders,
     });
 

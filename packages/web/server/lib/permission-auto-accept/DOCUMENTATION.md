@@ -12,7 +12,9 @@ Policy inheritance uses the nearest explicit session value. A child `false` ther
 
 ## Runtime
 
-`createPermissionAutoAcceptRuntime` loads and serializes policy writes, subscribes to the global OpenCode event hub, caches session lineage, retries transient replies, and reconciles pending permissions after startup, reconnect, and policy enablement. Enabling Auto-Accept for a session immediately accepts matching pending requests and keeps handling future requests without requiring a connected UI.
+`createPermissionAutoAcceptRuntime` loads and serializes policy writes, subscribes to the normalized global OpenCode event hub, caches session lineage, retries transient replies, and reconciles pending permissions after startup, reconnect, and policy enablement. Enabling Auto-Accept for a session immediately accepts matching pending requests and keeps handling future requests without requiring a connected UI.
+
+Internal requests follow the authoritative current OpenCode protocol. Legacy uses `/session/:sessionId` for lineage, `/permission` for pending requests, and `/permission/:requestId/reply`, with `directory` query scoping unchanged. opencode2 uses `/api/session/:sessionId`, `/api/permission/request`, and `/api/session/:sessionId/permission/:requestId/reply`; only pending-list requests accept directory scoping, using the generated-client query shape `location[directory]`. opencode2 session lookup and reply requests have no location or directory query. The opencode2 reply session ID comes directly from the permission event or pending request and is never inferred from the request ID.
 
 Unknown lineage and failed policy loads fail closed. A failed pending-permission fetch is distinct from an empty successful response and never clears policy state.
 
@@ -31,4 +33,4 @@ VS Code retains its foreground-only responder because it does not run the web se
 
 ## Tests
 
-`runtime.test.js` covers restart persistence, nearest explicit subagent inheritance, missing-lineage lookup, retry/deduplication, and reconnect reconciliation.
+`runtime.test.js` covers restart persistence, nearest explicit subagent inheritance, missing-lineage lookup, protocol-specific query shape, retry/deduplication, and reconnect reconciliation.

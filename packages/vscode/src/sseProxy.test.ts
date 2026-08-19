@@ -11,6 +11,7 @@ const createManager = (): OpenCodeManager => ({
   getStatus: () => 'connected',
   getApiUrl: () => 'http://127.0.0.1:3902',
   getOpenCodeAuthHeaders: () => ({}),
+  getProtocol: () => 'legacy',
   getWorkingDirectory: () => '/workspace',
   isCliAvailable: () => true,
   getDebugInfo: () => ({
@@ -36,6 +37,7 @@ const createManager = (): OpenCodeManager => ({
     version: null,
     secureConnection: false,
     authSource: null,
+    protocol: 'legacy',
   }),
   onStatusChange: (callback) => {
     callback('connected');
@@ -44,6 +46,48 @@ const createManager = (): OpenCodeManager => ({
 });
 
 describe('VS Code SSE proxy', () => {
+  test('maps exact webview SSE paths without changing legacy routes', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchedUrls: string[] = [];
+
+    try {
+      globalThis.fetch = async (input) => {
+        fetchedUrls.push(String(input));
+        return new Response(new ReadableStream<Uint8Array>({ start: (controller) => controller.close() }), {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      };
+
+      for (const path of ['/api/api/event?cursor=v2', '/api/global/event?cursor=global', '/api/event?cursor=legacy']) {
+        const proxy = await openSseProxy({
+          manager: createManager(),
+          path,
+          signal: new AbortController().signal,
+          onChunk: () => {},
+        });
+        await proxy.run;
+      }
+
+      assert.deepEqual(fetchedUrls, [
+        'http://127.0.0.1:3902/api/event?cursor=v2&directory=%2Fworkspace',
+        'http://127.0.0.1:3902/global/event?cursor=global',
+        'http://127.0.0.1:3902/event?cursor=legacy&directory=%2Fworkspace',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('rejects protocol-relative SSE paths', async () => {
+    await assert.rejects(openSseProxy({
+      manager: createManager(),
+      path: '//example.com/api/event',
+      signal: new AbortController().signal,
+      onChunk: () => {},
+    }), /Invalid OpenCode SSE path/);
+  });
+
   test('closes a quiet upstream SSE stream after the stall timeout', async () => {
     const originalFetch = globalThis.fetch;
 

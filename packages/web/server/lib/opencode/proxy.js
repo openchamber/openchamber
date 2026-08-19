@@ -861,6 +861,7 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   app.get('/api/global/event', forwardSseRequest);
   app.get('/api/event', forwardSseRequest);
+  app.get('/api/api/event', forwardSseRequest);
 
   app.get('/api/experimental/session', (req, res, next) => {
     return forwardSanitizedSessionListRequest(req, res, next, 'experimental.session');
@@ -874,13 +875,13 @@ export const registerOpenCodeProxy = (app, deps) => {
   // `apiProxy` and `interactiveOAuthProxy`.
   const resolveOpenCodeProxyAgent = createOpenCodeProxyAgentResolver(resolveProxyTarget);
 
-  const createApiProxy = (timeoutMs) => createProxyMiddleware({
+  const createApiProxy = (timeoutMs, pathRewrite = { '^/api': '' }) => createProxyMiddleware({
     target: resolveProxyTarget(),
     get agent() {
       return resolveOpenCodeProxyAgent();
     },
     changeOrigin: true,
-    pathRewrite: { '^/api': '' },
+    pathRewrite,
     timeout: timeoutMs,
     proxyTimeout: timeoutMs,
     // Dynamic target — port can change after restart
@@ -930,6 +931,7 @@ export const registerOpenCodeProxy = (app, deps) => {
   });
 
   const apiProxy = createApiProxy(PROXY_REQUEST_TIMEOUT_MS);
+  const v2ApiProxy = createApiProxy(PROXY_REQUEST_TIMEOUT_MS, (pathname) => `/api${pathname}`);
   const interactiveOAuthProxy = createApiProxy(INTERACTIVE_OAUTH_TIMEOUT_MS);
 
   // Best-effort fallback for stale clients still sending symlink paths.
@@ -953,5 +955,6 @@ export const registerOpenCodeProxy = (app, deps) => {
   // finishes authorization in the browser (up to OpenCode's 5-minute callback
   // timeout), so it needs the interactive-OAuth deadline, not the default one.
   app.post('/api/mcp/:name/auth/authenticate', interactiveOAuthProxy);
+  app.use('/api/api', v2ApiProxy);
   app.use('/api', apiProxy);
 };

@@ -1,12 +1,13 @@
 type UpgradeCapability = {
   supported: boolean;
   manager: 'opencode' | 'external' | 'openchamber' | null;
-  reason: 'external' | 'unavailable' | 'windows-arm64-workaround' | null;
+  reason: 'external' | 'unavailable' | 'unsupported-protocol' | 'windows-arm64-workaround' | null;
 };
 
 export type OpenCodeUpgradeManager = {
   getApiUrl(): string | null;
   getOpenCodeAuthHeaders(): Record<string, string>;
+  getProtocol(): 'legacy' | 'opencode2' | null;
   getDebugInfo(): { mode: 'managed' | 'external' };
   restart(): Promise<void>;
 };
@@ -47,6 +48,7 @@ const compareVersions = (left: unknown, right: unknown): number => {
 const getCapability = (manager?: OpenCodeUpgradeManager): UpgradeCapability => {
   if (isWindowsArm64()) return { supported: false, manager: 'openchamber', reason: 'windows-arm64-workaround' };
   if (!manager) return { supported: false, manager: null, reason: 'unavailable' };
+  if (manager.getProtocol() === 'opencode2') return { supported: false, manager: null, reason: 'unsupported-protocol' };
   if (manager.getDebugInfo().mode !== 'managed') return { supported: false, manager: 'external', reason: 'external' };
   if (!manager.getApiUrl()) return { supported: false, manager: null, reason: 'unavailable' };
   return { supported: true, manager: 'opencode', reason: null };

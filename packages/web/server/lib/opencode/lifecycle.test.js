@@ -68,6 +68,7 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     openCodeApiPrefix: '',
     openCodeApiPrefixDetected: false,
     openCodeApiDetectionTimer: null,
+    openCodeProtocol: 'legacy',
     lastOpenCodeError: null,
     lastOpenCodeHealthFailure: null,
     lastManagedOpenCodeProcess: null,
@@ -100,6 +101,7 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     getOpenCodeAuthHeaders: () => ({}),
     buildOpenCodeUrl: (route) => `http://127.0.0.1:45678${route}`,
     waitForReady: vi.fn(async () => true),
+    getOpenCodeHealthPath: vi.fn(() => '/global/health'),
     normalizeApiPrefix: vi.fn(() => ''),
     applyOpencodeBinaryFromSettings: vi.fn(async () => null),
     ensureOpencodeCliEnv: vi.fn(),
@@ -591,7 +593,7 @@ describe('OpenCode lifecycle', () => {
     const child = createMockChild();
     spawnMock.mockImplementationOnce(() => {
       queueMicrotask(() => {
-        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+        child.stdout.emit('data', 'server listening on http://127.0.0.1:45678\n');
       });
       return child;
     });

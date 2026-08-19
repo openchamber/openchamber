@@ -530,6 +530,7 @@ let isRestartingOpenCode = false;
 let openCodeApiPrefix = '';
 let openCodeApiPrefixDetected = true;
 let openCodeApiDetectionTimer = null;
+let openCodeProtocol = null;
 let lastOpenCodeError = null;
 let lastOpenCodeLaunchDiagnostics = null;
 let lastOpenCodeHealthFailure = null;
@@ -651,6 +652,7 @@ Object.defineProperties(openCodeNetworkState, {
   openCodeApiPrefix: { get: () => openCodeApiPrefix, set: (value) => { openCodeApiPrefix = value; } },
   openCodeApiPrefixDetected: { get: () => openCodeApiPrefixDetected, set: (value) => { openCodeApiPrefixDetected = value; } },
   openCodeApiDetectionTimer: { get: () => openCodeApiDetectionTimer, set: (value) => { openCodeApiDetectionTimer = value; } },
+  openCodeProtocol: { get: () => openCodeProtocol, set: (value) => { openCodeProtocol = value; } },
 });
 
 const openCodeNetworkRuntime = createOpenCodeNetworkRuntime({
@@ -663,6 +665,7 @@ const waitForReady = (...args) => openCodeNetworkRuntime.waitForReady(...args);
 const normalizeApiPrefix = (...args) => openCodeNetworkRuntime.normalizeApiPrefix(...args);
 const setDetectedOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.setDetectedOpenCodeApiPrefix(...args);
 const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(...args);
+const getOpenCodeHealthPath = (...args) => openCodeNetworkRuntime.getOpenCodeHealthPath(...args);
 const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
 const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
 
@@ -863,6 +866,7 @@ const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
+  getOpenCodeProtocol: () => openCodeProtocol,
 });
 
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
@@ -872,6 +876,7 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   readSettingsFromDiskMigrated,
   persistSettings,
   broadcastGlobalUiEvent,
+  getOpenCodeProtocol: () => openCodeProtocol,
 });
 permissionAutoAcceptRuntime.start();
 notificationTriggerRuntime.setGetIsSessionAutoAccepting(
@@ -1100,6 +1105,7 @@ Object.defineProperties(openCodeLifecycleState, {
   openCodeApiPrefix: { get: () => openCodeApiPrefix, set: (value) => { openCodeApiPrefix = value; } },
   openCodeApiPrefixDetected: { get: () => openCodeApiPrefixDetected, set: (value) => { openCodeApiPrefixDetected = value; } },
   openCodeApiDetectionTimer: { get: () => openCodeApiDetectionTimer, set: (value) => { openCodeApiDetectionTimer = value; } },
+  openCodeProtocol: { get: () => openCodeProtocol, set: (value) => { openCodeProtocol = value; } },
   lastOpenCodeError: { get: () => lastOpenCodeError, set: (value) => { lastOpenCodeError = value; } },
   lastOpenCodeLaunchDiagnostics: { get: () => lastOpenCodeLaunchDiagnostics, set: (value) => { lastOpenCodeLaunchDiagnostics = value; } },
   lastOpenCodeHealthFailure: { get: () => lastOpenCodeHealthFailure, set: (value) => { lastOpenCodeHealthFailure = value; } },
@@ -1131,6 +1137,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   getOpenCodeAuthHeaders,
   buildOpenCodeUrl,
   waitForReady,
+  getOpenCodeHealthPath,
   normalizeApiPrefix,
   applyOpencodeBinaryFromSettings,
   ensureOpencodeCliEnv,
@@ -1692,6 +1699,7 @@ async function main(options = {}) {
         openCodeAuthSource: openCodeAuthSource || null,
         openCodeApiPrefix: '',
         openCodeApiPrefixDetected: true,
+        openCodeProtocol,
         isOpenCodeReady,
         lastOpenCodeError,
         lastOpenCodeLaunchDiagnostics,
@@ -1893,6 +1901,7 @@ async function main(options = {}) {
     sanitizeSkillCatalogs,
     isUnsafeSkillRelativePath,
     buildOpenCodeUrl,
+    getOpenCodeHealthPath,
     getOpenCodeAuthHeaders,
     getOpenCodePort: () => openCodePort,
     // Dev-server discovery must not offer OpenChamber's own listeners back to
