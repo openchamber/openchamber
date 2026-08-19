@@ -88,31 +88,34 @@ const rollbackMovedSessions = async (
 const removeFailedWorktree = async (
   project: ProjectRef,
   worktree: WorktreeMetadata,
-  moveError: unknown,
+  moveError: Error,
 ): Promise<never> => {
   try {
     await removeProjectWorktree(project, worktree, { deleteLocalBranch: true });
   } catch {
-    const message = moveError instanceof Error ? moveError.message : String(moveError);
-    throw new Error(`Session move failed and the new worktree could not be removed: ${message}`);
+    throw new Error(`Session move failed and the new worktree could not be removed: ${moveError.message}`);
   }
   throw moveError;
 };
 
-const moveSessionTreeToQuickWorktree = async (input: {
-  root: Session;
-  descendants: Session[];
-  sourceDirectory: string;
-}): Promise<string> => {
+const moveSessionTreeTransaction = async (
+  input: {
+    root: Session;
+    descendants: Session[];
+    sourceDirectory: string;
+  },
+  prepareDestination: () => Promise<{
+    directory: string;
+    metadata: WorktreeMetadata;
+    onMoveFailure?: (error: Error) => Promise<never>;
+  }>,
+): Promise<string> => {
   if (useSessionMoveState.getState().pendingSessionIds.has(input.root.id)) {
     throw new Error('Session move already in progress');
   }
   setSessionMovePending(input.root.id, true);
 
   try {
-    const project = resolveProjectRef(input.sourceDirectory);
-    if (!project) throw new Error('Unable to find the project for this session');
-
     const sessions = [input.root, ...input.descendants];
     const previousMetadata = new Map(
       sessions.map((session) => [
@@ -122,47 +125,110 @@ const moveSessionTreeToQuickWorktree = async (input: {
     );
     assertSessionsIdle(sessions, input.sourceDirectory);
 
-    const sourceBranch = await resolveSourceBranch(input.sourceDirectory, project.path);
-    const worktree = await createQuickWorktree(project, { startRef: sourceBranch });
-
+    let destination: Awaited<ReturnType<typeof prepareDestination>> | null = null;
     const moved: Session[] = [];
     try {
-      await waitForWorktreeGitReady(worktree.path);
-      // Branch/status discovery and worktree creation can take long enough for a
-      // session to start running, so verify the whole tree again before moving.
+      destination = await prepareDestination();
+      // Setup can take long enough for one of the sessions to start running, so
+      // verify the whole tree again immediately before the first move.
       assertSessionsIdle(sessions, input.sourceDirectory);
       for (const [index, session] of sessions.entries()) {
         // Transfer the checkout changes once with the root. Descendants only
         // need their execution location updated.
-        await moveSessionToDirectory(session, input.sourceDirectory, worktree.path, index === 0);
+        await moveSessionToDirectory(session, input.sourceDirectory, destination.directory, index === 0);
         moved.push(session);
-        useSessionUIStore.getState().setWorktreeMetadata(session.id, getLatestWorktreeMetadata(worktree));
+        useSessionUIStore.getState().setWorktreeMetadata(session.id, getLatestWorktreeMetadata(destination.metadata));
       }
     } catch (error) {
+      const moveError = error instanceof Error ? error : new Error(String(error));
       const rollbackFailures = await rollbackMovedSessions(
         moved,
         input.root.id,
         input.sourceDirectory,
-        worktree.path,
+        destination?.directory ?? input.sourceDirectory,
         previousMetadata,
       );
       if (rollbackFailures.length > 0) {
-        throw new Error(`Session move partially failed and could not be fully rolled back: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`Session move partially failed and could not be fully rolled back: ${moveError.message}`);
       }
-      return removeFailedWorktree(project, worktree, error);
+      if (destination?.onMoveFailure) {
+        return destination.onMoveFailure(moveError);
+      }
+      throw moveError;
     }
 
     try {
-      await refreshGlobalSessionsForDirectories([input.sourceDirectory, worktree.path]);
+      await refreshGlobalSessionsForDirectories([input.sourceDirectory, destination.directory]);
     } catch (error) {
       // Direct action updates already reconciled both stores. Keep the move
       // successful if this best-effort authoritative refresh is unavailable.
       console.warn('[session-worktree-move] Failed to refresh moved sessions', error);
     }
-    return worktree.path;
+    return destination.directory;
   } finally {
     setSessionMovePending(input.root.id, false);
   }
+};
+
+export const moveSessionTreeToExistingWorktree = async (input: {
+  root: Session;
+  descendants: Session[];
+  sourceDirectory: string;
+  destination: WorktreeMetadata;
+}): Promise<string> => {
+  const normalizedSourceDirectory = normalizePath(input.sourceDirectory) ?? input.sourceDirectory;
+  const normalizedDestinationDirectory = normalizePath(input.destination.path) ?? input.destination.path;
+  if (normalizedSourceDirectory === normalizedDestinationDirectory) {
+    throw new Error('Source and destination are the same');
+  }
+  if (input.destination.worktreeStatus !== 'ready') {
+    throw new Error('Destination worktree is not ready');
+  }
+
+  return moveSessionTreeTransaction(input, async () => ({
+    directory: input.destination.path,
+    metadata: input.destination,
+  }));
+};
+
+const moveSessionTreeToQuickWorktree = async (input: {
+  root: Session;
+  descendants: Session[];
+  sourceDirectory: string;
+}): Promise<string> => {
+  return moveSessionTreeTransaction(input, async () => {
+    const project = resolveProjectRef(input.sourceDirectory);
+    if (!project) throw new Error('Unable to find the project for this session');
+
+    const sourceBranch = await resolveSourceBranch(input.sourceDirectory, project.path);
+    const worktree = await createQuickWorktree(project, { startRef: sourceBranch });
+    try {
+      await waitForWorktreeGitReady(worktree.path);
+    } catch (error) {
+      const setupError = error instanceof Error ? error : new Error(String(error));
+      return removeFailedWorktree(project, worktree, setupError);
+    }
+    return {
+      directory: worktree.path,
+      metadata: worktree,
+      onMoveFailure: (error) => removeFailedWorktree(project, worktree, error),
+    };
+  });
+};
+
+export const startSessionTreeExistingWorktreeMove = (input: {
+  root: Session;
+  descendants: Session[];
+  sourceDirectory: string;
+  destination: WorktreeMetadata;
+  successMessage: string;
+  failureMessage: string;
+}): void => {
+  void moveSessionTreeToExistingWorktree(input)
+    .then(() => toast.success(input.successMessage))
+    .catch((error) => toast.error(input.failureMessage, {
+      description: error instanceof Error ? error.message : String(error),
+    }));
 };
 
 export const startSessionTreeWorktreeMove = (input: {

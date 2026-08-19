@@ -103,6 +103,14 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { streamPerfCount, streamPerfMark } from '@/stores/utils/streamDebug';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { isCapacitorApp } from '@/lib/platform';
+import {
+  commitDiscoveredRawWorktreesByProject,
+  ensureRawWorktreesByProjectScope,
+  startSessionWorktreeMenuLoad,
+  type RawWorktreesByProjectScope,
+  type StartSessionWorktreeMenuLoadArgs,
+} from './sidebar/sessionWorktreeMenu';
+import { resolveProjectRef } from '@/lib/worktreeSessionCreator';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -542,6 +550,11 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const [worktreeDiscoveryRevision, requestWorktreeDiscovery] = React.useReducer((revision) => revision + 1, 0);
   const isWorktreeTopologyLoading = !isVSCode && resolvedWorktreeTopologyKey !== projectWorktreeDiscoveryKey;
   const [unresolvedWorktreeProjectPaths, setUnresolvedWorktreeProjectPaths] = React.useState<ReadonlySet<string>>(new Set());
+  const rawWorktreesByProjectRef = React.useRef<RawWorktreesByProjectScope>({
+    runtimeKey: null,
+    revision: 0,
+    worktreesByProject: new Map(),
+  });
 
   const initialGlobalSessionsRefreshStartedRef = React.useRef(false);
   React.useEffect(() => {
@@ -567,14 +580,25 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       const projectEntries = useProjectsStore.getState().projects;
       if (projectEntries.length === 0 || isVSCode) {
         if (!cancelled) {
+          rawWorktreesByProjectRef.current = {
+            runtimeKey: null,
+            revision: 0,
+            worktreesByProject: new Map(),
+          };
           setUnresolvedWorktreeProjectPaths(new Set());
           setResolvedWorktreeTopologyKey(projectWorktreeDiscoveryKey);
         }
         return;
       }
 
-      const knownWorktreesByProject = useSessionUIStore.getState().availableWorktreesByProject;
-      const worktreesByProject = new Map(knownWorktreesByProject);
+      const knownPublishedWorktreesByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      const seededRawScope = ensureRawWorktreesByProjectScope({
+        rawWorktreesByProjectRef,
+        publishedWorktreesByProject: knownPublishedWorktreesByProject,
+        runtimeKey: discoveryRuntimeKey,
+      });
+      const capturedRawRevision = seededRawScope.revision;
+      const worktreesByProject = new Map(seededRawScope.worktreesByProject);
       const unresolvedProjectPaths = new Set<string>();
 
       // Constrain fanout: previously `Promise.all(projects.map(...))` could
@@ -627,18 +651,26 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           worktreesByProject.delete(projectPath);
         }
       }
-      const partitionedWorktreesByProject = partitionWorktreesByRegisteredProject(projectEntries, worktreesByProject);
-      const allWorktrees = [...partitionedWorktreesByProject.values()].flat();
-      // Newly appearing worktrees sort to the top of their project's
-      // worktree list (see worktreeFirstSeen.ts).
-      recordWorktreesSeen(allWorktrees.map((worktree) => worktree.path), Date.now());
-
-      // Skip update if nothing changed — see worktreeMapsEqual JSDoc.
-      if (!worktreeMapsEqual(partitionedWorktreesByProject, knownWorktreesByProject)) {
-        useSessionUIStore.setState({
-          availableWorktrees: allWorktrees,
-          availableWorktreesByProject: partitionedWorktreesByProject,
-        });
+      const committed = commitDiscoveredRawWorktreesByProject({
+        rawWorktreesByProjectRef,
+        runtimeKey: discoveryRuntimeKey,
+        capturedRevision: capturedRawRevision,
+        nextRawWorktreesByProject: worktreesByProject,
+        publishedWorktreesByProject: knownPublishedWorktreesByProject,
+        partitionWorktreesByRegisteredProject,
+        projects: projectEntries,
+        worktreeMapsEqual,
+        recordWorktreesSeen,
+        publishTopology: (next) => {
+          useSessionUIStore.setState(next);
+        },
+        requestRediscovery: () => {
+          requestWorktreeDiscovery();
+        },
+        now: () => Date.now(),
+      });
+      if (!committed) {
+        return;
       }
       setUnresolvedWorktreeProjectPaths(unresolvedProjectPaths);
       setResolvedWorktreeTopologyKey(projectWorktreeDiscoveryKey);
@@ -930,6 +962,27 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const stableHandleDeleteSession = useStableRenderCallback(handleDeleteSession);
   const stableHandleRestoreSession = useStableRenderCallback(handleRestoreSession);
   const stableCreateFolderAndStartRename = useStableRenderCallback(createFolderAndStartRename);
+  const stableStartSessionWorktreeMenuLoad = useStableRenderCallback((args: StartSessionWorktreeMenuLoadArgs) => {
+    const resolvedProject = args.projectId
+      ? (projects.find((candidate) => candidate.id === args.projectId) ?? null)
+      : (args.sourceDirectory ? resolveProjectRef(args.sourceDirectory) : null);
+    return startSessionWorktreeMenuLoad(args, {
+      projects,
+      rawWorktreesByProjectRef,
+      getPublishedWorktreesByProject: () => useSessionUIStore.getState().availableWorktreesByProject,
+      resolveProject: (directory) => resolveProjectRef(directory),
+      listProjectWorktrees,
+      partitionWorktreesByRegisteredProject,
+      worktreeMapsEqual,
+      recordWorktreesSeen,
+      publishTopology: (next) => {
+        useSessionUIStore.setState(next);
+      },
+      getRuntimeKey,
+      now: () => Date.now(),
+      projectRootBranch: resolvedProject ? (projectRootBranches.get(resolvedProject.id) ?? null) : null,
+    });
+  });
 
   const showMoreGroupSessions = React.useCallback((groupId: string, currentVisibleCount: number, increment: number = 7) => {
     setVisibleSessionCountByGroup((prev) => {
@@ -1627,6 +1680,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         mobileVariant={mobileVariant}
         alwaysShowActions={alwaysShowSidebarActions}
         renderSessionNode={renderSessionNode}
+        startSessionWorktreeMenuLoad={stableStartSessionWorktreeMenuLoad}
         secondaryMeta={secondaryMeta}
         renderContext={renderContext}
         subtreeContainsEditing={renderExtras?.subtreeContainsEditing ?? EMPTY_SUBTREE_SET}
