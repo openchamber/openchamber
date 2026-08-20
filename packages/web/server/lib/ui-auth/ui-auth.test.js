@@ -182,6 +182,19 @@ describe('ui auth client credential seam', () => {
     expect(await auth.ensureSessionToken(urlReq, urlRes)).toBe('client:device-1');
     expect(await auth.resolveAuthContext(urlReq, urlRes, { allowUrlToken: false })).toBe(null);
 
+    const watchReq = {
+      method: 'GET',
+      path: '/api/fs/watch',
+      url: `/api/fs/watch?directory=%2Frepo&directories=%5B%22%2Frepo%22%5D&oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'text/event-stream' },
+    };
+    const watchRes = createResponse();
+    let watchCalled = false;
+    await auth.requireAuth(watchReq, watchRes, () => {
+      watchCalled = true;
+    });
+    expect(watchCalled).toBe(true);
+
     const serveReq = { method: 'GET', path: '/api/fs/serve/tmp/index.html', url: `/api/fs/serve/tmp/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
     const serveRes = createResponse();
     let serveCalled = false;

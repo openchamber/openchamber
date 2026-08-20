@@ -564,6 +564,20 @@ export interface DirectoryListResult {
   entries: FileListEntry[];
 }
 
+export interface FileChangeEvent {
+  directory: string;
+}
+
+export interface FileWatchHandlers {
+  onChange: (event: FileChangeEvent) => void;
+  onReady?: () => void;
+  onError?: () => void;
+}
+
+export interface FileWatchSubscription {
+  close: () => void;
+}
+
 export interface FileSearchQuery {
   directory: string;
   query: string;
@@ -600,6 +614,11 @@ interface FileReadOptions {
 
 export interface FilesAPI {
   listDirectory(path: string, options?: ListDirectoryOptions): Promise<DirectoryListResult>;
+  watchDirectories?(
+    workspaceDirectory: string,
+    directories: string[],
+    handlers: FileWatchHandlers,
+  ): FileWatchSubscription | null;
   search(payload: FileSearchQuery): Promise<FileSearchResult[]>;
   createDirectory(path: string): Promise<{ success: boolean; path: string }>;
   statFile?(path: string, options?: FileReadOptions): Promise<{ path: string; isFile: boolean; size: number; mtimeMs?: number }>;

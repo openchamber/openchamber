@@ -7,7 +7,8 @@ const isAllowedSsePath = (pathname) => {
   return pathname === '/api/event'
     || pathname === '/api/global/event'
     || pathname === '/api/openchamber/events'
-    || pathname === '/api/notifications/stream';
+    || pathname === '/api/notifications/stream'
+    || pathname === '/api/fs/watch';
 };
 
 const isAllowedWebSocketPath = (pathname) => {
