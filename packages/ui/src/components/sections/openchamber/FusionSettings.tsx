@@ -19,7 +19,14 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { FusionPreset } from '@/components/chat/FusionAutocomplete';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsSection,
+  SettingsFieldRow,
+  SettingsCheckboxRow,
+  SETTINGS_HELPER_CLASS,
+  SETTINGS_FIELD_LABEL_CLASS,
+  SETTINGS_OPTION_STACK_CLASS,
+} from '@/components/sections/shared/SettingsSection';
 
 const MAX_MODELS = 4;
 const MIN_MODELS = 2;
@@ -185,7 +192,7 @@ const PresetEditorDialog: React.FC<{
           <DialogDescription>{t('settings.fusion.dialogDescription')}</DialogDescription>
         </DialogHeader>
         <label className="block">
-          <span className="mb-1 block text-[12px] text-muted-foreground">{t('settings.fusion.nameLabel')}</span>
+          <span className={cn(SETTINGS_FIELD_LABEL_CLASS, 'mb-1 block')}>{t('settings.fusion.nameLabel')}</span>
           <Input
             value={name}
             onChange={(event) => setName(event.target.value)}
@@ -194,7 +201,7 @@ const PresetEditorDialog: React.FC<{
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-[12px] text-muted-foreground">{t('settings.fusion.descriptionLabel')}</span>
+          <span className={cn(SETTINGS_FIELD_LABEL_CLASS, 'mb-1 block')}>{t('settings.fusion.descriptionLabel')}</span>
           <Textarea
             value={description}
             onChange={(event) => setDescription(event.target.value)}
@@ -203,13 +210,13 @@ const PresetEditorDialog: React.FC<{
           />
         </label>
         <div>
-          <span className="mb-1 block text-[12px] text-muted-foreground">
+          <span className={cn(SETTINGS_FIELD_LABEL_CLASS, 'mb-1 block')}>
             {t('settings.fusion.modelsLabel', { count: models.length })}
           </span>
           {loadingOptions ? (
-            <p className="text-[12px] text-muted-foreground">{t('settings.fusion.loading')}</p>
+            <p className={SETTINGS_HELPER_CLASS}>{t('settings.fusion.loading')}</p>
           ) : options.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">{t('settings.fusion.noModels')}</p>
+            <p className={SETTINGS_HELPER_CLASS}>{t('settings.fusion.noModels')}</p>
           ) : (
             <>
               <Input
@@ -218,44 +225,33 @@ const PresetEditorDialog: React.FC<{
                 placeholder={t('settings.fusion.searchModels')}
                 className="mb-1.5"
               />
-              <div className="oc-scrollbar max-h-44 overflow-auto rounded-md border border-border/80 p-1">
+              <div className={cn('oc-scrollbar max-h-44 overflow-auto', SETTINGS_OPTION_STACK_CLASS)}>
                 {visibleOptions.length === 0 ? (
-                  <p className="px-2 py-4 text-center text-[12px] text-muted-foreground">
+                  <p className={cn(SETTINGS_HELPER_CLASS, 'px-2 py-4 text-center')}>
                     {t('settings.fusion.noModelResults')}
                   </p>
                 ) : (
                   visibleOptions.map((option) => {
                     const checked = models.includes(option.id);
                     return (
-                      <button
+                      <SettingsCheckboxRow
                         key={option.id}
-                        type="button"
-                        role="checkbox"
-                        aria-checked={checked}
+                        checked={checked}
+                        onChange={() => toggleModel(option.id)}
+                        label={option.label}
+                        ariaLabel={option.label}
                         disabled={!checked && models.length >= MAX_MODELS}
-                        onClick={() => toggleModel(option.id)}
-                        className={cn(
-                          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]',
-                          'transition-colors hover:bg-[var(--interactive-hover)]/40',
-                          'disabled:cursor-not-allowed disabled:opacity-50',
-                        )}
-                      >
-                        <Icon
-                          name={checked ? 'checkbox' : 'checkbox-blank'}
-                          className={cn('size-4 shrink-0', checked ? 'text-primary' : 'text-muted-foreground')}
-                        />
-                        <span className="min-w-0 truncate">{option.label}</span>
-                      </button>
+                      />
                     );
                   })
                 )}
               </div>
-              <p className="mt-1 text-[12px] text-muted-foreground">{t('settings.fusion.modelsHint')}</p>
+              <p className={cn(SETTINGS_HELPER_CLASS, 'mt-1')}>{t('settings.fusion.modelsHint')}</p>
             </>
           )}
         </div>
         {saveError ? (
-          <p className="text-[12px] text-[var(--status-error)]">{saveError}</p>
+          <p className={cn(SETTINGS_HELPER_CLASS, 'text-[var(--status-error)]')}>{saveError}</p>
         ) : null}
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
@@ -336,41 +332,45 @@ export const FusionSettings: React.FC = () => {
     >
 
       {loadError ? (
-        <p className="text-[13px] text-[var(--status-error)]">{loadError}</p>
+        <p className={cn(SETTINGS_HELPER_CLASS, 'text-[var(--status-error)]')}>{loadError}</p>
       ) : null}
 
       {loading ? (
-        <p className="text-[13px] text-muted-foreground">{t('settings.fusion.loading')}</p>
+        <p className={SETTINGS_HELPER_CLASS}>{t('settings.fusion.loading')}</p>
       ) : presets.length === 0 ? (
-        <p className="rounded-lg border border-border/80 px-3 py-4 text-center text-[13px] text-muted-foreground">
+        <p className={cn(SETTINGS_HELPER_CLASS, 'py-4 text-center')}>
           {t('settings.fusion.empty')}
         </p>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className={SETTINGS_OPTION_STACK_CLASS}>
           {presets.map((preset) => (
-            <div key={preset.name} className="flex items-center gap-3 rounded-lg border border-border/80 px-3 py-2.5">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-[13px] font-medium text-foreground">{preset.name}</span>
-                  <span className="rounded-full bg-[var(--interactive-hover)] px-1.5 py-px text-[11px] font-medium leading-4 text-muted-foreground">
+            <SettingsFieldRow
+              key={preset.name}
+              label={
+                <span className="inline-flex items-center gap-2">
+                  <span>{preset.name}</span>
+                  <span className={cn(SETTINGS_HELPER_CLASS, 'rounded-full bg-[var(--interactive-hover)] px-1.5 py-px font-medium leading-4')}>
                     {preset.models.length}
                   </span>
-                </div>
-                {preset.description ? (
-                  <p className="mt-0.5 truncate text-[12px] text-muted-foreground">{preset.description}</p>
-                ) : null}
-                <p className="mt-0.5 truncate text-[12px] text-muted-foreground/80">{preset.models.join(' · ')}</p>
-              </div>
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-[12px]" onClick={() => {
+                </span>
+              }
+              description={
+                <>
+                  {preset.description ? <span className="block truncate">{preset.description}</span> : null}
+                  <span className="block truncate opacity-80">{preset.models.join(' · ')}</span>
+                </>
+              }
+            >
+              <Button variant="ghost" size="sm" onClick={() => {
                 setEditing(preset);
                 setEditorOpen(true);
               }}>
                 {t('settings.fusion.edit')}
               </Button>
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-[12px] text-[var(--status-error)]" onClick={() => setDeleteTarget(preset)}>
+              <Button variant="ghost" size="sm" className="text-[var(--status-error)]" onClick={() => setDeleteTarget(preset)}>
                 {t('settings.fusion.delete')}
               </Button>
-            </div>
+            </SettingsFieldRow>
           ))}
         </div>
       )}
