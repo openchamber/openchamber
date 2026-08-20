@@ -244,6 +244,22 @@ export async function handleConfigBridgeMessage(
     }
 
     case 'api:config/reload': {
+      if (
+        ctx?.manager?.getProtocol() === 'opencode2'
+        && ctx.manager.getDebugInfo().mode === 'managed'
+      ) {
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            success: true,
+            requiresReload: false,
+            requiresManualRestart: true,
+            message: 'Configuration is saved on disk. Restart the global OpenCode service to apply the changes.',
+          },
+        };
+      }
       await ctx?.manager?.restart();
       return { id, type, success: true, data: { restarted: true } };
     }
@@ -635,6 +651,22 @@ export async function handleConfigBridgeMessage(
         if (typeof body?.renameTo === 'string') {
           const newName = body.renameTo.trim();
           renameSkill(skillName, newName, workingDirectory);
+          if (
+            ctx?.manager?.getProtocol() === 'opencode2'
+            && ctx.manager.getDebugInfo().mode === 'managed'
+          ) {
+            return {
+              id,
+              type,
+              success: true,
+              data: {
+                ...buildDeferredRestartResponse(
+                  `Skill renamed to ${newName}. Restart the global OpenCode service to apply.`,
+                ),
+                name: newName,
+              },
+            };
+          }
           await ctx?.manager?.restart();
           return {
             id,

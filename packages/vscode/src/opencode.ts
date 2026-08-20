@@ -7,6 +7,7 @@ import { execSync } from 'child_process';
 import { spawnSync } from 'child_process';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
+import { Service, type Endpoint } from '@opencode-ai/client/service';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './opencodeProcessRegistry';
@@ -22,6 +23,7 @@ const WINDOWS_EXECUTABLE_EXTENSIONS = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.C
   .map((ext) => (ext.startsWith('.') ? ext : `.${ext}`));
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 export type OpenCodeProtocol = 'legacy' | 'opencode2';
+type OpenCodeAuthHeaders = { Authorization?: string };
 
 type OpenCodeDebugInfo = {
   mode: 'managed' | 'external';
@@ -46,7 +48,7 @@ type OpenCodeDebugInfo = {
   lastStartAttempts: number | null;
   version: string | null;
   secureConnection: boolean;
-  authSource: 'user-env' | 'generated' | 'rotated' | null;
+  authSource: 'user-env' | 'generated' | 'rotated' | 'service' | null;
   protocol: OpenCodeProtocol | null;
 };
 
@@ -61,7 +63,7 @@ export interface OpenCodeManager {
   setWorkingDirectory(path: string): Promise<SetWorkingDirectoryResult>;
   getStatus(): ConnectionStatus;
   getApiUrl(): string | null;
-  getOpenCodeAuthHeaders(): Record<string, string>;
+  getOpenCodeAuthHeaders(): OpenCodeAuthHeaders;
   getProtocol(): OpenCodeProtocol | null;
   getWorkingDirectory(): string;
   isCliAvailable(): boolean;
@@ -156,6 +158,14 @@ export function resolveWindowsLaunchSpec(binary: string, args: string[]): Window
     binary: process.env.ComSpec || 'cmd.exe',
     args: ['/d', '/s', '/c', 'call', trimmed, ...args],
   };
+}
+
+function isOpenCodeV2Launch(binary: string, launch: WindowsLaunchSpec): boolean {
+  return [binary, launch.binary, ...launch.args].some((value) => {
+    const candidate = stripWrappingQuotes(value);
+    const extension = path.extname(candidate);
+    return path.basename(candidate, extension).toLowerCase() === 'opencode2';
+  });
 }
 
 // Strip a single wrapping quote pair (Windows "Copy as path" and quoted shell
@@ -851,8 +861,65 @@ async function allocateManagedOpenCodePort(): Promise<number> {
   });
 }
 
+async function startSharedOpenCodeService(
+  launch: WindowsLaunchSpec,
+  workingDirectory: string,
+  inheritedEnvironment: NodeJS.ProcessEnv,
+): Promise<Endpoint> {
+  await new Promise<void>((resolve, reject) => {
+    const serviceEnv = { ...inheritedEnvironment };
+    delete serviceEnv.OPENCODE_SERVER_PASSWORD;
+    delete serviceEnv.OPENCODE_SERVER_USERNAME;
+    const child = spawn(launch.binary, [...launch.args, 'service', 'start'], {
+      cwd: workingDirectory,
+      env: serviceEnv,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    let settled = false;
+
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      child.off('error', onError);
+      child.off('exit', onExit);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onError = (error: Error) => finish(error);
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (code === 0) {
+        finish();
+        return;
+      }
+      finish(new Error(`OpenCode V2 service start exited with ${signal ? `signal ${signal}` : `code ${code}`}`));
+    };
+    const timeout = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        // The startup command may already have exited.
+      }
+      finish(new Error(`OpenCode V2 service start timed out after ${READY_CHECK_TIMEOUT_MS}ms`));
+    }, READY_CHECK_TIMEOUT_MS);
+
+    child.once('error', onError);
+    child.once('exit', onExit);
+  });
+
+  const endpoint = await Service.discover();
+  if (!endpoint) {
+    throw new Error('OpenCode V2 global service did not publish a healthy compatible endpoint after service start');
+  }
+  return endpoint;
+}
+
 export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCodeManager {
+  const sharedServiceEnvironment = { ...process.env };
   let server: { url: string; close: () => void } | null = null;
+  let sharedServiceMode = false;
+  let sharedServiceEndpoint: Endpoint | null = null;
   let reapedOrphansOnce = false;
   let managedApiUrlOverride: string | null = null;
   let managedPassword: string | null = null;
@@ -916,6 +983,9 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
     if (useConfiguredUrl && configuredApiUrl) {
       return configuredApiUrl.replace(/\/+$/, '');
     }
+    if (sharedServiceEndpoint) {
+      return sharedServiceEndpoint.url.replace(/\/+$/, '');
+    }
     if (managedApiUrlOverride) {
       return managedApiUrlOverride.replace(/\/+$/, '');
     }
@@ -928,7 +998,14 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
     return null;
   };
 
-  const getOpenCodeAuthHeaders = (): Record<string, string> => {
+  const getOpenCodeAuthHeaders = (): OpenCodeAuthHeaders => {
+    if (!useConfiguredUrl && sharedServiceMode) {
+      if (!sharedServiceEndpoint) {
+        return {};
+      }
+      const headers = Service.headers(sharedServiceEndpoint);
+      return headers ? { Authorization: headers.authorization } : {};
+    }
     const password = (managedPassword || userProvidedEnvPassword || process.env.OPENCODE_SERVER_PASSWORD || '').trim();
     if (!password) {
       return {};
@@ -996,25 +1073,12 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       return;
     }
 
-    // If server already running, don't spawn another
-    if (server) {
+    // If the selected server is already running, don't start another.
+    if (server || sharedServiceEndpoint) {
       if (status !== 'connected') {
         setStatus('connected');
       }
       return;
-    }
-
-    // Before spawning our own server, reap any OpenCode process WE spawned in a
-    // prior run that was orphaned by a crash/host-kill. Verified + scoped to our
-    // own pids, so it never touches a live instance's or the user's own server.
-    if (!reapedOrphansOnce) {
-      reapedOrphansOnce = true;
-      try {
-        const { reaped } = await reapOrphanedProcesses({ log: (msg) => console.log(msg) });
-        if (reaped > 0) console.log(`[opencode] startup reaped ${reaped} orphaned process(es)`);
-      } catch (error) {
-        console.warn('[opencode] orphan reap failed:', error instanceof Error ? error.message : error);
-      }
     }
 
     setStatus('connecting');
@@ -1024,6 +1088,7 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
     detectedPort = null;
     lastExitCode = null;
     managedApiUrlOverride = null;
+    sharedServiceEndpoint = null;
     protocol = null;
 
     try {
@@ -1042,6 +1107,38 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
         cliPath = resolvedCli;
         appendToPath(path.dirname(resolvedCli));
         process.env.OPENCODE_BINARY = resolvedCli;
+
+        const launch = resolveWindowsLaunchSpec(resolvedCli, []);
+        sharedServiceMode = isOpenCodeV2Launch(resolvedCli, launch);
+        if (sharedServiceMode) {
+          protocol = 'opencode2';
+          if (managedPasswordSource !== 'user-env' && managedPassword === process.env.OPENCODE_SERVER_PASSWORD) {
+            delete process.env.OPENCODE_SERVER_PASSWORD;
+          }
+          const serviceStartedAt = Date.now();
+          const serviceCwd = serverWorkingDirectory();
+          fs.mkdirSync(serviceCwd, { recursive: true });
+          sharedServiceEndpoint = await startSharedOpenCodeService(launch, serviceCwd, sharedServiceEnvironment);
+          detectedPort = resolvePortFromUrl(sharedServiceEndpoint.url);
+          lastReadyElapsedMs = Date.now() - serviceStartedAt;
+          lastReadyAttempts = 1;
+          version = null;
+          setStatus('connected');
+          return;
+        }
+      }
+
+      sharedServiceMode = false;
+
+      // Legacy managed children retain the existing registry and orphan cleanup.
+      if (!reapedOrphansOnce) {
+        reapedOrphansOnce = true;
+        try {
+          const { reaped } = await reapOrphanedProcesses({ log: (msg) => console.log(msg) });
+          if (reaped > 0) console.log(`[opencode] startup reaped ${reaped} orphaned process(es)`);
+        } catch (error) {
+          console.warn('[opencode] orphan reap failed:', error instanceof Error ? error.message : error);
+        }
       }
 
       const password = await ensureManagedOpenCodeServerPassword({
@@ -1115,6 +1212,16 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
   }
 
   async function stopInternal(): Promise<void> {
+    if (sharedServiceMode) {
+      sharedServiceEndpoint = null;
+      managedApiUrlOverride = null;
+      detectedPort = null;
+      version = null;
+      protocol = null;
+      setStatus('disconnected');
+      return;
+    }
+
     const portToKill = detectedPort;
 
     if (server) {
@@ -1159,14 +1266,16 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
     restartCount += 1;
     const restartDirectory = workingDirectory;
     await stopInternal();
-    await new Promise(r => setTimeout(r, 250));
+    if (!sharedServiceMode) {
+      await new Promise(r => setTimeout(r, 250));
+    }
     await startInternal(restartDirectory, { rotateManaged: true });
   }
 
   async function start(workdir?: string): Promise<void> {
     if (pendingOperation) {
       await pendingOperation;
-      if (server) {
+      if (server || sharedServiceEndpoint) {
         return;
       }
     }
@@ -1184,7 +1293,7 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       await pendingOperation;
     }
     // Check if already stopped
-    if (!server) {
+    if (!server && !sharedServiceMode) {
       return;
     }
     pendingOperation = stopInternal();
@@ -1270,7 +1379,9 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
         lastStartAttempts,
         version,
         secureConnection,
-        authSource: managedPasswordSource || (userProvidedEnvPassword ? 'user-env' : null),
+        authSource: sharedServiceMode
+          ? (sharedServiceEndpoint?.auth ? 'service' : null)
+          : managedPasswordSource || (userProvidedEnvPassword ? 'user-env' : null),
         protocol,
       };
     },

@@ -6,6 +6,8 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
     setAuthPassword,
     getAuthSource,
     setAuthSource,
+    getAuthUsername = () => null,
+    setAuthUsername = () => {},
     getUserProvidedPassword,
     syncToHmrState,
   } = dependencies;
@@ -32,6 +34,7 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
     if (!isValidOpenCodePassword(normalized)) {
       setAuthPassword(null);
       setAuthSource(null);
+      setAuthUsername(null);
       delete process.env.OPENCODE_SERVER_PASSWORD;
       syncToHmrState();
       return null;
@@ -39,24 +42,39 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
 
     setAuthPassword(normalized);
     setAuthSource(source);
+    setAuthUsername(null);
     process.env.OPENCODE_SERVER_PASSWORD = normalized;
     syncToHmrState();
     return normalized;
   };
 
   const getOpenCodeAuthHeaders = () => {
-    const password = normalizeOpenCodePassword(getAuthPassword() || process.env.OPENCODE_SERVER_PASSWORD || '');
+    const sharedService = getAuthSource() === 'shared-service';
+    const password = normalizeOpenCodePassword(
+      getAuthPassword() || (sharedService ? '' : process.env.OPENCODE_SERVER_PASSWORD || ''),
+    );
 
     if (!password) {
       return {};
     }
 
-    const username = process.env.OPENCODE_SERVER_USERNAME?.trim() || 'opencode';
+    const username = sharedService
+      ? normalizeOpenCodePassword(getAuthUsername()) || 'opencode'
+      : process.env.OPENCODE_SERVER_USERNAME?.trim() || 'opencode';
     const credentials = Buffer.from(`${username}:${password}`).toString('base64');
     return { Authorization: `Basic ${credentials}` };
   };
 
   const isOpenCodeConnectionSecure = () => Object.prototype.hasOwnProperty.call(getOpenCodeAuthHeaders(), 'Authorization');
+
+  const setOpenCodeServiceAuth = (auth) => {
+    const username = normalizeOpenCodePassword(auth?.username);
+    const password = normalizeOpenCodePassword(auth?.password);
+    setAuthUsername(username || null);
+    setAuthPassword(username && password ? password : null);
+    setAuthSource('shared-service');
+    syncToHmrState();
+  };
 
   const ensureLocalOpenCodeServerPassword = async ({ rotateManaged = false } = {}) => {
     const userProvidedPassword = getUserProvidedPassword();
@@ -85,5 +103,6 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
     getOpenCodeAuthHeaders,
     isOpenCodeConnectionSecure,
     ensureLocalOpenCodeServerPassword,
+    setOpenCodeServiceAuth,
   };
 };
