@@ -60,14 +60,13 @@ Leaving the section or the project closes it, so its editor never sits over a
 list it no longer matches. Hosts that own a fullscreen plan surface (mobile)
 still pass `onOpenPlan` and keep theirs.
 
-## Pins are project state, not a message attachment
+## Pins belong to one session
 
-Pinning a note or plan writes to the project, not to the session, so it holds
-across every session in that project until it is unpinned. The composer once
-carried a chip for it, from when pinned context was a one-shot attachment to the
-next message; standing state shown permanently above the input reads as
-something being attached to what you are typing, which it is not. What is
-attached, and the control to detach it, live in the work status panel instead.
+Notes and plans are project data, but attaching one writes its id to the current
+session metadata. Other sessions in the project do not inherit it. A pin made
+while a new-session draft is open lives on that draft and transfers only to the
+session created by its first message. Work status lists and detaches draft pins
+before that first message, then reads them from the created session metadata.
 
 ## Memory is not a fifth kind of note
 
@@ -211,10 +210,8 @@ matched the old project would silently hide everything in the new one.
 
 ## Pinned context
 
-The pin toggle on a note or plan marks it as standing context for the agent.
-Assembly and delivery live in `packages/ui/src/lib/projectContextPinning.ts`;
-this surface only owns the toggle. `ComposerPinnedContextChip` shows the user
-what is riding along.
+The pin toggle on a note or plan attaches it to the current session or draft.
+Assembly and delivery live in `packages/web/server/lib/session-knowledge`.
 
 ## Related
 

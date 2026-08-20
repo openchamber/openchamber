@@ -44,6 +44,7 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { isFilesystemError } from '@/lib/api/files-errors';
+import { notifyFileContentInvalidated } from '@/lib/fileContentInvalidation';
 import { isBrowserClientRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
@@ -1044,9 +1045,18 @@ export const SidebarFilesTree: React.FC = () => {
     const uploadedCount = outcomes.filter((outcome) => outcome === 'uploaded').length;
     const failedCount = outcomes.filter((outcome) => outcome === 'failed').length;
     const conflictingFiles = droppedFiles.filter((_, index) => outcomes[index] === 'conflict');
+    const uploadedPaths = droppedFiles.flatMap((file, index) => {
+      const name = getUploadName(file);
+      return outcomes[index] === 'uploaded' && name
+        ? [normalizePath(`${directory}/${name}`)]
+        : [];
+    });
     const isCurrentDestination = rootRef.current === operationRoot && getRuntimeKey() === operationRuntime;
 
     try {
+      if (uploadedPaths.length > 0) {
+        notifyFileContentInvalidated({ runtimeKey: operationRuntime, paths: uploadedPaths });
+      }
       if (uploadedCount > 0 && isCurrentDestination) {
         await refreshDirectory(directory);
       }

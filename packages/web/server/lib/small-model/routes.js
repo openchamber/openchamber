@@ -10,7 +10,7 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
       res.json({
         available: Boolean(resolved),
         model: resolved,
-        authenticatedProviders: listAuthenticatedProviders(),
+        authenticatedProviders: await listAuthenticatedProviders(),
       });
     } catch (error) {
       console.error('Failed to resolve small model:', error);

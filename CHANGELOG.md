@@ -4,20 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- **Project knowledge:** the Project notes panel is now Project knowledge, with notes, todos, plans and their search in a resizable sidebar. Notes are cards you expand by clicking anywhere on them, plans open and edit in the panel itself instead of a separate tab, and notes and plans you pin travel with every message you send in that project until you unpin them.
-- **Work status:** the Context sources section now names each pinned note and plan riding along with your messages, and its pin button unpins them from there.
-- **Settings:** OpenChamber no longer replaces a full OpenCode config with an empty `$schema`-only stub when the file uses JSON5-style unquoted keys; Settings changes now fail instead of wiping plugins, MCP servers, and providers (thanks to @makeittech).
+- Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+
+## [1.19.0] - 2026-08-19
+
 - **Settings/Integrations:** a new Integrations settings page lists Claude Code, Command Code, and Cursor plugins with install, update, setup, and remove actions, plus Discord and Telegram Coming soon placeholders.
-- **Chat:** an open conversation no longer keeps re-coloring the same code blocks in the background, so browsing files with a chat open stops pinning a CPU core and spinning up the fans (thanks to @makeittech).
-- **Stability/Proxy:** the local server now reuses its connection to OpenCode instead of opening a new one for every API request. Under sustained traffic the old behavior could use up every outgoing network port on the machine, at which point nothing on the computer could open a new connection until the traffic stopped and the ports were released (thanks to @alohaninja).
+- **Project knowledge:** the Project notes panel is now Project knowledge, with notes, todos, plans and their search in a resizable sidebar. Notes are cards you expand by clicking anywhere on them, plans open and edit in the panel itself instead of a separate tab, and notes and plans can be pinned as context.
+- **Files:** drag files onto the Files sidebar to upload them into the project or a specific folder; existing files require confirmation before replacement, and open previews refresh after an upload (thanks to @makeittech, @alanzchen).
+- Settings: OpenChamber no longer replaces a full OpenCode config with an empty `$schema`-only stub when the file uses JSON5-style unquoted keys; Settings changes now fail instead of wiping plugins, MCP servers, and providers (thanks to @makeittech).
+- Chat: an open conversation no longer keeps re-coloring the same code blocks in the background, so browsing files with a chat open stops pinning a CPU core and spinning up the fans (thanks to @makeittech).
+- Stability/Proxy: the local server now reuses its connection to OpenCode instead of opening a new one for every API request. Under sustained traffic the old behavior could use up every outgoing network port on the machine, at which point nothing on the computer could open a new connection until the traffic stopped and the ports were released (thanks to @alohaninja).
 - Usage/Claude: Claude plan limits now work when you are signed in through Claude Code, without also signing into Anthropic in OpenCode; the account is read from Claude Code's own login on macOS, Linux, and WSL. The page shows your session and weekly limits again, adds per-model weekly limits and extra usage spending, and names your plan. Limits are kept on screen instead of disappearing when Anthropic temporarily blocks refreshes.
+- Usage/Command Code: Command Code plan limits now appear in the Usage page and work status panel.
 - Git: the pull request panel now follows the branch's current open PR, and an open PR always wins over an older merged or closed one. After a PR is merged or closed the panel keeps showing it as the branch's last PR and offers creating the next one right below it (thanks to @makeittech).
+- Git/Worktrees: creating a worktree from a pull request now falls back to GitHub's pull-request reference when the source fork was deleted or cannot be reached, instead of failing before creating the worktree (thanks to @makeittech).
 - Chat: new chats no longer start against a deleted last worktree directory; they fall back to the active project instead of saving the first message and never starting.
+- Chat: typing with Chinese, Japanese, or Korean input methods no longer interrupts composition or jumps the cursor to the end of the composer (thanks to @makeittech).
 - Chat: opening a busy subagent in the context panel now shows its history instead of only the working-status line (thanks to @makeittech).
 - Chat: saved chats in the context panel open again instead of staying blank.
 - Chat: the context meter no longer climbs over 100% (330% readouts) after turns with many tool calls and no longer jumps when reopening an older session; it now shows what the window actually holds, everywhere the value appears — header, context sidebar, work status panel, mini chat, and mobile (thanks to @pocharlies).
+- Chat/Attachments: extracted Office and OpenDocument content is now capped and presented more compactly, preventing large documents and their images from overwhelming the message context.
 - Projects: project names now match the folder name exactly, so `.ssh` and `opencode-claude` are no longer shown as `.Ssh` and `Opencode Claude` in the sidebar, window title, settings and notifications; names you renamed yourself are kept.
+- Files: files reached through a symlink inside the workspace now open correctly instead of being rejected as outside the workspace.
 - Settings: the session retention action you pick is now saved instead of being dropped (thanks to @Gautam0507).
+- Mobile: connecting through an ngrok address now bypasses ngrok's browser warning page instead of failing the server check.
+- Mobile/iOS: text selection in the chat composer now uses native CodeMirror selection handles.
+- Desktop: browser pages served from a self-signed loopback HTTPS address now load instead of being blocked by the certificate warning.
 - Browser: typing a comment on a page no longer triggers app shortcuts.
 - Skills Catalog: the source is now named ClawHub instead of "ClawdHub" (thanks to @makeittech).
 

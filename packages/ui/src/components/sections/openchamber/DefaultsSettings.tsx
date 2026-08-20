@@ -275,8 +275,11 @@ export const DefaultsSettings: React.FC = () => {
     [walkthroughModelOverride]
   );
   React.useEffect(() => {
-    // Both pickers filter by the same authenticated-provider list, and the
-    // walkthrough picker is always visible, so this is always worth fetching.
+    // Both pickers offer the same providers — the walkthrough runs through the
+    // small model — and the walkthrough picker is always visible, so this is
+    // always worth fetching. The server answers with the providers it has a
+    // credential and an endpoint for, including plugin-registered ones that
+    // exist only inside the running OpenCode.
     let cancelled = false;
     (async () => {
       try {

@@ -224,7 +224,7 @@ const QuickSessionAction = React.memo(function QuickSessionAction({
   };
 
   return (
-    <Tooltip>
+    <Tooltip delayDuration={500}>
       <TooltipTrigger asChild>
         <button
           type="button"

@@ -17,6 +17,8 @@ import { NotesSection } from './NotesSection';
 import { PlansSection } from './PlansSection';
 import { TodosSection } from './TodosSection';
 import { useProjectTodoSend } from './useProjectTodoSend';
+import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, type SessionProjectContextPins } from '@/lib/sessionKnowledgeApi';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 /** Lazy: the plan editor is a large view, and most panel visits never open it. */
 const PlanView = React.lazy(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
@@ -85,6 +87,43 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   );
   const loadProjectContext = useProjectContextStore((state) => state.load);
   const saveTodos = useProjectContextStore((state) => state.saveTodos);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+  const newSessionDraft = useSessionUIStore((state) => state.newSessionDraft);
+  const setDraftProjectContextPin = useSessionUIStore((state) => state.setDraftProjectContextPin);
+  const [sessionPins, setSessionPins] = React.useState<SessionProjectContextPins>({ notes: [], plans: [] });
+
+  React.useEffect(() => {
+    if (newSessionDraft.open) {
+      setSessionPins(newSessionDraft.projectContextPins ?? { notes: [], plans: [] });
+      return;
+    }
+    let cancelled = false;
+    void fetchSessionKnowledgeSummary(currentSessionDirectory, currentSessionId).then((summary) => {
+      if (!cancelled) {
+        setSessionPins({
+          notes: summary.notes.map((note) => note.id),
+          plans: summary.plans.map((plan) => plan.id),
+        });
+      }
+    });
+    return () => { cancelled = true; };
+  }, [currentSessionDirectory, currentSessionId, newSessionDraft.open, newSessionDraft.projectContextPins]);
+
+  const toggleSessionPin = React.useCallback(async (kind: 'note' | 'plan', id: string, pinned: boolean) => {
+    if (newSessionDraft.open) {
+      setDraftProjectContextPin(kind, id, pinned);
+      return true;
+    }
+    if (!currentSessionId || !currentSessionDirectory) return false;
+    const next = await setSessionProjectContextPin(currentSessionDirectory, currentSessionId, kind, id, pinned);
+    if (!next) return false;
+    setSessionPins(next);
+    return true;
+  }, [currentSessionDirectory, currentSessionId, newSessionDraft.open, setDraftProjectContextPin]);
+
+  const pinnedNoteIds = React.useMemo(() => new Set(sessionPins.notes), [sessionPins.notes]);
+  const pinnedPlanIds = React.useMemo(() => new Set(sessionPins.plans), [sessionPins.plans]);
 
   // The whole feature is one switch: with memory off there is nothing for the
   // agent to manage, so showing the user what is stored would be pointless.
@@ -387,6 +426,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             notes={contextEntry.notes}
             disabled={isLoading}
             query={query}
+            pinnedNoteIds={pinnedNoteIds}
+            onTogglePinned={(noteId, pinned) => toggleSessionPin('note', noteId, pinned)}
           />
         ) : null}
 
@@ -413,6 +454,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             projectRef={projectRef}
             plans={contextEntry.plans}
             query={query}
+            pinnedPlanIds={pinnedPlanIds}
+            onTogglePinned={(planId, pinned) => toggleSessionPin('plan', planId, pinned)}
             // Hosts that own a fullscreen plan surface (mobile) keep it; on the
             // desktop panel the plan opens here, in place of the list.
             onOpenPlan={onOpenPlan ?? setOpenPlan}

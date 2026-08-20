@@ -1,0 +1,62 @@
+---
+title: Integrations
+description: Use your Claude, Command Code, or Cursor subscription as a provider.
+---
+
+# Integrations
+
+An integration is a small plugin that adds a provider to OpenChamber using a subscription you already have. You manage them at **Settings → Integrations**.
+
+Available integrations:
+
+- **Claude Code** — your Claude Pro or Max plan, no API keys
+- **Command Code** — your Command Code plan
+- **Cursor** — the model limits of your Cursor plan
+
+## Install an integration
+
+1. Open **Settings → Integrations**.
+2. Find the integration and choose **Install**.
+3. Restart OpenCode when asked — the provider appears after the restart.
+4. Choose **Set up** and sign in. The models then appear in the chat model picker.
+
+Integrations install for your user, so they work in every project. You can update or remove them from the same card at any time.
+
+## Claude Code
+
+Claude Code uses your Claude Pro or Max plan — no API keys and no separate Claude app.
+
+1. Install the integration (above).
+2. Choose **Set up** and sign in. If you don't have the Claude Code CLI yet, setup offers to install it first and then sign you in.
+
+Claude Code is the only integration here that requires its provider CLI to be installed and signed in. Command Code and Cursor do not require their CLIs.
+
+**How your Claude account stays safe:** this integration uses Anthropic's official Claude Agent SDK and your installed Claude Code CLI. It does not hijack OAuth, extract or replay browser tokens, impersonate an unsupported client, or bypass Anthropic's authentication flow. It stays on Anthropic's supported access path, so it does not carry the account-ban risk of token hijacking or unauthorized authentication workarounds.
+
+## Command Code
+
+Command Code uses your Command Code plan.
+
+1. Install the integration (above).
+2. Choose **Set up** — a browser page opens. Approve access, then return to OpenChamber.
+
+On a headless machine or in CI, set the `COMMAND_CODE_API_KEY` environment variable instead of signing in in the browser.
+
+## Cursor
+
+Cursor makes the models included in your Cursor plan available in OpenChamber.
+
+1. Install the integration (above).
+2. Choose **Set up**, open the link, and approve access in your browser. No API key is required. The model list loads automatically after you sign in.
+
+## Update or remove
+
+- **Update** installs the latest published version of the plugin.
+- **Remove** deletes the plugin from your OpenCode config. The provider stops loading after OpenCode refreshes.
+
+If a card says the entries need manual management, choose **Manage plugins** and clean up the duplicates there.
+
+## Related
+
+- [Providers, Models & Agents](/providers/) — connect other providers and pick models
+- [Usage & Quotas](/usage/) — track how much you've used

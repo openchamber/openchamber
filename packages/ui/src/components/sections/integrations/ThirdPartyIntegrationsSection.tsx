@@ -36,6 +36,7 @@ type PendingAction = 'install' | 'update' | 'setup' | 'remove';
 type RemoveTarget = ThirdPartyPluginDefinition | null;
 
 interface ThirdPartyIntegrationsSectionProps {
+  divider?: boolean;
   onOpenProviderSetup: (providerId: string) => Promise<boolean>;
   onOpenPluginManager: () => void;
 }
@@ -46,6 +47,7 @@ const requiresRestart = (result: PluginMutationResult): boolean =>
   || result.reloadFailed === true;
 
 export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSectionProps> = ({
+  divider = true,
   onOpenProviderSetup,
   onOpenPluginManager,
 }) => {
@@ -413,6 +415,7 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
       <SettingsSection
         title={t('settings.integrations.thirdParty.title')}
         info={t('settings.integrations.thirdParty.info')}
+        divider={divider}
         settingsItem="integrations.third-party"
         contentClassName="space-y-3"
       >

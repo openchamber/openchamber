@@ -12,6 +12,7 @@
  */
 
 import { runtimeFetch } from './runtime-fetch';
+import { z } from 'zod';
 
 interface SessionKnowledge {
   /** Empty when the session already carries what it needs. */
@@ -86,14 +87,17 @@ const EMPTY_SUMMARY: SessionKnowledgeSummary = { notes: [], plans: [], memory: {
 /** What the session is carrying, for display. Never throws; shows nothing instead. */
 export const fetchSessionKnowledgeSummary = async (
   directory: string | null,
+  sessionId?: string | null,
 ): Promise<SessionKnowledgeSummary> => {
   if (!directory) {
     return EMPTY_SUMMARY;
   }
 
   try {
+    const params = new URLSearchParams({ directory });
+    if (sessionId) params.set('sessionId', sessionId);
     const response = await runtimeFetch(
-      `/api/session-knowledge/summary?${new URLSearchParams({ directory }).toString()}`,
+      `/api/session-knowledge/summary?${params.toString()}`,
       { cache: 'no-store' },
     );
     if (!response.ok) {
@@ -110,5 +114,31 @@ export const fetchSessionKnowledgeSummary = async (
     };
   } catch {
     return EMPTY_SUMMARY;
+  }
+};
+
+export type SessionProjectContextPins = { notes: string[]; plans: string[] };
+
+const sessionProjectContextPinsResponseSchema = z.object({
+  pins: z.object({ notes: z.array(z.string()), plans: z.array(z.string()) }),
+});
+
+export const setSessionProjectContextPin = async (
+  directory: string,
+  sessionId: string,
+  kind: 'note' | 'plan',
+  id: string,
+  pinned: boolean,
+): Promise<SessionProjectContextPins | null> => {
+  try {
+    const response = await runtimeFetch('/api/session-knowledge/pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory, sessionId, kind, id, pinned }),
+    });
+    if (!response.ok) return null;
+    return sessionProjectContextPinsResponseSchema.parse(await response.json()).pins;
+  } catch {
+    return null;
   }
 };

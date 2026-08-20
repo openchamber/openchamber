@@ -1185,7 +1185,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         </div>
         {group.isArchivedBucket && allGroupSessions.length > 0 ? (
           <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
-            <Tooltip>
+            <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1208,7 +1208,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         ) : null}
         {group.directory && !group.isMain && group.worktree ? (
           <div className={cn('absolute right-7 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
-            <Tooltip>
+            <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1232,7 +1232,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         ) : null}
         {group.directory ? (
           <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
-            <Tooltip>
+            <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
                   type="button"

@@ -3,7 +3,7 @@ import { useI18n } from '@/lib/i18n';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
-import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { getGitHubPrStatusKey, usePrVisualSummary, useFreshestPrVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
 import { useGitLabMrForBranch } from '@/lib/gitlabMrStatus';
 import { useGiteaPrForBranch } from '@/lib/giteaPrStatus';
 import { useGitProvider } from '@/lib/gitProvider';
@@ -110,11 +110,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // Read-only: PR watching is owned by the background tracker. Starting a watch
   // here would multiply GitHub requests per open session, which is exactly the
   // fan-out the PR-status concurrency gate exists to prevent.
-  const prKey = React.useMemo(
-    () => (directory && branch ? getGitHubPrStatusKey(directory, branch) : null),
-    [directory, branch],
-  );
-  const prSummary = usePrVisualSummary(prKey);
+  const prSummary = useFreshestPrVisualSummaryForBranch(directory, branch);
 
   // GitLab merge requests and Gitea pull requests ride the same shared TTL
   // cache as the git view and the walkthrough, so every surface that reports
