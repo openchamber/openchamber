@@ -1529,6 +1529,8 @@ export const settingsDict = {
   'settings.shared.projectSelector.fallbackProject': '專案',
   'settings.shared.projectSelector.switchProjectAria': '切換專案',
   'settings.shared.projectSelector.switchProjectTitle': '切換專案',
+  'settings.shared.projectSelector.sheetTitle': '專案',
+  'settings.shared.projectSelector.searchPlaceholder': '搜尋專案...',
   'settings.openchamber.defaults.title': '工作階段預設值',
   'settings.openchamber.defaults.summaryPrefix': '新工作階段將預設使用：',
   'settings.openchamber.defaults.summaryOpenCodeDefault': 'OpenCode agent 預設',

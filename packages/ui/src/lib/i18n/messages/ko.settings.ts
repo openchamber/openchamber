@@ -1622,6 +1622,8 @@ export const settingsDict = {
   'settings.shared.projectSelector.fallbackProject': '프로젝트',
   'settings.shared.projectSelector.switchProjectAria': '프로젝트 전환',
   'settings.shared.projectSelector.switchProjectTitle': '프로젝트 전환',
+  'settings.shared.projectSelector.sheetTitle': '프로젝트',
+  'settings.shared.projectSelector.searchPlaceholder': '프로젝트 검색...',
   'settings.openchamber.defaults.title': '세션 기본값',
   'settings.openchamber.defaults.summaryPrefix': '새 세션은 다음으로 시작됩니다:',
   'settings.openchamber.defaults.summaryOpenCodeDefault': 'OpenCode 에이전트 기본값',

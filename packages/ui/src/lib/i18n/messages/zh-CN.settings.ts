@@ -1622,6 +1622,8 @@ export const settingsDict = {
   'settings.shared.projectSelector.fallbackProject': '项目',
   'settings.shared.projectSelector.switchProjectAria': '切换项目',
   'settings.shared.projectSelector.switchProjectTitle': '切换项目',
+  'settings.shared.projectSelector.sheetTitle': '项目',
+  'settings.shared.projectSelector.searchPlaceholder': '搜索项目...',
   'settings.openchamber.defaults.title': '会话默认值',
   'settings.openchamber.defaults.summaryPrefix': '新会话将默认使用：',
   'settings.openchamber.defaults.summaryOpenCodeDefault': 'OpenCode 智能体默认值',

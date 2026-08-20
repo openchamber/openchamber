@@ -1765,6 +1765,8 @@ export const settingsDict = {
   'settings.shared.projectSelector.fallbackProject': 'Projekt',
   'settings.shared.projectSelector.switchProjectAria': 'Przełącz projekt',
   'settings.shared.projectSelector.switchProjectTitle': 'Przełącz projekt',
+  'settings.shared.projectSelector.sheetTitle': 'Projekt',
+  'settings.shared.projectSelector.searchPlaceholder': 'Szukaj projektów...',
   'settings.skills.catalog.add.actions.addCatalog': 'Dodaj katalog',
   'settings.skills.catalog.add.descriptionPrefix': 'Dodaj repozytorium Git jako nowe źródło katalogu. OpenChamber przeskanuje je w poszukiwaniu folderów zawierających',
   'settings.skills.catalog.add.descriptionSuffix': '.',

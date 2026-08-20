@@ -1622,6 +1622,8 @@ export const settingsDict = {
   "settings.shared.projectSelector.fallbackProject": "Projeto",
   "settings.shared.projectSelector.switchProjectAria": "Alternar projeto",
   "settings.shared.projectSelector.switchProjectTitle": "Alternar projeto",
+  "settings.shared.projectSelector.sheetTitle": "Projeto",
+  "settings.shared.projectSelector.searchPlaceholder": "Pesquisar projetos...",
   "settings.openchamber.defaults.title": "Configurações padrão",
   "settings.openchamber.defaults.summaryPrefix": "As novas sessões começarão com:",
   "settings.openchamber.defaults.summaryOpenCodeDefault": "Agente OpenCode por padrão",
