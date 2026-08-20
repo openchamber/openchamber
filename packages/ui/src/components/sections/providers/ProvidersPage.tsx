@@ -17,8 +17,10 @@ import {
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
+import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { noteDeferredRestartFromPayload, recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
 import { cn } from '@/lib/utils';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -159,6 +161,8 @@ export const ProvidersPage: React.FC = () => {
   const [authMethodsByProvider, setAuthMethodsByProvider] = React.useState<Record<string, AuthMethod[]>>({});
   const [authLoading, setAuthLoading] = React.useState(false);
   const [apiKeyInputs, setApiKeyInputs] = React.useState<Record<string, string>>({});
+  const [oauthCodes, setOauthCodes] = React.useState<Record<string, string>>({});
+  const [pendingOAuth, setPendingOAuth] = React.useState<{ providerId: string; methodIndex: number } | null>(null);
   const [authBusyKey, setAuthBusyKey] = React.useState<string | null>(null);
   const [modelQuery, setModelQuery] = React.useState('');
   const [availableProviders, setAvailableProviders] = React.useState<ProviderOption[]>([]);
@@ -571,7 +575,6 @@ export const ProvidersPage: React.FC = () => {
     }
     console.error('Failed to copy device code:', result.error);
     toast.error(t('settings.providers.page.toast.deviceCodeCopyFailed'));
->>>>>>> e7ca14b2b (fix(providers): refresh credentials after auth save)
   };
 
   const handleDisconnectProvider = async (providerId: string) => {
