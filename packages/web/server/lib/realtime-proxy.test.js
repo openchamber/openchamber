@@ -126,6 +126,25 @@ describe('realtime proxy', () => {
     }
   });
 
+  it('allows filesystem watcher SSE for remote runtimes', async () => {
+    const upstream = await startSseUpstream({ path: '/api/fs/watch' });
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin });
+
+    try {
+      const target = `${upstream.origin}/api/fs/watch?directory=%2Frepo&directories=%5B%22%2Frepo%22%5D`;
+      const response = await fetch(buildRealtimeProxySseUrl(origin, target), {
+        headers: { Origin: 'openchamber-ui://app' },
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('data: first\n\ndata: second\n\n');
+      expect(upstream.requests).toHaveLength(1);
+      expect(upstream.requests[0].headers['x-proxy-auth']).toBe('secret');
+    } finally {
+      runtime.stop();
+    }
+  });
+
   it('rejects unauthenticated SSE proxy requests', async () => {
     const upstream = await startSseUpstream();
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin, authToken: null });
