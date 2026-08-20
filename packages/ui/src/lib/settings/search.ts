@@ -907,6 +907,22 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'vision.model',
+    page: 'vision',
+    titleKey: 'settings.vision.model.label',
+    descriptionKey: 'settings.page.vision.description',
+    keywords: ['describe image', 'image input', 'multimodal', 'ocr', 'screenshot'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'vision.prompt',
+    page: 'vision',
+    titleKey: 'settings.vision.prompt.label',
+    descriptionKey: 'settings.vision.prompt.info',
+    keywords: ['image description', 'vision prompt', 'alt text'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'notifications.delivery',
     page: 'notifications',
     titleKey: 'settings.notifications.page.delivery.title',

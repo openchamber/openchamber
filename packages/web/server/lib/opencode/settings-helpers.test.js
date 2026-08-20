@@ -467,3 +467,43 @@ describe('settings helpers', () => {
     });
   });
 });
+
+describe('vision config sanitizer', () => {
+  it('round-trips a valid vision config', () => {
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({
+      vision: { model: 'anthropic/claude-sonnet-4', prompt: 'Describe briefly.' },
+    })).toEqual({ vision: { model: 'anthropic/claude-sonnet-4', prompt: 'Describe briefly.' } });
+  });
+
+  it('drops empty prompts so the server default applies at call time', () => {
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({
+      vision: { model: 'anthropic/claude-sonnet-4', prompt: '   ' },
+    })).toEqual({ vision: { model: 'anthropic/claude-sonnet-4' } });
+  });
+
+  it('caps the prompt at 4000 characters', () => {
+    const helpers = createTestHelpers();
+    const sanitized = helpers.sanitizeSettingsUpdate({
+      vision: { model: 'anthropic/claude-sonnet-4', prompt: 'x'.repeat(5000) },
+    });
+    expect(sanitized.vision.prompt.length).toBe(4000);
+  });
+
+  it('rejects malformed models before anything persists', () => {
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({ vision: { model: 'no-slash-here' } })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ vision: { model: '/leading-slash' } })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ vision: { model: 'trailing-slash/' } })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ vision: 'not-an-object' })).toEqual({});
+  });
+
+  it('keeps an existing config when an invalid update arrives', () => {
+    const helpers = createTestHelpers();
+    const current = { vision: { model: 'anthropic/claude-sonnet-4', prompt: 'Working prompt' } };
+    const changes = helpers.sanitizeSettingsUpdate({ vision: { model: 'broken' } });
+    expect(changes).toEqual({});
+    expect(helpers.mergePersistedSettings(current, changes).vision).toEqual(current.vision);
+  });
+});

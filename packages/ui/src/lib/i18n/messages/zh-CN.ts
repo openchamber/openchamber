@@ -2166,6 +2166,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolPart.copiedOutput': '已复制输出',
   'chat.toolPart.copyOutputFailed': '复制输出失败',
   'chat.toolPart.openSubtask': '打开{type}子任务',
+  'chat.toolPart.vision.modelLabel': '由 {model} 描述',
+  'chat.toolPart.vision.imageAlt': '由视觉工具描述的图片',
   'chat.todo.total': '总计',
   'chat.todo.inProgress': '进行中',
   'chat.todo.pending': '待处理',

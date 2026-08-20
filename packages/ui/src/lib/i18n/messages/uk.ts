@@ -2166,6 +2166,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.toolPart.copiedOutput": "Вивід скопійовано",
   "chat.toolPart.copyOutputFailed": "Не вдалося скопіювати вивід",
   "chat.toolPart.openSubtask": "Відкрити підзавдання {type}",
+  "chat.toolPart.vision.modelLabel": "Описано моделлю {model}",
+  "chat.toolPart.vision.imageAlt": "Зображення, описане інструментом зору",
   "chat.todo.total": "Усього",
   "chat.todo.inProgress": "В роботі",
   "chat.todo.pending": "В очікуванні",

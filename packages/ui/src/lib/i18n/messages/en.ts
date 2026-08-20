@@ -2200,6 +2200,8 @@ export const dict = {
   'chat.toolPart.copiedOutput': 'Copied output',
   'chat.toolPart.copyOutputFailed': 'Failed to copy output',
   'chat.toolPart.openSubtask': 'Open {type} subtask',
+  'chat.toolPart.vision.modelLabel': 'Described by {model}',
+  'chat.toolPart.vision.imageAlt': 'Image described by the vision tool',
   'chat.todo.total': 'Total',
   'chat.todo.inProgress': 'In Progress',
   'chat.todo.pending': 'Pending',

@@ -2027,6 +2027,8 @@ export const dict = {
   'chat.toolPart.copiedOutput': 'Ausgabe kopiert',
   'chat.toolPart.copyOutputFailed': 'Kopieren der Ausgabe fehlgeschlagen',
   'chat.toolPart.openSubtask': '{type}-Unteraufgabe öffnen',
+  'chat.toolPart.vision.modelLabel': 'Beschrieben von {model}',
+  'chat.toolPart.vision.imageAlt': 'Vom Vision-Tool beschriebenes Bild',
   'chat.todo.total': 'Gesamt',
   'chat.todo.inProgress': 'In Bearbeitung',
   'chat.todo.pending': 'Ausstehend',

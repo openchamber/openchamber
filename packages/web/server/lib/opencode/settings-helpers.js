@@ -1,5 +1,33 @@
-export const createSettingsHelpers = (dependencies) => {
-  const {
+export const DEFAULT_VISION_PROMPT = [
+  'You are a visual analysis assistant. Describe the attached image in exhaustive',
+  'detail so someone who cannot see it understands it completely. Cover:',
+  '',
+  '1. Overall description — what the image shows in one clear summary.',
+  '2. Layout and spatial arrangement — where elements sit relative to each other.',
+  '3. Visual style — colors, lighting, typography, art style, and tone.',
+  '4. Text — transcribe every visible word verbatim, including small or cropped text.',
+  '5. Notable objects, people, UI elements, charts, diagrams, or data visualizations.',
+  '6. Anything relevant to a coding, design, documentation, or debugging task.',
+  '',
+  'Be precise and factual. Never invent details you cannot see; say so when a',
+  'region is unclear, cropped, or unreadable.',
+].join('\n');
+
+const VISION_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const VISION_PROMPT_MAX_LENGTH = 4_000;
+
+// Returns the normalized { model, prompt? } config or undefined when the value
+// is malformed, so an invalid save can never replace an existing config.
+export const sanitizeVisionConfig = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const model = typeof value.model === 'string' ? value.model.trim() : '';
+  if (!model || !VISION_MODEL_PATTERN.test(model)) return undefined;
+  const rawPrompt = typeof value.prompt === 'string' ? value.prompt.trim() : '';
+  const prompt = rawPrompt.slice(0, VISION_PROMPT_MAX_LENGTH);
+  return { model, ...(prompt ? { prompt } : {}) };
+};
+
+export const createSettingsHelpers = (dependencies) => {  const {
     normalizePathForPersistence,
     normalizeDirectoryPath,
     normalizeTunnelBootstrapTtlMs,
@@ -866,6 +894,11 @@ export const createSettingsHelpers = (dependencies) => {
       if (trimmed.length <= STT_LANGUAGE_MAX_LENGTH) {
         result.sttLanguage = trimmed;
       }
+    }
+
+    if (candidate.vision !== undefined) {
+      const vision = sanitizeVisionConfig(candidate.vision);
+      if (vision) result.vision = vision;
     }
 
     return result;

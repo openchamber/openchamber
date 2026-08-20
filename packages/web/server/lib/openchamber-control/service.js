@@ -141,6 +141,7 @@ export const createOpenChamberControlService = (dependencies) => {
     waitForOpenCodeReady,
     sessionService,
     scheduledTaskService,
+    visionService,
     createClient = createOpencodeClient,
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
     now = Date.now,
@@ -324,6 +325,17 @@ export const createOpenChamberControlService = (dependencies) => {
     try {
       if (!CONTROL_ACTIONS.has(action)) {
         throw new OpenChamberControlError(`Unsupported OpenChamber action: ${action || 'missing'}`, 400);
+      }
+      if (action === 'vision.run') {
+        if (typeof visionService?.execute !== 'function') {
+          throw new OpenChamberControlError('Vision tool is unavailable', 500);
+        }
+        return visionService.execute({
+          imagePath: asNonEmptyString(input.imagePath),
+          question: asNonEmptyString(input.question) || undefined,
+          directory: asNonEmptyString(contextDirectory) || undefined,
+          signal: options.signal,
+        });
       }
       if (action === 'projects.list') return { projects: await projects() };
       if (action === 'models.list') return models();

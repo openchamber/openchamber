@@ -260,4 +260,35 @@ describe('OpenChamber control service', () => {
     const { service } = createService();
     await expect(service.execute('session.delete')).rejects.toThrow('Unsupported OpenChamber action');
   });
+
+  it('dispatches vision.run to the vision runtime with context and signal', async () => {
+    const visionService = { execute: vi.fn(async () => ({ description: 'A chart.' })) };
+    const { service } = createService({ visionService });
+
+    await expect(service.execute('vision.run', {
+      imagePath: '/repo/shot.png',
+      question: 'What color is the button?',
+    }, '/repo', { signal: 'signal-token' })).resolves.toEqual({ description: 'A chart.' });
+
+    expect(visionService.execute).toHaveBeenCalledWith({
+      imagePath: '/repo/shot.png',
+      question: 'What color is the button?',
+      directory: '/repo',
+      signal: 'signal-token',
+    });
+  });
+
+  it('trims empty vision inputs and falls back to the context directory', async () => {
+    const visionService = { execute: vi.fn(async () => ({})) };
+    const { service } = createService({ visionService });
+
+    await service.execute('vision.run', { imagePath: 'shot.png', question: '  ' }, '/repo', {});
+
+    expect(visionService.execute).toHaveBeenCalledWith({
+      imagePath: 'shot.png',
+      question: undefined,
+      directory: '/repo',
+      signal: undefined,
+    });
+  });
 });

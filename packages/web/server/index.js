@@ -101,6 +101,7 @@ import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
+import { createVisionRuntime } from './lib/agent-capabilities/vision.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -1188,6 +1189,11 @@ const openChamberSessionService = createOpenChamberSessionService({
   waitForOpenCodeReady,
   emitSessionCreatedEvent,
 });
+const visionService = createVisionRuntime({
+  readSettingsFromDiskMigrated,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+});
 const openChamberControlService = createOpenChamberControlService({
   readSettingsFromDiskMigrated,
   sanitizeProjects,
@@ -1196,6 +1202,7 @@ const openChamberControlService = createOpenChamberControlService({
   waitForOpenCodeReady,
   sessionService: openChamberSessionService,
   scheduledTaskService,
+  visionService,
 });
 
 const ensureGlobalWatcherStarted = async () => {

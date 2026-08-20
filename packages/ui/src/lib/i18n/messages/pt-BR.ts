@@ -2166,6 +2166,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.toolPart.copiedOutput": "Saída copiada",
   "chat.toolPart.copyOutputFailed": "Falha ao copiar saída",
   "chat.toolPart.openSubtask": "Abrir subtarefa {type}",
+  "chat.toolPart.vision.modelLabel": "Descrita por {model}",
+  "chat.toolPart.vision.imageAlt": "Imagem descrita pela ferramenta de visão",
   "chat.todo.total": "Total",
   "chat.todo.inProgress": "Em andamento",
   "chat.todo.pending": "Pendente",

@@ -25,6 +25,7 @@ export type SettingsPageSlug =
   | 'notifications'
   | 'voice'
   | 'tunnel'
+  | 'vision'
   | 'about';
 
 type SettingsPageGroup =
@@ -200,6 +201,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   { slug: 'notifications', title: 'Notifications', group: 'general', kind: 'single', keywords: ['alerts', 'native', 'summary', 'summarization'], },
   { slug: 'voice', title: 'Voice', group: 'general', kind: 'single', keywords: ['tts', 'speech', 'voice'], isAvailable: (ctx) => !ctx.isVSCode },
   { slug: 'tunnel', title: 'External Tunnel', group: 'projects', kind: 'single', keywords: ['tunnel', 'external', 'cloudflare', 'qr', 'remote', 'mobile', 'share'], isAvailable: (ctx) => !ctx.isVSCode },
+  { slug: 'vision', title: 'Vision', group: 'general', kind: 'single', keywords: ['vision', 'image', 'describe', 'screenshot', 'ocr', 'multimodal', 'see'], isAvailable: (ctx) => !ctx.isVSCode },
   { slug: 'about', title: 'About', group: 'general', kind: 'single', keywords: ['about', 'version', 'updates', 'release', 'changelog'], isAvailable: (ctx) => ctx.isMobile && !ctx.isVSCode },
 ] as const;
 
@@ -292,6 +294,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'mic';
     case 'tunnel':
       return 'home-office';
+    case 'vision':
+      return 'image';
     case 'about':
       return 'information';
     case 'home':
