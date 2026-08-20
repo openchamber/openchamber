@@ -298,6 +298,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Fusion presets known to the composer: the authoritative set that decides
     // whether a `%token` is painted as a chip and expanded at send time.
     const [fusionPresets, setFusionPresets] = React.useState<FusionPreset[]>([]);
+    // Tracks whether the registry has finished a successful load, so a send
+    // cannot race the mount-time fetch and pass a `%preset` through unexpanded.
+    const fusionPresetsLoadedRef = React.useRef(false);
     // Ref to track current message value without triggering re-renders in effects
     const messageRef = React.useRef(message);
     const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
@@ -584,20 +587,33 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // on mount so a restored or pasted `%preset` token still expands when the
     // picker never opened, and refetched whenever the picker opens so a preset
     // created in Settings is known as soon as the user opens it.
+    const loadFusionPresets = React.useCallback(async (): Promise<boolean> => {
+        try {
+            const response = await runtimeFetch('/api/openchamber/fusion/presets');
+            if (!response.ok) return false;
+            const body = (await response.json()) as { presets?: FusionPreset[] } | null;
+            const presets = Array.isArray(body?.presets) ? body.presets : [];
+            setFusionPresets(presets);
+            fusionPresetsLoadedRef.current = true;
+            return true;
+        } catch {
+            return false;
+        }
+    }, []);
+
+    // Ensures the registry is loaded before send-time expansion. A send can
+    // race the mount fetch, and expansion treats the registry as authoritative
+    // — an empty registry would pass a valid `%preset` through unexpanded. If
+    // the fetch is still pending (or failed), the caller blocks the send
+    // rather than silently dropping the directive.
+    const ensureFusionPresetsLoaded = React.useCallback(async (): Promise<boolean> => {
+        if (fusionPresetsLoadedRef.current) return true;
+        return loadFusionPresets();
+    }, [loadFusionPresets]);
+
     React.useEffect(() => {
-        let cancelled = false;
-        void runtimeFetch('/api/openchamber/fusion/presets')
-            .then((response) => (response.ok ? response.json() : null))
-            .then((body: { presets?: FusionPreset[] } | null) => {
-                if (!cancelled && Array.isArray(body?.presets)) {
-                    setFusionPresets(body.presets);
-                }
-            })
-            .catch(() => undefined);
-        return () => {
-            cancelled = true;
-        };
-    }, [openAutocomplete]);
+        void loadFusionPresets();
+    }, [loadFusionPresets]);
 
     const knownFusionPresets = React.useMemo(
         () => new Set(fusionPresets.map((preset) => preset.name)),
@@ -1095,6 +1111,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const availableSkillNames = new Set(
             useSkillsStore.getState().skills.map((skill) => skill.name),
         );
+
+        // Fusion expansion treats the preset registry as authoritative: if the
+        // text carries a `%token` that expansion could own but the registry
+        // failed to load (send raced the mount fetch, or the load errored),
+        // block the send instead of passing the token through unexpanded — the
+        // model would otherwise receive a literal directive it cannot act on.
+        // Plain percentages like "50% off" have no name char after `%`, so
+        // they never match the token shape and never block.
+        if (!queuedOnly && inputSnapshot.hasContent && inputSnapshot.message.includes('%')) {
+            const tokenPattern = /\s%[A-Za-z0-9]|^%[A-Za-z0-9]/;
+            const hasPotentialToken = tokenPattern.test(` ${inputSnapshot.message.trimStart()}`);
+            if (hasPotentialToken && !(await ensureFusionPresetsLoaded())) {
+                toast.error(t('chat.agentCapabilities.fusion.pickerLoadError'));
+                return;
+            }
+        }
 
         const outgoing = buildOutgoingMessage({
             queued: queuedMessagesToSend,
