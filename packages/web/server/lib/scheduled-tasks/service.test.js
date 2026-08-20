@@ -302,4 +302,28 @@ describe('scheduled-task service run', () => {
       denied: true,
     });
   });
+
+  it('carries persistError on a preflight denial whose completion-state write also failed', async () => {
+    const deniedTask = { id: 'task-1', state: { lastStatus: 'denied', lastError: 'blocked by policy' } };
+    const { service } = createService({
+      scheduledTasksRuntime: {
+        runNow: vi.fn(async () => ({
+          ok: false,
+          status: 'denied',
+          error: 'blocked by policy',
+          task: deniedTask,
+          persistError: 'timeout acquiring project config lock for project-test',
+          reason: 'completion-state-failed',
+        })),
+      },
+    });
+
+    await expect(service.run('project-test', 'task-1')).rejects.toMatchObject({
+      statusCode: 403,
+      message: 'blocked by policy',
+      task: deniedTask,
+      denied: true,
+      persistError: 'timeout acquiring project config lock for project-test',
+    });
+  });
 });

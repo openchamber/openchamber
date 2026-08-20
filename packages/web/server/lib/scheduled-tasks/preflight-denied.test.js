@@ -165,4 +165,32 @@ describe('scheduled task preflight denial', () => {
 
     runtime.stop();
   });
+
+  it('surfaces the denial reason and persistError together when the completion-state write also fails', async () => {
+    vi.setSystemTime(UTC(2026, 0, 1, 14, 0, 0));
+    const projectConfigRuntime = createProjectConfigRuntime(
+      makeTask({ kind: 'daily', times: ['15:00'] }),
+    );
+    const originalUpdate = projectConfigRuntime.updateScheduledTaskState;
+    projectConfigRuntime.updateScheduledTaskState = vi.fn(async (pid, tid, patch) => {
+      if (patch?.lastStatus === 'denied') {
+        throw new Error('timeout acquiring project config lock for p1');
+      }
+      return originalUpdate(pid, tid, patch);
+    });
+    const preflight = denyingPreflight('manual runs are blocked');
+    const runtime = createScheduledTasksRuntime(createRuntimeDeps(projectConfigRuntime, preflight));
+    await runtime.start();
+
+    const result = await runtime.runNow('p1', 'task-1');
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('denied');
+    expect(result.reason).toBe('completion-state-failed');
+    expect(result.error).toBe('manual runs are blocked');
+    expect(result.persistError).toMatch(/timeout acquiring project config lock/);
+    expect(sdk.sessionCreates.length).toBe(0);
+
+    runtime.stop();
+  });
 });
