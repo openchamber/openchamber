@@ -99,6 +99,7 @@ import {
     type ComposerChange,
     type ComposerEditorHandle,
 } from './composer/editor/ComposerEditor';
+import { useComposerHeightLimit } from './composer/editor/useComposerHeightLimit';
 import { createComposerEditorViewStore } from './composer/editor/viewStore';
 import {
     appendInlineText,
@@ -1687,12 +1688,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Height the dictation transcript needs (null when idle). Its overlay sits
     // absolutely over the composer, so the composer must be able to grow for
-    // it. The editor sizes itself to its own content; this is the one external
-    // constraint, applied as a floor on the editor's container.
+    // it. Apply the editor's line and screen bounds before using that height as
+    // a floor, otherwise a long transcript can push the action row off-screen.
+    const dictationHeightHostRef = React.useRef<HTMLDivElement | null>(null);
     const [dictationContentHeight, setDictationContentHeight] = React.useState<number | null>(null);
     const handleDictationContentHeightChange = React.useCallback((height: number | null) => {
         setDictationContentHeight((prev) => (prev === height ? prev : height));
     }, []);
+    const dictationHeightLimit = useComposerHeightLimit({
+        active: dictationContentHeight !== null,
+        disabled: isComposerExpanded,
+        hostRef: dictationHeightHostRef,
+        maxLines: isMobile ? MAX_MOBILE_COMPOSER_LINES : MAX_VISIBLE_COMPOSER_LINES,
+        boundSelector: isMobile ? '[data-composer-bound]' : undefined,
+        boundGapPx: isMobile ? MOBILE_COMPOSER_BOUND_GAP_PX : 0,
+    });
 
     const updateAutocompleteState = React.useCallback((
         value: string,
@@ -2768,14 +2778,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             <ActiveEditorFileSuggestion />
                         </div>
                         <div
+                            ref={dictationHeightHostRef}
                             className={cn("relative overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}
                             onDragEnter={handleDragEnter}
                             onDragOver={handleDragOver}
                             onDropCapture={handleDropCapture}
                             onDrop={handleDrop}
                             onDragEnd={handleDragEnd}
-                            style={dictationContentHeight !== null
-                                ? { minHeight: `${dictationContentHeight}px` }
+                            style={dictationContentHeight !== null && !isComposerExpanded
+                                ? {
+                                    minHeight: `${Math.min(
+                                        dictationContentHeight,
+                                        dictationHeightLimit ?? dictationContentHeight,
+                                    )}px`,
+                                }
                                 : undefined}
                         >
                             <ComposerEditor
