@@ -82,6 +82,38 @@ describe('scheduled task run route', () => {
     });
   });
 
+  it('carries persistError through to the HTTP error response for a denied run', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const deniedTask = { id: 'task-1', state: { lastStatus: 'denied', lastError: 'blocked by policy' } };
+    const deniedError = Object.assign(new Error('blocked by policy'), {
+      statusCode: 403,
+      task: deniedTask,
+      denied: true,
+      persistError: 'timeout acquiring project config lock for project-test',
+    });
+
+    registerScheduledTaskRoutes(app, {
+      scheduledTaskService: {
+        run: vi.fn(async () => {
+          throw deniedError;
+        }),
+      },
+    });
+
+    const handler = getRoute('POST', '/api/projects/:projectId/scheduled-tasks/:taskId/run');
+    const res = createMockResponse();
+
+    await handler({ params: { projectId: 'project-test', taskId: 'task-1' } }, res);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.payload).toEqual({
+      error: 'blocked by policy',
+      task: deniedTask,
+      denied: true,
+      persistError: 'timeout acquiring project config lock for project-test',
+    });
+  });
+
   it('omits the denied flag for a non-denial error', async () => {
     const { app, getRoute } = createRouteRegistry();
     const notFoundError = Object.assign(new Error('Task not found or disabled'), { statusCode: 404 });

@@ -988,7 +988,7 @@ export const createScheduledTasksRuntime = (deps) => {
           status,
           sessionID,
           task: stateResult.task || recoveredTask,
-          error: status === 'error' ? errorMessage : undefined,
+          error: status === 'error' || status === 'denied' ? errorMessage : undefined,
           persistError: message,
           reason: 'completion-state-failed',
         };
