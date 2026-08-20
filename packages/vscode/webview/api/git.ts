@@ -33,8 +33,10 @@ import type {
   GitPullResult,
   GitLogResponse,
   GitLogOptions,
+  GitCommitChangesRequest,
   GitCommitFilesResponse,
-  CommitFileDiffResponse,
+  GitCommitFilePreviewRequest,
+  GitCommitFilePreviewResponse,
   GitIdentitySummary,
   GitIdentityProfile,
   GitRemote,
@@ -333,19 +335,21 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     });
   },
 
-  getCommitFiles: async (directory: string, hash: string): Promise<GitCommitFilesResponse> => {
+  getCommitFiles: async (directory: string, request: GitCommitChangesRequest): Promise<GitCommitFilesResponse> => {
     return sendBridgeMessage<GitCommitFilesResponse>('api:git/commit-files', {
       directory,
-      hash,
+      hash: request.commitHash,
+      parentHash: request.parentHash,
     });
   },
 
-  getCommitFileDiff: async (directory: string, hash: string, filePath: string, isBinary: boolean): Promise<CommitFileDiffResponse> => {
-    return sendBridgeMessage<CommitFileDiffResponse>('api:git/commit-file-diff', {
+  getCommitFileDiff: async (directory: string, request: GitCommitFilePreviewRequest): Promise<GitCommitFilePreviewResponse> => {
+    return sendBridgeMessage<GitCommitFilePreviewResponse>('api:git/commit-file-diff', {
       directory,
-      hash,
-      path: filePath,
-      binary: isBinary,
+      hash: request.commitHash,
+      parentHash: request.parentHash,
+      originalPath: request.originalPath,
+      modifiedPath: request.modifiedPath,
     });
   },
 

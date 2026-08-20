@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { HistoryCommitRow } from './HistoryCommitRow';
-import type { GitLogEntry, CommitFileEntry, GitCommitHoverDetailsCache } from '@/lib/api/types';
+import type { GitLogEntry, GitCommitHoverDetailsCache } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { GitCommitHoverPopover } from './GitCommitHoverPopover';
 import {
@@ -24,6 +24,7 @@ import {
   type GitHistoryItemViewModel,
   type GitHistoryGraphRef,
 } from './gitGraph';
+import type { GitCommitDetailsController } from './gitCommitDetailsController';
 
 const LOG_SIZE_OPTIONS = [
   { labelKey: 'gitView.history.logSize25', value: 25 },
@@ -37,10 +38,7 @@ interface HistorySectionProps {
   isLogLoading: boolean;
   logMaxCount: number;
   onLogMaxCountChange: (count: number) => void;
-  expandedCommitHashes: Set<string>;
-  onToggleCommit: (hash: string) => void;
-  commitFilesMap: Map<string, CommitFileEntry[]>;
-  loadingCommitHashes: Set<string>;
+  commitDetailsController?: GitCommitDetailsController;
   onCopyHash: (hash: string) => void;
   directory: string | undefined;
   hoverRemoteName?: string | null;
@@ -63,10 +61,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   isLogLoading,
   logMaxCount,
   onLogMaxCountChange,
-  expandedCommitHashes,
-  onToggleCommit,
-  commitFilesMap,
-  loadingCommitHashes,
+  commitDetailsController,
   onCopyHash,
   directory,
   hoverRemoteName = null,
@@ -82,6 +77,17 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   const [isOpen, setIsOpen] = React.useState(true);
   const isGraphMode = mode === 'graph';
   const hoverCoordinator = React.useMemo(() => GitCommitHoverPopover.createCoordinator(), []);
+  const [, forceExpandedRefresh] = React.useReducer((count: number) => count + 1, 0);
+
+  React.useEffect(() => {
+    if (!commitDetailsController) {
+      return;
+    }
+
+    return commitDetailsController.subscribeExpanded(() => {
+      forceExpandedRefresh();
+    });
+  }, [commitDetailsController]);
 
   const historyItems = React.useMemo<GitHistoryGraphItem[]>(
     () => (log?.all ?? []).map((entry) => {
@@ -187,27 +193,41 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
 
   const renderCommitList = (entries: GitLogEntry[]) => (
     <ul className="divide-y divide-border/60" data-history-commit-list={mode}>
-      {entries.map((entry) => (
-        <HistoryCommitRow
-          key={entry.hash}
-          entry={entry}
-          mode={mode}
-          viewModel={isGraphMode ? viewModelByHash.get(entry.hash) : undefined}
-          totalColumns={isGraphMode ? maxColumns : undefined}
-          isExpanded={expandedCommitHashes.has(entry.hash)}
-          onToggle={() => onToggleCommit(entry.hash)}
-          files={commitFilesMap.get(entry.hash) ?? []}
-          isLoadingFiles={loadingCommitHashes.has(entry.hash)}
-          onCopyHash={onCopyHash}
-          directory={directory}
-          hoverCoordinator={hoverCoordinator}
-          hoverRemoteName={hoverRemoteName}
-          hoverRemoteUrl={hoverRemoteUrl}
-          hoverDetailsCache={hoverDetailsCache}
-          onConflict={onConflict}
-          onActionSuccess={onActionSuccess}
-        />
-      ))}
+      {entries.map((entry) => {
+        const comparison = directory ? {
+          directory,
+          commitHash: entry.hash,
+          parentHash: entry.parents[0] ?? null,
+        } : undefined;
+
+        return (
+          <HistoryCommitRow
+            key={entry.hash}
+            entry={entry}
+            mode={mode}
+            viewModel={isGraphMode ? viewModelByHash.get(entry.hash) : undefined}
+            totalColumns={isGraphMode ? maxColumns : undefined}
+            isExpanded={comparison ? (commitDetailsController?.isExpanded(comparison) ?? false) : false}
+            onToggle={() => {
+              if (comparison) {
+                commitDetailsController?.toggleExpanded(comparison);
+              }
+            }}
+            files={[]}
+            isLoadingFiles={false}
+            onCopyHash={onCopyHash}
+            directory={directory}
+            hoverCoordinator={hoverCoordinator}
+            hoverRemoteName={hoverRemoteName}
+            hoverRemoteUrl={hoverRemoteUrl}
+            hoverDetailsCache={hoverDetailsCache}
+            onConflict={onConflict}
+            onActionSuccess={onActionSuccess}
+            commitComparison={comparison}
+            commitDetailsController={commitDetailsController}
+          />
+        );
+      })}
     </ul>
   );
 

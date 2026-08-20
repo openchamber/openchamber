@@ -71,8 +71,8 @@ bootstrap, tracking is left unset rather than writing `branch.*.remote` /
 ### Log Operations
 - `getLog(directory, options)`: Get commit history with stats (supports maxCount, from, to, file filters).
 - `getGitHistory(directory, options)`: Graph history pages. Explicit requests require at least one validated ref and remain capped at 32 refs; `{ all: true }` is the only supported all-refs selector and maps to an internally authored `--all` argument instead of enumerating refs.
-- `getCommitFiles(directory, commitHash)`: Get file changes for a specific commit.
-- `getCommitFileDiff(directory, hash, filePath, isBinary)`: Get before/after content for a specific file in a commit. Returns `{ original, modified, isBinary }`. Runs `git show <hash>^:<path>` and `git show <hash>:<path>` in parallel; returns empty strings on failure (added/deleted/root-commit edge cases).
+- `getCommitFiles(directory, request)`: Get normalized file changes for a specific commit, using `{ commitHash, parentHash }`. `parentHash: null` is reserved for true root commits; non-root callers must pass the authoritative first parent. Metadata comes from one `git diff --raw --numstat --diff-filter=ADMRT -z --find-renames=50% <parent-or-empty-tree> <commit> --` call and preserves rename paths, object ids, binary flags, symlink/gitlink kinds, and deterministic Git order.
+- `getCommitFileDiff(directory, request)`: Get before/after content for a specific file preview using `{ commitHash, parentHash, originalPath, modifiedPath }`. Returns `{ status: 'ready', original, modified }` for accepted previews or `{ status: 'too-large', totalBytes, maxBytes }` when combined blob sizes exceed 8 MiB. The backend treats null sides as authoritative, validates expected objects and repository-relative paths, measures blobs with `git cat-file -s`, then reads permitted sides concurrently with `git cat-file -p`.
 
 ### Merge and Rebase Operations
 - `rebase(directory, options)`: Start a rebase onto a target branch.
@@ -151,6 +151,23 @@ The following functions are internal helpers used by exported functions:
 - `all`: Array of commit objects with hash, date, message, author info, stats.
 - `latest`: Latest commit object or null.
 - `total`: Total number of commits.
+
+### Commit File Metadata Response
+- `files`: Array in Git diff order.
+- Each file entry contains:
+  - `path`: destination path.
+  - `originalPath`: source path for renames only.
+  - `status`: `A`, `M`, `D`, or `R`. Type changes (`T`) normalize to `M`.
+  - `kind`: `file`, `symlink`, or `gitlink`, derived from raw modes (`120000` and `160000`).
+  - `originalObjectId` / `objectId`: omitted on null sides (adds/deletes).
+  - `insertions` / `deletions`: line counts, or `0/0` for binary files, symlinks, and gitlinks.
+  - `isBinary`: true only for regular files with `-/-` numstat output.
+
+### Commit File Preview Route Contract
+- `GET /api/git/commit-files` expects `directory`, `commitHash`, and `parentHash` query fields.
+- `GET /api/git/commit-file-diff` expects `directory`, `commitHash`, `parentHash`, `originalPath`, and `modifiedPath` query fields.
+- Web/Electron HTTP adapters serialize `null` parent/path values as the explicit root marker `__ROOT__`; routes decode that marker back to `null`.
+- Web routes require full 40-character SHA-1 or 64-character SHA-256 commit hashes. Abbreviated SHAs are rejected at the route boundary.
 
 ## Notes for Contributors
 

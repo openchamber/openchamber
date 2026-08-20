@@ -963,6 +963,265 @@ const runGitCommandOrThrow = async (cwd, args, fallbackMessage) => {
   return result;
 };
 
+const FULL_GIT_OBJECT_ID_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
+const EMPTY_TREE_HASHES_BY_FORMAT = {
+  sha1: '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+  sha256: '6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321',
+};
+const MAX_COMMIT_FILE_PREVIEW_BYTES = 8 * 1024 * 1024;
+
+const isZeroObjectId = (value) => /^[0]+$/.test(String(value || ''));
+
+const parseNonNegativeInt = (value, fallbackLabel) => {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`Malformed ${fallbackLabel}`);
+  }
+  return parsed;
+};
+
+const normalizeCommitHash = (value, fieldName) => {
+  const normalized = String(value || '').trim();
+  if (!FULL_GIT_OBJECT_ID_PATTERN.test(normalized)) {
+    throw new Error(`${fieldName} must be a full commit SHA`);
+  }
+  return normalized;
+};
+
+const isRecordLike = (value) => Object(value) === value && !Array.isArray(value);
+
+const normalizeNonEmptyString = (value, fieldName) => {
+  if (Object.prototype.toString.call(value) !== '[object String]' || value.length === 0) {
+    throw new Error(`${fieldName} must be a repository-relative path or null`);
+  }
+  return String(value);
+};
+
+const normalizeCommitChangesRequest = (request) => {
+  if (!isRecordLike(request)) {
+    throw new Error('commit file request is required');
+  }
+  return {
+    commitHash: normalizeCommitHash(request.commitHash, 'commitHash'),
+    parentHash: request.parentHash === null ? null : normalizeCommitHash(request.parentHash, 'parentHash'),
+  };
+};
+
+const normalizeCommitPreviewRequest = (request) => {
+  const normalized = normalizeCommitChangesRequest(request);
+  const normalizePath = (value, fieldName) => {
+    if (value === null) {
+      return null;
+    }
+    return normalizeNonEmptyString(value, fieldName);
+  };
+  const originalPath = normalizePath(request.originalPath, 'originalPath');
+  const modifiedPath = normalizePath(request.modifiedPath, 'modifiedPath');
+  if (originalPath === null && modifiedPath === null) {
+    throw new Error('originalPath or modifiedPath is required');
+  }
+  if (normalized.parentHash === null && originalPath !== null) {
+    throw new Error('root commit previews cannot request an originalPath');
+  }
+  return {
+    ...normalized,
+    originalPath,
+    modifiedPath,
+  };
+};
+
+const resolveCommitObjectPath = (directoryPath, repoRoot, filePath) => {
+  const candidates = Array.from(new Set([
+    path.resolve(repoRoot, filePath),
+    path.resolve(directoryPath, filePath),
+  ])).filter((candidate) => isInsideOrSameDirectory(repoRoot, candidate));
+
+  if (candidates.length === 0) {
+    throw new Error(`Path is outside repository: ${filePath}`);
+  }
+
+  return toGitPath(path.relative(repoRoot, candidates[0]));
+};
+
+const readCommitParentIds = async (repoRoot, commitHash) => {
+  const result = await runGitCommandOrThrow(
+    repoRoot,
+    ['rev-list', '--parents', '-n', '1', commitHash],
+    `Failed to resolve parents for commit ${commitHash}`,
+  );
+  const parts = String(result.stdout || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0 || parts[0] !== commitHash) {
+    throw new Error(`Failed to resolve parents for commit ${commitHash}`);
+  }
+  return parts.slice(1);
+};
+
+const getEmptyTreeHash = async (repoRoot) => {
+  const result = await runGitCommandOrThrow(
+    repoRoot,
+    ['rev-parse', '--show-object-format'],
+    'Failed to resolve repository object format',
+  );
+  const objectFormat = String(result.stdout || '').trim();
+  const hash = EMPTY_TREE_HASHES_BY_FORMAT[objectFormat];
+  if (!hash) {
+    throw new Error(`Unsupported git object format: ${objectFormat}`);
+  }
+  return hash;
+};
+
+const ensureCommitObjectExists = async (repoRoot, commitHash, fieldName) => {
+  const result = await runGitCommand(repoRoot, ['rev-parse', '--verify', '--quiet', `${commitHash}^{commit}`]);
+  if (!result.success) {
+    if (fieldName === 'parentHash') {
+      throw new Error(`Parent commit ${commitHash} is unavailable in this repository; fetch more history and try again`);
+    }
+    throw new Error(`Commit ${commitHash} is unavailable in this repository`);
+  }
+};
+
+const parseRawChangeRecord = (header) => {
+  const match = /^:([0-7]{6}) ([0-7]{6}) ([0-9a-f]+) ([0-9a-f]+) ([A-Z])(\d{0,3})$/i.exec(header);
+  if (!match) {
+    throw new Error(`Malformed raw change record: ${header}`);
+  }
+  return {
+    oldMode: match[1],
+    newMode: match[2],
+    oldObjectId: match[3],
+    newObjectId: match[4],
+    status: match[5].toUpperCase(),
+  };
+};
+
+const determineCommitFileKind = (oldMode, newMode) => {
+  if (oldMode === '160000' || newMode === '160000') {
+    return 'gitlink';
+  }
+  if (oldMode === '120000' || newMode === '120000') {
+    return 'symlink';
+  }
+  return 'file';
+};
+
+export function parseCommitChangesRaw(directory, raw) {
+  const input = String(raw || '');
+  if (!input) {
+    return [];
+  }
+
+  let cursor = 0;
+  const rawRecords = [];
+  while (cursor < input.length && input[cursor] === ':') {
+    const headerEnd = input.indexOf('\0', cursor);
+    if (headerEnd === -1) {
+      throw new Error(`Malformed raw change block for ${directory}`);
+    }
+    const header = input.slice(cursor, headerEnd);
+    const parsedHeader = parseRawChangeRecord(header);
+    cursor = headerEnd + 1;
+
+    const pathEnd = input.indexOf('\0', cursor);
+    if (pathEnd === -1) {
+      throw new Error(`Malformed raw path block for ${directory}`);
+    }
+    const pathValue = input.slice(cursor, pathEnd);
+    cursor = pathEnd + 1;
+
+    let originalPath;
+    let modifiedPath = pathValue;
+    if (parsedHeader.status === 'R' || parsedHeader.status === 'C') {
+      const renamedPathEnd = input.indexOf('\0', cursor);
+      if (renamedPathEnd === -1) {
+        throw new Error(`Malformed raw rename block for ${directory}`);
+      }
+      originalPath = pathValue;
+      modifiedPath = input.slice(cursor, renamedPathEnd);
+      cursor = renamedPathEnd + 1;
+    }
+
+    rawRecords.push({
+      ...parsedHeader,
+      originalPath,
+      path: modifiedPath,
+    });
+  }
+
+  const numstatRecords = [];
+  while (cursor < input.length) {
+    const addedEnd = input.indexOf('\t', cursor);
+    if (addedEnd === -1) {
+      throw new Error(`Malformed numstat block for ${directory}`);
+    }
+    const deletedEnd = input.indexOf('\t', addedEnd + 1);
+    if (deletedEnd === -1) {
+      throw new Error(`Malformed numstat block for ${directory}`);
+    }
+    const recordEnd = input.indexOf('\0', deletedEnd + 1);
+    if (recordEnd === -1) {
+      throw new Error(`Malformed numstat block for ${directory}`);
+    }
+
+    const insertionsRaw = input.slice(cursor, addedEnd);
+    const deletionsRaw = input.slice(addedEnd + 1, deletedEnd);
+    const pathValue = input.slice(deletedEnd + 1, recordEnd);
+    cursor = recordEnd + 1;
+
+    if (pathValue === '') {
+      const originalEnd = input.indexOf('\0', cursor);
+      if (originalEnd === -1) {
+        throw new Error(`Malformed rename numstat block for ${directory}`);
+      }
+      const modifiedEnd = input.indexOf('\0', originalEnd + 1);
+      if (modifiedEnd === -1) {
+        throw new Error(`Malformed rename numstat block for ${directory}`);
+      }
+      numstatRecords.push({
+        insertionsRaw,
+        deletionsRaw,
+        originalPath: input.slice(cursor, originalEnd),
+        path: input.slice(originalEnd + 1, modifiedEnd),
+      });
+      cursor = modifiedEnd + 1;
+      continue;
+    }
+
+    numstatRecords.push({
+      insertionsRaw,
+      deletionsRaw,
+      originalPath: undefined,
+      path: pathValue,
+    });
+  }
+
+  if (rawRecords.length !== numstatRecords.length) {
+    throw new Error(`Commit metadata block length mismatch for ${directory}`);
+  }
+
+  return rawRecords.map((rawRecord, index) => {
+    const numstatRecord = numstatRecords[index];
+    const isRename = rawRecord.status === 'R' || rawRecord.status === 'C';
+    if (rawRecord.path !== numstatRecord.path || (isRename && rawRecord.originalPath !== numstatRecord.originalPath)) {
+      throw new Error(`Commit metadata block association mismatch for ${directory}`);
+    }
+
+    const kind = determineCommitFileKind(rawRecord.oldMode, rawRecord.newMode);
+    const usesDashCounts = numstatRecord.insertionsRaw === '-' && numstatRecord.deletionsRaw === '-';
+    const isBinary = usesDashCounts && kind === 'file';
+    return {
+      path: rawRecord.path,
+      originalPath: rawRecord.originalPath,
+      status: rawRecord.status === 'T' ? 'M' : rawRecord.status,
+      kind,
+      originalObjectId: isZeroObjectId(rawRecord.oldObjectId) ? undefined : rawRecord.oldObjectId,
+      objectId: isZeroObjectId(rawRecord.newObjectId) ? undefined : rawRecord.newObjectId,
+      insertions: usesDashCounts ? 0 : parseNonNegativeInt(numstatRecord.insertionsRaw, 'numstat insertions'),
+      deletions: usesDashCounts ? 0 : parseNonNegativeInt(numstatRecord.deletionsRaw, 'numstat deletions'),
+      isBinary,
+    };
+  });
+}
+
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const isIndexLockError = (result) => {
@@ -5023,81 +5282,38 @@ export async function canonicalizeWorktreeState(directory) {
   };
 }
 
-export async function getCommitFiles(directory, commitHash) {
-  const { git } = await createRepositoryGitContext(directory);
+export async function getCommitFiles(directory, request) {
+  const { repoRoot, git } = await createRepositoryGitContext(directory);
+  const { commitHash, parentHash } = normalizeCommitChangesRequest(request);
 
   try {
+    await ensureCommitObjectExists(repoRoot, commitHash, 'commitHash');
 
-    const numstatRaw = await git.raw([
-      'show',
+    let baseRef = parentHash;
+    if (baseRef === null) {
+      const parentIds = await readCommitParentIds(repoRoot, commitHash);
+      if (parentIds.length > 0) {
+        throw new Error(`parentHash is required for non-root commit ${commitHash}`);
+      }
+      baseRef = await getEmptyTreeHash(repoRoot);
+    } else {
+      await ensureCommitObjectExists(repoRoot, baseRef, 'parentHash');
+    }
+
+    const diffRaw = await git.raw([
+      'diff',
+      '--raw',
       '--numstat',
-      '--format=',
-      commitHash
+      '--no-abbrev',
+      '--diff-filter=ADMRT',
+      '-z',
+      '--find-renames=50%',
+      baseRef,
+      commitHash,
+      '--',
     ]);
 
-    const files = [];
-    const lines = numstatRaw.trim().split('\n').filter(Boolean);
-
-    for (const line of lines) {
-      const parts = line.split('\t');
-      if (parts.length < 3) continue;
-
-      const [insertionsRaw, deletionsRaw, ...pathParts] = parts;
-      const filePath = pathParts.join('\t');
-      if (!filePath) continue;
-
-      const insertions = insertionsRaw === '-' ? 0 : parseInt(insertionsRaw, 10) || 0;
-      const deletions = deletionsRaw === '-' ? 0 : parseInt(deletionsRaw, 10) || 0;
-      const isBinary = insertionsRaw === '-' && deletionsRaw === '-';
-
-      let changeType = 'M';
-      let displayPath = filePath;
-
-      if (filePath.includes(' => ')) {
-        changeType = 'R';
-
-        const match = filePath.match(/(?:\{[^}]*\s=>\s[^}]*\}|.*\s=>\s.*)/);
-        if (match) {
-          displayPath = filePath;
-        }
-      }
-
-      files.push({
-        path: displayPath,
-        insertions,
-        deletions,
-        isBinary,
-        changeType
-      });
-    }
-
-    const nameStatusRaw = await git.raw([
-      'show',
-      '--name-status',
-      '--format=',
-      commitHash
-    ]).catch(() => '');
-
-    const statusMap = new Map();
-    const statusLines = nameStatusRaw.trim().split('\n').filter(Boolean);
-    for (const line of statusLines) {
-      const match = line.match(/^([AMDRC])\d*\t(.+)$/);
-      if (match) {
-        const [, status, pathPart] = match;
-        statusMap.set(extractGitStatusPath(status, pathPart), status);
-      }
-    }
-
-    for (const file of files) {
-      const basePath = extractGitNumstatDestinationPath(file.path);
-
-      const status = statusMap.get(basePath) || statusMap.get(file.path);
-      if (status) {
-        file.changeType = status;
-      }
-    }
-
-    return { files };
+    return { files: parseCommitChangesRaw(repoRoot, diffRaw) };
   } catch (error) {
     console.error('Failed to get commit files:', error);
     throw error;
@@ -5432,51 +5648,70 @@ export async function getConflictDetails(directory) {
   }
 }
 
-export async function getCommitFileDiff(directory, hash, filePath, isBinary) {
-  if (!directory || !hash || !filePath) {
-    throw new Error('directory, hash, and path are required for getCommitFileDiff');
+export async function getCommitFileDiff(directory, request) {
+  if (!directory) {
+    throw new Error('directory is required for getCommitFileDiff');
   }
 
-  if (isBinary) {
-    return { original: '', modified: '', isBinary: true };
-  }
-
+  const normalizedRequest = normalizeCommitPreviewRequest(request);
   const { directoryPath, repoRoot } = await createRepositoryGitContext(directory);
-  const candidates = Array.from(new Set([
-    toGitPath(path.relative(repoRoot, path.resolve(repoRoot, filePath))),
-    toGitPath(path.relative(repoRoot, path.resolve(directoryPath, filePath))),
-  ])).filter((candidate) => candidate && !candidate.startsWith('..') && !path.isAbsolute(candidate));
 
-  let originalResult = null;
-  let modifiedResult = null;
+  const originalPath = normalizedRequest.originalPath === null
+    ? null
+    : resolveCommitObjectPath(directoryPath, repoRoot, normalizedRequest.originalPath);
+  const modifiedPath = normalizedRequest.modifiedPath === null
+    ? null
+    : resolveCommitObjectPath(directoryPath, repoRoot, normalizedRequest.modifiedPath);
 
-  for (const candidate of candidates) {
-    const [candidateOriginalResult, candidateModifiedResult] = await Promise.all([
-      runGitCommand(repoRoot, ['show', `${hash}^:${candidate}`]),
-      runGitCommand(repoRoot, ['show', `${hash}:${candidate}`]),
-    ]);
+  await ensureCommitObjectExists(repoRoot, normalizedRequest.commitHash, 'commitHash');
+  if (normalizedRequest.parentHash !== null) {
+    await ensureCommitObjectExists(repoRoot, normalizedRequest.parentHash, 'parentHash');
+  }
 
-    if (candidateOriginalResult.success || candidateModifiedResult.success) {
-      originalResult = candidateOriginalResult;
-      modifiedResult = candidateModifiedResult;
-      break;
+  const originalSpec = normalizedRequest.parentHash !== null && originalPath !== null
+    ? `${normalizedRequest.parentHash}:${originalPath}`
+    : null;
+  const modifiedSpec = modifiedPath !== null
+    ? `${normalizedRequest.commitHash}:${modifiedPath}`
+    : null;
+
+  const readSize = async (objectSpec, label) => {
+    if (!objectSpec) {
+      return 0;
     }
+    const exists = await runGitCommand(repoRoot, ['cat-file', '-e', objectSpec]);
+    if (!exists.success) {
+      throw new Error(`Expected ${label} object is missing for ${objectSpec}`);
+    }
+    const sizeResult = await runGitCommandOrThrow(repoRoot, ['cat-file', '-s', objectSpec], `Failed to read ${label} object size`);
+    return parseNonNegativeInt(String(sizeResult.stdout || '').trim(), `${label} object size`);
+  };
+
+  const [originalBytes, modifiedBytes] = await Promise.all([
+    readSize(originalSpec, 'original'),
+    readSize(modifiedSpec, 'modified'),
+  ]);
+  const totalBytes = originalBytes + modifiedBytes;
+  if (totalBytes > MAX_COMMIT_FILE_PREVIEW_BYTES) {
+    return {
+      status: 'too-large',
+      totalBytes,
+      maxBytes: MAX_COMMIT_FILE_PREVIEW_BYTES,
+    };
   }
 
-  if (!originalResult || !modifiedResult) {
-    const resolvedPath = await resolveGitCommitFilePath(repoRoot, hash, candidates);
-    [originalResult, modifiedResult] = await Promise.all([
-      runGitCommand(repoRoot, ['show', `${hash}^:${resolvedPath}`]),
-      runGitCommand(repoRoot, ['show', `${hash}:${resolvedPath}`]),
-    ]);
-  }
+  const readContent = async (objectSpec, label) => {
+    if (!objectSpec) {
+      return '';
+    }
+    const result = await runGitCommandOrThrow(repoRoot, ['cat-file', '-p', objectSpec], `Failed to read ${label} object content`);
+    return result.stdout;
+  };
 
-  const original = originalResult.success ? originalResult.stdout : '';
-  const modified = modifiedResult.success ? modifiedResult.stdout : '';
+  const [original, modified] = await Promise.all([
+    readContent(originalSpec, 'original'),
+    readContent(modifiedSpec, 'modified'),
+  ]);
 
-  if (!originalResult.success && !modifiedResult.success) {
-    throw new Error(`Failed to read file content at commit ${hash}: ${originalResult.stderr || modifiedResult.stderr}`);
-  }
-
-  return { original, modified, isBinary: false };
+  return { status: 'ready', original, modified };
 }

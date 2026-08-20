@@ -9,12 +9,9 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
-import type { GitLogEntry, CommitFileEntry, GitHistoryItem } from '@/lib/api/types';
+import type { GitCommitChangedFile, GitLogEntry, GitHistoryItem } from '@/lib/api/types';
 import type { GitCommitHoverDetailsCache } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
-import { getCommitFileDiff, type CommitFileDiffResponse } from '@/lib/gitApi';
-import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
-import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { GitGraphSegment } from './GitGraphSegment';
 import { GitCommitHoverPopover, type GitCommitHoverPopoverCoordinator } from './GitCommitHoverPopover';
 import { formatGitCommitHoverRelativeTime, normalizeGitCommitHoverEntry } from './gitCommitHoverModel';
@@ -23,13 +20,10 @@ import { toast } from '@/components/ui/toast';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import type { GitHistoryGraphRef, GitHistoryItemViewModel } from './gitGraph';
-
-const HISTORY_DIFF_REQUEST_TIMEOUT_MS = 15000;
-const HISTORY_DIFF_LARGE_CHANGED_LINES = 500;
-const HISTORY_DIFF_CACHE_MAX_ENTRIES = 12;
-const HISTORY_DIFF_CACHE_MAX_TOTAL_SIZE_BYTES = 8 * 1024 * 1024;
-
-type HistoryDiffCacheValue = CommitFileDiffResponse | 'loading' | 'error';
+import {
+  GitCommitChangedFiles,
+  type GitCommitChangedFilesSnapshot,
+} from './GitCommitChangedFiles';
 
 const PENDING_ACTION_CONFIRM_LABELS = {
   checkout: 'gitView.history.actions.checkoutConfirm',
@@ -54,40 +48,17 @@ const RESET_LABELS = {
   hard: 'gitView.history.actions.resetHard',
 } as const;
 
-const getHistoryDiffCacheSize = (value: HistoryDiffCacheValue): number => {
-  if (value === 'loading' || value === 'error') {
-    return 0;
-  }
-  return (value.original?.length ?? 0) + (value.modified?.length ?? 0);
+export type GitCommitComparison = {
+  directory: string;
+  commitHash: string;
+  parentHash: string | null;
 };
 
-const trimHistoryDiffCache = (cache: Map<string, HistoryDiffCacheValue>): Map<string, HistoryDiffCacheValue> => {
-  if (cache.size <= HISTORY_DIFF_CACHE_MAX_ENTRIES) {
-    let totalSize = 0;
-    for (const value of cache.values()) {
-      totalSize += getHistoryDiffCacheSize(value);
-    }
-    if (totalSize <= HISTORY_DIFF_CACHE_MAX_TOTAL_SIZE_BYTES) {
-      return cache;
-    }
-  }
-
-  const entries = Array.from(cache.entries()).reverse();
-  const next = new Map<string, HistoryDiffCacheValue>();
-  let totalSize = 0;
-  for (const [key, value] of entries) {
-    if (next.size >= HISTORY_DIFF_CACHE_MAX_ENTRIES) {
-      continue;
-    }
-    const entrySize = getHistoryDiffCacheSize(value);
-    if (totalSize + entrySize > HISTORY_DIFF_CACHE_MAX_TOTAL_SIZE_BYTES && next.size > 0) {
-      continue;
-    }
-    next.set(key, value);
-    totalSize += entrySize;
-  }
-
-  return new Map(Array.from(next.entries()).reverse());
+type GitCommitDetailsControllerLike = {
+  getCommitSnapshot: (key: GitCommitComparison) => GitCommitChangedFilesSnapshot;
+  subscribeCommit: (key: GitCommitComparison, listener: () => void) => () => void;
+  retryCommit: (key: GitCommitComparison) => void;
+  selectFile: (key: GitCommitComparison, file: GitCommitChangedFile) => void;
 };
 
 interface HistoryCommitRowProps {
@@ -98,7 +69,7 @@ interface HistoryCommitRowProps {
   totalColumns?: number;
   isExpanded: boolean;
   onToggle: () => void;
-  files: CommitFileEntry[];
+  files: GitCommitChangedFile[];
   isLoadingFiles: boolean;
   onCopyHash: (hash: string) => void;
   directory: string | undefined;
@@ -108,6 +79,10 @@ interface HistoryCommitRowProps {
   hoverDetailsCache?: GitCommitHoverDetailsCache | null;
   onConflict?: (result: { conflict: boolean; conflictFiles?: string[]; operation: 'cherry-pick' | 'revert' | 'merge' | 'rebase' }) => void;
   onActionSuccess?: () => void;
+  commitComparison?: GitCommitComparison;
+  commitDetailsController?: GitCommitDetailsControllerLike;
+  selectedChangedFilePath?: string | null;
+  changedFilesView?: 'list' | 'tree';
 }
 
 const isGitHistoryItemEntry = (entry: GitLogEntry | GitHistoryItem): entry is GitHistoryItem => 'subject' in entry;
@@ -129,21 +104,6 @@ function formatCommitDate(date: string, timeFormatPreference: TimeFormatPreferen
     hour: '2-digit',
     minute: '2-digit',
   });
-}
-
-function getChangeTypeColor(changeType: string) {
-  switch (changeType) {
-    case 'A':
-      return 'text-[var(--status-success)]';
-    case 'D':
-      return 'text-[var(--status-error)]';
-    case 'M':
-      return 'text-[var(--status-warning)]';
-    case 'R':
-      return 'text-[var(--status-info)]';
-    default:
-      return 'text-muted-foreground';
-  }
 }
 
 function getRefBadgeClasses(ref: GitHistoryGraphRef): string {
@@ -176,11 +136,16 @@ export const HistoryCommitRow = React.memo(({
   hoverDetailsCache = null,
   onConflict,
   onActionSuccess,
+  commitComparison,
+  commitDetailsController,
+  selectedChangedFilePath = null,
+  changedFilesView = 'tree',
 }: HistoryCommitRowProps) => {
   const { t, locale } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const isGraphMode = mode === 'graph';
   const isCompactGraph = isGraphMode && compactGraph;
+  const detailsContentId = `history-commit-details-${getEntryHash(entry)}`;
   type PendingAction =
     | 'checkout' | 'cherryPick' | 'revert'
     | 'merge' | 'rebase'
@@ -191,9 +156,43 @@ export const HistoryCommitRow = React.memo(({
   const [newBranchName, setNewBranchName] = React.useState('');
   const [pendingAction, setPendingAction] = React.useState<PendingAction | null>(null);
 
-  const [openDiffPaths, setOpenDiffPaths] = React.useState<Set<string>>(new Set());
-  const [diffCache, setDiffCache] = React.useState<Map<string, HistoryDiffCacheValue>>(new Map());
-  const [forceRenderLargePaths, setForceRenderLargePaths] = React.useState<Set<string>>(new Set());
+  const fallbackSnapshot = React.useMemo<GitCommitChangedFilesSnapshot>(() => {
+    if (isLoadingFiles) {
+      return { status: 'loading' };
+    }
+
+    return { status: 'ready', files };
+  }, [files, isLoadingFiles]);
+
+  const controllerSnapshot = React.useSyncExternalStore(
+    React.useCallback(
+      (listener) => {
+        if (!commitDetailsController || !commitComparison) {
+          return () => {};
+        }
+
+        return commitDetailsController.subscribeCommit(commitComparison, listener);
+      },
+      [commitComparison, commitDetailsController],
+    ),
+    React.useCallback(() => {
+      if (!commitDetailsController || !commitComparison) {
+        return fallbackSnapshot;
+      }
+
+      return commitDetailsController.getCommitSnapshot(commitComparison);
+    }, [commitComparison, commitDetailsController, fallbackSnapshot]),
+    React.useCallback(() => {
+      if (!commitDetailsController || !commitComparison) {
+        return fallbackSnapshot;
+      }
+
+      return commitDetailsController.getCommitSnapshot(commitComparison);
+    }, [commitComparison, commitDetailsController, fallbackSnapshot]),
+  );
+
+  const changedFilesSnapshot = commitDetailsController && commitComparison ? controllerSnapshot : fallbackSnapshot;
+  const [expandedDirectories, setExpandedDirectories] = React.useState<Set<string> | null>(null);
 
   const handleCheckout = async () => {
     if (!directory) return;
@@ -322,60 +321,6 @@ export const HistoryCommitRow = React.memo(({
     }
   };
 
-  const loadFileDiff = React.useCallback(async (file: CommitFileEntry) => {
-    const key = file.path;
-    if (!directory) {
-      setDiffCache(prev => new Map(prev).set(key, 'error'));
-      return;
-    }
-
-    setDiffCache(prev => trimHistoryDiffCache(new Map(prev).set(key, 'loading')));
-    try {
-      const fetchPromise = getCommitFileDiff(directory, getEntryHash(entry), file.path, false);
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error(`Timed out after ${HISTORY_DIFF_REQUEST_TIMEOUT_MS}ms`)), HISTORY_DIFF_REQUEST_TIMEOUT_MS);
-      });
-      const result = await Promise.race([fetchPromise, timeoutPromise]);
-      setDiffCache(prev => trimHistoryDiffCache(new Map(prev).set(key, result)));
-    } catch {
-      setDiffCache(prev => new Map(prev).set(key, 'error'));
-    }
-  }, [directory, entry]);
-
-  const toggleFileDiff = React.useCallback(async (file: CommitFileEntry) => {
-    const key = file.path;
-
-    if (file.changeType === 'R' || file.isBinary) {
-      setOpenDiffPaths(prev => {
-        const next = new Set(prev);
-        if (next.has(key)) { next.delete(key); } else { next.add(key); }
-        return next;
-      });
-      return;
-    }
-
-    const cached = diffCache.get(key);
-    const isOpen = openDiffPaths.has(key);
-
-    if (isOpen && cached && cached !== 'error') {
-      // Close it
-      setOpenDiffPaths(prev => { const next = new Set(prev); next.delete(key); return next; });
-      return;
-    }
-
-    // Open it (or re-fetch on error)
-    setOpenDiffPaths(prev => { const next = new Set(prev); next.add(key); return next; });
-
-    if (cached && cached !== 'error') return; // Already loaded
-
-    const changedLines = file.insertions + file.deletions;
-    if (changedLines > HISTORY_DIFF_LARGE_CHANGED_LINES && !forceRenderLargePaths.has(key)) {
-      return;
-    }
-
-    await loadFileDiff(file);
-  }, [diffCache, forceRenderLargePaths, loadFileDiff, openDiffPaths]);
-
   const graphBadges: GitHistoryGraphRef[] = viewModel?.historyItem.references ?? [];
   const compactGraphBadges = graphBadges.some((badge) => badge.kind === 'head')
     ? graphBadges.filter((badge) => badge.kind === 'head' || badge.kind === 'tag')
@@ -398,6 +343,8 @@ export const HistoryCommitRow = React.memo(({
     <button
       type="button"
       onClick={onToggle}
+      aria-expanded={isExpanded}
+      aria-controls={isExpanded ? detailsContentId : undefined}
       className={cn(
         'w-full text-left transition-colors',
         isCompactGraph
@@ -493,6 +440,8 @@ export const HistoryCommitRow = React.memo(({
                     variant="ghost"
                     size="sm"
                     className="h-5 px-1 shrink-0"
+                    aria-label={t('gitView.history.copySha')}
+                    title={t('gitView.history.copySha')}
                     onClick={(e) => {
                       e.stopPropagation();
                       onCopyHash(getEntryHash(entry));
@@ -535,7 +484,7 @@ export const HistoryCommitRow = React.memo(({
       ) : rowButton}
 
       {isExpanded && (
-        <div className="px-3 pb-2 pl-8 border-t border-border/40">
+        <div id={detailsContentId} className="px-3 pb-2 pl-8 border-t border-border/40">
           {/* Action buttons */}
           {isGraphMode && pendingAction ? (
             /* Confirmation banner — replaces the button row while an action is pending */
@@ -662,124 +611,42 @@ export const HistoryCommitRow = React.memo(({
             </div>
           ) : null}
 
-          {isLoadingFiles ? (
-            <div className="flex items-center gap-2 py-2">
-              <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
-              <span className="typography-micro text-muted-foreground">{t('gitView.history.loadingFiles')}</span>
-            </div>
-          ) : files.length === 0 ? (
-            <p className="typography-micro text-muted-foreground py-2">{t('gitView.history.noFiles')}</p>
-          ) : (
-            <ul className="space-y-0.5 py-2">
-              {files.map((file) => (
-                <li key={file.path}>
-                  <button
-                    type="button"
-                    onClick={() => toggleFileDiff(file)}
-                    className={cn(
-                      'w-full flex items-center gap-2 typography-micro text-left cursor-pointer transition-colors rounded px-1',
-                      openDiffPaths.has(file.path) ? 'bg-sidebar/90' : 'hover:bg-sidebar/40'
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'font-semibold w-3 text-center shrink-0',
-                        getChangeTypeColor(file.changeType)
-                      )}
-                    >
-                      {file.changeType}
-                    </span>
-                    <span className="truncate text-foreground min-w-0" title={file.path}>
-                      {file.path}
-                    </span>
-                    {!file.isBinary && (
-                      <span className="shrink-0">
-                        <span style={{ color: 'var(--status-success)' }}>
-                          +{file.insertions}
-                        </span>
-                        <span className="text-muted-foreground mx-0.5">/</span>
-                        <span style={{ color: 'var(--status-error)' }}>
-                          -{file.deletions}
-                        </span>
-                      </span>
-                    )}
-                    {file.isBinary && (
-                      <span className="typography-micro text-muted-foreground shrink-0">
-                        {t('gitView.history.binary')}
-                      </span>
-                    )}
-                    <Icon
-                      name={openDiffPaths.has(file.path) ? 'arrow-down-s' : 'arrow-right-s'}
-                      className="size-3 shrink-0 text-muted-foreground"
-                    />
-                  </button>
-
-                  {openDiffPaths.has(file.path) && (
-                    <div className="max-h-[400px] overflow-y-auto rounded border border-border/40 mx-2 mb-1" data-diff-virtual-root data-diff-virtual-content>
-                      {file.changeType === 'R' ? (
-                        <div className="px-3 py-2 text-sm text-muted-foreground">{t('gitView.history.renamedNoDiff')}</div>
-                      ) : file.isBinary ? (
-                        <div className="px-3 py-2 text-sm text-muted-foreground">{t('gitView.history.binaryNoDiff')}</div>
-                      ) : (() => {
-                        const changedLines = file.insertions + file.deletions;
-                        if (!forceRenderLargePaths.has(file.path) && changedLines > HISTORY_DIFF_LARGE_CHANGED_LINES) {
-                          return (
-                            <div className="flex flex-col items-start gap-1 px-3 py-2 text-sm text-muted-foreground">
-                              <div className="typography-ui-label font-semibold text-foreground">
-                                {t('gitView.history.largeDiffTitle', { count: changedLines })}
-                              </div>
-                              <div className="typography-meta text-muted-foreground">
-                                {t('gitView.history.largeDiffDescription')}
-                              </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="xs"
-                                className="h-6 px-0 text-primary hover:bg-transparent hover:underline"
-                                onClick={() => {
-                                  setForceRenderLargePaths(prev => new Set(prev).add(file.path));
-                                  void loadFileDiff(file);
-                                }}
-                              >
-                                {t('gitView.history.renderDiffAnyway')}
-                              </Button>
-                            </div>
-                          );
+          <div className="py-2">
+            <GitCommitChangedFiles
+              snapshot={changedFilesSnapshot}
+              view={changedFilesView}
+              selectedPath={selectedChangedFilePath}
+              expandedDirectories={expandedDirectories ?? undefined}
+              onToggleDirectory={(path) => {
+                setExpandedDirectories((previous) => {
+                  const next = new Set(previous ?? (changedFilesSnapshot.status === 'ready'
+                    ? changedFilesSnapshot.files.flatMap((file) => {
+                        const segments = file.path.split('/').filter(Boolean);
+                        const directories: string[] = [];
+                        let current = '';
+                        for (const segment of segments.slice(0, -1)) {
+                          current = current ? `${current}/${segment}` : segment;
+                          directories.push(current);
                         }
-
-                        const cached = diffCache.get(file.path);
-                        if (cached === 'loading' || cached === undefined) {
-                          return <div className="px-3 py-2 text-sm text-muted-foreground">{t('gitView.history.loadingDiff')}</div>;
-                        }
-                        if (cached === 'error') {
-                          return (
-                            <button
-                              type="button"
-                              onClick={() => toggleFileDiff(file)}
-                              className="w-full text-left px-3 py-2 text-sm text-muted-foreground hover:bg-[var(--interactive-hover)] transition-colors"
-                            >
-                              {t('gitView.history.diffError')}
-                            </button>
-                          );
-                        }
-                        return (
-                            <PierreDiffViewer
-                             original={cached.original}
-                             modified={cached.modified}
-                             language={getLanguageFromExtension(file.path) || ''}
-                              fileName={file.path}
-                              renderSideBySide={false}
-                              layout="inline"
-                              enableComments={false}
-                            />
-                        );
-                      })()}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
+                        return directories;
+                      })
+                    : []));
+                  if (next.has(path)) {
+                    next.delete(path);
+                  } else {
+                    next.add(path);
+                  }
+                  return next;
+                });
+              }}
+              onRetry={commitDetailsController && commitComparison
+                ? () => commitDetailsController.retryCommit(commitComparison)
+                : undefined}
+              onSelectFile={commitDetailsController && commitComparison
+                ? (file) => commitDetailsController.selectFile(commitComparison, file)
+                : undefined}
+            />
+          </div>
         </div>
       )}
     </li>

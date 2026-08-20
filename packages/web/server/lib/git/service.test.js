@@ -9,6 +9,8 @@ import {
   checkoutCommit,
   cherryPick,
   createWorktree,
+  getCommitFileDiff,
+  getCommitFiles,
   getGitHistory,
   getGitHistoryMergeBase,
   getGitHistoryRefs,
@@ -30,6 +32,7 @@ import {
   applyHunk,
   getDiff,
   getFileDiff,
+  parseCommitChangesRaw,
   validateWorktreeCreate,
   parseBranchCreationSource,
   getRangeFiles,
@@ -85,6 +88,40 @@ const canRunGit = () => {
     return false;
   }
 };
+
+const describeIfGit = canRunGit() ? describe : describe.skip;
+
+if (!('poll' in expect)) {
+  expect.poll = (reader, { timeout = 1_000, interval = 25 } = {}) => {
+    const waitForMatch = async (predicate) => {
+      const deadline = Date.now() + timeout;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const value = await reader();
+        if (predicate(value)) {
+          return value;
+        }
+        if (Date.now() >= deadline) {
+          throw new Error(`Timed out after ${timeout}ms while polling`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, interval));
+      }
+    };
+
+    return {
+      async toBe(expected) {
+        const value = await waitForMatch((current) => Object.is(current, expected));
+        expect(value).toBe(expected);
+      },
+      not: {
+        async toBe(expected) {
+          const value = await waitForMatch((current) => !Object.is(current, expected));
+          expect(value).not.toBe(expected);
+        },
+      },
+    };
+  };
+}
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
@@ -160,7 +197,7 @@ describe('git index path validation', () => {
   });
 });
 
-describe.runIf(canRunGit())('setLocalIdentity', () => {
+describeIfGit('setLocalIdentity', () => {
   it('configures the local SSH command with the targeted simple-git opt-in', async () => {
     const { tmpDir } = await createTempRepo();
 
@@ -330,6 +367,351 @@ describe('symlink diffs', () => {
       original: '',
       modified: 'source',
       isBinary: false,
+    });
+  });
+});
+
+describe('parseCommitChangesRaw', () => {
+  it('parses modified files from NUL-delimited raw and numstat output', () => {
+    const raw = [
+      ':100644 100644 aaaaaaa bbbbbbb M\0src/a.ts\0',
+      '2\t1\tsrc/a.ts\0',
+    ].join('');
+
+    expect(parseCommitChangesRaw('/repo', raw)).toEqual([
+      {
+        path: 'src/a.ts',
+        status: 'M',
+        kind: 'file',
+        originalObjectId: 'aaaaaaa',
+        objectId: 'bbbbbbb',
+        insertions: 2,
+        deletions: 1,
+        isBinary: false,
+      },
+    ]);
+  });
+
+  it('parses add, delete, rename, type-change, tabs/newlines, binary, symlink, and gitlink records', () => {
+    const raw = [
+      ':000000 100644 0000000 1111111 A\0added.ts\0',
+      ':100644 000000 abcdef0 0000000 D\0deleted.ts\0',
+      ':100644 100644 2222222 3333333 R050\0old name.ts\0new name.ts\0',
+      ':100644 120000 4444444 5555555 T\0link.ts\0',
+      ':100644 100644 6666666 7777777 M\0tab\tname.ts\0',
+      ':100644 100644 8888888 9999999 M\0line\nbreak.ts\0',
+      ':100644 100644 aaaaaaa bbbbbbb M\0binary.bin\0',
+      ':120000 120000 ccccccc ddddddd M\0symlink\0',
+      ':160000 160000 eeeeeee fffffff M\0submodule\0',
+      '1\t0\tadded.ts\0',
+      '0\t3\tdeleted.ts\0',
+      '7\t4\t\0old name.ts\0new name.ts\0',
+      '-\t-\tlink.ts\0',
+      '5\t6\ttab\tname.ts\0',
+      '8\t9\tline\nbreak.ts\0',
+      '-\t-\tbinary.bin\0',
+      '-\t-\tsymlink\0',
+      '-\t-\tsubmodule\0',
+    ].join('');
+
+    expect(parseCommitChangesRaw('/repo', raw)).toEqual([
+      {
+        path: 'added.ts',
+        status: 'A',
+        kind: 'file',
+        originalObjectId: undefined,
+        objectId: '1111111',
+        insertions: 1,
+        deletions: 0,
+        isBinary: false,
+      },
+      {
+        path: 'deleted.ts',
+        status: 'D',
+        kind: 'file',
+        originalObjectId: 'abcdef0',
+        objectId: undefined,
+        insertions: 0,
+        deletions: 3,
+        isBinary: false,
+      },
+      {
+        path: 'new name.ts',
+        originalPath: 'old name.ts',
+        status: 'R',
+        kind: 'file',
+        originalObjectId: '2222222',
+        objectId: '3333333',
+        insertions: 7,
+        deletions: 4,
+        isBinary: false,
+      },
+      {
+        path: 'link.ts',
+        status: 'M',
+        kind: 'symlink',
+        originalObjectId: '4444444',
+        objectId: '5555555',
+        insertions: 0,
+        deletions: 0,
+        isBinary: false,
+      },
+      {
+        path: 'tab\tname.ts',
+        status: 'M',
+        kind: 'file',
+        originalObjectId: '6666666',
+        objectId: '7777777',
+        insertions: 5,
+        deletions: 6,
+        isBinary: false,
+      },
+      {
+        path: 'line\nbreak.ts',
+        status: 'M',
+        kind: 'file',
+        originalObjectId: '8888888',
+        objectId: '9999999',
+        insertions: 8,
+        deletions: 9,
+        isBinary: false,
+      },
+      {
+        path: 'binary.bin',
+        status: 'M',
+        kind: 'file',
+        originalObjectId: 'aaaaaaa',
+        objectId: 'bbbbbbb',
+        insertions: 0,
+        deletions: 0,
+        isBinary: true,
+      },
+      {
+        path: 'symlink',
+        status: 'M',
+        kind: 'symlink',
+        originalObjectId: 'ccccccc',
+        objectId: 'ddddddd',
+        insertions: 0,
+        deletions: 0,
+        isBinary: false,
+      },
+      {
+        path: 'submodule',
+        status: 'M',
+        kind: 'gitlink',
+        originalObjectId: 'eeeeeee',
+        objectId: 'fffffff',
+        insertions: 0,
+        deletions: 0,
+        isBinary: false,
+      },
+    ]);
+  });
+
+  it('rejects malformed raw and numstat block associations', () => {
+    expect(() => parseCommitChangesRaw('/repo', ':100644 100644 aaaaaaa bbbbbbb M\0only-raw.ts\0')).toThrow();
+    expect(() => parseCommitChangesRaw('/repo', [
+      ':100644 100644 aaaaaaa bbbbbbb M\0src/a.ts\0',
+      '1\t0\tsrc/a.ts\0',
+      '2\t0\tsrc/b.ts\0',
+    ].join(''))).toThrow();
+    expect(() => parseCommitChangesRaw('/repo', [
+      ':100644 100644 aaaaaaa bbbbbbb R050\0old.ts\0new.ts\0',
+      '1\t0\tnew.ts\0',
+    ].join(''))).toThrow();
+  });
+});
+
+describeIfGit('commit file metadata and preview', () => {
+  it('treats parentHash null as a root comparison', async () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'root.txt'), 'root\n');
+    runGit(repo, ['add', 'root.txt']);
+    runGit(repo, ['commit', '-m', 'root']);
+    const commitHash = runGit(repo, ['rev-parse', 'HEAD']).trim();
+
+    await expect(getCommitFiles(repo, { commitHash, parentHash: null })).resolves.toEqual({
+      files: [
+        expect.objectContaining({ path: 'root.txt', status: 'A', insertions: 1, deletions: 0 }),
+      ],
+    });
+
+    await expect(getCommitFileDiff(repo, {
+      commitHash,
+      parentHash: null,
+      originalPath: null,
+      modifiedPath: 'root.txt',
+    })).resolves.toEqual({
+      status: 'ready',
+      original: '',
+      modified: 'root\n',
+    });
+  });
+
+  it('fails when a non-root parent object is unavailable in shallow history', async () => {
+    const source = createTempDir();
+    runGit(source, ['init', '-b', 'main']);
+    runGit(source, ['config', 'user.email', 'test@example.com']);
+    runGit(source, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(source, 'file.txt'), 'one\n');
+    runGit(source, ['add', 'file.txt']);
+    runGit(source, ['commit', '-m', 'one']);
+    const firstCommit = runGit(source, ['rev-parse', 'HEAD']).trim();
+    fs.writeFileSync(path.join(source, 'file.txt'), 'one\ntwo\n');
+    runGit(source, ['add', 'file.txt']);
+    runGit(source, ['commit', '-m', 'two']);
+    const secondCommit = runGit(source, ['rev-parse', 'HEAD']).trim();
+
+    const bare = createTempDir();
+    runGit(bare, ['init', '--bare', '--initial-branch=main']);
+    runGit(source, ['remote', 'add', 'origin', bare]);
+    runGit(source, ['push', 'origin', 'main']);
+
+    const shallow = createTempDir();
+    runGit(createTempDir(), ['clone', '--depth=1', `file://${bare}`, shallow]);
+
+    await expect(getCommitFiles(shallow, { commitHash: secondCommit, parentHash: firstCommit })).rejects.toThrow(/parent.*unavailable|shallow/i);
+  });
+
+  it('uses explicit first-parent metadata for merge commits', async () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['config', 'core.abbrev', '12']);
+    fs.writeFileSync(path.join(repo, 'shared.txt'), 'base\n');
+    runGit(repo, ['add', 'shared.txt']);
+    runGit(repo, ['commit', '-m', 'base']);
+    const baseCommit = runGit(repo, ['rev-parse', 'HEAD']).trim();
+
+    runGit(repo, ['checkout', '-b', 'topic']);
+    fs.writeFileSync(path.join(repo, 'topic.txt'), 'topic\n');
+    runGit(repo, ['add', 'topic.txt']);
+    runGit(repo, ['commit', '-m', 'topic']);
+    runGit(repo, ['checkout', 'main']);
+    fs.writeFileSync(path.join(repo, 'main.txt'), 'main\n');
+    runGit(repo, ['add', 'main.txt']);
+    runGit(repo, ['commit', '-m', 'main']);
+    const firstParent = runGit(repo, ['rev-parse', 'HEAD']).trim();
+    runGit(repo, ['merge', '--no-ff', 'topic', '-m', 'merge topic']);
+    const mergeCommit = runGit(repo, ['rev-parse', 'HEAD']).trim();
+
+    const result = await getCommitFiles(repo, { commitHash: mergeCommit, parentHash: firstParent });
+    expect(result.files).toEqual([
+      expect.objectContaining({
+        path: 'topic.txt',
+        status: 'A',
+        objectId: expect.stringMatching(/^[0-9a-f]{40}$/),
+        insertions: 1,
+        deletions: 0,
+      }),
+    ]);
+    expect(result.files.some((file) => file.path === 'main.txt')).toBe(false);
+    expect(baseCommit).not.toBe(firstParent);
+  });
+
+  it('reads only the permitted preview sides for additions, deletions, and renames', async () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'alpha.txt'), 'alpha\n');
+    runGit(repo, ['add', 'alpha.txt']);
+    runGit(repo, ['commit', '-m', 'alpha']);
+
+    const addParent = runGit(repo, ['rev-parse', 'HEAD']).trim();
+    fs.writeFileSync(path.join(repo, 'added.txt'), 'added\n');
+    runGit(repo, ['add', 'added.txt']);
+    runGit(repo, ['commit', '-m', 'add']);
+    const addCommit = runGit(repo, ['rev-parse', 'HEAD']).trim();
+
+    const addPreview = await getCommitFileDiff(repo, {
+      commitHash: addCommit,
+      parentHash: addParent,
+      originalPath: null,
+      modifiedPath: 'added.txt',
+    });
+    expect(addPreview).toEqual({ status: 'ready', original: '', modified: 'added\n' });
+
+    const deleteParent = addCommit;
+    runGit(repo, ['rm', 'alpha.txt']);
+    runGit(repo, ['commit', '-m', 'delete']);
+    const deleteCommit = runGit(repo, ['rev-parse', 'HEAD']).trim();
+
+    const deletePreview = await getCommitFileDiff(repo, {
+      commitHash: deleteCommit,
+      parentHash: deleteParent,
+      originalPath: 'alpha.txt',
+      modifiedPath: null,
+    });
+    expect(deletePreview).toEqual({ status: 'ready', original: 'alpha\n', modified: '' });
+
+    const renameParent = deleteCommit;
+    fs.writeFileSync(path.join(repo, 'from.txt'), 'from\n');
+    runGit(repo, ['add', 'from.txt']);
+    runGit(repo, ['commit', '-m', 'from']);
+    const renameBase = runGit(repo, ['rev-parse', 'HEAD']).trim();
+    fs.renameSync(path.join(repo, 'from.txt'), path.join(repo, 'to.txt'));
+    fs.writeFileSync(path.join(repo, 'to.txt'), 'to\n');
+    runGit(repo, ['add', '-A']);
+    runGit(repo, ['commit', '-m', 'rename']);
+    const renameCommit = runGit(repo, ['rev-parse', 'HEAD']).trim();
+
+    const renamePreview = await getCommitFileDiff(repo, {
+      commitHash: renameCommit,
+      parentHash: renameBase,
+      originalPath: 'from.txt',
+      modifiedPath: 'to.txt',
+    });
+    expect(renamePreview).toEqual({ status: 'ready', original: 'from\n', modified: 'to\n' });
+    expect(renameParent).toBe(deleteCommit);
+  });
+
+  it('rejects previews when an expected object is missing and caps oversized previews', async () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'small.txt'), 'small\n');
+    runGit(repo, ['add', 'small.txt']);
+    runGit(repo, ['commit', '-m', 'small']);
+    const parentHash = runGit(repo, ['rev-parse', 'HEAD']).trim();
+
+    fs.writeFileSync(path.join(repo, 'small.txt'), 'small\nnext\n');
+    runGit(repo, ['add', 'small.txt']);
+    runGit(repo, ['commit', '-m', 'small update']);
+    const commitHash = runGit(repo, ['rev-parse', 'HEAD']).trim();
+
+    await expect(getCommitFileDiff(repo, {
+      commitHash,
+      parentHash,
+      originalPath: 'missing.txt',
+      modifiedPath: 'small.txt',
+    })).rejects.toThrow(/missing|Failed to read/i);
+
+    const big = 'x'.repeat(5 * 1024 * 1024);
+    fs.writeFileSync(path.join(repo, 'large.txt'), big);
+    runGit(repo, ['add', 'large.txt']);
+    runGit(repo, ['commit', '-m', 'large']);
+    const largeParent = runGit(repo, ['rev-parse', 'HEAD']).trim();
+    fs.writeFileSync(path.join(repo, 'large.txt'), `${big}y`);
+    runGit(repo, ['add', 'large.txt']);
+    runGit(repo, ['commit', '-m', 'large update']);
+    const largeCommit = runGit(repo, ['rev-parse', 'HEAD']).trim();
+
+    await expect(getCommitFileDiff(repo, {
+      commitHash: largeCommit,
+      parentHash: largeParent,
+      originalPath: 'large.txt',
+      modifiedPath: 'large.txt',
+    })).resolves.toEqual({
+      status: 'too-large',
+      totalBytes: 10 * 1024 * 1024 + 1,
+      maxBytes: 8 * 1024 * 1024,
     });
   });
 });
@@ -1295,7 +1677,7 @@ describe('hash validation', () => {
   });
 });
 
-describe.runIf(canRunGit())('getBranches', () => {
+describeIfGit('getBranches', () => {
   it('returns a remote default branch whose name is not a conventional fallback', async () => {
     const { repository } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
 
@@ -1327,7 +1709,7 @@ describe.runIf(canRunGit())('getBranches', () => {
   });
 });
 
-describe.runIf(canRunGit())('getRangeDiff', () => {
+describeIfGit('getRangeDiff', () => {
   it('resolves a base that exists only on a remote other than origin', async () => {
     const { repository } = createRepositoryWithRemote({ remoteName: 'upstream', defaultBranch: 'react' });
     // Only refs/remotes/upstream/react carries the base — git cannot resolve the
@@ -1484,7 +1866,7 @@ const createHistoryRepository = ({ withRemote = true } = {}) => {
   };
 };
 
-describe.runIf(canRunGit())('git history graph service', () => {
+describeIfGit('git history graph service', () => {
   it('classifies refs and resolves HEAD, upstream, and base refs', async () => {
     const { repository, commits } = createHistoryRepository();
 

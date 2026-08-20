@@ -392,23 +392,37 @@ export interface GitHistoryMergeBaseResponse {
   mergeBase: string | null;
 }
 
-export interface CommitFileEntry {
+export interface GitCommitChangedFile {
   path: string;
+  originalPath?: string;
+  status: 'A' | 'M' | 'D' | 'R';
+  kind: 'file' | 'symlink' | 'gitlink';
+  originalObjectId?: string;
+  objectId?: string;
   insertions: number;
   deletions: number;
   isBinary: boolean;
-  changeType: 'A' | 'M' | 'D' | 'R' | 'C' | string;
+}
+
+export interface GitCommitChangesRequest {
+  commitHash: string;
+  parentHash: string | null;
 }
 
 export interface GitCommitFilesResponse {
-  files: CommitFileEntry[];
+  files: GitCommitChangedFile[];
 }
 
-export interface CommitFileDiffResponse {
-  original: string;
-  modified: string;
-  isBinary: boolean;
+export interface GitCommitFilePreviewRequest {
+  commitHash: string;
+  parentHash: string | null;
+  originalPath: string | null;
+  modifiedPath: string | null;
 }
+
+export type GitCommitFilePreviewResponse =
+  | { status: 'ready'; original: string; modified: string }
+  | { status: 'too-large'; totalBytes: number; maxBytes: number };
 
 export interface GitWorktreeInfo {
   head: string;
@@ -573,8 +587,8 @@ export interface GitAPI {
   createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }>;
   renameBranch(directory: string, oldName: string, newName: string): Promise<{ success: boolean; branch: string }>;
   getGitLog(directory: string, options?: GitLogOptions): Promise<GitLogResponse>;
-  getCommitFiles(directory: string, hash: string): Promise<GitCommitFilesResponse>;
-  getCommitFileDiff?(directory: string, hash: string, filePath: string, isBinary: boolean): Promise<CommitFileDiffResponse>;
+  getCommitFiles(directory: string, request: GitCommitChangesRequest): Promise<GitCommitFilesResponse>;
+  getCommitFileDiff?(directory: string, request: GitCommitFilePreviewRequest): Promise<GitCommitFilePreviewResponse>;
   getCurrentGitIdentity(directory: string): Promise<GitIdentitySummary | null>;
   hasLocalIdentity?(directory: string): Promise<boolean>;
   setGitIdentity(directory: string, profileId: string): Promise<{ success: boolean; profile: GitIdentityProfile }>;

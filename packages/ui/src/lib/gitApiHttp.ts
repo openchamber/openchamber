@@ -28,8 +28,10 @@ import type {
   GitStashEntry,
   GitLogOptions,
   GitLogResponse,
+  GitCommitChangesRequest,
+  GitCommitFilePreviewRequest,
+  GitCommitFilePreviewResponse,
   GitCommitFilesResponse,
-  CommitFileDiffResponse,
   GitIdentityProfile,
   GitIdentitySummary,
   DiscoveredGitCredential,
@@ -44,6 +46,7 @@ import { getRuntimeUrlResolver } from './runtime-url';
 import { getRuntimeKey } from './runtime-switch';
 
 const API_BASE = '/api/git';
+const ROOT_QUERY_MARKER = '__ROOT__';
 const GIT_STATUS_CACHE_TTL_MS = 1200;
 const GIT_REPO_CHECK_CACHE_TTL_MS = 5000;
 const gitStatusCache = new Map<string, { value: GitStatus; expiresAt: number }>();
@@ -953,10 +956,13 @@ export async function getGitLog(
 
 export async function getCommitFiles(
   directory: string,
-  hash: string
+  request: GitCommitChangesRequest
 ): Promise<GitCommitFilesResponse> {
   const response = await runtimeFetch(
-    buildUrl(`${API_BASE}/commit-files`, directory, { hash })
+    buildUrl(`${API_BASE}/commit-files`, directory, {
+      commitHash: request.commitHash,
+      parentHash: request.parentHash ?? ROOT_QUERY_MARKER,
+    })
   );
   if (!response.ok) {
     throw new Error(`Failed to get commit files: ${response.statusText}`);
@@ -966,15 +972,14 @@ export async function getCommitFiles(
 
 export async function getCommitFileDiff(
   directory: string,
-  hash: string,
-  filePath: string,
-  isBinary: boolean
-): Promise<CommitFileDiffResponse> {
+  request: GitCommitFilePreviewRequest
+): Promise<GitCommitFilePreviewResponse> {
   const response = await runtimeFetch(
     buildUrl(`${API_BASE}/commit-file-diff`, directory, {
-      hash,
-      path: filePath,
-      binary: isBinary ? 'true' : undefined,
+      commitHash: request.commitHash,
+      parentHash: request.parentHash ?? ROOT_QUERY_MARKER,
+      originalPath: request.originalPath ?? ROOT_QUERY_MARKER,
+      modifiedPath: request.modifiedPath ?? ROOT_QUERY_MARKER,
     })
   );
   if (!response.ok) {

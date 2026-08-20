@@ -92,17 +92,26 @@ mock.module('./GitGraphSegment', () => ({
   },
 }));
 
-const renderedHistoryRows: Array<{ id: string; compactGraph?: boolean }> = [];
+const renderedHistoryRows: Array<{
+  id: string;
+  compactGraph?: boolean;
+  commitDetailsController?: unknown;
+  commitComparison?: { directory: string; commitHash: string; parentHash: string | null };
+}> = [];
 
 mock.module('./HistoryCommitRow', () => ({
   HistoryCommitRow: ({
     entry,
     compactGraph,
+    commitDetailsController,
+    commitComparison,
   }: {
     entry: { id: string };
     compactGraph?: boolean;
+    commitDetailsController?: unknown;
+    commitComparison?: { directory: string; commitHash: string; parentHash: string | null };
   }) => {
-    renderedHistoryRows.push({ id: entry.id, compactGraph });
+    renderedHistoryRows.push({ id: entry.id, compactGraph, commitDetailsController, commitComparison });
     return React.createElement('li', { 'data-history-id': entry.id });
   },
 }));
@@ -111,6 +120,7 @@ let gitPaneState: GitRepositoryPaneState = {
   changesCollapsed: false,
   graphCollapsed: true,
   graphHeight: 280,
+  previewWidth: 360,
   graphFilterMode: 'auto',
   graphManualRefIds: [],
 };
@@ -462,10 +472,21 @@ const createGitGraphPanelElement = (props: React.ComponentProps<typeof GitGraphP
 const createDefaultGitGraphPanelProps = (overrides: Partial<React.ComponentProps<typeof GitGraphPanel>> = {}): React.ComponentProps<typeof GitGraphPanel> => ({
   directory: '/repo',
   git: createUnusedGitApi(),
-  expandedCommitHashes: new Set<string>(),
-  onToggleCommit: () => {},
-  commitFilesMap: new Map(),
-  loadingCommitHashes: new Set<string>(),
+  commitDetailsController: {
+    getCommitSnapshot: () => ({ status: 'idle' }),
+    subscribeCommit: () => () => {},
+    isExpanded: () => false,
+    subscribeExpanded: () => () => {},
+    toggleExpanded: () => {},
+    retryCommit: () => {},
+    selectFile: () => {},
+    confirmLargePreview: () => {},
+    retryPreview: () => {},
+    clearSelection: () => {},
+    getPreviewSnapshot: () => ({ status: 'idle' }),
+    subscribePreview: () => () => {},
+    dispose: () => {},
+  },
   onCopyHash: () => {},
   isActive: true,
   ...overrides,
@@ -506,6 +527,7 @@ describe('GitGraphPanel component regression', () => {
       changesCollapsed: false,
       graphCollapsed: true,
       graphHeight: 280,
+      previewWidth: 360,
       graphFilterMode: 'auto',
       graphManualRefIds: [],
     };
@@ -725,6 +747,43 @@ describe('GitGraphPanel component regression', () => {
     dom.restore();
   });
 
+  test('passes the repository-scoped commit details controller and commit comparison to each commit row', async () => {
+    const controller = createDefaultGitGraphPanelProps().commitDetailsController;
+    const dom = installMinimalDom();
+    const root: Root = createRoot(dom.container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(
+          I18nProvider,
+          null,
+          React.createElement(GitGraphPanel, {
+            ...createDefaultGitGraphPanelProps(),
+            commitDetailsController: controller,
+          }),
+        ),
+      );
+      await flushEffects();
+    });
+
+    expect(renderedHistoryRows.find((row) => row.id === 'commit-a')).toEqual({
+      id: 'commit-a',
+      compactGraph: true,
+      commitDetailsController: controller,
+      commitComparison: {
+        directory: '/repo',
+        commitHash: 'commit-a',
+        parentHash: 'commit-root',
+      },
+    });
+
+    await act(async () => {
+      root.unmount();
+      await flushEffects();
+    });
+    dom.restore();
+  });
+
   test('uses the existing graph pane instead of nesting another card', () => {
     // SAFETY: Server rendering does not execute effects or read git API methods.
     const panelGitApi = {} as GitAPI;
@@ -935,6 +994,7 @@ describe('GitGraphPanel helpers', () => {
       changesCollapsed: false,
       graphCollapsed: true,
       graphHeight: 280,
+      previewWidth: 360,
       graphFilterMode: 'manual',
       graphManualRefIds: [],
     })).toEqual({ mode: 'auto' });

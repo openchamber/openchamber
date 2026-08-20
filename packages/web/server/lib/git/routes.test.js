@@ -8,6 +8,8 @@ const gitLibraries = {
   getGitHistoryRefs: vi.fn(),
   getGitHistory: vi.fn(),
   getGitHistoryMergeBase: vi.fn(),
+  getCommitFiles: vi.fn(),
+  getCommitFileDiff: vi.fn(),
 };
 
 vi.mock('./index.js', () => ({
@@ -18,6 +20,8 @@ vi.mock('./index.js', () => ({
   getGitHistoryRefs: gitLibraries.getGitHistoryRefs,
   getGitHistory: gitLibraries.getGitHistory,
   getGitHistoryMergeBase: gitLibraries.getGitHistoryMergeBase,
+  getCommitFiles: gitLibraries.getCommitFiles,
+  getCommitFileDiff: gitLibraries.getCommitFileDiff,
 }));
 
 const { registerGitRoutes } = await import('./routes.js');
@@ -77,6 +81,8 @@ describe('git routes index mutations', () => {
     gitLibraries.getGitHistoryRefs.mockReset();
     gitLibraries.getGitHistory.mockReset();
     gitLibraries.getGitHistoryMergeBase.mockReset();
+    gitLibraries.getCommitFiles.mockReset();
+    gitLibraries.getCommitFileDiff.mockReset();
   });
 
   it('accepts legacy stage path payloads', async () => {
@@ -352,5 +358,101 @@ describe('git routes status discovery', () => {
     expect(gitLibraries.isGitRepository).toHaveBeenCalledWith('/opened/git-project');
     expect(gitLibraries.getStatus).toHaveBeenCalledWith('/opened/git-project', { mode: undefined });
     expect(response.body).toMatchObject({ current: 'main' });
+  });
+});
+
+describe('git commit file routes', () => {
+  beforeEach(() => {
+    gitLibraries.getCommitFiles.mockReset();
+    gitLibraries.getCommitFileDiff.mockReset();
+  });
+
+  it('passes object-style commit file metadata requests through the route boundary', async () => {
+    gitLibraries.getCommitFiles.mockResolvedValue({ files: [] });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/commit-files')(
+      {
+        query: {
+          directory: '/repo',
+          commitHash: 'a'.repeat(40),
+          parentHash: 'b'.repeat(40),
+        },
+      },
+      response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(gitLibraries.getCommitFiles).toHaveBeenCalledWith('/repo', {
+      commitHash: 'a'.repeat(40),
+      parentHash: 'b'.repeat(40),
+    });
+  });
+
+  it('uses the root marker for null parent and nullable preview paths', async () => {
+    gitLibraries.getCommitFileDiff.mockResolvedValue({ status: 'ready', original: '', modified: 'root\n' });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/commit-file-diff')(
+      {
+        query: {
+          directory: '/repo',
+          commitHash: 'c'.repeat(40),
+          parentHash: '__ROOT__',
+          originalPath: '__ROOT__',
+          modifiedPath: 'root.txt',
+        },
+      },
+      response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(gitLibraries.getCommitFileDiff).toHaveBeenCalledWith('/repo', {
+      commitHash: 'c'.repeat(40),
+      parentHash: null,
+      originalPath: null,
+      modifiedPath: 'root.txt',
+    });
+  });
+
+  it('rejects abbreviated or malformed commit hash payloads before invoking git', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const metadataResponse = createMockResponse();
+
+    await getRoute('GET', '/api/git/commit-files')(
+      {
+        query: {
+          directory: '/repo',
+          commitHash: 'abc1234',
+          parentHash: '__ROOT__',
+        },
+      },
+      metadataResponse,
+    );
+
+    expect(metadataResponse.statusCode).toBe(400);
+    expect(gitLibraries.getCommitFiles).not.toHaveBeenCalled();
+
+    const previewResponse = createMockResponse();
+    await getRoute('GET', '/api/git/commit-file-diff')(
+      {
+        query: {
+          directory: '/repo',
+          commitHash: 'd'.repeat(40),
+          parentHash: 'bad-parent',
+          originalPath: 'a.ts',
+          modifiedPath: 'b.ts',
+        },
+      },
+      previewResponse,
+    );
+
+    expect(previewResponse.statusCode).toBe(400);
+    expect(gitLibraries.getCommitFileDiff).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
 describe('VS Code webview git API', () => {
-  test('exposes git history methods and transports the all selector', async () => {
+  test('exposes git history methods and transports commit metadata object requests', async () => {
     const originalWindow = globalThis.window;
     const originalAcquire = (globalThis as typeof globalThis & { acquireVsCodeApi?: unknown }).acquireVsCodeApi;
     const messages: Array<{ id: string; type: string; payload?: Record<string, unknown> }> = [];
@@ -53,6 +53,52 @@ describe('VS Code webview git API', () => {
         data: { id: mergeBaseRequest?.id, type: mergeBaseRequest?.type, success: true, data: { mergeBase: 'abc1234' } },
       }));
       await mergeBasePromise;
+
+      const commitFilesPromise = api.getCommitFiles?.('/repo', {
+        commitHash: 'abc123',
+        parentHash: 'def456',
+      });
+      const commitFilesRequest = messages.at(-1);
+      assert.equal(commitFilesRequest?.type, 'api:git/commit-files');
+      assert.deepEqual(commitFilesRequest?.payload, {
+        directory: '/repo',
+        hash: 'abc123',
+        parentHash: 'def456',
+      });
+      globalThis.window.dispatchEvent(new MessageEvent('message', {
+        data: {
+          id: commitFilesRequest?.id,
+          type: commitFilesRequest?.type,
+          success: true,
+          data: { files: [] },
+        },
+      }));
+      await commitFilesPromise;
+
+      const commitPreviewPromise = api.getCommitFileDiff?.('/repo', {
+        commitHash: 'abc123',
+        parentHash: 'def456',
+        originalPath: 'old/name.ts',
+        modifiedPath: 'new/name.ts',
+      });
+      const commitPreviewRequest = messages.at(-1);
+      assert.equal(commitPreviewRequest?.type, 'api:git/commit-file-diff');
+      assert.deepEqual(commitPreviewRequest?.payload, {
+        directory: '/repo',
+        hash: 'abc123',
+        parentHash: 'def456',
+        originalPath: 'old/name.ts',
+        modifiedPath: 'new/name.ts',
+      });
+      globalThis.window.dispatchEvent(new MessageEvent('message', {
+        data: {
+          id: commitPreviewRequest?.id,
+          type: commitPreviewRequest?.type,
+          success: true,
+          data: { status: 'too-large', totalBytes: 8388609, maxBytes: 8388608 },
+        },
+      }));
+      await commitPreviewPromise;
     } finally {
       Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
       Object.defineProperty(globalThis, 'acquireVsCodeApi', { configurable: true, value: originalAcquire });

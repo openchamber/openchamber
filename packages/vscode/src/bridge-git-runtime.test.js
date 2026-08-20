@@ -12,6 +12,8 @@ const gitService = {
   getGitHistoryRefs: mock(),
   getGitHistory: mock(),
   getGitHistoryMergeBase: mock(),
+  getCommitFiles: mock(),
+  getCommitFileDiff: mock(),
 };
 
 mock.module('./gitService', () => gitService);
@@ -31,6 +33,8 @@ describe('bridge git runtime index mutations', () => {
     gitService.getGitHistoryRefs.mockReset();
     gitService.getGitHistory.mockReset();
     gitService.getGitHistoryMergeBase.mockReset();
+    gitService.getCommitFiles.mockReset();
+    gitService.getCommitFileDiff.mockReset();
   });
 
   it('accepts legacy stage path payloads', async () => {
@@ -275,6 +279,96 @@ describe('bridge git runtime index mutations', () => {
       all: true,
       cursor: undefined,
       limit: 25,
+    });
+  });
+
+  it('forwards structured commit file requests to the git service', async () => {
+    gitService.getCommitFiles.mockResolvedValue({
+      files: [
+        {
+          path: 'new-name.ts',
+          originalPath: 'old-name.ts',
+          status: 'R',
+          kind: 'file',
+          originalObjectId: 'aaaa',
+          objectId: 'bbbb',
+          insertions: 1,
+          deletions: 1,
+          isBinary: false,
+        },
+      ],
+    });
+
+    const response = await handleStandardGitBridgeMessage({
+      id: 'commit-files',
+      type: 'api:git/commit-files',
+      payload: {
+        directory: '/repo',
+        hash: 'abc1234',
+        parentHash: 'def5678',
+      },
+    });
+
+    expect(response).toEqual({
+      id: 'commit-files',
+      type: 'api:git/commit-files',
+      success: true,
+      data: {
+        files: [
+          {
+            path: 'new-name.ts',
+            originalPath: 'old-name.ts',
+            status: 'R',
+            kind: 'file',
+            originalObjectId: 'aaaa',
+            objectId: 'bbbb',
+            insertions: 1,
+            deletions: 1,
+            isBinary: false,
+          },
+        ],
+      },
+    });
+    expect(gitService.getCommitFiles).toHaveBeenCalledWith('/repo', {
+      commitHash: 'abc1234',
+      parentHash: 'def5678',
+    });
+  });
+
+  it('forwards structured commit preview requests and preserves too-large responses', async () => {
+    gitService.getCommitFileDiff.mockResolvedValue({
+      status: 'too-large',
+      totalBytes: 8388609,
+      maxBytes: 8388608,
+    });
+
+    const response = await handleStandardGitBridgeMessage({
+      id: 'commit-preview',
+      type: 'api:git/commit-file-diff',
+      payload: {
+        directory: '/repo',
+        hash: 'abc1234',
+        parentHash: 'def5678',
+        originalPath: 'old-name.ts',
+        modifiedPath: 'new-name.ts',
+      },
+    });
+
+    expect(response).toEqual({
+      id: 'commit-preview',
+      type: 'api:git/commit-file-diff',
+      success: true,
+      data: {
+        status: 'too-large',
+        totalBytes: 8388609,
+        maxBytes: 8388608,
+      },
+    });
+    expect(gitService.getCommitFileDiff).toHaveBeenCalledWith('/repo', {
+      commitHash: 'abc1234',
+      parentHash: 'def5678',
+      originalPath: 'old-name.ts',
+      modifiedPath: 'new-name.ts',
     });
   });
 

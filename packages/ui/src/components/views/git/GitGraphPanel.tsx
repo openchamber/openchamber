@@ -2,7 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import type { CommitFileEntry, GitCommitHoverDetailsCache, GitHistoryRef } from '@/lib/api/types';
+import type { GitCommitHoverDetailsCache, GitHistoryRef } from '@/lib/api/types';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { HistoryCommitRow } from './HistoryCommitRow';
 import { GitGraphSegment } from './GitGraphSegment';
@@ -26,15 +26,13 @@ import {
   resolveGraphQuery,
   shouldAutoRefreshGitGraphQuery,
 } from './gitGraphPanelModel';
+import type { GitCommitDetailsController } from './gitCommitDetailsController';
 
 interface GitGraphPanelProps {
   directory: string;
   git: RuntimeAPIs['git'];
   isActive: boolean;
-  expandedCommitHashes: Set<string>;
-  onToggleCommit: (hash: string) => void;
-  commitFilesMap: Map<string, CommitFileEntry[]>;
-  loadingCommitHashes: Set<string>;
+  commitDetailsController: GitCommitDetailsController;
   onCopyHash: (hash: string) => void;
   hoverRemoteName?: string | null;
   hoverRemoteUrl?: string | null;
@@ -47,10 +45,7 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
   directory,
   git,
   isActive,
-  expandedCommitHashes,
-  onToggleCommit,
-  commitFilesMap,
-  loadingCommitHashes,
+  commitDetailsController,
   onCopyHash,
   hoverRemoteName = null,
   hoverRemoteUrl = null,
@@ -127,6 +122,11 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
     [viewModels],
   );
   const hoverCoordinator = React.useMemo(() => GitCommitHoverPopover.createCoordinator(), []);
+  const [, forceExpandedRefresh] = React.useReducer((count: number) => count + 1, 0);
+
+  React.useEffect(() => commitDetailsController.subscribeExpanded(() => {
+    forceExpandedRefresh();
+  }), [commitDetailsController]);
 
   const refresh = React.useCallback(async () => {
     await ensureHistoryRefs(directory, git);
@@ -332,6 +332,12 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
                 );
               }
 
+              const comparison = {
+                directory,
+                commitHash: viewModel.historyItem.id,
+                parentHash: viewModel.historyItem.parentIds[0] ?? null,
+              };
+
               return (
                 <HistoryCommitRow
                   key={viewModel.historyItem.id}
@@ -339,10 +345,10 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
                   mode="graph"
                   viewModel={viewModel}
                   totalColumns={totalColumns}
-                  isExpanded={expandedCommitHashes.has(viewModel.historyItem.id)}
-                  onToggle={() => onToggleCommit(viewModel.historyItem.id)}
-                  files={commitFilesMap.get(viewModel.historyItem.id) ?? []}
-                  isLoadingFiles={loadingCommitHashes.has(viewModel.historyItem.id)}
+                  isExpanded={commitDetailsController.isExpanded(comparison)}
+                  onToggle={() => commitDetailsController.toggleExpanded(comparison)}
+                  files={[]}
+                  isLoadingFiles={false}
                   onCopyHash={onCopyHash}
                   directory={directory}
                   hoverCoordinator={hoverCoordinator}
@@ -352,6 +358,8 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
                   compactGraph={true}
                   onConflict={onConflict}
                   onActionSuccess={onActionSuccess}
+                  commitComparison={comparison}
+                  commitDetailsController={commitDetailsController}
                 />
               );
             })}

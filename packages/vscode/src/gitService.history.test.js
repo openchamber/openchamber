@@ -43,6 +43,8 @@ const {
   getGitHistory,
   getGitHistoryMergeBase,
   getGitLog,
+  getCommitFiles,
+  getCommitFileDiff,
 } = await import('./gitService.ts?history-test');
 
 const setGitResponse = (args, response) => {
@@ -391,5 +393,230 @@ describe('VS Code git history service parity', () => {
       statusCode: 409,
       code: 'stale_git_history_cursor',
     });
+  });
+
+  it('parses normalized commit files from one explicit diff-tree comparison', async () => {
+    setGitResponse(
+      ['diff-tree', '-r', '--no-commit-id', '-M', '--raw', '--numstat', '--no-abbrev', '-z', 'parent123', 'commit456'],
+      {
+        stdout: [
+          ':000000 100644 0000000000000000000000000000000000000000 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa A\0added.txt\0',
+          ':100644 100644 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccccccccccc M\0modified.txt\0',
+          ':100644 000000 dddddddddddddddddddddddddddddddddddddddd 0000000000000000000000000000000000000000 D\0deleted.txt\0',
+          ':100644 100644 eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee ffffffffffffffffffffffffffffffffffffffff R100\0old-name.ts\0new-name.ts\0',
+          ':100644 120000 1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 T\0link.txt\0',
+          ':100644 160000 3333333333333333333333333333333333333333 4444444444444444444444444444444444444444 T\0submodule\0',
+          ':100644 100644 5555555555555555555555555555555555555555 6666666666666666666666666666666666666666 M\0image.png\0',
+          '3\t0\tadded.txt\0',
+          '5\t2\tmodified.txt\0',
+          '0\t7\tdeleted.txt\0',
+          '1\t1\t\0old-name.ts\0new-name.ts\0',
+          '1\t1\tlink.txt\0',
+          '-\t-\tsubmodule\0',
+          '-\t-\timage.png\0',
+        ].join(''),
+        stderr: '',
+        exitCode: 0,
+      },
+    );
+
+    await expect(getCommitFiles('/repo', { commitHash: 'commit456', parentHash: 'parent123' })).resolves.toEqual({
+      files: [
+        {
+          path: 'added.txt',
+          status: 'A',
+          kind: 'file',
+          objectId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          insertions: 3,
+          deletions: 0,
+          isBinary: false,
+        },
+        {
+          path: 'modified.txt',
+          status: 'M',
+          kind: 'file',
+          originalObjectId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          objectId: 'cccccccccccccccccccccccccccccccccccccccc',
+          insertions: 5,
+          deletions: 2,
+          isBinary: false,
+        },
+        {
+          path: 'deleted.txt',
+          status: 'D',
+          kind: 'file',
+          originalObjectId: 'dddddddddddddddddddddddddddddddddddddddd',
+          insertions: 0,
+          deletions: 7,
+          isBinary: false,
+        },
+        {
+          path: 'new-name.ts',
+          originalPath: 'old-name.ts',
+          status: 'R',
+          kind: 'file',
+          originalObjectId: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+          objectId: 'ffffffffffffffffffffffffffffffffffffffff',
+          insertions: 1,
+          deletions: 1,
+          isBinary: false,
+        },
+        {
+          path: 'link.txt',
+          status: 'M',
+          kind: 'symlink',
+          originalObjectId: '1111111111111111111111111111111111111111',
+          objectId: '2222222222222222222222222222222222222222',
+          insertions: 1,
+          deletions: 1,
+          isBinary: false,
+        },
+         {
+           path: 'submodule',
+           status: 'M',
+           kind: 'gitlink',
+           originalObjectId: '3333333333333333333333333333333333333333',
+           objectId: '4444444444444444444444444444444444444444',
+           insertions: 0,
+           deletions: 0,
+           isBinary: false,
+         },
+        {
+          path: 'image.png',
+          status: 'M',
+          kind: 'file',
+          originalObjectId: '5555555555555555555555555555555555555555',
+          objectId: '6666666666666666666666666666666666666666',
+          insertions: 0,
+          deletions: 0,
+          isBinary: true,
+        },
+      ],
+    });
+  });
+
+  it('uses --root comparisons for root commits and ignores malformed records', async () => {
+    setGitResponse(
+      ['diff-tree', '--root', '-r', '--no-commit-id', '-M', '--raw', '--numstat', '--no-abbrev', '-z', 'root123'],
+      {
+        stdout: [
+          ':000000 100644 0000000000000000000000000000000000000000 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa A\0valid.txt\0',
+          ':100644 100644 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccccccccccc M\0missing-numstat.txt\0',
+          '4\t0\tvalid.txt\0',
+          '2\t1\t\0dangling-old.txt\0',
+        ].join(''),
+        stderr: '',
+        exitCode: 0,
+      },
+    );
+
+    await expect(getCommitFiles('/repo', { commitHash: 'root123', parentHash: null })).resolves.toEqual({
+      files: [
+        {
+          path: 'valid.txt',
+          status: 'A',
+          kind: 'file',
+          objectId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          insertions: 4,
+          deletions: 0,
+          isBinary: false,
+        },
+      ],
+    });
+  });
+
+  it('returns an empty change list when the explicit parent is unavailable', async () => {
+    setGitResponse(
+      ['diff-tree', '-r', '--no-commit-id', '-M', '--raw', '--numstat', '--no-abbrev', '-z', 'missing-parent', 'commit456'],
+      {
+        stdout: '',
+        stderr: 'fatal: bad object missing-parent',
+        exitCode: 128,
+      },
+    );
+
+    await expect(getCommitFiles('/repo', { commitHash: 'commit456', parentHash: 'missing-parent' })).resolves.toEqual({ files: [] });
+  });
+
+  it('returns ready previews for explicit rename comparisons', async () => {
+    setGitResponse(['ls-tree', '-z', 'parent123', '--', 'old-name.ts'], {
+      stdout: '100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\told-name.ts\0',
+      stderr: '',
+      exitCode: 0,
+    });
+    setGitResponse(['ls-tree', '-z', 'commit456', '--', 'new-name.ts'], {
+      stdout: '100644 blob bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tnew-name.ts\0',
+      stderr: '',
+      exitCode: 0,
+    });
+    setGitResponse(['cat-file', '-s', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'], { stdout: '12\n', stderr: '', exitCode: 0 });
+    setGitResponse(['cat-file', '-s', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'], { stdout: '16\n', stderr: '', exitCode: 0 });
+    setGitResponse(['cat-file', '-p', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'], { stdout: 'old contents\n', stderr: '', exitCode: 0 });
+    setGitResponse(['cat-file', '-p', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'], { stdout: 'new contents\n', stderr: '', exitCode: 0 });
+
+    await expect(
+      getCommitFileDiff('/repo', {
+        commitHash: 'commit456',
+        parentHash: 'parent123',
+        originalPath: 'old-name.ts',
+        modifiedPath: 'new-name.ts',
+      }),
+    ).resolves.toEqual({
+      status: 'ready',
+      original: 'old contents\n',
+      modified: 'new contents\n',
+    });
+  });
+
+  it('returns nullable-side previews for additions without reading a missing parent blob', async () => {
+    setGitResponse(['ls-tree', '-z', 'commit456', '--', 'added.txt'], {
+      stdout: '100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tadded.txt\0',
+      stderr: '',
+      exitCode: 0,
+    });
+    setGitResponse(['cat-file', '-s', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'], { stdout: '6\n', stderr: '', exitCode: 0 });
+    setGitResponse(['cat-file', '-p', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'], { stdout: 'hello\n', stderr: '', exitCode: 0 });
+
+    await expect(
+      getCommitFileDiff('/repo', {
+        commitHash: 'commit456',
+        parentHash: null,
+        originalPath: null,
+        modifiedPath: 'added.txt',
+      }),
+    ).resolves.toEqual({
+      status: 'ready',
+      original: '',
+      modified: 'hello\n',
+    });
+  });
+
+  it('returns too-large before reading preview blobs', async () => {
+    setGitResponse(['ls-tree', '-z', 'parent123', '--', 'big-old.ts'], {
+      stdout: '100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tbig-old.ts\0',
+      stderr: '',
+      exitCode: 0,
+    });
+    setGitResponse(['ls-tree', '-z', 'commit456', '--', 'big-new.ts'], {
+      stdout: '100644 blob bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tbig-new.ts\0',
+      stderr: '',
+      exitCode: 0,
+    });
+    setGitResponse(['cat-file', '-s', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'], { stdout: '4194304\n', stderr: '', exitCode: 0 });
+    setGitResponse(['cat-file', '-s', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'], { stdout: '4194305\n', stderr: '', exitCode: 0 });
+
+    const result = await getCommitFileDiff('/repo', {
+      commitHash: 'commit456',
+      parentHash: 'parent123',
+      originalPath: 'big-old.ts',
+      modifiedPath: 'big-new.ts',
+    });
+
+    expect(result).toEqual({
+      status: 'too-large',
+      totalBytes: 8388609,
+      maxBytes: 8388608,
+    });
+    expect(spawnCalls.some((call) => call.args[0] === 'cat-file' && call.args[1] === '-p')).toBe(false);
   });
 });

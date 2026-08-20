@@ -599,28 +599,56 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/commit-files': {
-      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
+      const directory = readString(payloadRecord, 'directory');
+      const hash = readString(payloadRecord, 'hash');
+      const parentHashValue = payloadRecord.parentHash;
+      const parentHash = parentHashValue === null ? null : readString(payloadRecord, 'parentHash');
       if (!directory || !hash) {
         return { id, type, success: false, error: 'Directory and hash are required' };
       }
-      const result = await gitService.getCommitFiles(directory, hash);
+      if (parentHashValue !== undefined && parentHashValue !== null && parentHash === undefined) {
+        return { id, type, success: false, error: 'parentHash must be a string or null' };
+      }
+      const result = await gitService.getCommitFiles(directory, {
+        commitHash: hash,
+        parentHash: parentHash ?? null,
+      });
       return { id, type, success: true, data: result };
     }
 
     case 'api:git/commit-file-diff': {
-      const { directory, hash, path: filePath, binary } = (payload || {}) as {
-        directory?: string;
-        hash?: string;
-        path?: string;
-        binary?: boolean;
-      };
-      if (!directory || !hash || !filePath) {
-        return { id, type, success: false, error: 'Directory, hash, and path are required' };
+      const directory = readString(payloadRecord, 'directory');
+      const hash = readString(payloadRecord, 'hash');
+      const parentHashValue = payloadRecord.parentHash;
+      const parentHash = parentHashValue === null ? null : readString(payloadRecord, 'parentHash');
+      const originalPathValue = payloadRecord.originalPath;
+      const originalPath = originalPathValue === null ? null : readString(payloadRecord, 'originalPath');
+      const modifiedPathValue = payloadRecord.modifiedPath;
+      const modifiedPath = modifiedPathValue === null ? null : readString(payloadRecord, 'modifiedPath');
+      if (!directory || !hash) {
+        return { id, type, success: false, error: 'Directory and hash are required' };
       }
       if (!/^[0-9a-fA-F]{7,40}$/.test(hash)) {
         return { id, type, success: false, error: 'hash must be a valid commit SHA' };
       }
-      const result = await gitService.getCommitFileDiff(directory, hash, filePath, Boolean(binary));
+      if (parentHashValue !== undefined && parentHashValue !== null && parentHash === undefined) {
+        return { id, type, success: false, error: 'parentHash must be a string or null' };
+      }
+      if (originalPathValue !== undefined && originalPathValue !== null && originalPath === undefined) {
+        return { id, type, success: false, error: 'originalPath must be a string or null' };
+      }
+      if (modifiedPathValue !== undefined && modifiedPathValue !== null && modifiedPath === undefined) {
+        return { id, type, success: false, error: 'modifiedPath must be a string or null' };
+      }
+      if (!originalPath && !modifiedPath) {
+        return { id, type, success: false, error: 'originalPath or modifiedPath is required' };
+      }
+      const result = await gitService.getCommitFileDiff(directory, {
+        commitHash: hash,
+        parentHash: parentHash ?? null,
+        originalPath: originalPath ?? null,
+        modifiedPath: modifiedPath ?? null,
+      });
       return { id, type, success: true, data: result };
     }
 

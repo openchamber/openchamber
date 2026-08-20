@@ -34,6 +34,37 @@ const WORKTREE_PHASE_SETUP_READY = 'setup-ready' as const;
 const WORKTREE_INDEX_LOCK_RETRY_DELAY_MS = 250;
 const WORKTREE_INDEX_LOCK_STALE_DELAY_MS = 750;
 const GIT_NULL_REF = '0'.repeat(40);
+const COMMIT_FILE_PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
+
+type GitCommitChangedFile = {
+  path: string;
+  originalPath?: string;
+  status: 'A' | 'M' | 'D' | 'R';
+  kind: 'file' | 'symlink' | 'gitlink';
+  originalObjectId?: string;
+  objectId?: string;
+  insertions: number;
+  deletions: number;
+  isBinary: boolean;
+};
+
+type GitCommitChangesRequest = {
+  commitHash: string;
+  parentHash: string | null;
+};
+
+type GitCommitFilePreviewRequest = {
+  commitHash: string;
+  parentHash: string | null;
+  originalPath: string | null;
+  modifiedPath: string | null;
+};
+
+type CommitTreeEntry = {
+  mode: string;
+  objectId: string;
+  path: string;
+};
 
 const toBootstrapStateKey = (directory: string): string => {
   const normalized = normalizeDirectoryPath(directory);
@@ -347,25 +378,202 @@ function isValidCommitHash(hash: string): boolean {
   return /^[0-9a-fA-F]{7,40}$/.test(hash);
 }
 
-function extractGitStatusPath(status: string, pathPart: string): string {
-  if ((status === 'R' || status === 'C') && pathPart.includes('\t')) {
-    return pathPart.split('\t').pop() || pathPart;
+function getCommitEntryKind(mode: string): GitCommitChangedFile['kind'] {
+  if (mode === '120000') {
+    return 'symlink';
   }
-  return pathPart;
+  if (mode === '160000') {
+    return 'gitlink';
+  }
+  return 'file';
 }
 
-function extractGitNumstatDestinationPath(filePath: string): string {
-  if (!filePath.includes(' => ')) {
-    return filePath;
+function normalizeCommitDiffStatus(status: string): GitCommitChangedFile['status'] | null {
+  if (status === 'A' || status === 'D' || status === 'R') {
+    return status;
+  }
+  if (status === 'M' || status === 'T' || status === 'C') {
+    return 'M';
+  }
+  return null;
+}
+
+function buildCommitDiffEntryKey(pathValue: string, originalPath?: string): string {
+  return `${originalPath ?? ''}\u0000${pathValue}`;
+}
+
+function parseCommitTreeEntry(output: string): CommitTreeEntry | null {
+  const record = output.split('\u0000', 1)[0]?.trim();
+  if (!record) {
+    return null;
+  }
+  const match = /^([0-7]{6})\s+\S+\s+([0-9a-f]{40})\t(.+)$/.exec(record);
+  if (!match) {
+    return null;
+  }
+  const [, mode, objectId, entryPath] = match;
+  return { mode, objectId, path: entryPath };
+}
+
+async function getCommitTreeEntry(directory: string, treeish: string, filePath: string): Promise<CommitTreeEntry | null> {
+  const result = await execGit(['ls-tree', '-z', treeish, '--', filePath], directory);
+  if (result.exitCode !== 0 || !result.stdout) {
+    return null;
+  }
+  return parseCommitTreeEntry(result.stdout);
+}
+
+async function getGitObjectSize(directory: string, objectId: string): Promise<number> {
+  const result = await execGit(['cat-file', '-s', objectId], directory);
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to read object size for ${objectId}`);
+  }
+  const size = Number.parseInt(result.stdout.trim(), 10);
+  if (!Number.isFinite(size) || size < 0) {
+    throw new Error(`Invalid object size for ${objectId}`);
+  }
+  return size;
+}
+
+async function readGitObjectText(directory: string, objectId: string): Promise<string> {
+  const result = await execGit(['cat-file', '-p', objectId], directory);
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to read object ${objectId}`);
+  }
+  return result.stdout;
+}
+
+function parseCommitFileChanges(stdout: string): GitCommitChangedFile[] {
+  const rawEntries: Array<Omit<GitCommitChangedFile, 'insertions' | 'deletions' | 'isBinary'>> = [];
+  const indexByKey = new Map<string, number>();
+  let cursor = 0;
+
+  while (cursor < stdout.length && stdout[cursor] === ':') {
+    const headerEnd = stdout.indexOf('\u0000', cursor);
+    if (headerEnd === -1) {
+      break;
+    }
+    const header = stdout.slice(cursor, headerEnd);
+    cursor = headerEnd + 1;
+
+    const headerMatch = /^:([0-7]{6})\s+([0-7]{6})\s+([0-9a-f]{40})\s+([0-9a-f]{40})\s+([A-Z])(\d+)?$/.exec(header);
+    if (!headerMatch) {
+      break;
+    }
+
+    const [, oldMode, newMode, oldObjectId, newObjectId, rawStatus] = headerMatch;
+    const normalizedStatus = normalizeCommitDiffStatus(rawStatus);
+    if (!normalizedStatus) {
+      continue;
+    }
+
+    const firstPathEnd = stdout.indexOf('\u0000', cursor);
+    if (firstPathEnd === -1) {
+      break;
+    }
+    const firstPath = stdout.slice(cursor, firstPathEnd);
+    cursor = firstPathEnd + 1;
+    if (!firstPath) {
+      continue;
+    }
+
+    let originalPath: string | undefined;
+    let resolvedPath = firstPath;
+    if (rawStatus === 'R' || rawStatus === 'C') {
+      const secondPathEnd = stdout.indexOf('\u0000', cursor);
+      if (secondPathEnd === -1) {
+        break;
+      }
+      const secondPath = stdout.slice(cursor, secondPathEnd);
+      cursor = secondPathEnd + 1;
+      if (!secondPath) {
+        continue;
+      }
+      originalPath = firstPath;
+      resolvedPath = secondPath;
+    }
+
+    const kindMode = normalizedStatus === 'D' ? oldMode : newMode;
+    const entry: Omit<GitCommitChangedFile, 'insertions' | 'deletions' | 'isBinary'> = {
+      path: resolvedPath,
+      status: normalizedStatus,
+      kind: getCommitEntryKind(kindMode),
+    };
+    if (originalPath) {
+      entry.originalPath = originalPath;
+    }
+    if (oldObjectId !== GIT_NULL_REF) {
+      entry.originalObjectId = oldObjectId;
+    }
+    if (newObjectId !== GIT_NULL_REF) {
+      entry.objectId = newObjectId;
+    }
+    indexByKey.set(buildCommitDiffEntryKey(resolvedPath, originalPath), rawEntries.push(entry) - 1);
   }
 
-  const braceMatch = filePath.match(/^(.*)\{([^{}]*)\s=>\s([^{}]*)\}(.*)$/);
-  if (braceMatch) {
-    const [, prefix, , destination, suffix] = braceMatch;
-    return `${prefix}${destination}${suffix}`.replace(/\/+/g, '/');
+  const statsByKey = new Map<string, Pick<GitCommitChangedFile, 'insertions' | 'deletions' | 'isBinary'>>();
+  while (cursor < stdout.length) {
+    const recordEnd = stdout.indexOf('\u0000', cursor);
+    if (recordEnd === -1) {
+      break;
+    }
+    const record = stdout.slice(cursor, recordEnd);
+    cursor = recordEnd + 1;
+    if (!record) {
+      continue;
+    }
+
+    const statMatch = /^([0-9-]+)\t([0-9-]+)\t(.*)$/.exec(record);
+    if (!statMatch) {
+      continue;
+    }
+
+    const [, insertionsRaw, deletionsRaw, pathField] = statMatch;
+    const isRename = pathField.length === 0;
+    let originalPath: string | undefined;
+    let resolvedPath = pathField;
+
+    if (isRename) {
+      const originalPathEnd = stdout.indexOf('\u0000', cursor);
+      if (originalPathEnd === -1) {
+        break;
+      }
+      const renameOriginalPath = stdout.slice(cursor, originalPathEnd);
+      cursor = originalPathEnd + 1;
+      const resolvedPathEnd = stdout.indexOf('\u0000', cursor);
+      if (resolvedPathEnd === -1) {
+        break;
+      }
+      const renameResolvedPath = stdout.slice(cursor, resolvedPathEnd);
+      cursor = resolvedPathEnd + 1;
+      if (!renameOriginalPath || !renameResolvedPath) {
+        continue;
+      }
+      originalPath = renameOriginalPath;
+      resolvedPath = renameResolvedPath;
+    }
+
+    if (!resolvedPath) {
+      continue;
+    }
+
+    const rawEntryIndex = indexByKey.get(buildCommitDiffEntryKey(resolvedPath, originalPath));
+    const rawEntry = rawEntryIndex === undefined ? null : rawEntries[rawEntryIndex];
+    const isBinary = rawEntry?.kind === 'file' && insertionsRaw === '-' && deletionsRaw === '-';
+    statsByKey.set(buildCommitDiffEntryKey(resolvedPath, originalPath), {
+      insertions: isBinary ? 0 : Number.parseInt(insertionsRaw, 10) || 0,
+      deletions: isBinary ? 0 : Number.parseInt(deletionsRaw, 10) || 0,
+      isBinary,
+    });
   }
 
-  return filePath.split(' => ').pop()?.trim() || filePath;
+  return rawEntries.flatMap((entry) => {
+    const stats = statsByKey.get(buildCommitDiffEntryKey(entry.path, entry.originalPath));
+    if (!stats) {
+      return [];
+    }
+    return [{ ...entry, ...stats }];
+  });
 }
 
 // ============== Repository Operations ==============
@@ -3591,83 +3799,61 @@ export async function getGitLog(
  */
 export async function getCommitFiles(
   directory: string,
-  hash: string
-): Promise<{ files: Array<{ path: string; insertions: number; deletions: number; isBinary: boolean; changeType: string }> }> {
-  const numstatResult = await execGit(['show', '--numstat', '--format=', hash], directory);
+  request: GitCommitChangesRequest
+): Promise<{ files: GitCommitChangedFile[] }> {
+  const { commitHash, parentHash } = request;
+  const args = parentHash
+    ? ['diff-tree', '-r', '--no-commit-id', '-M', '--raw', '--numstat', '--no-abbrev', '-z', parentHash, commitHash]
+    : ['diff-tree', '--root', '-r', '--no-commit-id', '-M', '--raw', '--numstat', '--no-abbrev', '-z', commitHash];
+  const result = await execGit(args, directory);
 
-  if (numstatResult.exitCode !== 0) {
+  if (result.exitCode !== 0) {
     return { files: [] };
   }
 
-  const files: Array<{ path: string; insertions: number; deletions: number; isBinary: boolean; changeType: string }> = [];
-  const lines = numstatResult.stdout.trim().split('\n').filter(Boolean);
-
-  for (const line of lines) {
-    const parts = line.split('\t');
-    if (parts.length < 3) continue;
-
-    const [insertionsRaw, deletionsRaw, ...pathParts] = parts;
-    const filePath = pathParts.join('\t');
-    if (!filePath) continue;
-
-    const isBinary = insertionsRaw === '-' && deletionsRaw === '-';
-    const insertions = isBinary ? 0 : (parseInt(insertionsRaw, 10) || 0);
-    const deletions = isBinary ? 0 : (parseInt(deletionsRaw, 10) || 0);
-
-    let changeType = 'M';
-    if (filePath.includes(' => ')) {
-      changeType = 'R';
-    }
-
-    files.push({ path: filePath, insertions, deletions, isBinary, changeType });
-  }
-
-  // Get accurate change types from --name-status
-  const nameStatusResult = await execGit(['show', '--name-status', '--format=', hash], directory);
-  if (nameStatusResult.exitCode === 0) {
-    const statusMap = new Map<string, string>();
-    for (const line of nameStatusResult.stdout.trim().split('\n').filter(Boolean)) {
-      const match = line.match(/^([AMDRC])\d*\t(.+)$/);
-      if (match) {
-        const [, status, pathPart] = match;
-        statusMap.set(extractGitStatusPath(status, pathPart), status);
-      }
-    }
-    for (const file of files) {
-      const basePath = extractGitNumstatDestinationPath(file.path);
-      const status = statusMap.get(basePath) ?? statusMap.get(file.path);
-      if (status) {
-        file.changeType = status;
-      }
-    }
-  }
-
-  return { files };
+  return { files: parseCommitFileChanges(result.stdout) };
 }
 
 export async function getCommitFileDiff(
   directory: string,
-  hash: string,
-  filePath: string,
-  isBinary: boolean
-): Promise<{ original: string; modified: string; isBinary: boolean }> {
-  if (isBinary) {
-    return { original: '', modified: '', isBinary: true };
-  }
-
-  const [originalResult, modifiedResult] = await Promise.all([
-    execGit(['show', `${hash}^:${filePath}`], directory),
-    execGit(['show', `${hash}:${filePath}`], directory),
+  request: GitCommitFilePreviewRequest
+): Promise<
+  | { status: 'ready'; original: string; modified: string }
+  | { status: 'too-large'; totalBytes: number; maxBytes: number }
+> {
+  const { commitHash, parentHash, originalPath, modifiedPath } = request;
+  const [originalEntry, modifiedEntry] = await Promise.all([
+    parentHash && originalPath ? getCommitTreeEntry(directory, parentHash, originalPath) : Promise.resolve(null),
+    modifiedPath ? getCommitTreeEntry(directory, commitHash, modifiedPath) : Promise.resolve(null),
   ]);
 
-  if (originalResult.exitCode !== 0 && modifiedResult.exitCode !== 0) {
-    throw new Error(`Failed to read file content at commit ${hash}`);
+  if (!originalEntry && !modifiedEntry) {
+    throw new Error(`Failed to read file content at commit ${commitHash}`);
   }
 
+  const [originalSize, modifiedSize] = await Promise.all([
+    originalEntry?.objectId ? getGitObjectSize(directory, originalEntry.objectId) : Promise.resolve(0),
+    modifiedEntry?.objectId ? getGitObjectSize(directory, modifiedEntry.objectId) : Promise.resolve(0),
+  ]);
+  const totalBytes = originalSize + modifiedSize;
+
+  if (totalBytes > COMMIT_FILE_PREVIEW_MAX_BYTES) {
+    return {
+      status: 'too-large',
+      totalBytes,
+      maxBytes: COMMIT_FILE_PREVIEW_MAX_BYTES,
+    };
+  }
+
+  const [original, modified] = await Promise.all([
+    originalEntry?.objectId ? readGitObjectText(directory, originalEntry.objectId) : Promise.resolve(''),
+    modifiedEntry?.objectId ? readGitObjectText(directory, modifiedEntry.objectId) : Promise.resolve(''),
+  ]);
+
   return {
-    original: originalResult.exitCode === 0 ? originalResult.stdout : '',
-    modified: modifiedResult.exitCode === 0 ? modifiedResult.stdout : '',
-    isBinary: false,
+    status: 'ready',
+    original,
+    modified,
   };
 }
 

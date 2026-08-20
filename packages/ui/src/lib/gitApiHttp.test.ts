@@ -5,12 +5,18 @@ import {
   getGitHistoryRefs,
   getGitBranches,
   getGitStatus,
+  getCommitFileDiff,
+  getCommitFiles,
   gitFetch,
   stageGitFile,
   stageGitFiles,
   unstageGitFile,
   unstageGitFiles,
 } from './gitApiHttp';
+import type {
+  GitCommitChangesRequest,
+  GitCommitFilePreviewRequest,
+} from './api/types';
 
 type FetchCall = {
   input: RequestInfo | URL;
@@ -211,6 +217,31 @@ describe('gitApiHttp history requests', () => {
       await getGitHistory('/repo', { all: true, cursor: 'cursor', limit: 25 });
 
       expect(String(calls[0].input)).toBe('/api/git/history?directory=%2Frepo&all=true&cursor=cursor&limit=25');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('accepts object requests for commit file history helpers', async () => {
+    installWindowMock();
+    const calls = installFetchMock();
+    try {
+      const changesRequest: GitCommitChangesRequest = {
+        commitHash: 'abc123',
+        parentHash: null,
+      };
+      const previewRequest: GitCommitFilePreviewRequest = {
+        commitHash: 'abc123',
+        parentHash: 'def456',
+        originalPath: null,
+        modifiedPath: 'new/name.ts',
+      };
+
+      await getCommitFiles('/repo', changesRequest);
+      await getCommitFileDiff('/repo', previewRequest);
+
+      expect(String(calls[0].input)).toBe('/api/git/commit-files?directory=%2Frepo&commitHash=abc123&parentHash=__ROOT__');
+      expect(String(calls[1].input)).toBe('/api/git/commit-file-diff?directory=%2Frepo&commitHash=abc123&parentHash=def456&originalPath=__ROOT__&modifiedPath=new%2Fname.ts');
     } finally {
       restoreMocks();
     }
