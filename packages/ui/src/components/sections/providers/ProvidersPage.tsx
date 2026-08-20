@@ -18,14 +18,14 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
-import { noteDeferredRestartFromPayload, recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
+import { recordDeferredOpenCodeRestart } from '@/lib/opencode/deferredRestart';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { opencodeClient } from '@/lib/opencode/client';
-import { requiresProviderAuth, shouldLoadAvailableProviders } from './providerAvailability';
+import { shouldLoadAvailableProviders } from './providerAvailability';
 import {
   getOAuthAuthMethods,
   parseAuthPayload,
@@ -162,7 +162,6 @@ export const ProvidersPage: React.FC = () => {
   const [authLoading, setAuthLoading] = React.useState(false);
   const [apiKeyInputs, setApiKeyInputs] = React.useState<Record<string, string>>({});
   const [oauthCodes, setOauthCodes] = React.useState<Record<string, string>>({});
-  const [pendingOAuth, setPendingOAuth] = React.useState<{ providerId: string; methodIndex: number } | null>(null);
   const [authBusyKey, setAuthBusyKey] = React.useState<string | null>(null);
   const [modelQuery, setModelQuery] = React.useState('');
   const [availableProviders, setAvailableProviders] = React.useState<ProviderOption[]>([]);
@@ -520,61 +519,6 @@ export const ProvidersPage: React.FC = () => {
     if (requiresOpenCodeRestartAfterOAuth(providerId)) {
       recordDeferredOpenCodeRestart('providers', { id: providerId });
     }
-  };
-
-  const handleOAuthComplete = async (providerId: string, methodIndex: number) => {
-    const codeKey = `${providerId}:${methodIndex}`;
-    const code = oauthCodes[codeKey]?.trim();
-
-    const busyKey = `oauth-complete:${providerId}:${methodIndex}`;
-    setAuthBusyKey(busyKey);
-
-    try {
-      const requestBody: { method: number; code?: string } = { method: methodIndex };
-      if (code) {
-        requestBody.code = code;
-      }
-
-      const result = await opencodeClient.getSdkClient().provider.oauth.callback({
-        providerID: providerId,
-        method: requestBody.method,
-        code: requestBody.code,
-      });
-      if (result.error) {
-        throw new Error(t('settings.providers.page.toast.oauthCompleteFailed'));
-      }
-
-      toast.success(t('settings.providers.page.toast.oauthCompleted'));
-      setOauthCodes((prev) => ({ ...prev, [codeKey]: '' }));
-      setPendingOAuth(null);
-      await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
-      markAuthWriteSucceeded(providerId);
-    } catch (error) {
-      console.error('Failed to complete OAuth flow:', error);
-      toast.error(t('settings.providers.page.toast.oauthCompleteFailed'));
-    } finally {
-      setAuthBusyKey(null);
-    }
-  };
-
-  const handleCopyOAuthLink = async (url: string) => {
-    const result = await copyTextToClipboard(url);
-    if (result.ok) {
-      toast.success(t('settings.providers.page.toast.oauthLinkCopied'));
-      return;
-    }
-    console.error('Failed to copy OAuth link:', result.error);
-    toast.error(t('settings.providers.page.toast.oauthLinkCopyFailed'));
-  };
-
-  const handleCopyOAuthCode = async (code: string) => {
-    const result = await copyTextToClipboard(code);
-    if (result.ok) {
-      toast.success(t('settings.providers.page.toast.deviceCodeCopied'));
-      return;
-    }
-    console.error('Failed to copy device code:', result.error);
-    toast.error(t('settings.providers.page.toast.deviceCodeCopyFailed'));
   };
 
   const handleDisconnectProvider = async (providerId: string) => {
