@@ -42,6 +42,7 @@ const {
   getGitHistoryRefs,
   getGitHistory,
   getGitHistoryMergeBase,
+  getGitLog,
 } = await import('./gitService.ts?history-test');
 
 const setGitResponse = (args, response) => {
@@ -267,6 +268,74 @@ describe('VS Code git history service parity', () => {
 
     const refs = Array.from({ length: 33 }, (_, index) => `refs/heads/branch-${index + 1}`);
     await expect(getGitHistory('/repo', { refs })).rejects.toThrow('refs must contain at most 32 values');
+  });
+
+  it('preserves multiline commit bodies in legacy git log entries for all and ranged history', async () => {
+    setGitResponse(
+      [
+        'log',
+        '--max-count=5',
+        '--all',
+        '--topo-order',
+        '--date=iso',
+        '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D%x1f%b%x1d',
+        '--shortstat',
+      ],
+      {
+        stdout: [
+          '\x1ec1\x1fp1 p2\x1fAlice\x1falice@example.com\x1f2024-01-04 00:00:00 +0000\x1fAll subject\x1frefs/heads/feature\x1fFirst body line',
+          'Second body line\x1d',
+          ' 2 files changed, 3 insertions(+), 1 deletions(-)',
+        ].join('\n'),
+        stderr: '',
+        exitCode: 0,
+      },
+    );
+    setGitResponse(
+      [
+        'log',
+        '--max-count=5',
+        '--date=iso',
+        '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D%x1f%b%x1d',
+        '--shortstat',
+        'main..HEAD',
+      ],
+      {
+        stdout: [
+          '\x1ec2\x1fp3\x1fBob\x1fbob@example.com\x1f2024-01-05 00:00:00 +0000\x1fRange subject\x1frefs/heads/feature, refs/remotes/origin/feature\x1fBody line one',
+          'Body line two\x1d',
+          ' 1 file changed, 2 insertions(+), 4 deletions(-)',
+        ].join('\n'),
+        stderr: '',
+        exitCode: 0,
+      },
+    );
+
+    const allLog = await getGitLog('/repo', { maxCount: 5, all: true });
+    expect(allLog.all).toEqual([
+      expect.objectContaining({
+        hash: 'c1',
+        parents: ['p1', 'p2'],
+        message: 'All subject',
+        body: 'First body line\nSecond body line',
+        filesChanged: 2,
+        insertions: 3,
+        deletions: 1,
+      }),
+    ]);
+
+    const rangedLog = await getGitLog('/repo', { maxCount: 5, from: 'main' });
+    expect(rangedLog.all).toEqual([
+      expect.objectContaining({
+        hash: 'c2',
+        parents: ['p3'],
+        message: 'Range subject',
+        body: 'Body line one\nBody line two',
+        filesChanged: 1,
+        insertions: 2,
+        deletions: 4,
+      }),
+    ]);
   });
 
   it('rejects a detached-head cursor after HEAD moves even when named refs are unchanged', async () => {

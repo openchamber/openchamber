@@ -3,6 +3,16 @@ import { describe, expect, mock, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { I18nProvider } from '@/lib/i18n';
 
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  writable: true,
+  value: {
+    getItem() { return null; },
+    setItem() {},
+    removeItem() {},
+  },
+});
+
 type MockButtonProps = React.PropsWithChildren<React.ButtonHTMLAttributes<HTMLButtonElement>>;
 type MockWrapperProps = React.PropsWithChildren<{ asChild?: boolean }>;
 
@@ -38,8 +48,16 @@ mock.module('@/components/ui/toast', () => ({
   },
 }));
 
-mock.module('@/stores/useUIStore', () => ({
-  useUIStore: <T,>(selector: (state: { timeFormatPreference: 'absolute-12h' }) => T) => selector({ timeFormatPreference: 'absolute-12h' }),
+mock.module('./GitCommitHoverPopover', () => ({
+  GitCommitHoverPopover: Object.assign(
+    ({ rowButton }: { rowButton: React.ReactElement }) => rowButton,
+    {
+      createCoordinator: () => ({
+        claim() {},
+        release() {},
+      }),
+    },
+  ),
 }));
 
 const { HistoryCommitRow } = await import('./HistoryCommitRow');

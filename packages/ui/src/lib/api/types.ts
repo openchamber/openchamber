@@ -892,6 +892,12 @@ export type GitHubUserSummary = {
   email?: string;
 };
 
+export type GitHubCommitDetails = {
+  connected: boolean;
+  url?: string | null;
+  author?: GitHubUserSummary | null;
+};
+
 type GitHubRepoRef = {
   owner: string;
   repo: string;
@@ -1209,6 +1215,26 @@ export interface GitHubAPI {
   issueComments(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueCommentsResult>;
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
   repoBranches(owner: string, repo: string): Promise<string[]>;
+  commitDetails?(directory: string, hash: string, remote?: string): Promise<GitHubCommitDetails>;
+}
+
+export type GitCommitHoverDetailsKey = {
+  directory: string;
+  remoteName: string | null;
+  hash: string;
+};
+
+export type GitCommitHoverDetailsSnapshot =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ready'; details: GitHubCommitDetails }
+  | { status: 'unavailable' };
+
+export interface GitCommitHoverDetailsCache {
+  preload(key: GitCommitHoverDetailsKey): Promise<void>;
+  getSnapshot(key: GitCommitHoverDetailsKey): GitCommitHoverDetailsSnapshot;
+  subscribe(key: GitCommitHoverDetailsKey, listener: () => void): () => void;
+  dispose(): void;
 }
 
 export interface RemoteClientRecord {

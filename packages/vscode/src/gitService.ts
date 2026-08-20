@@ -2988,6 +2988,53 @@ export interface GitLogEntry {
   parents: string[];
 }
 
+const GIT_LOG_PRETTY_FORMAT = '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D%x1f%b%x1d';
+
+const parseGitLogStatistics = (lines: string[]) => {
+  let filesChanged = 0;
+  let insertions = 0;
+  let deletions = 0;
+
+  for (const line of lines) {
+    const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
+    const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+    const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+    if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
+    if (insertMatch) insertions = parseInt(insertMatch[1], 10);
+    if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
+  }
+
+  return { filesChanged, insertions, deletions };
+};
+
+const parseGitLogRecord = (record: string): GitLogEntry | null => {
+  const [payload, statsRaw = ''] = record.split('\x1d');
+  const [hash, parentsRaw = '', author_name = '', author_email = '', date = '', message = '', refsRaw = '', bodyRaw = ''] = payload
+    .replace(/^\n+/, '')
+    .trimEnd()
+    .split('\x1f');
+  if (!hash) {
+    return null;
+  }
+
+  const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
+  const stats = parseGitLogStatistics(statsRaw.split(/\r?\n/).filter((line) => line.trim().length > 0));
+
+  return {
+    hash,
+    date,
+    message,
+    refs: refsRaw.trim(),
+    body: bodyRaw.trimEnd(),
+    author_name,
+    author_email,
+    filesChanged: stats.filesChanged,
+    insertions: stats.insertions,
+    deletions: stats.deletions,
+    parents,
+  };
+};
+
 type GitHistoryRefKind = 'head' | 'local' | 'remote' | 'tag';
 
 interface GitHistoryRef {
@@ -3475,7 +3522,7 @@ export async function getGitLog(
       '--all',
       '--topo-order',
       '--date=iso',
-      '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
+      GIT_LOG_PRETTY_FORMAT,
       '--shortstat',
     ];
 
@@ -3490,43 +3537,7 @@ export async function getGitLog(
       .map((e) => e.trim())
       .filter(Boolean);
 
-    const entries: GitLogEntry[] = [];
-    for (const record of records) {
-      const lines = record.split('\n').filter((l) => l.trim().length > 0);
-      const header = lines.shift() || '';
-      const [hash, parentsRaw, author_name, author_email, date, message, refsRaw] =
-        header.split('\x1f');
-      if (!hash) continue;
-
-      const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
-      const refs = refsRaw ? refsRaw.trim() : '';
-
-      let filesChanged = 0;
-      let insertions = 0;
-      let deletions = 0;
-      for (const line of lines) {
-        const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
-        const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
-        const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
-        if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
-        if (insertMatch) insertions = parseInt(insertMatch[1], 10);
-        if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
-      }
-
-      entries.push({
-        hash,
-        date: date || '',
-        message: message || '',
-        refs,
-        body: '',
-        author_name: author_name || '',
-        author_email: author_email || '',
-        filesChanged,
-        insertions,
-        deletions,
-        parents,
-      });
-    }
+    const entries: GitLogEntry[] = records.map(parseGitLogRecord).filter((entry): entry is GitLogEntry => Boolean(entry));
 
     return { all: entries, latest: entries[0] || null, total: entries.length };
   }
@@ -3539,7 +3550,7 @@ export async function getGitLog(
     'log',
     `--max-count=${maxCount}`,
     '--date=iso',
-    '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
+    GIT_LOG_PRETTY_FORMAT,
     '--shortstat',
   ];
 
@@ -3566,55 +3577,7 @@ export async function getGitLog(
     .map((entry) => entry.trim())
     .filter(Boolean);
 
-  const statsMap = new Map<string, { filesChanged: number; insertions: number; deletions: number; parents: string[] }>();
-
-  for (const record of records) {
-    const lines = record.split('\n').filter((line) => line.trim().length > 0);
-    const header = lines.shift() || '';
-    const [hash, parentsRaw] = header.split('\x1f');
-    const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
-    if (!hash) continue;
-
-    let filesChanged = 0;
-    let insertions = 0;
-    let deletions = 0;
-
-    for (const line of lines) {
-      const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
-      const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
-      const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
-      if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
-      if (insertMatch) insertions = parseInt(insertMatch[1], 10);
-      if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
-    }
-
-    statsMap.set(hash, { filesChanged, insertions, deletions, parents });
-  }
-
-  const entries: GitLogEntry[] = [];
-  for (const record of records) {
-    const header = record.split('\n').filter((l) => l.trim().length > 0)[0] || '';
-    const [hash] = header.split('\x1f');
-    if (!hash) continue;
-    const stats = statsMap.get(hash) || { filesChanged: 0, insertions: 0, deletions: 0, parents: [] };
-    // Need to re-parse header fields for the final entries array
-    const lines = record.split('\n').filter((l) => l.trim().length > 0);
-    const lineHeader = lines.shift() || '';
-    const [, , author_name, author_email, date, message, refs] = lineHeader.split('\x1f');
-    entries.push({
-      hash,
-      date: date || '',
-      message: message || '',
-      refs: refs?.trim() || '',
-      body: '',
-      author_name: author_name || '',
-      author_email: author_email || '',
-      filesChanged: stats.filesChanged,
-      insertions: stats.insertions,
-      deletions: stats.deletions,
-      parents: stats.parents,
-    });
-  }
+  const entries: GitLogEntry[] = records.map(parseGitLogRecord).filter((entry): entry is GitLogEntry => Boolean(entry));
 
   return {
     all: entries,

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { I18nProvider } from '@/lib/i18n';
+import { dict as enDict } from '@/lib/i18n/messages/en';
 import type { GitAPI } from '@/lib/api/types';
 import type { GitRepositoryPaneState } from '@/stores/useUIStore';
 import {
@@ -61,6 +62,18 @@ type MockGitStoreState = {
   ensureHistoryRefs: typeof mockEnsureHistoryRefs;
   fetchHistoryPage: typeof mockFetchHistoryPage;
 };
+type FetchHistoryCall = {
+  directory: string;
+  git: GitAPI;
+  query: { mode: 'auto' | 'all' | 'manual'; refIds?: string[] };
+  options?: { append?: boolean; limit?: number };
+};
+type ObserverInstance = {
+  callback: IntersectionObserverCallback;
+  elements: ObservedElementStub[];
+  options?: IntersectionObserverInit;
+  observer: IntersectionObserver;
+};
 
 mock.module('@/components/ui/button', () => ({
   Button: ({ children, ...props }: MockButtonProps) => React.createElement('button', props, children),
@@ -102,8 +115,10 @@ let gitPaneState: GitRepositoryPaneState = {
   graphManualRefIds: [],
 };
 
-const mockEnsureHistoryRefs = async () => null;
-const mockFetchHistoryPage = async () => undefined;
+const fetchHistoryCalls: FetchHistoryCall[] = [];
+const observerInstances: ObserverInstance[] = [];
+let mockEnsureHistoryRefs: ReturnType<typeof mock> = mock(async () => null);
+let mockFetchHistoryPage: ReturnType<typeof mock> = mock(async () => undefined);
 const mockSetPaneState = () => undefined;
 
 let mockRefsState: MockRefsState = {
@@ -139,6 +154,8 @@ interface ElementStub {
   nodeType: number;
   nodeName: string;
   tagName: string;
+  id: string;
+  attributes: Record<string, string>;
   namespaceURI: string;
   ownerDocument: DocumentStub;
   parentNode: ElementStub | null;
@@ -149,9 +166,12 @@ interface ElementStub {
   appendChild(child: ElementStub): ElementStub;
   insertBefore(child: ElementStub, ref: ElementStub | null): ElementStub;
   removeChild(child: ElementStub): ElementStub;
-  setAttribute(): void;
-  removeAttribute(): void;
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+  getAttribute(name: string): string | null;
 }
+
+type ObservedElementStub = Element & ElementStub;
 
 interface DocumentStub {
   nodeType: number;
@@ -177,6 +197,8 @@ const installMinimalDom = () => {
     nodeType: 1,
     nodeName: tag.toUpperCase(),
     tagName: tag.toUpperCase(),
+    id: '',
+    attributes: {},
     namespaceURI: 'http://www.w3.org/1999/xhtml',
     ownerDocument: owner,
     parentNode: null,
@@ -205,8 +227,21 @@ const installMinimalDom = () => {
       child.parentNode = null;
       return child;
     },
-    setAttribute() {},
-    removeAttribute() {},
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+      if (name === 'id') {
+        this.id = value;
+      }
+    },
+    removeAttribute(name) {
+      delete this.attributes[name];
+      if (name === 'id') {
+        this.id = '';
+      }
+    },
+    getAttribute(name) {
+      return this.attributes[name] ?? null;
+    },
   });
 
   // SAFETY: The document stub is fully populated immediately below before any consumer can observe it.
@@ -227,6 +262,46 @@ const installMinimalDom = () => {
   });
 
   class GlobalElement {}
+  class ControlledIntersectionObserver implements IntersectionObserver {
+    readonly #instance: ObserverInstance;
+    readonly root: Element | Document | null;
+    readonly rootMargin: string;
+    readonly thresholds: ReadonlyArray<number>;
+
+    constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+      this.root = options?.root ?? null;
+      this.rootMargin = options?.rootMargin ?? '0px';
+      if (Array.isArray(options?.threshold)) {
+        this.thresholds = [...options.threshold];
+      } else if (options?.threshold !== undefined) {
+        this.thresholds = [options.threshold];
+      } else {
+        this.thresholds = [0];
+      }
+      this.#instance = { callback, elements: [], options, observer: this };
+      observerInstances.push(this.#instance);
+    }
+
+    disconnect() {
+      this.#instance.elements.length = 0;
+    }
+
+    observe(target: Element) {
+      this.#instance.elements.push(getObservedElementStub(target));
+    }
+
+    takeRecords() {
+      return [];
+    }
+
+    unobserve(target: Element) {
+      const observedTarget = getObservedElementStub(target);
+      const index = this.#instance.elements.indexOf(observedTarget);
+      if (index >= 0) {
+        this.#instance.elements.splice(index, 1);
+      }
+    }
+  }
 
   setGlobal('document', documentStub);
   setGlobal('window', globalThis);
@@ -244,6 +319,7 @@ const installMinimalDom = () => {
     observe() {}
     takeRecords() { return []; }
   });
+  setGlobal('IntersectionObserver', ControlledIntersectionObserver);
   setGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0));
   setGlobal('cancelAnimationFrame', (id: ReturnType<typeof setTimeout>) => clearTimeout(id));
   setGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -259,17 +335,141 @@ const installMinimalDom = () => {
   };
 
   const container = makeElement('div', documentStub);
-  // SAFETY: The stubbed element satisfies the DOM container contract React uses in this test.
-  const containerValue = container as unknown;
-  // SAFETY: React only touches the container fields provided by the stub in this test.
-  const reactContainer = containerValue as ReactContainer;
-  return { container: reactContainer, restore };
+  const isReactContainer = (value: ElementStub): value is ElementStub & ReactContainer => value.nodeType === 1;
+  if (!isReactContainer(container)) {
+    throw new Error('Expected the React root container to be an element');
+  }
+  return { container, restore };
 };
 
 const flushEffects = async () => {
   await Promise.resolve();
   await Promise.resolve();
 };
+
+const createEmptyDomRectReadOnly = (): DOMRectReadOnly => ({
+  x: 0,
+  y: 0,
+  width: 0,
+  height: 0,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+  toJSON: () => ({}),
+});
+
+const isObservedElementStub = (value: Element | Document | null | undefined): value is ObservedElementStub => (
+  value !== null
+  && value !== undefined
+  && 'attributes' in value
+  && 'childNodes' in value
+  && 'style' in value
+  && 'ownerDocument' in value
+);
+
+const getObservedElementStubOrThrow = (value: Element | Document | null | undefined, source: string): ObservedElementStub => {
+  if (isObservedElementStub(value)) {
+    return value;
+  }
+  throw new Error(`Expected ${source} to be a stubbed element`);
+};
+
+const getElementStubOrNull = (value: IntersectionObserverInit['root'] | undefined): ObservedElementStub | null => {
+  if (value !== null && value !== undefined) {
+    return getObservedElementStubOrThrow(value, 'observer root');
+  }
+  return null;
+};
+
+const getObservedElementStub = (value: Element): ObservedElementStub => getObservedElementStubOrThrow(value, 'observer target');
+
+const createIntersectionEntry = (target: ObservedElementStub): IntersectionObserverEntry => ({
+  isIntersecting: true,
+  target,
+  intersectionRatio: 1,
+  boundingClientRect: createEmptyDomRectReadOnly(),
+  intersectionRect: createEmptyDomRectReadOnly(),
+  rootBounds: null,
+  time: 0,
+});
+
+const createUnusedGitApi = (): GitAPI => {
+  const gitApiSource = {};
+  // SAFETY: These regression paths verify rendering and observer wiring only and never invoke GitAPI methods.
+  return gitApiSource as GitAPI;
+};
+
+const createQueryState = (overrides: Partial<NonNullable<MockQueryState>> = {}): NonNullable<MockQueryState> => ({
+  items: [{
+    id: 'commit-a',
+    parentIds: ['commit-root'],
+    subject: 'subject',
+    message: 'message',
+    author: 'author',
+    authorEmail: 'author@example.com',
+    timestamp: '2024-01-01T00:00:00Z',
+    statistics: { files: 0, insertions: 0, deletions: 0 },
+    references: [],
+  }],
+  outdated: false,
+  isLoading: false,
+  isLoadingMore: false,
+  error: null,
+  hasMore: true,
+  refIds: ['refs/heads/topic', 'refs/remotes/origin/topic'],
+  ...overrides,
+});
+
+const renderPanel = async (props: Partial<React.ComponentProps<typeof GitGraphPanel>> = {}) => {
+  const dom = installMinimalDom();
+  const root: Root = createRoot(dom.container);
+
+  await act(async () => {
+    root.render(
+      React.createElement(
+        I18nProvider,
+        null,
+        createGitGraphPanelElement(createDefaultGitGraphPanelProps(props)),
+      ),
+    );
+    await flushEffects();
+  });
+
+  return {
+    restore: async () => {
+      await act(async () => {
+        root.unmount();
+        await flushEffects();
+      });
+      dom.restore();
+    },
+  };
+};
+
+const triggerSentinelIntersection = async () => {
+  for (const instance of observerInstances) {
+    const entries = instance.elements.map(createIntersectionEntry);
+    instance.callback(entries, instance.observer);
+  }
+  await flushEffects();
+};
+
+const getAppendFetchCalls = () => fetchHistoryCalls.filter((call) => call.options?.append === true);
+
+const createGitGraphPanelElement = (props: React.ComponentProps<typeof GitGraphPanel>) => React.createElement(GitGraphPanel, props);
+
+const createDefaultGitGraphPanelProps = (overrides: Partial<React.ComponentProps<typeof GitGraphPanel>> = {}): React.ComponentProps<typeof GitGraphPanel> => ({
+  directory: '/repo',
+  git: createUnusedGitApi(),
+  expandedCommitHashes: new Set<string>(),
+  onToggleCommit: () => {},
+  commitFilesMap: new Map(),
+  loadingCommitHashes: new Set<string>(),
+  onCopyHash: () => {},
+  isActive: true,
+  ...overrides,
+});
 
 const settleMergeBaseLookupCount = async (getLookupCallCount: () => number) => {
   let previousCount = -1;
@@ -290,6 +490,18 @@ describe('GitGraphPanel component regression', () => {
   beforeEach(() => {
     renderedGraphSegmentIds.length = 0;
     renderedHistoryRows.length = 0;
+    mockEnsureHistoryRefs = mock(async () => null);
+    mockFetchHistoryPage = mock(async (
+      directory: string,
+      git: GitAPI,
+      query: FetchHistoryCall['query'],
+      options?: FetchHistoryCall['options'],
+    ) => {
+      fetchHistoryCalls.push({ directory, git, query, options });
+      return undefined;
+    });
+    fetchHistoryCalls.length = 0;
+    observerInstances.length = 0;
     gitPaneState = {
       changesCollapsed: false,
       graphCollapsed: true,
@@ -310,25 +522,7 @@ describe('GitGraphPanel component regression', () => {
       refsError: null,
       isLoadingRefs: false,
     };
-    mockQueryState = {
-      items: [{
-        id: 'commit-a',
-        parentIds: ['commit-root'],
-        subject: 'subject',
-        message: 'message',
-        author: 'author',
-        authorEmail: 'author@example.com',
-        timestamp: '2024-01-01T00:00:00Z',
-        statistics: { files: 0, insertions: 0, deletions: 0 },
-        references: [],
-      }],
-      outdated: false,
-      isLoading: false,
-      isLoadingMore: false,
-      error: null,
-      hasMore: false,
-      refIds: ['refs/heads/topic', 'refs/remotes/origin/topic'],
-    };
+    mockQueryState = createQueryState({ hasMore: false });
   });
 
   test('does not repeat merge-base lookup for an unchanged comparison request', async () => {
@@ -351,15 +545,7 @@ describe('GitGraphPanel component regression', () => {
         React.createElement(
           I18nProvider,
           null,
-          React.createElement(GitGraphPanel, {
-            directory: '/repo',
-            git: panelGitApi,
-            expandedCommitHashes: new Set<string>(),
-            onToggleCommit: () => {},
-            commitFilesMap: new Map(),
-            loadingCommitHashes: new Set<string>(),
-            onCopyHash: () => {},
-          }),
+          createGitGraphPanelElement(createDefaultGitGraphPanelProps({ git: panelGitApi })),
         ),
       );
       await flushEffects();
@@ -373,15 +559,7 @@ describe('GitGraphPanel component regression', () => {
         React.createElement(
           I18nProvider,
           null,
-          React.createElement(GitGraphPanel, {
-            directory: '/repo',
-            git: panelGitApi,
-            expandedCommitHashes: new Set<string>(),
-            onToggleCommit: () => {},
-            commitFilesMap: new Map(),
-            loadingCommitHashes: new Set<string>(),
-            onCopyHash: () => {},
-          }),
+          createGitGraphPanelElement(createDefaultGitGraphPanelProps({ git: panelGitApi })),
         ),
       );
       await flushEffects();
@@ -501,15 +679,7 @@ describe('GitGraphPanel component regression', () => {
         React.createElement(
           I18nProvider,
           null,
-          React.createElement(GitGraphPanel, {
-            directory: '/repo',
-            git: panelGitApi,
-            expandedCommitHashes: new Set<string>(),
-            onToggleCommit: () => {},
-            commitFilesMap: new Map(),
-            loadingCommitHashes: new Set<string>(),
-            onCopyHash: () => {},
-          }),
+          createGitGraphPanelElement(createDefaultGitGraphPanelProps({ git: panelGitApi })),
         ),
       );
       await flushEffects();
@@ -540,15 +710,7 @@ describe('GitGraphPanel component regression', () => {
         React.createElement(
           I18nProvider,
           null,
-          React.createElement(GitGraphPanel, {
-            directory: '/repo',
-            git: panelGitApi,
-            expandedCommitHashes: new Set<string>(),
-            onToggleCommit: () => {},
-            commitFilesMap: new Map(),
-            loadingCommitHashes: new Set<string>(),
-            onCopyHash: () => {},
-          }),
+          createGitGraphPanelElement(createDefaultGitGraphPanelProps({ git: panelGitApi })),
         ),
       );
       await flushEffects();
@@ -570,15 +732,7 @@ describe('GitGraphPanel component regression', () => {
       React.createElement(
         I18nProvider,
         null,
-        React.createElement(GitGraphPanel, {
-          directory: '/repo',
-          git: panelGitApi,
-          expandedCommitHashes: new Set<string>(),
-          onToggleCommit: () => {},
-          commitFilesMap: new Map(),
-          loadingCommitHashes: new Set<string>(),
-          onCopyHash: () => {},
-        }),
+        createGitGraphPanelElement(createDefaultGitGraphPanelProps({ git: panelGitApi })),
       ),
     );
 
@@ -586,6 +740,179 @@ describe('GitGraphPanel component regression', () => {
     expect(panelClass).toBe('flex h-full min-h-0 flex-col');
     expect(markup).toContain('aria-label="Refresh"');
     expect(markup).not.toContain('>Refresh</button>');
+  });
+
+  test('requests one append page with the scroll container as observer root when the active sentinel intersects', async () => {
+    const git = createUnusedGitApi();
+    mockQueryState = createQueryState();
+    const rendered = await renderPanel({ git, isActive: true });
+
+    expect(observerInstances).toHaveLength(1);
+    const observer = observerInstances[0];
+    const observerRoot = getElementStubOrNull(observer.options?.root);
+    expect(observerRoot).not.toBeNull();
+    expect(observerRoot?.id).toBe('git-graph-scroll-container');
+    expect(observer.elements).toHaveLength(1);
+    expect(observer.elements[0]?.id).toBe('git-graph-end-sentinel');
+
+    await act(async () => {
+      await triggerSentinelIntersection();
+    });
+
+    expect(getAppendFetchCalls()).toEqual([
+      {
+        directory: '/repo',
+        git,
+        query: { mode: 'auto' },
+        options: { append: true, limit: 20 },
+      },
+    ]);
+
+    await rendered.restore();
+  });
+
+  test('does not render an accessible Load more button when more history exists', () => {
+    mockQueryState = createQueryState();
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        I18nProvider,
+        null,
+        createGitGraphPanelElement(createDefaultGitGraphPanelProps()),
+      ),
+    );
+
+    expect(markup).not.toContain('>Load more</button>');
+  });
+
+  for (const scenario of [
+    { name: 'the graph is inactive', isActive: false, queryOverrides: {} },
+    { name: 'an append request is already in flight', isActive: true, queryOverrides: { isLoadingMore: true } },
+    { name: 'the query is outdated', isActive: true, queryOverrides: { outdated: true } },
+    { name: 'the query has an error', isActive: true, queryOverrides: { error: 'append failed' } },
+    { name: 'the initial query is still loading', isActive: true, queryOverrides: { isLoading: true } },
+  ] as const) {
+    test(`does not append while ${scenario.name}`, async () => {
+      mockQueryState = createQueryState(scenario.queryOverrides);
+      const rendered = await renderPanel({ isActive: scenario.isActive });
+
+      await act(async () => {
+        await triggerSentinelIntersection();
+      });
+
+      expect(getAppendFetchCalls()).toEqual([]);
+
+      await rendered.restore();
+    });
+  }
+
+  test('defers stale graph refresh until the panel becomes active, then refreshes refs before history once', async () => {
+    mockQueryState = {
+      items: [{
+        id: 'stale-commit',
+        parentIds: ['commit-root'],
+        subject: 'stale subject',
+        message: 'stale message',
+        author: 'author',
+        authorEmail: 'author@example.com',
+        timestamp: '2024-01-01T00:00:00Z',
+        statistics: { files: 0, insertions: 0, deletions: 0 },
+        references: [],
+      }],
+      outdated: true,
+      isLoading: false,
+      isLoadingMore: false,
+      error: null,
+      hasMore: false,
+      refIds: ['refs/heads/topic', 'refs/remotes/origin/topic'],
+    };
+
+    const refreshSequence: string[] = [];
+    let ensureHistoryRefsCalls = 0;
+    let fetchHistoryPageCalls = 0;
+    mockEnsureHistoryRefs = mock(async () => {
+      ensureHistoryRefsCalls += 1;
+      refreshSequence.push('refs');
+      return null;
+    });
+    mockFetchHistoryPage = mock(async () => {
+      fetchHistoryPageCalls += 1;
+      refreshSequence.push('history');
+      return undefined;
+    });
+
+    const dom = installMinimalDom();
+    const root: Root = createRoot(dom.container);
+    const panelGitApi = createUnusedGitApi();
+
+    await act(async () => {
+      root.render(
+        React.createElement(
+          I18nProvider,
+          null,
+          createGitGraphPanelElement(createDefaultGitGraphPanelProps({ git: panelGitApi, isActive: false })),
+        ),
+      );
+      await flushEffects();
+    });
+
+    expect(renderedHistoryRows.some((row) => row.id === 'stale-commit' && row.compactGraph === true)).toBe(true);
+    expect(ensureHistoryRefsCalls).toBe(0);
+    expect(fetchHistoryPageCalls).toBe(0);
+
+    await act(async () => {
+      root.render(
+        React.createElement(
+          I18nProvider,
+          null,
+          createGitGraphPanelElement(createDefaultGitGraphPanelProps({ git: panelGitApi, isActive: true })),
+        ),
+      );
+      await flushEffects();
+    });
+
+    expect(ensureHistoryRefsCalls).toBe(1);
+    expect(fetchHistoryPageCalls).toBe(1);
+    expect(refreshSequence).toEqual(['refs', 'history']);
+
+    await act(async () => {
+      root.unmount();
+      await flushEffects();
+    });
+    dom.restore();
+  });
+
+  test('keeps stale loaded rows visible without rendering an outdated history notice', () => {
+    mockQueryState = {
+      items: [{
+        id: 'stale-commit',
+        parentIds: ['commit-root'],
+        subject: 'stale subject',
+        message: 'stale message',
+        author: 'author',
+        authorEmail: 'author@example.com',
+        timestamp: '2024-01-01T00:00:00Z',
+        statistics: { files: 0, insertions: 0, deletions: 0 },
+        references: [],
+      }],
+      outdated: true,
+      isLoading: false,
+      isLoadingMore: false,
+      error: null,
+      hasMore: false,
+      refIds: ['refs/heads/topic', 'refs/remotes/origin/topic'],
+    };
+
+    const panelGitApi = createUnusedGitApi();
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        I18nProvider,
+        null,
+        createGitGraphPanelElement(createDefaultGitGraphPanelProps({ git: panelGitApi, isActive: false })),
+      ),
+    );
+
+    expect(markup).toContain('data-history-id="stale-commit"');
+    expect(markup).not.toContain(enDict['gitView.graph.outdated']);
   });
 });
 

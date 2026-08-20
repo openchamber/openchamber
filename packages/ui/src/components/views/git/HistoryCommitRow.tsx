@@ -10,11 +10,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import type { GitLogEntry, CommitFileEntry, GitHistoryItem } from '@/lib/api/types';
+import type { GitCommitHoverDetailsCache } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { getCommitFileDiff, type CommitFileDiffResponse } from '@/lib/gitApi';
 import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { GitGraphSegment } from './GitGraphSegment';
+import { GitCommitHoverPopover, type GitCommitHoverPopoverCoordinator } from './GitCommitHoverPopover';
+import { formatGitCommitHoverRelativeTime, normalizeGitCommitHoverEntry } from './gitCommitHoverModel';
 import * as git from '@/lib/gitApi';
 import { toast } from '@/components/ui/toast';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
@@ -99,6 +102,10 @@ interface HistoryCommitRowProps {
   isLoadingFiles: boolean;
   onCopyHash: (hash: string) => void;
   directory: string | undefined;
+  hoverCoordinator?: GitCommitHoverPopoverCoordinator;
+  hoverRemoteName?: string | null;
+  hoverRemoteUrl?: string | null;
+  hoverDetailsCache?: GitCommitHoverDetailsCache | null;
   onConflict?: (result: { conflict: boolean; conflictFiles?: string[]; operation: 'cherry-pick' | 'revert' | 'merge' | 'rebase' }) => void;
   onActionSuccess?: () => void;
 }
@@ -108,7 +115,6 @@ const isGitHistoryItemEntry = (entry: GitLogEntry | GitHistoryItem): entry is Gi
 const getEntryHash = (entry: GitLogEntry | GitHistoryItem): string => (isGitHistoryItemEntry(entry) ? entry.id : entry.hash);
 const getEntryMessage = (entry: GitLogEntry | GitHistoryItem): string => (isGitHistoryItemEntry(entry) ? entry.subject : entry.message);
 const getEntryAuthorName = (entry: GitLogEntry | GitHistoryItem): string => (isGitHistoryItemEntry(entry) ? entry.author : entry.author_name);
-const getEntryDate = (entry: GitLogEntry | GitHistoryItem): string => (isGitHistoryItemEntry(entry) ? entry.timestamp : entry.date);
 
 function formatCommitDate(date: string, timeFormatPreference: TimeFormatPreference) {
   const value = new Date(date);
@@ -164,10 +170,14 @@ export const HistoryCommitRow = React.memo(({
   isLoadingFiles,
   onCopyHash,
   directory,
+  hoverCoordinator,
+  hoverRemoteName = null,
+  hoverRemoteUrl = null,
+  hoverDetailsCache = null,
   onConflict,
   onActionSuccess,
 }: HistoryCommitRowProps) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const isGraphMode = mode === 'graph';
   const isCompactGraph = isGraphMode && compactGraph;
@@ -371,121 +381,158 @@ export const HistoryCommitRow = React.memo(({
     ? graphBadges.filter((badge) => badge.kind === 'head' || badge.kind === 'tag')
     : graphBadges;
 
-  return (
-    <li data-history-commit-row={getEntryHash(entry)}>
-      <button
-        type="button"
-        onClick={onToggle}
-        className={cn(
-          'w-full text-left transition-colors',
-          isCompactGraph
-            ? 'flex h-[22px] items-center gap-1.5 px-2'
-            : 'flex items-start gap-3 px-3 py-2',
-          isGraphMode
-            ? 'hover:bg-[var(--interactive-hover)]/40'
-            : isExpanded ? 'bg-sidebar/90' : 'hover:bg-sidebar/40'
-        )}
-        >
-        {isGraphMode && viewModel ? (
-          <div className={cn('shrink-0 self-stretch', isCompactGraph ? 'h-[22px]' : '-my-2')}>
-            <GitGraphSegment viewModel={viewModel} totalColumns={totalColumns} />
+  const hoverModel = React.useMemo(() => {
+    const normalized = normalizeGitCommitHoverEntry(entry);
+    return {
+      ...normalized,
+      relativeTime: formatGitCommitHoverRelativeTime(normalized.timestamp, { locale }),
+    };
+  }, [entry, locale]);
+
+  const absoluteTimestamp = React.useMemo(
+    () => formatCommitDate(hoverModel.timestamp, timeFormatPreference),
+    [hoverModel.timestamp, timeFormatPreference],
+  );
+
+  const rowButton = (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={cn(
+        'w-full text-left transition-colors',
+        isCompactGraph
+          ? 'flex h-[22px] items-center gap-1.5 px-2'
+          : 'flex items-start gap-3 px-3 py-2',
+        isGraphMode
+          ? 'hover:bg-[var(--interactive-hover)]/40'
+          : isExpanded ? 'bg-sidebar/90' : 'hover:bg-sidebar/40'
+      )}
+      data-row-hash={hoverModel.hash}
+    >
+      {isGraphMode && viewModel ? (
+        <div className={cn('shrink-0 self-stretch', isCompactGraph ? 'h-[22px]' : '-my-2')}>
+          <GitGraphSegment viewModel={viewModel} totalColumns={totalColumns} />
+        </div>
+      ) : (
+        <div
+          className="h-2 w-2 translate-y-2 rounded-full shrink-0"
+          style={{ backgroundColor: 'var(--status-success)' }}
+          aria-hidden
+        />
+      )}
+      <div className="min-w-0 flex-1">
+        {isCompactGraph ? (
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className={cn(
+              'min-w-0 flex-1 truncate typography-ui-label text-foreground',
+              viewModel?.kind === 'HEAD' ? 'font-semibold' : 'font-normal',
+            )}>
+              {getEntryMessage(entry)}
+            </span>
+            {compactGraphBadges.length > 0 ? (
+              <div className="flex max-w-[50%] shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap">
+                {compactGraphBadges.map((badge) => (
+                  <span
+                    key={badge.id}
+                    className={cn(
+                      'inline-flex min-w-0 max-w-40 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0 typography-micro font-medium',
+                      getRefBadgeClasses(badge),
+                    )}
+                    style={badge.color ? { backgroundColor: badge.color } : undefined}
+                  >
+                    {badge.kind === 'local' || badge.kind === 'remote' || badge.kind === 'head' ? <Icon name="git-branch" className="size-3" /> : null}
+                    <span className="truncate">{badge.name}</span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <span className="min-w-0 max-w-[35%] shrink truncate typography-meta text-muted-foreground" title={getEntryAuthorName(entry)}>
+              {getEntryAuthorName(entry)}
+            </span>
           </div>
         ) : (
-          <div
-            className="h-2 w-2 translate-y-2 rounded-full shrink-0"
-            style={{ backgroundColor: 'var(--status-success)' }}
-            aria-hidden
-          />
-        )}
-        <div className="min-w-0 flex-1">
-          {isCompactGraph ? (
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className={cn(
-                'min-w-0 flex-1 truncate typography-ui-label text-foreground',
-                viewModel?.kind === 'HEAD' ? 'font-semibold' : 'font-normal',
-              )}>
-                {getEntryMessage(entry)}
-              </span>
-              {compactGraphBadges.length > 0 ? (
-                <div className="flex max-w-[50%] shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap">
-                  {compactGraphBadges.map((badge) => (
-                    <span
-                      key={badge.id}
-                      className={cn(
-                        'inline-flex min-w-0 max-w-40 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0 typography-micro font-medium',
-                        getRefBadgeClasses(badge),
-                      )}
-                      style={badge.color ? { backgroundColor: badge.color } : undefined}
-                    >
-                      {badge.kind === 'local' || badge.kind === 'remote' || badge.kind === 'head' ? <Icon name="git-branch" className="size-3" /> : null}
-                      <span className="truncate">{badge.name}</span>
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-              <span className="min-w-0 max-w-[35%] shrink truncate typography-meta text-muted-foreground" title={getEntryAuthorName(entry)}>
-                {getEntryAuthorName(entry)}
-              </span>
-            </div>
-          ) : (
-            <>
-              {/* Ref badges */}
-              {isGraphMode && graphBadges.length > 0 ? (
-                <div className="mb-0.5 flex flex-wrap gap-1">
-                  {graphBadges.map((badge) => (
-                    <span
-                      key={badge.id}
-                      className={cn(
-                        'inline-flex items-center gap-1 rounded-full border px-1.5 py-0 typography-micro font-medium',
-                        getRefBadgeClasses(badge),
-                      )}
-                      style={badge.color ? { backgroundColor: badge.color } : undefined}
-                    >
-                      {badge.kind === 'local' || badge.kind === 'remote' || badge.kind === 'head' ? <Icon name="git-branch" className="size-3" /> : null}
-                      {badge.name}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-
-              <p className="typography-ui-label font-medium text-foreground line-clamp-1">
-                {getEntryMessage(entry)}
-              </p>
-              <div className="flex items-center gap-1 typography-meta text-muted-foreground">
-                <div className="flex items-center gap-1 min-w-0 truncate">
-                  <span className="truncate min-w-[3ch]" title={getEntryAuthorName(entry)}>
-                    {getEntryAuthorName(entry)}
+          <>
+            {isGraphMode && graphBadges.length > 0 ? (
+              <div className="mb-0.5 flex flex-wrap gap-1">
+                {graphBadges.map((badge) => (
+                  <span
+                    key={badge.id}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded-full border px-1.5 py-0 typography-micro font-medium',
+                      getRefBadgeClasses(badge),
+                    )}
+                    style={badge.color ? { backgroundColor: badge.color } : undefined}
+                  >
+                    {badge.kind === 'local' || badge.kind === 'remote' || badge.kind === 'head' ? <Icon name="git-branch" className="size-3" /> : null}
+                    {badge.name}
                   </span>
-                  <span className="shrink-0">·</span>
-                  <span className="truncate min-w-0" title={formatCommitDate(getEntryDate(entry), timeFormatPreference)}>
-                    {formatCommitDate(getEntryDate(entry), timeFormatPreference)}
-                  </span>
-                </div>
-                <span className="shrink-0">·</span>
-                <code className="shrink-0 font-mono">
-                  {getEntryHash(entry).slice(0, 8)}
-                </code>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-5 px-1 shrink-0"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onCopyHash(getEntryHash(entry));
-                      }}
-                    >
-                      <Icon name="file-copy" className="size-3" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent sideOffset={8}>{t('gitView.history.copySha')}</TooltipContent>
-                </Tooltip>
+                ))}
               </div>
-            </>
+            ) : null}
+
+            <p className="typography-ui-label font-medium text-foreground line-clamp-1">
+              {getEntryMessage(entry)}
+            </p>
+            <div className="flex items-center gap-1 typography-meta text-muted-foreground">
+              <div className="flex items-center gap-1 min-w-0 truncate">
+                <span className="truncate min-w-[3ch]" title={getEntryAuthorName(entry)}>
+                  {getEntryAuthorName(entry)}
+                </span>
+                <span className="shrink-0">·</span>
+                <span className="truncate min-w-0" title={absoluteTimestamp}>
+                  {absoluteTimestamp}
+                </span>
+              </div>
+              <span className="shrink-0">·</span>
+              <code className="shrink-0 font-mono">
+                {getEntryHash(entry).slice(0, 8)}
+              </code>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1 shrink-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCopyHash(getEntryHash(entry));
+                    }}
+                  >
+                    <Icon name="file-copy" className="size-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={8}>{t('gitView.history.copySha')}</TooltipContent>
+              </Tooltip>
+            </div>
+          </>
+        )}
+      </div>
+    </button>
+  );
+
+  return (
+    <li data-history-commit-row={getEntryHash(entry)}>
+      {directory && hoverCoordinator ? (
+        <GitCommitHoverPopover
+          model={hoverModel}
+          directory={directory}
+          remoteName={hoverRemoteName}
+          remoteUrl={hoverRemoteUrl}
+          detailsCache={hoverDetailsCache}
+          coordinator={hoverCoordinator}
+          onCopyHash={onCopyHash}
+          absoluteTimestamp={absoluteTimestamp}
+          rowButton={rowButton}
+          openGitHubLabel={t('gitView.pr.actions.openOnGitHub')}
+          copyShaLabel={t('gitView.history.copySha')}
+          changedFilesLabel={t(
+            hoverModel.statistics.files === 1
+              ? 'diffView.summary.changedFilesSingle'
+              : 'diffView.summary.changedFilesPlural',
+            { count: hoverModel.statistics.files },
           )}
-        </div>
-      </button>
+        />
+      ) : rowButton}
 
       {isExpanded && (
         <div className="px-3 pb-2 pl-8 border-t border-border/40">

@@ -15,8 +15,9 @@ import { Button } from '@/components/ui/button';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { HistoryCommitRow } from './HistoryCommitRow';
-import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
+import type { GitLogEntry, CommitFileEntry, GitCommitHoverDetailsCache } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { GitCommitHoverPopover } from './GitCommitHoverPopover';
 import {
   buildGitHistoryViewModels,
   type GitHistoryGraphItem,
@@ -42,6 +43,9 @@ interface HistorySectionProps {
   loadingCommitHashes: Set<string>;
   onCopyHash: (hash: string) => void;
   directory: string | undefined;
+  hoverRemoteName?: string | null;
+  hoverRemoteUrl?: string | null;
+  hoverDetailsCache?: GitCommitHoverDetailsCache | null;
   showHeader?: boolean;
   contentMaxHeightClassName?: string;
   branchDivider?: {
@@ -65,6 +69,9 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   loadingCommitHashes,
   onCopyHash,
   directory,
+  hoverRemoteName = null,
+  hoverRemoteUrl = null,
+  hoverDetailsCache = null,
   showHeader = true,
   contentMaxHeightClassName = 'max-h-[50vh]',
   branchDivider = null,
@@ -74,6 +81,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   const { t } = useI18n();
   const [isOpen, setIsOpen] = React.useState(true);
   const isGraphMode = mode === 'graph';
+  const hoverCoordinator = React.useMemo(() => GitCommitHoverPopover.createCoordinator(), []);
 
   const historyItems = React.useMemo<GitHistoryGraphItem[]>(
     () => (log?.all ?? []).map((entry) => {
@@ -192,6 +200,10 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
           isLoadingFiles={loadingCommitHashes.has(entry.hash)}
           onCopyHash={onCopyHash}
           directory={directory}
+          hoverCoordinator={hoverCoordinator}
+          hoverRemoteName={hoverRemoteName}
+          hoverRemoteUrl={hoverRemoteUrl}
+          hoverDetailsCache={hoverDetailsCache}
           onConflict={onConflict}
           onActionSuccess={onActionSuccess}
         />

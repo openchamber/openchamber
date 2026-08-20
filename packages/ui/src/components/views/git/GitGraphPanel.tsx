@@ -2,10 +2,11 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import type { CommitFileEntry, GitHistoryRef } from '@/lib/api/types';
+import type { CommitFileEntry, GitCommitHoverDetailsCache, GitHistoryRef } from '@/lib/api/types';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { HistoryCommitRow } from './HistoryCommitRow';
 import { GitGraphSegment } from './GitGraphSegment';
+import { GitCommitHoverPopover } from './GitCommitHoverPopover';
 import { buildGitHistoryViewModels } from './gitGraph';
 import {
   useGitHistoryQueryState,
@@ -29,11 +30,15 @@ import {
 interface GitGraphPanelProps {
   directory: string;
   git: RuntimeAPIs['git'];
+  isActive: boolean;
   expandedCommitHashes: Set<string>;
   onToggleCommit: (hash: string) => void;
   commitFilesMap: Map<string, CommitFileEntry[]>;
   loadingCommitHashes: Set<string>;
   onCopyHash: (hash: string) => void;
+  hoverRemoteName?: string | null;
+  hoverRemoteUrl?: string | null;
+  hoverDetailsCache?: GitCommitHoverDetailsCache | null;
   onConflict?: (result: { conflict: boolean; conflictFiles?: string[]; operation: 'cherry-pick' | 'revert' | 'merge' | 'rebase' }) => void;
   onActionSuccess?: () => void;
 }
@@ -41,11 +46,15 @@ interface GitGraphPanelProps {
 export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
   directory,
   git,
+  isActive,
   expandedCommitHashes,
   onToggleCommit,
   commitFilesMap,
   loadingCommitHashes,
   onCopyHash,
+  hoverRemoteName = null,
+  hoverRemoteUrl = null,
+  hoverDetailsCache = null,
   onConflict,
   onActionSuccess,
 }) => {
@@ -57,6 +66,9 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
   const fetchHistoryPage = useGitStore((state) => state.fetchHistoryPage);
   const [mergeBase, setMergeBase] = React.useState<string | null>(null);
   const [mergeBaseError, setMergeBaseError] = React.useState<string | null>(null);
+  const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const sentinelRef = React.useRef<HTMLDivElement | null>(null);
+  const appendRequestPendingRef = React.useRef(false);
   const { refs, refsError, isLoadingRefs } = useGitHistoryRefsState(directory);
   const query = React.useMemo(() => resolveGraphQuery(paneState), [paneState]);
   const queryState = useGitHistoryQueryState(directory, query);
@@ -114,6 +126,7 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
     () => Math.max(1, ...viewModels.map((viewModel) => Math.max(viewModel.inputSwimlanes.length, viewModel.outputSwimlanes.length, 1))),
     [viewModels],
   );
+  const hoverCoordinator = React.useMemo(() => GitCommitHoverPopover.createCoordinator(), []);
 
   const refresh = React.useCallback(async () => {
     await ensureHistoryRefs(directory, git);
@@ -121,16 +134,16 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
   }, [directory, ensureHistoryRefs, fetchHistoryPage, git, query]);
 
   React.useEffect(() => {
-    if (!directory) {
+    if (!directory || !isActive) {
       return;
     }
     if (shouldAutoRefreshGitGraphQuery({ isLoadingRefs, refsError, queryState })) {
       void refresh();
     }
-  }, [directory, isLoadingRefs, queryState, refsError, refresh]);
+  }, [directory, isActive, isLoadingRefs, queryState, refsError, refresh]);
 
   React.useEffect(() => {
-    if (!git.getGitHistoryMergeBase || comparisonRefIds.length < 2) {
+    if (!isActive || !git.getGitHistoryMergeBase || comparisonRefIds.length < 2) {
       setMergeBase(null);
       setMergeBaseError(null);
       return;
@@ -154,7 +167,41 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [comparisonRefIds, comparisonRequestKey, directory, git]);
+  }, [comparisonRefIds, comparisonRequestKey, directory, git, isActive]);
+
+  React.useEffect(() => {
+    if (!isActive) {
+      appendRequestPendingRef.current = false;
+      return;
+    }
+
+    const IntersectionObserverConstructor = globalThis.IntersectionObserver;
+
+    if (!queryState?.hasMore || queryState.outdated || queryState.isLoading || queryState.isLoadingMore || queryState.error || !scrollContainerRef.current || !sentinelRef.current || !IntersectionObserverConstructor) {
+      return;
+    }
+
+    const observer = new IntersectionObserverConstructor((entries) => {
+      const entry = entries[0];
+      if (!entry?.isIntersecting || appendRequestPendingRef.current || !isActive || !queryState.hasMore || queryState.outdated || queryState.isLoading || queryState.isLoadingMore || queryState.error) {
+        return;
+      }
+
+      appendRequestPendingRef.current = true;
+      void fetchHistoryPage(directory, git, query, { append: true, limit: 20 }).finally(() => {
+        appendRequestPendingRef.current = false;
+      });
+    }, {
+      root: scrollContainerRef.current,
+    });
+
+    observer.observe(sentinelRef.current);
+
+    return () => {
+      observer.disconnect();
+      appendRequestPendingRef.current = false;
+    };
+  }, [directory, fetchHistoryPage, git, isActive, query, queryState]);
 
   React.useEffect(() => {
     if (!refs || paneState.graphFilterMode !== 'manual') {
@@ -238,10 +285,6 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
         </div>
       ) : null}
 
-      {queryState?.outdated ? (
-        <div className="border-b border-border/50 px-2.5 py-1.5 typography-micro text-muted-foreground">{t('gitView.graph.outdated')}</div>
-      ) : null}
-
       {renderState.showInlineMergeBaseError ? (
         <div
           id="git-graph-merge-base-error"
@@ -267,7 +310,7 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
           <Button type="button" size="sm" onClick={() => void refresh()}>{t('contextPanel.preview.actions.retry')}</Button>
         </div>
       ) : renderState.showRows ? (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div id="git-graph-scroll-container" data-ui="git-graph-scroll-container" ref={scrollContainerRef} className="min-h-0 flex-1 overflow-auto">
           <ul>
             {viewModels.map((viewModel) => {
               if (viewModel.kind === 'incoming-changes' || viewModel.kind === 'outgoing-changes') {
@@ -302,6 +345,10 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
                   isLoadingFiles={loadingCommitHashes.has(viewModel.historyItem.id)}
                   onCopyHash={onCopyHash}
                   directory={directory}
+                  hoverCoordinator={hoverCoordinator}
+                  hoverRemoteName={hoverRemoteName}
+                  hoverRemoteUrl={hoverRemoteUrl}
+                  hoverDetailsCache={hoverDetailsCache}
                   compactGraph={true}
                   onConflict={onConflict}
                   onActionSuccess={onActionSuccess}
@@ -309,20 +356,15 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
               );
             })}
           </ul>
+          {queryState?.hasMore ? (
+            <div id="git-graph-end-sentinel" data-ui="git-graph-end-sentinel" ref={sentinelRef} aria-hidden="true" className="h-px w-full" />
+          ) : null}
         </div>
       ) : (
         <div className="flex flex-1 items-center justify-center px-4 py-6 text-center typography-meta text-muted-foreground">
           {renderState.emptyMessage ?? t('gitView.history.noCommits')}
         </div>
       )}
-
-      {queryState?.hasMore ? (
-        <div className="border-t border-border/50 px-2.5 py-1.5">
-          <Button type="button" variant="ghost" size="xs" onClick={() => void fetchHistoryPage(directory, git, query, { append: true })} disabled={queryState.isLoadingMore}>
-            {queryState.isLoadingMore ? t('gitView.history.loadingMore') : t('gitView.history.loadMore')}
-          </Button>
-        </div>
-      ) : null}
     </section>
   );
 };
