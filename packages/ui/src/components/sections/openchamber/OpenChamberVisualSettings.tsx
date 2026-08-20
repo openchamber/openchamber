@@ -61,8 +61,12 @@ import {
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { TerminalShellOption } from '@/lib/api/types';
+import type { InputHistoryScope } from '@/lib/inputHistoryScope';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import {
+    useInputHistoryStore,
+} from '@/stores/useInputHistoryStore';
 
 interface Option<T extends string> {
     id: T;
@@ -274,11 +278,22 @@ const FOLLOW_UP_BEHAVIOR_OPTIONS: Option<FollowUpBehavior>[] = [
     },
 ];
 
+const INPUT_HISTORY_SCOPE_OPTIONS: Option<InputHistoryScope>[] = [
+    {
+        id: 'global',
+        labelKey: 'settings.openchamber.visual.option.inputHistoryScope.global.label',
+    },
+    {
+        id: 'session',
+        labelKey: 'settings.openchamber.visual.option.inputHistoryScope.session.label',
+    },
+];
+
 const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar' | 'autoSaveEnabled';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'inputHistoryScope' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar' | 'autoSaveEnabled';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -367,6 +382,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
     const followUpBehavior = useMessageQueueStore(state => state.followUpBehavior);
     const setFollowUpBehavior = useMessageQueueStore(state => state.setFollowUpBehavior);
+    const inputHistoryScope = useInputHistoryStore(state => state.scope);
+    const applyInputHistoryScope = useInputHistoryStore(state => state.applyScope);
     const persistChatDraft = useUIStore(state => state.persistChatDraft);
     const setPersistChatDraft = useUIStore(state => state.setPersistChatDraft);
     const inputSpellcheckEnabled = useUIStore(state => state.inputSpellcheckEnabled);
@@ -545,6 +562,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ messageStreamTransport: mode });
     }, [setMessageStreamTransport]);
 
+    const handleInputHistoryScopeChange = React.useCallback((scope: InputHistoryScope) => {
+        applyInputHistoryScope(scope);
+        void updateDesktopSettings({ inputHistoryScope: scope });
+    }, [applyInputHistoryScope]);
+
     const handleActivityRenderModeChange = React.useCallback((mode: 'collapsed' | 'summary') => {
         setActivityRenderMode(mode);
         void updateDesktopSettings({ activityRenderMode: mode });
@@ -653,6 +675,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('fileViewerPreview')
         || shouldShow('reasoning')
         || shouldShow('followUpBehavior')
+        || shouldShow('inputHistoryScope')
         || shouldShow('persistDraft')
         || shouldShow('showToolFileIcons')
         || shouldShow('expandedTools')
@@ -663,7 +686,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const showBehaviorMessageOptions = shouldShow('userMessageRendering')
         || shouldShow('mermaidRendering')
         || (shouldShow('diffLayout') && !isVSCode)
-        || shouldShow('followUpBehavior');
+        || shouldShow('followUpBehavior')
+        || shouldShow('inputHistoryScope');
     const showBehaviorFeatureCheckboxes = shouldShow('sessionAssist')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('subagentReadOnlyBanner')
@@ -1745,6 +1769,26 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                         onSelect={() => setFollowUpBehavior(option.id)}
                                                         label={tUnsafe(option.labelKey)}
                                                         ariaLabel={t('settings.openchamber.visual.field.followUpBehaviorAria', { option: tUnsafe(option.labelKey) })}
+                                                    />
+                                                ))}
+                                            </SettingsRadioGroup>
+                                        </SettingsControlGroup>
+                                    )}
+
+                                    {shouldShow('inputHistoryScope') && (
+                                        <SettingsControlGroup
+                                            title={t('settings.openchamber.visual.field.inputHistoryScope')}
+                                            info={t('settings.openchamber.visual.field.inputHistoryScopeDescription')}
+                                            settingsItem="chat.input-history-scope"
+                                        >
+                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.inputHistoryScopeAria')}>
+                                                {INPUT_HISTORY_SCOPE_OPTIONS.map((option) => (
+                                                    <SettingsRadioOption
+                                                        key={option.id}
+                                                        selected={inputHistoryScope === option.id}
+                                                        onSelect={() => handleInputHistoryScopeChange(option.id)}
+                                                        label={tUnsafe(option.labelKey)}
+                                                        ariaLabel={tUnsafe(option.labelKey)}
                                                     />
                                                 ))}
                                             </SettingsRadioGroup>

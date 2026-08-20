@@ -322,6 +322,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['follow up', 'queue', 'steer', 'send immediately'],
   },
   {
+    id: 'chat.input-history-scope',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.inputHistoryScope',
+    descriptionKey: 'settings.openchamber.visual.field.inputHistoryScopeDescription',
+    keywords: ['input history', 'composer history', 'global', 'session', 'reuse'],
+  },
+  {
     id: 'chat.persist-drafts',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.persistDraftMessages',

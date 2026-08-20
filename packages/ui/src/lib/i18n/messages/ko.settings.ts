@@ -2152,5 +2152,10 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  'settings.openchamber.visual.field.inputHistoryScope': '입력 기록 범위',
+  'settings.openchamber.visual.field.inputHistoryScopeDescription': '보낸 프롬프트를 이 런타임에 연결된 모든 프로젝트에서 다시 불러올지, 현재 세션에서만 다시 불러올지 선택합니다.',
+  'settings.openchamber.visual.section.inputHistoryScopeAria': '입력 기록 범위',
+  'settings.openchamber.visual.option.inputHistoryScope.global.label': '모든 프로젝트',
+  'settings.openchamber.visual.option.inputHistoryScope.session.label': '현재 세션',
   ...thirdPartyIntegrationI18n.ko,
 } as const;

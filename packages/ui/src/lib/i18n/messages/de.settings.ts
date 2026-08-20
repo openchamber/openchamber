@@ -2055,6 +2055,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Wählen Sie aus, was passiert, wenn Sie Enter auf einer Follow-up-Nachricht drücken, während der Agent noch antwortet.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steuerung',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Warteschlange',
+  'settings.openchamber.visual.field.inputHistoryScope': 'Bereich des Eingabeverlaufs',
+  'settings.openchamber.visual.field.inputHistoryScopeDescription': 'Wählen Sie aus, ob gesendete Prompts projektübergreifend in allen mit dieser Laufzeit verbundenen Projekten oder nur in der aktuellen Sitzung wieder abgerufen werden können.',
+  'settings.openchamber.visual.section.inputHistoryScopeAria': 'Bereich des Eingabeverlaufs',
+  'settings.openchamber.visual.option.inputHistoryScope.global.label': 'Alle Projekte',
+  'settings.openchamber.visual.option.inputHistoryScope.session.label': 'Aktuelle Sitzung',
 
   'settings.providers.page.quotaCredentials.accessToken': 'Zugriffstoken',
   'settings.providers.page.quotaCredentials.refreshToken': 'Aktualisierungstoken',

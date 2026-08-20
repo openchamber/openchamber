@@ -4,6 +4,8 @@ import type { RuntimeAPIs, SettingsPayload } from '@/lib/api/types';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
+import { DEFAULT_INPUT_HISTORY_SCOPE } from '@/lib/inputHistoryScope';
+import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -29,6 +31,7 @@ type TestWindow = {
 
 let createdWindow = false;
 let createdLocalStorage = false;
+const originalInputHistoryApplyScope = useInputHistoryStore.getState().applyScope;
 
 const ensureLocalStorage = (): void => {
   if (typeof localStorage !== 'undefined') {
@@ -155,6 +158,12 @@ describe('updateDesktopSettings', () => {
     registerRuntimeAPIs(null);
     invalidateSettingsCache();
     resetModelPrefsState();
+    useInputHistoryStore.setState({
+      scope: DEFAULT_INPUT_HISTORY_SCOPE,
+      globalBuckets: {},
+      sessionBuckets: {},
+      applyScope: originalInputHistoryApplyScope,
+    });
   });
 
   test('waits for the debounced settings save to finish before resolving', async () => {
@@ -444,7 +453,7 @@ describe('updateDesktopSettings', () => {
     expect(localStorage.getItem('selectedThemeId')).toBe('existing-theme');
   });
 
-  test('applies authoritative shared sidebar preferences without replacing local-only sidebar state', async () => {
+test('applies authoritative shared sidebar preferences without replacing local-only sidebar state', async () => {
     getWindow();
     useSessionDisplayStore.setState({
       projectDisplayMode: 'all',
@@ -546,6 +555,14 @@ describe('updateDesktopSettings', () => {
       projectSortOrder: 'z-a',
       showRecentSection: false,
     });
+
+  test('applies validated input history scope from shared settings save responses', async () => {
+    getWindow();
+    registerSettingsSave(async () => ({ inputHistoryScope: 'session' }));
+
+    await updateDesktopSettings({ inputHistoryScope: 'session' });
+
+    expect(useInputHistoryStore.getState().scope).toBe('session');
   });
 
   test('applies model selector settings from server settings', async () => {
@@ -656,6 +673,78 @@ describe('updateDesktopSettings', () => {
     await syncDesktopSettings();
 
     expect(useUIStore.getState().autoSaveEnabled).toBe(false);
+  });
+
+  test('applies persisted input history scope from server settings', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        inputHistoryScope: 'session',
+        autoSaveEnabled: true,
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useInputHistoryStore.getState().scope).toBe('session');
+  });
+
+  test('defaults omitted input history scope to global without writing a migration', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useInputHistoryStore.getState().applyScope('session');
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsApi(async (changes) => {
+      saveCalls.push(changes);
+      return changes as SettingsPayload;
+    }, async () => ({
+      settings: {
+        autoSaveEnabled: true,
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useInputHistoryStore.getState().scope).toBe(DEFAULT_INPUT_HISTORY_SCOPE);
+    expect(saveCalls).toEqual([]);
+  });
+
+  test('does not reapply the hydrated input history scope when it already matches', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useInputHistoryStore.getState().applyScope('session');
+    let applyScopeCalls = 0;
+    useInputHistoryStore.setState({
+      applyScope: (scope) => {
+        applyScopeCalls += 1;
+        originalInputHistoryApplyScope(scope);
+      },
+    });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        inputHistoryScope: 'session',
+        autoSaveEnabled: true,
+        draftStartersCraftGoalAdded: true,
+        draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+
+    try {
+      await syncDesktopSettings();
+    } finally {
+      useInputHistoryStore.setState({ applyScope: originalInputHistoryApplyScope });
+    }
+
+    expect(applyScopeCalls).toBe(0);
+    expect(useInputHistoryStore.getState().scope).toBe('session');
   });
 
   test('autosaves autoSaveEnabled changes to shared settings', async () => {

@@ -204,6 +204,7 @@ const ChatSectionContent: React.FC = () => {
                 'splitAssistantMessageActions',
                 'subagentReadOnlyBanner',
                 'diffLayout',
+                'inputHistoryScope',
                 'dotfiles',
                 'fileViewerPreview',
                 'followUpBehavior',

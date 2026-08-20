@@ -2152,5 +2152,10 @@ export const settingsDict = {
   "settings.openchamber.visual.field.followUpBehaviorDescription": "Choose what happens when you press Enter on a follow-up message while the agent is still responding.",
   "settings.openchamber.visual.option.followUpBehavior.steer.label": "Steer",
   "settings.openchamber.visual.option.followUpBehavior.queue.label": "Queue",
+  "settings.openchamber.visual.field.inputHistoryScope": "Alcance del historial de entrada",
+  "settings.openchamber.visual.field.inputHistoryScopeDescription": "Elige si los prompts enviados se recuperan en todos los proyectos conectados a este runtime o solo en la sesión actual.",
+  "settings.openchamber.visual.section.inputHistoryScopeAria": "Alcance del historial de entrada",
+  "settings.openchamber.visual.option.inputHistoryScope.global.label": "Todos los proyectos",
+  "settings.openchamber.visual.option.inputHistoryScope.session.label": "Sesión actual",
   ...thirdPartyIntegrationI18n.es,
 } as const;

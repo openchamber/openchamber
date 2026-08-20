@@ -38,4 +38,15 @@ describe('settings search', () => {
 
     expect(results.some((result) => result.id === 'integrations.third-party.opencode-cursor-oauth')).toBe(true);
   });
+
+  test('finds the chat input history scope setting', () => {
+    const results = buildSettingsSearchResults({
+      query: 'input history scope',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'chat.input-history-scope')).toBe(true);
+  });
 });
