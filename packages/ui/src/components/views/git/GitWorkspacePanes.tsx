@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import {
   DEFAULT_GIT_REPOSITORY_PANE_STATE,
   gitRepositoryPanePreferenceKey,
@@ -24,6 +25,7 @@ export const GitWorkspacePanes: React.FC<GitWorkspacePanesProps> = ({ directory,
   const paneState = useUIStore((state) => state.gitRepositoryPaneStates[preferenceKey] ?? DEFAULT_GIT_REPOSITORY_PANE_STATE);
   const setPaneState = useUIStore((state) => state.setGitRepositoryPaneState);
   const dragStateRef = React.useRef<{ startY: number; startHeight: number } | null>(null);
+  const [isGraphResizeActive, setIsGraphResizeActive] = React.useState(false);
 
   React.useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -35,15 +37,18 @@ export const GitWorkspacePanes: React.FC<GitWorkspacePanesProps> = ({ directory,
       setPaneState(directory, { graphHeight: clampGitGraphPaneHeight(dragStateRef.current.startHeight + delta) });
     };
 
-    const handlePointerUp = () => {
+    const handlePointerEnd = () => {
       dragStateRef.current = null;
+      setIsGraphResizeActive(false);
     };
 
     window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointerup', handlePointerEnd);
+    window.addEventListener('pointercancel', handlePointerEnd);
     return () => {
       window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointerup', handlePointerEnd);
+      window.removeEventListener('pointercancel', handlePointerEnd);
     };
   }, [directory, setPaneState]);
 
@@ -65,11 +70,13 @@ export const GitWorkspacePanes: React.FC<GitWorkspacePanesProps> = ({ directory,
         <div
           role="separator"
           tabIndex={0}
-          aria-orientation="vertical"
+          aria-orientation="horizontal"
           aria-label={t('gitView.graph.resizeAria')}
-          className="mb-2 h-2 cursor-row-resize rounded bg-[var(--surface-subtle)] hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+          data-git-resize-handle="true"
+          className="group relative mb-2 flex h-5 w-full cursor-col-resize touch-none items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
           onPointerDown={(event) => {
             dragStateRef.current = { startY: event.clientY, startHeight: paneState.graphHeight };
+            setIsGraphResizeActive(true);
           }}
           onKeyDown={(event) => {
             if (event.key === 'ArrowUp') {
@@ -81,7 +88,38 @@ export const GitWorkspacePanes: React.FC<GitWorkspacePanesProps> = ({ directory,
               setPaneState(directory, { graphHeight: clampGitGraphPaneHeight(paneState.graphHeight - GRAPH_HEIGHT_STEP) });
             }
           }}
-        />
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              'absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-[var(--surface-subtle)] transition-colors group-hover:bg-[var(--chart-1)] group-focus-visible:bg-[var(--chart-1)]',
+              isGraphResizeActive && 'bg-[var(--chart-1)]',
+            )}
+          />
+          <span aria-hidden="true" className="relative z-10 flex items-center gap-1">
+            <span
+              data-git-resize-dot="true"
+              className={cn(
+                'size-1 rounded-full bg-[var(--surface-muted-foreground)] transition-colors group-hover:bg-[var(--chart-1)] group-focus-visible:bg-[var(--chart-1)]',
+                isGraphResizeActive && 'bg-[var(--chart-1)]',
+              )}
+            />
+            <span
+              data-git-resize-dot="true"
+              className={cn(
+                'size-1 rounded-full bg-[var(--surface-muted-foreground)] transition-colors group-hover:bg-[var(--chart-1)] group-focus-visible:bg-[var(--chart-1)]',
+                isGraphResizeActive && 'bg-[var(--chart-1)]',
+              )}
+            />
+            <span
+              data-git-resize-dot="true"
+              className={cn(
+                'size-1 rounded-full bg-[var(--surface-muted-foreground)] transition-colors group-hover:bg-[var(--chart-1)] group-focus-visible:bg-[var(--chart-1)]',
+                isGraphResizeActive && 'bg-[var(--chart-1)]',
+              )}
+            />
+          </span>
+        </div>
         <div className="mb-2 flex items-center gap-2">
           <Button type="button" variant="ghost" size="xs" aria-expanded={!paneState.graphCollapsed} aria-controls="git-graph-pane-body" onClick={() => setPaneState(directory, { graphCollapsed: !paneState.graphCollapsed })}>
             <Icon name={paneState.graphCollapsed ? 'arrow-right-s' : 'arrow-down-s'} className="mr-1 size-3" />
