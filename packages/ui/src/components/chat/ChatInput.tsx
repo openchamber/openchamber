@@ -580,11 +580,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     );
 
     // Load the preset registry for the composer: painting `%preset` chips and
-    // expanding them at send time both need the exact persisted names. The
-    // picker refetches on open, and this effect rides the same moment so a
-    // preset created in Settings is known as soon as the user opens the picker.
+    // expanding them at send time both need the exact persisted names. Loaded
+    // on mount so a restored or pasted `%preset` token still expands when the
+    // picker never opened, and refetched whenever the picker opens so a preset
+    // created in Settings is known as soon as the user opens it.
     React.useEffect(() => {
-        if (openAutocomplete !== 'fusion') return;
         let cancelled = false;
         void runtimeFetch('/api/openchamber/fusion/presets')
             .then((response) => (response.ok ? response.json() : null))
