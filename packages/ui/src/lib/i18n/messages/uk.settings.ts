@@ -1608,6 +1608,8 @@ export const settingsDict = {
   "settings.shared.projectSelector.fallbackProject": "Проєкт",
   "settings.shared.projectSelector.switchProjectAria": "Змінити проєкт",
   "settings.shared.projectSelector.switchProjectTitle": "Змінити проєкт",
+  "settings.shared.projectSelector.sheetTitle": "Проєкт",
+  "settings.shared.projectSelector.searchPlaceholder": "Пошук проєктів...",
   "settings.openchamber.defaults.title": "Стандартні параметри сесії",
   "settings.openchamber.defaults.summaryPrefix": "Нові сесії починатимуться з:",
   "settings.openchamber.defaults.summaryOpenCodeDefault": "Типовий агент OpenCode",

@@ -1641,6 +1641,8 @@ export const settingsDict = {
   'settings.shared.projectSelector.fallbackProject': 'プロジェクト',
   'settings.shared.projectSelector.switchProjectAria': 'プロジェクトを切替',
   'settings.shared.projectSelector.switchProjectTitle': 'プロジェクトを切替',
+  'settings.shared.projectSelector.sheetTitle': 'プロジェクト',
+  'settings.shared.projectSelector.searchPlaceholder': 'プロジェクトを検索...',
   'settings.openchamber.defaults.title': 'Session デフォルト',
   'settings.openchamber.defaults.summaryPrefix': '新しい Session は以下で開始されます:',
   'settings.openchamber.defaults.summaryOpenCodeDefault': 'OpenCode Agent デフォルト',

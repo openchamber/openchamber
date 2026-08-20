@@ -42,11 +42,16 @@ const { I18nProvider } = await import('@/lib/i18n');
 const { renderToStaticMarkup } = await import('react-dom/server');
 
 describe('SettingsProjectSelector (#2999)', () => {
-  test('renders through Select primitives so the popup is viewport-capped and internally scrolling', () => {
+  test('desktop renders through Select primitives so the popup is viewport-capped and internally scrolling', () => {
     expect(selectorSource).toContain("from '@/components/ui/select'");
     expect(selectorSource).toContain('<SelectContent');
     expect(selectorSource).not.toContain("from '@/components/ui/dropdown-menu'");
     expect(selectorSource).not.toContain('<DropdownMenu');
+  });
+
+  test('mobile reuses the composer bottom-sheet project picker instead of a popup', () => {
+    expect(selectorSource).toContain('ProjectPickerSheet');
+    expect(selectorSource).toContain('state.isMobile');
   });
 
   test('renders project icon and color metadata for parity with the main-view selector', () => {

@@ -213,6 +213,78 @@ export function MobileDraftTargetTriggers(
 }
 
 /**
+ * Mobile: bottom-sheet project picker shared by the composer draft target and
+ * the settings sections' project selector. A bottom sheet rather than a select
+ * because a native select over a keyboard-resized viewport is unusable.
+ */
+export interface ProjectPickerSheetProps {
+    open: boolean;
+    onClose: () => void;
+    projects: readonly DraftTargetProject[];
+    selectedProjectId: string;
+    onSelectProject: (projectId: string) => void;
+    theme: Theme;
+    title: string;
+    searchPlaceholder: string;
+}
+
+export function ProjectPickerSheet({
+    open,
+    onClose,
+    projects,
+    selectedProjectId,
+    onSelectProject,
+    theme,
+    title,
+    searchPlaceholder,
+}: ProjectPickerSheetProps) {
+    const [query, setQuery] = React.useState('');
+
+    // Reset the search whenever the sheet opens or closes.
+    React.useEffect(() => {
+        setQuery('');
+    }, [open]);
+
+    return (
+        <MobileOverlayPanel open={open} title={title} onClose={onClose}>
+            <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
+                <Input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder={searchPlaceholder}
+                    className="h-9"
+                />
+                <div className="flex flex-col">
+                    {projects
+                        .filter((project) => {
+                            const needle = query.trim().toLowerCase();
+                            if (!needle) return true;
+                            return getProjectDisplayLabel(project).toLowerCase().includes(needle)
+                                || project.path.toLowerCase().includes(needle);
+                        })
+                        .map((project) => (
+                            <button
+                                key={project.id}
+                                type="button"
+                                className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                onClick={() => {
+                                    onSelectProject(project.id);
+                                    onClose();
+                                }}
+                            >
+                                <span className="min-w-0 flex-1">{<ProjectLabel project={project} theme={theme} />}</span>
+                                {project.id === selectedProjectId ? (
+                                    <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                ) : null}
+                            </button>
+                        ))}
+                </div>
+            </div>
+        </MobileOverlayPanel>
+    );
+}
+
+/**
  * Mobile: the project and branch sheets. Bottom sheets rather than selects
  * because a native select over a keyboard-resized viewport is unusable.
  */
@@ -220,8 +292,6 @@ export function MobileDraftTargetSheets(
     props: DraftTargetProps & {
         openPicker: 'project' | 'branch' | null;
         onOpenPickerChange: (picker: 'project' | 'branch' | null) => void;
-        query: string;
-        onQueryChange: (query: string) => void;
     },
 ) {
     const { t } = useI18n();
@@ -238,52 +308,28 @@ export function MobileDraftTargetSheets(
         onDirectoryChange,
         openPicker,
         onOpenPickerChange,
-        query,
-        onQueryChange,
         theme,
     } = props;
 
+    const [branchQuery, setBranchQuery] = React.useState('');
+
+    // Reset the branch search whenever the branch sheet opens or closes.
+    React.useEffect(() => {
+        setBranchQuery('');
+    }, [openPicker]);
+
     return (
         <>
-            <MobileOverlayPanel
+            <ProjectPickerSheet
                 open={openPicker === 'project'}
-                title={t('chat.chatInput.draftPicker.projectTitle')}
                 onClose={() => onOpenPickerChange(null)}
-            >
-                <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
-                    <Input
-                        value={query}
-                        onChange={(event) => onQueryChange(event.target.value)}
-                        placeholder={t('chat.chatInput.draftPicker.searchProjects')}
-                        className="h-9"
-                    />
-                    <div className="flex flex-col">
-                        {projects
-                            .filter((project) => {
-                                const needle = query.trim().toLowerCase();
-                                if (!needle) return true;
-                                return getProjectDisplayLabel(project).toLowerCase().includes(needle)
-                                    || project.path.toLowerCase().includes(needle);
-                            })
-                            .map((project) => (
-                                <button
-                                    key={project.id}
-                                    type="button"
-                                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                    onClick={() => {
-                                        onProjectChange(project.id);
-                                        onOpenPickerChange(null);
-                                    }}
-                                >
-                                    <span className="min-w-0 flex-1">{<ProjectLabel project={project} theme={theme} />}</span>
-                                    {project.id === selectedProject.id ? (
-                                        <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                                    ) : null}
-                                </button>
-                            ))}
-                    </div>
-                </div>
-            </MobileOverlayPanel>
+                projects={projects}
+                selectedProjectId={selectedProject.id}
+                onSelectProject={onProjectChange}
+                theme={theme}
+                title={t('chat.chatInput.draftPicker.projectTitle')}
+                searchPlaceholder={t('chat.chatInput.draftPicker.searchProjects')}
+            />
             <MobileOverlayPanel
                 open={openPicker === 'branch'}
                 title={t('chat.chatInput.branch')}
@@ -291,14 +337,14 @@ export function MobileDraftTargetSheets(
             >
                 <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
                     <Input
-                        value={query}
-                        onChange={(event) => onQueryChange(event.target.value)}
+                        value={branchQuery}
+                        onChange={(event) => setBranchQuery(event.target.value)}
                         placeholder={t('chat.chatInput.draftPicker.searchBranches')}
                         className="h-9"
                     />
                     <div className="flex flex-col">
                         {(() => {
-                            const needle = query.trim().toLowerCase();
+                            const needle = branchQuery.trim().toLowerCase();
                             const matches = (label: string) => !needle || label.toLowerCase().includes(needle);
                             const selectedValue = selectedDirectory
                                 ?? branchItems[0]?.value
