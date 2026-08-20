@@ -126,8 +126,9 @@ describe('createVisionRuntime', () => {
       fetchMock.mockResolvedValue(imageCapableProviders());
       callSmallModel.mockResolvedValue('ok');
 
-      const tildeResult = await runtime.execute({ imagePath: '~/pics/shot.png', directory: '/work' });
-      expect(tildeResult.imagePath).toBe(path.join(os.homedir(), 'pics/shot.png'));
+      const home = os.homedir();
+      const tildeResult = await runtime.execute({ imagePath: '~/pics/shot.png', directory: home });
+      expect(tildeResult.imagePath).toBe(path.join(home, 'pics/shot.png'));
 
       const urlResult = await runtime.execute({ imagePath: 'file:///work/shot.png', directory: '/work' });
       expect(urlResult.imagePath).toBe('/work/shot.png');
@@ -203,12 +204,36 @@ describe('createVisionRuntime', () => {
     }
   });
 
-  it('requires an absolute path when there is no directory context', async () => {
+  it('requires a directory context so the image stays inside the workspace', async () => {
     const { runtime, fetchMock, restore } = createRuntime();
     try {
       fetchMock.mockResolvedValue(imageCapableProviders());
-      await expect(runtime.execute({ imagePath: 'shot.png' }))
-        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('absolute path') });
+      await expect(runtime.execute({ imagePath: '/work/shot.png' }))
+        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('directory context') });
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects an absolute path outside the session workspace', async () => {
+    const { runtime, fetchMock, restore } = createRuntime();
+    try {
+      fetchMock.mockResolvedValue(imageCapableProviders());
+      await expect(runtime.execute({ imagePath: '/etc/passwd', directory: '/work' }))
+        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('inside the session directory') });
+      expect(callSmallModel).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects a traversal that escapes the session workspace', async () => {
+    const { runtime, fetchMock, restore } = createRuntime();
+    try {
+      fetchMock.mockResolvedValue(imageCapableProviders());
+      await expect(runtime.execute({ imagePath: '../secret.png', directory: '/work/repo' }))
+        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('inside the session directory') });
+      expect(callSmallModel).not.toHaveBeenCalled();
     } finally {
       restore();
     }
@@ -237,7 +262,7 @@ describe('createVisionRuntime', () => {
     });
     try {
       fetchMock.mockResolvedValue(imageCapableProviders());
-      await expect(runtime.execute({ imagePath: '/work', directory: '/work' }))
+      await expect(runtime.execute({ imagePath: '/work/folder', directory: '/work' }))
         .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('not a file') });
     } finally {
       restore();
@@ -252,6 +277,21 @@ describe('createVisionRuntime', () => {
         .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('larger than 20 MB') });
     } finally {
       restoreOversized();
+    }
+  });
+
+  it('rejects a file that grows past the cap between stat and read', async () => {
+    const { runtime, fetchMock, restore } = createRuntime({
+      statFile: vi.fn(async () => ({ isFile: () => true, size: PNG_BYTES.length })),
+      readFile: vi.fn(async () => Buffer.alloc(21 * 1024 * 1024, 1)),
+    });
+    try {
+      fetchMock.mockResolvedValue(imageCapableProviders());
+      await expect(runtime.execute({ imagePath: '/work/shot.png', directory: '/work' }))
+        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('larger than 20 MB') });
+      expect(callSmallModel).not.toHaveBeenCalled();
+    } finally {
+      restore();
     }
   });
 

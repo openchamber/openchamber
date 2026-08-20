@@ -31,15 +31,20 @@ created and nothing streams into the sidebar.
   with a usage error pointing at Settings → Vision. An empty/unreachable
   snapshot fails open (mirrors the fusion runner's rule) — it must not turn a
   valid selection into a rejection.
-- **The image is validated, not trusted.** The path is resolved (absolute,
-  `~`, `file://`, or relative to the caller's directory), must be a file, is
-  capped at 20 MB, and its magic bytes must identify a raster image whose
-  format at least one major vision API documents as supported (PNG, JPEG,
-  GIF, WebP — the union of the OpenAI, Anthropic, and Google supported
-  formats). BMP, AVIF, ICO, and SVG are refused; SVG can carry scripts, and
-  the others are undocumented for vision input everywhere. Content that fails
-  sniffing is rejected even with a plausible extension; a format one
-  provider happens to reject surfaces as that provider's own error.
+- **The image is validated and contained, not trusted.** The path is resolved
+  (absolute, `~`, `file://`, or relative to the caller's directory) and must
+  resolve inside the session directory — the agent tool runs with a workspace
+  and must not exfiltrate arbitrary files from elsewhere on the machine to an
+  external provider, so traversal like `/work/../etc/passwd` is rejected. It
+  must be a file, is capped at 20 MB, and its magic bytes must identify a
+  raster image whose format at least one major vision API documents as
+  supported (PNG, JPEG, GIF, WebP — the union of the OpenAI, Anthropic, and
+  Google supported formats). BMP, AVIF, ICO, and SVG are refused; SVG can
+  carry scripts, and the others are undocumented for vision input everywhere.
+  Content that fails sniffing is rejected even with a plausible extension; a
+  format one provider happens to reject surfaces as that provider's own error.
+  The size cap is enforced on the bytes actually read, not the pre-read stat,
+  so a file swapped between stat and read cannot slip past it (TOCTOU).
 - **Every supported wire format carries image parts.** OpenAI-compatible
   `/chat/completions` gets `image_url` content parts, the Responses API and
   the ChatGPT-plan codex backend get `input_image`, Anthropic `/v1/messages`

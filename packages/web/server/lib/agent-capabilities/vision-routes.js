@@ -19,13 +19,28 @@ export const registerVisionRoutes = (app, { readSettingsFromDiskMigrated, persis
   });
 
   app.put('/api/openchamber/vision', express.json({ limit: '100kb' }), async (req, res) => {
-    const sanitized = sanitizeVisionConfig(req.body);
-    if (!sanitized) {
-      return res.status(400).json({ error: 'vision.model is required and must be in provider/model format' });
+    const incoming = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const model = typeof incoming.model === 'string' ? incoming.model.trim() : '';
+    const prompt = typeof incoming.prompt === 'string' ? incoming.prompt.trim() : undefined;
+    if (!model && prompt === undefined) {
+      return res.status(400).json({ error: 'Provide a vision model in provider/model format' });
     }
     try {
-      const settings = await persistSettings({ vision: sanitized });
-      return res.json({ config: sanitizeVisionConfig(settings?.vision) || sanitized });
+      // Merge, don't replace: an overlapping PUT from a stale editor must not
+      // silently drop the field the other editor just saved. The persisted
+      // config is the authority for fields the incoming request omits.
+      const settings = await readSettingsFromDiskMigrated();
+      const existing = sanitizeVisionConfig(settings?.vision) || {};
+      const merged = {
+        model: model || existing.model,
+        ...(prompt !== undefined ? { prompt } : existing.prompt ? { prompt: existing.prompt } : {}),
+      };
+      const sanitized = sanitizeVisionConfig(merged);
+      if (!sanitized) {
+        return res.status(400).json({ error: 'vision.model is required and must be in provider/model format' });
+      }
+      const updated = await persistSettings({ vision: sanitized });
+      return res.json({ config: sanitizeVisionConfig(updated?.vision) || sanitized });
     } catch (error) {
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to save vision settings' });
     }

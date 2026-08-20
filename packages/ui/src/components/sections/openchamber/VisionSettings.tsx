@@ -66,11 +66,12 @@ export const VisionSettings: React.FC = () => {
   const [model, setModel] = React.useState('');
   const [promptDraft, setPromptDraft] = React.useState('');
 
-  const savedPrompt = config?.prompt ?? '';
   const isModelAllowed = React.useCallback(
     (providerId: string, modelId: string) => isVisionCapableModel(getModelMetadata(providerId, modelId)),
     [getModelMetadata],
   );
+
+  const isPromptDirty = promptDraft !== (config?.prompt?.trim() ? config.prompt : defaultPrompt);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -98,7 +99,7 @@ export const VisionSettings: React.FC = () => {
     return () => controller.abort();
   }, [t]);
 
-  const persistConfig = React.useCallback(async (next: { model: string; prompt?: string }): Promise<VisionConfig | null> => {
+  const persistConfig = React.useCallback(async (next: { model?: string; prompt?: string }): Promise<VisionConfig | null> => {
     reportSettingsSaveState('saving');
     try {
       const response = await runtimeFetch('/api/openchamber/vision', {
@@ -111,35 +112,37 @@ export const VisionSettings: React.FC = () => {
       }
       const data = (await response.json()) as { config?: VisionConfig | null };
       reportSettingsSaveState('saved');
-      return data.config ?? next;
+      // The server returns the merged config (authoritative); fall back to
+      // merging the submitted fields over the last known config if absent.
+      if (data.config) return data.config;
+      const fallbackModel = next.model ?? config?.model;
+      return fallbackModel ? { model: fallbackModel, ...(next.prompt !== undefined ? { prompt: next.prompt } : {}) } : null;
     } catch (error) {
       reportSettingsSaveState('error');
       throw error;
     }
-  }, [t]);
+  }, [config, t]);
 
   const handleModelChange = React.useCallback(async (providerId: string, modelId: string) => {
     const nextModel = providerId && modelId ? `${providerId}/${modelId}` : '';
     setModel(nextModel);
     if (!nextModel) return;
     try {
-      const persisted = await persistConfig({
-        model: nextModel,
-        ...(savedPrompt ? { prompt: savedPrompt } : {}),
-      });
+      // Send only the model; the server merges it with the persisted prompt,
+      // so a concurrent prompt save is never clobbered by a stale model save.
+      const persisted = await persistConfig({ model: nextModel });
       setConfig(persisted);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('settings.vision.toast.saveFailed'));
     }
-  }, [persistConfig, savedPrompt, t]);
+  }, [persistConfig, t]);
 
   const handleSavePrompt = React.useCallback(async () => {
     setSaving(true);
     try {
-      const persisted = await persistConfig({
-        model,
-        ...(promptDraft.trim() ? { prompt: promptDraft } : {}),
-      });
+      // Send only the prompt; the server merges it with the persisted model,
+      // so a concurrent model change is never clobbered by a stale prompt save.
+      const persisted = await persistConfig({ prompt: promptDraft });
       setConfig(persisted);
       setPromptDraft(promptDraft.trim() || defaultPrompt);
       toast.success(t('settings.vision.toast.saved'));
@@ -148,7 +151,7 @@ export const VisionSettings: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [defaultPrompt, model, persistConfig, promptDraft, t]);
+  }, [defaultPrompt, persistConfig, promptDraft, t]);
 
   const handleResetPrompt = React.useCallback(() => {
     setPromptDraft(defaultPrompt);
@@ -156,8 +159,10 @@ export const VisionSettings: React.FC = () => {
     void (async () => {
       try {
         setSaving(true);
-        await persistConfig({ model });
-        setConfig({ model });
+        // An empty prompt clears the persisted prompt (the server default
+        // applies at call time) while keeping the model.
+        const persisted = await persistConfig({ prompt: '' });
+        setConfig(persisted);
         toast.success(t('settings.vision.toast.saved'));
       } catch (error) {
         toast.error(error instanceof Error ? error.message : t('settings.vision.toast.saveFailed'));
@@ -168,7 +173,6 @@ export const VisionSettings: React.FC = () => {
   }, [defaultPrompt, model, persistConfig, t]);
 
   const parsedModel = React.useMemo(() => parseModelIdentifier(model), [model]);
-  const isPromptDirty = promptDraft !== (config?.prompt?.trim() ? config.prompt : defaultPrompt);
 
   return (
     <SettingsSection title={t('settings.vision.section.title')} info={t('settings.vision.section.info')} divider={false}>

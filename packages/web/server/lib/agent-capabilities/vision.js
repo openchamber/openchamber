@@ -130,7 +130,29 @@ export const createVisionRuntime = (dependencies) => {
       );
     }
 
+    // The image must live inside the caller's workspace: the agent tool runs
+    // with a session directory and must not be able to exfiltrate arbitrary
+    // files from elsewhere on the machine to an external provider. A relative
+    // path already resolves against that directory; an absolute, ~, or file://
+    // path is checked for containment so a traversal like /work/../etc/passwd
+    // cannot reach outside the workspace.
+    const workspace = asNonEmptyString(directory);
+    if (!workspace) {
+      throw new OpenChamberControlError(
+        'imagePath requires a directory context so the image stays inside the workspace',
+        400,
+      );
+    }
     const resolvedPath = resolveImagePath(imagePath, directory);
+    const resolvedWorkspace = path.resolve(workspace);
+    const relative = path.relative(resolvedWorkspace, resolvedPath);
+    if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new OpenChamberControlError(
+        `imagePath must be inside the session directory: ${resolvedWorkspace}`,
+        400,
+      );
+    }
+
     let stat;
     let buffer;
     try {
@@ -145,6 +167,15 @@ export const createVisionRuntime = (dependencies) => {
         );
       }
       buffer = await readFile(resolvedPath);
+      // The stat was a fast-path guard; the authoritative check is the bytes
+      // actually read, so a file swapped between stat and read cannot slip
+      // past the cap (TOCTOU).
+      if (buffer.length > MAX_VISION_IMAGE_BYTES) {
+        throw new OpenChamberControlError(
+          `Image is larger than ${MAX_VISION_IMAGE_BYTES / 1024 / 1024} MB: ${resolvedPath}`,
+          400,
+        );
+      }
     } catch (error) {
       if (error instanceof OpenChamberControlError) throw error;
       if (error?.code === 'ENOENT') {
