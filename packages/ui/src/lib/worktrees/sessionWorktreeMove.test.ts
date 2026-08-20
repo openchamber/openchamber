@@ -204,7 +204,6 @@ const {
   cancelSessionTreeMove,
   useSessionTreeMoveConfirmation,
   getSessionTreeMoveConfirmation,
-  startSessionTreeWorktreeMove,
 } = await import('./sessionWorktreeMove');
 
 const makeSession = (id: string, directory = '/source'): Session => ({
@@ -659,16 +658,10 @@ describe('moveSessionTreeToExistingWorktree', () => {
       throw new Error('git-ready failed');
     };
 
-    startSessionTreeWorktreeMove({
-      root: makeSession('root'),
-      descendants: [],
-      sourceDirectory: '/source',
-      successMessage: 'success',
-      failureMessage: 'failed',
-    });
+    requestSessionTreeMove(makeQuickIntent());
 
     await waitFor(() => toastErrors.length === 1);
-    expect(toastErrors).toEqual([{ title: 'failed', description: 'git-ready failed' }]);
+    expect(toastErrors).toEqual([{ title: 'move failed', description: 'git-ready failed' }]);
     expect(removeWorktreeCalls).toEqual([{
       projectDirectory: '/repo',
       directory: '/created-worktree',
@@ -683,13 +676,7 @@ describe('moveSessionTreeToExistingWorktree', () => {
       setStatuses('/source', { root: 'busy' });
     };
 
-    startSessionTreeWorktreeMove({
-      root: makeSession('root'),
-      descendants: [],
-      sourceDirectory: '/source',
-      successMessage: 'success',
-      failureMessage: 'failed',
-    });
+    requestSessionTreeMove(makeQuickIntent());
 
     await waitFor(() => toastErrors.length === 1);
     expect(removeWorktreeCalls).toEqual([{
@@ -1020,16 +1007,10 @@ describe('moveSessionTreeToExistingWorktree', () => {
     setStatuses('/source', { root: 'idle' });
     resolveProjectRefImplementation = () => null;
 
-    startSessionTreeWorktreeMove({
-      root: makeSession('root'),
-      descendants: [],
-      sourceDirectory: '/source',
-      successMessage: 'success',
-      failureMessage: 'failed',
-    });
+    requestSessionTreeMove(makeQuickIntent());
 
     await waitFor(() => toastErrors.length === 1);
-    expect(toastErrors).toEqual([{ title: 'failed', description: 'Unable to find the project for this session' }]);
+    expect(toastErrors).toEqual([{ title: 'move failed', description: 'Unable to find the project for this session' }]);
     expect(removeWorktreeCalls).toEqual([]);
     expect(moveCalls).toEqual([]);
   });

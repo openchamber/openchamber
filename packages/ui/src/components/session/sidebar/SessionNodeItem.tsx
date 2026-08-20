@@ -49,8 +49,7 @@ import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog
 import { FusionIcon } from '@/components/icons/FusionIcon';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import {
-  startSessionTreeExistingWorktreeMove,
-  startSessionTreeWorktreeMove,
+  requestSessionTreeMove,
   useIsSessionWorktreeMovePending,
 } from '@/lib/worktrees/sessionWorktreeMove';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
@@ -1065,13 +1064,18 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                       if (isDisabled || !sessionDirectory) {
                         return;
                       }
-                      startSessionTreeExistingWorktreeMove({
+                      requestSessionTreeMove({
+                        kind: 'existing',
                         root: resolvedSession,
                         descendants: collectNodeDescendantSessions(node),
                         sourceDirectory: sessionDirectory,
                         destination: target.metadata,
-                        successMessage: t('sessions.sidebar.session.moveToWorktree.existingSuccess'),
-                        failureMessage: t('sessions.sidebar.session.moveToWorktree.existingFailed'),
+                        messages: {
+                          success: t('sessions.sidebar.session.moveToWorktree.existingSuccess'),
+                          failure: t('sessions.sidebar.session.moveToWorktree.existingFailed'),
+                          sourceVerificationFailed: t('sessions.sidebar.session.moveToWorktree.sourceVerificationFailed'),
+                          applyChangesFailed: t('sessions.sidebar.session.moveToWorktree.applyChangesFailed'),
+                        },
                       });
                     }}
                   >
@@ -1100,12 +1104,17 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   data-session-worktree-new-action="true"
                   onClick={() => {
                     if (isWorktreeMenuDisabled || !sessionDirectory) return;
-                    startSessionTreeWorktreeMove({
+                    requestSessionTreeMove({
+                      kind: 'quick',
                       root: resolvedSession,
                       descendants: collectNodeDescendantSessions(node),
                       sourceDirectory: sessionDirectory,
-                      successMessage: t('sessions.sidebar.session.moveToWorktree.success'),
-                      failureMessage: t('sessions.sidebar.session.moveToWorktree.failed'),
+                      messages: {
+                        success: t('sessions.sidebar.session.moveToWorktree.success'),
+                        failure: t('sessions.sidebar.session.moveToWorktree.failed'),
+                        sourceVerificationFailed: t('sessions.sidebar.session.moveToWorktree.sourceVerificationFailed'),
+                        applyChangesFailed: t('sessions.sidebar.session.moveToWorktree.applyChangesFailed'),
+                      },
                     });
                   }}
                   className="[&>svg]:mr-1"
