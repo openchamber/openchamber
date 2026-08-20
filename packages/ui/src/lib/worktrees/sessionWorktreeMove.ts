@@ -1,6 +1,6 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
-import { getGitStatus } from '@/lib/gitApi';
+import { checkIsGitRepository, getGitStatus } from '@/lib/gitApi';
 import { normalizePath } from '@/lib/pathNormalization';
 import { createQuickWorktree, resolveProjectRef } from '@/lib/worktreeSessionCreator';
 import { getLatestWorktreeMetadata, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
@@ -12,12 +12,60 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import { waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
 import { create } from 'zustand';
 
-const useSessionMoveState = create<{ pendingSessionIds: Set<string> }>(() => ({
+export type SessionTreeMoveMessages = {
+  success: string;
+  failure: string;
+  sourceVerificationFailed: string;
+  applyChangesFailed: string;
+};
+
+export type SessionTreeMoveIntent =
+  | {
+      kind: 'existing';
+      root: Session;
+      descendants: Session[];
+      sourceDirectory: string;
+      destination: WorktreeMetadata;
+      messages: SessionTreeMoveMessages;
+    }
+  | {
+      kind: 'quick';
+      root: Session;
+      descendants: Session[];
+      sourceDirectory: string;
+      messages: SessionTreeMoveMessages;
+    };
+
+export type SessionTreeMoveConfirmation = {
+  intent: SessionTreeMoveIntent;
+  dirtyFileCount: number;
+  stagedFileCount: number;
+};
+
+type SessionMoveState = {
+  pendingSessionIds: Set<string>;
+  requestingSessionIds: Set<string>;
+  confirmation: SessionTreeMoveConfirmation | null;
+};
+
+const useSessionMoveState = create<SessionMoveState>(() => ({
   pendingSessionIds: new Set(),
+  requestingSessionIds: new Set(),
+  confirmation: null,
 }));
 
 export const useIsSessionWorktreeMovePending = (sessionId: string): boolean =>
-  useSessionMoveState((state) => state.pendingSessionIds.has(sessionId));
+  useSessionMoveState((state) => state.pendingSessionIds.has(sessionId) || state.requestingSessionIds.has(sessionId));
+
+export const useSessionTreeMoveConfirmation = (): SessionTreeMoveConfirmation | null =>
+  useSessionMoveState((state) => state.confirmation);
+
+export const getSessionTreeMoveConfirmation = (): SessionTreeMoveConfirmation | null =>
+  useSessionMoveState.getState().confirmation;
+
+const setSessionMoveConfirmation = (confirmation: SessionTreeMoveConfirmation | null): void => {
+  useSessionMoveState.setState((state) => (state.confirmation === confirmation ? state : { ...state, confirmation }));
+};
 
 const setSessionMovePending = (sessionId: string, pending: boolean): void => {
   useSessionMoveState.setState((state) => {
@@ -25,8 +73,27 @@ const setSessionMovePending = (sessionId: string, pending: boolean): void => {
     const pendingSessionIds = new Set(state.pendingSessionIds);
     if (pending) pendingSessionIds.add(sessionId);
     else pendingSessionIds.delete(sessionId);
-    return { pendingSessionIds };
+    return { ...state, pendingSessionIds };
   });
+};
+
+const setSessionMoveRequesting = (sessionId: string, requesting: boolean): void => {
+  useSessionMoveState.setState((state) => {
+    if (state.requestingSessionIds.has(sessionId) === requesting) return state;
+    const requestingSessionIds = new Set(state.requestingSessionIds);
+    if (requesting) requestingSessionIds.add(sessionId);
+    else requestingSessionIds.delete(sessionId);
+    return { ...state, requestingSessionIds };
+  });
+};
+
+const APPLY_CHANGES_MESSAGE = 'Unable to apply your changes in the destination directory';
+
+const isApplyChangesError = (error: Error): boolean => {
+  // SAFETY: move failures originate from our own SDK/runtime layer, which may
+  // attach an optional numeric HTTP status to an Error instance.
+  const errorWithStatus = error as Error & { status?: number };
+  return errorWithStatus.status === 400 && error.message.includes(APPLY_CHANGES_MESSAGE);
 };
 
 const resolveSourceBranch = async (directory: string, projectDirectory: string): Promise<string> => {
@@ -87,6 +154,7 @@ const rollbackMovedSessions = async (
   sourceDirectory: string,
   worktreeDirectory: string,
   previousMetadata: ReadonlyMap<string, WorktreeMetadata | undefined>,
+  moveChanges: boolean,
 ): Promise<RollbackFailure[]> => {
   const failures: RollbackFailure[] = [];
   for (const session of [...sessions].reverse()) {
@@ -95,12 +163,12 @@ const rollbackMovedSessions = async (
       continue;
     }
     try {
-      await moveSessionToDirectory(
-        session,
-        worktreeDirectory,
-        sourceDirectory,
-        session.id === rootSessionId,
-      );
+        await moveSessionToDirectory(
+          session,
+          worktreeDirectory,
+          sourceDirectory,
+          session.id === rootSessionId && moveChanges,
+        );
       useSessionUIStore.getState().setWorktreeMetadata(session.id, previousMetadata.get(session.id) ?? null);
     } catch (error) {
       failures.push({
@@ -130,6 +198,7 @@ const moveSessionTreeTransaction = async (
     root: Session;
     descendants: Session[];
     sourceDirectory: string;
+    moveChanges: boolean;
   },
   prepareDestination: () => Promise<{
     directory: string;
@@ -161,9 +230,12 @@ const moveSessionTreeTransaction = async (
         // descendant to start running, so re-check the remaining source tree
         // immediately before each move.
         assertSessionsIdle(sessions.slice(index), input.sourceDirectory);
-        // Transfer the checkout changes once with the root. Descendants only
-        // need their execution location updated.
-        await moveSessionToDirectory(session, input.sourceDirectory, destination.directory, index === 0);
+        await moveSessionToDirectory(
+          session,
+          input.sourceDirectory,
+          destination.directory,
+          index === 0 && input.moveChanges,
+        );
         moved.push(session);
         useSessionUIStore.getState().setWorktreeMetadata(session.id, getLatestWorktreeMetadata(destination.metadata));
       }
@@ -175,6 +247,7 @@ const moveSessionTreeTransaction = async (
         input.sourceDirectory,
         destination?.directory ?? input.sourceDirectory,
         previousMetadata,
+        input.moveChanges,
       );
       if (rollbackFailures.length > 0) {
         throw createIncompleteRollbackError(moveError, rollbackFailures);
@@ -203,6 +276,7 @@ export const moveSessionTreeToExistingWorktree = async (input: {
   descendants: Session[];
   sourceDirectory: string;
   destination: WorktreeMetadata;
+  moveChanges: boolean;
 }): Promise<string> => {
   const normalizedSourceDirectory = normalizePath(input.sourceDirectory) ?? input.sourceDirectory;
   const normalizedDestinationDirectory = normalizePath(input.destination.path) ?? input.destination.path;
@@ -223,13 +297,16 @@ const moveSessionTreeToQuickWorktree = async (input: {
   root: Session;
   descendants: Session[];
   sourceDirectory: string;
+  moveChanges: boolean;
 }): Promise<string> => {
   return moveSessionTreeTransaction(input, async () => {
     const project = resolveProjectRef(input.sourceDirectory);
     if (!project) throw new Error('Unable to find the project for this session');
 
-    const sourceBranch = await resolveSourceBranch(input.sourceDirectory, project.path);
-    const worktree = await createQuickWorktree(project, { startRef: sourceBranch });
+    const sourceBranch = await checkIsGitRepository(input.sourceDirectory)
+      ? await resolveSourceBranch(input.sourceDirectory, project.path)
+      : null;
+    const worktree = await createQuickWorktree(project, sourceBranch ? { startRef: sourceBranch } : {});
     try {
       await waitForWorktreeGitReady(worktree.path);
     } catch (error) {
@@ -244,6 +321,91 @@ const moveSessionTreeToQuickWorktree = async (input: {
   });
 };
 
+const executeSessionTreeMove = (intent: SessionTreeMoveIntent, moveChanges: boolean): void => {
+  const movePromise = intent.kind === 'existing'
+    ? moveSessionTreeToExistingWorktree({
+        root: intent.root,
+        descendants: intent.descendants,
+        sourceDirectory: intent.sourceDirectory,
+        destination: intent.destination,
+        moveChanges,
+      })
+    : moveSessionTreeToQuickWorktree({
+        root: intent.root,
+        descendants: intent.descendants,
+        sourceDirectory: intent.sourceDirectory,
+        moveChanges,
+      });
+
+  void movePromise
+    .then(() => toast.success(intent.messages.success))
+    .catch((error) => {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      toast.error(intent.messages.failure, {
+        description: moveChanges && isApplyChangesError(failure)
+          ? intent.messages.applyChangesFailed
+          : failure.message,
+      });
+    });
+};
+
+export const cancelSessionTreeMove = (): void => {
+  const confirmation = getSessionTreeMoveConfirmation();
+  if (!confirmation) return;
+  setSessionMoveRequesting(confirmation.intent.root.id, false);
+  setSessionMoveConfirmation(null);
+};
+
+export const confirmSessionTreeMove = (moveChanges: boolean): void => {
+  const confirmation = getSessionTreeMoveConfirmation();
+  if (!confirmation) return;
+  const { intent } = confirmation;
+  setSessionMoveConfirmation(null);
+  setSessionMoveRequesting(intent.root.id, false);
+  executeSessionTreeMove(intent, moveChanges);
+};
+
+export const requestSessionTreeMove = (intent: SessionTreeMoveIntent): void => {
+  const state = useSessionMoveState.getState();
+  if (state.confirmation) return;
+  if (state.pendingSessionIds.has(intent.root.id) || state.requestingSessionIds.has(intent.root.id)) return;
+
+  setSessionMoveRequesting(intent.root.id, true);
+
+  void (async () => {
+    try {
+      const isGitRepository = await checkIsGitRepository(intent.sourceDirectory);
+      if (!isGitRepository) {
+        setSessionMoveRequesting(intent.root.id, false);
+        executeSessionTreeMove(intent, false);
+        return;
+      }
+
+      const status = await getGitStatus(intent.sourceDirectory);
+      if (status.isClean) {
+        setSessionMoveRequesting(intent.root.id, false);
+        executeSessionTreeMove(intent, false);
+        return;
+      }
+
+      const stagedFileCount = status.files.filter((file) => {
+        const indexStatus = file.index.trim();
+        return indexStatus !== '' && indexStatus !== '?';
+      }).length;
+      setSessionMoveConfirmation({
+        intent,
+        dirtyFileCount: status.files.length,
+        stagedFileCount,
+      });
+    } catch {
+      toast.error(intent.messages.failure, {
+        description: intent.messages.sourceVerificationFailed,
+      });
+      setSessionMoveRequesting(intent.root.id, false);
+    }
+  })();
+};
+
 export const startSessionTreeExistingWorktreeMove = (input: {
   root: Session;
   descendants: Session[];
@@ -252,11 +414,19 @@ export const startSessionTreeExistingWorktreeMove = (input: {
   successMessage: string;
   failureMessage: string;
 }): void => {
-  void moveSessionTreeToExistingWorktree(input)
-    .then(() => toast.success(input.successMessage))
-    .catch((error) => toast.error(input.failureMessage, {
-      description: error instanceof Error ? error.message : String(error),
-    }));
+  requestSessionTreeMove({
+    kind: 'existing',
+    root: input.root,
+    descendants: input.descendants,
+    sourceDirectory: input.sourceDirectory,
+    destination: input.destination,
+    messages: {
+      success: input.successMessage,
+      failure: input.failureMessage,
+      sourceVerificationFailed: input.failureMessage,
+      applyChangesFailed: input.failureMessage,
+    },
+  });
 };
 
 export const startSessionTreeWorktreeMove = (input: {
@@ -266,9 +436,16 @@ export const startSessionTreeWorktreeMove = (input: {
   successMessage: string;
   failureMessage: string;
 }): void => {
-  void moveSessionTreeToQuickWorktree(input)
-    .then(() => toast.success(input.successMessage))
-    .catch((error) => toast.error(input.failureMessage, {
-      description: error instanceof Error ? error.message : String(error),
-    }));
+  requestSessionTreeMove({
+    kind: 'quick',
+    root: input.root,
+    descendants: input.descendants,
+    sourceDirectory: input.sourceDirectory,
+    messages: {
+      success: input.successMessage,
+      failure: input.failureMessage,
+      sourceVerificationFailed: input.failureMessage,
+      applyChangesFailed: input.failureMessage,
+    },
+  });
 };
