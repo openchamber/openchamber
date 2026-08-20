@@ -63,6 +63,7 @@ export const createVisionRuntime = (dependencies) => {
     getOpenCodeAuthHeaders,
     statFile = (filePath) => fs.promises.stat(filePath),
     readFile = (filePath) => fs.promises.readFile(filePath),
+    realpathFile = (filePath) => fs.promises.realpath(filePath),
   } = dependencies;
 
   const resolveImagePath = (rawPath, directory) => {
@@ -144,8 +145,20 @@ export const createVisionRuntime = (dependencies) => {
       );
     }
     const resolvedPath = resolveImagePath(imagePath, directory);
+    // Containment is checked against the file's real filesystem target, not
+    // the lexical path: a symlink inside the workspace pointing at a private
+    // file elsewhere must not smuggle that file to an external provider.
+    let realPath;
+    try {
+      realPath = await realpathFile(resolvedPath);
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        throw new OpenChamberControlError(`Image file not found: ${resolvedPath}`, 400);
+      }
+      throw new OpenChamberControlError(`Failed to resolve image: ${resolvedPath}`, 400);
+    }
     const resolvedWorkspace = path.resolve(workspace);
-    const relative = path.relative(resolvedWorkspace, resolvedPath);
+    const relative = path.relative(resolvedWorkspace, realPath);
     if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
       throw new OpenChamberControlError(
         `imagePath must be inside the session directory: ${resolvedWorkspace}`,

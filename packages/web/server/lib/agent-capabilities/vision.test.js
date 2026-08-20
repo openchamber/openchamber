@@ -28,6 +28,7 @@ const createRuntime = (overrides = {}) => {
     getOpenCodeAuthHeaders: () => ({ authorization: 'Bearer test' }),
     statFile: vi.fn(async () => ({ isFile: () => true, size: PNG_BYTES.length })),
     readFile: vi.fn(async () => PNG_BYTES),
+    realpathFile: vi.fn(async (filePath) => filePath),
     ...overrides,
   });
   return { runtime, fetchMock, restore: () => { globalThis.fetch = previousFetch; } };
@@ -234,6 +235,34 @@ describe('createVisionRuntime', () => {
       await expect(runtime.execute({ imagePath: '../secret.png', directory: '/work/repo' }))
         .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('inside the session directory') });
       expect(callSmallModel).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it('rejects a symlink inside the workspace pointing outside it', async () => {
+    const { runtime, fetchMock, restore } = createRuntime({
+      realpathFile: vi.fn(async () => '/etc/private.png'),
+    });
+    try {
+      fetchMock.mockResolvedValue(imageCapableProviders());
+      await expect(runtime.execute({ imagePath: '/work/link.png', directory: '/work' }))
+        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('inside the session directory') });
+      expect(callSmallModel).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it('accepts a symlink inside the workspace that resolves inside it', async () => {
+    const { runtime, fetchMock, restore } = createRuntime({
+      realpathFile: vi.fn(async () => '/work/shared/shot.png'),
+    });
+    try {
+      fetchMock.mockResolvedValue(imageCapableProviders());
+      callSmallModel.mockResolvedValue('ok');
+      const result = await runtime.execute({ imagePath: '/work/link.png', directory: '/work' });
+      expect(result.description).toBe('ok');
     } finally {
       restore();
     }
