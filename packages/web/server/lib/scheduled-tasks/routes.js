@@ -128,6 +128,7 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
           error: error.message,
           ...(error.task ? { task: error.task } : {}),
           ...(error.denied ? { denied: true } : {}),
+          ...(error.persistError ? { persistError: error.persistError } : {}),
         });
       }
       console.error('[ScheduledTasks] failed to run task:', error);
