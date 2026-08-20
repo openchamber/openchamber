@@ -1,4 +1,4 @@
-import type { ProjectEntry, RuntimeAPIs, TerminalShell } from '@/lib/api/types';
+import type { ProjectEntry, ReasoningMode, RuntimeAPIs, TerminalShell } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -67,11 +67,14 @@ export type DesktopSettings = {
   activeProjectId?: string;
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
+  reasoningMode?: ReasoningMode;
+  /** @deprecated Use `reasoningMode`. Accepted for backward-compat migration. */
   showReasoningTraces?: boolean;
   /** Whether the in-chat work-status panel may render. */
   workStatusPanelEnabled?: boolean;
   /** Work-status panel sections the user switched off. */
   workStatusHiddenSections?: string[];
+  /** @deprecated Use `reasoningMode`. Accepted for backward-compat migration. */
   collapsibleThinkingBlocks?: boolean;
   showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;

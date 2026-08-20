@@ -1,12 +1,12 @@
 import { useUIStore } from '@/stores/useUIStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import type { DesktopSettings } from '@/lib/desktop';
+import type { ReasoningMode, TerminalShell } from '@/lib/api/types';
 import type { MonoFontOption, UiFontOption } from '@/lib/fontOptions';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import type { TerminalShell } from '@/lib/api/types';
 
 type AppearanceSlice = {
-  showReasoningTraces: boolean;
+  reasoningMode: ReasoningMode;
   workStatusPanelEnabled: boolean;
   workStatusHiddenSections: string[];
   sessionRecapEnabled: boolean;
@@ -14,7 +14,6 @@ type AppearanceSlice = {
   sessionGoalEnabled: boolean;
   sessionGoalDefaultBudgetEnabled: boolean;
   sessionGoalDefaultBudget: number;
-  collapsibleThinkingBlocks: boolean;
   showDeletionDialog: boolean;
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
@@ -61,7 +60,7 @@ export const startAppearanceAutoSave = (): void => {
   initialized = true;
 
   let previous: AppearanceSlice = {
-    showReasoningTraces: useUIStore.getState().showReasoningTraces,
+    reasoningMode: useUIStore.getState().reasoningMode,
     workStatusPanelEnabled: useUIStore.getState().workStatusPanelEnabled,
     workStatusHiddenSections: useUIStore.getState().workStatusHiddenSections,
     sessionRecapEnabled: useUIStore.getState().sessionRecapEnabled,
@@ -69,7 +68,6 @@ export const startAppearanceAutoSave = (): void => {
     sessionGoalEnabled: useUIStore.getState().sessionGoalEnabled,
     sessionGoalDefaultBudgetEnabled: useUIStore.getState().sessionGoalDefaultBudgetEnabled,
     sessionGoalDefaultBudget: useUIStore.getState().sessionGoalDefaultBudget,
-    collapsibleThinkingBlocks: useUIStore.getState().collapsibleThinkingBlocks,
     showDeletionDialog: useUIStore.getState().showDeletionDialog,
     nativeNotificationsEnabled: useUIStore.getState().nativeNotificationsEnabled,
     notificationMode: useUIStore.getState().notificationMode,
@@ -103,7 +101,7 @@ export const startAppearanceAutoSave = (): void => {
 
   useUIStore.subscribe((state) => {
     const current: AppearanceSlice = {
-      showReasoningTraces: state.showReasoningTraces,
+      reasoningMode: state.reasoningMode,
       workStatusPanelEnabled: state.workStatusPanelEnabled,
       workStatusHiddenSections: state.workStatusHiddenSections,
       sessionRecapEnabled: state.sessionRecapEnabled,
@@ -111,7 +109,6 @@ export const startAppearanceAutoSave = (): void => {
       sessionGoalEnabled: state.sessionGoalEnabled,
       sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
       sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
-      collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
       showDeletionDialog: state.showDeletionDialog,
       nativeNotificationsEnabled: state.nativeNotificationsEnabled,
       notificationMode: state.notificationMode,
@@ -145,6 +142,9 @@ export const startAppearanceAutoSave = (): void => {
 
     const diff: Partial<DesktopSettings> = {};
 
+    if (current.reasoningMode !== previous.reasoningMode) {
+      diff.reasoningMode = current.reasoningMode;
+    }
     if (current.workStatusPanelEnabled !== previous.workStatusPanelEnabled) {
       diff.workStatusPanelEnabled = current.workStatusPanelEnabled;
     }
@@ -152,9 +152,6 @@ export const startAppearanceAutoSave = (): void => {
     // so an identity check would push a write on unrelated store updates.
     if (current.workStatusHiddenSections.join('\u0000') !== previous.workStatusHiddenSections.join('\u0000')) {
       diff.workStatusHiddenSections = current.workStatusHiddenSections;
-    }
-    if (current.showReasoningTraces !== previous.showReasoningTraces) {
-      diff.showReasoningTraces = current.showReasoningTraces;
     }
     if (current.sessionRecapEnabled !== previous.sessionRecapEnabled) {
       diff.sessionRecapEnabled = current.sessionRecapEnabled;
@@ -170,9 +167,6 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.sessionGoalDefaultBudget !== previous.sessionGoalDefaultBudget) {
       diff.sessionGoalDefaultBudget = current.sessionGoalDefaultBudget;
-    }
-    if (current.collapsibleThinkingBlocks !== previous.collapsibleThinkingBlocks) {
-      diff.collapsibleThinkingBlocks = current.collapsibleThinkingBlocks;
     }
     if (current.showDeletionDialog !== previous.showDeletionDialog) {
       diff.showDeletionDialog = current.showDeletionDialog;
