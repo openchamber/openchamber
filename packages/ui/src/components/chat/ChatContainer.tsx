@@ -533,11 +533,27 @@ const DraftWelcome: React.FC = () => {
 
 type ChatContainerProps = {
     active?: boolean;
+    /**
+     * When set, controls message-history reads and session-message loads
+     * independently of `active`. Defaults to `active`. Embedded session-chat
+     * panels pass `true` so a delayed/lost visibility handshake cannot hide
+     * an already-materialized transcript (leaving only the working-status
+     * row — issue #2903).
+     */
+    messagesEnabled?: boolean;
     autoOpenDraft?: boolean;
     readOnly?: boolean;
+    initialAllowPromptingSubagentSessions?: boolean;
 };
 
-export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, autoOpenDraft = true, readOnly = false }) => {
+export const ChatContainer: React.FC<ChatContainerProps> = ({
+    active = true,
+    messagesEnabled: messagesEnabledProp,
+    autoOpenDraft = true,
+    readOnly = false,
+    initialAllowPromptingSubagentSessions,
+}) => {
+    const messagesEnabled = messagesEnabledProp ?? active;
     const { t } = useI18n();
     // Session UI state
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
@@ -568,6 +584,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
     const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
+    const [embeddedAllowPrompting, setEmbeddedAllowPrompting] = React.useState(initialAllowPromptingSubagentSessions);
     const isTimelineDialogOpen = useUIStore((s) => s.isTimelineDialogOpen);
     const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
 
@@ -589,9 +606,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     );
     const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '', effectiveSessionDirectory);
     const hasRenderableSessionSnapshot = useSessionRenderable(currentSessionId ?? '', effectiveSessionDirectory);
-    // Messages from sync system
+    // Messages from sync system. Keep this gated by `messagesEnabled`, not
+    // `active`, so embedded panels can show history while the composer stays
+    // inactive until the parent confirms visibility.
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', effectiveSessionDirectory, {
-        enabled: active,
+        enabled: messagesEnabled,
         suspendPartUpdates: Boolean(streamingMessageId),
         suspendPartUpdatesForMessageId: streamingMessageId,
     });
@@ -712,6 +731,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     const isVSCode = isVSCodeRuntime();
     const chatSurfaceMode = useChatSurfaceMode();
     const draftOpen = Boolean(newSessionDraft?.open);
+    // A draft can target another project or a pending worktree before it has a
+    // session. Keep the panel on that same directory so its project, MCP, and
+    // usage readouts describe where the draft will run rather than the project
+    // the user came from.
+    const workStatusDirectory = draftOpen
+        ? newSessionDraft?.bootstrapPendingDirectory ?? newSessionDraft?.directoryOverride ?? effectiveSessionDirectory
+        : effectiveSessionDirectory;
     const initError = useGlobalSyncStore((s) => s.error);
     // Despite the historical name, this now covers mobile too: the mobile
     // composer enters the same fullscreen-input mode via its drag handle.
@@ -722,12 +748,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     // row that holds both columns, so its width never depends on the panel's
     // own visibility.
     const { rowRef: workStatusRowRef, visible: workStatusVisible, fits: workStatusFits } = useWorkStatusVisibility({
-        directory: effectiveSessionDirectory,
+        directory: workStatusDirectory,
         isMobile,
         isVSCode,
     });
-    // Session view only. The draft branch returns its own layout before this
-    // one, so the panel has no place there yet.
     // Surfaces that never host the panel skip it entirely; the rest keep it
     // mounted so its visibility can animate rather than snap.
     const workStatusPanelMountable = !isMobile
@@ -795,7 +819,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
             {t('chat.container.returnToParent.label')}
         </Button>
     ) : null;
-    const promptReadOnly = resolveChatPromptReadOnly(currentSession, allowPromptingSubagentSessions, readOnly);
+    const promptReadOnly = resolveChatPromptReadOnly(
+        currentSession,
+        embeddedAllowPrompting ?? allowPromptingSubagentSessions,
+        readOnly,
+    );
 
     React.useEffect(() => {
         // VS Code/Cursor/Positron webviews delete window.parent (and window.top).
@@ -808,6 +836,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
 
         const parentWindow = window.parent;
         const applySetting = (value: boolean) => {
+            setEmbeddedAllowPrompting(value);
             useUIStore.getState().setAllowPromptingSubagentSessions(value);
         };
         const scopedWindow = window as typeof window & {
@@ -1030,9 +1059,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
         Boolean(currentSessionId)
         && !hasRenderableSessionSnapshot;
     const retrySessionLoad = React.useCallback(() => {
-        if (!active || !currentSessionId) return;
+        if (!messagesEnabled || !currentSessionId) return;
         void sync.ensureSessionRenderable(currentSessionId, true, effectiveSessionDirectory);
-    }, [active, currentSessionId, effectiveSessionDirectory, sync]);
+    }, [currentSessionId, effectiveSessionDirectory, messagesEnabled, sync]);
 
     React.useEffect(() => {
         if (!active || !currentSessionId) return;
@@ -1057,10 +1086,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     }, [active, currentSessionId, currentSessionKey, releaseAutoFollow, restoreSnapshot]);
 
     React.useEffect(() => {
-        if (!active || !currentSessionId) return;
+        if (!messagesEnabled || !currentSessionId) return;
         if (hasRenderableSessionSnapshot) return;
         void ensureSessionRenderable(currentSessionId);
-    }, [active, currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot]);
+    }, [currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot, messagesEnabled]);
 
 	if (!currentSessionId && !draftOpen) {
 		// With auto-open, the draft welcome opens on the next tick (effect below),
@@ -1082,20 +1111,37 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
 			// No transform on this root: it would become the containing block for
 			// the fullscreen composer's position:fixed visual-viewport pinning in
 			// mobile browsers (see ChatInput's composerFormRef effect).
-			<div data-composer-bound className="relative flex h-full flex-col bg-background">
-				{useCompactDraftLayout && !isDesktopExpandedInput ? <DraftWelcome /> : null}
-				<div
-					className={cn(
-						'relative z-10 flex min-h-0',
-						isDesktopExpandedInput
-							? 'flex-1 bg-background'
-							: useCompactDraftLayout
-								? 'bg-background px-0'
-								: 'flex-1 items-center justify-center bg-background px-0 pb-[6vh]'
-					)}
-				>
-                        {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+			<div ref={workStatusRowRef} className="flex h-full min-h-0 bg-background">
+				<div data-composer-bound className="relative flex min-w-0 flex-1 flex-col bg-background">
+					{useCompactDraftLayout && !isDesktopExpandedInput ? <DraftWelcome /> : null}
+					<div
+						className={cn(
+							'relative z-10 flex min-h-0',
+							isDesktopExpandedInput
+								? 'flex-1 bg-background'
+								: useCompactDraftLayout
+									? 'bg-background px-0'
+									: 'flex-1 items-center justify-center bg-background px-0 pb-[6vh]'
+						)}
+					>
+                          {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput active={active} scrollToBottom={scrollToBottomOnSend} />}
+					</div>
+					{workStatusOverlayMountable ? (
+						<WorkStatusPanel
+							overlay
+							visible={showWorkStatusOverlay}
+							sessionId={null}
+							directory={workStatusDirectory ?? null}
+						/>
+					) : null}
 				</div>
+				{workStatusPanelMountable ? (
+					<WorkStatusPanel
+						visible={showWorkStatusPanel}
+						sessionId={null}
+						directory={workStatusDirectory ?? null}
+					/>
+				) : null}
 			</div>
         );
     }
@@ -1122,7 +1168,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
 						</div>
 					</div>
 					<div className="relative z-10 bg-background">
-						{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+						{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput active={active} scrollToBottom={scrollToBottomOnSend} />}
 					</div>
 				</div>
 			);
@@ -1176,7 +1222,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
 							: 'bg-background'
 					)}
 				>
-                    {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+                    {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput active={active} scrollToBottom={scrollToBottomOnSend} />}
 				</div>
             </div>
         );
@@ -1211,7 +1257,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
 							: 'bg-background'
 					)}
 				>
-                    {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+                    {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput active={active} scrollToBottom={scrollToBottomOnSend} />}
 				</div>
             </div>
         );
@@ -1269,7 +1315,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
                         onClick={navigation.resumeToLatest}
                     />
                 )}
-                {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+                {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput active={active} scrollToBottom={scrollToBottomOnSend} />}
             </div>
 
             {/* Inside the chat column, not beside it: as a row sibling it took
@@ -1280,7 +1326,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
                     overlay
                     visible={showWorkStatusOverlay}
                     sessionId={currentSessionId ?? null}
-                    directory={effectiveSessionDirectory ?? null}
+                    directory={workStatusDirectory ?? null}
                 />
             ) : null}
 
@@ -1302,7 +1348,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
             <WorkStatusPanel
                 visible={showWorkStatusPanel}
                 sessionId={currentSessionId ?? null}
-                directory={effectiveSessionDirectory ?? null}
+                directory={workStatusDirectory ?? null}
             />
         ) : null}
         </div>

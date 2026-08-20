@@ -40,6 +40,16 @@ Examples:
 
 These stores coordinate visible app state, navigation, selected tabs, dialogs, and lightweight feature flags.
 
+Context-panel session chats mount only the active chat iframe. After installing
+its message listener, the iframe requests its authoritative visibility from the
+parent. The parent accepts requests only from a currently mounted chat frame and
+answers from the current active tab. Do not rely only on a parent `onLoad`
+notification: it can arrive before the iframe listener exists and leave a
+visible chat with background work disabled. Message-history subscriptions in the
+mounted session-chat iframe stay enabled independently of that visibility flag
+so a delayed or lost handshake cannot hide an already-materialized transcript
+(busy subagents would otherwise show only the working-status row).
+
 ### Session / project coordination stores
 
 Examples:
@@ -47,9 +57,12 @@ Examples:
 - `useProjectsStore.ts`
 - `useGlobalSessionsStore.ts`
 - `useSessionFoldersStore.ts`
+- `useProjectContextStore.ts`
 - `messageQueueStore.ts`
 
 These stores coordinate persistent project/session metadata across multiple views.
+
+`useProjectContextStore.ts` caches server-owned project notes, todos, and plan links, keyed by the path-derived project id. It replaced a pair of `window` CustomEvents that made every mounted notes panel re-read the whole project config. Writes are optimistic and roll back on failure; they are serialized per project, because the server's own store does a read-modify-write and two concurrent saves would otherwise race it. A load that resolves while a write is in flight keeps the local value for that field group only, so a slow snapshot cannot undo newer typing while still delivering the plan list it fetched. A failed load sets `error` and preserves the cached snapshot — an unreachable server must never render as "this project has no notes". Note and plan creation are deliberately not optimistic, since ids and timestamps are assigned by the server. Notes, todos, and plans are written through separate routes and tracked by separate in-flight flags, so a todo toggle cannot clobber a note edit in the same window. Pinned notes and plans are assembled into a synthetic context part by `lib/projectContextPinning.ts` at send time; that module tracks per-session what it already sent so an unchanged pinned set is not re-sent every turn.
 
 `messageQueueStore.ts` keeps a queued message until its own send resolves, so between dispatch and resolution the entry is still visible to every reader. Dispatchers must therefore mark the send (`markSending`/`clearSending`) and read `getSendableQueue()` — or filter `sendingIds` themselves — instead of dispatching straight from `queuedMessages`; otherwise a composer submit merges a message the auto-send hook is already delivering and it is sent twice (the window is seconds over a relay). `clearQueue()` retains in-flight entries for the same reason. `sendingIds` is deliberately not persisted: a restart has no in-flight sends, and a stale flag would strand a queued message.
 
@@ -163,6 +176,10 @@ Important properties:
 - `refreshTargets()` supports one-shot multi-target bootstrap without turning on live watching
 - runtime reset disposes timers, watchers, API references, and request ownership while inert namespaced snapshots remain isolated
 - persisted cache is versioned, TTL-filtered, and bounded for page refresh continuity, not broad background syncing
+- a closed/merged PR is the branch's history, not live status: it is displayed and persisted, but never treated as authority
+- closed/merged associations use the same `5m` discovery cadence as missing PRs so a newer open PR (or authoritative `pr: null`) replaces them without a manual refresh
+- hydrate restores a persisted closed/merged PR but resets its `lastDiscoveryPollAt`, so revalidation runs on the first watcher tick after a reload
+- a successful refresh that returns `pr: null` replaces any previously cached PR authoritatively; a failed refresh keeps the previous one
 
 ## Ownership Rules
 
@@ -189,7 +206,6 @@ Good:
 - `useGitBranches(directory)`
 - `useGitBranchLabel(directory)`
 - `useGitRepoStatusMap(directories)`
-- `usePrVisualSummaryByKeys(keys)`
 
 Bad:
 

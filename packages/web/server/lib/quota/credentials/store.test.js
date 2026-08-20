@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { deleteQuotaCredential, readQuotaCredential, writeQuotaCredential } from './store.js';
+import { deleteLegacyOpenCodeGoCredential, deleteQuotaCredential, readQuotaCredential, writeQuotaCredential } from './store.js';
 
 const previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-quota-store-'));
@@ -16,6 +16,14 @@ describe('quota credential store', () => {
     expect(readQuotaCredential('ollama-cloud', (value) => value)).toEqual({ cookie: 'secret' });
     expect(() => writeQuotaCredential('../escape', {})).toThrow('Unsupported credential provider');
     deleteQuotaCredential('ollama-cloud');
+  });
+
+  it('removes the obsolete OpenCode Go credential without parsing it', () => {
+    const legacyPath = path.join(temporaryDirectory, 'quota', 'opencode-go.json');
+    fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
+    fs.writeFileSync(legacyPath, '{not valid json', { mode: 0o600 });
+    deleteLegacyOpenCodeGoCredential();
+    expect(fs.existsSync(legacyPath)).toBe(false);
   });
 });
 

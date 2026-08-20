@@ -4,12 +4,12 @@ import type { Message, Part } from '@opencode-ai/sdk/v2/client';
 import { buildSessionMessageRecordsSnapshot } from './sync-context';
 import { INITIAL_STATE, type State } from './types';
 
-const message = (id: string, role: 'user' | 'assistant', parentID?: string): Message => ({
+const message = (id: string, role: 'user' | 'assistant', parentID?: string, created = 1): Message => ({
   id,
   role,
   sessionID: 'ses_1',
   ...(parentID ? { parentID } : {}),
-  time: { created: 1 },
+  time: { created },
 } as Message);
 
 const textPart = (id: string, text: string): Part => ({
@@ -34,6 +34,22 @@ const state = (partial: Partial<State>): State => ({
 });
 
 describe('buildSessionMessageRecordsSnapshot', () => {
+  test('renders and reverts a rollover-spanning transcript by array chronology', () => {
+    const before = message('msg_ffffffffffffBefore', 'user', undefined, 100);
+    const marker = message('msg_000000000000Marker', 'user', undefined, 200);
+    const after = message('msg_000000000001After', 'assistant', marker.id, 300);
+
+    const snapshot = buildSessionMessageRecordsSnapshot(
+      state({
+        session: [{ id: 'ses_1', revert: { messageID: marker.id } } as State['session'][number]],
+        message: { ses_1: [before, marker, after] },
+      }),
+      'ses_1',
+    );
+
+    expect(snapshot.list.map((record) => record.info.id)).toEqual([before.id]);
+  });
+
   test('only suspends part updates for the active streaming message', () => {
     const user = message('user_1', 'user');
     const assistant1 = message('assistant_1', 'assistant', 'user_1');

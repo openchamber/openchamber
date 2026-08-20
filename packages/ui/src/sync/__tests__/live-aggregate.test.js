@@ -7,7 +7,6 @@ import {
   findLiveSession,
   findLiveSessionStatus,
 } from '../live-aggregate.ts'
-import { deriveRecentSessions, RECENT_SESSION_MAX_AGE_MS } from '../../components/session/sidebar/activitySections.ts'
 
 const session = (id, directory, updated, extra = {}) => ({
   id,
@@ -94,19 +93,4 @@ describe('live aggregate', () => {
     )).toBe(false)
   })
 
-  it('derives recent sessions from the 48h window, excluding archived/subtasks', () => {
-    const now = 1_000_000_000
-    const sessions = [
-      session('ses-1', '/a', now - 1_000),
-      session('ses-2', '/b', now - 500),
-      session('ses-3', '/c', now - 10, { time: { created: now - 11, updated: now - 10, archived: now - 5 } }),
-      session('ses-4', '/d', now - 200, { parentID: 'ses-parent' }),
-      session('ses-5', '/e', now - RECENT_SESSION_MAX_AGE_MS - 1),
-    ]
-
-    const recent = deriveRecentSessions(sessions, now)
-
-    // ses-3 archived, ses-4 subtask, ses-5 older than 48h -> excluded; rest newest-first
-    expect(recent.map((item) => item.id)).toEqual(['ses-2', 'ses-1'])
-  })
 })

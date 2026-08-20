@@ -25,7 +25,7 @@ type WorkStatusSectionId = (typeof WORK_STATUS_SECTION_IDS)[number];
 
 export const WORK_STATUS_SECTION_LABEL_KEYS: Record<WorkStatusSectionId, I18nKey> = {
   session: 'chat.workStatus.section.session',
-  repository: 'chat.workStatus.section.repository',
+  repository: 'chat.workStatus.section.project',
   usage: 'chat.workStatus.section.usage',
   subagents: 'chat.workStatus.section.subagents',
   tasks: 'chat.workStatus.section.tasks',

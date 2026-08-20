@@ -331,12 +331,42 @@ describe('core-routes', () => {
     });
   });
 
-  it('advertises the caller-supplied serverUrl as the direct candidate over the request origin', async () => {
+  it('advertises the caller-supplied serverUrl first and keeps the request origin as a fallback candidate', async () => {
     const { app } = createPairingRouteApp();
 
     const response = await request(app)
       .post('/api/client-auth/pairing/sessions')
-      .set('Host', 'runtime.example')
+      .set('Host', 'chamber.example.com')
+      .set('X-Forwarded-Proto', 'https')
+      .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
+      .expect(201);
+
+    expect(response.body.server.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:2606', priority: 10 },
+      { type: 'tunnel', url: 'https://chamber.example.com', priority: 20 },
+    ]);
+  });
+
+  it('does not duplicate the request origin when it matches the caller-supplied serverUrl', async () => {
+    const { app } = createPairingRouteApp();
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', '192.168.1.20:2606')
+      .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
+      .expect(201);
+
+    expect(response.body.server.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:2606', priority: 10 },
+    ]);
+  });
+
+  it('skips a loopback request origin as the fallback candidate', async () => {
+    const { app } = createPairingRouteApp();
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', '127.0.0.1:2606')
       .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
       .expect(201);
 
@@ -461,7 +491,7 @@ describe('core-routes', () => {
     expect(dependencies.clientPairingRuntime.redeemPairingSession).toHaveBeenCalledTimes(11);
   });
 
-  it('should let preview proxy credentials reach preview proxy validation', async () => {
+  it('no longer exempts preview-proxy style credentials from API auth', async () => {
     const app = express();
     const requireAuth = vi.fn((_req, res) => res.status(401).type('text/plain').send('Authentication required'));
 
@@ -493,20 +523,18 @@ describe('core-routes', () => {
 
     app.use('/api/preview/proxy', (_req, res) => res.json({ reached: true }));
 
+    // The preview proxy is gone; the token that used to bypass the auth gate
+    // must no longer open a hole for any route that happens to match the path.
     await request(app)
       .get('/api/preview/proxy/abc123/?oc_preview_token=preview-secret')
-      .expect(200, { reached: true });
+      .expect(401, 'Authentication required');
 
     await request(app)
       .get('/api/preview/proxy/abc123/')
       .set('Cookie', 'oc_preview_token=preview-secret')
-      .expect(200, { reached: true });
-
-    await request(app)
-      .get('/api/preview/proxy/abc123/')
       .expect(401, 'Authentication required');
 
-    expect(requireAuth).toHaveBeenCalledTimes(1);
+    expect(requireAuth).toHaveBeenCalledTimes(2);
   });
 });
 

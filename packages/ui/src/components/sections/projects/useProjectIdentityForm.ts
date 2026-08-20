@@ -7,7 +7,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
 
-export const normalizeProjectIconBackground = (value: string | null | undefined): string | null => {
+const normalizeProjectIconBackground = (value: string | null | undefined): string | null => {
   if (!value) {
     return null;
   }

@@ -12,9 +12,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 
-const formatProjectLabel = (label: string): string => {
-  return label.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
-};
+const formatProjectLabel = (label: string): string => label.trim();
 
 export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ className }) => {
   const { t } = useI18n();

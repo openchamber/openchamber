@@ -312,7 +312,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 showCreateButtons ? 'right-7' : 'right-0.5',
               )}>
                 {showCreateButtons && isRepo && !hideDirectoryControls && onNewWorktreeSession ? (
-                  <Tooltip>
+                  <Tooltip delayDuration={500}>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
@@ -368,7 +368,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
 
               {showCreateButtons && onNewSession ? (
                 <div className="absolute right-0.5 top-1/2 z-10 -translate-y-1/2">
-                  <Tooltip>
+                  <Tooltip delayDuration={500}>
                     <TooltipTrigger asChild>
                       <button
                         type="button"

@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { shouldLoadAvailableProviders } from './providerAvailability';
+import { requiresProviderAuth, shouldLoadAvailableProviders } from './providerAvailability';
 import {
   getOAuthAuthMethods,
   normalizeAuthType,
   parseAuthPayload,
+  requiresOpenCodeRestartAfterOAuth,
   shouldShowApiKeyAuth,
 } from './providerAuth';
 
@@ -11,6 +12,14 @@ describe('ProvidersPage available provider loading', () => {
   test('loads available providers only in add-provider mode', () => {
     expect(shouldLoadAvailableProviders(false)).toBe(false);
     expect(shouldLoadAvailableProviders(true)).toBe(true);
+  });
+});
+
+describe('ProvidersPage provider authentication', () => {
+  test('does not require credentials for a custom provider defined in config', () => {
+    expect(requiresProviderAuth(true, false, true)).toBe(false);
+    expect(requiresProviderAuth(true, false, false)).toBe(true);
+    expect(requiresProviderAuth(true, true, false)).toBe(false);
   });
 });
 
@@ -56,5 +65,10 @@ describe('provider auth method helpers', () => {
     expect(getOAuthAuthMethods([{ type: 'oauth', label: 'Cursor' }])).toEqual([
       { method: { type: 'oauth', label: 'Cursor' }, methodIndex: 0 },
     ]);
+  });
+
+  test('Claude CLI OAuth does not require an OpenCode restart', () => {
+    expect(requiresOpenCodeRestartAfterOAuth('claude-code')).toBe(false);
+    expect(requiresOpenCodeRestartAfterOAuth('github-copilot')).toBe(true);
   });
 });

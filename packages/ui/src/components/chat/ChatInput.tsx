@@ -7,11 +7,12 @@ import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, typ
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { useInputStore } from '@/sync/input-store';
+import { prepareLocalAttachments, useInputStore } from '@/sync/input-store';
 import {
     ACCEPTED_ATTACHMENT_EXTENSIONS,
     ATTACHMENT_ACCEPT,
     getUnsupportedAttachmentInputs,
+    isDocumentAttachmentFilename,
     type AttachmentInputModality,
 } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -24,6 +25,7 @@ import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
     createChatDraftIdentity,
     readChatDraft,
@@ -221,6 +223,7 @@ const MemoStatusRow = React.memo(StatusRow);
 interface ChatInputProps {
     onOpenSettings?: () => void;
     scrollToBottom?: () => void;
+    active?: boolean;
 }
 
 const resolveChatDraftIdentity = (sessionId: string | null): ChatDraftIdentity | null => {
@@ -234,7 +237,7 @@ const resolveChatDraftIdentity = (sessionId: string | null): ChatDraftIdentity |
     return createChatDraftIdentity(getRuntimeKey(), directory, sessionId);
 };
 
-const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBottom }) => {
+const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBottom, active = true }) => {
     const { t } = useI18n();
     // Track if we restored a draft on mount (for text selection)
     const initialDraftRef = React.useRef<string | null>(null);
@@ -283,6 +286,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const suppressNextFileDropTextInsertTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const suppressNextFileMentionPasteRef = React.useRef(false);
     const suppressNextFileMentionPasteTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const shellTriggerNormalizationRef = React.useRef(false);
     const pendingDroppedAbsolutePathsRef = React.useRef<string[]>([]);
     const canAcceptDropRef = React.useRef(false);
     const mentionRef = React.useRef<FileMentionHandle>(null);
@@ -594,59 +598,62 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         [],
     );
 
-    const extractInlineFileMentions = React.useCallback((rawText: string): { sanitizedText: string; attachments: AttachedFile[] } => {
+    const resolveInlineFileMention = React.useCallback((mentionPath: string): { serverPath: string; filename: string } | null => {
+        const kind = classifyMention(mentionPath, {
+            knownAgentNames: knownAgentNamesRef.current,
+            confirmedMentions: confirmedMentionsRef.current,
+        });
+        if (kind !== 'file') return null;
+
+        const normalizedMentionPath = mentionPath.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
+        if (!normalizedMentionPath) return null;
+
+        const clientDirectory = opencodeClient.getDirectory() || '';
+        const root = (chatSearchDirectory || clientDirectory).replace(/\\/g, '/').replace(/\/+$/, '');
+        let serverPath: string | null = null;
+        if (mentionPath.startsWith('/')) {
+            serverPath = mentionPath.replace(/\\/g, '/');
+        } else if (root) {
+            serverPath = `${root}/${normalizedMentionPath}`;
+        }
+        if (!serverPath) return null;
+
+        return {
+            serverPath: serverPath.replace(/\/+/g, '/'),
+            filename: normalizedMentionPath.split('/').filter(Boolean).pop() || normalizedMentionPath,
+        };
+    }, [chatSearchDirectory]);
+
+    const extractInlineFileMentions = React.useCallback((
+        rawText: string,
+        preparedDocumentMentions?: ReadonlyMap<string, AttachedFile[]>,
+    ) => {
         if (!rawText || !rawText.includes('@')) {
             return { sanitizedText: rawText, attachments: [] };
         }
 
-        const clientDirectory = opencodeClient.getDirectory() || '';
-        const root = (chatSearchDirectory || clientDirectory).replace(/\\/g, '/').replace(/\/+$/, '');
         const seenPaths = new Set<string>();
         const attachments: AttachedFile[] = [];
 
         for (const token of scanMentions(rawText)) {
-            const mentionPath = token.name;
-            const kind = classifyMention(mentionPath, {
-                knownAgentNames: knownAgentNamesRef.current,
-                confirmedMentions: confirmedMentionsRef.current,
-            });
-            // Agents are routed separately by parseAgentMentions; only file
-            // references become attachments here.
-            if (kind !== 'file') {
+            const mention = resolveInlineFileMention(token.name);
+            if (!mention || seenPaths.has(mention.serverPath)) continue;
+            seenPaths.add(mention.serverPath);
+
+            const prepared = preparedDocumentMentions?.get(mention.serverPath);
+            if (prepared) {
+                attachments.push(...prepared);
                 continue;
             }
-
-            const normalizedMentionPath = mentionPath.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
-            if (!normalizedMentionPath) {
-                continue;
-            }
-
-            const serverPath = mentionPath.startsWith('/')
-                ? mentionPath.replace(/\\/g, '/')
-                : root
-                    ? `${root}/${normalizedMentionPath}`
-                    : null;
-
-            if (!serverPath) {
-                continue;
-            }
-
-            const normalizedServerPath = serverPath.replace(/\/+/g, '/');
-            if (seenPaths.has(normalizedServerPath)) {
-                continue;
-            }
-            seenPaths.add(normalizedServerPath);
-
-            const filename = normalizedMentionPath.split('/').filter(Boolean).pop() || normalizedMentionPath;
             attachments.push({
                 id: `inline-server-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-                file: new File([], filename, { type: 'text/plain' }),
-                filename,
+                file: new File([], mention.filename, { type: 'text/plain' }),
+                filename: mention.filename,
                 mimeType: 'text/plain',
                 size: 0,
-                dataUrl: toServerFileUrl(normalizedServerPath),
+                dataUrl: toServerFileUrl(mention.serverPath),
                 source: 'server',
-                serverPath: normalizedServerPath,
+                serverPath: mention.serverPath,
             });
         }
 
@@ -654,7 +661,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             sanitizedText: rawText,
             attachments,
         };
-    }, [chatSearchDirectory]);
+    }, [resolveInlineFileMention]);
     const abortTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const prevWasAbortedRef = React.useRef(false);
 
@@ -958,10 +965,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     };
 
     const handleSubmit = async (options?: SubmitOptions) => {
+        const submitRuntimeKey = getRuntimeKey();
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
         const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
         const capturedTarget = messageQueueTarget;
+        // Snapshot the draft and current-session identity before the first
+        // async gap so a later sidebar selection cannot reroute the send.
+        const capturedDraftSnapshot = newSessionDraftOpen ? { ...newSessionDraft } : null;
         const inputSnapshot = options?.presetText != null
             ? {
                 message: options.presetText,
@@ -1034,9 +1045,55 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const sendMessageOptions = capturedTarget
-            ? { target: capturedTarget, ...(delivery ? { delivery } : {}) }
-            : delivery ? { delivery } : undefined;
+        const sendMessageOptions: {
+            target?: NonNullable<typeof capturedTarget>;
+            draftSnapshot?: NonNullable<typeof capturedDraftSnapshot>;
+            delivery?: 'steer';
+        } | undefined = (capturedTarget || capturedDraftSnapshot || delivery)
+            ? {
+                ...(capturedTarget ? { target: capturedTarget } : {}),
+                ...(capturedDraftSnapshot ? { draftSnapshot: capturedDraftSnapshot } : {}),
+                ...(delivery ? { delivery } : {}),
+            }
+            : undefined;
+
+        const preparedDocumentMentions = new Map<string, AttachedFile[]>();
+        const reservedFilenames = new Set([
+            ...attachedFiles.map((attachment) => attachment.filename),
+            ...queuedMessagesToSend.flatMap((queued) => queued.attachments?.map((attachment) => attachment.filename) ?? []),
+        ]);
+        const mentionTexts = [
+            ...queuedMessagesToSend.map((queued) => queued.content),
+            ...(!queuedOnly && inputSnapshot.hasContent ? [inputSnapshot.message] : []),
+        ];
+        for (const rawText of mentionTexts) {
+            for (const token of scanMentions(rawText)) {
+                const mention = resolveInlineFileMention(token.name);
+                if (
+                    !mention
+                    || !isDocumentAttachmentFilename(mention.filename)
+                    || preparedDocumentMentions.has(mention.serverPath)
+                ) {
+                    continue;
+                }
+                try {
+                    const response = await runtimeFetch('/api/fs/raw', { query: { path: mention.serverPath } });
+                    if (!response.ok) throw new Error(`Failed to read ${mention.filename}`);
+                    const sourceBlob = await response.blob();
+                    if (getRuntimeKey() !== submitRuntimeKey) return;
+                    const source = new File([sourceBlob], mention.filename);
+                    const prepared = await prepareLocalAttachments(source, reservedFilenames);
+                    if (!prepared || prepared.length === 0) throw new Error(`Failed to prepare ${mention.filename}`);
+                    if (getRuntimeKey() !== submitRuntimeKey) return;
+                    preparedDocumentMentions.set(mention.serverPath, prepared);
+                    for (const attachment of prepared) reservedFilenames.add(attachment.filename);
+                } catch {
+                    if (getRuntimeKey() !== submitRuntimeKey) return;
+                    toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: mention.filename }));
+                    return;
+                }
+            }
+        }
 
         // Inline review comments and synthetic context are consumed before
         // assembly so a failed send can restore exactly what it took.
@@ -1066,7 +1123,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 return { text: sanitizedText, agentName: mention?.name };
             },
             extractFileMentions: (text) => {
-                const { sanitizedText, attachments } = extractInlineFileMentions(text);
+                const { sanitizedText, attachments } = extractInlineFileMentions(text, preparedDocumentMentions);
                 return { text: sanitizedText, attachments };
             },
             sanitizeAttachments: sanitizeAttachmentsForSend,
@@ -1402,6 +1459,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         // Uses keyCode === 229 fallback for WebKit where compositionend fires before keydown.
         if (isIMECompositionEvent(e)) return;
 
+        // Enter shell mode before CodeMirror inserts the trigger. Keeping the
+        // document unchanged also keeps the caret at the start for the first
+        // command character.
+        if (inputMode === 'normal' && e.key === '!') {
+            const selection = composerRef.current?.getSelection();
+            if (selection?.start === 0 && selection.end === 0) {
+                e.preventDefault();
+                setInputMode('shell');
+                closeAutocomplete();
+                return;
+            }
+        }
+
         if (inputMode === 'shell' && e.key === 'Escape') {
             e.preventDefault();
             setInputMode('normal');
@@ -1705,6 +1775,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, []);
 
     const handleComposerChange = ({ value, selection, fromPaste, insertedText }: ComposerChange) => {
+        if (shellTriggerNormalizationRef.current) {
+            shellTriggerNormalizationRef.current = false;
+            setMessage(value);
+            return;
+        }
+
         // VS Code drops the dragged path as text as well as firing the drop
         // handler; swallow that duplicate insertion.
         if (isVSCodeRuntime() && suppressNextFileDropTextInsertRef.current) {
@@ -1723,13 +1799,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const inputSource: FileMentionAutocompleteInputSource = isPasteInput ? 'paste' : 'manual';
 
         // A leading `!` switches the composer into shell mode and is consumed.
+        // Mobile keyboards and paste may update the document without a usable
+        // keydown, so consume the trigger in the same editor transaction rather
+        // than moving the caret in a later frame against stale text.
         if (inputMode === 'normal' && value.startsWith('!')) {
             const shellCommand = value.slice(1);
             const nextCursor = Math.max(0, selection.start - 1);
             setInputMode('shell');
-            setMessage(shellCommand);
             closeAutocomplete();
-            requestAnimationFrame(() => composerRef.current?.setSelection(nextCursor));
+            const editor = composerRef.current;
+            if (editor) {
+                shellTriggerNormalizationRef.current = true;
+                editor.replaceRange(0, 1, '', nextCursor);
+            } else {
+                setMessage(shellCommand);
+            }
             return;
         }
 
@@ -2000,10 +2084,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     React.useEffect(() => {
 
-        if (currentSessionId && composerRef.current && !isMobile) {
+        if (active && currentSessionId && composerRef.current && !isMobile) {
             composerRef.current.focus();
         }
-    }, [currentSessionId, isMobile]);
+    }, [active, currentSessionId, isMobile]);
 
     React.useEffect(() => {
         if (!isMobile) {

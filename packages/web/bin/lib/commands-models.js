@@ -60,4 +60,4 @@ async function modelsCommand(options = {}, action = 'show') {
   process.stdout.write(formatModelsOutput(result));
 }
 
-export { modelsCommand, formatModelsOutput, formatDefaultLine, formatModelRef };
+export { modelsCommand, formatModelsOutput };

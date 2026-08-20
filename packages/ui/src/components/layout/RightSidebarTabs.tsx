@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { ProjectNotesTodoPanel } from '@/components/session/ProjectNotesTodoPanel';
+import { ProjectNotesTodoPanel } from '@/components/session/project-context/ProjectNotesTodoPanel';
 import { useGitStore } from '@/stores/useGitStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -8,7 +8,7 @@ import { formatDirectoryName } from '@/lib/utils';
 
 export const ProjectContextPanel: React.FC<{
   onActionComplete?: () => void;
-  onOpenPlan?: (plan: { path: string; title: string }) => void;
+  onOpenPlan?: (plan: { id: string; title: string }) => void;
 }> = ({ onActionComplete, onOpenPlan }) => {
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const projects = useProjectsStore((state) => state.projects);
@@ -49,7 +49,8 @@ export const ProjectContextPanel: React.FC<{
   }, [activeProject, gitDirectories]);
 
   return (
-    <div className="h-full min-h-0 overflow-auto bg-background">
+    /* The panel scrolls its own tab content; a scroller here would nest. */
+    <div className="h-full min-h-0 overflow-hidden bg-background">
       <ProjectNotesTodoPanel
         projectRef={projectRef}
         projectLabel={projectLabel}

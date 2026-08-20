@@ -54,7 +54,7 @@ const getProjectIconColor = (projectColor?: string | null): string | undefined =
     projectColor ? PROJECT_COLOR_MAP[projectColor] ?? undefined : undefined;
 
 /** A project's icon (custom image, configured icon, or a folder) plus its name. */
-export function ProjectLabel({ project, theme }: { project: DraftTargetProject; theme: Theme }) {
+function ProjectLabel({ project, theme }: { project: DraftTargetProject; theme: Theme }) {
     const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
     const iconColor = getProjectIconColor(project.color);
     const fallbackIcon = projectIconName ? (

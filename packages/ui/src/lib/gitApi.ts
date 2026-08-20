@@ -2,39 +2,14 @@
 import * as gitHttp from './gitApiHttp';
 import { opencodeClient } from './opencode/client';
 import { renderMagicPrompt } from './magicPrompts';
-import { runtimeFetch } from './runtime-fetch';
+import { requestSmallModel } from './smallModelRequest';
 import { materializeOpenDraftSession, useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
 export type {
-  GitStatus,
-  GitDiffResponse,
-  GetGitDiffOptions,
-  GitBranchDetails,
-  GitBranch,
-  GitCommitResult,
-  GitPushResult,
-  GitPullResult,
-  GitIdentityProfile,
-  GitIdentityAuthType,
-  GitIdentitySummary,
-  GitLogEntry,
-  GitLogResponse,
-  GitWorktreeInfo,
-  CreateGitWorktreePayload,
-  GitWorktreeCreateResult,
-  RemoveGitWorktreePayload,
-  GitWorktreeValidationError,
-  GitWorktreeValidationResult,
-  GitDeleteBranchPayload,
-  GitDeleteRemoteBranchPayload,
-  GitRemoveRemotePayload,
-  DiscoveredGitCredential,
   GitRemote,
-  GitMergeResult,
-  GitRebaseResult,
   MergeConflictDetails,
   CommitFileDiffResponse,
 } from './api/types';
@@ -308,7 +283,7 @@ export async function generateCommitMessage(
   try {
     const diffs = await collectSelectedFileDiffs(directory, files);
     const { currentProviderId, currentModelId } = useConfigStore.getState();
-    const response = await runtimeFetch('/api/small-model/generate', {
+    const response = await requestSmallModel({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -318,7 +293,7 @@ export async function generateCommitMessage(
         ...(currentProviderId ? { preferredProviderID: currentProviderId } : {}),
         ...(currentModelId ? { preferredModelID: currentModelId } : {}),
       }),
-    });
+    }, { silentStatuses: [404] });
 
     if (response.status === 404) {
       // No authenticated provider has a small model — fall back to the
@@ -436,7 +411,7 @@ export async function generatePullRequestDescription(
 
   try {
     const { currentProviderId, currentModelId } = useConfigStore.getState();
-    const response = await runtimeFetch('/api/small-model/generate', {
+    const response = await requestSmallModel({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -446,7 +421,7 @@ export async function generatePullRequestDescription(
         ...(currentProviderId ? { preferredProviderID: currentProviderId } : {}),
         ...(currentModelId ? { preferredModelID: currentModelId } : {}),
       }),
-    });
+    }, { silentStatuses: [404] });
 
     if (response.status === 404) {
       // No authenticated provider has a small model — fall back to the

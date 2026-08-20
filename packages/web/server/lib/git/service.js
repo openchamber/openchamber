@@ -1891,6 +1891,100 @@ const fetchRemoteBranchRef = async (primaryWorktree, remoteName, branchName) => 
   );
 };
 
+/**
+ * Shared existing-mode resolver for validate + create.
+ * Provisioned remotes (`ensureRemoteName`/`ensureRemoteUrl`) are used for fork
+ * PR heads; other existing branches keep the local / already-fetched remote path.
+ *
+ * @param {'validate'|'create'} intent
+ */
+const resolveExistingWorktreeSource = async (primaryWorktree, input = {}, intent = 'create') => {
+  const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
+  const ensureRemoteName = String(input?.ensureRemoteName || '').trim();
+  const ensureRemoteUrl = String(input?.ensureRemoteUrl || '').trim();
+  const requestedExistingBranch = String(input?.existingBranch || '').trim();
+  const wantUpstream = Boolean(input?.setUpstream);
+  const explicitUpstreamRemote = String(input?.upstreamRemote || '').trim();
+  const explicitUpstreamBranch = String(input?.upstreamBranch || '').trim();
+  const parsedExistingRemote = await resolveRemoteBranchRef(primaryWorktree, requestedExistingBranch);
+
+  if (
+    parsedExistingRemote
+    && ensureRemoteName
+    && ensureRemoteUrl
+    && parsedExistingRemote.remote === ensureRemoteName
+  ) {
+    if (intent === 'validate') {
+      const lsRemote = await runGitCommand(
+        primaryWorktree,
+        ['ls-remote', '--heads', ensureRemoteUrl, `refs/heads/${parsedExistingRemote.branch}`]
+      );
+      if (!lsRemote.success) {
+        throw new Error(
+          `Unable to reach remote ${ensureRemoteName} (${ensureRemoteUrl}). `
+          + 'Check network access and credentials for that repository.'
+        );
+      }
+      if (!String(lsRemote.stdout || '').trim()) {
+        throw new Error(`Remote branch not found: ${parsedExistingRemote.remoteRef}`);
+      }
+    } else {
+      await ensureRemoteWithUrl(primaryWorktree, ensureRemoteName, ensureRemoteUrl);
+      try {
+        await fetchRemoteBranchRef(
+          primaryWorktree,
+          parsedExistingRemote.remote,
+          parsedExistingRemote.branch
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Unable to fetch ${parsedExistingRemote.remote}/${parsedExistingRemote.branch} `
+          + `from ${ensureRemoteUrl}. ${detail}`
+        );
+      }
+    }
+
+    const localBranch = cleanBranchName(preferredBranchName || parsedExistingRemote.branch);
+    return {
+      localBranch,
+      checkoutRef: parsedExistingRemote.remoteRef,
+      createLocalBranch: true,
+      setUpstream: wantUpstream,
+      upstream: {
+        remote: explicitUpstreamRemote || parsedExistingRemote.remote,
+        branch: explicitUpstreamBranch || parsedExistingRemote.branch,
+      },
+    };
+  }
+
+  if (!requestedExistingBranch) {
+    throw new Error('existingBranch is required in existing mode');
+  }
+
+  const resolved = await resolveBranchForExistingMode(
+    primaryWorktree,
+    requestedExistingBranch,
+    preferredBranchName
+  );
+  const upstream = resolved.remoteRef
+    ? {
+        remote: explicitUpstreamRemote || resolved.remoteRef.remote,
+        branch: explicitUpstreamBranch || resolved.remoteRef.branch,
+      }
+    : (explicitUpstreamRemote && explicitUpstreamBranch
+      ? { remote: explicitUpstreamRemote, branch: explicitUpstreamBranch }
+      : null);
+
+  return {
+    localBranch: resolved.localBranch,
+    checkoutRef: resolved.checkoutRef,
+    createLocalBranch: resolved.createLocalBranch,
+    setUpstream: wantUpstream && Boolean(upstream),
+    upstream,
+  };
+};
+
 const checkRemoteBranchExists = async (primaryWorktree, remoteName, branchName, remoteUrl = '') => {
   const remote = String(remoteName || '').trim();
   const branch = String(branchName || '').trim();
@@ -1912,19 +2006,6 @@ const checkRemoteBranchExists = async (primaryWorktree, remoteName, branchName, 
     success: true,
     found: Boolean(String(lsRemote.stdout || '').trim()),
   };
-};
-
-const setBranchTrackingFallback = async (worktreeDirectory, localBranch, upstream) => {
-  await runGitCommandOrThrow(
-    worktreeDirectory,
-    ['config', `branch.${localBranch}.remote`, upstream.remote],
-    `Failed to set branch.${localBranch}.remote`
-  );
-  await runGitCommandOrThrow(
-    worktreeDirectory,
-    ['config', `branch.${localBranch}.merge`, `refs/heads/${upstream.branch}`],
-    `Failed to set branch.${localBranch}.merge`
-  );
 };
 
 const applyUpstreamConfiguration = async (args) => {
@@ -1952,23 +2033,19 @@ const applyUpstreamConfiguration = async (args) => {
     return;
   }
 
-  let fetched = true;
   try {
     await fetchRemoteBranchRef(primaryWorktree, upstream.remote, upstream.branch);
   } catch {
-    fetched = false;
-  }
-
-  if (fetched) {
-    await runGitCommandOrThrow(
-      worktreeDirectory,
-      ['branch', `--set-upstream-to=${upstream.full}`, localBranch],
-      `Failed to set upstream to ${upstream.full}`
-    );
+    // Fetch failed: leave tracking unset. Do not write branch.*.remote/merge
+    // pointing at a ref that was never fetched.
     return;
   }
 
-  await setBranchTrackingFallback(worktreeDirectory, localBranch, upstream);
+  await runGitCommandOrThrow(
+    worktreeDirectory,
+    ['branch', `--set-upstream-to=${upstream.full}`, localBranch],
+    `Failed to set upstream to ${upstream.full}`
+  );
 };
 
 export async function isGitRepository(directory) {
@@ -3759,33 +3836,13 @@ export async function validateWorktreeCreate(directory, input = {}) {
 
     if (mode === 'existing') {
       try {
-        const requestedExistingBranch = String(input?.existingBranch || '').trim();
-        const parsedExistingRemote = await resolveRemoteBranchRef(context.primaryWorktree, requestedExistingBranch);
-        if (parsedExistingRemote && ensureRemoteName && ensureRemoteUrl && ensureRemoteName === parsedExistingRemote.remote) {
-          const lsRemote = await runGitCommand(
-            context.primaryWorktree,
-            ['ls-remote', '--heads', ensureRemoteUrl, `refs/heads/${parsedExistingRemote.branch}`]
-          );
-          if (!lsRemote.success) {
-            throw new Error(`Unable to query remote ${ensureRemoteName}`);
-          }
-          if (!String(lsRemote.stdout || '').trim()) {
-            throw new Error(`Remote branch not found: ${parsedExistingRemote.remoteRef}`);
-          }
-          localBranch = cleanBranchName(preferredBranchName || parsedExistingRemote.branch);
+        const resolved = await resolveExistingWorktreeSource(context.primaryWorktree, input, 'validate');
+        localBranch = resolved.localBranch || '';
+        if (resolved.upstream) {
           inferredUpstream = {
-            remote: parsedExistingRemote.remote,
-            branch: parsedExistingRemote.branch,
+            remote: resolved.upstream.remote,
+            branch: resolved.upstream.branch,
           };
-        } else {
-          const resolved = await resolveBranchForExistingMode(context.primaryWorktree, requestedExistingBranch, preferredBranchName);
-          localBranch = resolved.localBranch || '';
-          if (resolved.remoteRef) {
-            inferredUpstream = {
-              remote: resolved.remoteRef.remote,
-              branch: resolved.remoteRef.branch,
-            };
-          }
         }
       } catch (error) {
         errors.push({
@@ -3954,25 +4011,19 @@ export async function previewWorktreeCreate(directory, input = {}) {
 
 async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
-  const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
   const startRef = normalizeStartRef(input?.startRef);
-  const ensureRemoteName = String(input?.ensureRemoteName || '').trim();
-  const ensureRemoteUrl = String(input?.ensureRemoteUrl || '').trim();
+  let ensureRemoteName = String(input?.ensureRemoteName || '').trim();
+  let ensureRemoteUrl = String(input?.ensureRemoteUrl || '').trim();
 
   let localBranch = '';
   let inferredUpstream = null;
+  let shouldSetUpstream = Boolean(input?.setUpstream);
   const worktreeAddArgs = ['worktree', 'add', '--no-checkout'];
 
   if (mode === 'existing') {
-    const requestedExistingBranch = String(input?.existingBranch || '').trim();
-    const parsedExistingRemote = await resolveRemoteBranchRef(context.primaryWorktree, requestedExistingBranch);
-    if (parsedExistingRemote && ensureRemoteName && ensureRemoteUrl && parsedExistingRemote.remote === ensureRemoteName) {
-      await ensureRemoteWithUrl(context.primaryWorktree, ensureRemoteName, ensureRemoteUrl);
-      await fetchRemoteBranchRef(context.primaryWorktree, parsedExistingRemote.remote, parsedExistingRemote.branch);
-    }
-
-    const resolved = await resolveBranchForExistingMode(context.primaryWorktree, requestedExistingBranch, preferredBranchName);
+    const resolved = await resolveExistingWorktreeSource(context.primaryWorktree, input, 'create');
     localBranch = resolved.localBranch;
+    shouldSetUpstream = resolved.setUpstream;
 
     const inUse = await findBranchInUse(context.primaryWorktree, localBranch);
     if (inUse) {
@@ -3984,10 +4035,10 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
     }
     worktreeAddArgs.push(candidate.directory, resolved.checkoutRef);
 
-    if (resolved.remoteRef) {
+    if (resolved.upstream) {
       inferredUpstream = {
-        remote: resolved.remoteRef.remote,
-        branch: resolved.remoteRef.branch,
+        remote: resolved.upstream.remote,
+        branch: resolved.upstream.branch,
       };
     }
   } else {
@@ -4033,9 +4084,12 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
 
   await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
 
-  const shouldSetUpstream = Boolean(input?.setUpstream);
-  const upstreamRemote = String(input?.upstreamRemote || inferredUpstream?.remote || '').trim();
-  const upstreamBranch = String(input?.upstreamBranch || inferredUpstream?.branch || '').trim();
+  const upstreamRemote = shouldSetUpstream
+    ? String(inferredUpstream?.remote || input?.upstreamRemote || '').trim()
+    : '';
+  const upstreamBranch = shouldSetUpstream
+    ? String(inferredUpstream?.branch || input?.upstreamBranch || '').trim()
+    : '';
 
   const bootstrapStatus = setWorktreeBootstrapState(
     candidate.directory,
@@ -4697,7 +4751,7 @@ export async function renameBranch(directory, oldName, newName) {
             `Failed to set upstream to ${upstream.full}`
           );
         } catch {
-          await setBranchTrackingFallback(repoRoot, normalizedNewName, upstream);
+          // Leave tracking unset rather than writing config for a missing ref.
         }
       }
     }

@@ -1,8 +1,8 @@
 import type { Message, OpencodeClient, Part } from "@opencode-ai/sdk/v2/client"
 import type { ChildStoreManager, DirectoryStore } from "./child-store"
-import { Binary } from "./binary"
 import { retry } from "./retry"
 import { mergeOptimisticPage, type OptimisticItem } from "./optimistic"
+import { findMessageIndex, insertMessageChronologically, sortMessagesChronologically } from "./message-ordering"
 import { stripMessageDiffSnapshots } from "./sanitize"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import {
@@ -23,7 +23,6 @@ const CONSTRAINED_INITIAL_MESSAGE_PAGE_SIZE = 30
 const HISTORY_MESSAGE_PAGE_SIZE = 100
 const INITIAL_PAGE_EXPANSION_LIMITS = [100, 150] as const
 const CONSTRAINED_INITIAL_PAGE_EXPANSION_LIMITS = [50, 80, 120] as const
-const cmp = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0
 
 export type SessionMessageTarget = {
   directory: string
@@ -109,9 +108,8 @@ const assertSdkSuccess = (result: {
   throw error
 }
 
-const sortParts = (parts: Part[]): Part[] => parts
+const filterIdentifiedParts = (parts: Part[]): Part[] => parts
   .filter((part) => Boolean(part?.id))
-  .sort((left, right) => cmp(left.id, right.id))
 
 const createDefaultState = (generation = 0): SessionMessageLoadState => ({
   status: "idle",
@@ -341,15 +339,16 @@ export class SessionMessageLoader {
     const target = this.normalizeTarget(input)
     if (!target) return
     const entry = this.getEntry(target)
-    entry.optimistic.set(input.message.id, { message: input.message, parts: sortParts(input.parts) })
+    entry.optimistic.set(input.message.id, { message: input.message, parts: filterIdentifiedParts(input.parts) })
     const store = this.childStores.ensureChild(target.directory, { bootstrap: false })
     const current = store.getState()
     const messages = current.message[target.sessionID] ? [...current.message[target.sessionID]] : []
-    const result = Binary.search(messages, input.message.id, (message) => message.id)
-    if (!result.found) messages.splice(result.index, 0, input.message)
+    if (findMessageIndex(messages, input.message.id) < 0) {
+      insertMessageChronologically(messages, input.message)
+    }
     store.setState({
       message: { ...current.message, [target.sessionID]: messages },
-      part: { ...current.part, [input.message.id]: sortParts(input.parts) },
+      part: { ...current.part, [input.message.id]: filterIdentifiedParts(input.parts) },
     })
   }
 
@@ -601,12 +600,12 @@ export class SessionMessageLoader {
       const records = result.data.filter((record: { info?: { id?: string } }) => Boolean(record?.info?.id))
       recordCount = records.length
       if (performance) performance.recordCount += recordCount
-      const session = records
-        .map((record: { info: Message }) => stripMessageDiffSnapshots(record.info))
-        .sort((left: Message, right: Message) => cmp(left.id, right.id))
+      const session = sortMessagesChronologically(
+        records.map((record: { info: Message }) => stripMessageDiffSnapshots(record.info)),
+      )
       const partsByMessageID = new Map<string, Part[]>()
       for (const record of records as Array<{ info: { id: string }; parts?: Part[] }>) {
-        partsByMessageID.set(record.info.id, sortParts(record.parts ?? []))
+        partsByMessageID.set(record.info.id, filterIdentifiedParts(record.parts ?? []))
       }
       const cursor = result.response?.headers?.get?.("x-next-cursor") ?? undefined
       finishPagePerformance("complete", { retryCount: Math.max(0, attempts - 1), recordCount })

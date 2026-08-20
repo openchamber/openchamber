@@ -108,6 +108,12 @@ const createGitCheckIgnoreTimeoutMs = () => {
   return 2500;
 };
 
+const createUploadMaxBytes = () => {
+  const raw = Number(process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES);
+  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  return 100 * 1024 * 1024;
+};
+
 const FILE_MIME_MAP = Object.freeze({
   '.html': 'text/html',
   '.htm': 'text/html',
@@ -139,6 +145,27 @@ const FILE_MIME_MAP = Object.freeze({
 });
 
 const MAX_SERVE_BYTES = 100 * 1024 * 1024;
+
+const streamUploadBody = async (req, handle, maxBytes) => {
+  let received = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    received += buffer.length;
+    if (received > maxBytes) {
+      req.resume?.();
+      throw Object.assign(new Error('Upload exceeds the maximum allowed size'), { uploadTooLarge: true });
+    }
+
+    let offset = 0;
+    while (offset < buffer.length) {
+      const { bytesWritten } = await handle.write(buffer, offset, buffer.length - offset, null);
+      if (!Number.isFinite(bytesWritten) || bytesWritten <= 0) {
+        throw new Error('Failed to write upload');
+      }
+      offset += bytesWritten;
+    }
+  }
+};
 
 // Only deterministic, side-effect-free git plumbing path queries are cacheable.
 // Anything outside this allowlist (including any non-git command) runs normally
@@ -758,14 +785,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
-      ]);
-
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access to file denied' });
-      }
+      const canonicalPath = await fsPromises.realpath(resolved.resolved);
 
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
@@ -815,14 +835,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
-      ]);
-
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access to file denied' });
-      }
+      const canonicalPath = await fsPromises.realpath(resolved.resolved);
 
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
@@ -886,14 +899,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
-      ]);
-
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access to file denied' });
-      }
+      const canonicalPath = await fsPromises.realpath(resolved.resolved);
 
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
@@ -971,14 +977,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
-      ]);
-
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access to file denied' });
-      }
+      const canonicalPath = await fsPromises.realpath(resolved.resolved);
 
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
@@ -1066,6 +1065,124 @@ export const registerFsRoutes = (app, dependencies) => {
       }
       console.error('Failed to write file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to write file' });
+    }
+  });
+
+  app.post('/api/fs/upload', async (req, res) => {
+    const filePath = typeof req.query?.path === 'string' ? req.query.path.trim() : '';
+    const overwrite = req.query?.overwrite === 'true';
+    if (!filePath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+    if (!String(req.headers?.['content-type'] || '').toLowerCase().startsWith('application/octet-stream')) {
+      return res.status(415).json({ error: 'Content-Type must be application/octet-stream' });
+    }
+
+    const maxUploadBytes = createUploadMaxBytes();
+    const declaredSize = Number(req.headers?.['content-length']);
+    if (Number.isFinite(declaredSize) && declaredSize > maxUploadBytes) {
+      req.resume?.();
+      return res.status(413).json({ error: `File exceeds maximum size of ${maxUploadBytes} bytes` });
+    }
+
+    try {
+      const resolved = await resolveWorkspacePathFromContext({
+        req,
+        targetPath: filePath,
+        resolveProjectDirectory,
+        path,
+        os,
+        normalizeDirectoryPath,
+        openchamberUserConfigRoot,
+      });
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      const canonicalBase = await fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base));
+      const requestedParent = path.dirname(resolved.resolved);
+      const canonicalParent = await fsPromises.realpath(requestedParent);
+      if (!isPathWithinRoot(canonicalParent, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const existingPath = await fsPromises.realpath(resolved.resolved).catch((error) => {
+        if (error && typeof error === 'object' && error.code === 'ENOENT') {
+          return null;
+        }
+        throw error;
+      });
+      const writePath = existingPath || path.join(canonicalParent, path.basename(resolved.resolved));
+      if (!isPathWithinRoot(writePath, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      if (existingPath) {
+        const stats = await fsPromises.stat(existingPath);
+        if (stats.isDirectory()) {
+          return res.status(400).json({ error: 'Specified path is a directory' });
+        }
+        if (!overwrite) {
+          req.resume?.();
+          return res.status(409).json({ error: 'File already exists', reason: 'already-exists' });
+        }
+      }
+
+      const tmp = `${writePath}.upload-${crypto.randomUUID()}`;
+      let tempExists = false;
+      try {
+        const handle = await fsPromises.open(tmp, 'wx');
+        tempExists = true;
+        let streamError = null;
+        try {
+          await streamUploadBody(req, handle, maxUploadBytes);
+        } catch (error) {
+          streamError = error;
+        }
+        try {
+          await handle.close();
+        } catch (error) {
+          if (!streamError) throw error;
+        }
+        if (streamError) throw streamError;
+
+        if (overwrite) {
+          await fsPromises.rename(tmp, writePath);
+        } else {
+          // A same-directory hard link commits without replacing a target that
+          // appeared after the existence check. The temp file is already fully
+          // flushed, so readers never observe a partial upload.
+          await fsPromises.link(tmp, writePath);
+          await fsPromises.unlink(tmp).catch(() => {});
+        }
+        tempExists = false;
+      } catch (error) {
+        if (tempExists) {
+          await fsPromises.unlink(tmp).catch(() => {});
+        }
+        throw error;
+      }
+
+      return res.json({ success: true, path: resolved.resolved });
+    } catch (error) {
+      const err = error;
+      if (err && typeof err === 'object' && err.code === 'EEXIST') {
+        return res.status(409).json({ error: 'File already exists', reason: 'already-exists' });
+      }
+      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        return res.status(404).json({ error: 'Destination directory not found', reason: 'not-found' });
+      }
+      if (err && typeof err === 'object' && err.uploadTooLarge) {
+        return res.status(413).json({ error: `File exceeds maximum size of ${maxUploadBytes} bytes` });
+      }
+      if (err && typeof err === 'object' && (err.code === 'EISDIR' || err.code === 'ENOTDIR')) {
+        return res.status(400).json({ error: 'Specified path is a directory' });
+      }
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access denied');
+      }
+      console.error('Failed to upload file:', error);
+      return res.status(500).json({ error: (error && error.message) || 'Failed to upload file' });
     }
   });
 

@@ -48,8 +48,9 @@ import { getLanguageFromExtension, getImageMimeType, isBinaryFile, isDrawioFile,
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, subscribeRuntimeUrlAuthToken } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getOutsideFileGrant } from '@/lib/outsideFileGrants';
+import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
 import { DiagramEditor } from '@/components/diagram';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
@@ -904,7 +905,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [fileLoading, setFileLoading] = React.useState(false);
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState<string>('');
-  const desktopImageBlobUrlRef = React.useRef<string>('');
 
   const [loadedFilePath, setLoadedFilePath] = React.useState<string | null>(null);
 
@@ -921,6 +921,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const activeFileLoadIdRef = React.useRef(0);
   const loadingFilePathRef = React.useRef<string | null>(null);
+  const [fileContentRevision, setFileContentRevision] = React.useState(0);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
   const [diagramSaved, setDiagramSaved] = React.useState(false);
   const [contentDetectedBinary, setContentDetectedBinary] = React.useState(false);
@@ -2047,12 +2048,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         loadingFilePathRef.current = null;
       }
     });
-  }, [loadSelectedFile, loadedFilePath, selectedFile]);
+  }, [fileContentRevision, loadSelectedFile, loadedFilePath, selectedFile]);
 
   // Sync isDirty to a ref so the polling interval can read the latest value
   // without isDirty in its dependency array (avoids interval restart on every edit/save).
   const isDirtyRef = React.useRef(isDirty);
   isDirtyRef.current = isDirty;
+
+  React.useEffect(() => subscribeToFileContentInvalidation(({ runtimeKey, paths }) => {
+    const selectedPath = selectedFile?.path;
+    if (
+      runtimeKey !== getRuntimeKey()
+      || !selectedPath
+      || isDirtyRef.current
+      || !paths.includes(normalizePath(selectedPath))
+    ) {
+      return;
+    }
+
+    activeFileLoadIdRef.current += 1;
+    loadingFilePathRef.current = null;
+    lastLoadedFileStatRef.current = null;
+    setDesktopImageSrc('');
+    setFileError(null);
+    setLoadedFilePath(null);
+    setFileContentRevision((revision) => revision + 1);
+  }), [selectedFile?.path]);
 
   // Poll open file for external changes.
   // When a change is detected, reset loadedFilePath so the effect above
@@ -3006,43 +3027,27 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     [lightTheme.metadata.id, darkTheme.metadata.id],
   );
 
-  const imageAssetAuthKey = selectedFile?.path && isSelectedImage && !runtime.isDesktop && !isSelectedSvg
-    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${selectedFileReadOptions.outsideFileGrant ?? ''}`
-    : '';
-
   const pdfAssetAuthKey = selectedFile?.path && isSelectedPdf
-    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${selectedFileReadOptions.outsideFileGrant ?? ''}`
+    ? `${selectedFile.path}|${selectedFileReadOptions.allowOutsideWorkspace ? 'outside' : 'workspace'}|${selectedFileReadOptions.outsideFileGrant ?? ''}|${fileContentRevision}`
     : '';
 
   const htmlAssetAuthKey = selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode
-    ? selectedFile.path
+    ? `${selectedFile.path}|${fileContentRevision}`
     : '';
 
   const assetAuthErrorFallback = t('filesView.error.readFileFailed');
-  const { readyKey: imageAssetAuthReadyKey, nonce: imagePreviewNonce } =
-    useAssetAuthRefresh(imageAssetAuthKey, setFileError, assetAuthErrorFallback);
   const { readyKey: htmlAssetAuthReadyKey, nonce: htmlPreviewNonce } =
     useAssetAuthRefresh(htmlAssetAuthKey, setFileError, assetAuthErrorFallback);
   const { readyKey: pdfAssetAuthReadyKey, nonce: pdfPreviewNonce } =
     useAssetAuthRefresh(pdfAssetAuthKey, setFileError, assetAuthErrorFallback);
 
-  const isImageAssetAuthLoading = Boolean(imageAssetAuthKey && imageAssetAuthReadyKey !== imageAssetAuthKey);
   const isHtmlAssetAuthLoading = Boolean(htmlAssetAuthKey && htmlAssetAuthReadyKey !== htmlAssetAuthKey);
   const isPdfAssetAuthLoading = Boolean(pdfAssetAuthKey && pdfAssetAuthReadyKey !== pdfAssetAuthKey);
 
   const imageSrc = selectedFile?.path && isSelectedImage
-    ? (runtime.isDesktop
-      ? (isSelectedSvg
-        ? `data:${getImageMimeType(selectedFile.path)};utf8,${encodeURIComponent(fileContent)}`
-        : desktopImageSrc)
-      : (isSelectedSvg
-        ? `data:${getImageMimeType(selectedFile.path)};utf8,${encodeURIComponent(fileContent)}`
-        : imageAssetAuthReadyKey === imageAssetAuthKey ? getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
-          path: selectedFile.path,
-          allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
-          outsideFileGrant: selectedFileReadOptions.outsideFileGrant,
-          directory: root || undefined,
-        }) : ''))
+    ? (isSelectedSvg
+      ? `data:${getImageMimeType(selectedFile.path)};utf8,${encodeURIComponent(fileContent)}`
+      : desktopImageSrc)
     : '';
 
   const pdfSrc = selectedFile?.path && isSelectedPdf && pdfAssetAuthReadyKey === pdfAssetAuthKey
@@ -3067,23 +3072,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   React.useEffect(() => {
     let cancelled = false;
+    let objectUrl = '';
 
     const resolveDesktopImage = async () => {
-      if (!runtime.isDesktop || !selectedFile?.path || !isSelectedImage || isSelectedSvg) {
-        if (desktopImageBlobUrlRef.current) {
-          URL.revokeObjectURL(desktopImageBlobUrlRef.current);
-          desktopImageBlobUrlRef.current = '';
-        }
+      if (!selectedFile?.path || !isSelectedImage || isSelectedSvg) {
         setDesktopImageSrc('');
         return;
       }
 
       setFileError(null);
-
-      if (desktopImageBlobUrlRef.current) {
-        URL.revokeObjectURL(desktopImageBlobUrlRef.current);
-        desktopImageBlobUrlRef.current = '';
-      }
 
       const srcPromise = files.readFileBinary
         ? files.readFileBinary(selectedFile.path, selectedFileReadOptions).then((result) => result.dataUrl)
@@ -3100,13 +3097,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             throw new Error(t('filesView.error.readFileFailed'));
           }
           const blob = await response.blob();
-          const url = URL.createObjectURL(blob);
+          objectUrl = URL.createObjectURL(blob);
           if (cancelled) {
-            URL.revokeObjectURL(url);
+            URL.revokeObjectURL(objectUrl);
+            objectUrl = '';
             return '';
           }
-          desktopImageBlobUrlRef.current = url;
-          return url;
+          return objectUrl;
         })();
 
       await srcPromise
@@ -3117,10 +3114,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           }
         })
         .catch((error) => {
-          if (desktopImageBlobUrlRef.current) {
-            URL.revokeObjectURL(desktopImageBlobUrlRef.current);
-            desktopImageBlobUrlRef.current = '';
-          }
           if (!cancelled) {
             setDesktopImageSrc('');
             setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
@@ -3138,17 +3131,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     return () => {
       cancelled = true;
-    };
-  }, [files, isSelectedImage, isSelectedSvg, root, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, t]);
-
-  React.useEffect(() => {
-    return () => {
-      if (desktopImageBlobUrlRef.current) {
-        URL.revokeObjectURL(desktopImageBlobUrlRef.current);
-        desktopImageBlobUrlRef.current = '';
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
       }
     };
-  }, []);
+  }, [fileContentRevision, files, isSelectedImage, isSelectedSvg, root, selectedFile?.path, selectedFileReadOptions, t]);
 
   const handleCloseDialog = React.useCallback(() => setActiveDialog(null), []);
 
@@ -3870,7 +3857,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
           {!selectedFile ? (
             <div className="p-3 typography-ui text-muted-foreground">{t('filesView.editor.pickFileFromTree')}</div>
-          ) : (fileLoading || isImageAssetAuthLoading || isPdfAssetAuthLoading) ? (
+          ) : (fileLoading || isPdfAssetAuthLoading) ? (
             suppressFileLoadingIndicator
               ? <div className="p-3" />
               : (
@@ -3884,7 +3871,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : isSelectedImage ? (
             <div className="flex h-full items-center justify-center p-3">
               <img
-                key={imagePreviewNonce}
+                key={selectedFile.path}
                 src={imageSrc}
                 alt={selectedFile?.name ?? t('filesView.editor.imageAltFallback')}
                 className="max-w-full max-h-[70vh] object-contain rounded-md border border-border/30 bg-primary/10"
@@ -4264,7 +4251,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           {renderFloatingFileControls({ exitFullscreenOnly: true })}
         </div>
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
-          {(fileLoading || isImageAssetAuthLoading || isPdfAssetAuthLoading) ? (
+          {(fileLoading || isPdfAssetAuthLoading) ? (
             suppressFileLoadingIndicator
               ? <div className="p-4" />
               : (
@@ -4278,7 +4265,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : isSelectedImage ? (
             <div className="flex h-full items-center justify-center p-4">
               <img
-                key={imagePreviewNonce}
+                key={selectedFile.path}
                 src={imageSrc}
                 alt={selectedFile.name}
                 className="max-w-full max-h-full object-contain rounded-md border border-border/30 bg-primary/10"

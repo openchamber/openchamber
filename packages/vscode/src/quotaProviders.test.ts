@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, test } from 'node:test';
+import { after, afterEach, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const previousQuotaDataDirectory = process.env.OPENCHAMBER_DATA_DIR;
+const temporaryQuotaDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-quota-'));
+process.env.OPENCHAMBER_DATA_DIR = temporaryQuotaDataDirectory;
 
 // readAuthFile reads ~/.local/share/opencode/auth.json via fs.readFileSync.
 // Stub fs to serve a known auth entry so the providers treat themselves as
@@ -10,8 +16,11 @@ const AUTH = JSON.stringify({
   openai: { access: 'test-token' },
   crof: { key: 'test-token' },
   neuralwatt: { key: 'test-token' },
+  'opencode-go': { key: 'test-token' },
+  'command-code': { type: 'oauth', access: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
+  anthropic: { access: 'test-token', refresh: 'test-refresh' },
 });
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
@@ -19,6 +28,12 @@ const AUTH = JSON.stringify({
 import { fetchQuotaForProvider } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
+
+after(() => {
+  if (previousQuotaDataDirectory === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+  else process.env.OPENCHAMBER_DATA_DIR = previousQuotaDataDirectory;
+  fs.rmSync(temporaryQuotaDataDirectory, { recursive: true, force: true });
+});
 
 const mockResponse = (body: unknown, init: MockResponseInit = {}): Response => ({
   ok: 'ok' in init ? init.ok! : true,
@@ -69,6 +84,78 @@ const stubFetchFailing = (json: () => Promise<unknown>, init: MockResponseInit):
   globalThis.fetch = (async () => ({ json, ...init }) as unknown as Response) as typeof fetch;
 };
 
+describe('OpenCode Go quota provider (VS Code parity)', () => {
+  test('uses the opencode-go key from auth.json', async () => {
+    let request: RequestInit | undefined;
+    const legacyPath = path.join(temporaryQuotaDataDirectory, 'quota', 'opencode-go.json');
+    fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
+    fs.writeFileSync(legacyPath, '{not valid json');
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      request = init;
+      return mockResponse({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } });
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('opencode-go');
+
+    assert.equal(result.ok, true);
+    assert.equal((request?.headers as Record<string, string>).Authorization, 'Bearer test-token');
+    assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
+    assert.throws(() => fs.statSync(legacyPath));
+  });
+});
+
+describe('Command Code quota provider (VS Code parity)', () => {
+  test('uses the OAuth access token and resolves server-backed limits', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      requests.push({ url, init });
+      return mockResponse(url.endsWith('/alpha/whoami')
+        ? { org: { id: 'org/a' } }
+        : { credits: { monthlyCredits: 120 }, windowLimits: { fiveHour: { used: 25, cap: 100, resetAt: 1_776_000_000 } } });
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('command-code');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requests.map(({ url }) => url), [
+      'https://api.commandcode.ai/alpha/whoami',
+      'https://api.commandcode.ai/alpha/billing/credits?orgId=org%2Fa',
+    ]);
+    assert.equal((requests[0].init?.headers as Record<string, string>).Authorization, 'Bearer test-token');
+    assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
+    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '120');
+  });
+
+  test('omits orgId for personal accounts', async () => {
+    const urls: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      urls.push(url);
+      return mockResponse(url.endsWith('/alpha/whoami')
+        ? { user: { id: 'user-1' }, org: null }
+        : { credits: { monthlyCredits: 120 } });
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('command-code');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(urls, [
+      'https://api.commandcode.ai/alpha/whoami',
+      'https://api.commandcode.ai/alpha/billing/credits',
+    ]);
+  });
+
+  test('formats fractional credit values for display', async () => {
+    globalThis.fetch = (async (url: string) => mockResponse(url.endsWith('/alpha/whoami')
+      ? { org: null }
+      : { credits: { monthlyCredits: 69.7947070034 }, windowLimits: { fiveHour: { used: 0.2052929966, cap: 14 } } })) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('command-code');
+
+    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '69.79');
+    assert.equal(result.usage!.windows['5h']!.valueLabel, '0.21 / 14');
+  });
+});
+
 describe('Crof quota provider (VS Code parity)', () => {
   test('reports credits balance as valueLabel with null percent', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({ usable_requests: 450, credits: 12.3456 })));
@@ -116,6 +203,27 @@ describe('Crof quota provider (VS Code parity)', () => {
 });
 
 describe('Codex quota provider (VS Code parity)', () => {
+  test('coalesces concurrent refreshes for the same provider', async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    let requestCount = 0;
+    globalThis.fetch = (() => {
+      requestCount += 1;
+      return new Promise<Response>((resolve) => {
+        resolveResponse = resolve;
+      });
+    }) as typeof fetch;
+
+    const first = fetchQuotaForProvider('codex');
+    const second = fetchQuotaForProvider('codex');
+    resolveResponse?.(mockResponse({ rate_limit: null }));
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    assert.equal(firstResult.ok, true);
+    assert.equal(secondResult.ok, true);
+    assert.equal(requestCount, 1);
+  });
+
   test('surfaces spend_control individual limit for business accounts', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
       plan_type: 'business',
@@ -137,6 +245,60 @@ describe('Codex quota provider (VS Code parity)', () => {
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.credits!.usedPercent, 36);
     assert.equal(result.usage!.windows.credits!.valueLabel, '2675 / 7500 used');
+  });
+});
+
+describe('Claude quota provider (VS Code parity)', () => {
+  test('parses current limits, model-scoped limits, and extra usage', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      limits: [
+        { kind: 'session', percent: 12, resets_at: '2026-08-20T12:00:00Z', scope: null },
+        { kind: 'weekly_all', percent: 34, resets_at: '2026-08-24T12:00:00Z', scope: null },
+        { kind: 'weekly_scoped', percent: 56, resets_at: '2026-08-24T12:00:00Z', scope: { model: { display_name: 'Sonnet' } } },
+      ],
+      spend: {
+        enabled: true,
+        percent: 25,
+        used: { amount_minor: 2500, exponent: 2, currency: 'USD' },
+        limit: { amount_minor: 10000, exponent: 2, currency: 'USD' },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('claude');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 12);
+    assert.equal(result.usage?.windows['7d']?.usedPercent, 34);
+    assert.equal(result.usage?.models?.Sonnet?.windows['7d']?.usedPercent, 56);
+    assert.equal(result.usage?.windows.extra_usage?.valueLabel, '$25.00 / $100.00');
+  });
+
+  test('keeps serving the last good values while Anthropic rate limits', async () => {
+    const responses = [
+      mockResponse({ five_hour: { utilization: 12, resets_at: '2026-08-20T12:00:00Z' } }),
+      {
+        ok: false,
+        status: 429,
+        headers: new Headers({ 'retry-after': '120' }),
+        json: async () => ({}),
+      } as Response,
+    ];
+    let requestCount = 0;
+    globalThis.fetch = (async () => {
+      const response = responses[requestCount];
+      requestCount += 1;
+      return response;
+    }) as typeof fetch;
+
+    const initial = await fetchQuotaForProvider('claude');
+    const rateLimited = await fetchQuotaForProvider('claude');
+    const duringCooldown = await fetchQuotaForProvider('claude');
+
+    assert.equal(initial.ok, true);
+    assert.equal(rateLimited.ok, true);
+    assert.equal(duringCooldown.ok, true);
+    assert.equal(duringCooldown.usage?.windows['5h']?.usedPercent, 12);
+    assert.equal(requestCount, 2);
   });
 });
 

@@ -11,6 +11,7 @@ import { VoiceSettings } from './VoiceSettings';
 import { TunnelSettings } from './TunnelSettings';
 import { VisionSettings } from './VisionSettings';
 import { OpenCodeCliSettings } from './OpenCodeCliSettings';
+import { OpenChamberToolsSettings } from './OpenChamberToolsSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -53,6 +54,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 <DefaultsSettings />
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
                 {!isVSCode && <OpenCodeCliSettings />}
+                {!isVSCode && <OpenChamberToolsSettings />}
                 <SessionRetentionSettings />
                 {isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp() && <PasskeySettings />}
                 {showAbout && <AboutSettings />}
@@ -149,6 +151,7 @@ const GeneralSectionContent: React.FC = () => {
             {showDesktopNetworkSettings && <DesktopNetworkSettings />}
             {showPasskeySettings && <PasskeySettings />}
             {!isVSCode && <OpenCodeCliSettings />}
+            {!isVSCode && <OpenChamberToolsSettings />}
             <OpenChamberVisualSettings visibleSettings={[
                 'fileEditorKeymap',
                 'autoSaveEnabled',

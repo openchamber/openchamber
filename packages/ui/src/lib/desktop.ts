@@ -97,10 +97,7 @@ export type DesktopSettings = {
   summaryLength?: number;
   maxLastMessageLength?: number;
 
-  usageAutoRefresh?: boolean;
-  usageRefreshIntervalMs?: number;
   usageDisplayMode?: 'usage' | 'remaining';
-  usageShowPredValues?: boolean;
   usageDropdownProviders?: string[];
   usageSelectedModels?: Record<string, string[]>;  // Map of providerId -> selected model names
   usageCollapsedFamilies?: Record<string, string[]>;  // Map of providerId -> collapsed family IDs (UsagePage)
@@ -157,6 +154,9 @@ export type DesktopSettings = {
   inputSpellcheckEnabled?: boolean;
   showOpenCodeUpdateNotifications?: boolean;
   agentControlToolEnabled?: boolean;
+  agentWebToolEnabled?: boolean;
+  agentMemoryToolEnabled?: boolean;
+  agentMemoryFeatureAvailable?: boolean;
   optimizeSystemPrompt?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
@@ -256,7 +256,7 @@ const getDesktopBridge = (): DesktopBridgeGlobal | null => {
 
 export const isElectronShell = (): boolean => getElectronRuntime()?.runtime === 'electron';
 
-export const getElectronPlatform = (): string | null => {
+const getElectronPlatform = (): string | null => {
   if (typeof window === 'undefined') return null;
   const platform = (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__;
   return typeof platform === 'string' ? platform : null;

@@ -23,10 +23,11 @@ import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { opencodeClient } from '@/lib/opencode/client';
-import { shouldLoadAvailableProviders } from './providerAvailability';
+import { requiresProviderAuth, shouldLoadAvailableProviders } from './providerAvailability';
 import {
   getOAuthAuthMethods,
   parseAuthPayload,
+  requiresOpenCodeRestartAfterOAuth,
   shouldShowApiKeyAuth,
   type AuthMethod,
   type OAuthAuthMethodEntry,
@@ -323,7 +324,8 @@ export const ProvidersPage: React.FC = () => {
       ? provider.env.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
       : [];
     const hasCreds = Boolean(sources.auth.exists) || envEntries.length > 0;
-    if (!hasCreds) {
+    const isCustomProvider = Boolean(provider && isConfigDefinedCustomProvider(provider, sources));
+    if (requiresProviderAuth(true, hasCreds, isCustomProvider)) {
       setShowAuthPanel(true);
     }
   }, [selectedProviderId, providerSources, providers]);
@@ -471,7 +473,9 @@ export const ProvidersPage: React.FC = () => {
 
   const handleOAuthConnected = (providerId: string) => {
     setShowAuthPanel(false);
-    recordDeferredOpenCodeRestart('providers', { id: providerId });
+    if (requiresOpenCodeRestartAfterOAuth(providerId)) {
+      recordDeferredOpenCodeRestart('providers', { id: providerId });
+    }
     setSelectedProvider(providerId);
   };
 
@@ -770,8 +774,12 @@ export const ProvidersPage: React.FC = () => {
   const hasStoredAuth = Boolean(selectedSources?.auth.exists);
   const hasEnvCredentials = providerEnv.length > 0;
   const hasCredentials = hasStoredAuth || hasEnvCredentials;
-  const authStatusIncomplete = sourcesLoaded && !hasCredentials;
-  const showModelsSection = providerModels.length > 0 && (!sourcesLoaded || hasCredentials);
+  const authStatusIncomplete = requiresProviderAuth(
+    sourcesLoaded,
+    hasCredentials,
+    isEditableCustomProvider,
+  );
+  const showModelsSection = providerModels.length > 0 && !authStatusIncomplete;
   const incompleteAuthHint = !showApiKeyAuth && oauthAuthMethods.length > 0
     ? t('settings.providers.page.auth.useReconnectHint')
     : t('settings.providers.page.auth.incompleteHint');

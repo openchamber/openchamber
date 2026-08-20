@@ -382,12 +382,16 @@ export function ScheduledTasksDialog() {
     }
     setMutatingTaskID(task.id);
     try {
-      const { sessionId } = await runScheduledTaskNow(selectedProjectID, task.id);
+      const { sessionId, persistError } = await runScheduledTaskNow(selectedProjectID, task.id);
       await Promise.all([
         reloadTasks(selectedProjectID, { silent: true }),
         refreshGlobalSessions(),
       ]);
-      toast.success(t('sessions.scheduledTasks.dialog.toast.started'));
+      if (persistError) {
+        toast.warning(t('sessions.scheduledTasks.dialog.toast.startedPersistWarning'));
+      } else {
+        toast.success(t('sessions.scheduledTasks.dialog.toast.started'));
+      }
       if (sessionId) {
         // Jump straight into the started session; selecting it also closes
         // this surface (MainLayout closes surfaces on session selection).

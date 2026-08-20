@@ -5,7 +5,7 @@ import { useUIStore } from '@/stores/useUIStore';
 
 // How long the chat must sit untouched before the recap becomes visible.
 // The suggestion has no such delay — it shows as soon as it arrives.
-export const RECAP_VISIBILITY_DELAY_MS = 60 * 1000;
+const RECAP_VISIBILITY_DELAY_MS = 60 * 1000;
 
 interface LastMessageSnapshot {
   id: string;

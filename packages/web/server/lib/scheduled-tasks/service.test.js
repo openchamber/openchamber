@@ -262,3 +262,23 @@ describe('scheduled-task service remove', () => {
     expect(Array.isArray(tasks)).toBe(true);
   });
 });
+
+describe('scheduled-task service run', () => {
+  it('forwards persistError when the runtime reports a completion persist failure', async () => {
+    const { service } = createService({
+      scheduledTasksRuntime: {
+        runNow: vi.fn(async () => ({
+          ok: true,
+          sessionID: 'sess-1',
+          task: { id: 'task-1', state: { lastStatus: 'success' } },
+          persistError: 'timeout acquiring project config lock for project-test',
+          reason: 'completion-state-failed',
+        })),
+      },
+    });
+
+    const result = await service.run('project-test', 'task-1');
+    expect(result.sessionId).toBe('sess-1');
+    expect(result.persistError).toMatch(/timeout acquiring project config lock/);
+  });
+});

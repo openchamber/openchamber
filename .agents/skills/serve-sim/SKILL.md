@@ -7,44 +7,34 @@ description: Use when working with the OpenChamber iOS Simulator app without ope
 
 Use `serve-sim` to stream and control a booted Apple Simulator from the terminal. It captures the simulator framebuffer, serves a browser preview, and exposes CLI controls for taps, typing, gestures, hardware buttons, rotation, memory warnings, permissions, camera injection, and accessibility inspection.
 
-## OpenChamber Defaults
+## Scripted Workflow
 
-- Mobile package: `packages/mobile`
-- iOS bundle id: `com.openchamber.app`
-- Headless env wrapper: `packages/mobile/scripts/with-mobile-env.mjs`
-- iOS simulator helper: `packages/mobile/scripts/ios-sim.mjs`
-- Preferred scripts:
-  - `bun run mobile:build:ios:simulator`
-  - `bun run mobile:sim:run`
-  - `bun run mobile:sim:serve`
-  - `bun run mobile:sim:list`
-  - `bun run mobile:sim:kill`
-  - `bun run mobile:sim:dev` — foreground build + run + stream in one command (`--no-build` to skip the build); intended for the user, agents should prefer the discrete scripts above
+Run the discrete scripts from the repository root so each step has an observable completion boundary:
 
-## Workflow
-
-1. Build the simulator app without opening Xcode:
+1. Build the simulator app:
    ```sh
    bun run mobile:build:ios:simulator
    ```
 
-2. Boot a simulator if needed, install, and launch the app:
+2. Boot if needed, install, and launch:
    ```sh
    bun run mobile:sim:run
    ```
 
-3. Start the browser stream in detached JSON mode:
+3. Start the detached browser stream:
    ```sh
    bun run mobile:sim:serve
    ```
-   Surface the returned `url` to the user. It normally starts at `http://127.0.0.1:3100`; always use the `url` from the JSON output rather than assuming the port.
+   Surface the returned JSON `url`; it is the only authoritative stream address.
 
 4. Stop helpers when finished unless the user asks to keep them running:
    ```sh
    bun run mobile:sim:kill
    ```
 
-## Direct CLI Controls
+Completion means the app launched, the returned stream URL was surfaced, requested interactions were verified, and helpers were stopped or intentionally left running.
+
+## Manual Controls
 
 - Tap normalized coordinates: `bunx serve-sim tap 0.5 0.5`
 - Type focused text: `bunx serve-sim type "hello"`
@@ -64,9 +54,4 @@ Coordinates are normalized `0..1`, not pixels. Prefer `tap` for simple taps; do 
 - Node 18+.
 - At least one simulator can be booted with `xcrun simctl`.
 
-## Anti-Patterns
-
-- Do not open Xcode just to build/install/launch during agent work; use the scripts above.
-- Do not parse human output from `serve-sim`; use `-q` for JSON.
-- Do not leave helper streams running unintentionally.
-- Do not guess coordinates after accessibility lookup fails; report the missing target instead.
+Use the scripts above instead of opening Xcode for build/install/launch. Consume JSON output rather than parsing human output. If accessibility lookup cannot identify a target, report the missing target instead of guessing coordinates.

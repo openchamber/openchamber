@@ -5,10 +5,13 @@ import {
   buildEmbeddedSessionChatURL,
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
+  EMBEDDED_VISIBILITY_REQUEST,
   getOrCreateEmbeddedSessionChatURL,
+  getActiveEmbeddedSessionChatTab,
   getEmbeddedSessionChatOriginSessionId,
   isEmbeddedSessionChat,
   requestEmbeddedSessionRuntimeBootstrap,
+  requestEmbeddedSessionVisibility,
   resetEmbeddedSessionChatCache,
   type EmbeddedSessionChatURLCacheEntry,
 } from './contextPanelEmbeddedChat';
@@ -127,6 +130,17 @@ describe('embedded session chat URL', () => {
     expect(new URL(second).searchParams.get('themeVariant')).toBe('dark');
   });
 
+  test('bootstraps subagent prompting before the embedded chat first renders', () => {
+    const src = buildEmbeddedSessionChatURL('ses_1', '/repo', false, {
+      mode: 'system',
+      lightThemeId: 'light-a',
+      darkThemeId: 'dark-a',
+      currentTheme: makeTheme('dark-a', 'dark'),
+    }, { allowPromptingSubagentSessions: true });
+
+    expect(new URL(src).searchParams.get('allowPromptingSubagentSessions')).toBe('1');
+  });
+
   test('rebuilds cached src when readOnly changes for an existing tab', () => {
     const cache = new Map<string, EmbeddedSessionChatURLCacheEntry>();
     const theme = {
@@ -142,6 +156,38 @@ describe('embedded session chat URL', () => {
     expect(readOnly).not.toBe(writable);
     expect(new URL(writable).searchParams.get('readOnly')).toBeNull();
     expect(new URL(readOnly).searchParams.get('readOnly')).toBe('1');
+  });
+});
+
+describe('active embedded session chat', () => {
+  const tabs = Array.from({ length: 8 }, (_, index) => ({
+    id: `chat-${index + 1}`,
+    sessionID: `ses_${index + 1}`,
+  }));
+
+  test('selects one tab from persisted chat tabs', () => {
+    expect(getActiveEmbeddedSessionChatTab(tabs, 'chat-5')).toEqual(tabs[4]);
+  });
+
+  test('selects no tab when a chat is not active', () => {
+    expect(getActiveEmbeddedSessionChatTab(tabs, null)).toBeNull();
+    expect(getActiveEmbeddedSessionChatTab(tabs, 'missing-chat')).toBeNull();
+  });
+
+  test('requests authoritative visibility from the same-origin parent', () => {
+    installWindowLocation('http://127.0.0.1:5173/app?ocPanel=session-chat&sessionId=ses_1');
+    resetEmbeddedSessionChatCache();
+    const calls: Array<{ message: unknown; origin: string }> = [];
+    (window as unknown as { parent: { postMessage: (message: unknown, origin: string) => void } }).parent = {
+      postMessage: (message, origin) => calls.push({ message, origin }),
+    };
+
+    requestEmbeddedSessionVisibility();
+
+    expect(calls).toEqual([{
+      message: { type: EMBEDDED_VISIBILITY_REQUEST },
+      origin: 'http://127.0.0.1:5173',
+    }]);
   });
 });
 
