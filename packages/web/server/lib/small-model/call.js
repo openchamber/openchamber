@@ -341,7 +341,10 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
 };
 
 const callAnthropic = async ({ apiKey, baseURL, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => callMessages({
-  url: `${(baseURL || 'https://api.anthropic.com').replace(/\/+$/, '')}/v1/messages`,
+  // Matches @ai-sdk/anthropic: baseURL is the full API prefix (commonly
+  // already ending in /v1), so it gets /messages appended as-is rather than
+  // having /v1/messages appended, which would double up a configured /v1.
+  url: `${(baseURL || 'https://api.anthropic.com/v1').replace(/\/+$/, '')}/messages`,
   headers: {
     'x-api-key': apiKey,
     'anthropic-version': '2023-06-01',

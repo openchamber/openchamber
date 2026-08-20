@@ -325,7 +325,7 @@ describe('callSmallModel — custom provider config', () => {
 
     it('respects provider.anthropic.options.baseURL over the hardcoded Anthropic endpoint', async () => {
       readConfig.mockReturnValue({
-        provider: { anthropic: { options: { baseURL: 'http://127.0.0.1:3456' } } },
+        provider: { anthropic: { options: { baseURL: 'http://127.0.0.1:3456/v1' } } },
       });
       fetchMock.mockResolvedValue(anthropicOk('ok'));
 
@@ -342,6 +342,24 @@ describe('callSmallModel — custom provider config', () => {
       expect(url).toBe('http://127.0.0.1:3456/v1/messages');
       expect(url).not.toContain('api.anthropic.com');
       expect(init.headers['x-api-key']).toBe('dummy');
+    });
+
+    it('uses a bare-host baseURL as-is without inserting /v1, matching @ai-sdk/anthropic', async () => {
+      readConfig.mockReturnValue({
+        provider: { anthropic: { options: { baseURL: 'http://127.0.0.1:3456' } } },
+      });
+      fetchMock.mockResolvedValue(anthropicOk('ok'));
+
+      await callSmallModel({
+        auth: { anthropic: { type: 'api', key: 'dummy' } },
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'anthropic',
+        modelID: 'claude-haiku-4-5',
+        prompt: 'hi',
+      });
+
+      expect(lastCall(fetchMock).url).toBe('http://127.0.0.1:3456/messages');
     });
 
     it('falls back to https://api.anthropic.com when no anthropic baseURL override is configured', async () => {
