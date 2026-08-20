@@ -116,7 +116,7 @@ describe('VS Code SSE proxy', () => {
     const originalFetch = globalThis.fetch;
 
     try {
-      globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+      globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
         start(controller) {
           setTimeout(() => controller.enqueue(new TextEncoder().encode(':first\n\n')), 5);
           setTimeout(() => controller.enqueue(new TextEncoder().encode('data: second\n\n')), 15);
@@ -124,7 +124,7 @@ describe('VS Code SSE proxy', () => {
       }), {
         status: 200,
         headers: { 'content-type': 'text/event-stream' },
-      })) as typeof fetch;
+      });
 
       const chunks: string[] = [];
       const controller = new AbortController();
@@ -138,6 +138,47 @@ describe('VS Code SSE proxy', () => {
 
       await assert.doesNotReject(proxy.run);
       assert.deepEqual(chunks, [':first\n\n', 'data: second\n\n']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('closes an active stream when the manager disconnects', async () => {
+    const originalFetch = globalThis.fetch;
+    let statusListener: Parameters<OpenCodeManager['onStatusChange']>[0] | undefined;
+    let upstreamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let disposed = false;
+    const manager: OpenCodeManager = {
+      ...createManager(),
+      onStatusChange: (callback) => {
+        statusListener = callback;
+        callback('connected');
+        return { dispose: () => { disposed = true; } };
+      },
+    };
+
+    try {
+      globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          upstreamController = controller;
+        },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+
+      const proxy = await openSseProxy({
+        manager,
+        path: '/global/event',
+        signal: new AbortController().signal,
+        stallTimeoutMs: 0,
+        onChunk: () => {},
+      });
+
+      statusListener?.('disconnected');
+      upstreamController?.enqueue(new TextEncoder().encode(':closed\n\n'));
+      await assert.doesNotReject(proxy.run);
+      assert.equal(disposed, true);
     } finally {
       globalThis.fetch = originalFetch;
     }

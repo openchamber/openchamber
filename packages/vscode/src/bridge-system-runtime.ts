@@ -523,6 +523,22 @@ export async function handleSystemBridgeMessage(
           normalizedScope,
           { hasStoredAuth: Boolean(getProviderAuth(providerId)) },
         );
+        if (
+          ctx?.manager?.getProtocol() === 'opencode2'
+          && ctx.manager.getDebugInfo().mode === 'managed'
+        ) {
+          return {
+            id,
+            type,
+            success: true,
+            data: {
+              ...buildDeferredRestartResponse(`Provider ${providerId} saved. Restart the global OpenCode service to apply.`),
+              providerId: result.providerId,
+              path: result.path,
+              config: result.config,
+            },
+          };
+        }
         await ctx?.manager?.restart();
         return {
           id,

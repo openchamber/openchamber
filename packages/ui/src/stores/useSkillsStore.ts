@@ -569,6 +569,13 @@ export const useSkillsStore = create<SkillsStore>()(
 
             const needsReload = payload?.requiresReload ?? false;
             invalidateSkillsLoadCache(directory);
+            if (noteDeferredRestartFromPayload(payload, 'skills', { id: newName })) {
+              const loaded = await get().loadSkills();
+              if (loaded) {
+                emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
+              }
+              return loaded;
+            }
             if (needsReload) {
               requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({

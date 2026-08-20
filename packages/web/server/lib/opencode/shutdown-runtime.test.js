@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createGracefulShutdownRuntime } from './shutdown-runtime.js';
 
-const createRuntime = (server) => createGracefulShutdownRuntime({
+const createRuntime = (server, overrides = {}) => createGracefulShutdownRuntime({
   process: { exit: vi.fn() },
   shutdownTimeoutMs: 1000,
   getExitOnShutdown: () => false,
@@ -30,6 +30,7 @@ const createRuntime = (server) => createGracefulShutdownRuntime({
   getActiveTunnelController: () => null,
   setActiveTunnelController: vi.fn(),
   tunnelAuthController: { clearActiveTunnel: vi.fn() },
+  ...overrides,
 });
 
 describe('graceful shutdown runtime', () => {
@@ -54,5 +55,27 @@ describe('graceful shutdown runtime', () => {
 
     expect(warnSpy).not.toHaveBeenCalledWith('Server close timeout reached, forcing shutdown');
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not close or kill a shared OpenCode service during shutdown', async () => {
+    const close = vi.fn();
+    const killProcessOnPort = vi.fn();
+    const waitForPortRelease = vi.fn();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const runtime = createRuntime(null, {
+      shouldSkipOpenCodeStop: () => true,
+      getOpenCodeOwnership: () => 'shared-service',
+      getOpenCodePort: () => 6123,
+      getOpenCodeProcess: () => ({ close }),
+      killProcessOnPort,
+      waitForPortRelease,
+    });
+
+    await runtime.gracefulShutdown({ exitProcess: false });
+
+    expect(close).not.toHaveBeenCalled();
+    expect(killProcessOnPort).not.toHaveBeenCalled();
+    expect(waitForPortRelease).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith('Skipping OpenCode shutdown (shared service)');
   });
 });

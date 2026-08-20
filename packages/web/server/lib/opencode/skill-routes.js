@@ -21,6 +21,8 @@ export const registerSkillRoutes = (app, dependencies) => {
     readSettingsFromDisk,
     sanitizeSkillCatalogs,
     isUnsafeSkillRelativePath,
+    refreshOpenCodeAfterConfigChange,
+    clientReloadDelayMs,
     buildOpenCodeUrl,
 
     getOpenCodeAuthHeaders,
@@ -624,7 +626,16 @@ export const registerSkillRoutes = (app, dependencies) => {
         console.log(`[Server] Renaming skill: ${skillName} -> ${newName}`);
         console.log('[Server] Working directory:', directory);
         renameSkill(skillName, newName, directory);
-        await refreshOpenCodeAfterConfigChange('skill rename');
+        const refreshResult = await refreshOpenCodeAfterConfigChange('skill rename');
+
+        if (refreshResult?.sharedService) {
+          return res.json({
+            ...buildDeferredRestartResponse(
+              `Skill renamed to ${newName}. Restart the global OpenCode service to apply.`,
+            ),
+            name: newName,
+          });
+        }
 
         return res.json({
           success: true,

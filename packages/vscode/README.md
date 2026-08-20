@@ -32,7 +32,7 @@ Plus everything from the shared OpenChamber UI: branchable timeline, smart tool 
 | `OpenChamber: Open Agent Manager` | Launch parallel multi-model runs |
 | `OpenChamber: Open Session in Editor` | Open current or new session in an editor tab |
 | `OpenChamber: Settings` | Open extension settings |
-| `OpenChamber: Restart API Connection` | Restart the OpenCode API process |
+| `OpenChamber: Restart API Connection` | Reconnect to the OpenCode API |
 | `OpenChamber: Show OpenCode Status` | Debug info for development or bug reports |
 
 ### Right-click menu
@@ -49,7 +49,7 @@ Select code in the editor, right-click, and find the **OpenChamber** submenu:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `openchamber.apiUrl` | _(empty)_ | URL of an external OpenCode API server. Leave empty to auto-start a local instance. |
+| `openchamber.apiUrl` | _(empty)_ | URL of an external OpenCode API server. Leave empty to use the local OpenCode service. |
 | `openchamber.opencodeBinary` | _(empty)_ | Absolute path to the `opencode` CLI binary. Useful when PATH lookup fails. Requires window reload to apply. |
 
 ## Requirements

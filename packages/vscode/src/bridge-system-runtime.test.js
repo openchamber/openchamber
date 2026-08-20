@@ -8,6 +8,8 @@ const updateWorkspaceFolders = mock(async (start, deleteCount, ...foldersToAdd) 
   return true;
 });
 let currentWorkspaceFolders = [];
+const getProviderAuth = mock();
+const upsertProviderConfig = mock();
 
 class Position {
   constructor(line, character) {
@@ -41,10 +43,10 @@ mock.module('vscode', () => ({
 mock.module('./opencodeConfig', () => ({
   removeProviderConfig: mock(),
   getProviderSources: mock(),
-  upsertProviderConfig: mock(),
+  upsertProviderConfig,
 }));
 mock.module('./opencodeAuth', () => ({
-  getProviderAuth: mock(),
+  getProviderAuth,
   removeProviderAuth: mock(),
 }));
 mock.module('./quotaProviders', () => ({
@@ -217,5 +219,45 @@ describe('VS Code system bridge api:workspace:addFolder', () => {
       error: 'Directory path is required',
     });
     expect(updateWorkspaceFolders).not.toHaveBeenCalled();
+  });
+});
+
+describe('VS Code system bridge shared service mutations', () => {
+  test('defers provider apply without restarting opencode2', async () => {
+    const restart = mock(async () => undefined);
+    getProviderAuth.mockReturnValue({ type: 'api', key: 'stored' });
+    upsertProviderConfig.mockReturnValue({
+      providerId: 'custom-provider',
+      path: '/workspace/opencode.json',
+      config: { name: 'Custom Provider' },
+    });
+
+    const response = await handleSystemBridgeMessage({
+      id: 'provider',
+      type: 'api:provider:upsert',
+      payload: {
+        providerID: 'custom-provider',
+        config: { name: 'Custom Provider' },
+        directory: '/workspace',
+      },
+    }, {
+      manager: {
+        getProtocol: () => 'opencode2',
+        getDebugInfo: () => ({ mode: 'managed' }),
+        getWorkingDirectory: () => '/workspace',
+        restart,
+      },
+    }, deps);
+
+    expect(response).toMatchObject({
+      success: true,
+      data: {
+        providerId: 'custom-provider',
+        requiresReload: false,
+        requiresRestart: true,
+        restartDeferred: true,
+      },
+    });
+    expect(restart).not.toHaveBeenCalled();
   });
 });

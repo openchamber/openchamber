@@ -28,7 +28,7 @@ const createTempProject = () => {
   return projectRoot;
 };
 
-const startSkillsApp = ({ projectRoot }) => {
+const startSkillsApp = ({ projectRoot, refreshResult }) => {
   const app = express();
   app.use(express.json());
 
@@ -49,7 +49,7 @@ const startSkillsApp = ({ projectRoot }) => {
     readSettingsFromDisk: async () => ({}),
     sanitizeSkillCatalogs: (value) => value,
     isUnsafeSkillRelativePath: () => false,
-    refreshOpenCodeAfterConfigChange: async () => {},
+    refreshOpenCodeAfterConfigChange: async () => refreshResult,
     clientReloadDelayMs: 0,
     buildOpenCodeUrl: () => 'http://127.0.0.1:9/',
     getOpenCodeAuthHeaders: () => ({}),
@@ -212,5 +212,38 @@ describe('skill-routes directory soft fallback', () => {
         force: true,
       });
     }
+  });
+
+  it('defers apply after renaming a skill through the shared service', async () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.opencode', 'skills', 'old-skill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), [
+      '---',
+      'name: old-skill',
+      'description: Old skill',
+      '---',
+      '',
+      'Instructions',
+      '',
+    ].join('\n'));
+    appHandle = startSkillsApp({ projectRoot, refreshResult: { sharedService: true } });
+
+    const response = await fetch(`${appHandle.baseUrl}/api/config/skills/old-skill`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ renameTo: 'new-skill' }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      success: true,
+      name: 'new-skill',
+      requiresReload: false,
+      requiresRestart: true,
+      restartDeferred: true,
+    });
+    expect(fs.existsSync(path.join(projectRoot, '.opencode', 'skills', 'new-skill', 'SKILL.md'))).toBe(true);
   });
 });

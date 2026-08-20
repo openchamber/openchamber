@@ -62,6 +62,8 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 - `bridge-config-runtime.ts`
   - Config and skills message handlers (`api:config/*`).
   - Includes OpenCode resolution diagnostics parity handler used by shared UI (`/api/config/opencode-resolution`).
+  - Config reload returns `requiresManualRestart` for the shared opencode2 service instead of claiming to restart an operator-owned daemon.
+  - Immediate legacy mutations such as skill rename and provider upsert remain managed-child restarts; in shared opencode2 mode they are deferred and never restart the global daemon.
   - OpenCode JSONC reads in `opencodeConfig.ts` fail closed on a partial or non-object `jsonc-parser` tree (`INVALID_JSONC`) so mutations cannot rewrite a `$schema`-only stub over an existing config. Comment-only files read as empty, while other content that yields no JSON value (YAML, plain text) fails closed. A broken layer is omitted from the merge and recorded on `layerErrors`; valid sibling layers still load, including plugin list/read via `getPluginConfigSources`. Writes still refuse to overwrite the broken file.
 
 - `bridge-settings-runtime.ts`
@@ -79,6 +81,9 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - Owns managed-versus-external capability decisions, latest-version checks, serialized OpenCode self-upgrades, and restart-after-upgrade behavior.
   - `opencode.ts` detects legacy `/global/health` versus opencode2 `/api/health` with an independent bounded timeout per probe before reporting a managed or external server connected; opencode2 is not offered the legacy self-upgrade route.
   - Managed CLI discovery prefers legacy `opencode`, then discovers separately named `opencode2` through PATH, known install locations, `where.exe`, and login-shell lookup. Windows npm `opencode2.cmd` shims launch their packaged native executable directly when available; OpenCode desktop GUI executables remain excluded.
+  - A resolved local `opencode2` starts through its official global `service start` command. The extension then uses `Service.discover()` as the authoritative URL/auth source for every proxy, SSE stream, and watcher; it does not allocate a private port, inject a password, register process ownership, or stop the shared service.
+  - The service command inherits the extension-host environment captured before shell discovery, without applying OpenChamber's managed provider aliases; global service environment overrides remain owned by OpenCode service configuration.
+  - Restarting an opencode2 connection reruns global service start/discovery and publishes disconnect/connect transitions so transports rebind if the endpoint changes. Deactivation clears only extension-local state. Legacy managed children retain direct `serve` startup, generated auth, process registry, orphan cleanup, and owned shutdown; an explicit `openchamber.apiUrl` remains authoritative and bypasses global service discovery.
 
 - `bridge-permission-auto-accept-runtime.ts`
   - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.
