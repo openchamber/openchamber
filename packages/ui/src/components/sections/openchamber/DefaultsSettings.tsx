@@ -2,6 +2,9 @@ import React from 'react';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Icon } from '@/components/icon/Icon';
 import {
   SettingsSection,
   SettingsFieldRow,
@@ -12,6 +15,7 @@ import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SETTINGS_SELECT_SIZE,
   SETTINGS_OPTION_STACK_CLASS,
+  SETTINGS_ICON_BUTTON_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -21,6 +25,7 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { isDesktopShell, requestDirectoryAccess } from '@/lib/desktop';
 
 const getDisplayModel = (
   storedModel: string | undefined
@@ -42,6 +47,7 @@ export const DefaultsSettings: React.FC = () => {
   const setSettingsDefaultModel = useConfigStore((state) => state.setSettingsDefaultModel);
   const setSettingsDefaultVariant = useConfigStore((state) => state.setSettingsDefaultVariant);
   const setSettingsDefaultAgent = useConfigStore((state) => state.setSettingsDefaultAgent);
+  const setSettingsDefaultDirectory = useConfigStore((state) => state.setSettingsDefaultDirectory);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const providers = useConfigStore((state) => state.providers);
@@ -50,6 +56,7 @@ export const DefaultsSettings: React.FC = () => {
   const [defaultModel, setDefaultModel] = React.useState<string | undefined>();
   const [defaultVariant, setDefaultVariant] = React.useState<string | undefined>();
   const [defaultAgent, setDefaultAgent] = React.useState<string | undefined>();
+  const [defaultDirectory, setDefaultDirectory] = React.useState<string | undefined>();
   const [smallModelUseDefault, setSmallModelUseDefault] = React.useState(true);
   const [smallModelOverride, setSmallModelOverride] = React.useState<string | undefined>();
   const [smallModelProviders, setSmallModelProviders] = React.useState<string[]>([]);
@@ -65,6 +72,7 @@ export const DefaultsSettings: React.FC = () => {
           defaultModel?: string;
           defaultVariant?: string;
           defaultAgent?: string;
+          defaultDirectory?: string;
           smallModelUseDefault?: boolean;
           smallModelOverride?: string;
           walkthroughModelOverride?: string;
@@ -85,6 +93,7 @@ export const DefaultsSettings: React.FC = () => {
                       ? (raw.defaultVariant as string)
                       : undefined,
                   defaultAgent: typeof settings.defaultAgent === 'string' ? settings.defaultAgent : undefined,
+                  defaultDirectory: typeof settings.defaultDirectory === 'string' ? settings.defaultDirectory : undefined,
                   smallModelUseDefault: typeof raw.smallModelUseDefault === 'boolean' ? raw.smallModelUseDefault : undefined,
                   smallModelOverride: typeof raw.smallModelOverride === 'string' ? raw.smallModelOverride : undefined,
                   walkthroughModelOverride:
@@ -120,10 +129,15 @@ export const DefaultsSettings: React.FC = () => {
             typeof data.defaultAgent === 'string' && data.defaultAgent.trim().length > 0
               ? data.defaultAgent.trim()
               : undefined;
+          const directory =
+            typeof data.defaultDirectory === 'string' && data.defaultDirectory.trim().length > 0
+              ? data.defaultDirectory.trim()
+              : undefined;
 
           if (model !== undefined) setDefaultModel(model);
           if (variant !== undefined) setDefaultVariant(variant);
           if (agent !== undefined) setDefaultAgent(agent);
+          if (directory !== undefined) setDefaultDirectory(directory);
           if (typeof data.smallModelUseDefault === 'boolean') setSmallModelUseDefault(data.smallModelUseDefault);
           if (typeof data.smallModelOverride === 'string' && data.smallModelOverride.trim()) {
             setSmallModelOverride(data.smallModelOverride.trim());
@@ -218,6 +232,34 @@ export const DefaultsSettings: React.FC = () => {
     },
     [setAgent, setSettingsDefaultAgent]
   );
+
+  const handleDefaultDirectoryChange = React.useCallback(
+    async (value: string) => {
+      const newValue = value || undefined;
+      setDefaultDirectory(newValue);
+      setSettingsDefaultDirectory(newValue);
+      try {
+        await updateDesktopSettings({ defaultDirectory: newValue ?? '' });
+      } catch (error) {
+        console.warn('Failed to save default directory:', error);
+      }
+    },
+    [setSettingsDefaultDirectory]
+  );
+
+  const handleBrowseDefaultDirectory = React.useCallback(async () => {
+    if (!isDesktopShell()) {
+      return;
+    }
+    try {
+      const selected = await requestDirectoryAccess('');
+      if (selected.success && selected.path && selected.path.trim().length > 0) {
+        void handleDefaultDirectoryChange(selected.path.trim());
+      }
+    } catch {
+      // ignore
+    }
+  }, [handleDefaultDirectoryChange]);
 
   const handleSmallModelUseDefaultChange = React.useCallback(
     async (useDefault: boolean) => {
@@ -392,6 +434,33 @@ export const DefaultsSettings: React.FC = () => {
                 onChange={handleAgentChange}
                 className={SETTINGS_CUSTOM_TRIGGER_CLASS}
               />
+            </SettingsFieldRow>
+
+            <SettingsFieldRow
+              settingsItem="sessions.default-directory"
+              label={t('settings.openchamber.defaults.field.defaultDirectory')}
+              info={t('settings.openchamber.defaults.field.defaultDirectoryHint')}
+              alignEnd={false}
+              controlClassName="@xl:w-[20rem]"
+            >
+              <Input
+                value={defaultDirectory ?? ''}
+                onChange={(e) => void handleDefaultDirectoryChange(e.target.value)}
+                placeholder={t('settings.openchamber.defaults.field.defaultDirectoryPlaceholder')}
+                className="h-8 min-w-0 flex-1 font-mono text-xs"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={handleBrowseDefaultDirectory}
+                disabled={!isDesktopShell()}
+                className={SETTINGS_ICON_BUTTON_CLASS}
+                aria-label={t('settings.openchamber.defaults.actions.browseDirectoryAria')}
+                title={t('settings.openchamber.defaults.actions.browseDirectory')}
+              >
+                <Icon name="folder" className="h-4 w-4" />
+              </Button>
             </SettingsFieldRow>
           </div>
 

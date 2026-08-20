@@ -1206,6 +1206,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.defaultAgent === 'string' && candidate.defaultAgent.length > 0) {
     result.defaultAgent = candidate.defaultAgent;
   }
+  if (typeof candidate.defaultDirectory === 'string' && candidate.defaultDirectory.length > 0) {
+    result.defaultDirectory = candidate.defaultDirectory;
+  }
   if (typeof candidate.smallModelUseDefault === 'boolean') {
     result.smallModelUseDefault = candidate.smallModelUseDefault;
   }

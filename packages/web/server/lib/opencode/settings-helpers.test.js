@@ -467,6 +467,27 @@ describe('settings helpers', () => {
     });
   });
 
+  describe('default directory persistence', () => {
+    it('round-trips a non-empty defaultDirectory through the sanitizer', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ defaultDirectory: '/projects/alpha' })).toEqual({
+        defaultDirectory: '/projects/alpha',
+      });
+      expect(helpers.sanitizeSettingsUpdate({ defaultDirectory: '  /projects/beta  ' })).toEqual({
+        defaultDirectory: '/projects/beta',
+      });
+    });
+
+    it('clears defaultDirectory on empty input', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ defaultDirectory: '' })).toEqual({ defaultDirectory: undefined });
+      expect(helpers.sanitizeSettingsUpdate({ defaultDirectory: '   ' })).toEqual({ defaultDirectory: undefined });
+      expect(helpers.sanitizeSettingsUpdate({ defaultDirectory: 42 })).toEqual({});
+    });
+  });
+
   describe('session retention settings persistence', () => {
     it('round-trips sessionRetentionAction archive and delete through the sanitizer', () => {
       const helpers = createTestHelpersWithRealSanitizers();

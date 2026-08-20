@@ -368,6 +368,7 @@ describe('openNewSessionDraft project binding', () => {
       activeProjectId: projectA.id,
     });
     useDirectoryStore.getState().setDirectory(projectB.path, { showOverlay: false });
+    useConfigStore.setState({ settingsDefaultDirectory: undefined });
   });
 
   test('keeps implicit draft on current directory when active project differs', () => {
@@ -405,6 +406,47 @@ describe('openNewSessionDraft project binding', () => {
     expect(draft.open).toBe(true);
     expect(draft.selectedProjectId).toBe(projectB.id);
   });
+
+  test('uses the settings default directory for a plain new-session open', () => {
+    useConfigStore.setState({ settingsDefaultDirectory: '/projects/alpha' });
+
+    useSessionUIStore.getState().openNewSessionDraft();
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.open).toBe(true);
+    expect(draft.directoryOverride).toBe('/projects/alpha');
+    expect(draft.selectedProjectId).toBe(projectA.id);
+  });
+
+  test('leaves the draft unbounded when the default directory is not a known project', () => {
+    useConfigStore.setState({ settingsDefaultDirectory: '/external/default' });
+
+    useSessionUIStore.getState().openNewSessionDraft();
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.open).toBe(true);
+    expect(draft.directoryOverride).toBe('/external/default');
+    expect(draft.selectedProjectId).toBeNull();
+  });
+
+  test('explicit directoryOverride wins over the settings default directory', () => {
+    useConfigStore.setState({ settingsDefaultDirectory: '/projects/alpha' });
+
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: '/projects/beta/src' });
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.directoryOverride).toBe('/projects/beta/src');
+  });
+
+  test('explicit selectedProjectId wins over the settings default directory', () => {
+    useConfigStore.setState({ settingsDefaultDirectory: '/projects/alpha' });
+
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectB.id });
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.selectedProjectId).toBe(projectB.id);
+    expect(draft.directoryOverride).toBe(projectB.path);
+  });
 });
 
 describe('createSession draft lifecycle', () => {
@@ -429,6 +471,7 @@ describe('createSession draft lifecycle', () => {
       currentSessionDirectory: null,
       newSessionDraft: { open: true, directoryOverride: '/projects/alpha', parentID: null, title: 'Draft title' },
     });
+    useConfigStore.setState({ settingsDefaultDirectory: undefined });
   });
 
   afterEach(() => {

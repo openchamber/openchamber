@@ -55,6 +55,7 @@ interface OpenChamberDefaults {
     defaultModel?: string;
     defaultVariant?: string;
     defaultAgent?: string;
+    defaultDirectory?: string;
     autoCreateWorktree?: boolean;
     gitmojiEnabled?: boolean;
     defaultFileViewerPreview?: boolean;
@@ -91,6 +92,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                     const defaultModel = typeof data?.defaultModel === 'string' ? data.defaultModel.trim() : '';
                     const defaultVariant = typeof data?.defaultVariant === 'string' ? data.defaultVariant.trim() : '';
                     const defaultAgent = typeof data?.defaultAgent === 'string' ? data.defaultAgent.trim() : '';
+                    const defaultDirectory = typeof data?.defaultDirectory === 'string' ? data.defaultDirectory.trim() : '';
                     const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
                     const defaultFileViewerPreview = typeof data?.defaultFileViewerPreview === 'boolean' ? data.defaultFileViewerPreview : undefined;
                     const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
@@ -108,6 +110,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                         defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
                         defaultVariant: defaultVariant.length > 0 ? defaultVariant : undefined,
                         defaultAgent: defaultAgent.length > 0 ? defaultAgent : undefined,
+                        defaultDirectory: defaultDirectory.length > 0 ? defaultDirectory : undefined,
                         autoCreateWorktree: typeof data?.autoCreateWorktree === 'boolean' ? data.autoCreateWorktree : undefined,
                         gitmojiEnabled,
                         defaultFileViewerPreview,
@@ -137,6 +140,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
         const defaultModel = typeof data?.defaultModel === 'string' ? data.defaultModel.trim() : '';
         const defaultVariant = typeof data?.defaultVariant === 'string' ? data.defaultVariant.trim() : '';
         const defaultAgent = typeof data?.defaultAgent === 'string' ? data.defaultAgent.trim() : '';
+        const defaultDirectory = typeof data?.defaultDirectory === 'string' ? data.defaultDirectory.trim() : '';
         const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
         const defaultFileViewerPreview = typeof data?.defaultFileViewerPreview === 'boolean' ? data.defaultFileViewerPreview : undefined;
         const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
@@ -154,6 +158,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
             defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
             defaultVariant: defaultVariant.length > 0 ? defaultVariant : undefined,
             defaultAgent: defaultAgent.length > 0 ? defaultAgent : undefined,
+            defaultDirectory: defaultDirectory.length > 0 ? defaultDirectory : undefined,
             autoCreateWorktree: typeof data?.autoCreateWorktree === 'boolean' ? data.autoCreateWorktree : undefined,
             gitmojiEnabled,
             defaultFileViewerPreview,
@@ -1021,6 +1026,9 @@ interface ConfigStore {
     settingsDefaultModel: string | undefined; // format: "provider/model"
     settingsDefaultVariant: string | undefined;
     settingsDefaultAgent: string | undefined;
+    // Absolute path new-session drafts start in when no directory/project is
+    // explicitly chosen; empty/absent keeps the default resolution behavior.
+    settingsDefaultDirectory: string | undefined;
     // OpenCode server's own `default_agent` config field (name of a primary agent), used as a
     // fallback when our own settingsDefaultAgent is unset. Sourced from sync config.
     opencodeDefaultAgent: string | undefined;
@@ -1107,6 +1115,7 @@ interface ConfigStore {
     setSettingsDefaultModel: (model: string | undefined) => void;
     setSettingsDefaultVariant: (variant: string | undefined) => void;
     setSettingsDefaultAgent: (agent: string | undefined) => void;
+    setSettingsDefaultDirectory: (directory: string | undefined) => void;
     setSettingsAutoCreateWorktree: (enabled: boolean) => void;
     setSettingsGitmojiEnabled: (enabled: boolean) => void;
     setSettingsDefaultFileViewerPreview: (enabled: boolean) => void;
@@ -1165,6 +1174,7 @@ export const useConfigStore = create<ConfigStore>()(
                 settingsDefaultModel: undefined,
                 settingsDefaultVariant: undefined,
                 settingsDefaultAgent: undefined,
+                settingsDefaultDirectory: undefined,
                 opencodeDefaultAgent: undefined,
                 opencodeDefaultModel: undefined,
                 settingsAutoCreateWorktree: false,
@@ -2076,6 +2086,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     settingsDefaultModel: openChamberDefaults.defaultModel,
                                     settingsDefaultVariant: openChamberDefaults.defaultVariant,
                                     settingsDefaultAgent: openChamberDefaults.defaultAgent,
+                                    settingsDefaultDirectory: openChamberDefaults.defaultDirectory,
                                     settingsAutoCreateWorktree: openChamberDefaults.autoCreateWorktree ?? false,
                                     settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
                                     settingsDefaultFileViewerPreview: openChamberDefaults.defaultFileViewerPreview ?? false,
@@ -2800,6 +2811,10 @@ export const useConfigStore = create<ConfigStore>()(
  
                  setSettingsDefaultAgent: (agent: string | undefined) => {
                      set({ settingsDefaultAgent: agent });
+                 },
+
+                 setSettingsDefaultDirectory: (directory: string | undefined) => {
+                     set({ settingsDefaultDirectory: directory });
                  },
 
                 setSettingsAutoCreateWorktree: (enabled: boolean) => {

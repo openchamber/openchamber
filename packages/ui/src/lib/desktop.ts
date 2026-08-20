@@ -125,6 +125,9 @@ export type DesktopSettings = {
   defaultModel?: string; // format: "provider/model"
   defaultVariant?: string;
   defaultAgent?: string;
+  // Absolute path new-session drafts start in when no directory/project is
+  // explicitly chosen. Empty/absent keeps the current default behavior.
+  defaultDirectory?: string;
   smallModelUseDefault?: boolean;
   sessionRecapEnabled?: boolean;
   sessionSuggestionEnabled?: boolean;

@@ -1005,10 +1005,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       : null
     const persistedProjectByDir = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, persistedTarget?.directory ?? null)
     const currentDirProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, currentDirectory)
+    // Settings default for plain new-session opens (no explicit directory or
+    // project): overrides the current directory, but never an explicit pick.
+    const settingsDefaultDirectory = normalizePath(useConfigStore.getState().settingsDefaultDirectory ?? null)
+    const settingsDefaultDirProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, settingsDefaultDirectory)
 
     const selectedProject = (() => {
       if (explicitProject) return explicitProject
       if (explicitDirectory !== null) return inferredProjectFromDir
+      if (settingsDefaultDirectory) return settingsDefaultDirProject
       if (currentDirectory) return currentDirProject
       return persistedProjectByDir ?? persistedProjectById ?? fallbackProject
     })()
@@ -1016,6 +1021,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const directory = (() => {
       if (explicitDirectory !== null) return explicitDirectory
       if (explicitProject) return normalizePath(explicitProject.path ?? null)
+      if (settingsDefaultDirectory) return settingsDefaultDirectory
       if (currentDirectory) return currentDirectory
       if (persistedTarget?.directory) return persistedTarget.directory
       return normalizePath(selectedProject?.path ?? null)
