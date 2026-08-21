@@ -24,6 +24,7 @@ export const dict = {
   'common.language.korean': 'Korean',
   'common.language.polish': 'Polish',
   'common.language.japanese': 'Japanese',
+  'common.language.turkish': 'Turkish',
   'common.revealPath.finder': 'Reveal in Finder',
   'common.revealPath.fileExplorer': 'Open in File Explorer',
   'common.revealPath.fileManager': 'Open in File Manager',
