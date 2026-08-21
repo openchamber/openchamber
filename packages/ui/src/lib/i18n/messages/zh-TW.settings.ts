@@ -342,6 +342,7 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.relayEndpoint.error.invalid': '請輸入有效的 ws:// 或 wss:// WebSocket URL。',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.saveFailed': '儲存中繼伺服器 URL 失敗。',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed': '載入中繼伺服器設定失敗。',
+  'settings.remoteInstances.clientAuth.relayEndpoint.state.loading': '正在檢查中繼伺服器…',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.locked': '中繼端點已由伺服器上的 OPENCHAMBER_RELAY_URL 環境變數固定,無法在此變更。',
   'settings.remoteInstances.relay.title': 'OpenChamber Relay',
   'settings.remoteInstances.relay.autoHint': '透過中繼配對裝置時自動開啟。',

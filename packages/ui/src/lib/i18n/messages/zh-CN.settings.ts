@@ -336,6 +336,7 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.relayEndpoint.error.invalid': '请输入有效的 ws:// 或 wss:// WebSocket URL。',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.saveFailed': '保存中继服务器 URL 失败。',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed': '加载中继服务器配置失败。',
+  'settings.remoteInstances.clientAuth.relayEndpoint.state.loading': '正在检查中继服务器…',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.locked': '中继端点已由服务器上的 OPENCHAMBER_RELAY_URL 环境变量固定,无法在此更改。',
   'settings.remoteInstances.relay.title': 'OpenChamber Relay',
   'settings.remoteInstances.relay.autoHint': '通过中继配对设备时自动开启。',

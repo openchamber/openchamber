@@ -336,6 +336,7 @@ export const settingsDict = {
   "settings.remoteInstances.clientAuth.relayEndpoint.error.invalid": "Introduce una URL WebSocket ws:// o wss:// válida.",
   "settings.remoteInstances.clientAuth.relayEndpoint.error.saveFailed": "No se pudo guardar la URL del servidor Relay.",
   "settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed": "No se pudo cargar la configuración del servidor Relay.",
+  "settings.remoteInstances.clientAuth.relayEndpoint.state.loading": "Comprobando el servidor Relay…",
   "settings.remoteInstances.clientAuth.relayEndpoint.error.locked": "El punto de conexión del Relay está fijado en el servidor por la variable de entorno OPENCHAMBER_RELAY_URL y no puede cambiarse aquí.",
   "settings.remoteInstances.relay.title": "OpenChamber Relay",
   "settings.remoteInstances.relay.autoHint": "Se activa automáticamente al vincular un dispositivo por relay.",

@@ -336,6 +336,7 @@ export const settingsDict = {
   "settings.remoteInstances.clientAuth.relayEndpoint.error.invalid": "Введіть коректну адресу WebSocket ws:// або wss://.",
   "settings.remoteInstances.clientAuth.relayEndpoint.error.saveFailed": "Не вдалося зберегти адресу сервера Relay.",
   "settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed": "Не вдалося завантажити конфігурацію сервера Relay.",
+  "settings.remoteInstances.clientAuth.relayEndpoint.state.loading": "Перевірка сервера Relay…",
   "settings.remoteInstances.clientAuth.relayEndpoint.error.locked": "Адресу Relay закріплено на сервері змінною середовища OPENCHAMBER_RELAY_URL, і її не можна змінити тут.",
   "settings.remoteInstances.relay.title": "OpenChamber Relay",
   "settings.remoteInstances.relay.autoHint": "Вмикається автоматично, коли ти паруєш пристрій через relay.",

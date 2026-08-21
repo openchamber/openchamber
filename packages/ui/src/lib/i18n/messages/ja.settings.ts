@@ -369,6 +369,7 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.relayEndpoint.error.invalid': '有効な ws:// または wss:// のWebSocket URLを入力してください。',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.saveFailed': 'RelayサーバーのURLを保存できませんでした。',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed': 'Relayサーバーの設定を読み込めませんでした。',
+  'settings.remoteInstances.clientAuth.relayEndpoint.state.loading': 'Relayサーバーを確認しています…',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.locked': 'Relayのエンドポイントはサーバー上で環境変数 OPENCHAMBER_RELAY_URL によって固定されているため、ここでは変更できません。',
   'settings.remoteInstances.relay.title': 'OpenChamber Relay',
   'settings.remoteInstances.relay.autoHint': 'リレー経由でデバイスをペアリングすると自動的に有効になります。',

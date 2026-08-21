@@ -368,6 +368,7 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.relayEndpoint.error.invalid': 'Enter a valid ws:// or wss:// WebSocket URL.',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.saveFailed': 'Failed to save the relay server URL.',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed': 'Failed to load the relay server configuration.',
+  'settings.remoteInstances.clientAuth.relayEndpoint.state.loading': 'Checking relay server…',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.locked': 'The relay endpoint is pinned on the server by the OPENCHAMBER_RELAY_URL environment variable and cannot be changed here.',
   'settings.remoteInstances.relay.title': 'OpenChamber Relay',
   'settings.remoteInstances.relay.autoHint': 'Turns on automatically when you pair a device over the relay.',

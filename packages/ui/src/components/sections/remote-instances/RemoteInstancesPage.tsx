@@ -1601,22 +1601,29 @@ export const RemoteInstancesPage: React.FC = () => {
                 )}
               </div>
               {remoteClientError ? <p className="typography-meta text-[var(--status-error)]">{remoteClientError}</p> : null}
-              {relayEndpointLoadFailed || relayEndpoint ? (
-                <SettingsControlGroup
-                  title={t('settings.remoteInstances.clientAuth.relayEndpoint.title')}
-                  info={t('settings.remoteInstances.clientAuth.relayEndpoint.info')}
-                  settingsItem="remote-instances.relay-url"
-                >
-                  {relayEndpointLoadFailed ? (
+              {/* Always mounted while the section renders: the settings-search
+                  navigation looks the anchor up once (SettingsView), so the
+                  control group must exist even while the status request is
+                  still in flight — it shows an inline loading state instead. */}
+              <SettingsControlGroup
+                title={t('settings.remoteInstances.clientAuth.relayEndpoint.title')}
+                info={t('settings.remoteInstances.clientAuth.relayEndpoint.info')}
+                settingsItem="remote-instances.relay-url"
+              >
+                {relayEndpointLoadFailed ? (
                     <p className="typography-meta text-[var(--status-error)]">
                       {t('settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed')}
                     </p>
-                  ) : relayEndpoint?.relayUrlLocked ? (
+                  ) : !relayEndpoint ? (
+                    <p className="typography-meta text-muted-foreground">
+                      {t('settings.remoteInstances.clientAuth.relayEndpoint.state.loading')}
+                    </p>
+                  ) : relayEndpoint.relayUrlLocked ? (
                     <p className="typography-meta text-muted-foreground">
                       {t('settings.remoteInstances.clientAuth.relayEndpoint.locked')}
                       <span className="ml-1 font-mono text-xs break-all">{relayEndpoint.relayUrl}</span>
                     </p>
-                  ) : relayEndpoint ? (
+                  ) : (
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <SettingsChipGroup
@@ -1660,9 +1667,8 @@ export const RemoteInstancesPage: React.FC = () => {
                       ) : null}
                       {relayUrlError ? <p className="typography-meta text-[var(--status-error)]">{relayUrlError}</p> : null}
                     </div>
-                  ) : null}
-                </SettingsControlGroup>
-              ) : null}
+                  )}
+              </SettingsControlGroup>
           </SettingsSection>
         ) : null}
 

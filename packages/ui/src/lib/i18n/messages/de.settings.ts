@@ -352,6 +352,7 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.relayEndpoint.error.invalid': 'Gib eine gültige ws://- oder wss://-WebSocket-URL ein.',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.saveFailed': 'Relay-Server-URL konnte nicht gespeichert werden.',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed': 'Relay-Server-Konfiguration konnte nicht geladen werden.',
+  'settings.remoteInstances.clientAuth.relayEndpoint.state.loading': 'Relay-Server wird geprüft…',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.locked': 'Der Relay-Endpunkt ist auf dem Server durch die Umgebungsvariable OPENCHAMBER_RELAY_URL festgelegt und kann hier nicht geändert werden.',
   'settings.remoteInstances.relay.title': 'OpenChamber Relay',
   'settings.remoteInstances.relay.autoHint': 'Schaltet automatisch ein, wenn Sie ein Gerät über das Relay koppeln.',

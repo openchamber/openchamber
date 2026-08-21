@@ -336,6 +336,7 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.relayEndpoint.error.invalid': '유효한 ws:// 또는 wss:// WebSocket URL을 입력하세요.',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.saveFailed': 'Relay 서버 URL을 저장하지 못했습니다.',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed': 'Relay 서버 구성을 불러오지 못했습니다.',
+  'settings.remoteInstances.clientAuth.relayEndpoint.state.loading': 'Relay 서버를 확인하는 중…',
   'settings.remoteInstances.clientAuth.relayEndpoint.error.locked': 'Relay 엔드포인트는 서버의 환경 변수 OPENCHAMBER_RELAY_URL로 고정되어 있어 여기서 변경할 수 없습니다.',
   'settings.remoteInstances.relay.title': 'OpenChamber Relay',
   'settings.remoteInstances.relay.autoHint': '릴레이로 기기를 페어링하면 자동으로 켜집니다.',
