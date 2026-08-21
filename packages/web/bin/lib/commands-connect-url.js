@@ -70,7 +70,6 @@ function createSettingsAccessors() {
     const temporaryPath = `${settingsPath}.tmp-${process.pid}-${Date.now()}`;
     await fs.promises.writeFile(temporaryPath, JSON.stringify(settings, null, 2), 'utf8');
     await fs.promises.rename(temporaryPath, settingsPath);
-    await fs.promises.rm(`${settingsPath}.backup`, { force: true }).catch(() => undefined);
   };
   return { readSettingsFromDiskMigrated, writeSettingsToDisk };
 }

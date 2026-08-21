@@ -577,7 +577,6 @@ export const createSettingsRuntime = (deps) => {
       await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
       if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
       await replaceFile(tmp, SETTINGS_FILE_PATH);
-      await fsPromises.rm(`${SETTINGS_FILE_PATH}.backup`, { force: true }).catch(() => undefined);
       if (process.platform !== 'win32') await fsPromises.chmod(SETTINGS_FILE_PATH, 0o600);
     } catch (error) {
       await fsPromises.rm(tmp, { force: true }).catch(() => {});

@@ -183,7 +183,6 @@ const writeSharedSettingsToDisk = async (changes: Record<string, unknown>): Prom
     tmp = `${OPENCHAMBER_SHARED_SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await fs.promises.writeFile(tmp, JSON.stringify(next, null, 2), 'utf8');
     await fs.promises.rename(tmp, OPENCHAMBER_SHARED_SETTINGS_PATH);
-    await fs.promises.rm(`${OPENCHAMBER_SHARED_SETTINGS_PATH}.backup`, { force: true }).catch(() => undefined);
   } catch {
     if (tmp) {
       await fs.promises.rm(tmp, { force: true }).catch(() => {});

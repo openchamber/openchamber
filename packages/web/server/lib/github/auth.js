@@ -181,11 +181,6 @@ function writeSettingsFile(settings) {
   }
   fs.renameSync(tmpFile, SETTINGS_FILE);
   try {
-    fs.rmSync(`${SETTINGS_FILE}.backup`, { force: true });
-  } catch {
-    // The canonical file is already complete.
-  }
-  try {
     fs.chmodSync(SETTINGS_FILE, 0o600);
   } catch {
     // best-effort

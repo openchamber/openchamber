@@ -1,32 +1,45 @@
-import { describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { readJsonFileWithBackup, readJsonFileWithBackupSync } from './settings-file.js';
 
 describe('settings backup reads', () => {
-  it('uses the backup when the canonical file is unavailable', async () => {
-    const readFile = vi.fn(async (filePath) => {
-      if (filePath.endsWith('.backup')) return '{"theme":"old"}';
-      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
-    });
+  let directory;
+  let settingsPath;
 
-    await expect(readJsonFileWithBackup({ readFile }, 'settings.json')).resolves.toEqual({ theme: 'old' });
+  beforeEach(async () => {
+    directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'openchamber-settings-file-'));
+    settingsPath = path.join(directory, 'settings.json');
+  });
+
+  afterEach(() => fsp.rm(directory, { recursive: true, force: true }));
+
+  it('uses the backup when the canonical file is unavailable', async () => {
+    await fsp.writeFile(`${settingsPath}.backup-1-electron`, '{"theme":"old"}');
+
+    await expect(readJsonFileWithBackup(fsp, settingsPath)).resolves.toEqual({ theme: 'old' });
   });
 
   it('uses the backup when the canonical file is missing', () => {
-    const readFileSync = vi.fn((filePath) => {
-      if (filePath.endsWith('.backup')) return '{"theme":"old"}';
-      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
-    });
+    fs.writeFileSync(`${settingsPath}.backup-1-electron`, '{"theme":"old"}');
 
-    expect(readJsonFileWithBackupSync({ readFileSync }, 'settings.json')).toEqual({ theme: 'old' });
+    expect(readJsonFileWithBackupSync(fs, settingsPath)).toEqual({ theme: 'old' });
   });
 
-  it('does not hide a malformed recovery backup as a missing canonical file', async () => {
-    const readFile = vi.fn(async (filePath) => {
-      if (filePath.endsWith('.backup')) return '{';
-      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
-    });
+  it('uses the newest valid recovery backup', async () => {
+    await fsp.writeFile(`${settingsPath}.backup-1-electron`, '{"theme":"old"}');
+    await fsp.writeFile(`${settingsPath}.backup-2-electron`, '{"theme":"newer"}');
 
-    await expect(readJsonFileWithBackup({ readFile }, 'settings.json')).rejects.toBeInstanceOf(SyntaxError);
+    await expect(readJsonFileWithBackup(fsp, settingsPath)).resolves.toEqual({ theme: 'newer' });
+  });
+
+  it('does not hide malformed recovery data as a missing canonical file', async () => {
+    await fsp.writeFile(`${settingsPath}.backup-1-electron`, '{"theme":"stale"}');
+    await fsp.writeFile(`${settingsPath}.backup-2-electron`, '{');
+
+    await expect(readJsonFileWithBackup(fsp, settingsPath)).rejects.toBeInstanceOf(SyntaxError);
   });
 });
