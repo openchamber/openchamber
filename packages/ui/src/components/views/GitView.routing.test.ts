@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import { getWorkingTreeDiffDestination } from '@/lib/getWorkingTreeDiffDestination';
+import type { GitCommitChangedFile } from '@/lib/api/types';
+import { createGitContextCommitDetailsController } from './git/gitContextCommitDetailsController';
 import { getGitViewRenderMode } from './git/gitViewRenderMode';
 
 describe('getWorkingTreeDiffDestination', () => {
@@ -78,5 +80,54 @@ describe('getGitViewRenderMode', () => {
       isDesktopShell: false,
       isVSCode: true,
     })).toBe('legacy-inline');
+  });
+});
+
+describe('createGitContextCommitDetailsController', () => {
+  test('routes graph file selection to the context commit diff with the exact comparison key', async () => {
+    const openContextCommitDiffCalls: Array<{
+      directory: string;
+      target: {
+        commitHash: string;
+        parentHash: string | null;
+        file: GitCommitChangedFile;
+      };
+    }> = [];
+    const baseController = {
+      selectFile() {},
+    };
+    const wrappedController = createGitContextCommitDetailsController(
+      baseController as never,
+      '/repo',
+      (directory, target) => {
+        openContextCommitDiffCalls.push({ directory, target });
+      },
+    );
+    const selectedFile: GitCommitChangedFile = {
+      path: 'src/history.ts',
+      originalPath: 'src/history-before.ts',
+      status: 'R',
+      kind: 'file',
+      originalObjectId: '1'.repeat(40),
+      objectId: '2'.repeat(40),
+      insertions: 7,
+      deletions: 3,
+      isBinary: false,
+    };
+
+    wrappedController?.selectFile?.({
+      directory: '/repo',
+      commitHash: 'a'.repeat(40),
+      parentHash: 'c'.repeat(40),
+    }, selectedFile);
+
+    expect(openContextCommitDiffCalls).toEqual([{
+      directory: '/repo',
+      target: {
+        commitHash: 'a'.repeat(40),
+        parentHash: 'c'.repeat(40),
+        file: selectedFile,
+      },
+    }]);
   });
 });

@@ -123,7 +123,6 @@ let gitPaneState: GitRepositoryPaneState = {
   changesCollapsed: false,
   graphCollapsed: true,
   graphHeight: 280,
-  previewWidth: 360,
   graphFilterMode: 'auto',
   graphManualRefIds: [],
 };
@@ -530,7 +529,6 @@ describe('GitGraphPanel component regression', () => {
       changesCollapsed: false,
       graphCollapsed: true,
       graphHeight: 280,
-      previewWidth: 360,
       graphFilterMode: 'auto',
       graphManualRefIds: [],
     };
@@ -1025,7 +1023,6 @@ describe('GitGraphPanel helpers', () => {
       changesCollapsed: false,
       graphCollapsed: true,
       graphHeight: 280,
-      previewWidth: 360,
       graphFilterMode: 'manual',
       graphManualRefIds: [],
     })).toEqual({ mode: 'auto' });

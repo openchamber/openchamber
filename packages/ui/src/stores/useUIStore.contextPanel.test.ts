@@ -358,7 +358,6 @@ describe('useUIStore git repository pane state', () => {
     useUIStore.getState().setGitRepositoryPaneState('/repo///', {
       graphCollapsed: false,
       graphHeight: 999,
-      previewWidth: 9999,
       graphFilterMode: 'manual',
       graphManualRefIds: ['refs/tags/v1', 'refs/tags/v1', ' refs/heads/main '],
     }, 'runtime-a');
@@ -368,20 +367,19 @@ describe('useUIStore git repository pane state', () => {
 
     expect(runtimeA.graphCollapsed).toBe(false);
     expect(runtimeA.graphHeight).toBe(720);
-    expect(runtimeA.previewWidth).toBe(960);
+    expect('previewWidth' in runtimeA).toBe(false);
     expect(runtimeA.graphFilterMode).toBe('manual');
     expect(runtimeA.graphManualRefIds).toEqual(['refs/heads/main', 'refs/tags/v1']);
     expect(runtimeB).toEqual({
       changesCollapsed: false,
       graphCollapsed: true,
       graphHeight: 280,
-      previewWidth: 360,
       graphFilterMode: 'auto',
       graphManualRefIds: [],
     });
   });
 
-  test('sanitizes persisted repository pane state during migration', () => {
+  test('sanitizes persisted repository pane state during migration and discards legacy preview width', () => {
     const migrated = useUIStore.persist.getOptions().migrate?.({
       gitRepositoryPaneStates: {
         '["runtime-a","/repo"]': {
@@ -401,10 +399,10 @@ describe('useUIStore git repository pane state', () => {
           changesCollapsed: false,
           graphCollapsed: false,
           graphHeight: 180,
-          previewWidth: 320,
           graphFilterMode: 'manual',
           graphManualRefIds: ['refs/tags/v1'],
           },
     });
+    expect('previewWidth' in paneStates['["runtime-a","/repo"]']).toBe(false);
   });
 });

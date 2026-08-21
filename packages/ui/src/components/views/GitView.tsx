@@ -53,7 +53,6 @@ import { CommitSection } from './git/CommitSection';
 import { GitEmptyState } from './git/GitEmptyState';
 import { HistorySection } from './git/HistorySection';
 import { GitGraphPanel } from './git/GitGraphPanel';
-import { GitGraphWorkspace } from './git/GitGraphWorkspace';
 import { GitWorkspacePanes } from './git/GitWorkspacePanes';
 import { ConflictDialog } from './git/ConflictDialog';
 import { StashDialog } from './git/StashDialog';
@@ -75,6 +74,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { getGitViewRenderMode } from './git/gitViewRenderMode';
 import { createGitCommitDetailsController, scheduleGitCommitDetailsIdle } from './git/gitCommitDetailsController';
+import { createGitContextCommitDetailsController } from './git/gitContextCommitDetailsController';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
@@ -314,6 +314,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const { screenWidth } = useDeviceInfo();
   const gitReviewLayout = useUIStore((state) => state.gitReviewLayout);
   const openContextDiff = useUIStore((state) => state.openContextDiff);
+  const openContextCommitDiff = useUIStore((state) => state.openContextCommitDiff);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
 
   const prStatusBranch = status?.current ?? null;
@@ -726,6 +727,18 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       commitDetailsController?.dispose();
     };
   }, [commitDetailsController]);
+
+  const graphCommitDetailsController = React.useMemo(() => {
+    if (!commitDetailsController || !currentDirectory) {
+      return null;
+    }
+
+    return createGitContextCommitDetailsController(
+      commitDetailsController,
+      currentDirectory,
+      openContextCommitDiff,
+    );
+  }, [commitDetailsController, currentDirectory, openContextCommitDiff]);
 
   React.useEffect(() => {
     if (!currentDirectory) return;
@@ -2318,24 +2331,18 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     />
   );
 
-  const graphPaneContent = commitDetailsController && currentDirectory ? (
-    <GitGraphWorkspace
+  const graphPaneContent = graphCommitDetailsController && currentDirectory ? (
+    <GitGraphPanel
       directory={currentDirectory}
-      controller={commitDetailsController}
-      graph={(
-        <GitGraphPanel
-          directory={currentDirectory}
-          git={git}
-          isActive={isActive}
-          commitDetailsController={commitDetailsController}
-          onCopyHash={handleCopyCommitHash}
-          hoverRemoteName={hoverRemoteName}
-          hoverRemoteUrl={hoverRemoteUrl}
-          hoverDetailsCache={hoverDetailsCache}
-          onConflict={handleGraphConflict}
-          onActionSuccess={handleGraphActionSuccess}
-        />
-      )}
+      git={git}
+      isActive={isActive}
+      commitDetailsController={graphCommitDetailsController}
+      onCopyHash={handleCopyCommitHash}
+      hoverRemoteName={hoverRemoteName}
+      hoverRemoteUrl={hoverRemoteUrl}
+      hoverDetailsCache={hoverDetailsCache}
+      onConflict={handleGraphConflict}
+      onActionSuccess={handleGraphActionSuccess}
     />
   ) : null;
 
@@ -2509,26 +2516,20 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
           <div className="flex-1 min-h-0">
             {gitLogDialogMode === 'graph' ? graphPaneContent : (
               commitDetailsController && currentDirectory ? (
-                <GitGraphWorkspace
+                <HistorySection
+                  log={log}
+                  isLogLoading={isLogLoading}
+                  logMaxCount={logMaxCountLocal}
+                  onLogMaxCountChange={handleLogMaxCountChange}
+                  commitDetailsController={commitDetailsController}
+                  onCopyHash={handleCopyCommitHash}
                   directory={currentDirectory}
-                  controller={commitDetailsController}
-                  graph={(
-                    <HistorySection
-                      log={log}
-                      isLogLoading={isLogLoading}
-                      logMaxCount={logMaxCountLocal}
-                      onLogMaxCountChange={handleLogMaxCountChange}
-                      commitDetailsController={commitDetailsController}
-                      onCopyHash={handleCopyCommitHash}
-                      directory={currentDirectory}
-                      hoverRemoteName={hoverRemoteName}
-                      hoverRemoteUrl={hoverRemoteUrl}
-                      hoverDetailsCache={hoverDetailsCache}
-                      showHeader={false}
-                      contentMaxHeightClassName="h-full max-h-none"
-                      branchDivider={historyBranchDivider}
-                    />
-                  )}
+                  hoverRemoteName={hoverRemoteName}
+                  hoverRemoteUrl={hoverRemoteUrl}
+                  hoverDetailsCache={hoverDetailsCache}
+                  showHeader={false}
+                  contentMaxHeightClassName="h-full max-h-none"
+                  branchDivider={historyBranchDivider}
                 />
               ) : null
             )}
