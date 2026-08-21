@@ -82,7 +82,6 @@ interface HistoryCommitRowProps {
   commitComparison?: GitCommitComparison;
   commitDetailsController?: GitCommitDetailsControllerLike;
   selectedChangedFilePath?: string | null;
-  changedFilesView?: 'list' | 'tree';
   showGraphActions?: boolean;
 }
 
@@ -140,7 +139,6 @@ export const HistoryCommitRow = React.memo(({
   commitComparison,
   commitDetailsController,
   selectedChangedFilePath = null,
-  changedFilesView = 'tree',
   showGraphActions = true,
 }: HistoryCommitRowProps) => {
   const { t, locale } = useI18n();
@@ -194,7 +192,6 @@ export const HistoryCommitRow = React.memo(({
   );
 
   const changedFilesSnapshot = commitDetailsController && commitComparison ? controllerSnapshot : fallbackSnapshot;
-  const [expandedDirectories, setExpandedDirectories] = React.useState<Set<string> | null>(null);
 
   const handleCheckout = async () => {
     if (!directory) return;
@@ -616,31 +613,7 @@ export const HistoryCommitRow = React.memo(({
           <div className="py-2">
             <GitCommitChangedFiles
               snapshot={changedFilesSnapshot}
-              view={changedFilesView}
               selectedPath={selectedChangedFilePath}
-              expandedDirectories={expandedDirectories ?? undefined}
-              onToggleDirectory={(path) => {
-                setExpandedDirectories((previous) => {
-                  const next = new Set(previous ?? (changedFilesSnapshot.status === 'ready'
-                    ? changedFilesSnapshot.files.flatMap((file) => {
-                        const segments = file.path.split('/').filter(Boolean);
-                        const directories: string[] = [];
-                        let current = '';
-                        for (const segment of segments.slice(0, -1)) {
-                          current = current ? `${current}/${segment}` : segment;
-                          directories.push(current);
-                        }
-                        return directories;
-                      })
-                    : []));
-                  if (next.has(path)) {
-                    next.delete(path);
-                  } else {
-                    next.add(path);
-                  }
-                  return next;
-                });
-              }}
               onRetry={commitDetailsController && commitComparison
                 ? () => commitDetailsController.retryCommit(commitComparison)
                 : undefined}

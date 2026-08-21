@@ -31,15 +31,12 @@ type MockButtonProps = React.PropsWithChildren<{
   title?: string;
   'aria-label'?: string;
   'aria-pressed'?: boolean;
-  'aria-expanded'?: boolean;
-  'aria-controls'?: string;
   style?: React.CSSProperties;
   onClick?: (event: TestPressEvent) => void;
   onKeyDown?: (event: TestKeyEvent) => void;
   variant?: string;
   size?: string;
   'data-git-commit-changed-files-retry'?: string;
-  'data-git-commit-changed-directory-toggle'?: string;
   'data-git-commit-changed-file-row'?: string;
 }>;
 
@@ -54,11 +51,8 @@ mock.module('@/components/ui/button', () => ({
       title: props.title,
       'aria-label': props['aria-label'],
       'aria-pressed': props['aria-pressed'],
-      'aria-expanded': props['aria-expanded'],
-      'aria-controls': props['aria-controls'],
       style: props.style,
       'data-git-commit-changed-files-retry': props['data-git-commit-changed-files-retry'],
-      'data-git-commit-changed-directory-toggle': props['data-git-commit-changed-directory-toggle'],
       'data-git-commit-changed-file-row': props['data-git-commit-changed-file-row'],
     };
 
@@ -69,12 +63,6 @@ mock.module('@/components/ui/button', () => ({
 mock.module('@/components/icons/FileTypeIcon', () => ({
   FileTypeIcon: ({ filePath, className }: { filePath: string; className?: string }) => (
     <span data-file-type-icon={filePath} className={className} />
-  ),
-}));
-
-mock.module('@/components/icon/Icon', () => ({
-  Icon: ({ name, className }: { name: string; className?: string }) => (
-    <span data-icon={name} className={className} />
   ),
 }));
 
@@ -133,52 +121,58 @@ describe('GitCommitChangedFiles', () => {
     buttonRegistry.length = 0;
   });
 
-  test('renders list rows with status badges, file icons, rename label, stats, and selected state', () => {
+  test('renders compact flat rows with filename, dimmed path, rename meaning, and status letters', () => {
     const markup = renderMarkup(
       <GitCommitChangedFiles
         snapshot={{
           status: 'ready',
           files: [
             createFile({ path: 'src/new-name.ts', originalPath: 'src/old-name.ts', status: 'R', insertions: 4, deletions: 2 }),
-            createFile({ path: 'README.md', status: 'M', insertions: 1, deletions: 0 }),
+            createFile({ path: 'src/lib/example.ts', status: 'A', insertions: 1, deletions: 0 }),
+            createFile({ path: 'README.md', status: 'M', insertions: 2, deletions: 1 }),
+            createFile({ path: 'assets/logo.png', status: 'D', isBinary: true }),
           ],
         }}
-        view="list"
         selectedPath="src/new-name.ts"
       />,
     );
 
-    expect(markup).toContain('data-git-commit-changed-files="list"');
+    expect(markup).toContain('data-git-commit-changed-files="flat"');
     expect(markup).toContain('data-git-commit-changed-file-row="src/new-name.ts"');
+    expect(markup).toContain('data-git-commit-changed-file-name="src/new-name.ts"');
+    expect(markup).toContain('>new-name.ts<');
+    expect(markup).toContain('data-git-commit-changed-file-directory="src/new-name.ts"');
+    expect(markup).toContain('>src/old-name.ts → src/new-name.ts<');
+    expect(markup).toContain('data-git-commit-changed-file-status="src/new-name.ts"');
+    expect(markup).toContain('>R<');
+    expect(markup).toContain('data-git-commit-changed-file-name="src/lib/example.ts"');
+    expect(markup).toContain('>example.ts<');
+    expect(markup).toContain('data-git-commit-changed-file-directory="src/lib/example.ts"');
+    expect(markup).toContain('>src/lib<');
+    expect(markup).toContain('data-git-commit-changed-file-status="src/lib/example.ts"');
+    expect(markup).toContain('data-git-commit-changed-file-status="README.md"');
+    expect(markup).toContain('data-git-commit-changed-file-status="assets/logo.png"');
     expect(markup).toContain('data-file-type-icon="src/new-name.ts"');
     expect(markup).toContain('data-file-type-icon="README.md"');
-    expect(markup).toContain('>R<');
-    expect(markup).toContain('>M<');
-    expect(markup).toContain('src/old-name.ts');
-    expect(markup).toContain('src/new-name.ts');
-    expect(markup).toContain('data-icon="arrow-right"');
-    expect(markup).toContain('+4');
-    expect(markup).toContain('-2');
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('role="list"');
     expect(markup).toContain('role="listitem"');
+    expect(markup).not.toContain('data-git-commit-changed-directory-row=');
+    expect(markup).not.toContain('>Binary<');
+    expect(markup).not.toContain('>+4<');
+    expect(markup).not.toContain('>-2<');
   });
 
-  test('uses list semantics only for ready snapshots and preserves tree row behavior', () => {
+  test('preserves loading, retry, empty, and file selection behavior without directory toggles', () => {
     const retryCalls: number[] = [];
     const selectCalls: GitCommitChangedFile[] = [];
-    const toggledDirectories: string[] = [];
     const onRetry = mock(() => {
       retryCalls.push(1);
     });
     const onSelectFile = mock((file: GitCommitChangedFile) => {
       selectCalls.push(file);
     });
-    const onToggleDirectory = mock((path: string) => {
-      toggledDirectories.push(path);
-    });
     const nestedFile = createFile({ path: 'src/lib/example.ts', status: 'A', insertions: 3, deletions: 1 });
-    const binaryFile = createFile({ path: 'assets/logo.png', status: 'M', isBinary: true });
 
     const loadingMarkup = renderMarkup(
       <GitCommitChangedFiles snapshot={{ status: 'loading' }} />,
@@ -205,45 +199,14 @@ describe('GitCommitChangedFiles', () => {
     expect(emptyMarkup).not.toContain('role="list"');
 
     buttonRegistry.length = 0;
-    const collapsedTreeMarkup = renderMarkup(
+    const readyMarkup = renderMarkup(
       <GitCommitChangedFiles
-        snapshot={{ status: 'ready', files: [nestedFile, binaryFile] }}
-        view="tree"
-        expandedDirectories={new Set()}
-        onToggleDirectory={onToggleDirectory}
+        snapshot={{ status: 'ready', files: [nestedFile] }}
         onSelectFile={onSelectFile}
       />,
     );
-    expect(collapsedTreeMarkup).toContain('data-git-commit-changed-files="tree"');
-    expect(collapsedTreeMarkup).toContain('role="list"');
-    expect(collapsedTreeMarkup).toContain('role="listitem"');
-    expect(collapsedTreeMarkup).toContain('data-git-commit-changed-directory-row="src"');
-    expect(collapsedTreeMarkup).toContain('aria-expanded="false"');
-    expect(collapsedTreeMarkup).not.toContain('aria-controls="git-commit-changed-files-directory-src"');
-
-    const directoryButton = buttonRegistry.find((props) => props['data-git-commit-changed-directory-toggle'] === 'src');
-    expect(directoryButton).toBeDefined();
-    const directoryEvent = createPressEvent();
-    invokeClick(directoryButton?.onClick, directoryEvent);
-    expect(directoryEvent.defaultPrevented).toBe(true);
-    expect(directoryEvent.propagationStopped).toBe(true);
-    expect(toggledDirectories).toEqual(['src']);
-    expect(selectCalls).toEqual([]);
-
-    buttonRegistry.length = 0;
-    const expandedTreeMarkup = renderMarkup(
-      <GitCommitChangedFiles
-        snapshot={{ status: 'ready', files: [nestedFile, binaryFile] }}
-        view="tree"
-        expandedDirectories={new Set(['assets', 'src', 'src/lib'])}
-        onToggleDirectory={onToggleDirectory}
-        onSelectFile={onSelectFile}
-      />,
-    );
-    expect(expandedTreeMarkup).toContain('aria-expanded="true"');
-    expect(expandedTreeMarkup).toContain('aria-controls="git-commit-changed-files-directory-src"');
-    expect(expandedTreeMarkup).toContain('data-git-commit-changed-file-row="src/lib/example.ts"');
-    expect(expandedTreeMarkup).toContain('Binary');
+    expect(readyMarkup).toContain('data-git-commit-changed-files="flat"');
+    expect(readyMarkup).toContain('data-git-commit-changed-file-row="src/lib/example.ts"');
 
     const fileButton = buttonRegistry.find((props) => props['data-git-commit-changed-file-row'] === 'src/lib/example.ts');
     expect(fileButton).toBeDefined();

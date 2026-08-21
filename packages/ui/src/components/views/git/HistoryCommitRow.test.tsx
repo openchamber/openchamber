@@ -267,9 +267,19 @@ describe('HistoryCommitRow compact graph regression', () => {
     expect(markup).toContain('aria-expanded="true"');
     expect(markup).toContain('aria-controls="history-commit-details-abcdef1234567890"');
     expect(markup).toContain('id="history-commit-details-abcdef1234567890"');
-    expect(markup).toContain('data-git-commit-changed-files="tree"');
+    expect(markup).toContain('data-git-commit-changed-files="flat"');
     expect(markup).toContain('data-git-commit-changed-file-row="src/new-name.ts"');
     expect(markup).toContain('data-file-type-icon="src/new-name.ts"');
+    expect(markup).toContain('data-git-commit-changed-file-name="src/new-name.ts"');
+    expect(markup).toContain('>new-name.ts<');
+    expect(markup).toContain('data-git-commit-changed-file-directory="src/new-name.ts"');
+    expect(markup).toContain('>src/old-name.ts → src/new-name.ts<');
+    expect(markup).toContain('data-git-commit-changed-file-status="src/new-name.ts"');
+    expect(markup).toContain('>R<');
+    expect(markup).not.toContain('data-git-commit-changed-directory-row=');
+    expect(markup).not.toContain('>Binary<');
+    expect(markup).not.toContain('>+4<');
+    expect(markup).not.toContain('>-2<');
     expect(markup).not.toContain('data-diff-viewer');
 
     const fileRowButton = buttonRegistry.find((props) => props['data-git-commit-changed-file-row'] === 'src/new-name.ts');
