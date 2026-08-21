@@ -13,6 +13,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitStore } from '@/stores/useGitStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider, useSessions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
@@ -303,6 +304,7 @@ const useSessionUnavailable = (config: MiniChatConfig): boolean => {
 export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   const config = React.useMemo(() => readMiniChatConfig(), []);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const chatMessageWidthMode = useUIStore((state) => state.chatMessageWidthMode);
 
   React.useEffect(() => {
     opencodeClient.setDirectory(currentDirectory || config.directory || undefined);
@@ -312,6 +314,14 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
     registerRuntimeAPIs(apis);
     return () => registerRuntimeAPIs(null);
   }, [apis]);
+
+  React.useEffect(() => {
+    document.documentElement.classList.toggle('chat-message-width-wide', chatMessageWidthMode === 'wide');
+    document.documentElement.classList.toggle('chat-message-width-fluid', chatMessageWidthMode === 'fluid');
+    return () => {
+      document.documentElement.classList.remove('chat-message-width-wide', 'chat-message-width-fluid');
+    };
+  }, [chatMessageWidthMode]);
 
   useAppFontEffects();
   useMiniChatKeyboardShortcuts();
