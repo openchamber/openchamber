@@ -8,6 +8,7 @@ type OutsideFileGrantEntry = {
 
 const DEFAULT_GRANT_TTL_MS = 10 * 60 * 1000;
 const grantsByPath = new Map<string, OutsideFileGrantEntry>();
+const pendingGrantsByPath = new Map<string, Promise<string | undefined>>();
 
 export const getOutsideFileGrant = (path: string): string | undefined => {
   const normalizedPath = normalizeFilePath(path);
@@ -31,7 +32,6 @@ export const getOutsideFileGrant = (path: string): string | undefined => {
 const rememberOutsideFileGrant = (
   path: string,
   outsideFileGrant: string,
-  expiresAt?: number,
 ): void => {
   const normalizedPath = normalizeFilePath(path);
   if (!normalizedPath || !outsideFileGrant) {
@@ -40,9 +40,7 @@ const rememberOutsideFileGrant = (
 
   grantsByPath.set(normalizedPath, {
     outsideFileGrant,
-    expiresAt: typeof expiresAt === 'number' && Number.isFinite(expiresAt)
-      ? expiresAt
-      : Date.now() + DEFAULT_GRANT_TTL_MS,
+    expiresAt: Date.now() + DEFAULT_GRANT_TTL_MS,
   });
 };
 
@@ -60,14 +58,44 @@ export const ensureOutsideFileGrantForDesktop = async (
     return existing;
   }
 
-  const result = await requestExistingFileAccess(normalizedPath);
-  if (!result.success || !result.path || !result.outsideFileGrant) {
-    return undefined;
+  const pending = pendingGrantsByPath.get(normalizedPath);
+  if (pending) {
+    return pending;
   }
 
-  rememberOutsideFileGrant(result.path, result.outsideFileGrant);
-  if (normalizeFilePath(result.path) !== normalizedPath) {
-    rememberOutsideFileGrant(normalizedPath, result.outsideFileGrant);
+  const request = requestExistingFileAccess(normalizedPath).then((result) => {
+    if (!result.success || !result.path || !result.outsideFileGrant) {
+      return undefined;
+    }
+
+    rememberOutsideFileGrant(result.path, result.outsideFileGrant);
+    if (normalizeFilePath(result.path) !== normalizedPath) {
+      rememberOutsideFileGrant(normalizedPath, result.outsideFileGrant);
+    }
+    return result.outsideFileGrant;
+  });
+  pendingGrantsByPath.set(normalizedPath, request);
+  try {
+    return await request;
+  } finally {
+    pendingGrantsByPath.delete(normalizedPath);
   }
-  return result.outsideFileGrant;
+};
+
+export const resolveOutsideFileReadOptions = async (
+  path: string,
+  workspaceRoot: string,
+  enabled: boolean,
+): Promise<{ allowOutsideWorkspace: boolean; outsideFileGrant?: string }> => {
+  const allowOutsideWorkspace = enabled
+    && Boolean(workspaceRoot)
+    && !isFilePathWithinDirectory(path, workspaceRoot);
+  if (!allowOutsideWorkspace) {
+    return { allowOutsideWorkspace: false };
+  }
+
+  return {
+    allowOutsideWorkspace: true,
+    outsideFileGrant: await ensureOutsideFileGrantForDesktop(path, workspaceRoot),
+  };
 };
