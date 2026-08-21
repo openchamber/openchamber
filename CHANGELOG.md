@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Project knowledge: plans opened from the panel now load while a session runs from a temporary worktree, instead of showing a blank editor.
 
 ## [1.19.0] - 2026-08-19
 

@@ -6,6 +6,7 @@ import { McpIcon } from '@/components/icons/McpIcon';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import type { ProjectRef } from '@/lib/projectContextApi';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { TerminalView } from '@/components/views/TerminalView';
 import { useI18n } from '@/lib/i18n';
@@ -104,8 +105,9 @@ export const MobileWorkspaceDrawer: React.FC<{
   onTabChange: (tab: MobileWorkspaceTab) => void;
   /** When set, the Changes tab opens directly into the per-file diff. */
   pendingChangesDiff: { path: string; staged: boolean } | null;
-  /** Notes tab: opens a plan fullscreen (layered above the drawer). */
-  onOpenPlan: (plan: { id: string; title: string }) => void;
+  /** Notes tab: opens a plan fullscreen (layered above the drawer). The
+      owning project rides along for the viewer's project-plan lookup. */
+  onOpenPlan: (plan: { id: string; title: string; project: ProjectRef }) => void;
   /** MCP tab: jump to the MCP settings page pre-seeded with a new server draft. */
   onOpenMcpSettings: () => void;
   variant?: 'drawer' | 'panel';
