@@ -16,7 +16,9 @@ All notable changes to this project will be documented in this file.
 - Git: generated commit messages now match the repository's recent commit style and language.
 - Git: generating a pull request description now picks up the repository's own PR template when it has one, so the draft comes back in your project's sections and checklists instead of the built-in Summary/Why/Testing layout.
 - Sidebar: switch between the full project list and a focused view of one project. Sessions created outside OpenChamber now also appear in the sidebar and Recent list without a page refresh (thanks to @tomzx).
-- Chat/Work status: the work-status panel now includes a collapsed-by-default read-only Git graph section, and picking a historical changed file opens that exact commit comparison in the Context Panel Changes tab.
+- Chat/Work status: the work-status panel includes a collapsed-by-default Git section that matches the main Git graph pane, with shared commit controls, right-click context menu, and comparison overrides. Picking a historical changed file opens that exact commit comparison in the Context Panel Changes tab.
+- Git/Graph: commit rows now show compact changed-file lists with colored status letters (A/M/D/R), inline action buttons are replaced by a shared right-click context menu with full mutation support, filter controls (auto/all/manual/refresh) sit in pane headers, and selecting a changed file in any graph surface opens the historical diff in Context Panel Changes. Tags also moved from row badges to the hover popover for a cleaner row.
+- Git/Tags: create-tag runtime support is available across web and VS Code runtimes.
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
 - Chat: newly sent messages and syntax-highlighted code blocks no longer briefly flicker. Bash output can also grow with its content instead of being cut off.
 - Usage: Z.ai credit limits now appear alongside its other quota windows.
