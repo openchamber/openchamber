@@ -81,9 +81,11 @@ const paneStateCalls: Array<[
 const ensureHistoryRefsCalls: Array<[string, GitAPI]> = [];
 const fetchHistoryPageCalls: Array<[string, GitAPI, GraphQuery]> = [];
 
+/* eslint-disable @typescript-eslint/no-unused-vars */
 let mockSetPaneState = mock((_directory: string, _updates: Partial<GitRepositoryPaneState> | ((current: GitRepositoryPaneState) => Partial<GitRepositoryPaneState>)) => undefined);
 let mockEnsureHistoryRefs = mock(async (_directory: string, _git: GitAPI) => null);
 let mockFetchHistoryPage = mock(async (_directory: string, _git: GitAPI, _query: GraphQuery) => undefined);
+/* eslint-enable @typescript-eslint/no-unused-vars */
 
 const createMockRefsState = (): MockRefsState => ({
   refs: {
@@ -152,7 +154,7 @@ const renderControls = (props: Partial<React.ComponentProps<typeof GitGraphContr
 const getButtonByLabel = (label: string) => {
   const button = renderedButtons.find((entry) => entry.label === label);
   if (!button) {
-    throw new Error(`Expected button with label \"${label}\"`);
+    throw new Error(`Expected button with label "${label}"`);
   }
   return button;
 };
@@ -160,7 +162,7 @@ const getButtonByLabel = (label: string) => {
 const getButtonByAriaLabel = (label: string) => {
   const button = renderedButtons.find((entry) => entry.ariaLabel === label);
   if (!button) {
-    throw new Error(`Expected button with aria-label \"${label}\"`);
+    throw new Error(`Expected button with aria-label "${label}"`);
   }
   return button;
 };
