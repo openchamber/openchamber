@@ -3,11 +3,14 @@ import type { OpencodeClient, Project } from "@opencode-ai/sdk/v2/client"
 import { bootstrapDirectory } from "./bootstrap"
 import { INITIAL_STATE, type State } from "./types"
 
-const createSdk = (options?: { commandList?: () => Promise<{ data: unknown[] }> }) => ({
+const createSdk = (options?: {
+  commandList?: () => Promise<{ data: unknown[] }>
+  sessionStatus?: () => Promise<{ data: unknown }>
+}) => ({
   project: { current: async () => ({ data: { id: "project-a" } }) },
   config: { get: async () => ({ data: {} }) },
   path: { get: async () => ({ data: { state: "", config: "", worktree: "/repo", directory: "/repo", home: "/home" } }) },
-  session: { status: async () => ({ data: {} }) },
+  session: { status: options?.sessionStatus ?? (async () => ({ data: {} })) },
   command: { list: options?.commandList ?? (async () => ({ data: [] })) },
   mcp: { status: async () => ({ data: {} }) },
   lsp: { status: async () => ({ data: [] }) },
@@ -65,10 +68,32 @@ describe("bootstrapDirectory", () => {
 
     expect(await bootstrapping).toBe("complete")
     expect(state.status).toBe("complete")
+    expect(state.session_status_ready).toBe(true)
     expect(deferredStarted).toBe(false)
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(deferredStarted).toBe(true)
     resolveDeferred()
+  })
+
+  test("does not mark the status snapshot ready when its request fails", async () => {
+    let state = createState()
+    const result = await bootstrapDirectory({
+      directory: "/repo",
+      sdk: createSdk({
+        sessionStatus: async () => {
+          throw new Error("status unavailable")
+        },
+      }),
+      getState: () => state,
+      set: (patch) => {
+        state = { ...state, ...patch }
+      },
+      global: { config: {}, projects: [project] },
+      loadSessions: () => undefined,
+    })
+
+    expect(result).toBe("complete")
+    expect(state.session_status_ready).toBe(false)
   })
 
   test("reports session-list failure without clearing existing state", async () => {

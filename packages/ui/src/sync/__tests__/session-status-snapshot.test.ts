@@ -53,6 +53,7 @@ describe("applySessionStatusSnapshot", () => {
       const changed = applySessionStatusSnapshot(store, { ses_a: { type: "busy" } }, ["ses_a"], "monotonic")
       expect(changed).toBe(true)
       expect(store.getState().session_status.ses_a).toEqual(BUSY)
+      expect(store.getState().session_status_ready).toBe(false)
     })
 
     test("updates busy → retry from the snapshot", () => {
@@ -72,6 +73,7 @@ describe("applySessionStatusSnapshot", () => {
       const changed = applySessionStatusSnapshot(store, {} as StatusSnapshot, ["ses_a"], "authoritative")
       expect(changed).toBe(true)
       expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
+      expect(store.getState().session_status_ready).toBe(true)
     })
 
     test("snapshot is the source of truth: lowers to idle even if the trailing message looks unfinished", () => {

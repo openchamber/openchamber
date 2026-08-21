@@ -176,23 +176,26 @@ export const shouldDispatchQueuedAutoSend = (
  * Resolve the live status the queue gate should honor for a session.
  *
  * The server's `/session/status` map only lists busy/retry sessions — idle
- * sessions are absent — so a missing entry means "idle per the snapshot", not
- * "no information". A missed busy event therefore leaves no entry while a turn
- * is still streaming. The trailing in-flight assistant message is the live
- * evidence of that running turn: treat it as busy so the queue never dispatches
- * into it (mirrors `useSessionActivity`'s fallback). The entry becomes idle the
- * moment the message completes or an idle status event lands. This reads the
- * directory child store directly so both the effect-loop gate and the
- * dispatch-time re-check agree.
+ * sessions are absent — so a missing entry means idle after an authoritative
+ * snapshot. Before the first authoritative snapshot, a missed busy event leaves no
+ * entry while a turn is still streaming. The trailing in-flight assistant
+ * message is the only fallback evidence for that narrow window; once the
+ * snapshot is ready, historical unfinished-looking messages must not block the
+ * queue forever. This reads the directory child store directly so both the
+ * effect-loop gate and the dispatch-time re-check agree.
  */
 export const resolveQueuedSessionStatusType = (
   sessionId: string,
   directory: string,
 ): SessionStatusType => {
   const state = getDirectoryState(directory);
-  const statusType = state?.session_status?.[sessionId]?.type;
+  const sessionStatus = state?.session_status?.[sessionId];
+  const statusType = sessionStatus?.type;
   if (statusType === 'busy' || statusType === 'retry') {
     return statusType;
+  }
+  if (sessionStatus !== undefined || state?.session_status_ready === true) {
+    return 'idle';
   }
   const sessionMessages = state?.message?.[sessionId];
   const lastMessage = sessionMessages && sessionMessages.length > 0
