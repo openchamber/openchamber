@@ -6,26 +6,61 @@ import test from 'node:test';
 
 import { replaceFile } from './file-replace.mjs';
 
-test('falls back after Windows repeatedly blocks atomic file replacement', async (t) => {
+test('moves the old file aside after Windows repeatedly blocks atomic replacement', async (t) => {
   const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'openchamber-file-replace-'));
   const temporaryPath = path.join(directory, 'settings.json.tmp');
   const targetPath = path.join(directory, 'settings.json');
+  const rename = fsp.rename.bind(fsp);
   let renameAttempts = 0;
   t.after(() => fsp.rm(directory, { recursive: true, force: true }));
-  t.mock.method(fsp, 'rename', async () => {
+  t.mock.method(fsp, 'rename', async (...args) => {
     renameAttempts += 1;
-    const error = new Error('operation not permitted');
-    error.code = 'EPERM';
-    throw error;
+    if (renameAttempts <= 6) {
+      const error = new Error('operation not permitted');
+      error.code = 'EPERM';
+      throw error;
+    }
+    return rename(...args);
   });
 
   await fsp.writeFile(temporaryPath, 'new settings');
   await fsp.writeFile(targetPath, 'old settings');
   await replaceFile(temporaryPath, targetPath, 'win32');
 
-  assert.equal(renameAttempts, 6);
+  assert.equal(renameAttempts, 8);
   assert.equal(await fsp.readFile(targetPath, 'utf8'), 'new settings');
   await assert.rejects(fsp.access(temporaryPath), { code: 'ENOENT' });
+  assert.deepEqual(await fsp.readdir(directory), ['settings.json']);
+});
+
+test('restores the old file when fallback promotion fails', async (t) => {
+  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'openchamber-file-replace-'));
+  const temporaryPath = path.join(directory, 'settings.json.tmp');
+  const targetPath = path.join(directory, 'settings.json');
+  const rename = fsp.rename.bind(fsp);
+  let renameAttempts = 0;
+  t.after(() => fsp.rm(directory, { recursive: true, force: true }));
+  t.mock.method(fsp, 'rename', async (...args) => {
+    renameAttempts += 1;
+    if (renameAttempts <= 6) {
+      const error = new Error('operation not permitted');
+      error.code = 'EPERM';
+      throw error;
+    }
+    if (renameAttempts === 8) {
+      const error = new Error('input/output error');
+      error.code = 'EIO';
+      throw error;
+    }
+    return rename(...args);
+  });
+
+  await fsp.writeFile(temporaryPath, 'new settings');
+  await fsp.writeFile(targetPath, 'old settings');
+
+  await assert.rejects(replaceFile(temporaryPath, targetPath, 'win32'), { code: 'EIO' });
+  assert.equal(await fsp.readFile(targetPath, 'utf8'), 'old settings');
+  assert.equal(await fsp.readFile(temporaryPath, 'utf8'), 'new settings');
 });
 
 test('does not mask non-transient replacement errors', async (t) => {

@@ -21,6 +21,13 @@ export const replaceFile = async (temporaryPath, targetPath, platform = process.
     }
   }
 
-  await fsp.copyFile(temporaryPath, targetPath);
-  await fsp.rm(temporaryPath, { force: true });
+  const backupPath = `${targetPath}.backup-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  await fsp.rename(targetPath, backupPath);
+  try {
+    await fsp.rename(temporaryPath, targetPath);
+  } catch (error) {
+    await fsp.rename(backupPath, targetPath);
+    throw error;
+  }
+  await fsp.rm(backupPath, { force: true });
 };
