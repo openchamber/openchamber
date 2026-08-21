@@ -9,6 +9,7 @@ interface UseTurnRecordsOptions {
     showTextJustificationActivity: boolean;
     showTurnChangedFiles: boolean;
     planModeEnabled: boolean;
+    keepLastTurnLive: boolean;
 }
 
 export interface TurnRecordsResult {
@@ -16,6 +17,24 @@ export interface TurnRecordsResult {
     staticTurns: TurnProjectionResult['turns'];
     streamingTurn: TurnProjectionResult['turns'][number] | undefined;
 }
+
+export interface LiveTurnPartition<TTurn> {
+    staticTurns: TTurn[];
+    streamingTurn: TTurn | undefined;
+}
+
+export const partitionLiveTurn = <TTurn,>(
+    turns: readonly TTurn[],
+    keepLastTurnLive: boolean,
+): LiveTurnPartition<TTurn> => {
+    if (!keepLastTurnLive || turns.length === 0) {
+        return { staticTurns: [...turns], streamingTurn: undefined };
+    }
+    return {
+        staticTurns: turns.slice(0, -1),
+        streamingTurn: turns[turns.length - 1],
+    };
+};
 
 export const useTurnRecords = (
     messages: ChatMessageEntry[],
@@ -81,10 +100,13 @@ export const useTurnRecords = (
         });
     }, [messages, options.showTextJustificationActivity, options.showTurnChangedFiles, options.sessionKey, options.planModeEnabled]);
 
+    const livePartition = React.useMemo(
+        () => partitionLiveTurn(projection.turns, options.keepLastTurnLive),
+        [options.keepLastTurnLive, projection.turns],
+    );
+
     const staticTurns = React.useMemo(() => {
-        const nextStatic = projection.turns.length <= 1
-            ? []
-            : projection.turns.slice(0, -1);
+        const nextStatic = livePartition.staticTurns;
         const previousStatic = staticTurnsRef.current;
 
         if (previousStatic.length === nextStatic.length) {
@@ -102,18 +124,16 @@ export const useTurnRecords = (
 
         staticTurnsRef.current = nextStatic;
         return nextStatic;
-    }, [projection.turns]);
+    }, [livePartition.staticTurns]);
 
     const streamingTurn = React.useMemo(() => {
-        const nextStreamingTurn = projection.turns.length === 0
-            ? undefined
-            : projection.turns[projection.turns.length - 1];
+        const nextStreamingTurn = livePartition.streamingTurn;
         if (streamingTurnRef.current === nextStreamingTurn) {
             return streamingTurnRef.current;
         }
         streamingTurnRef.current = nextStreamingTurn;
         return nextStreamingTurn;
-    }, [projection.turns]);
+    }, [livePartition.streamingTurn]);
 
     return {
         projection,
