@@ -5,6 +5,8 @@ import path from 'node:path';
 import { clearAppImageArgv0FromProcessEnv } from '../inherited-env.js';
 import { mergePathValues } from './path-utils.js';
 
+const SHELL_PROBE_TIMEOUT_MS = 5_000;
+
 export const createOpenCodeEnvRuntime = (deps) => {
   const {
     state,
@@ -208,6 +210,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           stdio: ['ignore', 'pipe', 'pipe'],
           maxBuffer: 10 * 1024 * 1024,
           windowsHide: true,
+          timeout: SHELL_PROBE_TIMEOUT_MS,
         });
 
         if (result.status !== 0) {
@@ -452,6 +455,31 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return null;
     }
 
+    // Fast path: 'command -v' via plain sh (no login shell, no .zshrc sourcing).
+    // This is much faster than the full login shell probe below and catches
+    // brew paths when the Electron login shell env merge already augmented PATH
+    // or when /bin/sh has a broader default PATH than the process.
+    if (process.platform !== 'win32') {
+      try {
+        const fastResult = runSpawnSync('/bin/sh', ['-c', 'command -v opencode'], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          timeout: SHELL_PROBE_TIMEOUT_MS,
+        });
+        if (fastResult.status === 0) {
+          const found = (fastResult.stdout || '').trim().split(/\s+/).pop() || '';
+          if (found && isExecutable(found)) {
+            clearWslOpencodeResolution();
+            state.resolvedOpencodeBinarySource = 'shell';
+            return found;
+          }
+        }
+      } catch {
+        // Fall through to login shell probe
+      }
+    }
+
     const shells = [process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(Boolean);
     for (const shell of shells) {
       if (!isExecutable(shell)) continue;
@@ -460,6 +488,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          timeout: SHELL_PROBE_TIMEOUT_MS,
         });
         if (result.status === 0) {
           const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
@@ -519,6 +548,29 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return null;
     }
 
+    // Fast path: 'command -v' via plain sh (no login shell, no .zshrc sourcing).
+    // This is much faster than the full login shell probe below and catches
+    // brew paths when the Electron login shell env merge already augmented PATH
+    // or when /bin/sh has a broader default PATH than the process.
+    if (process.platform !== 'win32') {
+      try {
+        const fastResult = runSpawnSync('/bin/sh', ['-c', 'command -v node'], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          timeout: SHELL_PROBE_TIMEOUT_MS,
+        });
+        if (fastResult.status === 0) {
+          const found = (fastResult.stdout || '').trim().split(/\s+/).pop() || '';
+          if (found && isExecutable(found)) {
+            return found;
+          }
+        }
+      } catch {
+        // Fall through to login shell probe
+      }
+    }
+
     const shells = [process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(Boolean);
     for (const shell of shells) {
       if (!isExecutable(shell)) continue;
@@ -527,6 +579,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          timeout: SHELL_PROBE_TIMEOUT_MS,
         });
         if (result.status === 0) {
           const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
@@ -600,6 +653,29 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return null;
     }
 
+    // Fast path: 'command -v' via plain sh (no login shell, no .zshrc sourcing).
+    // This is much faster than the full login shell probe below and catches
+    // brew paths when the Electron login shell env merge already augmented PATH
+    // or when /bin/sh has a broader default PATH than the process.
+    if (process.platform !== 'win32') {
+      try {
+        const fastResult = runSpawnSync('/bin/sh', ['-c', 'command -v bun'], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          timeout: SHELL_PROBE_TIMEOUT_MS,
+        });
+        if (fastResult.status === 0) {
+          const found = (fastResult.stdout || '').trim().split(/\s+/).pop() || '';
+          if (found && isExecutable(found)) {
+            return found;
+          }
+        }
+      } catch {
+        // Fall through to login shell probe
+      }
+    }
+
     const shells = [process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(Boolean);
     for (const shell of shells) {
       if (!isExecutable(shell)) continue;
@@ -608,6 +684,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          timeout: SHELL_PROBE_TIMEOUT_MS,
         });
         if (result.status === 0) {
           const found = (result.stdout || '').trim().split(/\s+/).pop() || '';

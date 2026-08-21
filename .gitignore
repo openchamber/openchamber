@@ -69,6 +69,8 @@ workspaces/
 *.pid
 .worktrees/
 
+# Internal superpower planning docs (not for upstream)
+docs/superpowers/
 # Marks a disposable clone dedicated to unattended maintenance tasks.
 .maintenance-clone
 test-results/

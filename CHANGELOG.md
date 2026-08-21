@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Desktop: opencode installed via Homebrew on macOS is now found even when the app is launched from the Dock — shell probes won't block startup, a fast `command -v` probe catches brew paths without sourcing shell config, and brew path ordering is consistent across runtimes (issue #1720).
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
 
 ## [1.19.0] - 2026-08-19
