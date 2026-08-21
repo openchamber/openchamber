@@ -32,11 +32,33 @@ export function createGlobalMessageStreamWsBridge({
   };
 
   const replayEvents = (socket, requestedLastEventId) => {
-    for (const entry of globalHub.replayAfter(requestedLastEventId)) {
+    const replayState = globalHub.getReplayState(requestedLastEventId);
+    for (const entry of replayState.entries) {
       const sent = sendMessageStreamWsEvent(socket, entry.payload, {
         directory: entry.directory,
         eventId: entry.eventId,
       });
+      if (!sent) {
+        removeClient(socket);
+        return;
+      }
+    }
+    return replayState.cursor;
+  };
+
+  const sendSessionStatusSnapshot = (socket) => {
+    if (socket.readyState !== 1 || !clients.has(socket)) {
+      return;
+    }
+
+    for (const { sessionID, status, directory } of globalHub.getSessionStatusSnapshot()) {
+      const sent = sendMessageStreamWsEvent(socket, {
+        type: 'session.status',
+        properties: {
+          sessionID,
+          status,
+        },
+      }, { directory });
       if (!sent) {
         removeClient(socket);
         return;
@@ -60,7 +82,10 @@ export function createGlobalMessageStreamWsBridge({
 
     readyClients.add(socket);
     wsClients.add(socket);
-    replayEvents(socket, requestedLastEventId);
+    const replayCursor = replayEvents(socket, requestedLastEventId);
+    if (!requestedLastEventId || replayCursor === 'miss') {
+      sendSessionStatusSnapshot(socket);
+    }
   };
 
   const stopHubIfUnused = () => {
