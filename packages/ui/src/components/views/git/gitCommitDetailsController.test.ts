@@ -7,6 +7,7 @@ import type {
 } from '@/lib/api/types';
 import {
   createGitCommitDetailsController,
+  scheduleGitCommitDetailsIdle,
   type GitCommitComparison,
 } from './gitCommitDetailsController';
 
@@ -151,6 +152,99 @@ const createIdleScheduler = (): IdleScheduler => {
 };
 
 describe('createGitCommitDetailsController', () => {
+  test('schedules and cancels idle work through requestIdleCallback when available', () => {
+    const descriptors = new Map<string, PropertyDescriptor | undefined>();
+    const restoreGlobal = (name: string) => {
+      const descriptor = descriptors.get(name);
+      if (descriptor) {
+        Object.defineProperty(globalThis, name, descriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, name);
+      }
+    };
+    const setGlobal = <T,>(name: string, value: T) => {
+      descriptors.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+      Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+    };
+
+    const scheduledCallbacks: Array<() => void> = [];
+    const cancelledHandles: number[] = [];
+
+    setGlobal('requestIdleCallback', (callback: () => void) => {
+      scheduledCallbacks.push(callback);
+      return 42;
+    });
+    setGlobal('cancelIdleCallback', (handle: number) => {
+      cancelledHandles.push(handle);
+    });
+
+    try {
+      const seen: string[] = [];
+      const dispose = scheduleGitCommitDetailsIdle(() => {
+        seen.push('ran');
+      });
+
+      expect(scheduledCallbacks).toHaveLength(1);
+      scheduledCallbacks[0]?.();
+      expect(seen).toEqual(['ran']);
+
+      dispose();
+      expect(cancelledHandles).toEqual([42]);
+    } finally {
+      restoreGlobal('requestIdleCallback');
+      restoreGlobal('cancelIdleCallback');
+    }
+  });
+
+  test('falls back to timeout scheduling and cancellation when idle callbacks are unavailable', () => {
+    const descriptors = new Map<string, PropertyDescriptor | undefined>();
+    const restoreGlobal = (name: string) => {
+      const descriptor = descriptors.get(name);
+      if (descriptor) {
+        Object.defineProperty(globalThis, name, descriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, name);
+      }
+    };
+    const setGlobal = <T,>(name: string, value: T) => {
+      descriptors.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+      Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+    };
+
+    Reflect.deleteProperty(globalThis, 'requestIdleCallback');
+    Reflect.deleteProperty(globalThis, 'cancelIdleCallback');
+
+    const scheduledCallbacks: Array<() => void> = [];
+    const clearedHandles: number[] = [];
+
+    setGlobal('setTimeout', (callback: () => void) => {
+      scheduledCallbacks.push(callback);
+      return 7;
+    });
+    setGlobal('clearTimeout', (handle: number) => {
+      clearedHandles.push(handle);
+    });
+
+    try {
+      const seen: string[] = [];
+      const dispose = scheduleGitCommitDetailsIdle(() => {
+        seen.push('ran');
+      });
+
+      expect(scheduledCallbacks).toHaveLength(1);
+      scheduledCallbacks[0]?.();
+      expect(seen).toEqual(['ran']);
+
+      dispose();
+      expect(clearedHandles).toEqual([7]);
+    } finally {
+      restoreGlobal('setTimeout');
+      restoreGlobal('clearTimeout');
+      restoreGlobal('requestIdleCallback');
+      restoreGlobal('cancelIdleCallback');
+    }
+  });
+
   test('loads metadata lazily, dedupes repeated expansion, and distinguishes empty from error retries', async () => {
     const firstRequest = createDeferred<GitCommitFilesResponse>();
     const secondRequest = createDeferred<GitCommitFilesResponse>();

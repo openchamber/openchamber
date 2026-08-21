@@ -84,6 +84,16 @@ const LOADING_COMMIT_SNAPSHOT: GitCommitChangesSnapshot = { status: 'loading' };
 const EMPTY_COMMIT_SNAPSHOT: GitCommitChangesSnapshot = { status: 'empty' };
 const IDLE_PREVIEW_SNAPSHOT: GitCommitPreviewSnapshot = { status: 'idle' };
 
+export const scheduleGitCommitDetailsIdle = (callback: () => void) => {
+  if ('requestIdleCallback' in globalThis && 'cancelIdleCallback' in globalThis) {
+    const handle = globalThis.requestIdleCallback(callback);
+    return () => globalThis.cancelIdleCallback(handle);
+  }
+
+  const handle = globalThis.setTimeout(callback, 0);
+  return () => globalThis.clearTimeout(handle);
+};
+
 const toComparisonKey = (key: GitCommitComparison): string => JSON.stringify([key.directory, key.commitHash, key.parentHash]);
 
 const toPreviewRequest = (key: GitCommitComparison, file: GitCommitChangedFile): GitCommitFilePreviewRequest => ({

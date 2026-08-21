@@ -74,7 +74,7 @@ import { getWorkingTreeDiffDestination } from '@/lib/getWorkingTreeDiffDestinati
 import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { getGitViewRenderMode } from './git/gitViewRenderMode';
-import { createGitCommitDetailsController } from './git/gitCommitDetailsController';
+import { createGitCommitDetailsController, scheduleGitCommitDetailsIdle } from './git/gitCommitDetailsController';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
@@ -87,16 +87,6 @@ type HistoryBranchDivider = {
 } | null;
 
 const GIT_RECONCILE_DELAY_MS = 15000;
-
-const scheduleGitCommitDetailsIdle = (callback: () => void) => {
-  if ('requestIdleCallback' in globalThis && 'cancelIdleCallback' in globalThis) {
-    const handle = globalThis.requestIdleCallback(callback);
-    return () => globalThis.cancelIdleCallback(handle);
-  }
-
-  const handle = globalThis.setTimeout(callback, 0);
-  return () => globalThis.clearTimeout(handle);
-};
 
 type GitViewSnapshot = {
   directory?: string;

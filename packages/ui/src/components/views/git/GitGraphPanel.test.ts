@@ -95,6 +95,7 @@ mock.module('./GitGraphSegment', () => ({
 const renderedHistoryRows: Array<{
   id: string;
   compactGraph?: boolean;
+  showGraphActions?: boolean;
   commitDetailsController?: unknown;
   commitComparison?: { directory: string; commitHash: string; parentHash: string | null };
 }> = [];
@@ -103,15 +104,17 @@ mock.module('./HistoryCommitRow', () => ({
   HistoryCommitRow: ({
     entry,
     compactGraph,
+    showGraphActions,
     commitDetailsController,
     commitComparison,
   }: {
     entry: { id: string };
     compactGraph?: boolean;
+    showGraphActions?: boolean;
     commitDetailsController?: unknown;
     commitComparison?: { directory: string; commitHash: string; parentHash: string | null };
   }) => {
-    renderedHistoryRows.push({ id: entry.id, compactGraph, commitDetailsController, commitComparison });
+    renderedHistoryRows.push({ id: entry.id, compactGraph, showGraphActions, commitDetailsController, commitComparison });
     return React.createElement('li', { 'data-history-id': entry.id });
   },
 }));
@@ -769,6 +772,7 @@ describe('GitGraphPanel component regression', () => {
     expect(renderedHistoryRows.find((row) => row.id === 'commit-a')).toEqual({
       id: 'commit-a',
       compactGraph: true,
+      showGraphActions: true,
       commitDetailsController: controller,
       commitComparison: {
         directory: '/repo',
@@ -776,6 +780,33 @@ describe('GitGraphPanel component regression', () => {
         parentHash: 'commit-root',
       },
     });
+
+    await act(async () => {
+      root.unmount();
+      await flushEffects();
+    });
+    dom.restore();
+  });
+
+  test('forwards read-only graph consumers to rows without mutation controls', async () => {
+    const dom = installMinimalDom();
+    const root: Root = createRoot(dom.container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(
+          I18nProvider,
+          null,
+          React.createElement(GitGraphPanel, {
+            ...createDefaultGitGraphPanelProps(),
+            readOnly: true,
+          }),
+        ),
+      );
+      await flushEffects();
+    });
+
+    expect(renderedHistoryRows.find((row) => row.id === 'commit-a')?.showGraphActions).toBe(false);
 
     await act(async () => {
       root.unmount();

@@ -32,6 +32,7 @@ interface GitGraphPanelProps {
   directory: string;
   git: RuntimeAPIs['git'];
   isActive: boolean;
+  readOnly?: boolean;
   commitDetailsController: GitCommitDetailsController;
   onCopyHash: (hash: string) => void;
   hoverRemoteName?: string | null;
@@ -45,6 +46,7 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
   directory,
   git,
   isActive,
+  readOnly = false,
   commitDetailsController,
   onCopyHash,
   hoverRemoteName = null,
@@ -356,6 +358,7 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
                   hoverRemoteUrl={hoverRemoteUrl}
                   hoverDetailsCache={hoverDetailsCache}
                   compactGraph={true}
+                  showGraphActions={!readOnly}
                   onConflict={onConflict}
                   onActionSuccess={onActionSuccess}
                   commitComparison={comparison}

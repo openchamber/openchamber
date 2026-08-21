@@ -83,6 +83,7 @@ interface HistoryCommitRowProps {
   commitDetailsController?: GitCommitDetailsControllerLike;
   selectedChangedFilePath?: string | null;
   changedFilesView?: 'list' | 'tree';
+  showGraphActions?: boolean;
 }
 
 const isGitHistoryItemEntry = (entry: GitLogEntry | GitHistoryItem): entry is GitHistoryItem => 'subject' in entry;
@@ -140,6 +141,7 @@ export const HistoryCommitRow = React.memo(({
   commitDetailsController,
   selectedChangedFilePath = null,
   changedFilesView = 'tree',
+  showGraphActions = true,
 }: HistoryCommitRowProps) => {
   const { t, locale } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
@@ -486,7 +488,7 @@ export const HistoryCommitRow = React.memo(({
       {isExpanded && (
         <div id={detailsContentId} className="px-3 pb-2 pl-8 border-t border-border/40">
           {/* Action buttons */}
-          {isGraphMode && pendingAction ? (
+          {isGraphMode && showGraphActions && pendingAction ? (
             /* Confirmation banner — replaces the button row while an action is pending */
             <div className="flex items-center gap-2 py-2 border-b border-border/30 mb-2">
               <span className="typography-micro text-muted-foreground flex-1 min-w-0">
@@ -510,7 +512,7 @@ export const HistoryCommitRow = React.memo(({
                 {t('gitView.history.actions.cancelButton')}
               </Button>
             </div>
-          ) : isGraphMode ? (
+          ) : isGraphMode && showGraphActions ? (
             <div className="flex flex-wrap items-center gap-1.5 py-2 border-b border-border/30 mb-2">
               <Button variant="outline" size="xs" className="h-6"
                 disabled={actionLoading !== null}

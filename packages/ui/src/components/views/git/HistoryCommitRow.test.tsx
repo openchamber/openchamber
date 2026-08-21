@@ -294,4 +294,82 @@ describe('HistoryCommitRow compact graph regression', () => {
     expect(copiedHashes).toEqual(['abcdef1234567890']);
     expect(toggleCalls).toEqual([]);
   });
+
+  test('hides graph mutation controls for read-only graph consumers while keeping changed file selection', () => {
+    buttonRegistry.length = 0;
+    const selectedFiles: Array<{ comparison: GitCommitComparison; file: GitCommitChangedFile }> = [];
+    const comparison: GitCommitComparison = {
+      directory: '/repo',
+      commitHash: 'abcdef1234567890',
+      parentHash: 'fedcba0987654321',
+    };
+
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <ul>
+          <HistoryCommitRow
+            entry={{
+              id: 'abcdef1234567890',
+              parentIds: ['fedcba0987654321'],
+              subject: 'Read-only graph row',
+              message: 'Read-only graph row',
+              author: 'Taylor Developer',
+              authorEmail: 'taylor@example.com',
+              timestamp: '2024-01-02T03:04:00.000Z',
+              statistics: { files: 1, insertions: 2, deletions: 1 },
+              references: [],
+            }}
+            mode="graph"
+            isExpanded={true}
+            onToggle={() => {}}
+            files={[]}
+            isLoadingFiles={false}
+            onCopyHash={() => {}}
+            directory="/repo"
+            showGraphActions={false}
+            commitComparison={comparison}
+            commitDetailsController={{
+              getCommitSnapshot: () => ({
+                status: 'ready',
+                files: [
+                  createChangedFile({ path: 'src/readonly.ts', status: 'M', insertions: 2, deletions: 1 }),
+                ],
+              }),
+              subscribeCommit: () => () => {},
+              retryCommit: () => {},
+              selectFile: (nextComparison, file) => {
+                selectedFiles.push({ comparison: nextComparison, file });
+              },
+            }}
+            selectedChangedFilePath="src/readonly.ts"
+          />
+        </ul>
+      </I18nProvider>,
+    );
+
+    expect(markup).toContain('data-git-commit-changed-file-row="src/readonly.ts"');
+    expect(markup).not.toContain('>Checkout</button>');
+    expect(markup).not.toContain('>Create branch</button>');
+    expect(markup).not.toContain('>Cherry-pick</button>');
+    expect(markup).not.toContain('>Revert</button>');
+    expect(markup).not.toContain('>Reset</button>');
+    expect(markup).not.toContain('>Soft</button>');
+    expect(markup).not.toContain('>Mixed</button>');
+    expect(markup).not.toContain('>Hard</button>');
+    expect(markup).not.toContain('>Merge</button>');
+    expect(markup).not.toContain('>Rebase</button>');
+
+    const fileRowButton = buttonRegistry.find((props) => props['data-git-commit-changed-file-row'] === 'src/readonly.ts');
+    expect(fileRowButton).toBeDefined();
+    const fileEvent = createPressEvent();
+    invokeClick(fileRowButton?.onClick, fileEvent);
+    expect(fileEvent.defaultPrevented).toBe(true);
+    expect(fileEvent.propagationStopped).toBe(true);
+    expect(selectedFiles).toEqual([
+      {
+        comparison,
+        file: createChangedFile({ path: 'src/readonly.ts', status: 'M', insertions: 2, deletions: 1 }),
+      },
+    ]);
+  });
 });
