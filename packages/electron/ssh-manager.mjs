@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-import { replaceFileWithRetry } from './windows-file-replace.mjs';
+import { readJsonFileWithBackup, replaceFile } from './file-replace.mjs';
 
 const LOCAL_HOST_ID = 'local';
 const DEFAULT_CONNECTION_TIMEOUT_SEC = 60;
@@ -87,7 +87,7 @@ const expandSshIncludeToken = (token, baseDir) => {
 
 const readJsonRoot = (settingsFilePath) => {
   try {
-    const parsed = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    const parsed = readJsonFileWithBackup(settingsFilePath);
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
@@ -102,7 +102,7 @@ const writeJsonRoot = async (settingsFilePath, root) => {
   const tmp = `${settingsFilePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     await fsp.writeFile(tmp, JSON.stringify(root, null, 2));
-    await replaceFileWithRetry(tmp, settingsFilePath);
+    await replaceFile(tmp, settingsFilePath);
   } catch (error) {
     await fsp.rm(tmp, { force: true }).catch(() => {});
     throw error;
