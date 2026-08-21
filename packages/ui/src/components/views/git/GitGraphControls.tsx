@@ -39,8 +39,10 @@ export const GitGraphControls: React.FC<GitGraphControlsProps> = ({ directory, g
   );
 
   const refresh = React.useCallback(async () => {
-    await ensureHistoryRefs(directory, git);
-    await fetchHistoryPage(directory, git, query);
+    try {
+      await ensureHistoryRefs(directory, git);
+      await fetchHistoryPage(directory, git, query);
+    } catch { /* errors surfaced through store state */ }
   }, [directory, ensureHistoryRefs, fetchHistoryPage, git, query]);
 
   return (
