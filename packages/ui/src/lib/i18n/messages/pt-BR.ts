@@ -3101,6 +3101,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.section.project': 'Projeto',
   'chat.workStatus.section.subagents': 'Subagentes',
   'chat.workStatus.section.mcp': 'MCP',
+  'chat.workStatus.section.gitGraph': 'Gráfico do Git',
   'chat.workStatus.section.pinned': 'Mensagens fixadas',
   'chat.workStatus.section.tasks': 'Tarefas',
   'chat.workStatus.subagent.working': 'está trabalhando',

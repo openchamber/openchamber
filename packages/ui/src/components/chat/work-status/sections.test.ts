@@ -15,6 +15,15 @@ describe('section registry', () => {
     expect(Object.keys(WORK_STATUS_SECTION_LABEL_KEYS).sort())
       .toEqual([...WORK_STATUS_SECTION_IDS].sort());
   });
+
+  test('registers gitGraph immediately after mcp with a visible default and persisted sanitization support', () => {
+    expect(WORK_STATUS_SECTION_IDS.indexOf('gitGraph')).toBe(
+      WORK_STATUS_SECTION_IDS.indexOf('mcp') + 1,
+    );
+    expect(WORK_STATUS_SECTION_LABEL_KEYS.gitGraph).toBe('chat.workStatus.section.gitGraph');
+    expect(isWorkStatusSectionVisible([], 'gitGraph')).toBe(true);
+    expect(sanitizeWorkStatusHiddenSections(['gitGraph', 'nope'])).toEqual(['gitGraph']);
+  });
 });
 
 describe('isWorkStatusSectionVisible', () => {

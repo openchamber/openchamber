@@ -3100,6 +3100,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.section.project': '프로젝트',
   'chat.workStatus.section.subagents': '서브에이전트',
   'chat.workStatus.section.mcp': 'MCP',
+  'chat.workStatus.section.gitGraph': 'Git 그래프',
   'chat.workStatus.section.pinned': '고정된 메시지',
   'chat.workStatus.section.tasks': '작업',
   'chat.workStatus.subagent.working': '작업 중',

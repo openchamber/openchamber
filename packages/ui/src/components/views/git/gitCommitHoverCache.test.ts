@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { GitCommitHoverDetailsKey, GitHubCommitDetails } from '@/lib/api/types';
-import { createGitCommitHoverDetailsCache } from './gitCommitHoverCache';
+import { createGitCommitHoverDetailsCache, preloadGitCommitHoverImage } from './gitCommitHoverCache';
 
 const key: GitCommitHoverDetailsKey = {
   directory: '/repo',
@@ -9,6 +9,33 @@ const key: GitCommitHoverDetailsKey = {
 };
 
 describe('createGitCommitHoverDetailsCache', () => {
+  test('preloadGitCommitHoverImage resolves false when the runtime has no Image constructor', async () => {
+    expect(await preloadGitCommitHoverImage('https://avatars.githubusercontent.com/u/1', undefined)).toBe(false);
+  });
+
+  test('preloadGitCommitHoverImage resolves from image load and error callbacks', async () => {
+    class SuccessfulImage {
+      onload: null | (() => void) = null;
+      onerror: null | (() => void) = null;
+
+      set src(_value: string) {
+        this.onload?.();
+      }
+    }
+
+    class FailingImage {
+      onload: null | (() => void) = null;
+      onerror: null | (() => void) = null;
+
+      set src(_value: string) {
+        this.onerror?.();
+      }
+    }
+
+    expect(await preloadGitCommitHoverImage('https://avatars.githubusercontent.com/u/1', SuccessfulImage)).toBe(true);
+    expect(await preloadGitCommitHoverImage('https://avatars.githubusercontent.com/u/2', FailingImage)).toBe(false);
+  });
+
   test('does not load on construction or snapshot reads and dedupes in-flight preload work', async () => {
     let loaderCalls = 0;
     const cache = createGitCommitHoverDetailsCache({

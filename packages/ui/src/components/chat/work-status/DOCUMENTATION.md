@@ -184,7 +184,7 @@ Ordering is by durability, not category:
    open. Usage sits here rather than lower down because a spent quota stops the
    work outright;
 2. **Subagents**, **Tasks** — what is happening right now;
-3. **MCP**, **Pinned messages**, **Context sources** — supporting material.
+3. **MCP**, **Git graph**, **Pinned messages**, **Context sources** — supporting material.
 
 ## Switching it off
 
@@ -194,6 +194,9 @@ sections are stored rather than visible ones, so a section added later appears
 for everyone instead of staying invisible to whoever had saved settings before
 it existed. Both travel the full settings pipeline, including the server
 whitelist without which the keys never reach `settings.json`.
+
+The Git graph follows the same rule. `gitGraph` is absent from older hidden
+lists, so it appears by default when this release adds it.
 
 `workStatusPanelVisible` is separate and transient: the switch can be on while
 layout still refuses the panel. The header and the git rail read it to drop the
@@ -223,6 +226,31 @@ another's shorter panel lands somewhere arbitrary.
 The Subagents section opens itself when subagents appear where there were none,
 on that edge only: re-expanding on every count change would fight a user who
 just collapsed it.
+
+## Git graph
+
+The Git graph section reuses `GitGraphPanel` instead of implementing a second
+history surface. It sits after MCP, starts collapsed, and renders its body in a
+fixed `h-80 min-h-0 overflow-hidden` container so the graph scrolls inside its
+own pane.
+
+The graph becomes active only when the work-status panel is visible, the user
+has expanded the section, and the session still targets a directory with a Git
+runtime. While collapsed or hidden, it does no history refresh, merge-base
+lookup, remote lookup, or hover-enrichment work.
+
+This section is read-only. It keeps graph filters, refresh, row expansion,
+hover, copy-hash, and changed-file lists, but removes checkout, branch
+creation, cherry-pick, revert, reset, merge, and rebase controls.
+
+Selecting a changed file hands the exact historical comparison to the Context
+Panel Changes tab through `openContextCommitDiff`. The popover does not host an
+inline historical preview. The existing Changes surface keeps ownership of the
+real preview states: loading, retry, binary, gitlink, large-file, and error.
+
+Remote hover enrichment follows the same preferred-remote selection as
+`GitView`. If GitHub commit-details loading fails, the row still keeps its
+local hover summary and simply omits the unavailable remote details.
 
 Its expanded list is capped at eight rows and scrolls independently, so a
 session with many subagents does not crowd every section below it out of the

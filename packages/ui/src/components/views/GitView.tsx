@@ -60,7 +60,7 @@ import { StashDialog } from './git/StashDialog';
 import { InProgressOperationBanner } from './git/InProgressOperationBanner';
 import { BranchIntegrationSection, type OperationLogEntry } from './git/BranchIntegrationSection';
 import { deriveBaseBranch } from './git/baseBranch';
-import { createGitCommitHoverDetailsCache } from './git/gitCommitHoverCache';
+import { createGitCommitHoverDetailsCache, preloadGitCommitHoverImage } from './git/gitCommitHoverCache';
 import { selectGitCommitHoverRemote } from './git/gitCommitRemote';
 import { getFreshestPrStatusForBranch, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { createGitIndexMutationQueue, type GitIndexMutationDirection, type GitIndexMutationQueue } from './git/gitIndexMutationQueue';
@@ -1368,20 +1368,9 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       return null;
     }
 
-    const ImageConstructor = globalThis.Image;
-
     return createGitCommitHoverDetailsCache({
       load: ({ directory, hash, remoteName }) => commitDetails(directory, hash, remoteName ?? undefined),
-      preloadImage: (url) => new Promise<boolean>((resolve) => {
-        if (!ImageConstructor) {
-          resolve(false);
-          return;
-        }
-        const image = new ImageConstructor();
-        image.onload = () => resolve(true);
-        image.onerror = () => resolve(false);
-        image.src = url;
-      }),
+      preloadImage: preloadGitCommitHoverImage,
     });
   }, [github]);
 

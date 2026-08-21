@@ -3100,6 +3100,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.section.project': '專案',
   'chat.workStatus.section.subagents': '子代理',
   'chat.workStatus.section.mcp': 'MCP',
+  'chat.workStatus.section.gitGraph': 'Git 圖譜',
   'chat.workStatus.section.pinned': '已釘選的訊息',
   'chat.workStatus.section.tasks': '工作',
   'chat.workStatus.subagent.working': '正在工作',

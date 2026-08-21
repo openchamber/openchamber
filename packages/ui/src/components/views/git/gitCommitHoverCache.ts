@@ -16,6 +16,26 @@ type CacheEntry = {
 const DEFAULT_MAX_POSITIVE_ENTRIES = 200;
 const DEFAULT_NEGATIVE_TTL_MS = 60_000;
 
+export type RuntimeImageConstructor = new () => {
+  onload: null | ((event: Event) => void) | (() => void);
+  onerror: null | ((event: Event) => void) | (() => void);
+  src: string;
+};
+
+export const preloadGitCommitHoverImage = (
+  url: string,
+  ImageConstructor: RuntimeImageConstructor | undefined = globalThis.Image,
+): Promise<boolean> => new Promise<boolean>((resolve) => {
+  if (!ImageConstructor) {
+    resolve(false);
+    return;
+  }
+  const image = new ImageConstructor();
+  image.onload = () => resolve(true);
+  image.onerror = () => resolve(false);
+  image.src = url;
+});
+
 const toCacheKey = (key: GitCommitHoverDetailsKey): string => JSON.stringify([key.directory, key.remoteName, key.hash]);
 
 const cloneDetailsWithoutAvatar = (details: GitHubCommitDetails): GitHubCommitDetails => {
