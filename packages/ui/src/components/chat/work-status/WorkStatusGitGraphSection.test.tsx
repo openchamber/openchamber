@@ -426,21 +426,26 @@ const renderSection = async (
   const dom = installMinimalDom();
   const root: Root = createRoot(dom.container);
 
-  await act(async () => {
-    root.render(
-      <RuntimeAPIContext.Provider value={runtimeApis}>
-        <I18nProvider>
-          <WorkStatusPresenceProvider onChange={onPresenceChange}>
-            <WorkStatusGitGraphSection {...props} />
-          </WorkStatusPresenceProvider>
-        </I18nProvider>
-      </RuntimeAPIContext.Provider>,
-    );
-    await flush();
-  });
+  const renderWithProps = async (nextProps: { directory: string | null; panelVisible: boolean }) => {
+    await act(async () => {
+      root.render(
+        <RuntimeAPIContext.Provider value={runtimeApis}>
+          <I18nProvider>
+            <WorkStatusPresenceProvider onChange={onPresenceChange}>
+              <WorkStatusGitGraphSection {...nextProps} />
+            </WorkStatusPresenceProvider>
+          </I18nProvider>
+        </RuntimeAPIContext.Provider>,
+      );
+      await flush();
+    });
+  };
+
+  await renderWithProps(props);
 
   return {
     container: dom.container,
+    rerender: renderWithProps,
     unmount: async () => {
       await act(async () => {
         root.unmount();
@@ -619,5 +624,65 @@ describe('WorkStatusGitGraphSection', () => {
     });
     expect(calls).toEqual({ refs: 0, history: 0, remotes: 0 });
     await hiddenPanel.unmount();
+  });
+
+  test('disposes the old directory controller when the mounted expanded section switches directories', async () => {
+    useUIStore.getState().setWorkStatusSectionExpanded('gitGraph', true);
+
+    const refsByDirectory = new Map<string, number>();
+    const historyByDirectory = new Map<string, number>();
+    const remotesByDirectory = new Map<string, number>();
+    const increment = (map: Map<string, number>, directory: string) => {
+      map.set(directory, (map.get(directory) ?? 0) + 1);
+    };
+
+    const runtimeApis = createRuntimeApis({
+      getGitHistoryRefs: async (directory) => {
+        increment(refsByDirectory, directory);
+        return createHistoryRefs();
+      },
+      getGitHistory: async (directory) => {
+        increment(historyByDirectory, directory);
+        return createHistoryPage();
+      },
+      getRemotes: async (directory) => {
+        increment(remotesByDirectory, directory);
+        return [];
+      },
+    });
+
+    const rendered = await renderSection({ directory: '/repo-a', panelVisible: true }, runtimeApis);
+    const oldRow = historyRowCalls.at(-1);
+
+    expect(refsByDirectory.get('/repo-a')).toBeGreaterThan(0);
+    expect(historyByDirectory.get('/repo-a')).toBeGreaterThan(0);
+    expect(remotesByDirectory.get('/repo-a')).toBe(1);
+
+    await rendered.rerender({ directory: '/repo-b', panelVisible: true });
+
+    expect(refsByDirectory.get('/repo-b')).toBeGreaterThan(0);
+    expect(historyByDirectory.get('/repo-b')).toBeGreaterThan(0);
+    expect(remotesByDirectory.get('/repo-b')).toBe(1);
+
+    const repoARefsBeforeOldSelect = refsByDirectory.get('/repo-a') ?? 0;
+    const repoAHistoryBeforeOldSelect = historyByDirectory.get('/repo-a') ?? 0;
+
+    oldRow?.commitDetailsController?.selectFile(
+      oldRow.commitComparison ?? { directory: '/repo-a', commitHash: 'a'.repeat(40), parentHash: 'b'.repeat(40) },
+      {
+        path: 'src/old-history.ts',
+        status: 'M',
+        kind: 'file',
+        insertions: 1,
+        deletions: 1,
+        isBinary: false,
+      },
+    );
+    await flush();
+
+    expect(refsByDirectory.get('/repo-a')).toBe(repoARefsBeforeOldSelect);
+    expect(historyByDirectory.get('/repo-a')).toBe(repoAHistoryBeforeOldSelect);
+
+    await rendered.unmount();
   });
 });
