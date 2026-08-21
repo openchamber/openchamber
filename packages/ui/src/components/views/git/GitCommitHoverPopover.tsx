@@ -4,8 +4,10 @@ import React from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
+import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import type { GitCommitHoverDetailsCache } from '@/lib/api/types';
+import type { GitHistoryGraphRef } from './gitGraph';
 import type { GitCommitHoverModel } from './gitCommitHoverModel';
 import { buildGitHubCommitUrl } from './gitCommitRemote';
 
@@ -54,6 +56,7 @@ type GitCommitHoverPopoverProps = {
   openGitHubLabel: string;
   copyShaLabel: string;
   changedFilesLabel: string;
+  references?: readonly GitHistoryGraphRef[];
 };
 
 const getAuthorInitials = (value: string): string => {
@@ -77,6 +80,7 @@ const GitCommitHoverPopoverComponent: React.FC<GitCommitHoverPopoverProps> = ({
   openGitHubLabel,
   copyShaLabel,
   changedFilesLabel,
+  references,
 }) => {
   const actionsRef = React.useRef<Popover.Root.Actions | null>(null);
   const preloadTimeoutRef = React.useRef<number | null>(null);
@@ -213,6 +217,25 @@ const GitCommitHoverPopoverComponent: React.FC<GitCommitHoverPopoverProps> = ({
                   <span className="text-[var(--status-success)]">+{model.statistics.insertions}</span>
                   <span className="text-[var(--status-error)]">-{model.statistics.deletions}</span>
                 </div>
+                {references && references.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {references.filter((ref) => ref.kind === 'tag').map((ref) => (
+                      <span
+                        key={ref.id}
+                        data-git-commit-hover-tag={ref.id}
+                        className={cn(
+                          'inline-flex items-center rounded-full border px-1.5 py-0 typography-micro font-medium',
+                          ref.color
+                            ? 'border-transparent text-[var(--primary-foreground)]'
+                            : 'border-border/60 bg-muted/40 text-foreground',
+                        )}
+                        style={ref.color ? { backgroundColor: ref.color } : undefined}
+                      >
+                        {ref.name}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {githubUrl ? (
                     <Button

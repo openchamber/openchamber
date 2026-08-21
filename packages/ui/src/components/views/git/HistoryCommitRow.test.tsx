@@ -492,7 +492,7 @@ describe('HistoryCommitRow context menu regression', () => {
     expect(markup).toContain('whitespace-nowrap');
     expect(markup.match(/>topic<\/span>/g)).toHaveLength(1);
     expect(markup).not.toContain('origin/topic');
-    expect(markup).toContain('>v1</span>');
+    expect(markup).not.toContain('>v1</span>');
     expect(markup).not.toContain('<code');
     expect(markup).not.toContain('2024');
     expect(markup).not.toContain('data-icon="file-copy"');

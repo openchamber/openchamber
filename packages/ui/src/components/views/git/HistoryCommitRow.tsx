@@ -405,9 +405,11 @@ export const HistoryCommitRow = React.memo(({
   }, [ensureExpanded]);
 
   const graphBadges: GitHistoryGraphRef[] = viewModel?.historyItem.references ?? [];
-  const compactGraphBadges = graphBadges.some((badge) => badge.kind === 'head')
-    ? graphBadges.filter((badge) => badge.kind === 'head' || badge.kind === 'tag')
-    : graphBadges;
+  const visibleGraphBadges = graphBadges.filter((badge) => badge.kind !== 'tag');
+  const compactGraphBadges = visibleGraphBadges.some((badge) => badge.kind === 'head')
+    ? visibleGraphBadges.filter((badge) => badge.kind === 'head')
+    : visibleGraphBadges;
+  const tagNames = graphBadges.filter((badge) => badge.kind === 'tag' && !badge.color).map((badge) => badge.name).join(', ') || undefined;
 
   const hoverModel = React.useMemo(() => {
     const normalized = normalizeGitCommitHoverEntry(entry);
@@ -428,6 +430,7 @@ export const HistoryCommitRow = React.memo(({
       onClick={onToggle}
       aria-expanded={isExpanded}
       aria-controls={isExpanded ? detailsContentId : undefined}
+      title={tagNames}
       className={cn(
         'w-full text-left transition-colors',
         isCompactGraph
@@ -482,9 +485,9 @@ export const HistoryCommitRow = React.memo(({
           </div>
         ) : (
           <>
-            {isGraphMode && graphBadges.length > 0 ? (
+            {isGraphMode && visibleGraphBadges.length > 0 ? (
               <div className="mb-0.5 flex flex-wrap gap-1">
-                {graphBadges.map((badge) => (
+                {visibleGraphBadges.map((badge) => (
                   <span
                     key={badge.id}
                     className={cn(
@@ -555,13 +558,14 @@ export const HistoryCommitRow = React.memo(({
       rowButton={rowButton}
       openGitHubLabel={t('gitView.pr.actions.openOnGitHub')}
       copyShaLabel={t('gitView.history.copySha')}
-      changedFilesLabel={t(
-        hoverModel.statistics.files === 1
-          ? 'diffView.summary.changedFilesSingle'
-          : 'diffView.summary.changedFilesPlural',
-        { count: hoverModel.statistics.files },
-      )}
-    />
+changedFilesLabel={t(
+            hoverModel.statistics.files === 1
+              ? 'diffView.summary.changedFilesSingle'
+              : 'diffView.summary.changedFilesPlural',
+            { count: hoverModel.statistics.files },
+          )}
+          references={graphBadges}
+        />
   ) : rowButton;
 
   return (
