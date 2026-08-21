@@ -1601,6 +1601,68 @@ export const RemoteInstancesPage: React.FC = () => {
                 )}
               </div>
               {remoteClientError ? <p className="typography-meta text-[var(--status-error)]">{remoteClientError}</p> : null}
+              {relayEndpointLoadFailed || relayEndpoint ? (
+                <SettingsControlGroup
+                  title={t('settings.remoteInstances.clientAuth.relayEndpoint.title')}
+                  info={t('settings.remoteInstances.clientAuth.relayEndpoint.info')}
+                  settingsItem="remote-instances.relay-url"
+                >
+                  {relayEndpointLoadFailed ? (
+                    <p className="typography-meta text-[var(--status-error)]">
+                      {t('settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed')}
+                    </p>
+                  ) : relayEndpoint?.relayUrlLocked ? (
+                    <p className="typography-meta text-muted-foreground">
+                      {t('settings.remoteInstances.clientAuth.relayEndpoint.locked')}
+                      <span className="ml-1 font-mono text-xs break-all">{relayEndpoint.relayUrl}</span>
+                    </p>
+                  ) : relayEndpoint ? (
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <SettingsChipGroup
+                          aria-label={t('settings.remoteInstances.clientAuth.relayEndpoint.title')}
+                          value={relayEndpoint.relayUrl === relayEndpoint.defaultRelayUrl ? 'default' : 'custom'}
+                          options={[
+                            { value: 'default', label: t('settings.remoteInstances.clientAuth.relayEndpoint.option.default') },
+                            { value: 'custom', label: t('settings.remoteInstances.clientAuth.relayEndpoint.option.custom') },
+                          ]}
+                          onChange={(mode) => {
+                            if (mode === 'default') {
+                              setRelayUrlError(null);
+                              void saveRelayUrl(relayEndpoint.defaultRelayUrl);
+                            } else {
+                              setRelayCustomDraft(relayEndpoint.relayUrl === relayEndpoint.defaultRelayUrl ? '' : relayEndpoint.relayUrl);
+                            }
+                          }}
+                        />
+                        {relayCustomDraft != null ? (
+                          <Input
+                            className="h-8 w-64 max-w-full font-mono text-xs"
+                            value={relayCustomDraft}
+                            placeholder={t('settings.remoteInstances.clientAuth.relayEndpoint.field.placeholder')}
+                            spellCheck={false}
+                            autoComplete="off"
+                            disabled={relayUrlSaving}
+                            onChange={(event) => setRelayCustomDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') void saveRelayUrl(relayCustomDraft ?? '');
+                            }}
+                          />
+                        ) : null}
+                        {relayCustomDraft != null ? (
+                          <Button type="button" size="xs" className="!font-normal" disabled={relayUrlSaving} onClick={() => void saveRelayUrl(relayCustomDraft ?? '')}>
+                            {t('settings.remoteInstances.clientAuth.relayEndpoint.actions.save')}
+                          </Button>
+                        ) : null}
+                      </div>
+                      {relayCustomDraft == null ? (
+                        <p className="typography-micro text-muted-foreground break-all font-mono">{relayEndpoint.relayUrl}</p>
+                      ) : null}
+                      {relayUrlError ? <p className="typography-meta text-[var(--status-error)]">{relayUrlError}</p> : null}
+                    </div>
+                  ) : null}
+                </SettingsControlGroup>
+              ) : null}
           </SettingsSection>
         ) : null}
 
@@ -1853,68 +1915,6 @@ export const RemoteInstancesPage: React.FC = () => {
                   ) : null}
                 </div>
                 {remoteClientError ? <p className="typography-meta text-[var(--status-error)]">{remoteClientError}</p> : null}
-                {relayEndpointLoadFailed || relayEndpoint ? (
-                <SettingsControlGroup
-                  title={t('settings.remoteInstances.clientAuth.relayEndpoint.title')}
-                  info={t('settings.remoteInstances.clientAuth.relayEndpoint.info')}
-                  settingsItem="remote-instances.relay-url"
-                >
-                  {relayEndpointLoadFailed ? (
-                    <p className="typography-meta text-[var(--status-error)]">
-                      {t('settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed')}
-                    </p>
-                  ) : relayEndpoint?.relayUrlLocked ? (
-                    <p className="typography-meta text-muted-foreground">
-                      {t('settings.remoteInstances.clientAuth.relayEndpoint.locked')}
-                      <span className="ml-1 font-mono text-xs break-all">{relayEndpoint.relayUrl}</span>
-                    </p>
-                  ) : relayEndpoint ? (
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <SettingsChipGroup
-                          aria-label={t('settings.remoteInstances.clientAuth.relayEndpoint.title')}
-                          value={relayEndpoint.relayUrl === relayEndpoint.defaultRelayUrl ? 'default' : 'custom'}
-                          options={[
-                            { value: 'default', label: t('settings.remoteInstances.clientAuth.relayEndpoint.option.default') },
-                            { value: 'custom', label: t('settings.remoteInstances.clientAuth.relayEndpoint.option.custom') },
-                          ]}
-                          onChange={(mode) => {
-                            if (mode === 'default') {
-                              setRelayUrlError(null);
-                              void saveRelayUrl(relayEndpoint.defaultRelayUrl);
-                            } else {
-                              setRelayCustomDraft(relayEndpoint.relayUrl === relayEndpoint.defaultRelayUrl ? '' : relayEndpoint.relayUrl);
-                            }
-                          }}
-                        />
-                        {relayCustomDraft != null ? (
-                          <Input
-                            className="h-8 w-64 max-w-full font-mono text-xs"
-                            value={relayCustomDraft}
-                            placeholder={t('settings.remoteInstances.clientAuth.relayEndpoint.field.placeholder')}
-                            spellCheck={false}
-                            autoComplete="off"
-                            disabled={relayUrlSaving}
-                            onChange={(event) => setRelayCustomDraft(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') void saveRelayUrl(relayCustomDraft ?? '');
-                            }}
-                          />
-                        ) : null}
-                        {relayCustomDraft != null ? (
-                          <Button type="button" size="xs" className="!font-normal" disabled={relayUrlSaving} onClick={() => void saveRelayUrl(relayCustomDraft ?? '')}>
-                            {t('settings.remoteInstances.clientAuth.relayEndpoint.actions.save')}
-                          </Button>
-                        ) : null}
-                      </div>
-                      {relayCustomDraft == null ? (
-                        <p className="typography-micro text-muted-foreground break-all font-mono">{relayEndpoint.relayUrl}</p>
-                      ) : null}
-                      {relayUrlError ? <p className="typography-meta text-[var(--status-error)]">{relayUrlError}</p> : null}
-                    </div>
-                  ) : null}
-                </SettingsControlGroup>
-              ) : null}
                 <div className="flex justify-end gap-2">
                   <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setAddDeviceOpen(false)} disabled={addDeviceCreating}>{t('settings.common.actions.cancel')}</Button>
                   <Button type="submit" size="xs" className="!font-normal" disabled={addDeviceCreating || !transportOptions}>{t('settings.remoteInstances.clientAuth.addDevice.create')}</Button>
