@@ -1,5 +1,5 @@
 import React from 'react';
-import { getMessageQueueKey, parseMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
+import { getMessageQueueKey, MESSAGE_QUEUE_STORAGE_KEY, parseMessageQueueKey, useMessageQueueStore, withMessageQueueStateLock, withMessageQueueTargetLock, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -10,6 +10,7 @@ import { getDirectoryState } from '@/sync/sync-refs';
 import { useDirectorySync } from '@/sync/sync-context';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { opencodeClient } from '@/lib/opencode/client';
 
 type SessionStatusType = 'idle' | 'busy' | 'retry';
 
@@ -17,6 +18,7 @@ const RECENT_ABORT_WINDOW_MS = 2000;
 
 const AUTO_SEND_RETRY_BASE_DELAY_MS = 2000;
 const AUTO_SEND_RETRY_MAX_DELAY_MS = 60000;
+const QUEUE_LOCK_RETRY_DELAY_MS = 250;
 
 export type QueuedAutoSendFailure = {
   messageId: string;
@@ -91,6 +93,7 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
     primaryAttachments: queued.attachments ?? [],
     agentMentionName: mention?.name,
     sendConfig: queued.sendConfig,
+    sendAttempt: queued.sendAttempt,
   };
 };
 
@@ -102,11 +105,27 @@ type ResolvedQueuedSendConfig = {
   variant?: string;
 };
 
+type QueuedAutoSendOptions = {
+  target: MessageQueueTarget;
+  messageID?: string;
+  onMessageID?: (messageID: string) => void | Promise<void>;
+  beforeSend?: () => void | Promise<void>;
+  onSendFailure?: (ambiguous: boolean) => void;
+};
+
 export const sendQueuedAutoSendPayload = (
   target: MessageQueueTarget,
   payload: QueuedAutoSendPayload,
   resolved: ResolvedQueuedSendConfig,
+  onMessageID?: (messageID: string) => void | Promise<void>,
+  beforeSend?: () => void | Promise<void>,
+  onSendFailure?: (ambiguous: boolean) => void,
 ) => {
+  const options: QueuedAutoSendOptions = { target };
+  if (payload.sendAttempt) options.messageID = payload.sendAttempt.messageID;
+  if (onMessageID) options.onMessageID = onMessageID;
+  if (beforeSend) options.beforeSend = beforeSend;
+  if (onSendFailure) options.onSendFailure = onSendFailure;
   return useSessionUIStore.getState().sendMessage(
     payload.primaryText,
     resolved.providerID,
@@ -117,8 +136,25 @@ export const sendQueuedAutoSendPayload = (
     undefined,
     resolved.variant,
     'normal',
-    { target },
+    options,
   );
+};
+
+export const reconcileQueuedAutoSendAttempt = async (
+  target: MessageQueueTarget,
+  queuedMessageId: string,
+  messageID: string,
+): Promise<boolean> => {
+  if (target.runtimeKey !== getRuntimeKey()) {
+    throw new Error('Queued send reconciliation was cancelled because the runtime changed.');
+  }
+  const confirmed = await opencodeClient.findSessionMessage(target.sessionId, messageID, target.directory);
+  if (target.runtimeKey !== getRuntimeKey()) {
+    throw new Error('Queued send reconciliation was cancelled because the runtime changed.');
+  }
+  if (!confirmed) return false;
+  await useMessageQueueStore.getState().removeFromQueue(target, queuedMessageId);
+  return true;
 };
 
 const resolveSessionSendConfig = (sessionId: string) => {
@@ -231,17 +267,42 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   React.useEffect(() => () => retryScheduler.dispose(), [retryScheduler]);
 
   React.useEffect(() => {
+    if (!globalThis.window) return;
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== MESSAGE_QUEUE_STORAGE_KEY) return;
+      void withMessageQueueStateLock(() => undefined).catch((error) => {
+        console.warn('[queue] failed to hydrate an external queue update:', error);
+      });
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  React.useEffect(() => {
     if (!enabled) {
       return;
     }
 
-    const dispatchSessionQueue = async (target: MessageQueueTarget, queueSnapshot: QueuedMessage[]) => {
+    const dispatchSessionQueue = async (
+      target: MessageQueueTarget,
+      queueSnapshot: QueuedMessage[],
+      lockHeld = false,
+    ) => {
       const { sessionId } = target;
       const targetKey = getMessageQueueKey(target);
       if (queueSnapshot.length === 0) {
         return;
       }
       if (inFlightSessionsRef.current.has(targetKey)) {
+        return;
+      }
+      if (!lockHeld) {
+        const acquired = await withMessageQueueTargetLock(
+          target,
+          () => dispatchSessionQueue(target, queueSnapshot, true),
+          { ifAvailable: true },
+        );
+        if (!acquired) retryScheduler.schedule(Date.now() + QUEUE_LOCK_RETRY_DELAY_MS);
         return;
       }
       const abortHoldUntil = getAbortHoldUntil(sessionId);
@@ -251,11 +312,6 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       }
       if (useAutoReviewStore.getState().isRunningForSession(sessionId)) {
         autoReviewBlockedSessionsRef.current.add(sessionId);
-        return;
-      }
-
-      const currentStatus = resolveQueuedSessionStatusType(sessionId, target.directory);
-      if (currentStatus !== 'idle') {
         return;
       }
 
@@ -271,6 +327,56 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         sendFailuresRef.current.delete(targetKey);
       } else if (failure && isQueuedAutoSendBackedOff(failure, payload.queuedMessageId, Date.now())) {
         retryScheduler.schedule(failure.nextAttemptAt);
+        return;
+      }
+
+      const scheduleFailure = () => {
+        const priorFailures = failure?.messageId === payload.queuedMessageId ? failure.failures : 0;
+        const failures = priorFailures + 1;
+        const nextAttemptAt = Date.now() + getQueuedAutoSendRetryDelayMs(failures);
+        sendFailuresRef.current.set(targetKey, {
+          messageId: payload.queuedMessageId,
+          failures,
+          nextAttemptAt,
+        });
+        retryScheduler.schedule(nextAttemptAt);
+      };
+
+      if (payload.sendAttempt) {
+        inFlightSessionsRef.current.add(targetKey);
+        let markedSending = false;
+        try {
+          markedSending = await useMessageQueueStore.getState().markSending(target, payload.queuedMessageId);
+          if (!markedSending) return;
+          const confirmed = await reconcileQueuedAutoSendAttempt(
+            target,
+            payload.queuedMessageId,
+            payload.sendAttempt.messageID,
+          );
+          if (confirmed) {
+            sendFailuresRef.current.delete(targetKey);
+          } else {
+            // A reload loses the original request promise. A 404 does not prove
+            // the request was never admitted, so keep reconciling but never
+            // auto-send an outcome-unknown attempt again.
+            scheduleFailure();
+          }
+        } catch (error) {
+          console.warn('[queue] queued auto-send reconciliation failed:', error);
+          scheduleFailure();
+        } finally {
+          inFlightSessionsRef.current.delete(targetKey);
+          if (markedSending) {
+            await useMessageQueueStore.getState().clearSending(target, payload.queuedMessageId).catch((error) => {
+              console.warn('[queue] failed to clear queued reconciliation state:', error);
+            });
+          }
+        }
+        return;
+      }
+
+      const currentStatus = resolveQueuedSessionStatusType(sessionId, target.directory);
+      if (currentStatus !== 'idle') {
         return;
       }
 
@@ -291,31 +397,57 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       // The ref only guards this hook. Publish the dispatch to the store so the
       // composer cannot merge the same item into a parallel send while this one
       // is still awaiting the server.
-      useMessageQueueStore.getState().markSending(target, payload.queuedMessageId);
-
+      let outcomeUnknown = false;
+      let markedSending = false;
+      let queuedMessageID: string | undefined;
+      let sendAcknowledged = false;
       try {
+        markedSending = await useMessageQueueStore.getState().markSending(target, payload.queuedMessageId);
+        if (!markedSending) return;
         await sendQueuedAutoSendPayload(target, payload, {
           providerID: resolved.providerID,
           modelID: resolved.modelID,
           agent: resolved.agent,
           variant: resolved.variant,
+        }, async (messageID) => {
+          queuedMessageID = messageID;
+          const recorded = await useMessageQueueStore.getState().recordSendAttempt(target, payload.queuedMessageId, messageID);
+          if (!recorded) throw new Error('Queued send was cancelled before dispatch.');
+        }, async () => {
+          if (!queuedMessageID) throw new Error('Queued send has no durable message ID.');
+          const active = await useMessageQueueStore.getState().recordSendAttempt(
+            target,
+            payload.queuedMessageId,
+            queuedMessageID,
+          );
+          if (!active) throw new Error('Queued send was cancelled before dispatch.');
+        }, (ambiguous) => {
+          outcomeUnknown = ambiguous;
         });
-        useMessageQueueStore.getState().removeFromQueue(target, payload.queuedMessageId);
+        sendAcknowledged = true;
+        await useMessageQueueStore.getState().removeFromQueue(target, payload.queuedMessageId);
         sendFailuresRef.current.delete(targetKey);
       } catch (error) {
+        if (sendAcknowledged) {
+          console.warn('[queue] queued send succeeded but cleanup failed:', error);
+          scheduleFailure();
+          return;
+        }
         console.warn('[queue] queued auto-send failed:', error);
-        const priorFailures = failure?.messageId === payload.queuedMessageId ? failure.failures : 0;
-        const failures = priorFailures + 1;
-        const nextAttemptAt = Date.now() + getQueuedAutoSendRetryDelayMs(failures);
-        sendFailuresRef.current.set(targetKey, {
-          messageId: payload.queuedMessageId,
-          failures,
-          nextAttemptAt,
-        });
-        retryScheduler.schedule(nextAttemptAt);
+        // Definite rejection can use the existing retry path. An unresolved
+        // transport failure keeps its message ID and switches to exact-message
+        // reconciliation, because the server may still admit the first request.
+        if (!outcomeUnknown) {
+          await useMessageQueueStore.getState().clearSendAttempt(target, payload.queuedMessageId);
+        }
+        scheduleFailure();
       } finally {
         inFlightSessionsRef.current.delete(targetKey);
-        useMessageQueueStore.getState().clearSending(target, payload.queuedMessageId);
+        if (markedSending) {
+          await useMessageQueueStore.getState().clearSending(target, payload.queuedMessageId).catch((error) => {
+            console.warn('[queue] failed to clear queued send state:', error);
+          });
+        }
       }
     };
 

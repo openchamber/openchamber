@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
-import { createDeferredSafeJSONStorage } from './utils/safeStorage';
+import { createJSONStorage, devtools, persist } from 'zustand/middleware';
+import { z } from 'zod';
+import { getSafeStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -45,6 +46,10 @@ export interface QueuedMessage {
     content: string;
     attachments?: AttachedFile[];
     createdAt: number;
+    /** Durable identity for a send whose outcome may survive this page. */
+    sendAttempt?: {
+        messageID: string;
+    };
     /** Send config captured at queue time — used as-is when auto-sending */
     sendConfig?: {
         providerID: string;
@@ -62,6 +67,23 @@ export type MessageQueueTarget = {
 
 const MAX_QUEUE_TARGETS = 50;
 const MAX_MESSAGES_PER_QUEUE = 20;
+const MESSAGE_QUEUE_STORE_VERSION = 4;
+export const MESSAGE_QUEUE_STORAGE_KEY = 'message-queue-store';
+const persistedSendAttemptSchema = z.object({
+    messageID: z.string().trim().min(1),
+});
+const durableQueueEnvelopeSchema = z.object({
+    state: z.object({
+        queuedMessages: z.record(z.string(), z.array(z.object({
+            id: z.string(),
+            sendAttempt: persistedSendAttemptSchema.optional(),
+        }).passthrough())).optional(),
+    }),
+});
+const queueLockTicketSchema = z.object({
+    ticket: z.number().finite(),
+    expiresAt: z.number().finite(),
+});
 
 export const createMessageQueueTarget = (
     sessionId: string,
@@ -81,9 +103,31 @@ export const parseMessageQueueKey = (key: string): MessageQueueTarget | null => 
     return createMessageQueueTarget(sessionParts.join('\n'), directory, runtimeKey);
 };
 
+export const selectQueuedMessagesForSubmit = (
+    queue: QueuedMessage[],
+    sendingIds: string[],
+    hasComposerContent: boolean,
+    explicitMessageId?: string,
+): QueuedMessage[] => {
+    if (explicitMessageId) {
+        const selectedIndex = queue.findIndex((message) => message.id === explicitMessageId);
+        const selected = queue[selectedIndex];
+        if (!selected || sendingIds.includes(selected.id)) return [];
+        const hasProtectedPredecessor = queue.slice(0, selectedIndex).some((message) => (
+            message.sendAttempt !== undefined || sendingIds.includes(message.id)
+        ));
+        return hasProtectedPredecessor ? [] : [selected];
+    }
+    if (hasComposerContent) return [];
+    const head = queue[0];
+    if (!head || head.sendAttempt !== undefined || sendingIds.includes(head.id)) return [];
+    return [head];
+};
+
 interface MessageQueueState {
     queuedMessages: Record<string, QueuedMessage[]>; // runtime + directory + session → queue
     quarantinedLegacyMessages: Record<string, QueuedMessage[]>;
+    deletedTargets: Record<string, number>;
     followUpBehavior: FollowUpBehavior;
     /**
      * Queued messages whose send is currently awaiting the server, per target.
@@ -94,23 +138,26 @@ interface MessageQueueState {
      * that window is seconds, long enough for the same message to be delivered
      * twice. Dispatchers must skip entries listed here.
      *
-     * Never persisted: a restart has no in-flight sends, and a stale flag would
-     * strand a queued message permanently.
+     * Never persisted: durable outcome-unknown sends live on the queued item as
+     * `sendAttempt`; a stale transient flag would strand an ordinary item.
      */
     sendingIds: Record<string, string[]>;
 }
 
 interface MessageQueueActions {
-    addToQueue: (target: MessageQueueTarget, message: Omit<QueuedMessage, 'id' | 'createdAt'>) => void;
-    removeFromQueue: (target: MessageQueueTarget, messageId: string) => void;
-    reorderQueue: (target: MessageQueueTarget, fromId: string, toId: string) => void;
-    popToInput: (target: MessageQueueTarget, messageId: string) => QueuedMessage | null;
-    clearQueue: (target: MessageQueueTarget) => void;
-    clearAllQueues: () => void;
-    markSending: (target: MessageQueueTarget, messageId: string) => void;
-    clearSending: (target: MessageQueueTarget, messageId: string) => void;
+    addToQueue: (target: MessageQueueTarget, message: Omit<QueuedMessage, 'id' | 'createdAt' | 'sendAttempt'>) => Promise<boolean>;
+    removeFromQueue: (target: MessageQueueTarget, messageId: string) => Promise<void>;
+    reorderQueue: (target: MessageQueueTarget, fromId: string, toId: string) => Promise<void>;
+    popToInput: (target: MessageQueueTarget, messageId: string) => Promise<QueuedMessage | null>;
+    clearQueue: (target: MessageQueueTarget) => Promise<void>;
+    purgeQueue: (target: MessageQueueTarget) => Promise<void>;
+    clearAllQueues: () => Promise<void>;
+    markSending: (target: MessageQueueTarget, messageId: string) => Promise<boolean>;
+    clearSending: (target: MessageQueueTarget, messageId: string) => Promise<void>;
+    recordSendAttempt: (target: MessageQueueTarget, messageId: string, sendMessageID: string) => Promise<boolean>;
+    clearSendAttempt: (target: MessageQueueTarget, messageId: string) => Promise<void>;
     getSendableQueue: (target: MessageQueueTarget) => QueuedMessage[];
-    setFollowUpBehavior: (behavior: FollowUpBehavior) => void;
+    setFollowUpBehavior: (behavior: FollowUpBehavior) => Promise<void>;
     getQueueForTarget: (target: MessageQueueTarget) => QueuedMessage[];
 }
 
@@ -119,19 +166,67 @@ type MessageQueueStore = MessageQueueState & MessageQueueActions;
 type PersistedMessageQueueState = {
     queuedMessages?: Record<string, QueuedMessage[]>;
     quarantinedLegacyMessages?: Record<string, QueuedMessage[]>;
+    deletedTargets?: Record<string, number>;
     followUpBehavior?: FollowUpBehavior;
     queueModeEnabled?: boolean;
+};
+
+const sanitizeSendAttempts = (
+    queues: Record<string, QueuedMessage[]> | undefined,
+): Record<string, QueuedMessage[]> => Object.fromEntries(
+    Object.entries(queues ?? {}).map(([key, messages]) => [
+        key,
+        messages.map((message) => {
+            if (message.sendAttempt === undefined) return message;
+            const parsed = persistedSendAttemptSchema.safeParse(message.sendAttempt);
+            if (parsed.success) return { ...message, sendAttempt: parsed.data };
+            const { sendAttempt: _removed, ...queuedMessage } = message;
+            void _removed;
+            return queuedMessage;
+        }),
+    ]),
+);
+
+const sanitizeDeletedTargets = (targets: Record<string, number> | undefined): Record<string, number> =>
+    Object.fromEntries(Object.entries(targets ?? {}).filter(([, deletedAt]) => Number.isFinite(deletedAt)));
+
+const readDurableQueue = (target: MessageQueueTarget) => {
+    try {
+        const raw = globalThis.localStorage.getItem(MESSAGE_QUEUE_STORAGE_KEY);
+        if (!raw) return null;
+        const persisted = durableQueueEnvelopeSchema.safeParse(JSON.parse(raw));
+        if (!persisted.success) return null;
+        return persisted.data.state.queuedMessages?.[getMessageQueueKey(target)] ?? [];
+    } catch {
+        return null;
+    }
+};
+
+const isQueuedMessageDurable = (target: MessageQueueTarget, messageId: string): boolean => (
+    !globalThis.window || readDurableQueue(target)?.some((message) => message.id === messageId) === true
+);
+
+const isSendAttemptDurable = (
+    target: MessageQueueTarget,
+    messageId: string,
+    sendMessageID: string,
+): boolean => {
+    if (!globalThis.window) return true;
+    return readDurableQueue(target)?.some((message) => (
+        message.id === messageId && message.sendAttempt?.messageID === sendMessageID
+    )) === true;
 };
 
 export const migrateMessageQueueState = (persistedState: unknown, version: number): Partial<MessageQueueStore> => {
     const state = (persistedState ?? {}) as PersistedMessageQueueState;
     const legacyQueues = version < 2 ? (state.queuedMessages ?? {}) : {};
     return {
-        queuedMessages: version < 2 ? {} : (state.queuedMessages ?? {}),
-        quarantinedLegacyMessages: {
+        queuedMessages: version < 2 ? {} : sanitizeSendAttempts(state.queuedMessages),
+        quarantinedLegacyMessages: sanitizeSendAttempts({
             ...(state.quarantinedLegacyMessages ?? {}),
             ...legacyQueues,
-        },
+        }),
+        deletedTargets: sanitizeDeletedTargets(state.deletedTargets),
         followUpBehavior: normalizeFollowUpBehavior(state.followUpBehavior, state.queueModeEnabled ?? null),
     };
 };
@@ -142,10 +237,11 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
             (set, get) => ({
                 queuedMessages: {},
                 quarantinedLegacyMessages: {},
+                deletedTargets: {},
                 followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
                 sendingIds: {},
 
-                addToQueue: (target, message) => {
+                addToQueue: async (target, message) => {
                     const key = getMessageQueueKey(target);
                     const id = `queued-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
                     const queuedMessage: QueuedMessage = {
@@ -156,143 +252,256 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         sendConfig: message.sendConfig,
                     };
 
-                    set((state) => {
-                        const currentQueue = state.queuedMessages[key] ?? [];
-                        const queuedMessages = {
-                            ...state.queuedMessages,
-                            [key]: [...currentQueue, queuedMessage].slice(-MAX_MESSAGES_PER_QUEUE),
-                        };
-                        const keys = Object.keys(queuedMessages);
-                        if (keys.length > MAX_QUEUE_TARGETS) {
-                            keys.sort((left, right) => (
-                                (queuedMessages[left]?.[0]?.createdAt ?? 0) - (queuedMessages[right]?.[0]?.createdAt ?? 0)
-                            ));
-                            for (const staleKey of keys.slice(0, keys.length - MAX_QUEUE_TARGETS)) delete queuedMessages[staleKey];
-                        }
-                        return {
-                            queuedMessages,
-                        };
+                    return withMessageQueueStateLock(() => {
+                        let added = false;
+                        set((state) => {
+                            if (state.deletedTargets[key] !== undefined) return state;
+
+                            const currentQueue = state.queuedMessages[key] ?? [];
+                            if (currentQueue.length >= MAX_MESSAGES_PER_QUEUE) return state;
+                            if (!state.queuedMessages[key] && Object.keys(state.queuedMessages).length >= MAX_QUEUE_TARGETS) return state;
+                            const queuedMessages = {
+                                ...state.queuedMessages,
+                                [key]: [...currentQueue, queuedMessage],
+                            };
+                            added = true;
+                            return {
+                                queuedMessages,
+                            };
+                        });
+                        if (!added || isQueuedMessageDurable(target, id)) return added;
+                        set((state) => {
+                            const currentQueue = state.queuedMessages[key] ?? [];
+                            const nextQueue = currentQueue.filter((queued) => queued.id !== id);
+                            if (nextQueue.length > 0) {
+                                return { queuedMessages: { ...state.queuedMessages, [key]: nextQueue } };
+                            }
+                            const { [key]: _removed, ...queuedMessages } = state.queuedMessages;
+                            void _removed;
+                            return { queuedMessages };
+                        });
+                        return false;
                     });
                 },
 
-                removeFromQueue: (target, messageId) => {
+                removeFromQueue: async (target, messageId) => {
                     const key = getMessageQueueKey(target);
-                    set((state) => {
+                    await withMessageQueueStateLock(() => {
+                        set((state) => {
+                            const currentQueue = state.queuedMessages[key] ?? [];
+                            const newQueue = currentQueue.filter((m) => m.id !== messageId);
+
+                            if (newQueue.length === 0) {
+                                const { [key]: _removed, ...rest } = state.queuedMessages;
+                                void _removed;
+                                return { queuedMessages: rest };
+                            }
+
+                            return {
+                                queuedMessages: {
+                                    ...state.queuedMessages,
+                                    [key]: newQueue,
+                                },
+                            };
+                        });
+                    });
+                },
+
+                reorderQueue: async (target, fromId, toId) => {
+                    if (fromId === toId) return;
+                    const key = getMessageQueueKey(target);
+                    await withMessageQueueStateLock(() => {
+                        set((state) => {
+                            const currentQueue = state.queuedMessages[key];
+                            if (!currentQueue) return state;
+                            const fromIndex = currentQueue.findIndex((m) => m.id === fromId);
+                            const toIndex = currentQueue.findIndex((m) => m.id === toId);
+                            if (fromIndex === -1 || toIndex === -1) return state;
+                            const sending = new Set(state.sendingIds[key] ?? []);
+                            const start = Math.min(fromIndex, toIndex);
+                            const end = Math.max(fromIndex, toIndex);
+                            if (currentQueue.slice(start, end + 1).some((message) => (
+                                message.sendAttempt !== undefined || sending.has(message.id)
+                            ))) return state;
+
+                            const newQueue = currentQueue.slice();
+                            const [moved] = newQueue.splice(fromIndex, 1);
+                            newQueue.splice(toIndex, 0, moved);
+
+                            return {
+                                queuedMessages: {
+                                    ...state.queuedMessages,
+                                    [key]: newQueue,
+                                },
+                            };
+                        });
+                    });
+                },
+
+                popToInput: async (target, messageId) => {
+                    const key = getMessageQueueKey(target);
+                    return withMessageQueueStateLock(() => {
+                        const state = get();
                         const currentQueue = state.queuedMessages[key] ?? [];
-                        const newQueue = currentQueue.filter((m) => m.id !== messageId);
+                        const message = currentQueue.find((m) => m.id === messageId);
                         
-                        if (newQueue.length === 0) {
+                        if (
+                            !message
+                            || message.sendAttempt !== undefined
+                            || (state.sendingIds[key] ?? []).includes(messageId)
+                        ) {
+                            return null;
+                        }
+
+                        set((prevState) => {
+                            const queue = prevState.queuedMessages[key] ?? [];
+                            const newQueue = queue.filter((m) => m.id !== messageId);
+
+                            if (newQueue.length === 0) {
+                                const { [key]: _removed, ...rest } = prevState.queuedMessages;
+                                void _removed;
+                                return { queuedMessages: rest };
+                            }
+
+                            return {
+                                queuedMessages: {
+                                    ...prevState.queuedMessages,
+                                    [key]: newQueue,
+                                },
+                            };
+                        });
+
+                        return message;
+                    });
+                },
+
+                clearQueue: async (target) => {
+                    const key = getMessageQueueKey(target);
+                    await withMessageQueueStateLock(() => {
+                        set((state) => {
+                            // Clearing drops what is still queued, never a message
+                            // already handed to the server: that send will resolve
+                            // and must find its entry to remove or restore.
+                            const sending = state.sendingIds[key] ?? [];
+                            const retained = (state.queuedMessages[key] ?? []).filter((m) => (
+                                sending.includes(m.id) || m.sendAttempt !== undefined
+                            ));
+                            if (retained.length > 0) {
+                                return { queuedMessages: { ...state.queuedMessages, [key]: retained } };
+                            }
                             const { [key]: _removed, ...rest } = state.queuedMessages;
                             void _removed;
                             return { queuedMessages: rest };
-                        }
-                        
-                        return {
-                            queuedMessages: {
-                                ...state.queuedMessages,
-                                [key]: newQueue,
-                            },
-                        };
+                        });
                     });
                 },
 
-                reorderQueue: (target, fromId, toId) => {
-                    if (fromId === toId) return;
+                purgeQueue: async (target) => {
                     const key = getMessageQueueKey(target);
-                    set((state) => {
-                        const currentQueue = state.queuedMessages[key];
-                        if (!currentQueue) return state;
-                        const fromIndex = currentQueue.findIndex((m) => m.id === fromId);
-                        const toIndex = currentQueue.findIndex((m) => m.id === toId);
-                        if (fromIndex === -1 || toIndex === -1) return state;
-
-                        const newQueue = currentQueue.slice();
-                        const [moved] = newQueue.splice(fromIndex, 1);
-                        newQueue.splice(toIndex, 0, moved);
-
-                        return {
-                            queuedMessages: {
-                                ...state.queuedMessages,
-                                [key]: newQueue,
-                            },
-                        };
+                    await withMessageQueueStateLock(() => {
+                        set((state) => {
+                            const { [key]: _queued, ...queuedMessages } = state.queuedMessages;
+                            const { [key]: _sending, ...sendingIds } = state.sendingIds;
+                            void _queued;
+                            void _sending;
+                            return {
+                                queuedMessages,
+                                sendingIds,
+                                deletedTargets: { ...state.deletedTargets, [key]: Date.now() },
+                            };
+                        });
                     });
                 },
 
-                popToInput: (target, messageId) => {
-                    const key = getMessageQueueKey(target);
-                    const state = get();
-                    const currentQueue = state.queuedMessages[key] ?? [];
-                    const message = currentQueue.find((m) => m.id === messageId);
-                    
-                    if (!message) {
-                        return null;
-                    }
+                clearAllQueues: async () => {
+                    await withMessageQueueStateLock(() => {
+                        set({ queuedMessages: {}, sendingIds: {} });
+                    });
+                },
 
-                    // Remove from queue
-                    set((prevState) => {
-                        const queue = prevState.queuedMessages[key] ?? [];
-                        const newQueue = queue.filter((m) => m.id !== messageId);
-                        
-                        if (newQueue.length === 0) {
-                            const { [key]: _removed, ...rest } = prevState.queuedMessages;
+                markSending: async (target, messageId) => {
+                    const key = getMessageQueueKey(target);
+                    return withMessageQueueStateLock(() => {
+                        let marked = false;
+                        set((state) => {
+                            if (state.deletedTargets[key] !== undefined) return state;
+                            if (!(state.queuedMessages[key] ?? []).some((message) => message.id === messageId)) return state;
+                            const current = state.sendingIds[key] ?? [];
+                            if (current.includes(messageId)) return state;
+                            marked = true;
+                            return { sendingIds: { ...state.sendingIds, [key]: [...current, messageId] } };
+                        });
+                        return marked;
+                    });
+                },
+
+                clearSending: async (target, messageId) => {
+                    const key = getMessageQueueKey(target);
+                    await withMessageQueueStateLock(() => {
+                        set((state) => {
+                            const current = state.sendingIds[key];
+                            if (!current || !current.includes(messageId)) return state;
+                            const next = current.filter((id) => id !== messageId);
+                            if (next.length === 0) {
+                                const { [key]: _removed, ...rest } = state.sendingIds;
+                                void _removed;
+                                return { sendingIds: rest };
+                            }
+                            return { sendingIds: { ...state.sendingIds, [key]: next } };
+                        });
+                    });
+                },
+
+                recordSendAttempt: async (target, messageId, sendMessageID) => {
+                    const key = getMessageQueueKey(target);
+                    return withMessageQueueStateLock(() => {
+                        let recorded = false;
+                        set((state) => {
+                            if (state.deletedTargets[key] !== undefined) return state;
+                            const currentQueue = state.queuedMessages[key];
+                            if (!currentQueue) return state;
+                            const messageIndex = currentQueue.findIndex((message) => message.id === messageId);
+                            if (messageIndex === -1) return state;
+                            const existingMessageID = currentQueue[messageIndex]?.sendAttempt?.messageID;
+                            if (existingMessageID && existingMessageID !== sendMessageID) return state;
+                            recorded = true;
+                            if (existingMessageID === sendMessageID) return state;
+                            const nextQueue = currentQueue.slice();
+                            nextQueue[messageIndex] = {
+                                ...nextQueue[messageIndex],
+                                sendAttempt: { messageID: sendMessageID },
+                            };
+                            return {
+                                queuedMessages: {
+                                    ...state.queuedMessages,
+                                    [key]: nextQueue,
+                                },
+                            };
+                        });
+                        return recorded && isSendAttemptDurable(target, messageId, sendMessageID);
+                    });
+                },
+
+                clearSendAttempt: async (target, messageId) => {
+                    const key = getMessageQueueKey(target);
+                    await withMessageQueueStateLock(() => {
+                        set((state) => {
+                            const currentQueue = state.queuedMessages[key];
+                            if (!currentQueue) return state;
+                            const messageIndex = currentQueue.findIndex((message) => message.id === messageId);
+                            const message = currentQueue[messageIndex];
+                            if (!message?.sendAttempt) return state;
+                            const { sendAttempt: _removed, ...queuedMessage } = message;
                             void _removed;
-                            return { queuedMessages: rest };
-                        }
-                        
-                        return {
-                            queuedMessages: {
-                                ...prevState.queuedMessages,
-                                    [key]: newQueue,
-                            },
-                        };
-                    });
-
-                    return message;
-                },
-
-                clearQueue: (target) => {
-                    const key = getMessageQueueKey(target);
-                    set((state) => {
-                        // Clearing drops what is still queued, never a message
-                        // already handed to the server: that send will resolve
-                        // and must find its entry to remove or restore.
-                        const sending = state.sendingIds[key] ?? [];
-                        const retained = (state.queuedMessages[key] ?? []).filter((m) => sending.includes(m.id));
-                        if (retained.length > 0) {
-                            return { queuedMessages: { ...state.queuedMessages, [key]: retained } };
-                        }
-                        const { [key]: _removed, ...rest } = state.queuedMessages;
-                        void _removed;
-                        return { queuedMessages: rest };
-                    });
-                },
-
-                clearAllQueues: () => {
-                    set({ queuedMessages: {}, sendingIds: {} });
-                },
-
-                markSending: (target, messageId) => {
-                    const key = getMessageQueueKey(target);
-                    set((state) => {
-                        const current = state.sendingIds[key] ?? [];
-                        if (current.includes(messageId)) return state;
-                        return { sendingIds: { ...state.sendingIds, [key]: [...current, messageId] } };
-                    });
-                },
-
-                clearSending: (target, messageId) => {
-                    const key = getMessageQueueKey(target);
-                    set((state) => {
-                        const current = state.sendingIds[key];
-                        if (!current || !current.includes(messageId)) return state;
-                        const next = current.filter((id) => id !== messageId);
-                        if (next.length === 0) {
-                            const { [key]: _removed, ...rest } = state.sendingIds;
-                            void _removed;
-                            return { sendingIds: rest };
-                        }
-                        return { sendingIds: { ...state.sendingIds, [key]: next } };
+                            const nextQueue = currentQueue.slice();
+                            nextQueue[messageIndex] = queuedMessage;
+                            return {
+                                queuedMessages: {
+                                    ...state.queuedMessages,
+                                    [key]: nextQueue,
+                                },
+                            };
+                        });
                     });
                 },
 
@@ -305,8 +514,10 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     return queue.filter((message) => !sending.includes(message.id));
                 },
 
-                setFollowUpBehavior: (behavior) => {
-                    set({ followUpBehavior: behavior });
+                setFollowUpBehavior: async (behavior) => {
+                    await withMessageQueueStateLock(() => {
+                        set({ followUpBehavior: behavior });
+                    });
                     void updateDesktopSettings({ followUpBehavior: behavior });
                 },
 
@@ -315,15 +526,20 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 },
             }),
             {
-                name: 'message-queue-store',
-                version: 2,
-                storage: createDeferredSafeJSONStorage(),
+                name: MESSAGE_QUEUE_STORAGE_KEY,
+                version: MESSAGE_QUEUE_STORE_VERSION,
+                storage: createJSONStorage(() => getSafeStorage()),
                 partialize: (state) => ({
                     queuedMessages: state.queuedMessages,
                     quarantinedLegacyMessages: state.quarantinedLegacyMessages,
+                    deletedTargets: state.deletedTargets,
                     followUpBehavior: state.followUpBehavior,
                 }),
                 migrate: migrateMessageQueueState,
+                merge: (persistedState, currentState) => ({
+                    ...currentState,
+                    ...migrateMessageQueueState(persistedState, MESSAGE_QUEUE_STORE_VERSION),
+                }),
             }
         ),
         {
@@ -331,3 +547,235 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
         }
     )
 );
+
+let localQueueStateLock: Promise<void> = Promise.resolve();
+const localQueueTargetLocks = new Map<string, Promise<void>>();
+const queueLockOwner = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+const QUEUE_LOCK_PREFIX = 'openchamber:message-queue-lock:';
+const QUEUE_STATE_LOCK_EXPIRY_MS = 5000;
+const QUEUE_TARGET_LOCK_EXPIRY_MS = 120000;
+
+type QueueLockTicket = {
+    ticket: number;
+    expiresAt: number;
+};
+
+const getQueueLockStorage = (): Storage | null => {
+    if (!globalThis.window) return null;
+    try {
+        return globalThis.localStorage;
+    } catch {
+        return null;
+    }
+};
+
+const readQueueLockTickets = (
+    storage: Storage,
+    lockPrefix: string,
+): Array<{ owner: string; value: QueueLockTicket }> => {
+    const now = Date.now();
+    const records: Array<{ owner: string; value: QueueLockTicket }> = [];
+    for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index);
+        if (!key?.startsWith(`${lockPrefix}ticket:`)) continue;
+        const owner = key.slice(`${lockPrefix}ticket:`.length);
+        try {
+            const parsed = queueLockTicketSchema.safeParse(JSON.parse(storage.getItem(key) ?? ''));
+            if (!parsed.success || parsed.data.expiresAt <= now) {
+                storage.removeItem(key);
+                continue;
+            }
+            records.push({ owner, value: parsed.data });
+        } catch {
+            storage.removeItem(key);
+        }
+    }
+    return records;
+};
+
+const withFallbackQueueStateLock = async <Result>(
+    storage: Storage,
+    lockName: string,
+    expiryMs: number,
+    task: () => Promise<Result>,
+): Promise<Result> => {
+    const lockPrefix = `${QUEUE_LOCK_PREFIX}${encodeURIComponent(lockName)}:`;
+    const choosingKey = `${lockPrefix}choosing:${queueLockOwner}`;
+    const ticketKey = `${lockPrefix}ticket:${queueLockOwner}`;
+    storage.setItem(choosingKey, String(Date.now() + expiryMs));
+    const ticket = Math.max(0, ...readQueueLockTickets(storage, lockPrefix).map((record) => record.value.ticket)) + 1;
+    const refreshTicket = () => {
+        storage.setItem(ticketKey, JSON.stringify({ ticket, expiresAt: Date.now() + expiryMs }));
+    };
+    refreshTicket();
+    storage.removeItem(choosingKey);
+    const heartbeat = setInterval(() => {
+        try {
+            refreshTicket();
+        } catch {
+            // The current transaction still completes through safe storage.
+        }
+    }, Math.floor(expiryMs / 3));
+
+    try {
+        while (true) {
+            const now = Date.now();
+            let blocked = false;
+            for (let index = 0; index < storage.length; index += 1) {
+                const key = storage.key(index);
+                if (!key?.startsWith(`${lockPrefix}choosing:`) || key === choosingKey) continue;
+                const expiresAt = Number(storage.getItem(key));
+                if (Number.isFinite(expiresAt) && expiresAt > now) {
+                    blocked = true;
+                    break;
+                }
+                storage.removeItem(key);
+            }
+            if (!blocked) {
+                blocked = readQueueLockTickets(storage, lockPrefix).some((record) => (
+                    record.owner !== queueLockOwner
+                    && (record.value.ticket < ticket
+                        || (record.value.ticket === ticket && record.owner < queueLockOwner))
+                ));
+            }
+            if (!blocked) break;
+            await new Promise<void>((resolve) => setTimeout(resolve, 10));
+        }
+        return await task();
+    } finally {
+        clearInterval(heartbeat);
+        try {
+            storage.removeItem(choosingKey);
+            storage.removeItem(ticketKey);
+        } catch {
+            // Expiry releases records when direct cleanup is unavailable.
+        }
+    }
+};
+
+const withLocalQueueStateLock = async <Result>(task: () => Promise<Result>): Promise<Result> => {
+    const previous = localQueueStateLock;
+    let release: () => void = () => undefined;
+    localQueueStateLock = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    await previous;
+    try {
+        return await task();
+    } finally {
+        release();
+    }
+};
+
+export const withMessageQueueStateLock = async <Result>(task: () => Result | Promise<Result>): Promise<Result> => {
+    const run = async () => {
+        await useMessageQueueStore.persist.rehydrate();
+        return task();
+    };
+    const lockManager = globalThis.navigator?.locks;
+    if (lockManager) {
+        return lockManager.request('openchamber:message-queue-state', { mode: 'exclusive' }, run);
+    }
+
+    const fallbackStorage = getQueueLockStorage();
+    if (fallbackStorage) {
+        return withLocalQueueStateLock(async () => {
+            let taskStarted = false;
+            try {
+                return await withFallbackQueueStateLock(
+                    fallbackStorage,
+                    'state',
+                    QUEUE_STATE_LOCK_EXPIRY_MS,
+                    async () => {
+                        taskStarted = true;
+                        return run();
+                    },
+                );
+            } catch (error) {
+                if (taskStarted) throw error;
+                throw new Error('Cross-document queue state lock is unavailable.', { cause: error });
+            }
+        });
+    }
+    if (globalThis.window) {
+        throw new Error('Cross-document queue state lock is unavailable.');
+    }
+    return withLocalQueueStateLock(run);
+};
+
+export const withMessageQueueTargetLock = async (
+    target: MessageQueueTarget,
+    task: () => Promise<void>,
+    options?: { ifAvailable?: boolean },
+): Promise<boolean> => {
+    const run = async () => {
+        await withMessageQueueStateLock(() => undefined);
+        await task();
+    };
+    const lockManager = globalThis.navigator?.locks;
+    if (!lockManager) {
+        const key = getMessageQueueKey(target);
+        const previous = localQueueTargetLocks.get(key);
+        if (previous && options?.ifAvailable) return false;
+
+        let release: () => void = () => undefined;
+        const current = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        localQueueTargetLocks.set(key, current);
+        await previous;
+        try {
+            const fallbackStorage = getQueueLockStorage();
+            if (!fallbackStorage) {
+                if (globalThis.window) return false;
+                await run();
+                return true;
+            }
+            let taskStarted = false;
+            try {
+                await withFallbackQueueStateLock(
+                    fallbackStorage,
+                    `target:${key}`,
+                    QUEUE_TARGET_LOCK_EXPIRY_MS,
+                    async () => {
+                        taskStarted = true;
+                        await run();
+                    },
+                );
+            } catch (error) {
+                if (taskStarted) throw error;
+                return false;
+            }
+            return true;
+        } finally {
+            release();
+            if (localQueueTargetLocks.get(key) === current) localQueueTargetLocks.delete(key);
+        }
+    }
+
+    let taskFailed = false;
+    let taskError: unknown;
+    let acquired: boolean;
+    try {
+        acquired = await lockManager.request(
+            `openchamber:message-queue:${getMessageQueueKey(target)}`,
+            { mode: 'exclusive', ifAvailable: options?.ifAvailable ?? false },
+            async (lock) => {
+                if (!lock) return false;
+                try {
+                    await run();
+                    return true;
+                } catch (error) {
+                    taskFailed = true;
+                    taskError = error;
+                    return false;
+                }
+            },
+        );
+    } catch (error) {
+        console.warn('[queue] failed to acquire message queue lock:', error);
+        return false;
+    }
+    if (taskFailed) throw taskError;
+    return acquired;
+};

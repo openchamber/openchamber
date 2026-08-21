@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 - If OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Chat: queued messages accepted just before a reload no longer remain in the queue and send again after the webview returns (thanks to @karimodm).
 
 ## [1.19.0] - 2026-08-19
 

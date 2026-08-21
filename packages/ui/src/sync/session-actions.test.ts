@@ -944,6 +944,50 @@ describe("optimisticSend target directory", () => {
     expect(currentStore.getState().session_status["session-new"]).toBe(undefined)
   })
 
+  test("reuses a supplied message ID for optimistic state and server dispatch", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let optimisticMessageID = ""
+    let callbackMessageID = ""
+    let sentMessageID = ""
+    const order: string[] = []
+
+    const [{ optimisticSend, setActionRefs, setOptimisticRefs }, { opencodeClient }] = await Promise.all([
+      import("./session-actions"),
+      import("@/lib/opencode/client"),
+    ])
+    setActionRefs(opencodeClient.getSdkClient(), childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        optimisticMessageID = input.message.id
+      },
+      () => {},
+    )
+
+    await optimisticSend({
+      sessionId: "session-recovered",
+      directory: "/target/project",
+      content: "hello",
+      providerID: "provider",
+      modelID: "model",
+      messageID: "msg_durable",
+      onMessageID: async (messageID) => {
+        callbackMessageID = messageID
+        await Promise.resolve()
+        order.push("persisted")
+      },
+      send: async (messageID) => {
+        sentMessageID = messageID
+        order.push("sent")
+      },
+    })
+
+    expect(optimisticMessageID).toBe("msg_durable")
+    expect(callbackMessageID).toBe("msg_durable")
+    expect(sentMessageID).toBe("msg_durable")
+    expect(order).toEqual(["persisted", "sent"])
+  })
+
   test("commits the new branch locally and discards its optimistic shadow when sending after a revert", async () => {
     const retainedMessage = { id: "msg_ffffffffffffRetained", role: "user", sessionID: "session-reverted", time: { created: 1 } } as Message
     const revertedMessage = { id: "msg_000000000000Reverted", role: "user", sessionID: "session-reverted", time: { created: 2 } } as Message
@@ -1177,6 +1221,7 @@ describe("optimisticSend target directory", () => {
     const childStores = createChildStores([["/target/project", targetStore]])
     let optimisticRemove: OptimisticRemoveCall | null = null
     let optimisticConfirm: OptimisticRemoveCall | null = null
+    let reportedAmbiguousFailure = false
 
     const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
@@ -1198,6 +1243,9 @@ describe("optimisticSend target directory", () => {
         content: "hello",
         providerID: "provider",
         modelID: "model",
+        onSendFailure: (ambiguous) => {
+          reportedAmbiguousFailure = ambiguous
+        },
         send: async () => {
           const error = new Error("Failed to send message (504): gateway timeout") as Error & { status?: number }
           error.status = 504
@@ -1211,6 +1259,7 @@ describe("optimisticSend target directory", () => {
     expect(caught).toBeInstanceOf(Error)
     expect((optimisticRemove as OptimisticRemoveCall | null)?.sessionID).toBe("session-missing")
     expect(optimisticConfirm).toBe(null)
+    expect(reportedAmbiguousFailure).toBe(true)
     expect(replyCalls.filter((call) => call.method === "session.messages").every((call) => call.params.limit === 30)).toBe(true)
     expect(targetStore.getState().session_status["session-missing"]?.type).toBe("idle")
   })
