@@ -1112,7 +1112,11 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
             let messageCount = 0;
             let sampleCount = 0;
             for (const [key, size] of sizes) {
-                const count = entryMessageCounts.get(String(key));
+                // The configured keys are entry IDs. Keep an index fallback
+                // for restored/default-key caches from another engine state.
+                const indexedEntry = typeof key === 'number' ? entriesRef.current[key] : undefined;
+                const count = entryMessageCounts.get(String(key))
+                    ?? (indexedEntry ? getRenderEntryMessageCount(indexedEntry) : undefined);
                 if (count === undefined) continue;
                 total += size;
                 messageCount += count;
