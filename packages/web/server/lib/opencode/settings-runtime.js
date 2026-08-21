@@ -1,4 +1,5 @@
 import { createProjectIdFromPath } from '../projects/project-id.js';
+import { readJsonFileWithBackup } from './settings-file.js';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
@@ -474,8 +475,7 @@ export const createSettingsRuntime = (deps) => {
 
   const readSettingsFromDisk = async () => {
     try {
-      const raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(raw);
+      const parsed = await readJsonFileWithBackup(fsPromises, SETTINGS_FILE_PATH);
       if (parsed && typeof parsed === 'object') {
         return parsed;
       }
@@ -497,20 +497,18 @@ export const createSettingsRuntime = (deps) => {
   // the empty spread. Here only a genuinely missing file means "no settings";
   // any other failure (including a non-object payload) throws.
   const readSettingsFromDiskStrict = async () => {
-    let raw;
     try {
-      raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
+      const parsed = await readJsonFileWithBackup(fsPromises, SETTINGS_FILE_PATH);
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('Settings file is malformed (non-object payload)');
+      }
+      return parsed;
     } catch (error) {
       if (error && typeof error === 'object' && error.code === 'ENOENT') {
         return {};
       }
       throw error;
     }
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-      throw new Error('Settings file is malformed (non-object payload)');
-    }
-    return parsed;
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -579,6 +577,7 @@ export const createSettingsRuntime = (deps) => {
       await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
       if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
       await replaceFile(tmp, SETTINGS_FILE_PATH);
+      await fsPromises.rm(`${SETTINGS_FILE_PATH}.backup`, { force: true }).catch(() => undefined);
       if (process.platform !== 'win32') await fsPromises.chmod(SETTINGS_FILE_PATH, 0o600);
     } catch (error) {
       await fsPromises.rm(tmp, { force: true }).catch(() => {});
