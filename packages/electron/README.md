@@ -19,7 +19,7 @@ The preload bridge exposes desktop-only APIs to the web UI through `window.__OPE
 | File | Purpose |
 |------|---------|
 | `main.mjs` | Electron main process, app lifecycle, windows, menus, deep links, native IPC handlers, updates, local server startup |
-| `file-replace.mjs` | Windows settings replacement retries, fallback rollback, and backup-aware JSON recovery shared by main and SSH settings writers |
+| `file-replace.mjs` | Windows settings replacement retries, per-write fallback rollback, and backup-aware JSON recovery shared by main and SSH settings writers |
 | `startup-url-selection.mjs` | Pure bundled/HMR startup probe and loopback connection-limit policy |
 | `preload.mjs` | Safe bridge from the rendered UI to Electron IPC |
 | `ssh-manager.mjs` | SSH host import, connection lifecycle, tunnel/port forwarding helpers |
