@@ -17,6 +17,7 @@ import { SessionsTabTitle } from '@/components/session/SessionsTabTitle';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { cn } from '@/lib/utils';
+import { normalizePath } from '@/lib/pathNormalization';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,15 +62,6 @@ const EXPANDED_LAYOUT_THRESHOLD = 1400;
 const SESSIONS_SIDEBAR_WIDTH = 280;
 const SESSIONS_SIDEBAR_MIN_WIDTH = Math.round(SESSIONS_SIDEBAR_WIDTH * 0.7);
 const SESSIONS_SIDEBAR_MAX_WIDTH = 520;
-
-const normalizePath = (value?: string | null): string | null => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const replaced = trimmed.replace(/\\/g, '/');
-  if (replaced === '/') return '/';
-  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
-};
 
 type VSCodeView = 'sessions' | 'chat' | 'settings';
 

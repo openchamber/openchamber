@@ -1,13 +1,7 @@
 import React from 'react';
 import { resolveGitPrimaryRoot, resolveGitTopLevel } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
-
-const normalizePath = (value: string): string => {
-  if (!value) return '';
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') return '/';
-  return replaced.replace(/\/+$/, '');
-};
+import { normalizePath } from '@/lib/pathNormalization';
 
 /**
  * When the store-based WorktreeMetadata lookup fails, this hook falls back to

@@ -6,6 +6,7 @@ import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { cn } from '@/lib/utils';
+import { normalizePath } from '@/lib/pathNormalization';
 import { useI18n } from '@/lib/i18n';
 import { invokeDesktop, isElectronShell } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
@@ -39,13 +40,6 @@ const compactPath = (value: string | null | undefined): string => {
   const segments = path.split('/').filter(Boolean);
   if (segments.length <= 3) return path;
   return `.../${segments.slice(-3).join('/')}`;
-};
-
-const normalizePath = (value: string | null | undefined): string => {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (!raw) return '';
-  const normalized = raw.replace(/\\/g, '/');
-  return normalized === '/' ? '/' : normalized.replace(/\/+$/, '');
 };
 
 const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
