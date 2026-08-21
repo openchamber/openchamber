@@ -53,6 +53,7 @@ import { CommitSection } from './git/CommitSection';
 import { GitEmptyState } from './git/GitEmptyState';
 import { HistorySection } from './git/HistorySection';
 import { GitGraphPanel } from './git/GitGraphPanel';
+import { GitGraphControls } from './git/GitGraphControls';
 import { GitWorkspacePanes } from './git/GitWorkspacePanes';
 import { ConflictDialog } from './git/ConflictDialog';
 import { StashDialog } from './git/StashDialog';
@@ -2418,6 +2419,9 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
                 changes={changesPaneContent}
                 commit={commitPaneContent}
                 graph={graphPaneContent}
+                graphHeaderControls={currentDirectory && git ? (
+                  <GitGraphControls directory={currentDirectory} git={git} />
+                ) : undefined}
               />
             ) : (
               <div className="flex min-h-full flex-col gap-4 py-2">
@@ -2514,7 +2518,16 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
             </DialogDescription>
           </DialogHeader>
           <div className="flex-1 min-h-0">
-            {gitLogDialogMode === 'graph' ? graphPaneContent : (
+            {gitLogDialogMode === 'graph' ? (
+              <div className="flex h-full min-h-0 flex-col">
+                {currentDirectory && git ? (
+                  <div className="flex shrink-0 justify-end border-b border-border/50 px-2 py-1">
+                    <GitGraphControls directory={currentDirectory} git={git} />
+                  </div>
+                ) : null}
+                <div className="min-h-0 flex-1">{graphPaneContent}</div>
+              </div>
+            ) : (
               commitDetailsController && currentDirectory ? (
                 <HistorySection
                   log={log}

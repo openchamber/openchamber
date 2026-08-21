@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { WorkStatusCollapsibleSection } from './WorkStatusPrimitives';
 import { GitGraphPanel } from '@/components/views/git/GitGraphPanel';
+import { GitGraphControls } from '@/components/views/git/GitGraphControls';
 import {
   createGitCommitDetailsController,
   scheduleGitCommitDetailsIdle,
@@ -131,6 +132,7 @@ export const WorkStatusGitGraphSection: React.FC<Props> = ({ directory, panelVis
       title={t('chat.workStatus.section.gitGraph')}
       icon="git-branch"
       defaultExpanded={false}
+      headerControls={<GitGraphControls directory={directory} git={git} />}
     >
       <div className="h-80 min-h-0 overflow-hidden">
         <GitGraphPanel

@@ -17,9 +17,10 @@ interface GitWorkspacePanesProps {
   changes: React.ReactNode;
   commit: React.ReactNode;
   graph: React.ReactNode;
+  graphHeaderControls?: React.ReactNode;
 }
 
-export const GitWorkspacePanes: React.FC<GitWorkspacePanesProps> = ({ directory, changes, commit, graph }) => {
+export const GitWorkspacePanes: React.FC<GitWorkspacePanesProps> = ({ directory, changes, commit, graph, graphHeaderControls }) => {
   const { t } = useI18n();
   const preferenceKey = gitRepositoryPanePreferenceKey(directory);
   const paneState = useUIStore((state) => state.gitRepositoryPaneStates[preferenceKey] ?? DEFAULT_GIT_REPOSITORY_PANE_STATE);
@@ -61,7 +62,7 @@ export const GitWorkspacePanes: React.FC<GitWorkspacePanesProps> = ({ directory,
             {t('gitView.changes.title')}
           </Button>
         </div>
-        {!paneState.changesCollapsed ? <div id="git-changes-pane-body" className="min-h-0 flex-1">{changes}</div> : null}
+        {!paneState.changesCollapsed ? <div id="git-changes-pane-body" className="min-h-0 flex-1 flex flex-col">{changes}</div> : null}
       </section>
 
       <section id="git-commit-pane" className="shrink-0">{commit}</section>
@@ -73,7 +74,7 @@ export const GitWorkspacePanes: React.FC<GitWorkspacePanesProps> = ({ directory,
           aria-orientation="horizontal"
           aria-label={t('gitView.graph.resizeAria')}
           data-git-resize-handle="true"
-          className="group relative mb-2 flex h-5 w-full cursor-col-resize touch-none items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+          className="group relative mb-2 flex h-5 w-full cursor-row-resize touch-none items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
           onPointerDown={(event) => {
             dragStateRef.current = { startY: event.clientY, startHeight: paneState.graphHeight };
             setIsGraphResizeActive(true);
@@ -125,6 +126,7 @@ export const GitWorkspacePanes: React.FC<GitWorkspacePanesProps> = ({ directory,
             <Icon name={paneState.graphCollapsed ? 'arrow-right-s' : 'arrow-down-s'} className="mr-1 size-3" />
             {t('gitView.graph.title')}
           </Button>
+          {!paneState.graphCollapsed && graphHeaderControls ? <div className="ml-auto">{graphHeaderControls}</div> : null}
         </div>
         {!paneState.graphCollapsed ? (
           <div id="git-graph-pane-body" className="min-h-0" style={{ height: paneState.graphHeight }}>

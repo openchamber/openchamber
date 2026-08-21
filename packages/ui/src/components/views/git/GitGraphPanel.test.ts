@@ -813,7 +813,7 @@ describe('GitGraphPanel component regression', () => {
     dom.restore();
   });
 
-  test('uses the existing graph pane instead of nesting another card', () => {
+  test('uses the existing graph pane and leaves filter controls to the pane header', () => {
     // SAFETY: Server rendering does not execute effects or read git API methods.
     const panelGitApi = {} as GitAPI;
     const markup = renderToStaticMarkup(
@@ -826,8 +826,10 @@ describe('GitGraphPanel component regression', () => {
 
     const panelClass = markup.match(/<section id="git-graph-panel" class="([^"]+)"/)?.[1];
     expect(panelClass).toBe('flex h-full min-h-0 flex-col');
-    expect(markup).toContain('aria-label="Refresh"');
-    expect(markup).not.toContain('>Refresh</button>');
+    expect(markup).not.toContain('aria-label="Refresh"');
+    expect(markup).not.toContain('>Auto</button>');
+    expect(markup).not.toContain('>All</button>');
+    expect(markup).not.toContain('>Manual</button>');
   });
 
   test('requests one append page with the scroll container as observer root when the active sentinel intersects', async () => {

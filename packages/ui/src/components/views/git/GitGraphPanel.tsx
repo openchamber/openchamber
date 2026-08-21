@@ -1,6 +1,5 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import type { GitCommitHoverDetailsCache, GitHistoryRef } from '@/lib/api/types';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -263,21 +262,6 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
 
   return (
     <section id="git-graph-panel" className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-wrap items-center gap-1 border-b border-border/50 px-2 py-1">
-        <Button type="button" size="xs" variant={paneState.graphFilterMode === 'auto' ? 'secondary' : 'ghost'} onClick={() => setPaneState(directory, { graphFilterMode: 'auto', graphManualRefIds: [] })} disabled={areFilterControlsDisabled}>
-          {t('quota.window.auto')}
-        </Button>
-        <Button type="button" size="xs" variant={paneState.graphFilterMode === 'all' ? 'secondary' : 'ghost'} onClick={() => setPaneState(directory, { graphFilterMode: 'all', graphManualRefIds: [] })} disabled={areFilterControlsDisabled}>
-          {t('contextPanel.preview.console.filter.all')}
-        </Button>
-        <Button type="button" size="xs" variant={paneState.graphFilterMode === 'manual' ? 'secondary' : 'ghost'} onClick={() => setPaneState(directory, { graphFilterMode: 'manual' })} disabled={areFilterControlsDisabled}>
-          {t('sessions.sidebar.header.projectSort.manual')}
-        </Button>
-        <Button type="button" size="xs" variant="ghost" className="ml-auto" aria-label={t('gitView.history.refresh')} onClick={() => void refresh()} disabled={isLoadingRefs || queryState?.isLoading || queryState?.isLoadingMore}>
-          <Icon name="refresh" className="size-3" />
-        </Button>
-      </div>
-
       {paneState.graphFilterMode === 'manual' ? (
         <div className="flex flex-col gap-2 border-b border-border/50 px-2.5 py-1.5">
           <div className="typography-micro text-muted-foreground">{t('gitView.graph.manualSelection')}</div>
