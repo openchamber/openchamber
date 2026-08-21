@@ -64,7 +64,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - OpenCode JSONC reads in `opencodeConfig.ts` fail closed on a partial or non-object `jsonc-parser` tree (`INVALID_JSONC`) so mutations cannot rewrite a `$schema`-only stub over an existing config. Comment-only files read as empty, while other content that yields no JSON value (YAML, plain text) fails closed. A broken layer is omitted from the merge and recorded on `layerErrors`; valid sibling layers still load, including plugin list/read via `getPluginConfigSources`. Writes still refuse to overwrite the broken file.
 
 - `bridge-settings-runtime.ts`
-  - Settings read/write and OpenCode skills discovery via API for bridge consumers.
+  - Settings read/write and OpenCode skills discovery via API for bridge consumers. Canonical setting writes remove superseded keys from both shared disk settings and VS Code global state.
 
 - `bridge-system-runtime.ts`
   - System/editor/provider/quota/notification/update-check message handlers.
