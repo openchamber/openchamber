@@ -1,13 +1,22 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Agent, Message } from '@opencode-ai/sdk/v2';
-import type { QueuedMessage } from '../stores/messageQueueStore';
+import { useMessageQueueStore, type QueuedMessage } from '../stores/messageQueueStore';
 import { ChildStoreManager } from '@/sync/child-store';
 import { setSyncRefs } from '@/sync/sync-refs';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 let visibleAgents: Agent[] = [];
 const sendMessageCalls: unknown[][] = [];
+const findSessionMessageCalls: unknown[][] = [];
+const findSessionMessageResults: unknown[] = [];
 
 const getVisibleAgentsMock = mock(() => visibleAgents);
+const findSessionMessageMock = mock(async (...args: unknown[]) => {
+  findSessionMessageCalls.push(args);
+  const result = findSessionMessageResults.shift();
+  if (result instanceof Error) throw result;
+  return result ?? null;
+});
 
 mock.module('@/stores/useConfigStore', () => ({
   useConfigStore: {
@@ -29,11 +38,18 @@ mock.module('@/sync/session-ui-store', () => ({
   },
 }));
 
+mock.module('@/lib/opencode/client', () => ({
+  opencodeClient: {
+    findSessionMessage: findSessionMessageMock,
+  },
+}));
+
 import {
   buildQueuedAutoSendPayload,
   createQueuedAutoSendRetryScheduler,
   getQueuedAutoSendRetryDelayMs,
   isQueuedAutoSendBackedOff,
+  reconcileQueuedAutoSendAttempt,
   resolveQueuedSessionStatusType,
   sendQueuedAutoSendPayload,
   shouldDispatchQueuedAutoSend,
@@ -179,6 +195,9 @@ describe('buildQueuedAutoSendPayload', () => {
   beforeEach(() => {
     visibleAgents = [];
     sendMessageCalls.length = 0;
+    findSessionMessageCalls.length = 0;
+    findSessionMessageResults.length = 0;
+    useMessageQueueStore.setState({ queuedMessages: {}, quarantinedLegacyMessages: {}, deletedTargets: {}, sendingIds: {} });
   });
 
   test('returns only the first queued message for auto-send', () => {
@@ -302,5 +321,68 @@ describe('buildQueuedAutoSendPayload', () => {
         },
       },
     ]);
+  });
+
+  test('reuses a durable message ID when the user explicitly retries an unknown send', async () => {
+    const payload = buildQueuedAutoSendPayload([{
+      id: 'queued-1',
+      content: 'queued message',
+      createdAt: 1,
+      sendAttempt: { messageID: 'msg_durable' },
+    }]);
+    expect(payload).not.toBeNull();
+    if (!payload) throw new Error('Expected a queued auto-send payload.');
+
+    await sendQueuedAutoSendPayload({
+      runtimeKey: 'runtime-original',
+      sessionId: 'session-original',
+      directory: '/repo',
+    }, payload, {
+      providerID: 'provider-1',
+      modelID: 'model-1',
+    });
+
+    expect(sendMessageCalls[0]?.[9]).toEqual({
+      target: {
+        runtimeKey: 'runtime-original',
+        sessionId: 'session-original',
+        directory: '/repo',
+      },
+      messageID: 'msg_durable',
+    });
+  });
+
+  test('removes a reloaded send confirmed by exact server message ID without sending it again', async () => {
+    findSessionMessageResults.push({ info: { id: 'msg_durable' }, parts: [] });
+    const target = {
+      runtimeKey: getRuntimeKey(),
+      sessionId: 'session-original',
+      directory: '/repo',
+    };
+    await useMessageQueueStore.getState().addToQueue(target, { content: 'queued message' });
+    const [queued] = useMessageQueueStore.getState().getQueueForTarget(target);
+    await useMessageQueueStore.getState().recordSendAttempt(target, queued.id, 'msg_durable');
+    useMessageQueueStore.setState({ sendingIds: {} });
+
+    expect(await reconcileQueuedAutoSendAttempt(target, queued.id, 'msg_durable')).toBe(true);
+    expect(findSessionMessageCalls).toEqual([['session-original', 'msg_durable', '/repo']]);
+    expect(useMessageQueueStore.getState().getQueueForTarget(target)).toEqual([]);
+    expect(sendMessageCalls).toEqual([]);
+  });
+
+  test('keeps an outcome-unknown send queued when the exact server message is missing', async () => {
+    findSessionMessageResults.push(null);
+    const target = {
+      runtimeKey: getRuntimeKey(),
+      sessionId: 'session-original',
+      directory: '/repo',
+    };
+    await useMessageQueueStore.getState().addToQueue(target, { content: 'queued message' });
+    const [queued] = useMessageQueueStore.getState().getQueueForTarget(target);
+    await useMessageQueueStore.getState().recordSendAttempt(target, queued.id, 'msg_unknown');
+
+    expect(await reconcileQueuedAutoSendAttempt(target, queued.id, 'msg_unknown')).toBe(false);
+    expect(useMessageQueueStore.getState().getQueueForTarget(target)[0]?.sendAttempt?.messageID).toBe('msg_unknown');
+    expect(sendMessageCalls).toEqual([]);
   });
 });

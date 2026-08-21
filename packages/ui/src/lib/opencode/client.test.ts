@@ -10,6 +10,8 @@ let runtimeKey = 'test-runtime';
 const promptAsyncCalls: unknown[][] = [];
 const promptAsyncResults: Array<unknown> = [];
 const pathGetResults: Array<unknown> = [];
+const sessionMessageCalls: unknown[][] = [];
+const sessionMessageResults: Array<unknown> = [];
 
 const promptAsyncMock = mock(async (...args: unknown[]) => {
   promptAsyncCalls.push(args);
@@ -24,6 +26,13 @@ const pathGetMock = mock(async () => {
   return next ?? { data: { directory: '/workspace/project' } };
 });
 
+const sessionMessageMock = mock(async (...args: unknown[]) => {
+  sessionMessageCalls.push(args);
+  const next = sessionMessageResults.shift();
+  if (next instanceof Error) throw next;
+  return next ?? { error: { name: 'NotFoundError' }, response: { status: 404 } };
+});
+
 mock.module('@opencode-ai/sdk/v2', () => ({
   createOpencodeClient: mock(() => ({
     config: {
@@ -36,6 +45,7 @@ mock.module('@opencode-ai/sdk/v2', () => ({
     },
     session: {
       promptAsync: promptAsyncMock,
+      message: sessionMessageMock,
     },
     path: {
       get: pathGetMock,
@@ -75,6 +85,8 @@ beforeEach(() => {
   promptAsyncCalls.length = 0;
   promptAsyncResults.length = 0;
   pathGetResults.length = 0;
+  sessionMessageCalls.length = 0;
+  sessionMessageResults.length = 0;
 });
 
 describe('opencodeClient directory availability', () => {
@@ -110,6 +122,28 @@ describe('opencodeClient getConfig cache', () => {
     const cached = await opencodeClient.getConfig('/workspace/project');
     expect(cached).toEqual({ model: 'new/model' });
     expect(configCalls).toBe(2);
+  });
+});
+
+describe('opencodeClient exact message lookup', () => {
+  test('returns the exact message and routes it through the supplied directory', async () => {
+    const record = { info: { id: 'msg_1' }, parts: [] };
+    sessionMessageResults.push({ data: record });
+
+    expect(await opencodeClient.findSessionMessage('ses_1', 'msg_1', '/workspace/target')).toBe(record);
+    expect(sessionMessageCalls).toEqual([[
+      { sessionID: 'ses_1', messageID: 'msg_1', directory: '/workspace/target' },
+    ]]);
+  });
+
+  test('returns null only for an authoritative 404', async () => {
+    sessionMessageResults.push({ error: { name: 'NotFoundError' }, response: { status: 404 } });
+    expect(await opencodeClient.findSessionMessage('ses_1', 'msg_missing', '/workspace/target')).toBe(null);
+
+    sessionMessageResults.push({ error: { message: 'offline' }, response: { status: 503 } });
+    expect(opencodeClient.findSessionMessage('ses_1', 'msg_unknown', '/workspace/target')).rejects.toThrow(
+      'session.message failed (503)',
+    );
   });
 });
 
