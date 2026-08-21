@@ -22,6 +22,11 @@ export interface DictationAudioSource {
 
 const OUTPUT_RATE = 16000;
 const CHUNK_SAMPLES = OUTPUT_RATE; // ~1s per chunk
+// Safety ceiling only — not the drain signal itself. stop() normally
+// resolves as soon as one more onaudioprocess callback actually fires (see
+// below); this just guarantees stop() can't hang forever if the audio
+// context is suspended (e.g. a backgrounded tab) and no callback ever comes.
+const STOP_DRAIN_TIMEOUT_MS = 500;
 
 const getAudioContextCtor = (): typeof AudioContext | null => {
     if (typeof window === 'undefined') {
@@ -91,6 +96,9 @@ interface CaptureGraph {
     gain: GainNode | null;
     pending: Int16Array;
     started: boolean;
+    /** Set by stop() while draining; onaudioprocess calls it once, then
+        clears it, to signal that the next real buffer has landed. */
+    onDrain: (() => void) | null;
 }
 
 const emptyGraph = (): CaptureGraph => ({
@@ -101,6 +109,7 @@ const emptyGraph = (): CaptureGraph => ({
     gain: null,
     pending: new Int16Array(0),
     started: false,
+    onDrain: null,
 });
 
 const safeDisconnect = (node: AudioNode | null): void => {
@@ -174,7 +183,7 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
             const gain = context.createGain();
             gain.gain.value = 0;
 
-            graphRef.current = {
+            const graph: CaptureGraph = {
                 stream,
                 context,
                 source,
@@ -182,11 +191,18 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
                 gain,
                 pending: new Int16Array(0),
                 started: true,
+                onDrain: null,
             };
+            graphRef.current = graph;
 
             processor.onaudioprocess = (event) => {
-                const graph = graphRef.current;
-                if (!graph.started) {
+                // Close over this call's own graph rather than re-reading
+                // graphRef.current: stop() below keeps this processor
+                // connected for a short drain window after a newer
+                // dictation could in principle have already started and
+                // replaced graphRef.current, and a stale trailing callback
+                // must not inject leftover audio into that new session.
+                if (graphRef.current !== graph) {
                     return;
                 }
                 const input = event.inputBuffer.getChannelData(0);
@@ -205,6 +221,17 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
                     const chunk = graph.pending.slice(0, CHUNK_SAMPLES);
                     graph.pending = graph.pending.slice(CHUNK_SAMPLES);
                     onPcmSegmentRef.current(int16ToBase64(chunk));
+                }
+
+                // Tell a draining stop() that this delivery — guaranteed by
+                // the Web Audio API to be contiguous with the previous one —
+                // covers everything captured up through "now". One firing is
+                // enough; clear it so later callbacks in the same recording
+                // don't loop back into an already-resolved stop().
+                if (graph.onDrain) {
+                    const onDrain = graph.onDrain;
+                    graph.onDrain = null;
+                    onDrain();
                 }
             };
 
@@ -231,8 +258,31 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
 
     const stop = useCallback(async () => {
         const graph = graphRef.current;
-        graph.started = false;
         setVolume(0);
+
+        // Wait for one more real onaudioprocess delivery — not a guessed
+        // delay — before tearing the graph down. Web Audio buffers are
+        // contiguous, so the very next callback is guaranteed to cover
+        // everything captured up to this point; anything still in flight
+        // through the pipeline right now lands in that callback instead of
+        // being silently dropped. The timeout is a ceiling for a stalled
+        // audio context (e.g. a backgrounded tab), not the mechanism itself.
+        if (graph.started && graph.processor) {
+            await new Promise<void>((resolve) => {
+                let settled = false;
+                const settle = () => {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    graph.onDrain = null;
+                    resolve();
+                };
+                graph.onDrain = settle;
+                setTimeout(settle, STOP_DRAIN_TIMEOUT_MS);
+            });
+        }
+        graph.started = false;
 
         if (graph.processor) {
             try {
