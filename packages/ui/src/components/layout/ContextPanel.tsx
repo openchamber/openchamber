@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
+import { useUIStore, type ContextPanelMode, type GitCommitDiffTarget, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
@@ -253,7 +253,11 @@ const browserFaviconFor = (url: string, faviconByOrigin: Record<string, string>)
   }
 };
 
-export const getDiffTabRenderKind = (tab: { commitDiffTarget: unknown }): 'commit' | 'working' => {
+type DiffTabRenderCandidate = {
+  commitDiffTarget: GitCommitDiffTarget | null;
+};
+
+export const getDiffTabRenderKind = (tab: DiffTabRenderCandidate): 'commit' | 'working' => {
   return tab.commitDiffTarget ? 'commit' : 'working';
 };
 

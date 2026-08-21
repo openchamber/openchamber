@@ -4,19 +4,10 @@ import type { GitCommitDiffTarget } from '@/stores/useUIStore';
 import { GitCommitDiffPreview } from './GitCommitDiffPreview';
 import {
   createGitCommitDetailsController,
+  scheduleGitCommitDetailsIdle,
   type GitCommitComparison,
   type GitCommitDetailsController,
 } from './gitCommitDetailsController';
-
-const scheduleGitCommitDetailsIdle = (callback: () => void) => {
-  if ('requestIdleCallback' in globalThis && 'cancelIdleCallback' in globalThis) {
-    const handle = globalThis.requestIdleCallback(callback);
-    return () => globalThis.cancelIdleCallback(handle);
-  }
-
-  const handle = globalThis.setTimeout(callback, 0);
-  return () => globalThis.clearTimeout(handle);
-};
 
 export interface ContextCommitDiffViewProps {
   directory: string;

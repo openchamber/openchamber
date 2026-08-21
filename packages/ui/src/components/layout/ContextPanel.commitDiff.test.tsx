@@ -44,6 +44,13 @@ mock.module('@/lib/chunkLoadRecovery', () => ({ lazyWithChunkRecovery: () => () 
 
 const { getDiffTabRenderKind } = await import('./ContextPanel');
 
+type DiffTabRenderInput = Parameters<typeof getDiffTabRenderKind>[0];
+type HasExactCommitTargetContract =
+  [DiffTabRenderInput] extends [{ commitDiffTarget: GitCommitDiffTarget | null }]
+    ? ([{ commitDiffTarget: GitCommitDiffTarget | null }] extends [DiffTabRenderInput] ? true : false)
+    : false;
+const hasExactCommitTargetContract: HasExactCommitTargetContract = true;
+
 const buildTarget = (): GitCommitDiffTarget => ({
   commitHash: 'a'.repeat(40),
   parentHash: 'b'.repeat(40),
@@ -62,7 +69,11 @@ const buildTarget = (): GitCommitDiffTarget => ({
 
 describe('ContextPanel diff render kind', () => {
   test('routes historical diff tabs to the historical preview and ordinary diff tabs to DiffView', () => {
-    expect(getDiffTabRenderKind({ commitDiffTarget: buildTarget() })).toBe('commit');
-    expect(getDiffTabRenderKind({ commitDiffTarget: null })).toBe('working');
+    const commitTab: DiffTabRenderInput = { commitDiffTarget: buildTarget() };
+    const workingTab: DiffTabRenderInput = { commitDiffTarget: null };
+
+    expect(hasExactCommitTargetContract).toBe(true);
+    expect(getDiffTabRenderKind(commitTab)).toBe('commit');
+    expect(getDiffTabRenderKind(workingTab)).toBe('working');
   });
 });
