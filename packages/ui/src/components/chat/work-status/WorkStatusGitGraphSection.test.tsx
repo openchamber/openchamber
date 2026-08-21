@@ -16,6 +16,8 @@ const historyRowCalls: Array<{
   onCopyHash: (hash: string) => void;
   commitComparison?: { directory: string; commitHash: string; parentHash: string | null };
   commitDetailsController?: {
+    getCommitSnapshot: (comparison: { directory: string; commitHash: string; parentHash: string | null }) => { status: string };
+    toggleExpanded: (comparison: { directory: string; commitHash: string; parentHash: string | null }) => void;
     selectFile: (comparison: { directory: string; commitHash: string; parentHash: string | null }, file: GitCommitChangedFile) => void;
   };
   hoverRemoteName?: string | null;
@@ -64,6 +66,8 @@ mock.module('@/components/views/git/HistoryCommitRow', () => ({
     onCopyHash: (hash: string) => void;
     commitComparison?: { directory: string; commitHash: string; parentHash: string | null };
     commitDetailsController?: {
+      getCommitSnapshot: (comparison: { directory: string; commitHash: string; parentHash: string | null }) => { status: string };
+      toggleExpanded: (comparison: { directory: string; commitHash: string; parentHash: string | null }) => void;
       selectFile: (comparison: { directory: string; commitHash: string; parentHash: string | null }, file: GitCommitChangedFile) => void;
     };
     hoverRemoteName?: string | null;
@@ -631,6 +635,7 @@ describe('WorkStatusGitGraphSection', () => {
 
     const refsByDirectory = new Map<string, number>();
     const historyByDirectory = new Map<string, number>();
+    const commitChangesByDirectory = new Map<string, number>();
     const remotesByDirectory = new Map<string, number>();
     const increment = (map: Map<string, number>, directory: string) => {
       map.set(directory, (map.get(directory) ?? 0) + 1);
@@ -644,6 +649,10 @@ describe('WorkStatusGitGraphSection', () => {
       getGitHistory: async (directory) => {
         increment(historyByDirectory, directory);
         return createHistoryPage();
+      },
+      getCommitFiles: async (directory) => {
+        increment(commitChangesByDirectory, directory);
+        return { files: [] };
       },
       getRemotes: async (directory) => {
         increment(remotesByDirectory, directory);
@@ -664,24 +673,20 @@ describe('WorkStatusGitGraphSection', () => {
     expect(historyByDirectory.get('/repo-b')).toBeGreaterThan(0);
     expect(remotesByDirectory.get('/repo-b')).toBe(1);
 
-    const repoARefsBeforeOldSelect = refsByDirectory.get('/repo-a') ?? 0;
-    const repoAHistoryBeforeOldSelect = historyByDirectory.get('/repo-a') ?? 0;
+    const oldController = oldRow?.commitDetailsController;
+    const oldComparison = {
+      directory: '/repo-a',
+      commitHash: 'c'.repeat(40),
+      parentHash: 'd'.repeat(40),
+    };
+    expect(oldController?.getCommitSnapshot(oldComparison).status).toBe('idle');
 
-    oldRow?.commitDetailsController?.selectFile(
-      oldRow.commitComparison ?? { directory: '/repo-a', commitHash: 'a'.repeat(40), parentHash: 'b'.repeat(40) },
-      {
-        path: 'src/old-history.ts',
-        status: 'M',
-        kind: 'file',
-        insertions: 1,
-        deletions: 1,
-        isBinary: false,
-      },
-    );
+    const repoACommitChangesBeforeOldToggle = commitChangesByDirectory.get('/repo-a') ?? 0;
+
+    oldController?.toggleExpanded(oldComparison);
     await flush();
 
-    expect(refsByDirectory.get('/repo-a')).toBe(repoARefsBeforeOldSelect);
-    expect(historyByDirectory.get('/repo-a')).toBe(repoAHistoryBeforeOldSelect);
+    expect(commitChangesByDirectory.get('/repo-a') ?? 0).toBe(repoACommitChangesBeforeOldToggle);
 
     await rendered.unmount();
   });
