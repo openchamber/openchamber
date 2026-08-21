@@ -999,12 +999,13 @@ export function registerGitRoutes(app) {
   app.post('/api/git/branches', async (req, res) => {
     const { createBranch } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { name, startPoint } = req.body;
+      const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+      const startPoint = typeof req.body?.startPoint === 'string' ? req.body.startPoint : undefined;
       if (!name) {
         return res.status(400).json({ error: 'name is required' });
       }
@@ -1014,6 +1015,38 @@ export function registerGitRoutes(app) {
     } catch (error) {
       console.error('Failed to create branch:', error);
       res.status(500).json({ error: error.message || 'Failed to create branch' });
+    }
+  });
+
+  app.post('/api/git/tags', async (req, res) => {
+    const { createTag } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+      if (!name) {
+        return res.status(400).json({ error: 'name is required' });
+      }
+      if (name.startsWith('-') || name.includes('\0')) {
+        return res.status(400).json({ error: 'name must not contain option-like values' });
+      }
+
+      const commitHashRaw = typeof req.body?.commitHash === 'string' ? req.body.commitHash.trim() : '';
+      if (!commitHashRaw) {
+        return res.status(400).json({ error: 'commitHash is required' });
+      }
+      if (!FULL_GIT_OBJECT_ID_PATTERN.test(commitHashRaw)) {
+        return res.status(400).json({ error: 'commitHash must be a full commit SHA' });
+      }
+
+      const result = await createTag(directory, name, commitHashRaw);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to create tag:', error);
+      res.status(500).json({ error: error.message || 'Failed to create tag' });
     }
   });
 

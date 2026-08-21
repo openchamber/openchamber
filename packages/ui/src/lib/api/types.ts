@@ -585,6 +585,7 @@ export interface GitAPI {
   dropGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }>;
   checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }>;
   createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }>;
+  createGitTag?(directory: string, name: string, commitHash: string): Promise<{ success: boolean; tag: string }>;
   renameBranch(directory: string, oldName: string, newName: string): Promise<{ success: boolean; branch: string }>;
   getGitLog(directory: string, options?: GitLogOptions): Promise<GitLogResponse>;
   getCommitFiles(directory: string, request: GitCommitChangesRequest): Promise<GitCommitFilesResponse>;

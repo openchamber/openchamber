@@ -315,6 +315,15 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     });
   },
 
+  createGitTag: async (directory: string, name: string, commitHash: string): Promise<{ success: boolean; tag: string }> => {
+    return sendBridgeMessage<{ success: boolean; tag: string }>('api:git/tags', {
+      directory,
+      method: 'POST',
+      name,
+      commitHash,
+    });
+  },
+
   renameBranch: async (directory: string, oldName: string, newName: string): Promise<{ success: boolean; branch: string }> => {
     return sendBridgeMessage<{ success: boolean; branch: string }>('api:git/branches/rename', {
       directory,

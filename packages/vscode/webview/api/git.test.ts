@@ -23,9 +23,29 @@ describe('VS Code webview git API', () => {
 
       const { createVSCodeGitAPI } = await import(`./git?history-api-${Date.now()}`);
       const api = createVSCodeGitAPI();
+      assert.equal(typeof api.createGitTag, 'function');
       assert.equal(typeof api.getGitHistoryRefs, 'function');
       assert.equal(typeof api.getGitHistory, 'function');
       assert.equal(typeof api.getGitHistoryMergeBase, 'function');
+
+      const createTagPromise = api.createGitTag?.('/repo', 'v1.2.3', '0123456789abcdef0123456789abcdef01234567');
+      const createTagRequest = messages.at(-1);
+      assert.equal(createTagRequest?.type, 'api:git/tags');
+      assert.deepEqual(createTagRequest?.payload, {
+        directory: '/repo',
+        method: 'POST',
+        name: 'v1.2.3',
+        commitHash: '0123456789abcdef0123456789abcdef01234567',
+      });
+      globalThis.window.dispatchEvent(new MessageEvent('message', {
+        data: {
+          id: createTagRequest?.id,
+          type: createTagRequest?.type,
+          success: true,
+          data: { success: true, tag: 'v1.2.3' },
+        },
+      }));
+      await createTagPromise;
 
       const refsPromise = api.getGitHistoryRefs?.('/repo');
       const refsRequest = messages.at(-1);

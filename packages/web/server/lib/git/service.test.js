@@ -8,6 +8,7 @@ import simpleGit from 'simple-git';
 import {
   checkoutCommit,
   cherryPick,
+  createTag,
   createWorktree,
   getCommitFileDiff,
   getCommitFiles,
@@ -194,6 +195,41 @@ describe('git index path validation', () => {
     await expect(unstageFiles('/repo', ['../secret.txt'])).rejects.toThrow(
       'Path is outside repository: ../secret.txt'
     );
+  });
+});
+
+describeIfGit('createTag', () => {
+  it('creates a tag at the requested commit', async () => {
+    const { tmpDir } = await createTempRepo();
+    await writeFile(tmpDir, 'README.md', '# tagged\n');
+    runGit(tmpDir, ['add', 'README.md']);
+    runGit(tmpDir, ['commit', '-m', 'tag target']);
+    const commitHash = runGit(tmpDir, ['rev-parse', 'HEAD']).trim();
+
+    await expect(createTag(tmpDir, 'v1.2.3', commitHash)).resolves.toEqual({ success: true, tag: 'v1.2.3' });
+    expect(runGit(tmpDir, ['rev-parse', 'v1.2.3']).trim()).toBe(commitHash);
+  });
+
+  it('rejects option-like tag names before invoking git', async () => {
+    const { tmpDir } = await createTempRepo();
+    await writeFile(tmpDir, 'README.md', '# tagged\n');
+    runGit(tmpDir, ['add', 'README.md']);
+    runGit(tmpDir, ['commit', '-m', 'tag target']);
+    const commitHash = runGit(tmpDir, ['rev-parse', 'HEAD']).trim();
+
+    await expect(createTag(tmpDir, '-d', commitHash)).rejects.toThrow('Invalid tag name');
+    expect(runGit(tmpDir, ['tag', '--list']).trim()).toBe('');
+  });
+
+  it('rejects NUL-delimited tag names before invoking git', async () => {
+    const { tmpDir } = await createTempRepo();
+    await writeFile(tmpDir, 'README.md', '# tagged\n');
+    runGit(tmpDir, ['add', 'README.md']);
+    runGit(tmpDir, ['commit', '-m', 'tag target']);
+    const commitHash = runGit(tmpDir, ['rev-parse', 'HEAD']).trim();
+
+    await expect(createTag(tmpDir, 'bad\0tag', commitHash)).rejects.toThrow('Invalid tag name');
+    expect(runGit(tmpDir, ['tag', '--list']).trim()).toBe('');
   });
 });
 

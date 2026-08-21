@@ -964,6 +964,16 @@ export async function createBranch(
   return gitHttp.createBranch(directory, name, startPoint);
 }
 
+export async function createGitTag(
+  directory: string,
+  name: string,
+  commitHash: string
+): Promise<{ success: boolean; tag: string }> {
+  const runtime = getRuntimeGit();
+  if (runtime?.createGitTag) return runtime.createGitTag(directory, name, commitHash);
+  return gitHttp.createGitTag(directory, name, commitHash);
+}
+
 export async function renameBranch(
   directory: string,
   oldName: string,

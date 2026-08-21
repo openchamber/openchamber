@@ -378,6 +378,10 @@ function isValidCommitHash(hash: string): boolean {
   return /^[0-9a-fA-F]{7,40}$/.test(hash);
 }
 
+function isOptionLikeGitName(value: string): boolean {
+  return value.startsWith('-') || value.includes('\0');
+}
+
 function getCommitEntryKind(mode: string): GitCommitChangedFile['kind'] {
   if (mode === '120000') {
     return 'symlink';
@@ -1011,6 +1015,36 @@ export async function createBranch(directory: string, name: string, startPoint?:
   if (startPoint) args.push(startPoint);
   const result = await execGit(args, directory);
   return { success: result.exitCode === 0, branch: name };
+}
+
+/**
+ * Create a new tag at a commit
+ */
+export async function createTag(directory: string, name: string, commitHash: string): Promise<{ success: boolean; tag: string }> {
+  const normalizedName = name.trim();
+  if (!normalizedName) {
+    throw new Error('Tag name is required');
+  }
+  if (isOptionLikeGitName(normalizedName)) {
+    throw new Error('Invalid tag name');
+  }
+  if (!isValidCommitHash(commitHash)) {
+    throw new Error('Invalid commit hash');
+  }
+
+  const repo = await getRepository(directory);
+
+  if (repo) {
+    try {
+      await repo.tag(normalizedName, commitHash);
+      return { success: true, tag: normalizedName };
+    } catch (error) {
+      console.error('[GitService] Failed to create tag:', error);
+    }
+  }
+
+  const result = await execGit(['tag', '--', normalizedName, commitHash], directory);
+  return { success: result.exitCode === 0, tag: normalizedName };
 }
 
 /**

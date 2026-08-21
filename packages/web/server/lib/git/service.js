@@ -1481,6 +1481,17 @@ const normalizeIntegrateBranch = (value, fieldName) => {
   return branch;
 };
 
+const normalizeTagName = (value) => {
+  const tagName = String(value || '').trim();
+  if (!tagName) {
+    throw new Error('Tag name is required');
+  }
+  if (tagName.startsWith('-') || tagName.includes('\0')) {
+    throw new Error('Invalid tag name');
+  }
+  return tagName;
+};
+
 const normalizeIntegrateSha = (value) => {
   const sha = String(value || '').trim();
   if (!/^[0-9a-fA-F]{4,64}$/.test(sha)) {
@@ -4333,6 +4344,23 @@ export async function createBranch(directory, branchName, options = {}) {
     return { success: true, branch: branchName };
   } catch (error) {
     console.error('Failed to create branch:', error);
+    throw error;
+  }
+}
+
+export async function createTag(directory, tagName, commitHash) {
+  const normalizedTagName = normalizeTagName(tagName);
+  if (!isValidCommitHash(commitHash)) {
+    throw new Error('Invalid commit hash');
+  }
+
+  const { git } = await createRepositoryGitContext(directory);
+
+  try {
+    await git.raw(['tag', '--', normalizedTagName, commitHash]);
+    return { success: true, tag: normalizedTagName };
+  } catch (error) {
+    console.error('Failed to create tag:', error);
     throw error;
   }
 }

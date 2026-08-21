@@ -6,6 +6,7 @@ describe('createWebGitAPI', () => {
     const api = createWebGitAPI();
 
     expect(api).toEqual(expect.objectContaining({
+      createGitTag: expect.any(Function),
       stageGitFiles: expect.any(Function),
       unstageGitFiles: expect.any(Function),
       stageGitHunk: expect.any(Function),

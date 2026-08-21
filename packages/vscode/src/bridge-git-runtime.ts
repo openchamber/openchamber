@@ -20,6 +20,10 @@ const isValidCommitHash = (hash: string | undefined): hash is string => (
   typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
 );
 
+const isOptionLikeGitName = (value: string | undefined): value is string => (
+  typeof value === 'string' && (value.startsWith('-') || value.includes('\0'))
+);
+
 const asRecord = (payload: unknown): BridgePayloadRecord => (
   payload && typeof payload === 'object' ? payload as BridgePayloadRecord : {}
 );
@@ -175,6 +179,34 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       }
 
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+    }
+
+    case 'api:git/tags': {
+      const directory = readString(payloadRecord, 'directory');
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+
+      const method = readString(payloadRecord, 'method');
+      const normalizedMethod = typeof method === 'string' ? method.toUpperCase() : 'GET';
+      if (normalizedMethod !== 'POST') {
+        return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+      }
+
+      const name = readString(payloadRecord, 'name')?.trim();
+      if (!name) {
+        return { id, type, success: false, error: 'Tag name is required' };
+      }
+      if (isOptionLikeGitName(name)) {
+        return { id, type, success: false, error: 'Tag name must not contain option-like values' };
+      }
+
+      const commitHash = readString(payloadRecord, 'commitHash')?.trim();
+      if (!commitHash || !isValidCommitHash(commitHash)) {
+        return { id, type, success: false, error: 'commitHash must be a commit SHA' };
+      }
+
+      const result = await gitService.createTag(directory!, name, commitHash);
+      return { id, type, success: true, data: result };
     }
 
     case 'api:git/remote-branches': {

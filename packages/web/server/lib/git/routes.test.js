@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const gitLibraries = {
+  createTag: vi.fn(),
   stageFiles: vi.fn(),
   unstageFiles: vi.fn(),
   isGitRepository: vi.fn(),
@@ -13,6 +14,7 @@ const gitLibraries = {
 };
 
 vi.mock('./index.js', () => ({
+  createTag: gitLibraries.createTag,
   stageFiles: gitLibraries.stageFiles,
   unstageFiles: gitLibraries.unstageFiles,
   isGitRepository: gitLibraries.isGitRepository,
@@ -74,6 +76,7 @@ const createMockResponse = () => {
 
 describe('git routes index mutations', () => {
   beforeEach(() => {
+    gitLibraries.createTag.mockReset();
     gitLibraries.stageFiles.mockReset();
     gitLibraries.unstageFiles.mockReset();
     gitLibraries.isGitRepository.mockReset();
@@ -290,6 +293,70 @@ describe('git history routes', () => {
     );
     expect(optionResponse.statusCode).toBe(400);
     expect(optionResponse.body).toEqual({ error: 'refs must not contain option-like values' });
+  });
+});
+
+describe('git tag routes', () => {
+  beforeEach(() => {
+    gitLibraries.createTag.mockReset();
+  });
+
+  it('validates create tag payloads before invoking git', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+
+    const missingHashResponse = createMockResponse();
+    await getRoute('POST', '/api/git/tags')(
+      { query: { directory: '/repo' }, body: { name: 'v1.2.3' } },
+      missingHashResponse,
+    );
+    expect(missingHashResponse.statusCode).toBe(400);
+    expect(missingHashResponse.body).toEqual({ error: 'commitHash is required' });
+
+    const malformedHashResponse = createMockResponse();
+    await getRoute('POST', '/api/git/tags')(
+      { query: { directory: '/repo' }, body: { name: 'v1.2.3', commitHash: 'abc1234' } },
+      malformedHashResponse,
+    );
+    expect(malformedHashResponse.statusCode).toBe(400);
+    expect(malformedHashResponse.body).toEqual({ error: 'commitHash must be a full commit SHA' });
+
+    const optionLikeNameResponse = createMockResponse();
+    await getRoute('POST', '/api/git/tags')(
+      { query: { directory: '/repo' }, body: { name: '-d', commitHash: '0123456789abcdef0123456789abcdef01234567' } },
+      optionLikeNameResponse,
+    );
+    expect(optionLikeNameResponse.statusCode).toBe(400);
+    expect(optionLikeNameResponse.body).toEqual({ error: 'name must not contain option-like values' });
+
+    const nulNameResponse = createMockResponse();
+    await getRoute('POST', '/api/git/tags')(
+      { query: { directory: '/repo' }, body: { name: 'bad\0tag', commitHash: '0123456789abcdef0123456789abcdef01234567' } },
+      nulNameResponse,
+    );
+    expect(nulNameResponse.statusCode).toBe(400);
+    expect(nulNameResponse.body).toEqual({ error: 'name must not contain option-like values' });
+
+    expect(gitLibraries.createTag).not.toHaveBeenCalled();
+  });
+
+  it('creates tags for valid payloads', async () => {
+    gitLibraries.createTag.mockResolvedValue({ success: true, tag: 'v1.2.3' });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/tags')(
+      {
+        query: { directory: '/repo' },
+        body: { name: 'v1.2.3', commitHash: '0123456789abcdef0123456789abcdef01234567' },
+      },
+      response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(gitLibraries.createTag).toHaveBeenCalledWith('/repo', 'v1.2.3', '0123456789abcdef0123456789abcdef01234567');
+    expect(response.body).toEqual({ success: true, tag: 'v1.2.3' });
   });
 });
 
