@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **CLI:** options are now validated per command, so passing a flag that belongs to another command (for example `openchamber serve --daily 09:30`) fails with a clear message and the closest matching flag instead of being silently ignored; tunnel and startup validate against the specific subcommand (`openchamber tunnel status --dry-run` is rejected, `openchamber tunnel start --dry-run` still works).
+- CLI: `--help` shows only the options of the command asked about (for example `openchamber session list --help` or `openchamber tunnel start --help`) instead of every command's options, subcommand lists are labeled `COMMANDS` everywhere, and `openchamber control` explains that its listed commands run at the top level and points typos like `openchamber control status` at `openchamber status`.
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
 
 ## [1.19.0] - 2026-08-19

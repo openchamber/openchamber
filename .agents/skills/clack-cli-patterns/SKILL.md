@@ -11,9 +11,11 @@ OpenChamber terminal CLI uses `@clack/prompts` for interactive UX, but command p
 
 **Core principle:** policy-first, UX-second. Clack is presentation, not enforcement.
 
+Flag parsing, per-command option schemas, help text, and command dispatch are commander's; see `commander-cli-patterns`.
+
 ## Scope
 
-Use this skill for terminal CLI work only (for example `packages/web/bin/*`).
+Use this skill for terminal CLI output, prompts, and mode-parity work (for example `packages/web/bin/cli-output.js` and command modules' rendering paths).
 
 Do not use this skill for web UI or VS Code webview styling work.
 
@@ -142,5 +144,6 @@ Implementation is complete when validators run before every mode branch, interac
 ## References
 
 - This skill is the canonical CLI parity and safety policy.
+- Flag schemas, parsing, and help structure: `commander-cli-patterns`
 - Terminal CLI precedent: `packages/web/bin/cli.js`
 - Output adapter precedent: `packages/web/bin/cli-output.js`

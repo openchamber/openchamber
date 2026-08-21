@@ -28,6 +28,7 @@ import {
 } from '../server/lib/tunnels/types.js';
 import {
   assertAuthenticatedNetworkExposure,
+  commandDispatch,
   commands,
   discoverOpenChamberInstanceOnPort,
   discoverLifecycleInstances,
@@ -42,6 +43,7 @@ import {
   parseArgs,
   resolveServeHost,
   resolveServeUiPassword,
+  runControlAction,
 } from './cli.js';
 
 async function withTempOpenChamberDataDir(fn) {
@@ -81,6 +83,20 @@ async function captureStdout(fn) {
     return output;
   } finally {
     process.stdout.write = originalWrite;
+  }
+}
+
+async function captureConsoleLog(fn) {
+  const originalLog = console.log;
+  let output = '';
+  console.log = (...args) => {
+    output += `${args.join(' ')}\n`;
+  };
+  try {
+    await fn();
+    return output;
+  } finally {
+    console.log = originalLog;
   }
 }
 
@@ -616,6 +632,270 @@ describe('cli args', () => {
 
     expect(parsed.options.hostname).toBe('app.example.com');
     expect(parsed.options.host).toBeUndefined();
+  });
+
+  it('rejects flags owned by another command', () => {
+    const parsed = parseArgs(['serve', '--daily', '09:30']);
+
+    expect(parsed.removedFlagErrors).toHaveLength(1);
+    expect(parsed.removedFlagErrors[0]).toContain(`'--daily'`);
+    expect(parsed.removedFlagErrors[0]).toContain(`command 'serve'`);
+  });
+
+  it('accepts command-owned flags for their command', () => {
+    expect(parseArgs(['schedule', 'create', '--daily', '09:30']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['session', 'list', '--limit', '5', '--all']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['logs', '--lines', '50', '--no-follow']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['startup', 'enable', '--no-env-snapshot']).removedFlagErrors).toEqual([]);
+  });
+
+  it('rejects tunnel-only flags outside tunnel commands', () => {
+    const parsed = parseArgs(['session', 'list', '--token-file', '/secrets/cf']);
+
+    expect(parsed.removedFlagErrors).toHaveLength(1);
+    expect(parsed.removedFlagErrors[0]).toContain(`command 'session'`);
+  });
+
+  it('suggests the closest allowed flag for the resolved command', () => {
+    const parsed = parseArgs(['serve', '--prot', '3000']);
+
+    expect(parsed.removedFlagErrors).toHaveLength(1);
+    expect(parsed.removedFlagErrors[0]).toContain(`Did you mean '--port'?`);
+  });
+
+  it('reports unknown options with the resolved command context', () => {
+    const parsed = parseArgs(['status', '--bogus']);
+
+    expect(parsed.removedFlagErrors).toEqual([`Unknown option '--bogus' for command 'status'.`]);
+  });
+
+  it('omits command context for flags typed before a known command', () => {
+    const parsed = parseArgs(['--prot', '3000']);
+
+    expect(parsed.removedFlagErrors).toEqual([`Unknown option '--prot'. Did you mean '--port'?`]);
+  });
+
+  it('accepts global flags before the command token', () => {
+    expect(parseArgs(['--json', '--port', '3000', 'status']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['--quiet']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['--ui-password']).removedFlagErrors).toEqual([]);
+  });
+
+  it('still reports removed tunnel flags on any command', () => {
+    expect(parseArgs(['status', '--tunnel-qr']).removedFlagErrors).toHaveLength(1);
+    expect(parseArgs(['serve', '--tunnel-qr']).removedFlagErrors[0]).toContain('was removed');
+  });
+
+  it('reports every unsupported flag independently', () => {
+    const parsed = parseArgs(['logs', '--daily', '09:30', '--provider', 'cloudflare']);
+
+    expect(parsed.removedFlagErrors).toHaveLength(2);
+  });
+
+  it('validates tunnel flags against the resolved subcommand', () => {
+    expect(parseArgs(['tunnel', 'start', '--dry-run', '--qr', '--lan']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['tunnel', 'stop', '--all', '--force']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['tunnel', 'doctor', '--provider', 'cloudflare', '--all']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['tunnel', 'profile', 'add', '--name', 'x', '--force', '--show-secrets']).removedFlagErrors).toEqual([]);
+
+    expect(parseArgs(['tunnel', 'status', '--dry-run']).removedFlagErrors)
+      .toEqual([`Unknown option '--dry-run' for command 'tunnel status'.`]);
+    expect(parseArgs(['tunnel', 'providers', '--token', 'x']).removedFlagErrors)
+      .toEqual([`Unknown option '--token' for command 'tunnel providers'.`]);
+    expect(parseArgs(['tunnel', 'stop', '--provider', 'cloudflare']).removedFlagErrors)
+      .toEqual([`Unknown option '--provider' for command 'tunnel stop'.`]);
+  });
+
+  it('falls back to the tunnel union pool for unknown subcommands', () => {
+    const parsed = parseArgs(['tunnel', 'bogus', '--provider', 'cloudflare']);
+
+    expect(parsed.removedFlagErrors).toEqual([]);
+    expect(parseArgs(['tunnel', 'bogus', '--nope']).removedFlagErrors)
+      .toEqual([expect.stringContaining(`Unknown option '--nope' for command 'tunnel'.`)]);
+  });
+
+  it('validates startup flags against the resolved action', () => {
+    expect(parseArgs(['startup', 'enable', '--no-env-snapshot', '--api-only']).removedFlagErrors).toEqual([]);
+
+    expect(parseArgs(['startup', 'status', '--no-env-snapshot']).removedFlagErrors)
+      .toEqual([`Unknown option '--no-env-snapshot' for command 'startup status'.`]);
+    expect(parseArgs(['startup', 'disable', '--api-only']).removedFlagErrors)
+      .toEqual([`Unknown option '--api-only' for command 'startup disable'.`]);
+    expect(parseArgs(['startup', '--api-only']).removedFlagErrors)
+      .toEqual([`Unknown option '--api-only' for command 'startup status'.`]);
+  });
+
+  it('parses inline --flag=value forms', () => {
+    const parsed = parseArgs(['serve', '--port=8080', '--host=0.0.0.0']);
+
+    expect(parsed.options.port).toBe(8080);
+    expect(parsed.options.explicitPort).toBe(true);
+    expect(parsed.options.host).toBe('0.0.0.0');
+  });
+
+  it('reports a clean range error for negative ports', () => {
+    expect(() => parseArgs(['serve', '-p', '-1'])).toThrow('Invalid port value: -1');
+    expect(() => parseArgs(['serve', '--port=-1'])).toThrow('Invalid port value: -1');
+  });
+
+  it('reports missing values for required-value options', () => {
+    expect(() => parseArgs(['serve', '--port'])).toThrow('Missing value for --port.');
+    expect(() => parseArgs(['serve', '--host', '--json'])).toThrow('Missing value for --host.');
+    expect(() => parseArgs(['connect-url', '--server'])).toThrow('Missing value for --server.');
+  });
+
+  it('parses qr negation pairs explicitly', () => {
+    expect(parseArgs(['tunnel', 'start', '--qr']).options).toMatchObject({ qr: true, explicitQr: true });
+    expect(parseArgs(['tunnel', 'start', '--no-qr']).options).toMatchObject({ qr: false, explicitQr: true });
+  });
+
+  it('keeps bare --help command-scoped only when a command is present', () => {
+    expect(parseArgs(['--help']).commandExplicit).toBe(false);
+    expect(parseArgs(['--help']).helpRequested).toBe(true);
+    const scoped = parseArgs(['session', 'list', '--help']);
+    expect(scoped.commandExplicit).toBe(true);
+    expect(scoped.helpRequested).toBe(true);
+    expect(scoped.sessionAction).toBe('list');
+  });
+});
+
+describe('command dispatch table', () => {
+  it('registers every user-facing command including connect-url', () => {
+    expect(Object.keys(commandDispatch).sort()).toEqual([
+      'connect-url', 'control', 'logs', 'models', 'projects', 'restart',
+      'schedule', 'serve', 'session', 'startup', 'status', 'stop', 'tunnel',
+      'update',
+    ]);
+  });
+
+  it('rejects unknown control actions with a usage error', () => {
+    expect(() => runControlAction('bogus')).toThrow(/Unknown control command 'bogus'/);
+    expect(() => runControlAction('bogus')).toThrow(expect.objectContaining({ exitCode: 2 }));
+  });
+
+  it('points control-plane names at their top-level command', () => {
+    expect(() => runControlAction('status')).toThrow(
+      `'status' is a top-level command, not a control subcommand. Use: openchamber status`,
+    );
+  });
+
+  it('suggests the closest control-plane command for typos', () => {
+    expect(() => runControlAction('stat')).toThrow(/Did you mean 'openchamber status'\?/);
+  });
+
+  it('delegates run entries to the wired commands with fixed subcommands', async () => {
+    const originalModels = commands.models;
+    const originalProjects = commands.projects;
+    const calls = [];
+    commands.models = async (options, action) => { calls.push(['models', options.json, action]); };
+    commands.projects = async (options, action) => { calls.push(['projects', options.quiet, action]); };
+    try {
+      await commandDispatch.models.run({ json: true }, {});
+      await commandDispatch.projects.run({ quiet: true }, {});
+      expect(calls).toEqual([
+        ['models', true, 'show'],
+        ['projects', true, 'list'],
+      ]);
+    } finally {
+      commands.models = originalModels;
+      commands.projects = originalProjects;
+    }
+  });
+
+  it('passes parsed actions through to command run entries', async () => {
+    const originalSchedule = commands.schedule;
+    const originalSession = commands.session;
+    const originalTunnel = commands.tunnel;
+    const originalStartup = commands.startup;
+    const calls = [];
+    commands.schedule = async (options, action) => { calls.push(['schedule', action]); };
+    commands.session = async (options, action) => { calls.push(['session', action]); };
+    commands.tunnel = async (options, subcommand, action) => { calls.push(['tunnel', subcommand, action]); };
+    commands.startup = async (options, action) => { calls.push(['startup', action]); };
+    try {
+      await commandDispatch.schedule.run({}, { scheduleAction: 'create' });
+      await commandDispatch.session.run({}, { sessionAction: 'send' });
+      await commandDispatch.tunnel.run({}, { subcommand: 'start', tunnelAction: null });
+      await commandDispatch.startup.run({}, { startupAction: 'disable' });
+      expect(calls).toEqual([
+        ['schedule', 'create'],
+        ['session', 'send'],
+        ['tunnel', 'start', null],
+        ['startup', 'disable'],
+      ]);
+    } finally {
+      commands.schedule = originalSchedule;
+      commands.session = originalSession;
+      commands.tunnel = originalTunnel;
+      commands.startup = originalStartup;
+    }
+  });
+
+  it('binds restart through the commands context', async () => {
+    const originalRestart = commands.restart;
+    const observed = [];
+    commands.restart = async function observedRestart(options) {
+      observed.push(typeof this?.stop, typeof this?.serve);
+    };
+    try {
+      await commandDispatch.restart.run({}, {});
+      expect(observed).toEqual(['function', 'function']);
+    } finally {
+      commands.restart = originalRestart;
+    }
+  });
+
+  it('renders per-command help for plain commands', async () => {
+    const serveHelp = await captureConsoleLog(() => commandDispatch.serve.help());
+    expect(serveHelp).toContain('OpenChamber Serve');
+
+    const logsHelp = await captureConsoleLog(() => commandDispatch.logs.help());
+    expect(logsHelp).toContain('OpenChamber Logs');
+  });
+
+  it('renders focused help for session and schedule actions', async () => {
+    const listHelp = await captureStdout(() => commandDispatch.session.help({}, { sessionAction: 'list' }));
+    expect(listHelp).toContain('openchamber session list');
+    expect(listHelp).not.toContain('CREATE OPTIONS');
+    expect(listHelp).not.toContain('STATUS/MESSAGES OPTIONS');
+
+    const createHelp = await captureStdout(() => commandDispatch.schedule.help({}, { scheduleAction: 'create' }));
+    expect(createHelp).toContain('openchamber schedule create');
+    expect(createHelp).not.toContain('--task <taskId>');
+  });
+
+  it('renders focused help for tunnel subcommands', async () => {
+    const startHelp = await captureConsoleLog(() => commandDispatch.tunnel.help({}, { subcommand: 'start' }));
+    expect(startHelp).toContain('OpenChamber Tunnel Start');
+    expect(startHelp).toContain('--connect-ttl <value>');
+    expect(startHelp).not.toContain('--show-secrets');
+
+    const profileHelp = await captureConsoleLog(() => commandDispatch.tunnel.help({}, { subcommand: 'profile' }));
+    expect(profileHelp).toContain('OpenChamber Tunnel Profile');
+    expect(profileHelp).not.toContain('--connect-ttl <value>');
+  });
+
+  it('renders the tunnel overview when no subcommand is given', async () => {
+    const overview = await captureConsoleLog(() => commandDispatch.tunnel.help({}, { subcommand: 'help' }));
+    expect(overview).toContain('Tunnel Lifecycle Commands');
+    expect(overview).toContain('openchamber tunnel <command> --help');
+  });
+
+  it('renders focused help for startup commands', async () => {
+    const enableHelp = await captureConsoleLog(() => commandDispatch.startup.help({}, { startupAction: 'enable' }));
+    expect(enableHelp).toContain('OpenChamber Startup Enable');
+    expect(enableHelp).toContain('--no-env-snapshot');
+
+    const statusHelp = await captureConsoleLog(() => commandDispatch.startup.help({}, { startupAction: 'status' }));
+    expect(statusHelp).toContain('OpenChamber Startup Status');
+    expect(statusHelp).not.toContain('--no-env-snapshot');
+    expect(statusHelp).not.toContain('--api-only');
+  });
+
+  it('renders action overviews when no action is given', async () => {
+    const overview = await captureStdout(() => commandDispatch.session.help({}, { sessionAction: 'help' }));
+    expect(overview).toContain('COMMANDS:');
+    expect(overview).toContain('openchamber session <command> --help');
   });
 });
 
