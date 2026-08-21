@@ -7,7 +7,10 @@ import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContexts
 import TurnItem from './components/TurnItem';
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
-import { useTurnRecords } from './hooks/useTurnRecords';
+import {
+    collectTrailingUngroupedMessages,
+    useTurnRecords,
+} from './hooks/useTurnRecords';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
 import { getNormalizedMessageForDisplay, hasCompactionPart } from './lib/messageDisplayNormalization';
@@ -1409,31 +1412,30 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }), [baseDisplayMessages, retryOverlay]);
 
     const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
-    const keepLastTurnLive = sessionIsWorking || activeStreamingMessageId !== null;
-    const { projection, staticTurns, streamingTurn } = useTurnRecords(displayMessages, {
+    const { projection, staticTurns, streamingTurn, keepLastTurnLive } = useTurnRecords(displayMessages, {
         sessionKey,
         showTextJustificationActivity: chatRenderMode === 'sorted',
         showTurnChangedFiles,
         planModeEnabled,
-        keepLastTurnLive,
+        sessionIsWorking,
+        activeStreamingMessageId,
     });
-    const trailingUngroupedMessage = React.useMemo(() => {
-        if (!keepLastTurnLive || projection.ungroupedMessageIds.size === 0) return undefined;
-        const lastMessage = displayMessages[displayMessages.length - 1];
-        return lastMessage && projection.ungroupedMessageIds.has(lastMessage.info.id)
-            ? lastMessage
-            : undefined;
+    const trailingUngroupedMessages = React.useMemo(() => {
+        return collectTrailingUngroupedMessages(
+            displayMessages,
+            projection.ungroupedMessageIds,
+            keepLastTurnLive,
+        );
     }, [displayMessages, keepLastTurnLive, projection.ungroupedMessageIds]);
-    const renderedTrailingUngroupedMessage = streamingTurn ? undefined : trailingUngroupedMessage;
     const hasUngroupedStaticEntries = projection.ungroupedMessageIds.size > 0;
     const staticEntryMessages = hasUngroupedStaticEntries ? displayMessages : EMPTY_STATIC_ENTRY_MESSAGES;
     const staticEntryUngroupedIds = React.useMemo(() => {
         if (!hasUngroupedStaticEntries) return EMPTY_UNGROUPED_MESSAGE_IDS;
-        if (!renderedTrailingUngroupedMessage) return projection.ungroupedMessageIds;
+        if (trailingUngroupedMessages.length === 0) return projection.ungroupedMessageIds;
         const ids = new Set(projection.ungroupedMessageIds);
-        ids.delete(renderedTrailingUngroupedMessage.info.id);
+        trailingUngroupedMessages.forEach((message) => ids.delete(message.info.id));
         return ids;
-    }, [hasUngroupedStaticEntries, projection.ungroupedMessageIds, renderedTrailingUngroupedMessage]);
+    }, [hasUngroupedStaticEntries, projection.ungroupedMessageIds, trailingUngroupedMessages]);
     const staticRenderEntries = React.useMemo<RenderEntry[]>(() => streamPerfMeasure('ui.message_list.render_entries_ms', () => {
         const turnEntries = staticTurns.map((turn) => ({
             kind: 'turn' as const,
@@ -1475,38 +1477,42 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return orderedEntries;
     }), [projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns]);
 
-    const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
+    const liveTailEntries = React.useMemo<RenderEntry[]>(() => {
+        const entries: RenderEntry[] = [];
         if (streamingTurn) {
-            return {
+            entries.push({
                 kind: 'turn',
                 key: `turn:${streamingTurn.turnId}`,
                 turn: streamingTurn,
                 isLastTurn: streamingTurn.turnId === projection.lastTurnId,
-            } satisfies RenderEntry;
+                nextEntryFirstMessage: trailingUngroupedMessages[0],
+            });
         }
 
-        if (!renderedTrailingUngroupedMessage) {
-            return undefined;
-        }
+        const trailingStart = displayMessages.length - trailingUngroupedMessages.length;
+        trailingUngroupedMessages.forEach((message, index) => {
+            const messageIndex = trailingStart + index;
+            entries.push({
+                kind: 'ungrouped',
+                key: `msg:${message.info.id}`,
+                message,
+                previousMessage: messageIndex > 0 ? displayMessages[messageIndex - 1] : undefined,
+                nextMessage: messageIndex < displayMessages.length - 1 ? displayMessages[messageIndex + 1] : undefined,
+            });
+        });
+        return entries;
+    }, [displayMessages, projection.lastTurnId, streamingTurn, trailingUngroupedMessages]);
 
-        return {
-            kind: 'ungrouped',
-            key: `msg:${renderedTrailingUngroupedMessage.info.id}`,
-            message: renderedTrailingUngroupedMessage,
-            previousMessage: displayMessages.length > 1 ? displayMessages[displayMessages.length - 2] : undefined,
-            nextMessage: undefined,
-        } satisfies RenderEntry;
-    }, [displayMessages, projection.lastTurnId, renderedTrailingUngroupedMessage, streamingTurn]);
-
-    if (trailingStreamingEntry) {
+    if (liveTailEntries.length > 0) {
         streamPerfCount('ui.message_list.render.streaming');
     }
 
     // Depend on the trailing entry's first message (stable while its assistant
     // streams), not the trailing entry itself, so streaming updates do not
     // recreate every static entry and re-render every turn block.
-    const trailingEntryFirstMessage = trailingStreamingEntry
-        ? (trailingStreamingEntry.kind === 'turn' ? trailingStreamingEntry.turn.userMessage : trailingStreamingEntry.message)
+    const firstLiveTailEntry = liveTailEntries[0];
+    const trailingEntryFirstMessage = firstLiveTailEntry
+        ? (firstLiveTailEntry.kind === 'turn' ? firstLiveTailEntry.turn.userMessage : firstLiveTailEntry.message)
         : undefined;
     const historyEntries = React.useMemo<RenderEntry[]>(() => {
         return staticRenderEntries.map((entry, index) => {
@@ -1526,8 +1532,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         });
     }, [staticRenderEntries, trailingEntryFirstMessage]);
     const allEntries = React.useMemo(() => {
-        return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
-    }, [historyEntries, trailingStreamingEntry]);
+        return liveTailEntries.length > 0 ? [...historyEntries, ...liveTailEntries] : historyEntries;
+    }, [historyEntries, liveTailEntries]);
 
     // Mobile always starts with the same virtualized engine it will use after
     // pagination. Switching a short list from normal DOM to TanStack during a
@@ -1703,7 +1709,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return true;
                 }
 
-                const targetIsTail = trailingStreamingEntry !== undefined && index >= historyEntries.length;
+                const targetIsTail = liveTailEntries.length > 0 && index >= historyEntries.length;
                 if (targetIsTail) {
                     return false;
                 }
@@ -1720,7 +1726,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
                 return scrollMessageElementIntoView(messageId, behavior)
                     || (
-                        trailingStreamingEntry !== undefined && index >= historyEntries.length
+                        liveTailEntries.length > 0 && index >= historyEntries.length
                             ? false
                             : scrollHistoryIndexIntoView(index)
                     );
@@ -1863,7 +1869,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             objectRef.current = null;
         };
-    }, [findMessageElement, historyEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
+    }, [findMessageElement, historyEntries.length, liveTailEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, turnIndexMap, ref]);
 
     const disableFadeIn = false;
 
@@ -1898,9 +1904,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 reviewTransferDirection={reviewTransferDirection}
                             />
                         </FadeInDisabledProvider>
-                        {trailingStreamingEntry ? (
+                        {liveTailEntries.map((entry) => (
                             <StreamingTailContent
-                                entry={trailingStreamingEntry}
+                                key={entry.key}
+                                entry={entry}
                                 directory={directory}
                                 onMessageContentChange={stableTailContentChange}
                                 getAnimationHandlers={stableGetAnimationHandlers}
@@ -1918,7 +1925,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 activeStreamingPhase={activeStreamingPhase}
                                 reviewTransferDirection={reviewTransferDirection}
                             />
-                        ) : null}
+                        ))}
                     </div>
                 </FadeInDisabledProvider>
 

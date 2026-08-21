@@ -9,19 +9,42 @@ interface UseTurnRecordsOptions {
     showTextJustificationActivity: boolean;
     showTurnChangedFiles: boolean;
     planModeEnabled: boolean;
-    keepLastTurnLive: boolean;
+    sessionIsWorking: boolean;
+    activeStreamingMessageId: string | null | undefined;
 }
 
 export interface TurnRecordsResult {
     projection: TurnProjectionResult;
     staticTurns: TurnProjectionResult['turns'];
     streamingTurn: TurnProjectionResult['turns'][number] | undefined;
+    keepLastTurnLive: boolean;
 }
 
 export interface LiveTurnPartition<TTurn> {
     staticTurns: TTurn[];
     streamingTurn: TTurn | undefined;
 }
+
+export const shouldKeepLastTurnLive = (
+    sessionIsWorking: boolean,
+    activeStreamingMessageId: string | null | undefined,
+    lastTurn: Pick<TurnRecord, 'assistantMessages'> | undefined,
+): boolean => activeStreamingMessageId != null
+    || (sessionIsWorking && (lastTurn?.assistantMessages.length ?? 0) === 0);
+
+export const collectTrailingUngroupedMessages = <TMessage extends { info: { id: string } }>(
+    messages: readonly TMessage[],
+    ungroupedMessageIds: ReadonlySet<string>,
+    enabled: boolean,
+): TMessage[] => {
+    if (!enabled || ungroupedMessageIds.size === 0) return [];
+
+    let start = messages.length;
+    while (start > 0 && ungroupedMessageIds.has(messages[start - 1].info.id)) {
+        start -= 1;
+    }
+    return messages.slice(start);
+};
 
 export const partitionLiveTurn = <TTurn,>(
     turns: readonly TTurn[],
@@ -100,9 +123,14 @@ export const useTurnRecords = (
         });
     }, [messages, options.showTextJustificationActivity, options.showTurnChangedFiles, options.sessionKey, options.planModeEnabled]);
 
+    const keepLastTurnLive = shouldKeepLastTurnLive(
+        options.sessionIsWorking,
+        options.activeStreamingMessageId,
+        projection.turns[projection.turns.length - 1],
+    );
     const livePartition = React.useMemo(
-        () => partitionLiveTurn(projection.turns, options.keepLastTurnLive),
-        [options.keepLastTurnLive, projection.turns],
+        () => partitionLiveTurn(projection.turns, keepLastTurnLive),
+        [keepLastTurnLive, projection.turns],
     );
 
     const staticTurns = React.useMemo(() => {
@@ -139,5 +167,6 @@ export const useTurnRecords = (
         projection,
         staticTurns,
         streamingTurn,
+        keepLastTurnLive,
     };
 };
