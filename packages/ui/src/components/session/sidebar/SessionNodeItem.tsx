@@ -26,7 +26,7 @@ import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSession
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
-import { nodeContainsSessionId, nodeHasPinnedMembershipChange, selectQuestionBadgeSessionScopes } from './sessionNodeItemUtils';
+import { getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, selectQuestionBadgeSessionScopes } from './sessionNodeItemUtils';
 import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
@@ -48,9 +48,18 @@ import { parseMultiRunSessionTitle } from '@/lib/multirun/title';
 import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog';
 import { FusionIcon } from '@/components/icons/FusionIcon';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import { startSessionTreeWorktreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
+import {
+  requestSessionTreeMove,
+  useIsSessionWorktreeMovePending,
+} from '@/lib/worktrees/sessionWorktreeMove';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import type { WorktreeMetadata } from '@/types/worktree';
+import {
+  getSessionWorktreeMenuState,
+  type SessionWorktreeMenuTarget,
+  type StartSessionWorktreeMenuLoadResult,
+} from './sessionWorktreeMenu';
 
 type Folder = { id: string; name: string; sessionIds: string[] };
 
@@ -96,6 +105,11 @@ type Props = {
   openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string; sessionTitleFallback?: string; readOnly?: boolean }) => void;
   handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean; hardDelete?: boolean; skipConfirm?: boolean }) => void;
   handleRestoreSession: (session: Session) => void;
+  startSessionWorktreeMenuLoad: (args: {
+    projectId: string | null;
+    sourceDirectory: string | null;
+    currentWorktree: WorktreeMetadata | null;
+  }) => StartSessionWorktreeMenuLoadResult;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   renderSessionNode: (
@@ -292,6 +306,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     openContextPanelTab,
     handleDeleteSession,
     handleRestoreSession,
+    startSessionWorktreeMenuLoad,
     mobileVariant,
     alwaysShowActions,
     renderSessionNode,
@@ -452,6 +467,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   // tick of the counter it only decides to mount.
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
+  const currentWorktreeMetadata = node.worktree ?? useSessionUIStore.getState().getWorktreeMetadata(session.id) ?? null;
+  const [worktreeTargets, setWorktreeTargets] = React.useState<SessionWorktreeMenuTarget[]>([]);
+  const [worktreeTargetsLoading, setWorktreeTargetsLoading] = React.useState(false);
+  const [worktreeTargetsLoadFailed, setWorktreeTargetsLoadFailed] = React.useState(false);
+  const worktreeSubmenuOpenRef = React.useRef(false);
+  const worktreeLoadSequenceRef = React.useRef(0);
   const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined, { bootstrap: false });
   const sessionGoal = getSessionGoal(resolvedSession);
   const sessionGoalGlyph = sessionGoal ? (
@@ -902,6 +923,41 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     }
   };
 
+  const handleWorktreeSubmenuOpenChange = (open: boolean) => {
+    worktreeSubmenuOpenRef.current = open;
+    worktreeLoadSequenceRef.current += 1;
+    const loadSequence = worktreeLoadSequenceRef.current;
+    if (!open) {
+      setWorktreeTargetsLoading(false);
+      setWorktreeTargetsLoadFailed(false);
+      return;
+    }
+    const load = startSessionWorktreeMenuLoad({
+      projectId: projectId ?? null,
+      sourceDirectory: sessionDirectory,
+      currentWorktree: currentWorktreeMetadata,
+    });
+    setWorktreeTargets(load.cachedTargets);
+    setWorktreeTargetsLoading(true);
+    setWorktreeTargetsLoadFailed(false);
+    void load.refreshTargets
+      .then((freshTargets) => {
+        if (!worktreeSubmenuOpenRef.current || worktreeLoadSequenceRef.current !== loadSequence) {
+          return;
+        }
+        setWorktreeTargets(freshTargets);
+        setWorktreeTargetsLoading(false);
+        setWorktreeTargetsLoadFailed(false);
+      })
+      .catch(() => {
+        if (!worktreeSubmenuOpenRef.current || worktreeLoadSequenceRef.current !== loadSequence) {
+          return;
+        }
+        setWorktreeTargetsLoading(false);
+        setWorktreeTargetsLoadFailed(true);
+      });
+  };
+
   const renderSessionMenuItems = ({
     Item,
     Separator,
@@ -958,38 +1014,119 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         <Icon name="download" className="mr-1 h-4 w-4" />
         {t('sessions.sidebar.session.menu.exportMarkdown')}
       </Item>
-      {!isSubtaskSession && !archivedBucket && !isVSCode && !isChatDirectoryPath(sessionDirectory) ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="block">
-              <Item
-                disabled={!sessionDirectory || isStreaming || isMovingToWorktree}
-                onClick={() => {
-                  if (!sessionDirectory || isStreaming || isMovingToWorktree) return;
-                  startSessionTreeWorktreeMove({
-                    root: resolvedSession,
-                    descendants: collectNodeDescendantSessions(node),
-                    sourceDirectory: sessionDirectory,
-                    successMessage: t('sessions.sidebar.session.moveToWorktree.success'),
-                    failureMessage: t('sessions.sidebar.session.moveToWorktree.failed'),
-                  });
-                }}
-                className="w-full [&>svg]:mr-1"
-              >
-                <Icon name="folder-shared" className="mr-1 h-4 w-4" />
-                {t('sessions.sidebar.session.menu.moveToWorktree')}
-              </Item>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="right" className="max-w-72">
-            {isMovingToWorktree
-              ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
-              : isStreaming
-                ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
-                : t('sessions.sidebar.session.moveToWorktree.tooltip')}
-          </TooltipContent>
-        </Tooltip>
-      ) : null}
+{!isSubtaskSession && !archivedBucket && !isVSCode ? (() => {
+        const isWorktreeMenuDisabled = getSessionWorktreeMenuDisabled({
+          sessionDirectory,
+          isStreaming,
+          isMovingToWorktree,
+        });
+        const worktreeMenuState = getSessionWorktreeMenuState({
+          targets: worktreeTargets,
+          isRefreshing: worktreeTargetsLoading,
+          loadFailed: worktreeTargetsLoadFailed,
+        });
+        return (
+          <Sub onOpenChange={handleWorktreeSubmenuOpenChange}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <SubTrigger
+                  disabled={isWorktreeMenuDisabled}
+                  className="w-full [&>svg]:mr-1"
+                  data-session-worktree-submenu-trigger={session.id}
+                >
+                  <Icon name="folder-shared" className="mr-1 h-4 w-4" />
+                  {t('sessions.sidebar.session.menu.moveToWorktreeTargets')}
+                </SubTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-72">
+                {isMovingToWorktree
+                  ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
+                  : isStreaming
+                    ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
+                    : t('sessions.sidebar.session.moveToWorktree.tooltipTargets')}
+              </TooltipContent>
+            </Tooltip>
+            <SubContent className="min-w-[220px]" data-session-worktree-submenu={session.id}>
+              {worktreeTargets.map((target) => {
+                const targetPath = normalizePath(target.metadata.path ?? null) ?? target.metadata.path;
+                const itemLabel = target.isPrimary
+                  ? t('sessions.sidebar.session.moveToWorktree.main')
+                  : (target.metadata.label || target.metadata.branch || target.metadata.name || target.metadata.path);
+                const isDisabled = target.isCurrent || target.metadata.worktreeStatus !== 'ready';
+
+                return (
+                  <Item
+                    key={targetPath}
+                    disabled={isDisabled}
+                    title={target.metadata.path}
+                    data-session-worktree-target={targetPath}
+                    onClick={() => {
+                      if (isDisabled || !sessionDirectory) {
+                        return;
+                      }
+                      requestSessionTreeMove({
+                        kind: 'existing',
+                        root: resolvedSession,
+                        descendants: collectNodeDescendantSessions(node),
+                        sourceDirectory: sessionDirectory,
+                        destination: target.metadata,
+                        messages: {
+                          success: t('sessions.sidebar.session.moveToWorktree.existingSuccess'),
+                          failure: t('sessions.sidebar.session.moveToWorktree.existingFailed'),
+                          sourceVerificationFailed: t('sessions.sidebar.session.moveToWorktree.sourceVerificationFailed'),
+                          applyChangesFailed: t('sessions.sidebar.session.moveToWorktree.applyChangesFailed'),
+                        },
+                      });
+                    }}
+                  >
+                    <span className="flex min-w-0 flex-1 items-center gap-1 truncate">
+                      <span className="truncate">{itemLabel}</span>
+                      {target.isCurrent ? <span className="sr-only">{t('sessions.sidebar.session.moveToWorktree.current')}</span> : null}
+                    </span>
+                    {target.isCurrent ? <Icon name="check" className="ml-2 h-3.5 w-3.5 flex-shrink-0 text-primary" aria-hidden="true" /> : null}
+                  </Item>
+                );
+              })}
+              {worktreeMenuState.refreshState === 'loading' ? (
+                <Item disabled data-session-worktree-refresh-state="loading" className="py-0.5 text-muted-foreground typography-micro">
+                  {t('sessions.sidebar.session.moveToWorktree.refreshing')}
+                </Item>
+              ) : null}
+              {worktreeMenuState.refreshState === 'error' ? (
+                <Item disabled data-session-worktree-refresh-state="error" className="py-0.5 text-muted-foreground typography-micro">
+                  {t('sessions.sidebar.session.moveToWorktree.loadFailed')}
+                </Item>
+              ) : null}
+              <Separator />
+              {worktreeMenuState.showNewWorktreeAction ? (
+                <Item
+                  disabled={isWorktreeMenuDisabled}
+                  data-session-worktree-new-action="true"
+                  onClick={() => {
+                    if (isWorktreeMenuDisabled || !sessionDirectory) return;
+                    requestSessionTreeMove({
+                      kind: 'quick',
+                      root: resolvedSession,
+                      descendants: collectNodeDescendantSessions(node),
+                      sourceDirectory: sessionDirectory,
+                      messages: {
+                        success: t('sessions.sidebar.session.moveToWorktree.success'),
+                        failure: t('sessions.sidebar.session.moveToWorktree.failed'),
+                        sourceVerificationFailed: t('sessions.sidebar.session.moveToWorktree.sourceVerificationFailed'),
+                        applyChangesFailed: t('sessions.sidebar.session.moveToWorktree.applyChangesFailed'),
+                      },
+                    });
+                  }}
+                  className="[&>svg]:mr-1"
+                >
+                  <Icon name="add" className="mr-1 h-4 w-4" />
+                  {t('sessions.sidebar.session.menu.newWorktree')}
+                </Item>
+              ) : null}
+            </SubContent>
+          </Sub>
+        );
+      })() : null}
       {isMultiRunLikeSession ? (
         <Item onClick={() => setFusionDialogOpen(true)} className="[&>svg]:mr-1">
           <FusionIcon className="mr-1 h-4 w-4" />
@@ -1660,6 +1797,7 @@ const areSessionNodeItemPropsEqual = (prev: Props, next: Props): boolean => {
     && prev.openContextPanelTab === next.openContextPanelTab
     && prev.handleDeleteSession === next.handleDeleteSession
     && prev.handleRestoreSession === next.handleRestoreSession
+    && prev.startSessionWorktreeMenuLoad === next.startSessionWorktreeMenuLoad
     && prev.renderSessionNode === next.renderSessionNode;
 };
 

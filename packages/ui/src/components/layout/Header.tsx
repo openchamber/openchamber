@@ -87,7 +87,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { startSessionTreeWorktreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
+import { requestSessionTreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 
 const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
 const MOBILE_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-9 w-9 items-center justify-center gap-2 p-2 rounded-md typography-ui-label font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:text-foreground hover:bg-interactive-hover transition-colors';
@@ -1235,12 +1235,17 @@ export const Header: React.FC<HeaderProps> = ({
       }
     }
 
-    startSessionTreeWorktreeMove({
+    requestSessionTreeMove({
+      kind: 'quick',
       root,
       descendants,
       sourceDirectory: sessionDirectory,
-      successMessage: t('sessions.sidebar.session.moveToWorktree.success'),
-      failureMessage: t('sessions.sidebar.session.moveToWorktree.failed'),
+      messages: {
+        success: t('sessions.sidebar.session.moveToWorktree.success'),
+        failure: t('sessions.sidebar.session.moveToWorktree.failed'),
+        sourceVerificationFailed: t('sessions.sidebar.session.moveToWorktree.sourceVerificationFailed'),
+        applyChangesFailed: t('sessions.sidebar.session.moveToWorktree.applyChangesFailed'),
+      },
     });
   }, [currentSessionId, isCurrentSessionActive, isCurrentSessionMovingToWorktree, sessionDirectory, t]);
 

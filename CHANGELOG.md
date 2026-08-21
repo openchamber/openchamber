@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Git/Worktrees: session menus can now move an idle session and its sub-sessions into an existing worktree, and opening the target list discovers worktrees created outside OpenChamber without a restart (thanks to @mattv8).
 
 ## [1.19.0] - 2026-08-19
 
