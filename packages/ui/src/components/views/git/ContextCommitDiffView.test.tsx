@@ -1,9 +1,11 @@
 import React, { act } from 'react';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { createRoot, type Root } from 'react-dom/client';
-import { I18nProvider } from '@/lib/i18n';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import { I18nProvider } from '@/lib/i18n/context';
 import type { GitCommitChangedFile, GitCommitFilePreviewRequest, GitCommitFilePreviewResponse, RuntimeAPIs } from '@/lib/api/types';
 import type { GitCommitDiffTarget } from '@/stores/useUIStore';
+import { createGitCommitDetailsController } from './gitCommitDetailsController';
 
 type MockButtonProps = React.PropsWithChildren<React.ButtonHTMLAttributes<HTMLButtonElement>>;
 type PierreDiffViewerProps = {
@@ -59,10 +61,6 @@ type DocumentStub = {
 const pierreCalls: PierreDiffViewerProps[] = [];
 const closeHandlers: Array<() => void> = [];
 let runtimeApis: RuntimeAPIs;
-
-mock.module('@/hooks/useRuntimeAPIs', () => ({
-  useRuntimeAPIs: () => runtimeApis,
-}));
 
 mock.module('@/components/ui/button', () => ({
   Button: React.forwardRef<HTMLButtonElement, MockButtonProps>(({ children, onClick, ...props }, ref) => {
@@ -282,26 +280,37 @@ const createDeferred = <T,>() => {
   return { promise, resolve, reject };
 };
 
-const renderView = async (target: GitCommitDiffTarget, onClose: () => void) => {
+const renderView = async (target: GitCommitDiffTarget, onClose: () => void, props: Record<string, unknown> = {}) => {
   const dom = installMinimalDom();
   const root: Root = createRoot(dom.reactContainer);
-  await act(async () => {
-    root.render(
-      React.createElement(
-        I18nProvider,
-        null,
-        React.createElement(ContextCommitDiffView, {
-          directory: '/repo',
-          target,
-          onClose,
-        }),
-      ),
-    );
-    await flush();
-  });
+
+  const render = async (nextTarget: GitCommitDiffTarget, nextProps: Record<string, unknown> = props) => {
+    await act(async () => {
+      root.render(
+        React.createElement(
+          I18nProvider,
+          null,
+          React.createElement(
+            RuntimeAPIContext.Provider,
+            { value: runtimeApis },
+            React.createElement(ContextCommitDiffView, {
+              directory: '/repo',
+              target: nextTarget,
+              onClose,
+              ...nextProps,
+            }),
+          ),
+        ),
+      );
+      await flush();
+    });
+  };
+
+  await render(target, props);
 
   return {
     container: dom.container,
+    rerender: render,
     restore: async () => {
       await act(async () => {
         root.unmount();
@@ -395,5 +404,82 @@ describe('ContextCommitDiffView', () => {
     deferred.resolve({ status: 'ready', original: 'stale old', modified: 'stale new' });
     await flush();
     expect(pierreCalls).toHaveLength(0);
+  });
+
+  test('keeps one controller for equivalent targets, refetches only when the target changes, and disposes once on unmount', async () => {
+    const requests: GitCommitFilePreviewRequest[] = [];
+    let controllerCreations = 0;
+    let controllerDisposals = 0;
+
+    runtimeApis = {
+      git: {
+        getCommitFileDiff: async (_directory: string, request: GitCommitFilePreviewRequest) => {
+          requests.push(request);
+          return { status: 'ready', original: request.originalPath ?? '', modified: request.modifiedPath ?? '' } satisfies GitCommitFilePreviewResponse;
+        },
+      },
+    } as unknown as RuntimeAPIs;
+
+    const target = buildTarget();
+    const equivalentTarget = buildTarget();
+    const changedTarget = buildTarget({
+      commitHash: 'c'.repeat(40),
+      parentHash: null,
+      file: buildFile({
+        path: 'src/changed.ts',
+        originalPath: 'src/changed-before.ts',
+        status: 'R',
+      }),
+    });
+
+    const createController = (options: Parameters<typeof createGitCommitDetailsController>[0]) => {
+      controllerCreations += 1;
+      const controller = createGitCommitDetailsController(options);
+      return {
+        ...controller,
+        dispose: () => {
+          controllerDisposals += 1;
+          controller.dispose();
+        },
+      };
+    };
+
+    const rendered = await renderView(target, () => {}, {
+      createController,
+    });
+
+    expect(controllerCreations).toBe(1);
+    expect(requests).toEqual([{
+      commitHash: 'a'.repeat(40),
+      parentHash: 'b'.repeat(40),
+      originalPath: 'src/old-name.ts',
+      modifiedPath: 'src/new-name.ts',
+    }]);
+
+    await rendered.rerender(equivalentTarget, { createController });
+
+    expect(controllerCreations).toBe(1);
+    expect(requests).toHaveLength(1);
+
+    await rendered.rerender(changedTarget, { createController });
+
+    expect(controllerCreations).toBe(1);
+    expect(requests).toEqual([
+      {
+        commitHash: 'a'.repeat(40),
+        parentHash: 'b'.repeat(40),
+        originalPath: 'src/old-name.ts',
+        modifiedPath: 'src/new-name.ts',
+      },
+      {
+        commitHash: 'c'.repeat(40),
+        parentHash: null,
+        originalPath: 'src/changed-before.ts',
+        modifiedPath: 'src/changed.ts',
+      },
+    ]);
+
+    await rendered.restore();
+    expect(controllerDisposals).toBe(1);
   });
 });
