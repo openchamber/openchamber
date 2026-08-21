@@ -3100,7 +3100,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.section.project': 'プロジェクト',
   'chat.workStatus.section.subagents': 'サブエージェント',
   'chat.workStatus.section.mcp': 'MCP',
-  'chat.workStatus.section.gitGraph': 'Git グラフ',
+  'chat.workStatus.section.gitGraph': 'Git',
   'chat.workStatus.section.pinned': 'ピン留めしたメッセージ',
   'chat.workStatus.section.tasks': 'タスク',
   'chat.workStatus.subagent.working': '作業中',

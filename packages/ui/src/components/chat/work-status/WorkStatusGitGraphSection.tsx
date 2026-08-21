@@ -121,27 +121,30 @@ export const WorkStatusGitGraphSection: React.FC<Props> = ({ directory, panelVis
   }
 
   return (
-    <div id="work-status-git-graph" data-work-status-git-graph="true" className="min-h-0">
-      <WorkStatusCollapsibleSection
-        id="gitGraph"
-        title={t('chat.workStatus.section.gitGraph')}
-        icon="git-branch"
-        defaultExpanded={false}
-      >
-        <div className="h-80 min-h-0 overflow-hidden">
-          <GitGraphPanel
-            directory={directory}
-            git={git}
-            isActive={isActive}
-            readOnly={true}
-            commitDetailsController={commitDetailsController}
-            onCopyHash={handleCopyCommitHash}
-            hoverRemoteName={hoverRemote?.name ?? null}
-            hoverRemoteUrl={hoverRemote?.url ?? null}
-            hoverDetailsCache={hoverDetailsCache}
-          />
-        </div>
-      </WorkStatusCollapsibleSection>
-    </div>
+    <WorkStatusCollapsibleSection
+      id="gitGraph"
+      sectionProps={{
+        id: 'work-status-git-graph',
+        'data-work-status-git-graph': 'true',
+        className: 'min-h-0',
+      }}
+      title={t('chat.workStatus.section.gitGraph')}
+      icon="git-branch"
+      defaultExpanded={false}
+    >
+      <div className="h-80 min-h-0 overflow-hidden">
+        <GitGraphPanel
+          directory={directory}
+          git={git}
+          isActive={isActive}
+          readOnly={true}
+          commitDetailsController={commitDetailsController}
+          onCopyHash={handleCopyCommitHash}
+          hoverRemoteName={hoverRemote?.name ?? null}
+          hoverRemoteUrl={hoverRemote?.url ?? null}
+          hoverDetailsCache={hoverDetailsCache}
+        />
+      </div>
+    </WorkStatusCollapsibleSection>
   );
 };

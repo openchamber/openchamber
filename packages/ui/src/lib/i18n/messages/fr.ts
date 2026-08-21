@@ -3098,7 +3098,7 @@ export const dict = {
   'chat.workStatus.section.project': 'Projet',
   'chat.workStatus.section.subagents': 'Sous-agents',
   'chat.workStatus.section.mcp': 'MCP',
-  'chat.workStatus.section.gitGraph': 'Graphe Git',
+  'chat.workStatus.section.gitGraph': 'Git',
   'chat.workStatus.section.pinned': 'Messages épinglés',
   'chat.workStatus.section.tasks': 'Tâches',
   'chat.workStatus.subagent.working': 'travaille',

@@ -296,6 +296,9 @@ const flush = async () => {
 const isElementStub = (node: ElementStub | TextStub | null | undefined): node is ElementStub =>
   Boolean(node && node.nodeType === 1);
 
+const isTextStub = (node: ElementStub | TextStub | null | undefined): node is TextStub =>
+  Boolean(node && node.nodeType === 3);
+
 const isReactContainerLike = (value: ElementStub | null): value is ReactContainerLike => value !== null;
 
 const unexpectedAsync = async (): Promise<never> => {
@@ -422,6 +425,14 @@ const collectPresenceCounts = () => {
   };
 };
 
+const collectText = (node: ElementStub | TextStub | null | undefined): string => {
+  if (isTextStub(node)) return node.nodeValue;
+  if (!isElementStub(node)) return '';
+  return node.childNodes.length > 0
+    ? node.childNodes.map((child) => collectText(child)).join('')
+    : node.textContent;
+};
+
 const renderSection = async (
   props: { directory: string | null; panelVisible: boolean },
   runtimeApis: RuntimeAPIs,
@@ -476,7 +487,7 @@ describe('WorkStatusGitGraphSection', () => {
     useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
   });
 
-  test('renders a collapsed git-graph section boundary without starting graph requests', async () => {
+  test('renders the git section boundary on the section element with the Git title without starting graph requests', async () => {
     const calls = { refs: 0, history: 0, remotes: 0 };
     const runtimeApis = createRuntimeApis({
       getGitHistoryRefs: async () => {
@@ -497,6 +508,10 @@ describe('WorkStatusGitGraphSection', () => {
 
     const boundary = findElement(rendered.container, (element) => element.attributes['data-work-status-git-graph'] === 'true');
     expect(boundary).not.toBeNull();
+    expect(boundary?.tagName).toBe('SECTION');
+    expect(boundary?.id).toBe('work-status-git-graph');
+    expect(collectText(boundary)).toContain('Git');
+    expect(collectText(boundary)).not.toContain('Git graph');
     expect(findElement(rendered.container, (element) => element.id === 'git-graph-panel')).toBeNull();
     expect(calls).toEqual({ refs: 0, history: 0, remotes: 0 });
 
