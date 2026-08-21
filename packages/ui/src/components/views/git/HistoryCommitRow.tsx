@@ -123,9 +123,9 @@ function formatCommitDate(date: string, timeFormatPreference: TimeFormatPreferen
 
   return formatDateTimeForPreference(value, timeFormatPreference, {
     year: 'numeric',
-    month: 'short',
+    month: 'long',
     day: 'numeric',
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
   });
 }

@@ -987,4 +987,40 @@ describe('GitCommitHoverPopover', () => {
 
     await rendered.restore();
   });
+
+  test('renders structured 5-row layout with author time, subject, diff stats, ref pills, and action bar', async () => {
+    const rendered = await renderPopover({
+      model: {
+        hash: 'fcf24621234567890abcdef1234567890abcdef1',
+        shortHash: 'fcf2462',
+        subject: 'fix: select canonical next work order step',
+        body: '',
+        authorName: 'mattv8',
+        authorEmail: 'mattv8@example.com',
+        timestamp: '2026-08-21T08:26:00.000Z',
+        relativeTime: '5 hours ago',
+        statistics: { files: 2, insertions: 134, deletions: 7 },
+      },
+      absoluteTimestamp: 'August 21, 2026 at 8:26 AM',
+      changedFilesLabel: '2 files changed',
+      references: [
+        { id: 'ref-1', name: 'fix/no-valid-next-step', kind: 'local', revision: 'fcf2462', category: 'branches' },
+        { id: 'ref-2', name: 'origin/fix/no-valid-next-step', kind: 'remote', revision: 'fcf2462', category: 'remote-branches' },
+      ],
+    });
+
+    await act(async () => {
+      triggerRegistry.get('fcf24621234567890abcdef1234567890abcdef1')?.focus();
+      await flush();
+    });
+
+    const popup = findByAttribute(rendered.container, 'data-git-commit-hover', 'fcf24621234567890abcdef1234567890abcdef1');
+    expect(popup).not.toBeNull();
+    expect(findByAttribute(rendered.container, 'data-git-commit-hover-subject', 'fcf24621234567890abcdef1234567890abcdef1')).not.toBeNull();
+    expect(findByAttribute(rendered.container, 'data-git-commit-hover-author', 'fcf24621234567890abcdef1234567890abcdef1')).not.toBeNull();
+    expect(findByAttribute(rendered.container, 'data-git-commit-hover-ref', 'ref-1')).not.toBeNull();
+    expect(findByAttribute(rendered.container, 'data-git-commit-hover-ref', 'ref-2')).not.toBeNull();
+
+    await rendered.restore();
+  });
 });

@@ -2,7 +2,6 @@
 
 import React from 'react';
 import { Popover } from '@base-ui/react/popover';
-import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
@@ -175,90 +174,128 @@ const GitCommitHoverPopoverComponent: React.FC<GitCommitHoverPopoverProps> = ({
           <Popover.Popup
             initialFocus={false}
             data-git-commit-hover={model.hash}
-            className="w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-border/60 bg-[var(--surface-elevated)] p-3 text-left shadow-lg transition-[opacity,transform] duration-150 ease-out data-[starting-style]:translate-x-1 data-[starting-style]:opacity-0 data-[ending-style]:translate-x-1 data-[ending-style]:opacity-0"
+            className="w-[min(26rem,calc(100vw-2rem))] rounded-xl border border-border/60 bg-[var(--surface-elevated)] p-3 text-left shadow-lg transition-[opacity,transform] duration-150 ease-out data-[starting-style]:translate-x-1 data-[starting-style]:opacity-0 data-[ending-style]:translate-x-1 data-[ending-style]:opacity-0"
           >
-            <div className="flex items-start gap-3">
+            {/* Line 1: Author, relative time, absolute time */}
+            <div className="flex items-center gap-1.5 typography-meta text-muted-foreground min-w-0 flex-wrap">
               {githubAuthor?.avatarUrl ? (
                 <img
                   src={githubAuthor.avatarUrl}
                   alt={authorName}
-                  className="size-10 shrink-0 rounded-full object-cover"
+                  className="size-5 shrink-0 rounded object-cover"
                 />
               ) : (
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-interactive-selection text-interactive-selection-foreground typography-ui-label font-semibold">
+                <div className="flex size-5 shrink-0 items-center justify-center rounded bg-interactive-selection text-interactive-selection-foreground typography-micro font-semibold">
                   {authorInitials}
                 </div>
               )}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p data-git-commit-hover-subject={model.hash} className="typography-ui-label font-semibold text-foreground">{model.subject}</p>
-                    {model.body ? (
-                      <p className="mt-1 whitespace-pre-wrap break-words typography-meta text-muted-foreground">{model.body}</p>
-                    ) : null}
-                  </div>
-                  <code className="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono typography-micro text-muted-foreground">
-                    {model.shortHash}
-                  </code>
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 typography-meta text-muted-foreground">
-                  <span data-git-commit-hover-author={model.hash} className="truncate text-foreground" title={authorName}>{authorName}</span>
-                  <span className="shrink-0">·</span>
-                  <span className="truncate" title={authorSecondary}>{authorSecondary}</span>
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 typography-meta text-muted-foreground">
-                  <span>{model.relativeTime}</span>
-                  <span className="shrink-0">·</span>
-                  <span title={absoluteTimestamp}>{absoluteTimestamp}</span>
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 typography-meta text-muted-foreground">
-                  <span>{changedFilesLabel}</span>
-                  <span className="shrink-0">·</span>
-                  <span className="text-[var(--status-success)]">+{model.statistics.insertions}</span>
-                  <span className="text-[var(--status-error)]">-{model.statistics.deletions}</span>
-                </div>
-                {references && references.length > 0 ? (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {references.filter((ref) => ref.kind === 'tag').map((ref) => (
-                      <span
-                        key={ref.id}
-                        data-git-commit-hover-tag={ref.id}
-                        className={cn(
-                          'inline-flex items-center rounded-full border px-1.5 py-0 typography-micro font-medium',
-                          ref.color
-                            ? 'border-transparent text-[var(--primary-foreground)]'
-                            : 'border-border/60 bg-muted/40 text-foreground',
-                        )}
-                        style={ref.color ? { backgroundColor: ref.color } : undefined}
-                      >
-                        {ref.name}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {githubUrl ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      onClick={() => { void openExternalUrl(githubUrl); }}
+              <span
+                data-git-commit-hover-author={model.hash}
+                className="truncate font-semibold text-sky-400"
+                title={authorSecondary ? `${authorName} (${authorSecondary})` : authorName}
+              >
+                {authorName},
+              </span>
+              <Icon name="history" className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate" title={absoluteTimestamp}>
+                {model.relativeTime} ({absoluteTimestamp})
+              </span>
+            </div>
+
+            {/* Line 2: Subject and Body */}
+            <div className="mt-1.5 min-w-0">
+              <p data-git-commit-hover-subject={model.hash} className="typography-ui-label font-medium text-foreground break-words">
+                {model.subject}
+              </p>
+              {model.body ? (
+                <p className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words typography-meta text-muted-foreground">
+                  {model.body}
+                </p>
+              ) : null}
+            </div>
+
+            {/* Line 3: Changed files and diff stats */}
+            <div className="mt-1.5 flex flex-wrap items-center typography-meta text-muted-foreground">
+              <span>
+                {changedFilesLabel}
+                {model.statistics.insertions > 0 || model.statistics.deletions > 0 ? ', ' : ''}
+              </span>
+              {model.statistics.insertions > 0 ? (
+                <span className="text-[var(--status-success)]">
+                  {model.statistics.insertions} {model.statistics.insertions === 1 ? 'insertion(+)' : 'insertions(+)'}
+                </span>
+              ) : null}
+              {model.statistics.insertions > 0 && model.statistics.deletions > 0 ? (
+                <span>,&nbsp;</span>
+              ) : null}
+              {model.statistics.deletions > 0 ? (
+                <span className="text-[var(--status-error)]">
+                  {model.statistics.deletions} {model.statistics.deletions === 1 ? 'deletion(-)' : 'deletions(-)'}
+                </span>
+              ) : null}
+            </div>
+
+            {/* Line 4: Reference badges */}
+            {references && references.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {references.map((ref) => {
+                  const isRemote = ref.kind === 'remote';
+                  const isTag = ref.kind === 'tag';
+                  return (
+                    <span
+                      key={ref.id}
+                      data-git-commit-hover-tag={isTag ? ref.id : undefined}
+                      data-git-commit-hover-ref={ref.id}
+                      className={cn(
+                        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 typography-micro font-medium',
+                        ref.color
+                          ? 'border-transparent text-[var(--primary-foreground)]'
+                          : 'border-sky-800/60 bg-sky-950/60 text-sky-300',
+                      )}
+                      style={ref.color ? { backgroundColor: ref.color } : undefined}
                     >
-                      <Icon name="external-link" className="size-3" />
-                      {openGitHubLabel}
-                    </Button>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => onCopyHash(model.hash)}
-                  >
-                    <Icon name="file-copy" className="size-3" />
-                    {copyShaLabel}
-                  </Button>
-                </div>
+                      {isRemote ? (
+                        <Icon name="cloud" className="size-3 shrink-0" />
+                      ) : isTag ? (
+                        <Icon name="git-commit" className="size-3 shrink-0" />
+                      ) : (
+                        <Icon name="git-branch" className="size-3 shrink-0" />
+                      )}
+                      <span className="truncate max-w-[200px]">{ref.name}</span>
+                    </span>
+                  );
+                })}
               </div>
+            ) : null}
+
+            {/* Line 5: Actions / SHA / GitHub */}
+            <div className="mt-2.5 flex items-center gap-2 typography-meta text-muted-foreground">
+              <div className="flex items-center gap-1 text-sky-400">
+                <Icon name="git-commit" className="size-3.5 shrink-0" />
+                <span className="font-mono text-sky-400">{model.shortHash}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onCopyHash(model.hash)}
+                title={copyShaLabel}
+                aria-label={copyShaLabel}
+                className="inline-flex items-center justify-center p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <Icon name="file-copy" className="size-3.5" />
+              </button>
+              {githubUrl ? (
+                <>
+                  <span className="select-none text-muted-foreground/40">|</span>
+                  <button
+                    type="button"
+                    onClick={() => { void openExternalUrl(githubUrl); }}
+                    className="inline-flex items-center gap-1 text-sky-400 transition-colors hover:text-sky-300 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    <Icon name="github" className="size-3.5 shrink-0" />
+                    <span>{openGitHubLabel}</span>
+                  </button>
+                </>
+              ) : null}
             </div>
           </Popover.Popup>
         </Popover.Positioner>
