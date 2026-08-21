@@ -23,6 +23,8 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import {
   SettingsSection,
   SettingsGroupTitle,
+  SettingsControlGroup,
+  SettingsChipGroup,
   SETTINGS_PAGE_TITLE_CLASS,
   SETTINGS_FIELD_LABEL_CLASS,
   SETTINGS_SELECT_SIZE,
@@ -67,6 +69,7 @@ import {
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { reportSettingsSaveState } from '@/lib/persistence';
 import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 const randomPort = (): number => {
@@ -325,6 +328,15 @@ const resolvePairingServerUrl = async (): Promise<string> => {
   return `http://${address}:${port}`;
 };
 
+// Relay endpoint configuration as reported by /api/openchamber/relay/status
+// and returned by /api/openchamber/relay/url (server contract:
+// packages/web/server/lib/relay/service.js getStatus).
+type RelayEndpointConfig = {
+  relayUrl: string;
+  defaultRelayUrl: string;
+  relayUrlLocked: boolean;
+};
+
 const navigateToUrl = (rawUrl: string): void => {
   const target = rawUrl.trim();
   if (!target) {
@@ -460,6 +472,16 @@ export const RemoteInstancesPage: React.FC = () => {
   const [addDeviceTransport, setAddDeviceTransport] = React.useState<'local' | 'lan' | 'relay'>('relay');
   const [addDeviceFallback, setAddDeviceFallback] = React.useState(true);
   const [transportOptions, setTransportOptions] = React.useState<{ localUrl: string | null; lanUrl: string | null; relayAvailable: boolean } | null>(null);
+  // Relay endpoint (default vs self-hosted) shown in the "Connect to this
+  // service" section. `null` means not loaded yet; a failed load is tracked
+  // separately so it can never masquerade as an authoritative empty state.
+  const [relayEndpoint, setRelayEndpoint] = React.useState<RelayEndpointConfig | null>(null);
+  const [relayEndpointLoadFailed, setRelayEndpointLoadFailed] = React.useState(false);
+  // Draft while editing a custom URL; `null` when the input should mirror the
+  // persisted state (not mid-edit).
+  const [relayCustomDraft, setRelayCustomDraft] = React.useState<string | null>(null);
+  const [relayUrlSaving, setRelayUrlSaving] = React.useState(false);
+  const [relayUrlError, setRelayUrlError] = React.useState<string | null>(null);
   const revokedClientCount = React.useMemo(() => remoteClients.filter((client) => Boolean(client.revokedAt)).length, [remoteClients]);
   const [sshAddDialogOpen, setSshAddDialogOpen] = React.useState(false);
   const [sshCommandDraft, setSshCommandDraft] = React.useState('ssh user@example.com');
@@ -870,6 +892,96 @@ export const RemoteInstancesPage: React.FC = () => {
     }
     return { localUrl, lanUrl, relayAvailable: true };
   }, [clientAuth]);
+
+  // Relay endpoint configuration. The server owns the default URL and the
+  // env-pin state; the UI only mirrors what /relay/status reports and writes
+  // changes through /relay/url (which also restarts a running relay host).
+  const loadRelayEndpoint = React.useCallback(async (): Promise<void> => {
+    let response: Response;
+    try {
+      response = await runtimeFetch('/api/openchamber/relay/status', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+    } catch {
+      setRelayEndpoint(null);
+      setRelayEndpointLoadFailed(true);
+      return;
+    }
+    if (!response.ok) {
+      setRelayEndpoint(null);
+      setRelayEndpointLoadFailed(true);
+      return;
+    }
+    // SAFETY: own-server contract (relay/service.js getStatus) over
+    // same-origin runtimeFetch, not third-party input; a malformed body fails
+    // the presence checks below and lands in the explicit load-failure state.
+    const status = (await response.json().catch(() => null)) as null | RelayEndpointConfig;
+    if (!status || !status.relayUrl || !status.defaultRelayUrl) {
+      setRelayEndpoint(null);
+      setRelayEndpointLoadFailed(true);
+      return;
+    }
+    setRelayEndpoint({
+      relayUrl: status.relayUrl,
+      defaultRelayUrl: status.defaultRelayUrl,
+      relayUrlLocked: status.relayUrlLocked === true,
+    });
+    setRelayEndpointLoadFailed(false);
+  }, []);
+
+  React.useEffect(() => {
+    if (!clientAuth) return;
+    void loadRelayEndpoint();
+  }, [clientAuth, loadRelayEndpoint]);
+
+  const saveRelayUrl = React.useCallback(async (nextUrl: string): Promise<void> => {
+    const trimmed = nextUrl.trim();
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:')) {
+      setRelayUrlError(t('settings.remoteInstances.clientAuth.relayEndpoint.error.invalid'));
+      return;
+    }
+    setRelayUrlSaving(true);
+    setRelayUrlError(null);
+    reportSettingsSaveState('saving');
+    try {
+      const response = await runtimeFetch('/api/openchamber/relay/url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ relayUrl: trimmed }),
+      });
+      // SAFETY: own-server contract (relay/service.js getStatus) over
+      // same-origin runtimeFetch; a malformed body is treated as a save
+      // failure and the endpoint state is re-synced from the server.
+      const body = (await response.json().catch(() => null)) as null | RelayEndpointConfig;
+      if (!response.ok || !body || !body.relayUrl || !body.defaultRelayUrl) {
+        reportSettingsSaveState('error');
+        if (response.status === 409) {
+          setRelayUrlError(t('settings.remoteInstances.clientAuth.relayEndpoint.error.locked'));
+        } else {
+          setRelayUrlError(t('settings.remoteInstances.clientAuth.relayEndpoint.error.saveFailed'));
+        }
+        // Re-sync: the server may be pinned or in a state the UI doesn't know.
+        void loadRelayEndpoint();
+        return;
+      }
+      setRelayEndpoint({ relayUrl: body.relayUrl, defaultRelayUrl: body.defaultRelayUrl, relayUrlLocked: body.relayUrlLocked === true });
+      setRelayCustomDraft(null);
+      setRelayEndpointLoadFailed(false);
+      reportSettingsSaveState('saved');
+    } catch {
+      reportSettingsSaveState('error');
+      setRelayUrlError(t('settings.remoteInstances.clientAuth.relayEndpoint.error.saveFailed'));
+    } finally {
+      setRelayUrlSaving(false);
+    }
+  }, [loadRelayEndpoint, t]);
 
   const openAddDevice = React.useCallback(async () => {
     setRemoteClientError(null);
@@ -1386,7 +1498,7 @@ export const RemoteInstancesPage: React.FC = () => {
 
   if (!draft) {
     return (
-      <SettingsPageLayout title={t('settings.page.remoteInstances.title')}>
+      <SettingsPageLayout title={t('settings.page.remoteInstances.title')} showSaveStatus>
         {clientAuth ? (
           <SettingsSection
             title={t('settings.remoteInstances.clientAuth.title')}
@@ -1741,6 +1853,68 @@ export const RemoteInstancesPage: React.FC = () => {
                   ) : null}
                 </div>
                 {remoteClientError ? <p className="typography-meta text-[var(--status-error)]">{remoteClientError}</p> : null}
+                {relayEndpointLoadFailed || relayEndpoint ? (
+                <SettingsControlGroup
+                  title={t('settings.remoteInstances.clientAuth.relayEndpoint.title')}
+                  info={t('settings.remoteInstances.clientAuth.relayEndpoint.info')}
+                  settingsItem="remote-instances.relay-url"
+                >
+                  {relayEndpointLoadFailed ? (
+                    <p className="typography-meta text-[var(--status-error)]">
+                      {t('settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed')}
+                    </p>
+                  ) : relayEndpoint?.relayUrlLocked ? (
+                    <p className="typography-meta text-muted-foreground">
+                      {t('settings.remoteInstances.clientAuth.relayEndpoint.locked')}
+                      <span className="ml-1 font-mono text-xs break-all">{relayEndpoint.relayUrl}</span>
+                    </p>
+                  ) : relayEndpoint ? (
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <SettingsChipGroup
+                          aria-label={t('settings.remoteInstances.clientAuth.relayEndpoint.title')}
+                          value={relayEndpoint.relayUrl === relayEndpoint.defaultRelayUrl ? 'default' : 'custom'}
+                          options={[
+                            { value: 'default', label: t('settings.remoteInstances.clientAuth.relayEndpoint.option.default') },
+                            { value: 'custom', label: t('settings.remoteInstances.clientAuth.relayEndpoint.option.custom') },
+                          ]}
+                          onChange={(mode) => {
+                            if (mode === 'default') {
+                              setRelayUrlError(null);
+                              void saveRelayUrl(relayEndpoint.defaultRelayUrl);
+                            } else {
+                              setRelayCustomDraft(relayEndpoint.relayUrl === relayEndpoint.defaultRelayUrl ? '' : relayEndpoint.relayUrl);
+                            }
+                          }}
+                        />
+                        {relayCustomDraft != null ? (
+                          <Input
+                            className="h-8 w-64 max-w-full font-mono text-xs"
+                            value={relayCustomDraft}
+                            placeholder={t('settings.remoteInstances.clientAuth.relayEndpoint.field.placeholder')}
+                            spellCheck={false}
+                            autoComplete="off"
+                            disabled={relayUrlSaving}
+                            onChange={(event) => setRelayCustomDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') void saveRelayUrl(relayCustomDraft ?? '');
+                            }}
+                          />
+                        ) : null}
+                        {relayCustomDraft != null ? (
+                          <Button type="button" size="xs" className="!font-normal" disabled={relayUrlSaving} onClick={() => void saveRelayUrl(relayCustomDraft ?? '')}>
+                            {t('settings.remoteInstances.clientAuth.relayEndpoint.actions.save')}
+                          </Button>
+                        ) : null}
+                      </div>
+                      {relayCustomDraft == null ? (
+                        <p className="typography-micro text-muted-foreground break-all font-mono">{relayEndpoint.relayUrl}</p>
+                      ) : null}
+                      {relayUrlError ? <p className="typography-meta text-[var(--status-error)]">{relayUrlError}</p> : null}
+                    </div>
+                  ) : null}
+                </SettingsControlGroup>
+              ) : null}
                 <div className="flex justify-end gap-2">
                   <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setAddDeviceOpen(false)} disabled={addDeviceCreating}>{t('settings.common.actions.cancel')}</Button>
                   <Button type="submit" size="xs" className="!font-normal" disabled={addDeviceCreating || !transportOptions}>{t('settings.remoteInstances.clientAuth.addDevice.create')}</Button>

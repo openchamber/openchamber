@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Settings/Remote instances: the relay server endpoint can now be configured in the UI (default vs custom, e.g. a self-hosted relay) instead of editing settings files by hand; a running relay reconnects to the new endpoint immediately, and an endpoint pinned by the `OPENCHAMBER_RELAY_URL` environment variable stays read-only.
 
 ## [1.19.0] - 2026-08-19
 

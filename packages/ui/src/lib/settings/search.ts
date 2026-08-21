@@ -583,6 +583,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'remote-instances.relay-url',
+    page: 'remote-instances',
+    titleKey: 'settings.remoteInstances.clientAuth.relayEndpoint.title',
+    descriptionKey: 'settings.remoteInstances.clientAuth.relayEndpoint.info',
+    keywords: ['relay', 'relay server', 'custom relay', 'self-hosted relay', 'relay url', 'relay endpoint', 'private relay'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'remote-instances.direct-hosts',
     page: 'remote-instances',
     titleKey: 'settings.remoteInstances.direct.title',
