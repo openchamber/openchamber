@@ -13,6 +13,12 @@ type PierreDiffViewerProps = {
   original?: string;
   modified?: string;
 };
+type RenderViewOptions = {
+  createController?: typeof createGitCommitDetailsController;
+};
+type PreviewRuntimeApis = {
+  git: Pick<RuntimeAPIs['git'], 'getCommitFileDiff'>;
+};
 
 type NodeStub = ElementStub | TextStub;
 type TextStub = {
@@ -60,13 +66,22 @@ type DocumentStub = {
 
 const pierreCalls: PierreDiffViewerProps[] = [];
 const closeHandlers: Array<() => void> = [];
-let runtimeApis: RuntimeAPIs;
+const buttonHandlers: Array<{ isClose: boolean; click: () => void }> = [];
+let runtimeApis: PreviewRuntimeApis;
 
 mock.module('@/components/ui/button', () => ({
-  Button: React.forwardRef<HTMLButtonElement, MockButtonProps>(({ children, onClick, ...props }, ref) => {
-    const closeMarker = (props as MockButtonProps & { 'data-git-commit-diff-preview-close'?: string })['data-git-commit-diff-preview-close'];
+  Button: React.forwardRef<HTMLButtonElement, MockButtonProps & { 'data-git-commit-diff-preview-close'?: string }>(({ children, onClick, ...props }, ref) => {
+    const closeMarker = props['data-git-commit-diff-preview-close'];
     if (closeMarker === 'true' && onClick) {
+      // SAFETY: These preview button handlers never inspect the event payload in this test.
       closeHandlers.push(() => onClick({} as React.MouseEvent<HTMLButtonElement>));
+    }
+    if (onClick) {
+      buttonHandlers.push({
+        isClose: closeMarker === 'true',
+        // SAFETY: These preview button handlers never inspect the event payload in this test.
+        click: () => onClick({} as React.MouseEvent<HTMLButtonElement>),
+      });
     }
     return React.createElement('button', { ...props, onClick, ref }, children);
   }),
@@ -195,6 +210,7 @@ const installMinimalDom = () => {
   setGlobal('cancelAnimationFrame', (id: ReturnType<typeof setTimeout>) => clearTimeout(id));
 
   return {
+    // SAFETY: React only reads DOM-like container methods that this stub implements for the test harness.
     reactContainer: container as Element & ElementStub,
     container,
     restore: () => {
@@ -280,22 +296,25 @@ const createDeferred = <T,>() => {
   return { promise, resolve, reject };
 };
 
-const renderView = async (target: GitCommitDiffTarget, onClose: () => void, props: Record<string, unknown> = {}) => {
+const renderView = async (target: GitCommitDiffTarget, onClose: () => void, props: RenderViewOptions = {}) => {
   const dom = installMinimalDom();
   const root: Root = createRoot(dom.reactContainer);
 
-  const render = async (nextTarget: GitCommitDiffTarget, nextProps: Record<string, unknown> = props) => {
+  const render = async (nextTarget: GitCommitDiffTarget, nextProps: RenderViewOptions = props) => {
     await act(async () => {
       root.render(
         React.createElement(
-          I18nProvider,
-          null,
-          React.createElement(
-            RuntimeAPIContext.Provider,
-            { value: runtimeApis },
-            React.createElement(ContextCommitDiffView, {
-              directory: '/repo',
-              target: nextTarget,
+            I18nProvider,
+            null,
+            React.createElement(
+              RuntimeAPIContext.Provider,
+              {
+                // SAFETY: This client test renders only the git preview path and never reads other runtime APIs.
+                value: runtimeApis as RuntimeAPIs,
+              },
+              React.createElement(ContextCommitDiffView, {
+                directory: '/repo',
+                target: nextTarget,
               onClose,
               ...nextProps,
             }),
@@ -324,6 +343,7 @@ const renderView = async (target: GitCommitDiffTarget, onClose: () => void, prop
 beforeEach(() => {
   pierreCalls.length = 0;
   closeHandlers.length = 0;
+  buttonHandlers.length = 0;
 });
 
 describe('ContextCommitDiffView', () => {
@@ -336,7 +356,7 @@ describe('ContextCommitDiffView', () => {
           return { status: 'ready', original: 'before\n', modified: 'after\n' } satisfies GitCommitFilePreviewResponse;
         },
       },
-    } as unknown as RuntimeAPIs;
+    };
     let closeCount = 0;
 
     const rendered = await renderView(buildTarget(), () => {
@@ -361,32 +381,83 @@ describe('ContextCommitDiffView', () => {
   });
 
   test('reuses preview component states for binary, gitlink, too-large, and error cases', async () => {
+    const requests: GitCommitFilePreviewRequest[] = [];
     runtimeApis = {
       git: {
         getCommitFileDiff: async (_directory: string, request: GitCommitFilePreviewRequest) => {
+          requests.push(request);
           if (request.modifiedPath === 'src/too-large.ts') {
             return { status: 'too-large', totalBytes: 9 * 1024 * 1024, maxBytes: 8 * 1024 * 1024 } satisfies GitCommitFilePreviewResponse;
           }
           throw new Error('offline');
         },
       },
-    } as unknown as RuntimeAPIs;
+    };
 
     const binary = await renderView(buildTarget({ file: buildFile({ path: 'assets/logo.png', isBinary: true, status: 'M' }) }), () => {});
-    expect(collectText(binary.container)).toContain('filesView.editor.cannotPreviewBinary');
+    expect(requests).toHaveLength(0);
+    expect(findByAttribute(binary.container, 'data-diff-viewer')).toBeNull();
+    expect(collectText(binary.container)).toContain('2'.repeat(40));
+    expect(collectText(binary.container)).toContain('1'.repeat(40));
     await binary.restore();
 
-    const gitlink = await renderView(buildTarget({ file: buildFile({ path: 'vendor/tooling', kind: 'gitlink', isBinary: true }) }), () => {});
-    expect(collectText(gitlink.container)).toContain('gitView.preview.submodulePointer');
+    const gitlink = await renderView(buildTarget({ file: buildFile({ path: 'vendor/tooling', kind: 'gitlink', isBinary: true, objectId: 'b'.repeat(40), originalObjectId: 'a'.repeat(40) }) }), () => {});
+    expect(requests).toHaveLength(0);
+    expect(findByAttribute(gitlink.container, 'data-diff-viewer')).toBeNull();
+    expect(collectText(gitlink.container)).toContain('a'.repeat(40));
+    expect(collectText(gitlink.container)).toContain('b'.repeat(40));
     await gitlink.restore();
 
     const tooLarge = await renderView(buildTarget({ file: buildFile({ path: 'src/too-large.ts', status: 'M', originalPath: undefined }) }), () => {});
-    expect(collectText(tooLarge.container)).toContain('gitView.integrate.previewUnavailable');
+    expect(findByAttribute(tooLarge.container, 'data-diff-viewer')).toBeNull();
+    expect(requests).toEqual([{
+      commitHash: 'a'.repeat(40),
+      parentHash: 'b'.repeat(40),
+      originalPath: 'src/too-large.ts',
+      modifiedPath: 'src/too-large.ts',
+    }]);
     await tooLarge.restore();
 
     const error = await renderView(buildTarget({ file: buildFile({ path: 'src/error.ts', status: 'M', originalPath: undefined }) }), () => {});
-    expect(collectText(error.container)).toContain('gitView.history.diffError');
-    expect(collectText(error.container)).toContain('diffView.actions.retry');
+    expect(findByAttribute(error.container, 'data-diff-viewer')).toBeNull();
+    expect(requests).toEqual([
+      {
+        commitHash: 'a'.repeat(40),
+        parentHash: 'b'.repeat(40),
+        originalPath: 'src/too-large.ts',
+        modifiedPath: 'src/too-large.ts',
+      },
+      {
+        commitHash: 'a'.repeat(40),
+        parentHash: 'b'.repeat(40),
+        originalPath: 'src/error.ts',
+        modifiedPath: 'src/error.ts',
+      },
+    ]);
+    await act(async () => {
+      buttonHandlers.find((handler) => !handler.isClose)?.click();
+      await flush();
+    });
+    expect(requests).toEqual([
+      {
+        commitHash: 'a'.repeat(40),
+        parentHash: 'b'.repeat(40),
+        originalPath: 'src/too-large.ts',
+        modifiedPath: 'src/too-large.ts',
+      },
+      {
+        commitHash: 'a'.repeat(40),
+        parentHash: 'b'.repeat(40),
+        originalPath: 'src/error.ts',
+        modifiedPath: 'src/error.ts',
+      },
+      {
+        commitHash: 'a'.repeat(40),
+        parentHash: 'b'.repeat(40),
+        originalPath: 'src/error.ts',
+        modifiedPath: 'src/error.ts',
+      },
+    ]);
     await error.restore();
   });
 
@@ -396,7 +467,7 @@ describe('ContextCommitDiffView', () => {
       git: {
         getCommitFileDiff: async () => deferred.promise,
       },
-    } as unknown as RuntimeAPIs;
+    };
 
     const rendered = await renderView(buildTarget({ file: buildFile({ path: 'src/pending.ts', status: 'M', originalPath: undefined }) }), () => {});
     await rendered.restore();
@@ -418,7 +489,7 @@ describe('ContextCommitDiffView', () => {
           return { status: 'ready', original: request.originalPath ?? '', modified: request.modifiedPath ?? '' } satisfies GitCommitFilePreviewResponse;
         },
       },
-    } as unknown as RuntimeAPIs;
+    };
 
     const target = buildTarget();
     const equivalentTarget = buildTarget();

@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { useUIStore, type ContextPanelMode, type GitCommitDiffTarget, type PendingDiffScope } from '@/stores/useUIStore';
+import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
@@ -36,6 +36,7 @@ import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/run
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
 import { Icon } from "@/components/icon/Icon";
+import { getDiffTabRenderKind } from './contextPanelDiffTabs';
 import {
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
@@ -251,14 +252,6 @@ const browserFaviconFor = (url: string, faviconByOrigin: Record<string, string>)
   } catch {
     return '';
   }
-};
-
-type DiffTabRenderCandidate = {
-  commitDiffTarget: GitCommitDiffTarget | null;
-};
-
-export const getDiffTabRenderKind = (tab: DiffTabRenderCandidate): 'commit' | 'working' => {
-  return tab.commitDiffTarget ? 'commit' : 'working';
 };
 
 const EDITOR_TREE_MIN_WIDTH = 200;
