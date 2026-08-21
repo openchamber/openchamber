@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 - **Dictation:** speech is now transcribed after you stop talking, instead of being re-guessed word by word while you speak. The offline models OpenChamber runs are built to read a whole utterance at once, so the running transcript was consistently worse than the final one. While recording, the composer shows a live waveform of your voice and a timer, then Transcribing while the text is produced. Long recordings are split at pauses in your speech rather than on a timer, so a three-minute dictation still returns a few seconds after you stop, and words are no longer cut in half at the split.
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Settings/Remote instances: the relay server endpoint can now be configured in the UI (default vs custom, e.g. a self-hosted relay) instead of editing settings files by hand; a running relay reconnects to the new endpoint immediately, and an endpoint pinned by the `OPENCHAMBER_RELAY_URL` environment variable stays read-only.
 
 ## [1.19.0] - 2026-08-19
 

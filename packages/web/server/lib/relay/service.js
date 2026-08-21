@@ -237,6 +237,9 @@ export const createRelayService = ({
       connectedClients: live.connectedClients,
       relayUrl: config.relayUrl,
       relayUrlLocked: config.relayUrlLocked,
+      // The built-in endpoint, so settings UI can offer "default vs custom"
+      // without hardcoding it client-side (it must not drift from the server).
+      defaultRelayUrl: DEFAULT_RELAY_URL,
       ...(live.lastError ? { lastError: live.lastError } : {}),
     };
   };
@@ -316,6 +319,35 @@ export const createRelayService = ({
         res.json(await getStatus());
       } catch (error) {
         res.status(500).json({ error: error?.message ?? 'Failed to disable relay' });
+      }
+    });
+
+    // Persist a custom relay endpoint (e.g. a self-hosted relay). Unlike
+    // /enable this is a pure configuration write: it never turns the relay on
+    // by itself. When THIS process is already running the relay host onto a
+    // different endpoint, the host is restarted onto the new URL (same
+    // lifecycle as /enable); a standby process only persists the setting —
+    // the claim watcher of the running instance is untouched.
+    app.post('/api/openchamber/relay/url', express.json({ limit: '16kb' }), async (req, res) => {
+      try {
+        const current = await readConfig();
+        if (current.relayUrlLocked) {
+          return res.status(409).json({ error: 'Relay endpoint is pinned by OPENCHAMBER_RELAY_URL' });
+        }
+        // Decode at the boundary: anything that is not a string (or is empty
+        // after trimming) stringifies into an invalid URL and is rejected.
+        const raw = String(req.body?.relayUrl ?? '').trim();
+        if (!raw || !isValidRelayUrl(raw)) {
+          return res.status(400).json({ error: 'relayUrl must be a valid ws:// or wss:// URL' });
+        }
+        await writeConfig({ enabled: current.enabled, relayUrl: raw });
+        if (hostClient && current.relayUrl !== raw) {
+          stop();
+          await start(raw, { claim: 'force' });
+        }
+        res.json(await getStatus());
+      } catch (error) {
+        res.status(500).json({ error: error?.message ?? 'Failed to save relay URL' });
       }
     });
 
