@@ -941,6 +941,8 @@ export const dict = {
   'contextPanel.mode.context': 'Contexte',
   'contextPanel.mode.preview': 'Aperçu',
   'contextPanel.mode.browser': 'Navigateur',
+  'contextPanel.mode.subagents': 'Sous-agents',
+  'contextRail.surface.subagents.description': 'Sous-agents actifs et progression de l\'équipe',
   'contextRail.aria.rail': 'Surfaces du panneau',
   'contextPanel.editorEmpty.title': 'Aucun fichier ouvert',
   'contextPanel.editorEmpty.description': 'Choisissez un fichier dans l’arborescence pour commencer.',

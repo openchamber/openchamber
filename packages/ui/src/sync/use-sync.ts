@@ -165,6 +165,7 @@ export function useSync() {
         todo: { ...current.todo },
         permission: { ...current.permission },
         question: { ...current.question },
+        session_error: { ...current.session_error },
       }
       dropSessionCaches(draft, sessionIDs)
       dropCachedSessionMessageRecordsSnapshots(dirStore, sessionIDs)

@@ -1048,6 +1048,8 @@ export const dict = {
   'contextPanel.mode.context': 'Kontext',
   'contextPanel.mode.preview': 'Vorschau',
   'contextPanel.mode.browser': 'Browser',
+  'contextPanel.mode.subagents': 'Subagenten',
+  'contextRail.surface.subagents.description': 'Laufende Subagenten und Team-Fortschritt',
   'contextPanel.browser.open': 'Browser-Panel öffnen',
   'contextPanel.browser.addressAria': 'Browser-Adresse',
   'contextPanel.browser.history.label': 'Zuletzt besuchte Adressen',

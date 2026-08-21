@@ -1437,6 +1437,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.mode.pr': 'Pull Request',
   'contextPanel.mode.preview': 'Podgląd',
   'contextPanel.mode.browser': 'Przeglądarka',
+  'contextPanel.mode.subagents': 'Subagenci',
+  'contextRail.surface.subagents.description': 'Aktywne subagenci i postęp zespołu',
   'contextRail.aria.rail': 'Powierzchnie panelu',
   'contextPanel.editorEmpty.title': 'Brak otwartego pliku',
   'contextPanel.editorEmpty.description': 'Wybierz plik z drzewa, aby rozpocząć edycję.',

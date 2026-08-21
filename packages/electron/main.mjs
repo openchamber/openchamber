@@ -90,6 +90,11 @@ if (isDev) {
 }
 app.setAppUserModelId(APP_USER_MODEL_ID);
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
+// GitHub/Fastly refuses HTTP/2 streams from Electron's net stack during the
+// auto-update check (net::ERR_HTTP2_SERVER_REFUSED_STREAM), while HTTP/1.1
+// works. Force HTTP/1.1 for Chromium's network stack so checkForUpdates can
+// reach api.github.com. See napoleonmm83/Transkribor#150 for the same fix.
+app.commandLine.appendSwitch('disable-http2');
 // Lift Chromium's per-host cap only for bundled UI. Applying this to Vite HMR
 // lets the renderer request most of the module graph at once, overwhelming the
 // dev server's transform pipeline and leaving the HTML splash visible for up

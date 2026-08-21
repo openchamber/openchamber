@@ -1122,6 +1122,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.mode.context': '上下文',
   'contextPanel.mode.preview': '预览',
   'contextPanel.mode.browser': '浏览器',
+  'contextPanel.mode.subagents': '子代理',
+  'contextRail.surface.subagents.description': '运行中的子代理和团队进度',
   'contextRail.aria.rail': '面板界面',
   'contextPanel.editorEmpty.title': '未打开文件',
   'contextPanel.editorEmpty.description': '从文件树中选择一个文件开始编辑。',

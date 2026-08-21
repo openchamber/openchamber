@@ -1122,6 +1122,8 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.mode.context": "Contexto",
   "contextPanel.mode.preview": "Prévia",
   "contextPanel.mode.browser": "Navegador",
+  "contextPanel.mode.subagents": "Subagentes",
+  "contextRail.surface.subagents.description": "Subagentes ativos e progresso da equipe",
   "contextRail.aria.rail": "Superfícies do painel",
   "contextPanel.editorEmpty.title": "Nenhum arquivo aberto",
   "contextPanel.editorEmpty.description": "Escolha um arquivo na árvore para começar a editar.",

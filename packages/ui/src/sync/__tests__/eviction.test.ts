@@ -154,6 +154,7 @@ describe("session cache eviction", () => {
       question: {
         ses_question: [buildQuestion({ sessionID: "ses_question" })],
       },
+      session_error: {},
     })
 
     expect(protectedIds).toEqual(new Set(["ses_busy", "ses_streaming", "ses_permission", "ses_question"]))

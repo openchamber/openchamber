@@ -1121,6 +1121,8 @@ export const dict = {
   'contextPanel.mode.context': 'Context',
   'contextPanel.mode.preview': 'Preview',
   'contextPanel.mode.browser': 'Browser',
+  'contextPanel.mode.subagents': 'Subagents',
+  'contextRail.surface.subagents.description': 'Running subagents and team progress',
   'contextRail.aria.rail': 'Panel surfaces',
   'contextPanel.editorEmpty.title': 'No file open',
   'contextPanel.editorEmpty.description': 'Pick a file from the tree to start editing.',

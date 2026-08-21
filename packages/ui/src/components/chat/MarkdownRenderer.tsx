@@ -4,10 +4,10 @@ import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { cn } from '@/lib/utils';
 import { loadMarkdownRendererModule } from './markdownRendererLoader';
 
-// Thin lazy wrapper around the MarkdownRenderer implementation.
-// The full implementation (marked + Shiki highlighting + KaTeX + morphdom
-// DOM morphing, plus beautiful-mermaid) is loaded on demand, keeping the
-// initial bundle lean.
+// Thin lazy wrapper around the heavy MarkdownRenderer implementation.
+// The full implementation (morphdom-based streaming renderer with Shiki
+// syntax highlighting and beautiful-mermaid diagrams) is loaded on demand,
+// keeping the initial bundle lean.
 
 const MarkdownRendererLazy = lazyWithChunkRecovery(() =>
   loadMarkdownRendererModule().then((m) => ({ default: m.MarkdownRenderer }))

@@ -35,6 +35,22 @@ test('treats missing update feed (404) as no update available', async () => {
   assert.equal(result.nextVersion, '1.15.0');
 });
 
+test('treats transient GitHub rate limit (429) as no update available', async () => {
+  const result = await checkForDesktopUpdate({
+    autoUpdater: {
+      checkForUpdates: async () => {
+        throw new Error('HttpError: 429 Too Many Requests "https://github.com/openchamber/openchamber/releases/download/v1.18.2/latest.yml"');
+      },
+    },
+    currentVersion: '1.18.2',
+    pendingUpdate: { version: '1.19.0' },
+    compareVersions,
+  });
+  assert.equal(result.available, false);
+  assert.equal(result.pendingUpdate, null);
+  assert.equal(result.nextVersion, '1.18.2');
+});
+
 test('authoritative no-update result clears pending update', async () => {
   const result = await checkForDesktopUpdate({
     autoUpdater: { checkForUpdates: async () => ({ updateInfo: { version: '1.0.0' } }) },

@@ -1122,6 +1122,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.mode.context': '컨텍스트',
   'contextPanel.mode.preview': '미리보기',
   'contextPanel.mode.browser': '브라우저',
+  'contextPanel.mode.subagents': '서브에이전트',
+  'contextRail.surface.subagents.description': '실행 중인 서브에이전트와 팀 진행 상황',
   'contextRail.aria.rail': '패널 서피스',
   'contextPanel.editorEmpty.title': '열린 파일 없음',
   'contextPanel.editorEmpty.description': '트리에서 파일을 선택해 편집을 시작하세요.',

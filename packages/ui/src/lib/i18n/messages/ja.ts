@@ -1118,6 +1118,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.mode.context': 'コンテキスト',
   'contextPanel.mode.preview': 'プレビュー',
   'contextPanel.mode.browser': 'ブラウザ',
+  'contextPanel.mode.subagents': 'サブエージェント',
+  'contextRail.surface.subagents.description': '実行中のサブエージェントとチームの進捗',
   'contextRail.aria.rail': 'パネルサーフェス',
   'contextPanel.editorEmpty.title': 'ファイルが開かれていません',
   'contextPanel.editorEmpty.description': 'ツリーからファイルを選んで編集を始めましょう。',

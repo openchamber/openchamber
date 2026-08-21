@@ -37,6 +37,7 @@ import { mergeMessages } from "./optimistic"
 import { messagesBefore, messagesFrom } from "./message-ordering"
 import { deleteChatDirectory } from "@/lib/chatDirectories"
 
+import { assertSdkSuccess, assertSdkData } from "./sdk-utils"
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
 // A relay-tunnel send fails when the tunnel drops, and the confirming refetch
@@ -103,47 +104,6 @@ function invalidateSessionLoads(sessionId: string, directories: Iterable<string 
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-type SdkResult<T> = {
-  data?: T
-  error?: unknown
-  response?: { status?: number }
-}
-
-function formatSdkError(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === "string") return error
-  if (error && typeof error === "object") {
-    const message = (error as { message?: unknown }).message
-    if (typeof message === "string" && message.length > 0) return message
-
-    const data = (error as { data?: unknown }).data
-    if (data && typeof data === "object") {
-      const dataMessage = (data as { message?: unknown }).message
-      if (typeof dataMessage === "string" && dataMessage.length > 0) return dataMessage
-    }
-  }
-  try {
-    return JSON.stringify(error)
-  } catch {
-    return String(error)
-  }
-}
-
-function assertSdkSuccess<T>(result: SdkResult<T>, operation: string): T | undefined {
-  if (!result.error) return result.data
-  const status = result.response?.status
-  const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number }
-  if (status !== undefined) error.status = status
-  throw error
-}
-
-function assertSdkData<T>(result: SdkResult<T>, operation: string): T {
-  const data = assertSdkSuccess(result, operation)
-  if (data === undefined || data === null) {
-    throw new Error(`${operation} failed: empty response`)
-  }
-  return data
-}
 
 export function setActionRefs(
   sdk: OpencodeClient,

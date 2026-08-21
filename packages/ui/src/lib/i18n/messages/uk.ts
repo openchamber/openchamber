@@ -1122,6 +1122,8 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.mode.context": "Контекст",
   "contextPanel.mode.preview": "Перегляд",
   "contextPanel.mode.browser": "Браузер",
+  "contextPanel.mode.subagents": "Субагенти",
+  "contextRail.surface.subagents.description": "Активні субагенти та прогрес команди",
   "contextRail.aria.rail": "Поверхні панелі",
   "contextPanel.editorEmpty.title": "Файл не відкрито",
   "contextPanel.editorEmpty.description": "Виберіть файл у дереві, щоб почати редагування.",

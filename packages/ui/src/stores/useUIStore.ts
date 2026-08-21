@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+﻿import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
@@ -14,8 +14,9 @@ import { isWindowsArm64 } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
+export type RightSidebarTab = 'git' | 'files' | 'context' | 'subagents';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
-export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal';
+export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'subagents';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
@@ -751,9 +752,9 @@ interface UIStore {
 
   // Summarization settings
   summarizeLastMessage: boolean;
-  summaryThreshold: number;   // chars — messages longer than this get summarized
-  summaryLength: number;      // chars — target length for summary
-  maxLastMessageLength: number; // chars — truncate {last_message} when summarization is off
+  summaryThreshold: number;   // chars â€” messages longer than this get summarized
+  summaryLength: number;      // chars â€” target length for summary
+  maxLastMessageLength: number; // chars â€” truncate {last_message} when summarization is off
 
   showTerminalQuickKeysOnDesktop: boolean;
   persistChatDraft: boolean;
@@ -2592,7 +2593,7 @@ export const useUIStore = create<UIStore>()(
 
           // v2 -> v3: collapse 3 memory-limit fields into single messageLimit.
           // Pick the best user-customised value (prefer historical, fall back to active).
-          // Discard old defaults (90/120/180) — they become the new single default (200).
+          // Discard old defaults (90/120/180) â€” they become the new single default (200).
           if (version < 3) {
             const OLD_DEFAULTS = new Set([90, 120, 180, 220]);
             const hist = state.memoryLimitHistorical as number | undefined;
@@ -2604,7 +2605,7 @@ export const useUIStore = create<UIStore>()(
             } else if (typeof active === 'number' && !OLD_DEFAULTS.has(active)) {
               state.messageLimit = active;
             }
-            // Otherwise leave undefined → Zustand uses the initial default (200).
+            // Otherwise leave undefined â†’ Zustand uses the initial default (200).
 
             delete state.memoryLimitHistorical;
             delete state.memoryLimitViewport;
