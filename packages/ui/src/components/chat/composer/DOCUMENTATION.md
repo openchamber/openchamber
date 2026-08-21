@@ -143,12 +143,13 @@ hardware.
 
 ## Testing
 
-The package has no DOM test environment, so coverage stops at the state and
-logic layers: the language, the submit assembly, path and drop handling, text
-splicing, message history, and the CodeMirror language extension at the
-`EditorState` level.
+The package has no browser DOM test environment. Focused tests can still mount
+React component effects with minimal stubs and real state logic, alongside the
+state and logic layers: the language, the submit assembly, path and drop
+handling, text splicing, message history, and the CodeMirror language
+extension at the `EditorState` level.
 
-Rendering, focus, keyboard behavior, IME and WKWebView are **not covered by
+Rendering, focus, keyboard behavior, IME, and WKWebView are **not covered by
 tests** and are verified by hand. Do not report a change to them as validated
 on the strength of type-check and unit tests.
 
