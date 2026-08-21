@@ -11,10 +11,12 @@ export const readJsonFileWithBackup = (targetPath) => {
   try {
     return JSON.parse(fs.readFileSync(targetPath, 'utf8'));
   } catch (targetError) {
+    if (targetError?.code !== 'ENOENT') throw targetError;
     try {
       return JSON.parse(fs.readFileSync(`${targetPath}.backup`, 'utf8'));
-    } catch {
-      throw targetError;
+    } catch (backupError) {
+      if (backupError?.code === 'ENOENT') throw targetError;
+      throw backupError;
     }
   }
 };
@@ -40,13 +42,15 @@ export const replaceFile = async (temporaryPath, targetPath, platform = process.
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       await fsp.rename(temporaryPath, targetPath);
-      return;
     } catch (error) {
       if (!isTransientWindowsReplaceError(error, platform)) throw error;
       if (attempt < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
       }
+      continue;
     }
+    await fsp.rm(backupPath, { force: true }).catch(() => undefined);
+    return;
   }
 
   await fsp.rename(targetPath, backupPath);
@@ -56,5 +60,5 @@ export const replaceFile = async (temporaryPath, targetPath, platform = process.
     await fsp.rename(backupPath, targetPath);
     throw error;
   }
-  await fsp.rm(backupPath, { force: true });
+  await fsp.rm(backupPath, { force: true }).catch(() => undefined);
 };
