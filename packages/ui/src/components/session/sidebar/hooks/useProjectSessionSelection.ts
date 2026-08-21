@@ -21,7 +21,7 @@ type Args = {
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null) => void;
   newSessionDraftOpen: boolean;
   mobileVariant: boolean;
-  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
+  openNewSessionDraft: (options?: { automatic?: boolean; selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
 };
@@ -69,7 +69,7 @@ export function resolveMissingProjectSessionSelection<T>({
         ([projectId, sessions]) => projectId !== activeProjectId && sessions.has(currentSessionId),
       ),
     );
-    if (currentSessionId && projectMap && !currentSessionBelongsToAnotherProject) {
+    if (currentSessionId && !currentSessionBelongsToAnotherProject) {
       return { kind: 'preserve-current' };
     }
   }
@@ -210,6 +210,7 @@ export const useProjectSessionSelection = (args: Args): void => {
         setSessionSwitcherOpen(false);
       }
       openNewSessionDraft({
+        automatic: true,
         selectedProjectId: section.project.id,
         directoryOverride: section.project.normalizedPath,
       });

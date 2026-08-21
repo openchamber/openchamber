@@ -5,6 +5,7 @@ import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import type { MainTab } from '@/stores/useUIStore';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
+import { resolveRecentSession, resolveRouteSessionToken } from '@/lib/recentSession';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
 /**
@@ -68,10 +69,16 @@ export function useRouter(): void {
       try {
         // 1. Apply session first (may trigger async operations)
         if (route.sessionId) {
-          const currentSessionId = useSessionUIStore.getState().currentSessionId;
-          if (route.sessionId !== currentSessionId) {
-            const directoryHint = useSessionUIStore.getState().getDirectoryForSession(route.sessionId);
-            setCurrentSession(route.sessionId, directoryHint);
+          const resolution = await resolveRouteSessionToken(
+            route.sessionId,
+            resolveRecentSession,
+            (sessionId) => useSessionUIStore.getState().getDirectoryForSession(sessionId),
+          );
+          if (resolution) {
+            const currentSessionId = useSessionUIStore.getState().currentSessionId;
+            if (resolution.sessionId !== currentSessionId) {
+              setCurrentSession(resolution.sessionId, resolution.directoryHint ?? undefined);
+            }
           }
         }
 
