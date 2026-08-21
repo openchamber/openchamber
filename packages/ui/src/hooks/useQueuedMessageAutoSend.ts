@@ -302,7 +302,9 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           () => dispatchSessionQueue(target, queueSnapshot, true),
           { ifAvailable: true },
         );
-        if (!acquired) retryScheduler.schedule(Date.now() + QUEUE_LOCK_RETRY_DELAY_MS);
+        if (!acquired && globalThis.navigator?.locks) {
+          retryScheduler.schedule(Date.now() + QUEUE_LOCK_RETRY_DELAY_MS);
+        }
         return;
       }
       const abortHoldUntil = getAbortHoldUntil(sessionId);

@@ -74,6 +74,21 @@ describe("message queue runtime ownership", () => {
     expect(migrated.queuedMessages?.[key]?.[0]?.sendAttempt).toBe(undefined)
   })
 
+  test("migrates version 4 tombstones with bounded retention", () => {
+    const now = Date.now()
+    const deletedTargets = Object.fromEntries(
+      Array.from({ length: 110 }, (_, index) => [`target-${index}`, now - index]),
+    )
+    deletedTargets.expired = now - (31 * 24 * 60 * 60 * 1000)
+
+    const migrated = migrateMessageQueueState({ deletedTargets }, 4)
+
+    expect(Object.keys(migrated.deletedTargets ?? {})).toHaveLength(110)
+    expect(migrated.deletedTargets?.["target-0"]).toBe(now)
+    expect(migrated.deletedTargets?.["target-109"]).toBe(now - 109)
+    expect(migrated.deletedTargets?.expired).toBe(undefined)
+  })
+
   test("rejects new entries once a queue reaches 20 messages", async () => {
     const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
     for (let index = 0; index < 25; index += 1) {
@@ -110,6 +125,25 @@ describe("message queue runtime ownership", () => {
     expect(await useMessageQueueStore.getState().addToQueue(target, { content: "stale" })).toBe(false)
     expect(await useMessageQueueStore.getState().markSending(target, "queued-stale")).toBe(false)
     expect(useMessageQueueStore.getState().getQueueForTarget(target)).toEqual([])
+  })
+
+  test("drops expired tombstones during a later queue purge", async () => {
+    const now = Date.now()
+    useMessageQueueStore.setState({
+      deletedTargets: {
+        retained: now,
+        expired: now - (31 * 24 * 60 * 60 * 1000),
+      },
+    })
+    const target = createMessageQueueTarget("session-new", "/repo", "runtime-a")!
+
+    await useMessageQueueStore.getState().purgeQueue(target)
+
+    const tombstones = useMessageQueueStore.getState().deletedTargets
+    expect(Object.keys(tombstones)).toHaveLength(2)
+    expect(tombstones[getMessageQueueKey(target)]).toBeGreaterThan(0)
+    expect(tombstones.retained).toBe(now)
+    expect(tombstones.expired).toBe(undefined)
   })
 
   test("rejects a browser enqueue when durable storage cannot confirm the new entry", async () => {
@@ -313,4 +347,28 @@ describe("queue persistence transactions", () => {
     releaseFirst()
     expect(await first).toBe(true)
   })
+
+  test("declines browser dispatch without native Web Locks", async () => {
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+    const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator")
+    Object.defineProperty(globalThis, "window", { configurable: true, value: {} })
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: {} })
+    let dispatched = false
+
+    try {
+      const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
+      const acquired = await withMessageQueueTargetLock(target, async () => {
+        dispatched = true
+      })
+
+      expect(acquired).toBe(false)
+      expect(dispatched).toBe(false)
+    } finally {
+      if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow)
+      else Reflect.deleteProperty(globalThis, "window")
+      if (originalNavigator) Object.defineProperty(globalThis, "navigator", originalNavigator)
+      else Reflect.deleteProperty(globalThis, "navigator")
+    }
+  })
+
 })

@@ -67,7 +67,8 @@ export type MessageQueueTarget = {
 
 const MAX_QUEUE_TARGETS = 50;
 const MAX_MESSAGES_PER_QUEUE = 20;
-const MESSAGE_QUEUE_STORE_VERSION = 4;
+const DELETED_TARGET_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const MESSAGE_QUEUE_STORE_VERSION = 5;
 export const MESSAGE_QUEUE_STORAGE_KEY = 'message-queue-store';
 const persistedSendAttemptSchema = z.object({
     messageID: z.string().trim().min(1),
@@ -187,8 +188,13 @@ const sanitizeSendAttempts = (
     ]),
 );
 
-const sanitizeDeletedTargets = (targets: Record<string, number> | undefined): Record<string, number> =>
-    Object.fromEntries(Object.entries(targets ?? {}).filter(([, deletedAt]) => Number.isFinite(deletedAt)));
+const sanitizeDeletedTargets = (targets: Record<string, number> | undefined): Record<string, number> => {
+    const cutoff = Date.now() - DELETED_TARGET_RETENTION_MS;
+    return Object.fromEntries(
+        Object.entries(targets ?? {})
+            .filter(([, deletedAt]) => Number.isFinite(deletedAt) && deletedAt >= cutoff)
+    );
+};
 
 const readDurableQueue = (target: MessageQueueTarget) => {
     try {
@@ -407,7 +413,10 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             return {
                                 queuedMessages,
                                 sendingIds,
-                                deletedTargets: { ...state.deletedTargets, [key]: Date.now() },
+                                deletedTargets: sanitizeDeletedTargets({
+                                    ...state.deletedTargets,
+                                    [key]: Date.now(),
+                                }),
                             };
                         });
                     });
@@ -553,7 +562,6 @@ const localQueueTargetLocks = new Map<string, Promise<void>>();
 const queueLockOwner = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 const QUEUE_LOCK_PREFIX = 'openchamber:message-queue-lock:';
 const QUEUE_STATE_LOCK_EXPIRY_MS = 5000;
-const QUEUE_TARGET_LOCK_EXPIRY_MS = 120000;
 
 type QueueLockTicket = {
     ticket: number;
@@ -714,6 +722,11 @@ export const withMessageQueueTargetLock = async (
     };
     const lockManager = globalThis.navigator?.locks;
     if (!lockManager) {
+        // Timer-backed leases cannot safely guard network I/O because browser
+        // suspension can stop their heartbeat. Decline queued dispatch rather
+        // than allow a second document to acquire an expired live lease.
+        if (globalThis.window) return false;
+
         const key = getMessageQueueKey(target);
         const previous = localQueueTargetLocks.get(key);
         if (previous && options?.ifAvailable) return false;
@@ -725,27 +738,7 @@ export const withMessageQueueTargetLock = async (
         localQueueTargetLocks.set(key, current);
         await previous;
         try {
-            const fallbackStorage = getQueueLockStorage();
-            if (!fallbackStorage) {
-                if (globalThis.window) return false;
-                await run();
-                return true;
-            }
-            let taskStarted = false;
-            try {
-                await withFallbackQueueStateLock(
-                    fallbackStorage,
-                    `target:${key}`,
-                    QUEUE_TARGET_LOCK_EXPIRY_MS,
-                    async () => {
-                        taskStarted = true;
-                        await run();
-                    },
-                );
-            } catch (error) {
-                if (taskStarted) throw error;
-                return false;
-            }
+            await run();
             return true;
         } finally {
             release();

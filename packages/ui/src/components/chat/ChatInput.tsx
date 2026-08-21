@@ -901,6 +901,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const handleQueueMessage = React.useCallback(async () => {
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
+        if (globalThis.window && !globalThis.navigator?.locks) {
+            toast.error(t('chat.chatInput.toast.messageSendFailed'));
+            return;
+        }
 
         const drafts = inlineDraftTarget ? consumeDrafts(inlineDraftTarget) : [];
 
@@ -999,13 +1003,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 )
                 : null;
             if (!liveTarget || getMessageQueueKey(liveTarget) !== options.queueLockKey) return;
-        } else if (queueLockTarget && queueLockKey) {
-            const acquired = await withMessageQueueTargetLock(queueLockTarget, () => handleSubmit({
-                ...options,
-                queueLockKey,
-            }));
-            if (!acquired) toast.error(t('chat.chatInput.toast.messageSendFailed'));
-            return;
         }
 
         const submitRuntimeKey = getRuntimeKey();
@@ -1042,6 +1039,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         );
         const queuedMessageIdsToSend = queuedMessagesToSend.map((queued) => queued.id);
         const queuedSendHadExistingAttempt = queuedMessagesToSend.some((queued) => queued.sendAttempt !== undefined);
+        if (!options?.queueLockKey && queueLockTarget && queueLockKey && queuedMessagesToSend.length > 0) {
+            const acquired = await withMessageQueueTargetLock(queueLockTarget, () => handleSubmit({
+                ...options,
+                queueLockKey,
+            }));
+            if (!acquired) toast.error(t('chat.chatInput.toast.messageSendFailed'));
+            return;
+        }
         let queuedSendOutcomeUnknown = false;
         let queuedSendIdentityPrepared = false;
         let queuedSendMessageID: string | undefined;
