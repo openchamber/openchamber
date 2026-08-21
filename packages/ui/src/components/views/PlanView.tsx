@@ -38,7 +38,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { EditorView } from '@codemirror/view';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
-import { fetchProjectPlan, parsePlanMarkdown } from '@/lib/projectContextApi';
+import { fetchProjectPlan, parsePlanMarkdown, type ProjectRef } from '@/lib/projectContextApi';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
@@ -52,6 +52,11 @@ type PlanViewProps = {
   /** Saved project plan to open. Project plans are server-owned and addressed
       by id; they never carry a client-visible filesystem path. */
   projectPlanId?: string | null;
+  /** The project that owns `projectPlanId`. Callers opening a plan from a
+      project-scoped list pass this so the view does not have to re-derive the
+      project from the session directory, which resolves to nothing for
+      sessions running in a worktree outside the project path. */
+  projectRef?: ProjectRef | null;
   /** Called after a send action routes the user to the chat — hosts that show
       PlanView in an overlay (mobile fullscreen surface) close it here. */
   onNavigatedToChat?: () => void;
@@ -154,7 +159,7 @@ type SelectedLineRange = {
   end: number;
 };
 
-export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, projectPlanId = null, onNavigatedToChat }) => {
+export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, projectPlanId = null, projectRef = null, onNavigatedToChat }) => {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const createSession = useSessionUIStore((state) => state.createSession);
@@ -186,10 +191,12 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, projectPl
     () => normalize(effectiveDirectory || sessionDirectory),
     [effectiveDirectory, sessionDirectory],
   );
-  const currentProjectRef = React.useMemo(
-    () => resolveProjectRefForDirectory(projectDirectory, projects, activeProjectId),
-    [activeProjectId, projectDirectory, projects],
-  );
+  const currentProjectRef = React.useMemo(() => {
+    if (projectRef) {
+      return projectRef;
+    }
+    return resolveProjectRefForDirectory(projectDirectory, projects, activeProjectId);
+  }, [activeProjectId, projectDirectory, projectRef, projects]);
   const canCreateWorktree = React.useMemo(
     () => (currentProjectRef ? gitDirectories.get(currentProjectRef.path)?.isGitRepo === true : false),
     [currentProjectRef, gitDirectories],

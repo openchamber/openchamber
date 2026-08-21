@@ -60,6 +60,12 @@ Leaving the section or the project closes it, so its editor never sits over a
 list it no longer matches. Hosts that own a fullscreen plan surface (mobile)
 still pass `onOpenPlan` and keep theirs.
 
+A plan's owning project travels with it. The panel passes its `projectRef` to
+`PlanView`, and the mobile and desktop context-tab flows carry the project in
+the open-plan payload, so the editor loads the plan even while the session
+directory is a worktree outside the project path. The directory-based project
+lookup survives only as the fallback for viewers that were not handed one.
+
 ## Pins belong to one session
 
 Notes and plans are project data, but attaching one writes its id to the current

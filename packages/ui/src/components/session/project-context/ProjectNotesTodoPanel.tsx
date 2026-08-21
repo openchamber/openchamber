@@ -29,8 +29,10 @@ interface ProjectNotesTodoPanelProps {
   canCreateWorktree?: boolean;
   onActionComplete?: () => void;
   /** When provided, opening a plan calls this instead of the desktop context
-      panel tab — hosts without ContextPanel (mobile) render their own viewer. */
-  onOpenPlan?: (plan: { id: string; title: string }) => void;
+      panel tab — hosts without ContextPanel (mobile) render their own viewer.
+      The owning project rides along so the host's viewer never has to guess it
+      from the session directory. */
+  onOpenPlan?: (plan: { id: string; title: string; project: ProjectRef }) => void;
   className?: string;
 }
 
@@ -153,7 +155,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
    * separate context-panel tab, which pushed the user out of the panel they
    * were browsing to read something that belongs to it.
    */
-  const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string } | null>(null);
+  const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string; project: ProjectRef } | null>(null);
   const trimmedQuery = query.trim().toLowerCase();
 
   // Completed items sink to the bottom in the list; storage order is untouched.
@@ -503,6 +505,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           <React.Suspense fallback={null}>
             <PlanView
               projectPlanId={openPlan.id}
+              projectRef={projectRef}
               onNavigatedToChat={() => setOpenPlan(null)}
             />
           </React.Suspense>

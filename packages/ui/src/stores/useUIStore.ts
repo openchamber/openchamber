@@ -11,6 +11,7 @@ import type { TerminalShell } from '@/lib/api/types';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import type { ProjectRef } from '@/lib/projectContextApi';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch';
 export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal';
@@ -37,6 +38,11 @@ type ContextPanelTab = {
       panel. Project plans are addressed by id because their markdown is
       server-owned and has no client-visible path. */
   projectPlanId: string | null;
+  /** Owning project for the saved plan, carried because plan tabs open from a
+      project-scoped list. Without it the editor infers the project from the
+      session directory, which fails for worktree sessions outside the
+      project path. */
+  projectRef: ProjectRef | null;
   dedupeKey: string;
   label: string | null;
   sessionTitleFallback: string | null;
@@ -50,6 +56,7 @@ type ContextPanelTabDescriptor = {
   mode: ContextPanelMode;
   targetPath?: string | null;
   projectPlanId?: string | null;
+  projectRef?: ProjectRef | null;
   dedupeKey?: string | null;
   label?: string | null;
   sessionTitleFallback?: string | null;
@@ -222,6 +229,19 @@ const normalizeContextPanelTabDedupeKey = (
   return buildDefaultContextPanelTabDedupeKey(mode, targetPath);
 };
 
+const normalizeProjectRef = (value: unknown): ProjectRef | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const candidate = value as { id?: unknown; path?: unknown };
+  const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+  const path = typeof candidate.path === 'string' ? candidate.path.trim() : '';
+  if (!id || !path) {
+    return null;
+  }
+  return { id, path };
+};
+
 const buildContextPanelTabID = (mode: ContextPanelMode, dedupeKey: string): string => {
   return dedupeKey === mode ? mode : `${mode}:${dedupeKey}`;
 };
@@ -240,6 +260,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     projectPlanId: typeof descriptor.projectPlanId === 'string' && descriptor.projectPlanId.trim()
       ? descriptor.projectPlanId.trim()
       : null,
+    projectRef: normalizeProjectRef(descriptor.projectRef),
     dedupeKey,
     label: normalizeContextTabLabel(descriptor.label),
     sessionTitleFallback: normalizeContextTabLabel(descriptor.sessionTitleFallback),
@@ -300,6 +321,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       mode?: unknown;
       targetPath?: unknown;
       projectPlanId?: unknown;
+      projectRef?: unknown;
       dedupeKey?: unknown;
       label?: unknown;
       sessionTitleFallback?: unknown;
@@ -341,6 +363,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       projectPlanId: typeof candidate.projectPlanId === 'string' && candidate.projectPlanId.trim()
         ? candidate.projectPlanId.trim()
         : null,
+      projectRef: normalizeProjectRef(candidate.projectRef),
       dedupeKey,
       label: normalizeContextTabLabel(typeof candidate.label === 'string' ? candidate.label : null),
       sessionTitleFallback: normalizeContextTabLabel(typeof candidate.sessionTitleFallback === 'string' ? candidate.sessionTitleFallback : null),
@@ -413,6 +436,7 @@ const upsertContextPanelTab = (
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
           sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
+          projectRef: nextTab.projectRef,
           stagedDiff: nextTab.stagedDiff,
           diffScope: nextTab.diffScope,
           readOnly: nextTab.readOnly,

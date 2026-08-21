@@ -85,6 +85,7 @@ All notable changes to this project will be documented in this file.
 - Git: pull-request checks in Work status stay current as their status changes.
 - UI: the default dialog close button is easier to click or tap (thanks to @rockinrimmer).
 - Desktop/Windows: the close button now aligns correctly with the rest of the window chrome.
+- Project knowledge: plans opened from the panel now load while a session runs from a temporary worktree, instead of showing a blank editor.
 
 ## [1.19.0] - 2026-08-19
 
