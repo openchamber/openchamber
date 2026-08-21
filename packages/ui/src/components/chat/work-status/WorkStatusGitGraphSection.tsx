@@ -139,7 +139,6 @@ export const WorkStatusGitGraphSection: React.FC<Props> = ({ directory, panelVis
           directory={directory}
           git={git}
           isActive={isActive}
-          readOnly={true}
           commitDetailsController={commitDetailsController}
           onCopyHash={handleCopyCommitHash}
           hoverRemoteName={hoverRemote?.name ?? null}

@@ -1,11 +1,14 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
@@ -17,13 +20,17 @@ import { GitCommitHoverPopover, type GitCommitHoverPopoverCoordinator } from './
 import { formatGitCommitHoverRelativeTime, normalizeGitCommitHoverEntry } from './gitCommitHoverModel';
 import * as git from '@/lib/gitApi';
 import { toast } from '@/components/ui/toast';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import { openExternalUrl } from '@/lib/url';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import type { GitHistoryGraphRef, GitHistoryItemViewModel } from './gitGraph';
 import {
   GitCommitChangedFiles,
   type GitCommitChangedFilesSnapshot,
 } from './GitCommitChangedFiles';
+import { buildGitHubCommitUrl } from './gitCommitRemote';
 
 const PENDING_ACTION_CONFIRM_LABELS = {
   checkout: 'gitView.history.actions.checkoutConfirm',
@@ -46,6 +53,17 @@ const RESET_LABELS = {
   soft: 'gitView.history.actions.resetSoft',
   mixed: 'gitView.history.actions.resetMixed',
   hard: 'gitView.history.actions.resetHard',
+} as const;
+
+const PENDING_ACTION_MENU_LABELS = {
+  checkout: 'gitView.history.actions.checkoutDetached',
+  cherryPick: 'gitView.history.actions.cherryPick',
+  revert: 'gitView.history.actions.revert',
+  merge: 'gitView.history.actions.merge',
+  rebase: 'gitView.history.actions.rebase',
+  resetSoft: 'gitView.history.actions.resetSoft',
+  resetMixed: 'gitView.history.actions.resetMixed',
+  resetHard: 'gitView.history.actions.resetHard',
 } as const;
 
 export type GitCommitComparison = {
@@ -82,7 +100,13 @@ interface HistoryCommitRowProps {
   commitComparison?: GitCommitComparison;
   commitDetailsController?: GitCommitDetailsControllerLike;
   selectedChangedFilePath?: string | null;
-  showGraphActions?: boolean;
+  onCompareWithRemote?: () => void;
+  canCompareWithRemote?: boolean;
+  onCompareWithMergeBase?: () => void;
+  canCompareWithMergeBase?: boolean;
+  onCompareWithRef?: () => void;
+  activeComparisonLabel?: string | null;
+  onClearComparison?: () => void;
 }
 
 const isGitHistoryItemEntry = (entry: GitLogEntry | GitHistoryItem): entry is GitHistoryItem => 'subject' in entry;
@@ -139,9 +163,16 @@ export const HistoryCommitRow = React.memo(({
   commitComparison,
   commitDetailsController,
   selectedChangedFilePath = null,
-  showGraphActions = true,
+  onCompareWithRemote,
+  canCompareWithRemote = false,
+  onCompareWithMergeBase,
+  canCompareWithMergeBase = false,
+  onCompareWithRef,
+  activeComparisonLabel = null,
+  onClearComparison,
 }: HistoryCommitRowProps) => {
   const { t, locale } = useI18n();
+  const runtimeApis = useRuntimeAPIs();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const isGraphMode = mode === 'graph';
   const isCompactGraph = isGraphMode && compactGraph;
@@ -152,9 +183,21 @@ export const HistoryCommitRow = React.memo(({
     | 'resetSoft' | 'resetMixed' | 'resetHard';
 
   const [actionLoading, setActionLoading] = React.useState<string | null>(null);
-  const [showCreateBranch, setShowCreateBranch] = React.useState(false);
+  const [branchDialogOpen, setBranchDialogOpen] = React.useState(false);
+  const [tagDialogOpen, setTagDialogOpen] = React.useState(false);
   const [newBranchName, setNewBranchName] = React.useState('');
+  const [newTagName, setNewTagName] = React.useState('');
   const [pendingAction, setPendingAction] = React.useState<PendingAction | null>(null);
+  const supportsCreateTag = Boolean(runtimeApis.git?.createGitTag);
+  const githubUrl = React.useMemo(
+    () => buildGitHubCommitUrl(hoverRemoteUrl, getEntryHash(entry)),
+    [entry, hoverRemoteUrl],
+  );
+  const ensureExpanded = React.useCallback(() => {
+    if (!isExpanded) {
+      onToggle();
+    }
+  }, [isExpanded, onToggle]);
 
   const fallbackSnapshot = React.useMemo<GitCommitChangedFilesSnapshot>(() => {
     if (isLoadingFiles) {
@@ -212,8 +255,24 @@ export const HistoryCommitRow = React.memo(({
     setActionLoading('createBranch');
     try {
       await git.createBranch(directory, newBranchName.trim(), getEntryHash(entry));
-      setShowCreateBranch(false);
+      setBranchDialogOpen(false);
       setNewBranchName('');
+      onActionSuccess?.();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleCreateTag = async () => {
+    if (!directory || !newTagName.trim() || !supportsCreateTag) return;
+    setActionLoading('createTag');
+    try {
+      await git.createGitTag(directory, newTagName.trim(), getEntryHash(entry));
+      toast.success(t('gitView.toast.tagCreated', { name: newTagName.trim() }));
+      setTagDialogOpen(false);
+      setNewTagName('');
       onActionSuccess?.();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -319,6 +378,31 @@ export const HistoryCommitRow = React.memo(({
       setActionLoading(null);
     }
   };
+
+  const handleOpenChanges = React.useCallback(() => {
+    ensureExpanded();
+  }, [ensureExpanded]);
+
+  const handleOpenOnGitHub = React.useCallback(() => {
+    if (!githubUrl) return;
+    void openExternalUrl(githubUrl);
+  }, [githubUrl]);
+
+  const handleCopyMessage = React.useCallback(() => {
+    void copyTextToClipboard(getEntryMessage(entry)).then((result) => {
+      if (result.ok) {
+        toast.success(t('gitView.toast.commitMessageCopied'));
+        return;
+      }
+      toast.error(t('gitView.toast.copyFailed'));
+    });
+  }, [entry, t]);
+
+  const handleCompareAction = React.useCallback((callback?: () => void) => {
+    if (!callback) return;
+    ensureExpanded();
+    callback();
+  }, [ensureExpanded]);
 
   const graphBadges: GitHistoryGraphRef[] = viewModel?.historyItem.references ?? [];
   const compactGraphBadges = graphBadges.some((badge) => badge.kind === 'head')
@@ -458,155 +542,215 @@ export const HistoryCommitRow = React.memo(({
     </button>
   );
 
+  const rowContent = directory && hoverCoordinator ? (
+    <GitCommitHoverPopover
+      model={hoverModel}
+      directory={directory}
+      remoteName={hoverRemoteName}
+      remoteUrl={hoverRemoteUrl}
+      detailsCache={hoverDetailsCache}
+      coordinator={hoverCoordinator}
+      onCopyHash={onCopyHash}
+      absoluteTimestamp={absoluteTimestamp}
+      rowButton={rowButton}
+      openGitHubLabel={t('gitView.pr.actions.openOnGitHub')}
+      copyShaLabel={t('gitView.history.copySha')}
+      changedFilesLabel={t(
+        hoverModel.statistics.files === 1
+          ? 'diffView.summary.changedFilesSingle'
+          : 'diffView.summary.changedFilesPlural',
+        { count: hoverModel.statistics.files },
+      )}
+    />
+  ) : rowButton;
+
   return (
     <li data-history-commit-row={getEntryHash(entry)}>
-      {directory && hoverCoordinator ? (
-        <GitCommitHoverPopover
-          model={hoverModel}
-          directory={directory}
-          remoteName={hoverRemoteName}
-          remoteUrl={hoverRemoteUrl}
-          detailsCache={hoverDetailsCache}
-          coordinator={hoverCoordinator}
-          onCopyHash={onCopyHash}
-          absoluteTimestamp={absoluteTimestamp}
-          rowButton={rowButton}
-          openGitHubLabel={t('gitView.pr.actions.openOnGitHub')}
-          copyShaLabel={t('gitView.history.copySha')}
-          changedFilesLabel={t(
-            hoverModel.statistics.files === 1
-              ? 'diffView.summary.changedFilesSingle'
-              : 'diffView.summary.changedFilesPlural',
-            { count: hoverModel.statistics.files },
-          )}
-        />
-      ) : rowButton}
+      <ContextMenu>
+        <ContextMenuTrigger>{rowContent}</ContextMenuTrigger>
+        <ContextMenuContent className="min-w-[220px]">
+          <ContextMenuItem onClick={handleOpenChanges}>
+            {t('gitView.history.actions.openChanges')}
+          </ContextMenuItem>
+          {githubUrl ? (
+            <ContextMenuItem onClick={handleOpenOnGitHub}>
+              {t('gitView.pr.actions.openOnGitHub')}
+            </ContextMenuItem>
+          ) : null}
+
+          {directory ? (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => setPendingAction('checkout')} disabled={actionLoading !== null}>
+                {t('gitView.history.actions.checkoutDetached')}
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => setBranchDialogOpen(true)} disabled={actionLoading !== null}>
+                {t('gitView.history.actions.createBranchEllipsis')}
+              </ContextMenuItem>
+              {supportsCreateTag ? (
+                <ContextMenuItem onClick={() => setTagDialogOpen(true)} disabled={actionLoading !== null}>
+                  {t('gitView.history.actions.createTagEllipsis')}
+                </ContextMenuItem>
+              ) : null}
+              <ContextMenuItem onClick={() => setPendingAction('cherryPick')} disabled={actionLoading !== null}>
+                {t('gitView.history.actions.cherryPick')}
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => setPendingAction('revert')} disabled={actionLoading !== null}>
+                {t('gitView.history.actions.revert')}
+              </ContextMenuItem>
+              {(['soft', 'mixed', 'hard'] as const).map((mode) => (
+                <ContextMenuItem
+                  key={mode}
+                  onClick={() => setPendingAction(RESET_PENDING_ACTIONS[mode])}
+                  disabled={actionLoading !== null}
+                >
+                  {t(RESET_LABELS[mode])}
+                </ContextMenuItem>
+              ))}
+              <ContextMenuItem onClick={() => setPendingAction('merge')} disabled={actionLoading !== null}>
+                {t('gitView.history.actions.merge')}
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => setPendingAction('rebase')} disabled={actionLoading !== null}>
+                {t('gitView.history.actions.rebase')}
+              </ContextMenuItem>
+            </>
+          ) : null}
+
+          {onCompareWithRemote || onCompareWithMergeBase || onCompareWithRef ? (
+            <>
+              <ContextMenuSeparator />
+              {onCompareWithRemote ? (
+                <ContextMenuItem
+                  onClick={() => handleCompareAction(onCompareWithRemote)}
+                  disabled={!canCompareWithRemote}
+                >
+                  {t('gitView.history.actions.compareWithRemote')}
+                </ContextMenuItem>
+              ) : null}
+              {onCompareWithMergeBase ? (
+                <ContextMenuItem
+                  onClick={() => handleCompareAction(onCompareWithMergeBase)}
+                  disabled={!canCompareWithMergeBase}
+                >
+                  {t('gitView.history.actions.compareWithMergeBase')}
+                </ContextMenuItem>
+              ) : null}
+              {onCompareWithRef ? (
+                <ContextMenuItem onClick={() => handleCompareAction(onCompareWithRef)}>
+                  {t('gitView.history.actions.compareWithRef')}
+                </ContextMenuItem>
+              ) : null}
+            </>
+          ) : null}
+
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => onCopyHash(getEntryHash(entry))}>
+            {t('gitView.history.copySha')}
+          </ContextMenuItem>
+          <ContextMenuItem onClick={handleCopyMessage}>
+            {t('gitView.history.actions.copyMessage')}
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+
+      <Dialog open={pendingAction !== null} onOpenChange={(open) => { if (!open) setPendingAction(null); }}>
+        <DialogContent showCloseButton={false} className="max-w-sm gap-4">
+          <DialogHeader>
+            <DialogTitle>{pendingAction ? t(PENDING_ACTION_MENU_LABELS[pendingAction]) : ''}</DialogTitle>
+            <DialogDescription>
+              {pendingAction ? t(PENDING_ACTION_CONFIRM_LABELS[pendingAction]) : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setPendingAction(null)} disabled={actionLoading !== null}>
+              {t('gitView.history.actions.cancelButton')}
+            </Button>
+            <Button variant="destructive" size="sm" onClick={() => void confirmPendingAction()} disabled={actionLoading !== null}>
+              {actionLoading !== null ? <Icon name="loader-4" className="mr-1 size-3 animate-spin" /> : null}
+              {pendingAction === 'resetHard'
+                ? t('gitView.history.actions.resetHardConfirmButton')
+                : t('gitView.history.actions.confirmButton')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={branchDialogOpen} onOpenChange={(open) => { setBranchDialogOpen(open); if (!open) setNewBranchName(''); }}>
+        <DialogContent showCloseButton={false} className="max-w-sm gap-4">
+          <DialogHeader>
+            <DialogTitle>{t('gitView.history.actions.createBranchEllipsis')}</DialogTitle>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={newBranchName}
+            onChange={(event) => setNewBranchName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                void handleCreateBranch();
+              }
+              if (event.key === 'Escape') {
+                setBranchDialogOpen(false);
+                setNewBranchName('');
+              }
+            }}
+            placeholder={t('gitView.history.actions.createBranchPlaceholder')}
+          />
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => { setBranchDialogOpen(false); setNewBranchName(''); }} disabled={actionLoading !== null}>
+              {t('gitView.history.actions.cancelButton')}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => void handleCreateBranch()} disabled={!newBranchName.trim() || actionLoading !== null}>
+              {actionLoading === 'createBranch' ? <Icon name="loader-4" className="mr-1 size-3 animate-spin" /> : null}
+              {t('gitView.history.actions.createBranchConfirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={tagDialogOpen} onOpenChange={(open) => { setTagDialogOpen(open); if (!open) setNewTagName(''); }}>
+        <DialogContent showCloseButton={false} className="max-w-sm gap-4">
+          <DialogHeader>
+            <DialogTitle>{t('gitView.history.actions.createTagEllipsis')}</DialogTitle>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={newTagName}
+            onChange={(event) => setNewTagName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                void handleCreateTag();
+              }
+              if (event.key === 'Escape') {
+                setTagDialogOpen(false);
+                setNewTagName('');
+              }
+            }}
+            placeholder={t('gitView.history.actions.createTagPlaceholder')}
+          />
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => { setTagDialogOpen(false); setNewTagName(''); }} disabled={actionLoading !== null}>
+              {t('gitView.history.actions.cancelButton')}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => void handleCreateTag()} disabled={!newTagName.trim() || actionLoading !== null}>
+              {actionLoading === 'createTag' ? <Icon name="loader-4" className="mr-1 size-3 animate-spin" /> : null}
+              {t('gitView.history.actions.createTagConfirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {isExpanded && (
-        <div id={detailsContentId} className="px-3 pb-2 pl-8 border-t border-border/40">
-          {/* Action buttons */}
-          {isGraphMode && showGraphActions && pendingAction ? (
-            /* Confirmation banner — replaces the button row while an action is pending */
-            <div className="flex items-center gap-2 py-2 border-b border-border/30 mb-2">
-              <span className="typography-micro text-muted-foreground flex-1 min-w-0">
-                {t(PENDING_ACTION_CONFIRM_LABELS[pendingAction])}
+        <div id={detailsContentId} className="border-t border-border/40 px-3 pb-2 pl-8">
+          {activeComparisonLabel ? (
+            <div className="mb-2 flex items-center gap-2 border-b border-border/30 py-2">
+              <span className="min-w-0 flex-1 typography-micro text-muted-foreground">
+                {t('gitView.history.actions.comparingWith', { name: activeComparisonLabel })}
               </span>
-              <Button
-                variant="destructive" size="xs" className="h-6 shrink-0"
-                disabled={actionLoading !== null}
-                onClick={(e) => { e.stopPropagation(); void confirmPendingAction(); }}
-              >
-                {actionLoading !== null
-                  ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
-                  : null}
-                {t('gitView.history.actions.confirmButton')}
-              </Button>
-              <Button
-                variant="ghost" size="xs" className="h-6 shrink-0"
-                disabled={actionLoading !== null}
-                onClick={(e) => { e.stopPropagation(); setPendingAction(null); }}
-              >
-                {t('gitView.history.actions.cancelButton')}
-              </Button>
-            </div>
-          ) : isGraphMode && showGraphActions ? (
-            <div className="flex flex-wrap items-center gap-1.5 py-2 border-b border-border/30 mb-2">
-              <Button variant="outline" size="xs" className="h-6"
-                disabled={actionLoading !== null}
-                onClick={(e) => { e.stopPropagation(); setPendingAction('checkout'); }}
-              >
-                {t('gitView.history.actions.checkout')}
-              </Button>
-
-              {showCreateBranch ? (
-                <div className="flex items-center gap-1">
-                  <input
-                    autoFocus value={newBranchName}
-                    onChange={(e) => setNewBranchName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void handleCreateBranch();
-                      if (e.key === 'Escape') { setShowCreateBranch(false); setNewBranchName(''); }
-                    }}
-                    placeholder={t('gitView.history.actions.createBranchPlaceholder')}
-                    className="h-6 text-xs px-2 rounded border border-border/60 bg-background min-w-0 w-32"
-                  />
-                  <Button variant="outline" size="xs" className="h-6"
-                    disabled={!newBranchName.trim() || actionLoading !== null}
-                    onClick={(e) => { e.stopPropagation(); void handleCreateBranch(); }}
-                  >
-                    {actionLoading === 'createBranch'
-                      ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
-                      : null}
-                    {t('gitView.history.actions.createBranchConfirm')}
-                  </Button>
-                </div>
-              ) : (
-                <Button variant="outline" size="xs" className="h-6"
-                  onClick={(e) => { e.stopPropagation(); setShowCreateBranch(true); }}
-                >
-                  {t('gitView.history.actions.createBranch')}
+              {onClearComparison ? (
+                <Button variant="ghost" size="xs" className="h-6 shrink-0" onClick={onClearComparison}>
+                  {t('gitView.history.actions.clearComparison')}
                 </Button>
-              )}
-
-              <Button variant="outline" size="xs" className="h-6"
-                disabled={actionLoading !== null}
-                onClick={(e) => { e.stopPropagation(); setPendingAction('cherryPick'); }}
-              >
-                {t('gitView.history.actions.cherryPick')}
-              </Button>
-
-              <Button variant="outline" size="xs" className="h-6"
-                disabled={actionLoading !== null}
-                onClick={(e) => { e.stopPropagation(); setPendingAction('revert'); }}
-              >
-                {t('gitView.history.actions.revert')}
-              </Button>
-
-              {/* Reset: dropdown first to pick mode, then confirmation banner */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    className="h-6"
-                    disabled={actionLoading !== null}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {actionLoading === 'reset'
-                      ? <Icon name="loader-4" className="size-3 animate-spin mr-1" />
-                      : null}
-                    {t('gitView.history.actions.reset')}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-max">
-                  {(['soft', 'mixed', 'hard'] as const).map((mode) => (
-                    <DropdownMenuItem
-                      key={mode}
-                        disabled={actionLoading !== null}
-                        onSelect={(e) => {
-                          e.stopPropagation();
-                          setPendingAction(RESET_PENDING_ACTIONS[mode]);
-                        }}
-                      >
-                        {t(RESET_LABELS[mode])}
-                      </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              <Button variant="outline" size="xs" className="h-6"
-                disabled={actionLoading !== null}
-                onClick={(e) => { e.stopPropagation(); setPendingAction('merge'); }}
-              >
-                {t('gitView.history.actions.merge')}
-              </Button>
-
-              <Button variant="outline" size="xs" className="h-6"
-                disabled={actionLoading !== null}
-                onClick={(e) => { e.stopPropagation(); setPendingAction('rebase'); }}
-              >
-                {t('gitView.history.actions.rebase')}
-              </Button>
+              ) : null}
             </div>
           ) : null}
 

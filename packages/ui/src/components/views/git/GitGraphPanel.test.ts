@@ -95,26 +95,56 @@ mock.module('./GitGraphSegment', () => ({
 const renderedHistoryRows: Array<{
   id: string;
   compactGraph?: boolean;
-  showGraphActions?: boolean;
   commitDetailsController?: unknown;
   commitComparison?: { directory: string; commitHash: string; parentHash: string | null };
+  onCompareWithRemote?: () => void;
+  canCompareWithRemote?: boolean;
+  onCompareWithMergeBase?: () => void;
+  canCompareWithMergeBase?: boolean;
+  onCompareWithRef?: () => void;
+  activeComparisonLabel?: string | null;
+  onClearComparison?: () => void;
 }> = [];
 
 mock.module('./HistoryCommitRow', () => ({
   HistoryCommitRow: ({
     entry,
     compactGraph,
-    showGraphActions,
     commitDetailsController,
     commitComparison,
+    onCompareWithRemote,
+    canCompareWithRemote,
+    onCompareWithMergeBase,
+    canCompareWithMergeBase,
+    onCompareWithRef,
+    activeComparisonLabel,
+    onClearComparison,
   }: {
     entry: { id: string };
     compactGraph?: boolean;
-    showGraphActions?: boolean;
     commitDetailsController?: unknown;
     commitComparison?: { directory: string; commitHash: string; parentHash: string | null };
+    onCompareWithRemote?: () => void;
+    canCompareWithRemote?: boolean;
+    onCompareWithMergeBase?: () => void;
+    canCompareWithMergeBase?: boolean;
+    onCompareWithRef?: () => void;
+    activeComparisonLabel?: string | null;
+    onClearComparison?: () => void;
   }) => {
-    renderedHistoryRows.push({ id: entry.id, compactGraph, showGraphActions, commitDetailsController, commitComparison });
+    renderedHistoryRows.push({
+      id: entry.id,
+      compactGraph,
+      commitDetailsController,
+      commitComparison,
+      onCompareWithRemote,
+      canCompareWithRemote,
+      onCompareWithMergeBase,
+      canCompareWithMergeBase,
+      onCompareWithRef,
+      activeComparisonLabel,
+      onClearComparison,
+    });
     return React.createElement('li', { 'data-history-id': entry.id });
   },
 }));
@@ -767,17 +797,16 @@ describe('GitGraphPanel component regression', () => {
       await flushEffects();
     });
 
-    expect(renderedHistoryRows.find((row) => row.id === 'commit-a')).toEqual({
-      id: 'commit-a',
-      compactGraph: true,
-      showGraphActions: true,
-      commitDetailsController: controller,
-      commitComparison: {
-        directory: '/repo',
-        commitHash: 'commit-a',
-        parentHash: 'commit-root',
-      },
+    const row = renderedHistoryRows.find((candidate) => candidate.id === 'commit-a');
+    expect(row?.compactGraph).toBe(true);
+    expect(row?.commitDetailsController).toBe(controller);
+    expect(row?.commitComparison).toEqual({
+      directory: '/repo',
+      commitHash: 'commit-a',
+      parentHash: 'commit-root',
     });
+    expect(row?.onCompareWithRemote).toBeDefined();
+    expect(row?.onCompareWithRef).toBeDefined();
 
     await act(async () => {
       root.unmount();
@@ -786,9 +815,10 @@ describe('GitGraphPanel component regression', () => {
     dom.restore();
   });
 
-  test('forwards read-only graph consumers to rows without mutation controls', async () => {
+  test('applies and clears comparison overrides on graph rows', async () => {
     const dom = installMinimalDom();
     const root: Root = createRoot(dom.container);
+    const toggledComparisons: Array<{ directory: string; commitHash: string; parentHash: string | null }> = [];
 
     await act(async () => {
       root.render(
@@ -797,14 +827,67 @@ describe('GitGraphPanel component regression', () => {
           null,
           React.createElement(GitGraphPanel, {
             ...createDefaultGitGraphPanelProps(),
-            readOnly: true,
+            commitDetailsController: {
+              getCommitSnapshot: () => ({ status: 'idle' as const }),
+              subscribeCommit: () => () => {},
+              isExpanded: () => false,
+              subscribeExpanded: () => () => {},
+              toggleExpanded: (comparison: { directory: string; commitHash: string; parentHash: string | null }) => {
+                toggledComparisons.push(comparison);
+              },
+              retryCommit: () => {},
+              selectFile: () => {},
+              confirmLargePreview: () => {},
+              retryPreview: () => {},
+              clearSelection: () => {},
+              getPreviewSnapshot: () => ({ status: 'idle' as const }),
+              subscribePreview: () => () => {},
+              dispose: () => {},
+            },
           }),
         ),
       );
       await flushEffects();
     });
 
-    expect(renderedHistoryRows.find((row) => row.id === 'commit-a')?.showGraphActions).toBe(false);
+    const lastRowFor = (id: string) => {
+      for (let index = renderedHistoryRows.length - 1; index >= 0; index -= 1) {
+        if (renderedHistoryRows[index]?.id === id) {
+          return renderedHistoryRows[index];
+        }
+      }
+      return undefined;
+    };
+
+    let row = lastRowFor('commit-a');
+    expect(row?.commitComparison?.parentHash).toBe('commit-root');
+    expect(row?.onCompareWithRemote).toBeDefined();
+    expect(row?.canCompareWithRemote).toBe(true);
+    expect(row?.canCompareWithMergeBase).toBe(false);
+    expect(row?.onCompareWithRef).toBeDefined();
+    expect(row?.activeComparisonLabel).toBeNull();
+
+    await act(async () => {
+      row?.onCompareWithRemote?.();
+      await flushEffects();
+    });
+
+    row = lastRowFor('commit-a');
+    expect(row?.commitComparison).toEqual({ directory: '/repo', commitHash: 'commit-a', parentHash: 'commit-b' });
+    expect(row?.activeComparisonLabel).toBe('origin/topic');
+    expect(row?.onClearComparison).toBeDefined();
+    expect(toggledComparisons).toEqual([
+      { directory: '/repo', commitHash: 'commit-a', parentHash: 'commit-b' },
+    ]);
+
+    await act(async () => {
+      row?.onClearComparison?.();
+      await flushEffects();
+    });
+
+    row = lastRowFor('commit-a');
+    expect(row?.commitComparison?.parentHash).toBe('commit-root');
+    expect(row?.activeComparisonLabel).toBeNull();
 
     await act(async () => {
       root.unmount();

@@ -359,6 +359,10 @@ mock.module('@/stores/useUIStore', () => ({
   useUIStore: <T,>(selector: (state: { timeFormatPreference: 'auto' }) => T) => selector({ timeFormatPreference: 'auto' }),
 }));
 
+mock.module('@/hooks/useRuntimeAPIs', () => ({
+  useRuntimeAPIs: () => ({}),
+}));
+
 mock.module('@/lib/url', () => ({
   openExternalUrl: mock(async () => true),
 }));

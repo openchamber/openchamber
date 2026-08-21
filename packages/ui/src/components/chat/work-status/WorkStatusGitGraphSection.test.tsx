@@ -552,7 +552,6 @@ describe('WorkStatusGitGraphSection', () => {
     expect(calls.history).toBeGreaterThan(0);
     expect(historyRowCalls[0]).toEqual({
       id: 'a'.repeat(40),
-      showGraphActions: false,
       onCopyHash: historyRowCalls[0]?.onCopyHash,
       commitComparison: {
         directory: '/repo',

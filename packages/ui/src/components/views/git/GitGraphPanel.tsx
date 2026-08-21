@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useI18n } from '@/lib/i18n';
 import type { GitCommitHoverDetailsCache, GitHistoryRef } from '@/lib/api/types';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -31,7 +32,6 @@ interface GitGraphPanelProps {
   directory: string;
   git: RuntimeAPIs['git'];
   isActive: boolean;
-  readOnly?: boolean;
   commitDetailsController: GitCommitDetailsController;
   onCopyHash: (hash: string) => void;
   hoverRemoteName?: string | null;
@@ -45,7 +45,6 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
   directory,
   git,
   isActive,
-  readOnly = false,
   commitDetailsController,
   onCopyHash,
   hoverRemoteName = null,
@@ -124,6 +123,33 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
   );
   const hoverCoordinator = React.useMemo(() => GitCommitHoverPopover.createCoordinator(), []);
   const [, forceExpandedRefresh] = React.useReducer((count: number) => count + 1, 0);
+
+  const [comparisonOverrides, setComparisonOverrides] = React.useState<ReadonlyMap<string, { parentHash: string; label: string }>>(new Map());
+  const [comparePickerCommitHash, setComparePickerCommitHash] = React.useState<string | null>(null);
+
+  const applyComparisonOverride = React.useCallback((commitHash: string, parentHash: string, label: string) => {
+    setComparisonOverrides((previous) => {
+      const next = new Map(previous);
+      next.set(commitHash, { parentHash, label });
+      return next;
+    });
+    setComparePickerCommitHash(null);
+    const comparison = { directory, commitHash, parentHash };
+    if (!commitDetailsController.isExpanded(comparison)) {
+      commitDetailsController.toggleExpanded(comparison);
+    }
+  }, [commitDetailsController, directory]);
+
+  const clearComparisonOverride = React.useCallback((commitHash: string) => {
+    setComparisonOverrides((previous) => {
+      if (!previous.has(commitHash)) {
+        return previous;
+      }
+      const next = new Map(previous);
+      next.delete(commitHash);
+      return next;
+    });
+  }, []);
 
   React.useEffect(() => commitDetailsController.subscribeExpanded(() => {
     forceExpandedRefresh();
@@ -318,15 +344,19 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
                 );
               }
 
+              const commitHash = viewModel.historyItem.id;
+              const override = comparisonOverrides.get(commitHash);
               const comparison = {
                 directory,
-                commitHash: viewModel.historyItem.id,
-                parentHash: viewModel.historyItem.parentIds[0] ?? null,
+                commitHash,
+                parentHash: override?.parentHash ?? viewModel.historyItem.parentIds[0] ?? null,
               };
+              const upstreamRevision = upstreamRef?.revision ?? null;
+              const canCompareWithMergeBase = Boolean(mergeBase);
 
               return (
                 <HistoryCommitRow
-                  key={viewModel.historyItem.id}
+                  key={commitHash}
                   entry={viewModel.historyItem}
                   mode="graph"
                   viewModel={viewModel}
@@ -342,11 +372,21 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
                   hoverRemoteUrl={hoverRemoteUrl}
                   hoverDetailsCache={hoverDetailsCache}
                   compactGraph={true}
-                  showGraphActions={!readOnly}
                   onConflict={onConflict}
                   onActionSuccess={onActionSuccess}
                   commitComparison={comparison}
                   commitDetailsController={commitDetailsController}
+                  onCompareWithRemote={upstreamRevision
+                    ? () => applyComparisonOverride(commitHash, upstreamRevision, upstreamRef?.name ?? upstreamRevision)
+                    : undefined}
+                  canCompareWithRemote={Boolean(upstreamRevision)}
+                  onCompareWithMergeBase={canCompareWithMergeBase && mergeBase
+                    ? () => applyComparisonOverride(commitHash, mergeBase, t('gitView.graph.mergeBaseLabel'))
+                    : undefined}
+                  canCompareWithMergeBase={canCompareWithMergeBase}
+                  onCompareWithRef={() => setComparePickerCommitHash(commitHash)}
+                  activeComparisonLabel={override?.label ?? null}
+                  onClearComparison={override ? () => clearComparisonOverride(commitHash) : undefined}
                 />
               );
             })}
@@ -360,6 +400,51 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
           {renderState.emptyMessage ?? t('gitView.history.noCommits')}
         </div>
       )}
+
+      <Dialog
+        open={comparePickerCommitHash !== null}
+        onOpenChange={(open) => { if (!open) setComparePickerCommitHash(null); }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('gitView.history.actions.compareWithRef')}</DialogTitle>
+          </DialogHeader>
+          <div className="flex max-h-72 flex-col gap-2 overflow-auto">
+            {([
+              { title: t('gitView.graph.localBranches'), refsForGroup: groupedRefs.branches },
+              { title: t('gitView.branch.remoteBranches'), refsForGroup: groupedRefs.remoteBranches },
+              { title: t('gitView.graph.tags'), refsForGroup: groupedRefs.tags },
+            ] as const).map(({ title, refsForGroup }) => {
+              const selectable = refsForGroup.filter((ref) => Boolean(ref.revision));
+              if (selectable.length === 0) {
+                return null;
+              }
+              return (
+                <div key={title} className="flex flex-col gap-1">
+                  <div className="typography-micro font-medium text-muted-foreground">{title}</div>
+                  <div className="flex flex-wrap gap-1">
+                    {selectable.map((ref) => (
+                      <Button
+                        key={ref.id}
+                        type="button"
+                        variant="chip"
+                        size="xs"
+                        onClick={() => {
+                          if (comparePickerCommitHash && ref.revision) {
+                            applyComparisonOverride(comparePickerCommitHash, ref.revision, ref.name);
+                          }
+                        }}
+                      >
+                        {ref.name}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 };
