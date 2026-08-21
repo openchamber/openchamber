@@ -543,7 +543,7 @@ const sshManager = new ElectronSshManager({
 
 const readJsonFile = (filePath) => {
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return readJsonFileWithBackup(filePath);
   } catch (error) {
     if (error && error.code === 'ENOENT') return {};
     // Parse errors can happen if a concurrent writer just truncated the file

@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 
 const WINDOWS_REPLACE_ERRORS = new Set(['EPERM', 'EACCES', 'EBUSY']);
@@ -6,7 +7,34 @@ const isTransientWindowsReplaceError = (error, platform) => (
   platform === 'win32' && WINDOWS_REPLACE_ERRORS.has(error?.code)
 );
 
+export const readJsonFileWithBackup = (targetPath) => {
+  try {
+    return JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+  } catch (targetError) {
+    try {
+      return JSON.parse(fs.readFileSync(`${targetPath}.backup`, 'utf8'));
+    } catch {
+      throw targetError;
+    }
+  }
+};
+
 export const replaceFile = async (temporaryPath, targetPath, platform = process.platform) => {
+  const backupPath = `${targetPath}.backup`;
+
+  if (platform === 'win32') {
+    try {
+      await fsp.access(targetPath);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      try {
+        await fsp.rename(backupPath, targetPath);
+      } catch (backupError) {
+        if (backupError?.code !== 'ENOENT') throw backupError;
+      }
+    }
+  }
+
   const maxAttempts = platform === 'win32' ? 6 : 1;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -21,7 +49,6 @@ export const replaceFile = async (temporaryPath, targetPath, platform = process.
     }
   }
 
-  const backupPath = `${targetPath}.backup-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   await fsp.rename(targetPath, backupPath);
   try {
     await fsp.rename(temporaryPath, targetPath);
