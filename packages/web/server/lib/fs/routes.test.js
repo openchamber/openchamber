@@ -45,6 +45,12 @@ const createMockResponse = () => {
       headers.set(name.toLowerCase(), value);
       return this;
     },
+    flushHeaders() {
+      return this;
+    },
+    end() {
+      return this;
+    },
     getHeader(name) {
       return headers.get(name.toLowerCase());
     },
@@ -245,6 +251,49 @@ const registerReveal = ({ fsPromises, spawn, platform = 'linux' }) => {
   return getRoute('POST', '/api/fs/reveal');
 };
 
+const registerWatch = ({
+  failDirectory = '',
+  realpath = async (targetPath) => targetPath,
+  writeSseEvent = vi.fn(),
+} = {}) => {
+  const { app, getRoute } = createRouteRegistry();
+  const registrations = [];
+  const watch = vi.fn((directory, options, listener) => {
+    if (directory === failDirectory) {
+      throw new Error('watch failed');
+    }
+    const watcher = {
+      close: vi.fn(),
+      on: vi.fn(() => watcher),
+    };
+    registrations.push({ directory, options, listener, watcher });
+    return watcher;
+  });
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fs: { watch },
+    fsPromises: {
+      realpath,
+      stat: async () => ({ isDirectory: () => true }),
+    },
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+    writeSseEvent,
+  });
+  return {
+    handler: getRoute('GET', '/api/fs/watch'),
+    registrations,
+    watch,
+    writeSseEvent,
+  };
+};
+
 const callExec = async (handler, body) => {
   const res = createMockResponse();
   await handler({ body }, res);
@@ -302,6 +351,121 @@ const callReveal = async (handler, body) => {
   await handler({ body }, res);
   return res;
 };
+
+describe('fs watch', () => {
+  it('streams debounced changes and closes watchers with the client connection', async () => {
+    vi.useFakeTimers();
+    try {
+      const { handler, registrations, watch, writeSseEvent } = registerWatch();
+      expect(handler).toBeTypeOf('function');
+      const req = new EventEmitter();
+      req.query = {
+        directory: '/repo',
+        directories: JSON.stringify(['/repo', '/repo/src']),
+      };
+      const res = createMockResponse();
+
+      await handler(req, res);
+
+      expect(watch).toHaveBeenCalledTimes(2);
+      expect(writeSseEvent).toHaveBeenCalledWith(res, {
+        type: 'openchamber:files-watch-ready',
+        properties: { directories: ['/repo', '/repo/src'] },
+      });
+
+      registrations[1].listener('rename', 'new-file.ts');
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(writeSseEvent).toHaveBeenCalledWith(res, {
+        type: 'openchamber:files-changed',
+        properties: { directory: '/repo/src' },
+      });
+
+      req.emit('close');
+      expect(registrations[0].watcher.close).toHaveBeenCalledTimes(1);
+      expect(registrations[1].watcher.close).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects directories outside the active workspace before opening a watcher', async () => {
+    const { handler, watch } = registerWatch();
+    const req = new EventEmitter();
+    req.query = {
+      directory: '/repo',
+      directories: JSON.stringify(['/outside']),
+    };
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Path is outside of active workspace' });
+    expect(watch).not.toHaveBeenCalled();
+  });
+
+  it('closes earlier watchers when a later directory cannot be watched', async () => {
+    const { handler, registrations } = registerWatch({ failDirectory: '/repo/src' });
+    const req = new EventEmitter();
+    req.query = {
+      directory: '/repo',
+      directories: JSON.stringify(['/repo', '/repo/src']),
+    };
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual({ error: 'watch failed' });
+    expect(registrations[0].watcher.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not open watchers after the client disconnects during path resolution', async () => {
+    let releaseRealpath;
+    const realpath = vi.fn(() => new Promise((resolve) => {
+      releaseRealpath = resolve;
+    }));
+    const { handler, watch } = registerWatch({ realpath });
+    const req = new EventEmitter();
+    req.query = {
+      directory: '/repo',
+      directories: JSON.stringify(['/repo']),
+    };
+    const res = createMockResponse();
+
+    const pending = handler(req, res);
+    await vi.waitFor(() => expect(realpath).toHaveBeenCalledTimes(1));
+    req.emit('close');
+    releaseRealpath('/repo');
+    await pending;
+
+    expect(watch).not.toHaveBeenCalled();
+  });
+
+  it('does not leave a heartbeat behind when the ready event cannot be written', async () => {
+    vi.useFakeTimers();
+    try {
+      const writeSseEvent = vi.fn(() => {
+        throw new Error('socket closed');
+      });
+      const { handler, registrations } = registerWatch({ writeSseEvent });
+      const req = new EventEmitter();
+      req.query = {
+        directory: '/repo',
+        directories: JSON.stringify(['/repo']),
+      };
+
+      await handler(req, createMockResponse());
+
+      expect(writeSseEvent).toHaveBeenCalledTimes(1);
+      expect(registrations[0].watcher.close).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe('fs write', () => {
   it('does not rewrite a file when content is unchanged', async () => {

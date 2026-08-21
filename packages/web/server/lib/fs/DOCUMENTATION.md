@@ -6,6 +6,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 ## Entrypoints and structure
 - `packages/web/server/lib/fs/routes.js`: route registration and runtime-owned state for `/api/fs/*` endpoints.
 - `packages/web/server/lib/fs/search.js`: fuzzy filesystem search runtime used by non-FS routes (for example project icon discovery).
+- `packages/web/server/lib/fs/watcher.js`: shared, reference-counted `fs.watch` runtime with per-directory event batching.
 
 ## Public exports
 - `registerFsRoutes(app, dependencies)` from `routes.js`
@@ -23,8 +24,14 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `POST /api/fs/exec`
     - `GET /api/fs/exec/:jobId`
     - `GET /api/fs/list`
+    - `GET /api/fs/watch`
   - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
   - Enforces workspace boundary checks with active project + worktree fallback support.
+- `createFsWatcherRuntime({ watch, path, platform, debounceMs, maxWaitMs, logger })` from `watcher.js`
+  - Shares one OS watcher for subscribers whose requested paths resolve to the same canonical directory.
+  - Batches directory invalidations after 250 ms of quiet time, with a 1-second maximum wait during continuous changes.
+  - Treats OS events as hints and lets clients authoritatively re-list the affected directory instead of depending on platform-specific filename details.
+  - Closes the OS watcher when its final subscriber disconnects.
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
   - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.
@@ -38,5 +45,8 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 - Filesystem `EPERM`/`EACCES` failures use the stable `reason: "os-permission"` response marker. Policy denials such as workspace-boundary or missing-grant failures must not use that marker because a native folder picker cannot remediate them.
 - Read-only routes authorize the requested path against the workspace before resolving symlinks. A symlink reached through the workspace may therefore target a file outside it, while a directly requested outside path still requires an exact-path grant. Write routes keep canonical-target boundary checks.
 - If adding new `/api/fs/*` endpoints, add them in `routes.js` and extend this document.
+- `GET /api/fs/watch` accepts the active workspace in `directory` and a JSON array in `directories`. Every watched directory is validated against the active workspace/worktree boundary before SSE headers are sent. The route emits `openchamber:files-watch-ready`, `openchamber:files-changed`, and heartbeat envelopes, and closes every subscription with the client request. No more than 64 directories may be watched by one connection. Disconnect and response-error handlers are installed before asynchronous path resolution so abandoned requests cannot leave watchers or heartbeat timers behind.
+- Standard Web and Electron Desktop surfaces mount `SidebarFilesTree`. While the tree is visible, direct connections consume `/api/fs/watch` through the runtime URL resolver; when the same surface uses the private relay, native `EventSource` cannot traverse the tunnel and the tree uses its 8-second polling fallback. Hiding the tree closes its subscription and fallback timer. Showing it again starts a new subscription and authoritatively reconciles the watched directories before treating the watcher as ready. The fallback remains active until that reconciliation finishes, and returns while the stream is unavailable. Failed streams reconnect with bounded exponential backoff, use a longer delay while the client is hidden or offline, and rebind immediately when the active runtime changes. Dedicated VS Code, hosted-mobile, and Capacitor surfaces do not mount this sidebar tree and are unaffected.
+- `GET /api/fs/watch` is an explicit read-only URL-auth and Desktop realtime-proxy SSE path. This keeps direct remote, SSH, and local standard surfaces on the same scoped authentication boundary without allowing URL tokens on filesystem mutation routes.
 - `GET /api/fs/list` may resolve symlinks with `realpath` to read directory contents, but the response `path` and each entry `path` must stay in the caller's requested path space (`path.join(requestedPath, name)`). Returning real paths breaks file-tree expansion for directories reached through workspace symlinks.
 - `POST /api/fs/upload` accepts one `application/octet-stream` body with `path` and optional `overwrite=true` query parameters. The body streams into a same-directory temp file with a 100 MiB default cap configurable through `OPENCHAMBER_FS_UPLOAD_MAX_BYTES`; failed and oversized uploads clean up that temp file. New files commit through an atomic no-replace link, existing files return `409` unless overwrite is explicit, directory targets are rejected, and the destination parent resolves before writing so uploads cannot escape through workspace symlinks.

@@ -31,6 +31,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useFileTreeAutoRefresh } from '@/hooks/useFileTreeAutoRefresh';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -45,6 +46,11 @@ import { Icon } from "@/components/icon/Icon";
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { isFilesystemError } from '@/lib/api/files-errors';
 import { notifyFileContentInvalidated } from '@/lib/fileContentInvalidation';
+import {
+  getFileTreeRelativePath,
+  isFileTreePathWithinRoot,
+  normalizeFileTreePath as normalizePath,
+} from '@/lib/fileTreePath';
 import { isBrowserClientRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
@@ -98,35 +104,11 @@ const sortNodes = (items: FileNode[]) =>
     return a.name.localeCompare(b.name);
   });
 
-const normalizePath = (value: string): string => {
-  if (!value) return '';
-
-  const raw = value.replace(/\\/g, '/');
-  const hadUncPrefix = raw.startsWith('//');
-
-  let normalized = raw.replace(/\/+$/g, '');
-  normalized = normalized.replace(/\/+/g, '/');
-  if (hadUncPrefix && !normalized.startsWith('//')) {
-    normalized = `/${normalized}`;
-  }
-
-  if (normalized === '') {
-    return raw.startsWith('/') ? '/' : '';
-  }
-
-  return normalized;
-};
-
 const getRelativePath = (root: string, path: string): string => {
   const normalizedPath = normalizePath(path);
-  const normalizedRoot = normalizePath(root).replace(/\/+$/, '');
-  if (normalizedPath === normalizedRoot) {
-    return '.';
-  }
-  if (!normalizedRoot || !normalizedPath.startsWith(`${normalizedRoot}/`)) {
-    return normalizedPath;
-  }
-  return normalizedPath.slice(normalizedRoot.length + 1);
+  const relativePath = getFileTreeRelativePath(normalizedPath, root);
+  if (relativePath === null) return normalizedPath;
+  return relativePath || '.';
 };
 
 const getDropTargetLabel = (root: string, target: string): string => {
@@ -525,7 +507,11 @@ const MemoizedFileRow = React.memo(FileRow, areFileRowPropsEqual);
 
 // --- Main component ---
 
-export const SidebarFilesTree: React.FC = () => {
+interface SidebarFilesTreeProps {
+  autoRefreshEnabled: boolean;
+}
+
+export const SidebarFilesTree: React.FC<SidebarFilesTreeProps> = ({ autoRefreshEnabled }) => {
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
   const isBrowserClient = isBrowserClientRuntime(runtime.platform);
@@ -553,6 +539,8 @@ export const SidebarFilesTree: React.FC = () => {
   const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
+  const activeDirectoryLoadIdsRef = React.useRef<Map<string, number>>(new Map());
+  const nextDirectoryLoadIdRef = React.useRef(0);
   const refreshAbortRef = React.useRef<AbortController | null>(null);
 
   // Hydrate the per-root cache on mount or root change. The cache is
@@ -561,6 +549,7 @@ export const SidebarFilesTree: React.FC = () => {
   // combining the two means the tree re-paints with cached data instead
   // of blanking out and re-listing every directory.
   React.useEffect(() => {
+    activeDirectoryLoadIdsRef.current = new Map();
     setDropTarget(null);
     setUploadConflicts(null);
     if (!root) {
@@ -629,6 +618,7 @@ export const SidebarFilesTree: React.FC = () => {
   const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const addOpenPath = useFilesViewTabsStore((state) => state.addOpenPath);
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
+  const removeExpandedPathsByPrefix = useFilesViewTabsStore((state) => state.removeExpandedPathsByPrefix);
   const toggleExpandedPath = useFilesViewTabsStore((state) => state.toggleExpandedPath);
   const collapseAllExpandedPaths = useFilesViewTabsStore((state) => state.collapseAllExpandedPaths);
   const contextTabs = useUIStore((state) => (root ? (state.contextPanelByDirectory[root]?.tabs ?? EMPTY_CONTEXT_TABS) : EMPTY_CONTEXT_TABS));
@@ -694,12 +684,17 @@ export const SidebarFilesTree: React.FC = () => {
 
   const loadDirectory = React.useCallback(async (dirPath: string, isCancelled?: () => boolean) => {
     const normalizedDir = normalizePath(dirPath.trim());
-    if (!normalizedDir) return;
+    if (!normalizedDir) return false;
 
-    if (loadedDirsRef.current.has(normalizedDir) || inFlightDirsRef.current.has(normalizedDir)) return;
+    if (loadedDirsRef.current.has(normalizedDir) || inFlightDirsRef.current.has(normalizedDir)) return true;
 
     inFlightDirsRef.current = new Set(inFlightDirsRef.current);
     inFlightDirsRef.current.add(normalizedDir);
+    const requestId = nextDirectoryLoadIdRef.current + 1;
+    nextDirectoryLoadIdRef.current = requestId;
+    activeDirectoryLoadIdsRef.current = new Map(activeDirectoryLoadIdsRef.current);
+    activeDirectoryLoadIdsRef.current.set(normalizedDir, requestId);
+    const isCurrentRequest = () => activeDirectoryLoadIdsRef.current.get(normalizedDir) === requestId;
 
     const listPromise = files.listDirectory
       ? files.listDirectory(normalizedDir).then((result) => result.entries.map((entry) => ({
@@ -715,7 +710,7 @@ export const SidebarFilesTree: React.FC = () => {
 
     try {
       const entries = await listPromise;
-      if (isCancelled?.()) return;
+      if (isCancelled?.() || !isCurrentRequest()) return false;
       const mapped = mapDirectoryEntries(normalizedDir, entries);
 
       loadedDirsRef.current = new Set(loadedDirsRef.current);
@@ -727,19 +722,35 @@ export const SidebarFilesTree: React.FC = () => {
         return next;
       });
       setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
+      return true;
     } catch (error) {
-      if (isCancelled?.()) return;
+      if (isCancelled?.() || !isCurrentRequest()) return false;
       const message = error instanceof Error ? error.message : String(error ?? '');
+      if (root && normalizedDir !== root && isFilesystemError(error) && error.status === 404) {
+        removeExpandedPathsByPrefix(root, normalizedDir);
+        setLoadErrorsByDir((prev) => {
+          if (!prev[normalizedDir]) return prev;
+          const next = { ...prev };
+          delete next[normalizedDir];
+          return next;
+        });
+        return false;
+      }
       console.error('Failed to load sidebar directory:', error);
       setLoadErrorsByDir((prev) => ({
         ...prev,
         [normalizedDir]: message,
       }));
+      return false;
     } finally {
-      inFlightDirsRef.current = new Set(inFlightDirsRef.current);
-      inFlightDirsRef.current.delete(normalizedDir);
+      if (isCurrentRequest()) {
+        activeDirectoryLoadIdsRef.current = new Map(activeDirectoryLoadIdsRef.current);
+        activeDirectoryLoadIdsRef.current.delete(normalizedDir);
+        inFlightDirsRef.current = new Set(inFlightDirsRef.current);
+        inFlightDirsRef.current.delete(normalizedDir);
+      }
     }
-  }, [files, mapDirectoryEntries]);
+  }, [files, mapDirectoryEntries, removeExpandedPathsByPrefix, root]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) return;
@@ -759,13 +770,17 @@ export const SidebarFilesTree: React.FC = () => {
       const normalizedExpanded = currentExpanded
         .map((p) => normalizePath(p))
         .filter((normalized): normalized is string =>
-          Boolean(normalized) && normalized !== root && normalized.startsWith(`${root}/`),
+          Boolean(normalized) && normalized !== root && isFileTreePathWithinRoot(normalized, root),
         );
       const pathsToRefresh = [root, ...normalizedExpanded];
 
       loadedDirsRef.current = new Set(loadedDirsRef.current);
+      inFlightDirsRef.current = new Set(inFlightDirsRef.current);
+      activeDirectoryLoadIdsRef.current = new Map(activeDirectoryLoadIdsRef.current);
       for (const dirPath of pathsToRefresh) {
         loadedDirsRef.current.delete(dirPath);
+        inFlightDirsRef.current.delete(dirPath);
+        activeDirectoryLoadIdsRef.current.delete(dirPath);
       }
 
       setLoadErrorsByDir((prev) => {
@@ -818,6 +833,25 @@ export const SidebarFilesTree: React.FC = () => {
     await loadDirectory(normalized);
   }, [loadDirectory, refreshRoot]);
 
+  const refreshDirectoryForAutoRefresh = React.useCallback(async (dirPath: string) => {
+    const normalized = normalizePath(dirPath);
+    if (!normalized) throw new Error('File tree refresh requires a directory');
+    loadedDirsRef.current = new Set(loadedDirsRef.current);
+    loadedDirsRef.current.delete(normalized);
+    inFlightDirsRef.current = new Set(inFlightDirsRef.current);
+    inFlightDirsRef.current.delete(normalized);
+    const refreshed = await loadDirectory(normalized);
+    if (!refreshed) throw new Error('File tree directory refresh failed');
+  }, [loadDirectory]);
+
+  useFileTreeAutoRefresh({
+    enabled: autoRefreshEnabled,
+    root,
+    expandedPaths,
+    watchDirectories: files.watchDirectories,
+    refreshDirectory: refreshDirectoryForAutoRefresh,
+  });
+
   React.useEffect(() => {
     if (!root) return;
 
@@ -826,6 +860,7 @@ export const SidebarFilesTree: React.FC = () => {
     refreshAbortRef.current?.abort();
     loadedDirsRef.current = new Set();
     inFlightDirsRef.current = new Set();
+    activeDirectoryLoadIdsRef.current = new Map();
     setLoadErrorsByDir({});
     setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
     void loadDirectory(root);
@@ -840,7 +875,7 @@ export const SidebarFilesTree: React.FC = () => {
       .filter((normalized): normalized is string =>
         !!normalized &&
         normalized !== root &&
-        normalized.startsWith(`${root}/`) &&
+        isFileTreePathWithinRoot(normalized, root) &&
         !loadedDirsRef.current.has(normalized) &&
         !inFlightDirsRef.current.has(normalized),
       )
@@ -951,7 +986,7 @@ export const SidebarFilesTree: React.FC = () => {
       if (segments.length <= 1) continue;
       let currentDir = root;
       for (let i = 0; i < segments.length - 1; i++) {
-        currentDir = `${currentDir}/${segments[i]}`;
+        currentDir = normalizePath(`${currentDir}/${segments[i]}`);
         let entry = map.get(currentDir);
         if (!entry) {
           entry = { modified: 0, added: 0 };
@@ -967,7 +1002,7 @@ export const SidebarFilesTree: React.FC = () => {
   const getFileStatus = React.useCallback((path: string): FileStatus | null => {
     if (openContextFilePaths.has(path)) return 'open';
     if (statusByPath.size === 0) return null;
-    const relative = path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
+    const relative = getFileTreeRelativePath(path, root) ?? path;
     return statusByPath.get(relative) ?? null;
   }, [openContextFilePaths, statusByPath, root]);
 

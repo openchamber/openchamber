@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Files: the project file sidebar now updates automatically when agents or other programs create, rename, or delete files, while expanded folders stay open (thanks to @zzhonglei).
 
 ## [1.19.0] - 2026-08-19
 

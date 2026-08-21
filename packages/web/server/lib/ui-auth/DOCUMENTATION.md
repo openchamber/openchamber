@@ -42,3 +42,7 @@ Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. I
   - `beginAuthentication(req)`
   - `finishAuthentication(payload)`
   - `dispose()`
+
+## URL authentication boundary
+
+Browser APIs that cannot attach an authorization header use a short-lived `oc_url_token`. The controller accepts that token only for the explicit read-only asset and realtime allowlists in `ui-auth.js`; arbitrary API reads and every HTTP mutation still require normal session or bearer authentication. Filesystem watcher SSE uses this boundary through `GET /api/fs/watch`, matching the existing raw-file, notification, and global-event streams.
