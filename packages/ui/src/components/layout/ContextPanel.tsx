@@ -13,6 +13,7 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 // into the eager startup graph even when no such tab is open.
 const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/walkthrough/WalkthroughView').then((m) => ({ default: m.WalkthroughView })));
 const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((m) => ({ default: m.DiffView })));
+const ContextCommitDiffView = lazyWithChunkRecovery(() => import('@/components/views/git/ContextCommitDiffView').then((m) => ({ default: m.ContextCommitDiffView })));
 const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((m) => ({ default: m.FilesView })));
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((m) => ({ default: m.PlanView })));
@@ -1206,18 +1207,33 @@ export const ContextPanel: React.FC = () => {
               activeTab?.id !== tab.id && 'hidden'
             )}
           >
-            <React.Suspense fallback={null}>
-              <DiffView
-                hideStackedFileSidebar
-                stackedDefaultCollapsedAll
-                pinSelectedFileHeaderToTopOnNavigate
-                showOpenInEditorAction
-                diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
-                onDiffScopeChange={handleDiffScopeChange}
-                targetFilePath={tab.targetPath}
-                flushContent
-              />
-            </React.Suspense>
+            {tab.commitDiffTarget ? (
+              <React.Suspense fallback={null}>
+                <ContextCommitDiffView
+                  directory={directoryKey}
+                  target={tab.commitDiffTarget}
+                  onClose={() => {
+                    if (!directoryKey) {
+                      return;
+                    }
+                    closeContextPanelTab(directoryKey, tab.id);
+                  }}
+                />
+              </React.Suspense>
+            ) : (
+              <React.Suspense fallback={null}>
+                <DiffView
+                  hideStackedFileSidebar
+                  stackedDefaultCollapsedAll
+                  pinSelectedFileHeaderToTopOnNavigate
+                  showOpenInEditorAction
+                  diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
+                  onDiffScopeChange={handleDiffScopeChange}
+                  targetFilePath={tab.targetPath}
+                  flushContent
+                />
+              </React.Suspense>
+            )}
           </div>
         ))}
         {hasTerminalTab ? (

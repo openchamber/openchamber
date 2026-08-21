@@ -1,6 +1,27 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import type { GitCommitChangedFile } from '@/lib/api/types';
 import { CONTEXT_SURFACES, sortContextSurfaces } from '../lib/surfaces/registry';
-import { useUIStore } from './useUIStore';
+import { useUIStore, type GitCommitDiffTarget } from './useUIStore';
+
+const buildCommitChangedFile = (overrides: Partial<GitCommitChangedFile> = {}): GitCommitChangedFile => ({
+  path: 'src/new-name.ts',
+  originalPath: 'src/old-name.ts',
+  status: 'R',
+  kind: 'file',
+  originalObjectId: '1'.repeat(64),
+  objectId: '2'.repeat(64),
+  insertions: 7,
+  deletions: 3,
+  isBinary: false,
+  ...overrides,
+});
+
+const buildCommitDiffTarget = (overrides: Partial<GitCommitDiffTarget> = {}): GitCommitDiffTarget => ({
+  commitHash: 'a'.repeat(40),
+  parentHash: null,
+  file: buildCommitChangedFile(),
+  ...overrides,
+});
 
 beforeEach(() => {
   useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [], gitRepositoryPaneStates: {} });
@@ -27,6 +48,134 @@ describe('useUIStore context panel tabs', () => {
     const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
     expect(tabs).toHaveLength(1);
     expect(tabs[0]?.readOnly).toBe(false);
+  });
+
+  test('openContextCommitDiff stores a normalized historical diff target and keeps diff tabs singleton', () => {
+    const directory = '/repo';
+    const firstTarget = buildCommitDiffTarget();
+    const secondTarget = buildCommitDiffTarget({
+      commitHash: 'b'.repeat(40),
+      parentHash: 'c'.repeat(40),
+      file: buildCommitChangedFile({
+        path: 'src/second.ts',
+        originalPath: 'src/first.ts',
+        status: 'R',
+        objectId: 'd'.repeat(40),
+        originalObjectId: 'e'.repeat(40),
+      }),
+    });
+
+    useUIStore.getState().openContextCommitDiff(directory, firstTarget);
+
+    let panel = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(panel?.isOpen).toBe(true);
+    expect(panel?.activeTabId).toBe('diff');
+    expect(panel?.tabs).toHaveLength(1);
+    expect(panel?.tabs[0]?.targetPath).toBe('src/new-name.ts');
+    expect(panel?.tabs[0]?.commitDiffTarget).toEqual(firstTarget);
+
+    useUIStore.getState().openContextCommitDiff(directory, secondTarget);
+
+    panel = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(panel?.tabs).toHaveLength(1);
+    expect(panel?.tabs[0]?.id).toBe('diff');
+    expect(panel?.tabs[0]?.targetPath).toBe('src/second.ts');
+    expect(panel?.tabs[0]?.commitDiffTarget).toEqual(secondTarget);
+  });
+
+  test('migrate retains valid historical diff targets and clears malformed ones', () => {
+    const migrate = useUIStore.persist.getOptions().migrate;
+    const migrated = migrate?.({
+      contextPanelByDirectory: {
+        '/repo-valid': {
+          isOpen: true,
+          tabs: [{
+            mode: 'diff',
+            targetPath: 'src/valid.ts',
+            commitDiffTarget: buildCommitDiffTarget({
+              commitHash: 'f'.repeat(64),
+              parentHash: 'a'.repeat(40),
+              file: buildCommitChangedFile({
+                path: 'src/valid.ts',
+                originalPath: 'src/valid-before.ts',
+                kind: 'symlink',
+                originalObjectId: 'b'.repeat(40),
+                objectId: 'c'.repeat(64),
+              }),
+            }),
+          }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-commit': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-commit.ts', commitDiffTarget: buildCommitDiffTarget({ commitHash: 'not-a-hash' }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-parent': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-parent.ts', commitDiffTarget: buildCommitDiffTarget({ parentHash: 'xyz' }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-counts': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-counts.ts', commitDiffTarget: buildCommitDiffTarget({ file: buildCommitChangedFile({ insertions: -1 }) }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-status': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-status.ts', commitDiffTarget: buildCommitDiffTarget({ file: buildCommitChangedFile({ status: 'X' as GitCommitChangedFile['status'] }) }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-kind': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-kind.ts', commitDiffTarget: buildCommitDiffTarget({ file: buildCommitChangedFile({ kind: 'folder' as GitCommitChangedFile['kind'] }) }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-path': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-path.ts', commitDiffTarget: buildCommitDiffTarget({ file: buildCommitChangedFile({ path: '   ' }) }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-object': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-object.ts', commitDiffTarget: buildCommitDiffTarget({ file: buildCommitChangedFile({ objectId: 'oops' }) }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-binary': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-binary.ts', commitDiffTarget: buildCommitDiffTarget({ file: buildCommitChangedFile({ isBinary: 'true' as unknown as boolean }) }) }],
+          activeTabId: 'diff',
+        },
+      },
+    }, 16);
+
+    const state = JSON.parse(JSON.stringify(migrated ?? {})) as {
+      contextPanelByDirectory?: Record<string, { tabs?: Array<{ commitDiffTarget?: GitCommitDiffTarget | null }> }>;
+    };
+
+    expect(state.contextPanelByDirectory?.['/repo-valid']?.tabs?.[0]?.commitDiffTarget).toEqual({
+      commitHash: 'f'.repeat(64),
+      parentHash: 'a'.repeat(40),
+      file: {
+        path: 'src/valid.ts',
+        originalPath: 'src/valid-before.ts',
+        status: 'R',
+        kind: 'symlink',
+        originalObjectId: 'b'.repeat(40),
+        objectId: 'c'.repeat(64),
+        insertions: 7,
+        deletions: 3,
+        isBinary: false,
+      },
+    });
+    expect(state.contextPanelByDirectory?.['/repo-bad-commit']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-parent']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-counts']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-status']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-kind']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-path']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-object']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-binary']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
   });
 });
 
