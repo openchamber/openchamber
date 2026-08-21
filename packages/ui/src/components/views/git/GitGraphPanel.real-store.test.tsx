@@ -243,6 +243,15 @@ describe('GitGraphPanel real store regression', () => {
     expect(useGitStore.getState().getDirectoryState('/repo')?.history.refs?.snapshot).toBe('snapshot-a');
     expect(/getSnapshot should be cached|Maximum update depth exceeded/i.test(consoleMessages.join('\n'))).toBe(false);
 
+    // Appending a second page must reuse cached refs without calling getGitHistoryRefs again
+    await act(async () => {
+      await useGitStore.getState().fetchHistoryPage('/repo', git, { mode: 'auto' }, { append: true });
+      await flushEffects();
+    });
+
+    expect(requestCounts).toEqual({ refs: 1, history: 2 });
+    expect(/getSnapshot should be cached|Maximum update depth exceeded/i.test(consoleMessages.join('\n'))).toBe(false);
+
     await act(async () => {
       root.unmount();
       await flushEffects();

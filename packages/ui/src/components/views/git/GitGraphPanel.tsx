@@ -2,7 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useI18n } from '@/lib/i18n';
-import type { GitCommitHoverDetailsCache, GitHistoryRef } from '@/lib/api/types';
+import type { GitCommitChangedFile, GitCommitHoverDetailsCache, GitHistoryRef } from '@/lib/api/types';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { HistoryCommitRow } from './HistoryCommitRow';
 import { GitGraphSegment } from './GitGraphSegment';
@@ -40,6 +40,8 @@ interface GitGraphPanelProps {
   onConflict?: (result: { conflict: boolean; conflictFiles?: string[]; operation: 'cherry-pick' | 'revert' | 'merge' | 'rebase' }) => void;
   onActionSuccess?: () => void;
 }
+
+const EMPTY_FILES: GitCommitChangedFile[] = [];
 
 export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
   directory,
@@ -157,7 +159,7 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
 
   const refresh = React.useCallback(async () => {
     try {
-      await ensureHistoryRefs(directory, git);
+      await ensureHistoryRefs(directory, git, { force: true });
       await fetchHistoryPage(directory, git, query);
     } catch { /* errors surfaced through store state */ }
   }, [directory, ensureHistoryRefs, fetchHistoryPage, git, query]);
@@ -198,39 +200,70 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
     };
   }, [comparisonRefIds, comparisonRequestKey, directory, git, isActive]);
 
+  const latestStateRef = React.useRef({
+    directory,
+    git,
+    query,
+    queryState,
+    isActive,
+  });
+  latestStateRef.current = {
+    directory,
+    git,
+    query,
+    queryState,
+    isActive,
+  };
+
+  const hasMore = queryState?.hasMore ?? false;
+  const isQueryLoading = queryState?.isLoading ?? false;
+  const isQueryLoadingMore = queryState?.isLoadingMore ?? false;
+  const isQueryOutdated = queryState?.outdated ?? false;
+  const hasQueryError = queryState?.error !== null && queryState?.error !== undefined;
+
   React.useEffect(() => {
-    if (!isActive) {
-      appendRequestPendingRef.current = false;
+    if (!isActive || !hasMore || isQueryOutdated || isQueryLoading || isQueryLoadingMore || hasQueryError) {
       return;
     }
 
     const IntersectionObserverConstructor = globalThis.IntersectionObserver;
+    const scrollContainer = scrollContainerRef.current;
+    const sentinel = sentinelRef.current;
 
-    if (!queryState?.hasMore || queryState.outdated || queryState.isLoading || queryState.isLoadingMore || queryState.error || !scrollContainerRef.current || !sentinelRef.current || !IntersectionObserverConstructor) {
+    if (!scrollContainer || !sentinel || !IntersectionObserverConstructor) {
       return;
     }
 
     const observer = new IntersectionObserverConstructor((entries) => {
       const entry = entries[0];
-      if (!entry?.isIntersecting || appendRequestPendingRef.current || !isActive || !queryState.hasMore || queryState.outdated || queryState.isLoading || queryState.isLoadingMore || queryState.error) {
+      const state = latestStateRef.current;
+      if (
+        !entry?.isIntersecting
+        || appendRequestPendingRef.current
+        || !state.isActive
+        || !state.queryState?.hasMore
+        || state.queryState.outdated
+        || state.queryState.isLoading
+        || state.queryState.isLoadingMore
+        || state.queryState.error
+      ) {
         return;
       }
 
       appendRequestPendingRef.current = true;
-      void fetchHistoryPage(directory, git, query, { append: true, limit: 20 }).finally(() => {
+      void fetchHistoryPage(state.directory, state.git, state.query, { append: true, limit: 20 }).finally(() => {
         appendRequestPendingRef.current = false;
       });
     }, {
-      root: scrollContainerRef.current,
+      root: scrollContainer,
     });
 
-    observer.observe(sentinelRef.current);
+    observer.observe(sentinel);
 
     return () => {
       observer.disconnect();
-      appendRequestPendingRef.current = false;
     };
-  }, [directory, fetchHistoryPage, git, isActive, query, queryState]);
+  }, [fetchHistoryPage, hasMore, hasQueryError, isActive, isQueryLoading, isQueryLoadingMore, isQueryOutdated]);
 
   React.useEffect(() => {
     if (!refs || paneState.graphFilterMode !== 'manual') {
@@ -365,7 +398,7 @@ export const GitGraphPanel: React.FC<GitGraphPanelProps> = ({
                   totalColumns={totalColumns}
                   isExpanded={commitDetailsController.isExpanded(comparison)}
                   onToggle={() => commitDetailsController.toggleExpanded(comparison)}
-                  files={[]}
+                  files={EMPTY_FILES}
                   isLoadingFiles={false}
                   onCopyHash={onCopyHash}
                   directory={directory}
