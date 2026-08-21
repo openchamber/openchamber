@@ -3057,7 +3057,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       : desktopImageSrc)
     : '';
 
-  const pdfSrc = selectedFile?.path && isSelectedPdf && pdfAssetAuthReadyKey === pdfAssetAuthKey
+  const pdfSrc = selectedFile?.path && isSelectedPdf && pdfAssetAuthKey && pdfAssetAuthReadyKey === pdfAssetAuthKey
     ? getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
       path: selectedFile.path,
       allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,

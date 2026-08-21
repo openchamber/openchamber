@@ -1,14 +1,17 @@
 import { requestExistingFileAccess } from '@/lib/desktop';
 import { isFilePathWithinDirectory, normalizeFilePath } from '@/lib/path-utils';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type OutsideFileGrantEntry = {
   outsideFileGrant: string;
   expiresAt: number;
 };
 
-const DEFAULT_GRANT_TTL_MS = 10 * 60 * 1000;
-const grantsByPath = new Map<string, OutsideFileGrantEntry>();
-const pendingGrantsByPath = new Map<string, Promise<string | undefined>>();
+const GRANT_RENEWAL_BUFFER_MS = 5_000;
+const grantsByCacheKey = new Map<string, OutsideFileGrantEntry>();
+const pendingGrantsByCacheKey = new Map<string, Promise<string | undefined>>();
+
+const grantCacheKey = (path: string, runtimeKey = getRuntimeKey()): string => `${runtimeKey}\0${path}`;
 
 export const getOutsideFileGrant = (path: string): string | undefined => {
   const normalizedPath = normalizeFilePath(path);
@@ -16,13 +19,14 @@ export const getOutsideFileGrant = (path: string): string | undefined => {
     return undefined;
   }
 
-  const entry = grantsByPath.get(normalizedPath);
+  const cacheKey = grantCacheKey(normalizedPath);
+  const entry = grantsByCacheKey.get(cacheKey);
   if (!entry) {
     return undefined;
   }
 
   if (entry.expiresAt <= Date.now()) {
-    grantsByPath.delete(normalizedPath);
+    grantsByCacheKey.delete(cacheKey);
     return undefined;
   }
 
@@ -32,15 +36,17 @@ export const getOutsideFileGrant = (path: string): string | undefined => {
 const rememberOutsideFileGrant = (
   path: string,
   outsideFileGrant: string,
+  expiresAt: number,
+  runtimeKey: string,
 ): void => {
   const normalizedPath = normalizeFilePath(path);
   if (!normalizedPath || !outsideFileGrant) {
     return;
   }
 
-  grantsByPath.set(normalizedPath, {
+  grantsByCacheKey.set(grantCacheKey(normalizedPath, runtimeKey), {
     outsideFileGrant,
-    expiresAt: Date.now() + DEFAULT_GRANT_TTL_MS,
+    expiresAt: expiresAt - GRANT_RENEWAL_BUFFER_MS,
   });
 };
 
@@ -53,32 +59,41 @@ export const ensureOutsideFileGrantForDesktop = async (
     return undefined;
   }
 
+  const runtimeKey = getRuntimeKey();
+  if (runtimeKey !== 'local') {
+    return undefined;
+  }
+  const cacheKey = grantCacheKey(normalizedPath, runtimeKey);
   const existing = getOutsideFileGrant(normalizedPath);
   if (existing) {
     return existing;
   }
 
-  const pending = pendingGrantsByPath.get(normalizedPath);
+  const pending = pendingGrantsByCacheKey.get(cacheKey);
   if (pending) {
     return pending;
   }
 
   const request = requestExistingFileAccess(normalizedPath).then((result) => {
-    if (!result.success || !result.path || !result.outsideFileGrant) {
+    if (!result.success || getRuntimeKey() !== runtimeKey) {
       return undefined;
     }
 
-    rememberOutsideFileGrant(result.path, result.outsideFileGrant);
-    if (normalizeFilePath(result.path) !== normalizedPath) {
-      rememberOutsideFileGrant(normalizedPath, result.outsideFileGrant);
+    const { path: grantedPath, outsideFileGrant, expiresAt } = result;
+    if (expiresAt <= Date.now() + GRANT_RENEWAL_BUFFER_MS) {
+      return undefined;
     }
-    return result.outsideFileGrant;
+    rememberOutsideFileGrant(grantedPath, outsideFileGrant, expiresAt, runtimeKey);
+    if (normalizeFilePath(grantedPath) !== normalizedPath) {
+      rememberOutsideFileGrant(normalizedPath, outsideFileGrant, expiresAt, runtimeKey);
+    }
+    return outsideFileGrant;
   });
-  pendingGrantsByPath.set(normalizedPath, request);
+  pendingGrantsByCacheKey.set(cacheKey, request);
   try {
     return await request;
   } finally {
-    pendingGrantsByPath.delete(normalizedPath);
+    pendingGrantsByCacheKey.delete(cacheKey);
   }
 };
 
