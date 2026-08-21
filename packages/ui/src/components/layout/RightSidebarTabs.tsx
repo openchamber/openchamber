@@ -5,13 +5,14 @@ import { useGitStore } from '@/stores/useGitStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { formatDirectoryName } from '@/lib/utils';
+import type { ProjectRef } from '@/lib/projectContextApi';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { CHAT_DRAFT_PROJECT_ID, getChatsRootForHome, getChatsRootFromDirectory, isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 
 export const ProjectContextPanel: React.FC<{
   onActionComplete?: () => void;
-  onOpenPlan?: (plan: { id: string; title: string }) => void;
+  onOpenPlan?: (plan: { id: string; title: string; project: ProjectRef }) => void;
 }> = ({ onActionComplete, onOpenPlan }) => {
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const projects = useProjectsStore((state) => state.projects);

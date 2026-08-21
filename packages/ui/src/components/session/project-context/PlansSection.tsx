@@ -22,8 +22,10 @@ export const PlansSection: React.FC<{
   plans: ProjectPlanLink[];
   /** Panel-wide filter, matched against plan titles. */
   query: string;
-  /** Hosts without a ContextPanel (mobile) render their own plan viewer. */
-  onOpenPlan?: (plan: { id: string; title: string }) => void;
+  /** Hosts without a ContextPanel (mobile) render their own plan viewer.
+      Includes the owning project so the host's viewer does not have to resolve
+      it from the session directory. */
+  onOpenPlan?: (plan: { id: string; title: string; project: ProjectRef }) => void;
   pinnedPlanIds: ReadonlySet<string>;
   onTogglePinned: (planId: string, pinned: boolean) => Promise<boolean>;
 }> = ({ projectRef, plans, query, onOpenPlan, pinnedPlanIds, onTogglePinned }) => {
@@ -155,7 +157,7 @@ export const PlansSection: React.FC<{
   const handleOpenPlan = React.useCallback(
     (plan: ProjectPlanLink) => {
       if (onOpenPlan) {
-        onOpenPlan({ id: plan.id, title: plan.title });
+        onOpenPlan({ id: plan.id, title: plan.title, project: projectRef });
         return;
       }
       const panelDirectory = currentDirectory?.trim() || projectRef.path.trim();
@@ -165,11 +167,12 @@ export const PlansSection: React.FC<{
       openContextPanelTab(panelDirectory, {
         mode: 'plan',
         projectPlanId: plan.id,
+        projectRef,
         dedupeKey: `plan:${plan.id}`,
         label: plan.title,
       });
     },
-    [currentDirectory, onOpenPlan, openContextPanelTab, projectRef.path]
+    [currentDirectory, onOpenPlan, openContextPanelTab, projectRef]
   );
 
   return (

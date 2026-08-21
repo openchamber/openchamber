@@ -142,6 +142,55 @@ describe('useUIStore closeContextPanelTab surface stability', () => {
   });
 });
 
+describe('useUIStore plan tab project ref', () => {
+  const directory = '/repo';
+
+  test('stores the owning project passed with a project plan tab', () => {
+    useUIStore.getState().openContextPanelTab(directory, {
+      mode: 'plan',
+      projectPlanId: 'plan_1',
+      projectRef: { id: 'project_1', path: '/repo' },
+      dedupeKey: 'plan:plan_1',
+    });
+
+    const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]?.projectPlanId).toBe('plan_1');
+    expect(tabs[0]?.projectRef).toEqual({ id: 'project_1', path: '/repo' });
+  });
+
+  test('keeps plan tabs without an owning project nullable', () => {
+    useUIStore.getState().openContextPanelTab(directory, {
+      mode: 'plan',
+      projectPlanId: 'plan_1',
+      dedupeKey: 'plan:plan_1',
+    });
+
+    const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
+    expect(tabs[0]?.projectPlanId).toBe('plan_1');
+    expect(tabs[0]?.projectRef).toBe(null);
+  });
+
+  test('reopening a plan tab refreshes the owning project', () => {
+    useUIStore.getState().openContextPanelTab(directory, {
+      mode: 'plan',
+      projectPlanId: 'plan_1',
+      projectRef: { id: 'project_1', path: '/repo' },
+      dedupeKey: 'plan:plan_1',
+    });
+    useUIStore.getState().openContextPanelTab(directory, {
+      mode: 'plan',
+      projectPlanId: 'plan_1',
+      projectRef: { id: 'project_1', path: '/repo' },
+      dedupeKey: 'plan:plan_1',
+    });
+
+    const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]?.projectRef).toEqual({ id: 'project_1', path: '/repo' });
+  });
+});
+
 describe('useUIStore per-surface panel widths', () => {
   const directory = '/repo';
 
