@@ -670,9 +670,11 @@ const ToolScrollableTextOutput: React.FC<{
     const [copiedJson, setCopiedJson] = React.useState(false);
 
     React.useEffect(() => {
-        setJsonViewMode(getToolJsonViewMode());
+        if (jsonResult.isJson) {
+            setJsonViewMode(getToolJsonViewMode());
+        }
         setCopiedJson(false);
-    }, [renderedOutput]);
+    }, [jsonResult.isJson, renderedOutput]);
 
     const handleJsonViewChange = React.useCallback((view: ToolJsonViewMode, event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
