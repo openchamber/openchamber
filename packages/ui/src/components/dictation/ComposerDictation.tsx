@@ -257,13 +257,21 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         // inside the overlay, so its scrollHeight tracks the composer's own
         // height — feeding that back would creep a few px on every transcript
         // update instead of stepping per wrapped line.
-        const style = window.getComputedStyle(area);
-        const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
-        hasReportedHeightRef.current = true;
-        onContentHeightChangeRef.current?.(content.offsetHeight + padding);
-        // Once the composer hits its line cap the transcript area starts
-        // scrolling — follow the newest words like a textarea caret would.
-        area.scrollTop = area.scrollHeight;
+        const reportHeight = () => {
+            const style = window.getComputedStyle(area);
+            const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+            hasReportedHeightRef.current = true;
+            onContentHeightChangeRef.current?.(content.offsetHeight + padding);
+            // Once the composer hits its line cap the transcript area starts
+            // scrolling — follow the newest words like a textarea caret would.
+            area.scrollTop = area.scrollHeight;
+        };
+        reportHeight();
+        if (typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(reportHeight);
+        // Re-report after rotation or any other width change rewraps the text.
+        observer.observe(content);
+        return () => observer.disconnect();
     }, [isActiveStatus, partialTranscript, status, error]);
     React.useEffect(() => () => {
         if (hasReportedHeightRef.current) {
