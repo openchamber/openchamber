@@ -8,10 +8,15 @@ interface UseProviderLogoReturn {
     hasLogo: boolean;
 }
 
-const localLogoModules = import.meta.glob<string>('../assets/provider-logos/*.svg', {
-    eager: true,
-    import: 'default',
-});
+let localLogoModules: Record<string, string> = {};
+try {
+    localLogoModules = import.meta.glob<string>('../assets/provider-logos/*.svg', {
+        eager: true,
+        import: 'default',
+    });
+} catch {
+    localLogoModules = {};
+}
 
 const LOCAL_PROVIDER_LOGO_MAP = new Map<string, string>();
 const PRELOADED_LOGO_SRCS = new Set<string>();
@@ -21,6 +26,8 @@ const LOGO_ALIAS = new Map<string, string>([
     ['chatgpt', 'openai'],
     ['claude', 'anthropic'],
     ['gemini', 'google'],
+    ['zen', 'opencode'],
+    ['opencode-zen', 'opencode'],
     ['evroc-ai', 'evroc'],
     ['evrocai', 'evroc'],
     ['ollama-cloud', 'ollama'],

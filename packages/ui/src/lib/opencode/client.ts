@@ -1154,6 +1154,27 @@ class OpencodeService {
     }
   }
 
+  async listTools(
+    providerID: string,
+    modelID: string,
+    directory?: string | null,
+  ): Promise<Array<{ id: string; description: string; parameters: unknown }>> {
+    const dir = typeof directory === 'string' && directory.trim()
+      ? directory.trim()
+      : (this.currentDirectory ? this.currentDirectory.trim() : '');
+
+    const result = await this.client.tool.list({
+      provider: providerID,
+      model: modelID,
+      ...(dir ? { directory: dir } : {}),
+    });
+    // Failures (SDK `{ error }` shape or a thrown fetch) propagate to the
+    // caller — never masked as `[]`, which would silently understate the
+    // system-tools/MCP segments of the context breakdown.
+    const tools = unwrapSdkData(result, 'tool.list') as Array<{ id: string; description: string; parameters: unknown }>;
+    return tools.filter((tool) => tool && typeof tool.id === 'string');
+  }
+
   // Permissions
   async replyToPermission(
     requestId: string,

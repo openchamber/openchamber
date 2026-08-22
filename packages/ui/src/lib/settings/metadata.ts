@@ -8,6 +8,7 @@ export type SettingsPageSlug =
   | 'remote-instances'
   | 'providers'
   | 'usage'
+  | 'analytics'
   | 'agents'
   | 'behavior'
   | 'commands'
@@ -95,6 +96,13 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'general',
     kind: 'split',
     keywords: ['quota', 'billing', 'tokens', 'usage', 'limits'],
+  },
+  {
+    slug: 'analytics',
+    title: 'Analytics',
+    group: 'general',
+    kind: 'single',
+    keywords: ['analytics', 'statistics', 'tokens', 'cost', 'dashboard', 'charts', 'heatmap'],
   },
   {
     slug: 'agents',
@@ -293,6 +301,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
 
     case 'usage':
       return 'bar-chart-2';
+    case 'analytics':
+      return 'file-chart';
     case 'voice':
       return 'mic';
     case 'tunnel':

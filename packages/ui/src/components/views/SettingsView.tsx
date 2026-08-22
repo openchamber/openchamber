@@ -1,58 +1,61 @@
-import React from 'react';
-import { cn, getModifierLabel } from '@/lib/utils';
-import { useUIStore } from '@/stores/useUIStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useAgentsStore } from '@/stores/useAgentsStore';
-import { useCommandsStore } from '@/stores/useCommandsStore';
-import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
-import { useSnippetsStore } from '@/stores/useSnippetsStore';
-import { useSkillsStore } from '@/stores/useSkillsStore';
-import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
-import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
-import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
-import { AgentsPage } from '@/components/sections/agents/AgentsPage';
-import { BehaviorPage } from '@/components/sections/behavior/BehaviorPage';
-import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
-import { CommandsPage } from '@/components/sections/commands/CommandsPage';
-import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
-import { McpPage } from '@/components/sections/mcp/McpPage';
-import { PluginsSidebar, PluginsPage } from '@/components/sections/plugins';
-import { usePluginsStore } from '@/stores/usePluginsStore';
-import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
-import { SkillsPage } from '@/components/sections/skills/SkillsPage';
-import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
-import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
-import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
-import { ProvidersSidebar } from '@/components/sections/providers/ProvidersSidebar';
-import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
-import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
-import { UsagePage } from '@/components/sections/usage/UsagePage';
-import { MagicPromptsSidebar } from '@/components/sections/magic-prompts/MagicPromptsSidebar';
-import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromptsPage';
-import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar';
-import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
-import { GitPage } from '@/components/sections/git-identities/GitPage';
-import { IntegrationsPage } from '@/components/sections/integrations/IntegrationsPage';
-import type { OpenChamberSection } from '@/components/sections/openchamber/types';
-import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
-import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
-import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import React from "react";
+import { cn, getModifierLabel } from "@/lib/utils";
+import { useUIStore } from "@/stores/useUIStore";
+import { useProjectsStore } from "@/stores/useProjectsStore";
+import { useAgentsStore } from "@/stores/useAgentsStore";
+import { useCommandsStore } from "@/stores/useCommandsStore";
+import { useMcpConfigStore } from "@/stores/useMcpConfigStore";
+import { useSnippetsStore } from "@/stores/useSnippetsStore";
+import { useSkillsStore } from "@/stores/useSkillsStore";
+import { useSkillsCatalogStore } from "@/stores/useSkillsCatalogStore";
+import { useConfigStore } from "@/stores/useConfigStore";
+import { Tooltip, TooltipTrigger } from "@/components/ui/tooltip";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { AgentsSidebar } from "@/components/sections/agents/AgentsSidebar";
+import { AgentsPage } from "@/components/sections/agents/AgentsPage";
+import { BehaviorPage } from "@/components/sections/behavior/BehaviorPage";
+import { CommandsSidebar } from "@/components/sections/commands/CommandsSidebar";
+import { CommandsPage } from "@/components/sections/commands/CommandsPage";
+import { McpSidebar } from "@/components/sections/mcp/McpSidebar";
+import { McpPage } from "@/components/sections/mcp/McpPage";
+import { PluginsSidebar, PluginsPage } from "@/components/sections/plugins";
+import { usePluginsStore } from "@/stores/usePluginsStore";
+import { SkillsSidebar } from "@/components/sections/skills/SkillsSidebar";
+import { SkillsPage } from "@/components/sections/skills/SkillsPage";
+import { ProjectsSidebar } from "@/components/sections/projects/ProjectsSidebar";
+import { ProjectsPage } from "@/components/sections/projects/ProjectsPage";
+import { RemoteInstancesPage } from "@/components/sections/remote-instances/RemoteInstancesPage";
+import { ProvidersSidebar } from "@/components/sections/providers/ProvidersSidebar";
+import { ProvidersPage } from "@/components/sections/providers/ProvidersPage";
+import { UsageSidebar } from "@/components/sections/usage/UsageSidebar";
+import { UsagePage } from "@/components/sections/usage/UsagePage";
+import { AnalyticsPage } from "@/components/sections/analytics/AnalyticsPage";
+import { MagicPromptsSidebar } from "@/components/sections/magic-prompts/MagicPromptsSidebar";
+import { MagicPromptsPage } from "@/components/sections/magic-prompts/MagicPromptsPage";
+import { SnippetsSidebar } from "@/components/sections/snippets/SnippetsSidebar";
+import { SnippetsPage } from "@/components/sections/snippets/SnippetsPage";
+import { GitPage } from "@/components/sections/git-identities/GitPage";
+import type { OpenChamberSection } from "@/components/sections/openchamber/types";
+import { OpenChamberPage } from "@/components/sections/openchamber/OpenChamberPage";
+import { AboutSettings } from "@/components/sections/openchamber/AboutSettings";
+import { SettingsPageLayout } from "@/components/sections/shared/SettingsPageLayout";
+import { SETTINGS_SECTION_TITLE_CLASS } from "@/components/sections/shared/SettingsSection";
+import { useDeviceInfo } from "@/lib/device";
 import {
-  SETTINGS_SECTION_TITLE_CLASS,
-} from '@/components/sections/shared/SettingsSection';
-import { useDeviceInfo } from '@/lib/device';
-import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
-import { isWindowsArm64 as isWindowsArm64Platform } from '@/lib/platform';
-import { useI18n } from '@/lib/i18n';
+  isDesktopLocalOriginActive,
+  isDesktopShell,
+  isVSCodeRuntime,
+  isWebRuntime,
+} from "@/lib/desktop";
+import { isWindowsArm64 as isWindowsArm64Platform } from "@/lib/platform";
+import { useI18n } from "@/lib/i18n";
 import { Icon } from "@/components/icon/Icon";
-import { McpIcon } from '@/components/icons/McpIcon';
-import { OpenCodeReloadFooterAction } from '@/components/views/OpenCodeReloadFooterAction';
+import { McpIcon } from "@/components/icons/McpIcon";
+import { OpenCodeReloadFooterAction } from "@/components/views/OpenCodeReloadFooterAction";
 import {
   selectPendingOpenCodeRestartCount,
   usePendingOpenCodeRestartStore,
-} from '@/stores/usePendingOpenCodeRestartStore';
+} from "@/stores/usePendingOpenCodeRestartStore";
 import {
   SETTINGS_PAGE_METADATA,
   getSettingsNavIcon,
@@ -61,18 +64,21 @@ import {
   type SettingsPageSlug,
   type SettingsRuntimeContext,
   type SettingsPageMeta,
-} from '@/lib/settings/metadata';
-import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/settings/search';
+} from "@/lib/settings/metadata";
+import {
+  buildSettingsSearchResults,
+  type SettingsSearchResult,
+} from "@/lib/settings/search";
 
 // UI Kit: fixed settings navigation width
 const SETTINGS_NAV_WIDTH = 256;
 const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
-const SETTINGS_DETAIL_HISTORY_KEY = '__openchamberSettingsDetail';
+const SETTINGS_DETAIL_HISTORY_KEY = "__openchamberSettingsDetail";
 
-type MobileStage = 'nav' | 'page-sidebar' | 'page-content';
+type MobileStage = "nav" | "page-sidebar" | "page-content";
 type SettingsDetailHistoryEntry = {
   page: SettingsPageSlug;
-  stage: 'page-content';
+  stage: "page-content";
 };
 
 interface SettingsViewProps {
@@ -88,46 +94,52 @@ interface SettingsViewProps {
 
 const pageOrder: SettingsPageSlug[] = [
   // 'general' group — OpenChamber
-  'general',
-  'appearance',
-  'chat',
-  'notifications',
-  'sessions',
-  'shortcuts',
-  'voice',
-  'integrations',
-  'usage',
-  'about',
+  "general",
+  "appearance",
+  "chat",
+  "notifications",
+  "sessions",
+  "shortcuts",
+  "voice",
+  "usage",
+  "analytics",
+  "about",
   // 'projects' group — Workspace
-  'projects',
-  'remote-instances',
-  'tunnel',
-  'git',
+  "projects",
+  "remote-instances",
+  "tunnel",
+  "git",
   // 'opencode' group — OpenCode
-  'providers',
-  'agents',
-  'behavior',
-  'commands',
-  'mcp',
-  'plugins',
+  "providers",
+  "agents",
+  "behavior",
+  "commands",
+  "mcp",
+  "plugins",
   // 'content' group — Library
-  'magic-prompts',
-  'snippets',
-  'skills.installed',
-  'skills.catalog',
+  "magic-prompts",
+  "snippets",
+  "skills.installed",
+  "skills.catalog",
 ];
 
-const NAV_GROUP_ORDER = ['general', 'projects', 'opencode', 'content'] as const;
+const NAV_GROUP_ORDER = ["general", "projects", "opencode", "content"] as const;
 
-const ADD_PROVIDER_SETTINGS_ID = '__add_provider__';
+const ADD_PROVIDER_SETTINGS_ID = "__add_provider__";
 
-function buildRuntimeContext(isDesktop: boolean, isMobile: boolean): SettingsRuntimeContext {
+function buildRuntimeContext(
+  isDesktop: boolean,
+  isMobile: boolean,
+): SettingsRuntimeContext {
   const isVSCode = isVSCodeRuntime();
   const isWeb = !isDesktop && isWebRuntime();
   return { isVSCode, isWeb, isDesktop, isMobile };
 }
 
-function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): boolean {
+function isPageAvailable(
+  page: SettingsPageMeta,
+  ctx: SettingsRuntimeContext,
+): boolean {
   if (!page.isAvailable) {
     return true;
   }
@@ -135,10 +147,13 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function nextUniqueName(baseName: string, existingNames: Iterable<string>): string {
+function nextUniqueName(
+  baseName: string,
+  existingNames: Iterable<string>,
+): string {
   const existing = new Set(existingNames);
   let name = baseName;
   let counter = 1;
@@ -149,7 +164,9 @@ function nextUniqueName(baseName: string, existingNames: Iterable<string>): stri
   return name;
 }
 
-function getSettingsDetailHistoryEntry(state: unknown): SettingsDetailHistoryEntry | null {
+function getSettingsDetailHistoryEntry(
+  state: unknown,
+): SettingsDetailHistoryEntry | null {
   if (!isObjectRecord(state)) {
     return null;
   }
@@ -161,7 +178,7 @@ function getSettingsDetailHistoryEntry(state: unknown): SettingsDetailHistoryEnt
 
   const page = detail.page;
   const stage = detail.stage;
-  if (typeof page !== 'string' || stage !== 'page-content') {
+  if (typeof page !== "string" || stage !== "page-content") {
     return null;
   }
 
@@ -170,43 +187,58 @@ function getSettingsDetailHistoryEntry(state: unknown): SettingsDetailHistoryEnt
 }
 
 function getCurrentHistoryState(): Record<string, unknown> {
-  if (typeof window === 'undefined' || !isObjectRecord(window.history.state)) {
+  if (typeof window === "undefined" || !isObjectRecord(window.history.state)) {
     return {};
   }
   return window.history.state;
 }
 
-
-export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile, isWindowed, visiblePageSlugs, initialMobileStage = 'nav' }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({
+  onClose,
+  forceMobile,
+  isWindowed,
+  visiblePageSlugs,
+  initialMobileStage = "nav",
+}) => {
   const { t } = useI18n();
   const deviceInfo = useDeviceInfo();
   const isMobile = forceMobile ?? deviceInfo.isMobile;
-  const pendingRestartCount = usePendingOpenCodeRestartStore(selectPendingOpenCodeRestartCount);
+  const pendingRestartCount = usePendingOpenCodeRestartStore(
+    selectPendingOpenCodeRestartCount,
+  );
 
   const settingsPageRaw = useUIStore((state) => state.settingsPage);
-  const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
+  const isSettingsDialogOpen = useUIStore(
+    (state) => state.isSettingsDialogOpen,
+  );
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const settingsSlug = resolveSettingsSlug(settingsPageRaw);
 
-  const [mobileStage, setMobileStage] = React.useState<MobileStage>(initialMobileStage);
+  const [mobileStage, setMobileStage] =
+    React.useState<MobileStage>(initialMobileStage);
   // Seed with the mount-time slug when opening at the nav stage: the slug
   // persists across opens, and the deep-link auto-jump below must react only
   // to slug CHANGES after mount — not re-enter the previously visited page
   // every time settings reopen.
-  const autoNavSlugRef = React.useRef<string | null>(initialMobileStage === 'nav' ? settingsSlug : null);
+  const autoNavSlugRef = React.useRef<string | null>(
+    initialMobileStage === "nav" ? settingsSlug : null,
+  );
 
   // No starter page on desktop: 'home' (fresh state) resolves to General.
   // settingsPage persists in the UI store, so subsequent opens restore the
   // last visited page. Mobile keeps 'home' — its entry stage is the nav list.
   React.useEffect(() => {
-    if (!isMobile && settingsSlug === 'home') {
-      setSettingsPage('general');
+    if (!isMobile && settingsSlug === "home") {
+      setSettingsPage("general");
     }
   }, [isMobile, setSettingsPage, settingsSlug]);
 
-  const [settingsSearchQuery, setSettingsSearchQuery] = React.useState('');
-  const [pendingSearchItemId, setPendingSearchItemId] = React.useState<string | null>(null);
-  const [activeSearchResultIndex, setActiveSearchResultIndex] = React.useState(0);
+  const [settingsSearchQuery, setSettingsSearchQuery] = React.useState("");
+  const [pendingSearchItemId, setPendingSearchItemId] = React.useState<
+    string | null
+  >(null);
+  const [activeSearchResultIndex, setActiveSearchResultIndex] =
+    React.useState(0);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const searchResultRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
   const activeSearchResultIndexRef = React.useRef(0);
@@ -219,35 +251,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return isDesktopShell() && isDesktopLocalOriginActive();
   }, []);
   const isMac = React.useMemo(() => {
-    return isDesktopShell() && typeof window !== 'undefined'
-      && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'darwin';
+    return (
+      isDesktopShell() &&
+      typeof window !== "undefined" &&
+      (window as unknown as { __OPENCHAMBER_PLATFORM__?: string })
+        .__OPENCHAMBER_PLATFORM__ === "darwin"
+    );
   }, []);
   const isWindows = React.useMemo(() => {
-    return isDesktopShell() && typeof window !== 'undefined'
-      && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'win32';
+    return (
+      isDesktopShell() &&
+      typeof window !== "undefined" &&
+      (window as unknown as { __OPENCHAMBER_PLATFORM__?: string })
+        .__OPENCHAMBER_PLATFORM__ === "win32"
+    );
   }, []);
   const isLinux = React.useMemo(() => {
-    return isDesktopShell() && typeof window !== 'undefined'
-      && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'linux';
+    return (
+      isDesktopShell() &&
+      typeof window !== "undefined" &&
+      (window as unknown as { __OPENCHAMBER_PLATFORM__?: string })
+        .__OPENCHAMBER_PLATFORM__ === "linux"
+    );
   }, []);
   const isWindowsArm64 = React.useMemo(() => isWindowsArm64Platform(), []);
 
   // keep platform check available for future window chrome tweaks
 
-  const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp, isMobile), [isDesktopApp, isMobile]);
+  const runtimeCtx = React.useMemo(
+    () => buildRuntimeContext(isDesktopApp, isMobile),
+    [isDesktopApp, isMobile],
+  );
 
   const visiblePages = React.useMemo(() => {
-    const allowedPages = visiblePageSlugs ? new Set<SettingsPageSlug>(visiblePageSlugs) : null;
-    return SETTINGS_PAGE_METADATA
-      .filter((page) => page.slug !== 'home')
+    const allowedPages = visiblePageSlugs
+      ? new Set<SettingsPageSlug>(visiblePageSlugs)
+      : null;
+    return SETTINGS_PAGE_METADATA.filter((page) => page.slug !== "home")
       .filter((page) => !allowedPages || allowedPages.has(page.slug))
       .filter((page) => isPageAvailable(page, runtimeCtx))
-      .filter((page) => !(runtimeCtx.isVSCode && page.slug === 'projects'))
-      .filter((page) => !(isMobile && page.slug === 'shortcuts'));
+      .filter((page) => !(runtimeCtx.isVSCode && page.slug === "projects"))
+      .filter((page) => !(isMobile && page.slug === "shortcuts"));
   }, [runtimeCtx, isMobile, visiblePageSlugs]);
 
   const sortedFilteredPages = React.useMemo(() => {
-    const rank = new Map<SettingsPageSlug, number>(pageOrder.map((s, i) => [s, i]));
+    const rank = new Map<SettingsPageSlug, number>(
+      pageOrder.map((s, i) => [s, i]),
+    );
     return visiblePages
       .slice()
       .sort((a, b) => (rank.get(a.slug) ?? 999) - (rank.get(b.slug) ?? 999));
@@ -261,62 +311,56 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return;
     }
 
-    if (settingsSlug === 'agents') {
+    if (settingsSlug === "agents") {
       void useAgentsStore.getState().loadAgents();
       return;
     }
-    if (settingsSlug === 'commands') {
+    if (settingsSlug === "commands") {
       void useCommandsStore.getState().loadCommands();
       return;
     }
-    if (settingsSlug === 'mcp') {
+    if (settingsSlug === "mcp") {
       void useMcpConfigStore.getState().loadMcpConfigs();
       return;
     }
-    if (settingsSlug === 'plugins') {
+    if (settingsSlug === "plugins") {
       void usePluginsStore.getState().loadPlugins();
       return;
     }
-    if (settingsSlug === 'skills.installed' || settingsSlug === 'skills.catalog') {
+    if (
+      settingsSlug === "skills.installed" ||
+      settingsSlug === "skills.catalog"
+    ) {
       void useSkillsStore.getState().loadSkills();
       void useSkillsCatalogStore.getState().loadCatalog();
     }
-    if (settingsSlug === 'snippets') {
+    if (settingsSlug === "snippets") {
       void useSnippetsStore.getState().loadSnippets();
     }
-  }, [activeProjectId, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode, settingsSlug]);
+  }, [
+    activeProjectId,
+    isSettingsDialogOpen,
+    isWindowed,
+    runtimeCtx.isVSCode,
+    settingsSlug,
+  ]);
 
-  const openPage = React.useCallback((slug: SettingsPageSlug) => {
-    setSettingsPage(slug);
-    autoNavSlugRef.current = slug;
-    if (!isMobile) {
-      return;
-    }
-    const def = getSettingsPageMeta(slug);
-    if (!def || def.slug === 'home') {
-      setMobileStage('nav');
-      return;
-    }
-    setMobileStage(def.kind === 'split' ? 'page-sidebar' : 'page-content');
-  }, [isMobile, setSettingsPage]);
-
-  const openThirdPartyProviderSetup = React.useCallback(async (providerId: string): Promise<boolean> => {
-    const configStore = useConfigStore.getState();
-    await configStore.loadProviders({ source: 'settings:third-party-provider-setup' });
-    const providerAvailable = useConfigStore.getState().providers.some(
-      (provider) => provider.id === providerId,
-    );
-    if (!providerAvailable) {
-      return false;
-    }
-
-    configStore.setSelectedProvider(providerId);
-    openPage('providers');
-    if (isMobile) {
-      setMobileStage('page-content');
-    }
-    return true;
-  }, [isMobile, openPage]);
+  const openPage = React.useCallback(
+    (slug: SettingsPageSlug) => {
+      setSettingsPage(slug);
+      autoNavSlugRef.current = slug;
+      if (!isMobile) {
+        return;
+      }
+      const def = getSettingsPageMeta(slug);
+      if (!def || def.slug === "home") {
+        setMobileStage("nav");
+        return;
+      }
+      setMobileStage(def.kind === "split" ? "page-sidebar" : "page-content");
+    },
+    [isMobile, setSettingsPage],
+  );
 
   const activePageMeta = React.useMemo(() => {
     return getSettingsPageMeta(settingsSlug);
@@ -324,153 +368,216 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   // Nav is always open (collapsed state removed)
 
-  const openChamberSectionBySlug: Partial<Record<SettingsPageSlug, OpenChamberSection>> = React.useMemo(() => ({
-    general: 'general',
-    appearance: 'visual',
-    chat: 'chat',
-    shortcuts: 'shortcuts',
-    sessions: 'sessions',
-    notifications: 'notifications',
-    voice: 'voice',
-    tunnel: 'tunnel',
-  }), []);
+  const openChamberSectionBySlug: Partial<
+    Record<SettingsPageSlug, OpenChamberSection>
+  > = React.useMemo(
+    () => ({
+      general: "general",
+      appearance: "visual",
+      chat: "chat",
+      shortcuts: "shortcuts",
+      sessions: "sessions",
+      notifications: "notifications",
+      voice: "voice",
+      tunnel: "tunnel",
+    }),
+    [],
+  );
 
-  const getPageTitle = React.useCallback((slug: SettingsPageSlug): string => {
-    switch (slug) {
-      case 'general':
-        return t('settings.page.general.title');
-      case 'projects':
-        return t('settings.page.projects.title');
-      case 'remote-instances':
-        return t('settings.page.remoteInstances.title');
-      case 'providers':
-        return t('settings.page.providers.title');
-      case 'usage':
-        return t('settings.page.usage.title');
-      case 'agents':
-        return t('settings.page.agents.title');
-      case 'behavior':
-        return t('settings.page.behavior.title');
-      case 'commands':
-        return t('settings.page.commands.title');
-      case 'mcp':
-        return t('settings.page.mcp.title');
-      case 'plugins':
-        return t('settings.page.plugins.title');
-      case 'skills.installed':
-        return t('settings.page.skills.title');
-      case 'skills.catalog':
-        return t('settings.page.skillsCatalog.title');
-      case 'git':
-        return t('settings.page.git.title');
-      case 'integrations':
-        return t('settings.page.integrations.title');
-      case 'appearance':
-        return t('settings.page.appearance.title');
-      case 'chat':
-        return t('settings.page.chat.title');
-      case 'shortcuts':
-        return t('settings.page.shortcuts.title');
-      case 'sessions':
-        return t('settings.page.sessions.title');
-      case 'magic-prompts':
-        return t('settings.page.magicPrompts.title');
-      case 'snippets':
-        return t('settings.page.snippets.title');
-      case 'notifications':
-        return t('settings.page.notifications.title');
-      case 'voice':
-        return t('settings.page.voice.title');
-      case 'tunnel':
-        return t('settings.page.tunnel.title');
-      case 'about':
-        return t('settings.page.about.title');
-      case 'home':
-      default:
-        return t('settings.view.home.title');
-    }
-  }, [t]);
+  const getPageTitle = React.useCallback(
+    (slug: SettingsPageSlug): string => {
+      switch (slug) {
+        case "general":
+          return t("settings.page.general.title");
+        case "projects":
+          return t("settings.page.projects.title");
+        case "remote-instances":
+          return t("settings.page.remoteInstances.title");
+        case "providers":
+          return t("settings.page.providers.title");
+        case "analytics":
+          return t("settings.page.analytics.title");
+        case "usage":
+          return t("settings.page.usage.title");
+        case "agents":
+          return t("settings.page.agents.title");
+        case "behavior":
+          return t("settings.page.behavior.title");
+        case "commands":
+          return t("settings.page.commands.title");
+        case "mcp":
+          return t("settings.page.mcp.title");
+        case "plugins":
+          return t("settings.page.plugins.title");
+        case "skills.installed":
+          return t("settings.page.skills.title");
+        case "skills.catalog":
+          return t("settings.page.skillsCatalog.title");
+        case "git":
+          return t("settings.page.git.title");
+        case "appearance":
+          return t("settings.page.appearance.title");
+        case "chat":
+          return t("settings.page.chat.title");
+        case "shortcuts":
+          return t("settings.page.shortcuts.title");
+        case "sessions":
+          return t("settings.page.sessions.title");
+        case "magic-prompts":
+          return t("settings.page.magicPrompts.title");
+        case "snippets":
+          return t("settings.page.snippets.title");
+        case "notifications":
+          return t("settings.page.notifications.title");
+        case "voice":
+          return t("settings.page.voice.title");
+        case "tunnel":
+          return t("settings.page.tunnel.title");
+        case "about":
+          return t("settings.page.about.title");
+        case "home":
+        default:
+          return t("settings.view.home.title");
+      }
+    },
+    [t],
+  );
 
   const settingsSearchResults = React.useMemo(() => {
     return buildSettingsSearchResults({
       query: settingsSearchQuery,
-      runtimeCtx: { ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, isLinux, isWindowsArm64 },
+      runtimeCtx: {
+        ...runtimeCtx,
+        isDesktopLocalOrigin,
+        isMac,
+        isWindows,
+        isLinux,
+        isWindowsArm64,
+      },
       visiblePageSlugs,
       t,
       getPageTitle,
     });
-  }, [getPageTitle, isWindowsArm64, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
+  }, [
+    getPageTitle,
+    isWindowsArm64,
+    isDesktopLocalOrigin,
+    isMac,
+    isWindows,
+    isLinux,
+    runtimeCtx,
+    settingsSearchQuery,
+    t,
+    visiblePageSlugs,
+  ]);
 
-  const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
-    if (result.id.startsWith('agents.')) {
-      const store = useAgentsStore.getState();
-      const name = nextUniqueName('new-agent', store.agents.map((agent) => agent.name));
-      store.setAgentDraft({ name, scope: 'user' });
-      store.setSelectedAgent(name);
-      return result.id === 'agents.create' ? 'agents.name' : result.id;
-    }
+  const prepareSettingsSearchTarget = React.useCallback(
+    (result: SettingsSearchResult): string => {
+      if (result.id.startsWith("agents.")) {
+        const store = useAgentsStore.getState();
+        const name = nextUniqueName(
+          "new-agent",
+          store.agents.map((agent) => agent.name),
+        );
+        store.setAgentDraft({ name, scope: "user" });
+        store.setSelectedAgent(name);
+        return result.id === "agents.create" ? "agents.name" : result.id;
+      }
 
-    if (result.id.startsWith('commands.')) {
-      const store = useCommandsStore.getState();
-      const name = nextUniqueName('new-command', store.commands.map((command) => command.name));
-      store.setCommandDraft({ name, scope: 'user' });
-      store.setSelectedCommand(name);
-      return result.id === 'commands.create' ? 'commands.name' : result.id;
-    }
+      if (result.id.startsWith("commands.")) {
+        const store = useCommandsStore.getState();
+        const name = nextUniqueName(
+          "new-command",
+          store.commands.map((command) => command.name),
+        );
+        store.setCommandDraft({ name, scope: "user" });
+        store.setSelectedCommand(name);
+        return result.id === "commands.create" ? "commands.name" : result.id;
+      }
 
-    if (result.id.startsWith('mcp.')) {
-      const store = useMcpConfigStore.getState();
-      const name = nextUniqueName('new-mcp-server', store.mcpServers.map((server) => server.name));
-      store.setMcpDraft({
-        name,
-        scope: 'user',
-        type: 'local',
-        command: [],
-        url: '',
-        environment: [],
-        headers: [],
-        oauthEnabled: true,
-        oauthClientId: '',
-        oauthClientSecret: '',
-        oauthScope: '',
-        oauthRedirectUri: '',
-        timeout: '',
-        enabled: true,
-      });
-      store.setSelectedMcp(name);
-      return result.id === 'mcp.create' ? 'mcp.server' : result.id;
-    }
+      if (result.id.startsWith("mcp.")) {
+        const store = useMcpConfigStore.getState();
+        const name = nextUniqueName(
+          "new-mcp-server",
+          store.mcpServers.map((server) => server.name),
+        );
+        store.setMcpDraft({
+          name,
+          scope: "user",
+          type: "local",
+          command: [],
+          url: "",
+          environment: [],
+          headers: [],
+          oauthEnabled: true,
+          oauthClientId: "",
+          oauthClientSecret: "",
+          oauthScope: "",
+          oauthRedirectUri: "",
+          timeout: "",
+          enabled: true,
+        });
+        store.setSelectedMcp(name);
+        return result.id === "mcp.create" ? "mcp.server" : result.id;
+      }
 
-    if (result.id.startsWith('snippets.')) {
-      const store = useSnippetsStore.getState();
-      const name = nextUniqueName('new-snippet', store.snippets.map((snippet) => snippet.name));
-      store.setSnippetDraft({ name, scope: 'global' });
-      store.setSelectedSnippet(name);
-      return result.id === 'snippets.create' ? 'snippets.content' : result.id;
-    }
+      if (result.id.startsWith("snippets.")) {
+        const store = useSnippetsStore.getState();
+        const name = nextUniqueName(
+          "new-snippet",
+          store.snippets.map((snippet) => snippet.name),
+        );
+        store.setSnippetDraft({ name, scope: "global" });
+        store.setSelectedSnippet(name);
+        return result.id === "snippets.create" ? "snippets.content" : result.id;
+      }
 
-    if (result.id.startsWith('skills.')) {
-      const store = useSkillsStore.getState();
-      const name = nextUniqueName('new-skill', store.skills.map((skill) => skill.name));
-      store.setSkillDraft({ name, scope: 'user', source: 'opencode', description: '', instructions: '' });
-      store.setSelectedSkill(name);
-      return result.id === 'skills.create' ? 'skills.basic-information' : result.id;
-    }
+      if (result.id.startsWith("skills.")) {
+        const store = useSkillsStore.getState();
+        const name = nextUniqueName(
+          "new-skill",
+          store.skills.map((skill) => skill.name),
+        );
+        store.setSkillDraft({
+          name,
+          scope: "user",
+          source: "opencode",
+          description: "",
+          instructions: "",
+        });
+        store.setSelectedSkill(name);
+        return result.id === "skills.create"
+          ? "skills.basic-information"
+          : result.id;
+      }
 
-    if (result.id === 'providers.connect') {
-      useConfigStore.getState().setSelectedProvider(ADD_PROVIDER_SETTINGS_ID);
-    }
+      if (result.id === "providers.connect") {
+        useConfigStore.getState().setSelectedProvider(ADD_PROVIDER_SETTINGS_ID);
+      }
 
-    if (result.id === 'plugins.create') {
-      return 'plugins.spec';
-    }
+      if (result.id === "plugins.create") {
+        return "plugins.spec";
+      }
 
-    return result.id;
-  }, []);
+      return result.id;
+    },
+    [],
+  );
 
   const groupedSettingsSearchResults = React.useMemo(() => {
-    const groups: Array<{ page: SettingsPageSlug; pageTitle: string; results: SettingsSearchResult[] }> = [];
-    const groupByPage = new Map<SettingsPageSlug, { page: SettingsPageSlug; pageTitle: string; results: SettingsSearchResult[] }>();
+    const groups: Array<{
+      page: SettingsPageSlug;
+      pageTitle: string;
+      results: SettingsSearchResult[];
+    }> = [];
+    const groupByPage = new Map<
+      SettingsPageSlug,
+      {
+        page: SettingsPageSlug;
+        pageTitle: string;
+        results: SettingsSearchResult[];
+      }
+    >();
     for (const result of settingsSearchResults) {
       let group = groupByPage.get(result.page);
       if (!group) {
@@ -494,7 +601,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [activeSearchResultIndex]);
 
   React.useEffect(() => {
-    searchResultRefs.current[activeSearchResultIndex]?.scrollIntoView({ block: 'nearest' });
+    searchResultRefs.current[activeSearchResultIndex]?.scrollIntoView({
+      block: "nearest",
+    });
   }, [activeSearchResultIndex]);
 
   React.useEffect(() => {
@@ -504,58 +613,76 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     searchResultRefs.current.length = settingsSearchResults.length;
   }, [activeSearchResultIndex, settingsSearchResults.length]);
 
-  const openSearchResult = React.useCallback((result: SettingsSearchResult) => {
-    const targetId = prepareSettingsSearchTarget(result);
-    setPendingSearchItemId(targetId);
-    openPage(result.page);
-    if (isMobile) {
-      setMobileStage('page-content');
-    }
-    if (result.id === 'plugins.create' && typeof window !== 'undefined') {
-      window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('openchamber:settings-open-plugin-add'));
-      }, 50);
-    }
-  }, [isMobile, openPage, prepareSettingsSearchTarget]);
-
-  const handleSettingsSearchKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!settingsSearchQuery.trim()) {
-      return;
-    }
-
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      setSettingsSearchQuery('');
-      return;
-    }
-
-    if (settingsSearchResults.length === 0) {
-      return;
-    }
-
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      keyboardSearchNavigationRef.current = true;
-      setActiveSearchResultIndex((current) => (current + 1) % settingsSearchResults.length);
-      return;
-    }
-
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      keyboardSearchNavigationRef.current = true;
-      setActiveSearchResultIndex((current) => (current - 1 + settingsSearchResults.length) % settingsSearchResults.length);
-      return;
-    }
-
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      const safeIndex = ((activeSearchResultIndexRef.current % settingsSearchResults.length) + settingsSearchResults.length) % settingsSearchResults.length;
-      const result = settingsSearchResults[safeIndex] ?? settingsSearchResults[0];
-      if (result) {
-        openSearchResult(result);
+  const openSearchResult = React.useCallback(
+    (result: SettingsSearchResult) => {
+      const targetId = prepareSettingsSearchTarget(result);
+      setPendingSearchItemId(targetId);
+      openPage(result.page);
+      if (isMobile) {
+        setMobileStage("page-content");
       }
-    }
-  }, [openSearchResult, settingsSearchQuery, settingsSearchResults]);
+      if (result.id === "plugins.create" && typeof window !== "undefined") {
+        window.setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent("openchamber:settings-open-plugin-add"),
+          );
+        }, 50);
+      }
+    },
+    [isMobile, openPage, prepareSettingsSearchTarget],
+  );
+
+  const handleSettingsSearchKeyDown = React.useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (!settingsSearchQuery.trim()) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSettingsSearchQuery("");
+        return;
+      }
+
+      if (settingsSearchResults.length === 0) {
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        keyboardSearchNavigationRef.current = true;
+        setActiveSearchResultIndex(
+          (current) => (current + 1) % settingsSearchResults.length,
+        );
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        keyboardSearchNavigationRef.current = true;
+        setActiveSearchResultIndex(
+          (current) =>
+            (current - 1 + settingsSearchResults.length) %
+            settingsSearchResults.length,
+        );
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const safeIndex =
+          ((activeSearchResultIndexRef.current % settingsSearchResults.length) +
+            settingsSearchResults.length) %
+          settingsSearchResults.length;
+        const result =
+          settingsSearchResults[safeIndex] ?? settingsSearchResults[0];
+        if (result) {
+          openSearchResult(result);
+        }
+      }
+    },
+    [openSearchResult, settingsSearchQuery, settingsSearchResults],
+  );
 
   React.useEffect(() => {
     const targetId = pendingSearchItemId;
@@ -568,18 +695,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       if (cancelled) {
         return;
       }
-      const escapedId = typeof CSS !== 'undefined' && CSS.escape
-        ? CSS.escape(targetId)
-        : targetId.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
-      const target = containerRef.current?.querySelector<HTMLElement>(`[data-settings-item="${escapedId}"]`);
+      const escapedId =
+        typeof CSS !== "undefined" && CSS.escape
+          ? CSS.escape(targetId)
+          : targetId.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+      const target = containerRef.current?.querySelector<HTMLElement>(
+        `[data-settings-item="${escapedId}"]`,
+      );
       if (!target) {
         return;
       }
       setPendingSearchItemId(null);
-      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      target.setAttribute('data-settings-search-highlight', 'true');
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.setAttribute("data-settings-search-highlight", "true");
       window.setTimeout(() => {
-        target.removeAttribute('data-settings-search-highlight');
+        target.removeAttribute("data-settings-search-highlight");
       }, 1600);
     });
 
@@ -593,180 +723,199 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return (
       <div className="flex h-full items-center justify-center px-6">
         <div className="max-w-md text-center">
-          <div className={SETTINGS_SECTION_TITLE_CLASS}>{t('settings.view.unavailable.title')}</div>
-          <p className="typography-ui text-muted-foreground mt-1">{t('settings.view.unavailable.description')}</p>
+          <div className={SETTINGS_SECTION_TITLE_CLASS}>
+            {t("settings.view.unavailable.title")}
+          </div>
+          <p className="typography-ui text-muted-foreground mt-1">
+            {t("settings.view.unavailable.description")}
+          </p>
         </div>
       </div>
     );
   }, [t]);
 
-  const renderPageSidebar = React.useCallback((slug: SettingsPageSlug, opts: { onItemSelect?: () => void }) => {
-    switch (slug) {
-      case 'projects':
-        return <ProjectsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'agents':
-        return <AgentsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'commands':
-        return <CommandsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'mcp':
-        return <McpSidebar onItemSelect={opts.onItemSelect} />;
-      case 'plugins':
-        return <PluginsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'skills.installed':
-        return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'providers':
-        return <ProvidersSidebar onItemSelect={opts.onItemSelect} />;
-      case 'usage':
-        return <UsageSidebar onItemSelect={opts.onItemSelect} />;
-      case 'magic-prompts':
-        return <MagicPromptsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'snippets':
-        return <SnippetsSidebar onItemSelect={opts.onItemSelect} />;
-      default:
-        return null;
-    }
-  }, []);
-
-  const renderPageContent = React.useCallback((slug: SettingsPageSlug) => {
-    const meta = getSettingsPageMeta(slug);
-    if (meta && !isPageAvailable(meta, runtimeCtx)) {
-      return renderUnavailable();
-    }
-
-    switch (slug) {
-      case 'projects':
-        return <ProjectsPage />;
-      case 'remote-instances':
-        return <RemoteInstancesPage />;
-      case 'agents':
-        return <AgentsPage />;
-      case 'behavior':
-        return <BehaviorPage />;
-      case 'commands':
-        return <CommandsPage />;
-      case 'mcp':
-        return <McpPage />;
-      case 'plugins':
-        return <PluginsPage />;
-      case 'skills.installed':
-        return <SkillsPage view="installed" />;
-      case 'skills.catalog':
-        return <SkillsPage view="catalog" />;
-      case 'providers':
-        return <ProvidersPage />;
-      case 'usage':
-        return <UsagePage />;
-      case 'about':
-        return (
-          <SettingsPageLayout title={t('settings.page.about.title')} showSaveStatus={false}>
-            <AboutSettings />
-          </SettingsPageLayout>
-        );
-      case 'magic-prompts':
-        return <MagicPromptsPage />;
-      case 'snippets':
-        return <SnippetsPage />;
-      case 'git':
-        return <GitPage />;
-      case 'integrations':
-        return (
-          <IntegrationsPage
-            onOpenProviderSetup={openThirdPartyProviderSetup}
-            onOpenPluginManager={() => openPage('plugins')}
-          />
-        );
-      case 'general':
-      case 'appearance':
-      case 'chat':
-      case 'shortcuts':
-      case 'sessions':
-      case 'notifications':
-      case 'voice':
-      case 'tunnel': {
-        const section = openChamberSectionBySlug[slug] ?? 'visual';
-        return <OpenChamberPage section={section} />;
+  const renderPageSidebar = React.useCallback(
+    (slug: SettingsPageSlug, opts: { onItemSelect?: () => void }) => {
+      switch (slug) {
+        case "projects":
+          return <ProjectsSidebar onItemSelect={opts.onItemSelect} />;
+        case "agents":
+          return <AgentsSidebar onItemSelect={opts.onItemSelect} />;
+        case "commands":
+          return <CommandsSidebar onItemSelect={opts.onItemSelect} />;
+        case "mcp":
+          return <McpSidebar onItemSelect={opts.onItemSelect} />;
+        case "plugins":
+          return <PluginsSidebar onItemSelect={opts.onItemSelect} />;
+        case "skills.installed":
+          return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
+        case "providers":
+          return <ProvidersSidebar onItemSelect={opts.onItemSelect} />;
+        case "usage":
+          return <UsageSidebar onItemSelect={opts.onItemSelect} />;
+        case "magic-prompts":
+          return <MagicPromptsSidebar onItemSelect={opts.onItemSelect} />;
+        case "snippets":
+          return <SnippetsSidebar onItemSelect={opts.onItemSelect} />;
+        default:
+          return null;
       }
-      case 'home':
-      default:
-        return null;
-    }
-  }, [openChamberSectionBySlug, openPage, openThirdPartyProviderSetup, renderUnavailable, runtimeCtx, t]);
+    },
+    [],
+  );
+
+  const renderPageContent = React.useCallback(
+    (slug: SettingsPageSlug) => {
+      const meta = getSettingsPageMeta(slug);
+      if (meta && !isPageAvailable(meta, runtimeCtx)) {
+        return renderUnavailable();
+      }
+
+      switch (slug) {
+        case "projects":
+          return <ProjectsPage />;
+        case "remote-instances":
+          return <RemoteInstancesPage />;
+        case "agents":
+          return <AgentsPage />;
+        case "behavior":
+          return <BehaviorPage />;
+        case "commands":
+          return <CommandsPage />;
+        case "mcp":
+          return <McpPage />;
+        case "plugins":
+          return <PluginsPage />;
+        case "skills.installed":
+          return <SkillsPage view="installed" />;
+        case "skills.catalog":
+          return <SkillsPage view="catalog" />;
+        case "providers":
+          return <ProvidersPage />;
+        case "analytics":
+          return <AnalyticsPage />;
+        case "usage":
+          return <UsagePage />;
+        case "about":
+          return (
+            <SettingsPageLayout
+              title={t("settings.page.about.title")}
+              showSaveStatus={false}
+            >
+              <AboutSettings />
+            </SettingsPageLayout>
+          );
+        case "magic-prompts":
+          return <MagicPromptsPage />;
+        case "snippets":
+          return <SnippetsPage />;
+        case "git":
+          return <GitPage />;
+        case "general":
+        case "appearance":
+        case "chat":
+        case "shortcuts":
+        case "sessions":
+        case "notifications":
+        case "voice":
+        case "tunnel": {
+          const section = openChamberSectionBySlug[slug] ?? "visual";
+          return <OpenChamberPage section={section} />;
+        }
+        case "home":
+        default:
+          return null;
+      }
+    },
+    [openChamberSectionBySlug, renderUnavailable, runtimeCtx, t],
+  );
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {
     if (!isMobile) {
       return;
     }
-    if (mobileStage !== 'nav') {
+    if (mobileStage !== "nav") {
       return;
     }
-    if (settingsSlug === 'home') {
+    if (settingsSlug === "home") {
       return;
     }
     if (autoNavSlugRef.current === settingsSlug) {
       return;
     }
     const def = getSettingsPageMeta(settingsSlug);
-    if (!def || def.slug === 'home') {
+    if (!def || def.slug === "home") {
       return;
     }
     autoNavSlugRef.current = settingsSlug;
-    setMobileStage(def.kind === 'split' ? 'page-sidebar' : 'page-content');
+    setMobileStage(def.kind === "split" ? "page-sidebar" : "page-content");
   }, [isMobile, mobileStage, settingsSlug]);
 
-  const showBackButton = isMobile && mobileStage !== 'nav';
-  const backButtonTargetsPageSidebar = isMobile && mobileStage === 'page-content' && settingsSlug === 'skills.installed';
-  const showOpenPageSidebarButton = mobileStage === 'page-content'
-    && activePageMeta?.kind === 'split'
-    && !backButtonTargetsPageSidebar;
+  const showBackButton = isMobile && mobileStage !== "nav";
+  const backButtonTargetsPageSidebar =
+    isMobile &&
+    mobileStage === "page-content" &&
+    settingsSlug === "skills.installed";
+  const showOpenPageSidebarButton =
+    mobileStage === "page-content" &&
+    activePageMeta?.kind === "split" &&
+    !backButtonTargetsPageSidebar;
   const mobileBackButtonLabel = backButtonTargetsPageSidebar
-    ? t('settings.view.actions.back')
+    ? t("settings.view.actions.back")
     : showBackButton
-      ? t('settings.view.actions.backToSettings')
-      : t('settings.view.actions.closeSettings');
+      ? t("settings.view.actions.backToSettings")
+      : t("settings.view.actions.closeSettings");
   const shortcutKey = getModifierLabel();
 
-  const pushMobileSplitDetailHistory = React.useCallback((slug: SettingsPageSlug) => {
-    if (typeof window === 'undefined' || runtimeCtx.isVSCode) {
-      return;
-    }
+  const pushMobileSplitDetailHistory = React.useCallback(
+    (slug: SettingsPageSlug) => {
+      if (typeof window === "undefined" || runtimeCtx.isVSCode) {
+        return;
+      }
 
-    const currentDetail = getSettingsDetailHistoryEntry(window.history.state);
-    if (currentDetail?.page === slug && currentDetail.stage === 'page-content') {
-      return;
-    }
+      const currentDetail = getSettingsDetailHistoryEntry(window.history.state);
+      if (
+        currentDetail?.page === slug &&
+        currentDetail.stage === "page-content"
+      ) {
+        return;
+      }
 
-    window.history.pushState(
-      {
-        ...getCurrentHistoryState(),
-        [SETTINGS_DETAIL_HISTORY_KEY]: { page: slug, stage: 'page-content' },
-      },
-      '',
-      window.location.href,
-    );
-  }, [runtimeCtx.isVSCode]);
+      window.history.pushState(
+        {
+          ...getCurrentHistoryState(),
+          [SETTINGS_DETAIL_HISTORY_KEY]: { page: slug, stage: "page-content" },
+        },
+        "",
+        window.location.href,
+      );
+    },
+    [runtimeCtx.isVSCode],
+  );
 
   const handleMobilePageSidebarItemSelect = React.useCallback(() => {
-    setMobileStage('page-content');
-    if (settingsSlug === 'skills.installed') {
+    setMobileStage("page-content");
+    if (settingsSlug === "skills.installed") {
       pushMobileSplitDetailHistory(settingsSlug);
     }
   }, [pushMobileSplitDetailHistory, settingsSlug]);
 
   const handleBack = React.useCallback(() => {
     if (backButtonTargetsPageSidebar) {
-      const currentDetail = typeof window !== 'undefined'
-        ? getSettingsDetailHistoryEntry(window.history.state)
-        : null;
+      const currentDetail =
+        typeof window !== "undefined"
+          ? getSettingsDetailHistoryEntry(window.history.state)
+          : null;
       if (currentDetail?.page === settingsSlug && !runtimeCtx.isVSCode) {
         window.history.back();
         return;
       }
-      setMobileStage('page-sidebar');
+      setMobileStage("page-sidebar");
       return;
     }
 
-    setMobileStage('nav');
+    setMobileStage("nav");
   }, [backButtonTargetsPageSidebar, runtimeCtx.isVSCode, settingsSlug]);
 
   React.useEffect(() => {
@@ -775,27 +924,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     }
 
     const handlePopState = (event: PopStateEvent) => {
-      if (settingsSlug !== 'skills.installed') {
+      if (settingsSlug !== "skills.installed") {
         return;
       }
 
       const detail = getSettingsDetailHistoryEntry(event.state);
-      if (detail?.page === 'skills.installed') {
-        setMobileStage('page-content');
+      if (detail?.page === "skills.installed") {
+        setMobileStage("page-content");
         return;
       }
 
-      setMobileStage((stage) => stage === 'page-content' ? 'page-sidebar' : stage);
+      setMobileStage((stage) =>
+        stage === "page-content" ? "page-sidebar" : stage,
+      );
     };
 
-    window.addEventListener('popstate', handlePopState);
+    window.addEventListener("popstate", handlePopState);
     return () => {
-      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener("popstate", handlePopState);
     };
   }, [isMobile, runtimeCtx.isVSCode, settingsSlug]);
 
   const handleOpenPageSidebar = React.useCallback(() => {
-    setMobileStage('page-sidebar');
+    setMobileStage("page-sidebar");
   }, []);
 
   const renderSettingsNav = () => {
@@ -810,15 +961,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               value={settingsSearchQuery}
               onChange={(event) => setSettingsSearchQuery(event.target.value)}
               onKeyDown={handleSettingsSearchKeyDown}
-              placeholder={t('settings.view.search.placeholder')}
-              aria-label={t('settings.view.search.aria')}
+              placeholder={t("settings.view.search.placeholder")}
+              aria-label={t("settings.view.search.aria")}
               className="typography-ui min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground/70"
             />
             {hasSearchQuery && (
               <button
                 type="button"
-                onClick={() => setSettingsSearchQuery('')}
-                aria-label={t('settings.view.search.clear')}
+                onClick={() => setSettingsSearchQuery("")}
+                aria-label={t("settings.view.search.clear")}
                 className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground sm:h-5 sm:w-5"
               >
                 <Icon name="close" className="h-3.5 w-3.5" />
@@ -831,117 +982,142 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
           <div className="flex flex-col gap-0.5 px-4 pt-4 pb-2">
             {hasSearchQuery ? (
-              settingsSearchResults.length > 0 ? (() => {
-                let resultIndex = 0;
-                return groupedSettingsSearchResults.map((group) => (
-                  <div key={group.page} className="space-y-0.5">
-                    <div className="px-2 pb-0.5 pt-2 typography-micro font-medium text-muted-foreground/70">
-                      {group.pageTitle}
+              settingsSearchResults.length > 0 ? (
+                (() => {
+                  let resultIndex = 0;
+                  return groupedSettingsSearchResults.map((group) => (
+                    <div key={group.page} className="space-y-0.5">
+                      <div className="px-2 pb-0.5 pt-2 typography-micro font-medium text-muted-foreground/70">
+                        {group.pageTitle}
+                      </div>
+                      {group.results.map((result) => {
+                        const currentIndex = resultIndex;
+                        resultIndex += 1;
+                        const active = currentIndex === activeSearchResultIndex;
+                        const hasDescription = Boolean(result.description);
+                        return (
+                          <button
+                            key={result.id}
+                            type="button"
+                            ref={(element) => {
+                              searchResultRefs.current[currentIndex] = element;
+                            }}
+                            onMouseMove={() => {
+                              keyboardSearchNavigationRef.current = false;
+                              setActiveSearchResultIndex(currentIndex);
+                            }}
+                            onClick={() => openSearchResult(result)}
+                            className={cn(
+                              "flex w-full flex-col rounded-md px-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                              hasDescription ? "min-h-11 py-1.5" : "py-2",
+                              active
+                                ? "bg-interactive-selection"
+                                : "hover:bg-interactive-hover",
+                            )}
+                          >
+                            <span className="typography-ui-label text-foreground truncate">
+                              {result.title}
+                            </span>
+                            {hasDescription && (
+                              <span className="typography-micro text-muted-foreground/70 line-clamp-2">
+                                {result.description}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
-                    {group.results.map((result) => {
-                      const currentIndex = resultIndex;
-                      resultIndex += 1;
-                      const active = currentIndex === activeSearchResultIndex;
-                      const hasDescription = Boolean(result.description);
+                  ));
+                })()
+              ) : (
+                <div className="px-2 py-6 text-center typography-ui text-muted-foreground">
+                  {t("settings.view.search.noResults")}
+                </div>
+              )
+            ) : (
+              (() => {
+                const pagesByGroup = new Map<
+                  string,
+                  typeof sortedFilteredPages
+                >();
+                for (const page of sortedFilteredPages) {
+                  const group = page.group;
+                  const existing = pagesByGroup.get(group);
+                  if (existing) {
+                    existing.push(page);
+                  } else {
+                    pagesByGroup.set(group, [page]);
+                  }
+                }
+
+                const visibleGroups = NAV_GROUP_ORDER.map((group) => ({
+                  group,
+                  pages: pagesByGroup.get(group) ?? [],
+                })).filter((entry) => entry.pages.length > 0);
+
+                return visibleGroups.map(({ group, pages }, groupIndex) => (
+                  <div key={group} className="space-y-0.5">
+                    <div
+                      className={cn(
+                        "px-3 pb-1 typography-micro font-semibold uppercase tracking-wide text-muted-foreground sm:px-2 sm:pb-0.5",
+                        groupIndex === 0 ? "pt-1" : "pt-4 sm:pt-3",
+                      )}
+                    >
+                      {t(`settings.view.nav.group.${group}`)}
+                    </div>
+                    {pages.map((page) => {
+                      // On the mobile nav STAGE nothing is "current" — the user is
+                      // choosing, and settingsSlug only remembers the last visited
+                      // page. Keeping it highlighted read as a stuck selection.
+                      const selected =
+                        settingsSlug === page.slug &&
+                        !(isMobile && mobileStage === "nav");
+                      const iconName = getSettingsNavIcon(page.slug);
+                      if (!iconName && page.slug !== "mcp") return null;
+
                       return (
-                        <button
-                          key={result.id}
-                          type="button"
-                          ref={(element) => {
-                            searchResultRefs.current[currentIndex] = element;
-                          }}
-                          onMouseMove={() => {
-                            keyboardSearchNavigationRef.current = false;
-                            setActiveSearchResultIndex(currentIndex);
-                          }}
-                          onClick={() => openSearchResult(result)}
-                          className={cn(
-                            'flex w-full flex-col rounded-md px-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                            hasDescription ? 'min-h-11 py-1.5' : 'py-2',
-                            active ? 'bg-interactive-selection' : 'hover:bg-interactive-hover'
-                          )}
-                        >
-                          <span className="typography-ui-label text-foreground truncate">{result.title}</span>
-                          {hasDescription && (
-                            <span className="typography-micro text-muted-foreground/70 line-clamp-2">{result.description}</span>
-                          )}
-                        </button>
+                        <Tooltip key={page.slug}>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => openPage(page.slug)}
+                              aria-current={selected ? "page" : undefined}
+                              className={cn(
+                                "flex h-11 w-full items-center gap-2.5 rounded-md px-3 overflow-hidden sm:h-8 sm:gap-2 sm:px-2",
+                                selected
+                                  ? "bg-interactive-selection text-foreground"
+                                  : "text-foreground hover:bg-interactive-hover",
+                              )}
+                            >
+                              {page.slug === "mcp" ? (
+                                <McpIcon className="h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" />
+                              ) : (
+                                <Icon
+                                  name={iconName!}
+                                  className="h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4"
+                                />
+                              )}
+                              <span className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100">
+                                <span className="typography-ui-label font-normal truncate">
+                                  {getPageTitle(page.slug)}
+                                </span>
+                                {(page.slug === "tunnel" ||
+                                  page.slug === "integrations") && (
+                                  <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
+                                    {t("settings.view.badge.beta")}
+                                  </span>
+                                )}
+                              </span>
+                            </button>
+                          </TooltipTrigger>
+                        </Tooltip>
                       );
                     })}
                   </div>
                 ));
-              })() : (
-                <div className="px-2 py-6 text-center typography-ui text-muted-foreground">
-                  {t('settings.view.search.noResults')}
-                </div>
-              )
-            ) : (() => {
-              const pagesByGroup = new Map<string, typeof sortedFilteredPages>();
-              for (const page of sortedFilteredPages) {
-                const group = page.group;
-                const existing = pagesByGroup.get(group);
-                if (existing) {
-                  existing.push(page);
-                } else {
-                  pagesByGroup.set(group, [page]);
-                }
-              }
+              })()
+            )}
 
-              const visibleGroups = NAV_GROUP_ORDER
-                .map((group) => ({ group, pages: pagesByGroup.get(group) ?? [] }))
-                .filter((entry) => entry.pages.length > 0);
-
-              return visibleGroups.map(({ group, pages }, groupIndex) => (
-                <div key={group} className="space-y-0.5">
-                  <div
-                    className={cn(
-                      'px-3 pb-1 typography-micro font-semibold uppercase tracking-wide text-muted-foreground sm:px-2 sm:pb-0.5',
-                      groupIndex === 0 ? 'pt-1' : 'pt-4 sm:pt-3',
-                    )}
-                  >
-                    {t(`settings.view.nav.group.${group}`)}
-                  </div>
-                  {pages.map((page) => {
-                    // On the mobile nav STAGE nothing is "current" — the user is
-                    // choosing, and settingsSlug only remembers the last visited
-                    // page. Keeping it highlighted read as a stuck selection.
-                    const selected = settingsSlug === page.slug && !(isMobile && mobileStage === 'nav');
-                    const iconName = getSettingsNavIcon(page.slug);
-                    if (!iconName && page.slug !== 'mcp') return null;
-
-                    return (
-                      <Tooltip key={page.slug}>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={() => openPage(page.slug)}
-                            aria-current={selected ? 'page' : undefined}
-                            className={cn(
-                              'flex h-11 w-full items-center gap-2.5 rounded-md px-3 overflow-hidden sm:h-8 sm:gap-2 sm:px-2',
-                              selected
-                                ? 'bg-interactive-selection text-foreground'
-                                : 'text-foreground hover:bg-interactive-hover'
-                            )}
-                          >
-                            {page.slug === 'mcp'
-                              ? <McpIcon className="h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" />
-                              : <Icon name={iconName!} className="h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" />}
-                            <span className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100">
-                              <span className="typography-ui-label font-normal truncate">{getPageTitle(page.slug)}</span>
-                              {(page.slug === 'tunnel' || page.slug === 'integrations') && (
-                                <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
-                                  {t('settings.view.badge.beta')}
-                                </span>
-                              )}
-                            </span>
-                          </button>
-                        </TooltipTrigger>
-                      </Tooltip>
-                    );
-                  })}
-                </div>
-              ));
-            })()}
           </div>
         </div>
 
@@ -958,7 +1134,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   };
 
   const renderMobileStage = () => {
-    if (mobileStage === 'nav') {
+    if (mobileStage === "nav") {
       return (
         <div className="flex-1 min-h-0 overflow-hidden bg-background">
           <div className="flex h-full min-h-0 flex-col">
@@ -972,8 +1148,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return <div className="flex-1 bg-background" />;
     }
 
-    if (mobileStage === 'page-sidebar') {
-      if (activePageMeta.kind !== 'split') {
+    if (mobileStage === "page-sidebar") {
+      if (activePageMeta.kind !== "split") {
         // No sidebar available; fall back to direct content.
         const fallback = renderPageContent(settingsSlug);
         return (
@@ -985,7 +1161,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return (
         <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
           <ErrorBoundary>
-            {renderPageSidebar(settingsSlug, { onItemSelect: handleMobilePageSidebarItemSelect })}
+            {renderPageSidebar(settingsSlug, {
+              onItemSelect: handleMobilePageSidebarItemSelect,
+            })}
           </ErrorBoundary>
         </div>
       );
@@ -1002,14 +1180,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   };
 
   const renderDesktopContent = () => {
-    if (!activePageMeta || settingsSlug === 'home') {
+    if (!activePageMeta || settingsSlug === "home") {
       return null;
     }
 
-    if (activePageMeta.kind === 'split') {
+    if (activePageMeta.kind === "split") {
       return (
         <div className="flex h-full min-h-0 overflow-hidden">
-          <div className={cn('border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ width: SETTINGS_SPLIT_SIDEBAR_WIDTH, minWidth: SETTINGS_SPLIT_SIDEBAR_WIDTH, borderColor: 'var(--interactive-border)' }}>
+          <div
+            className={cn(
+              "border-r",
+              runtimeCtx.isVSCode ? "bg-background" : "bg-sidebar",
+            )}
+            style={{
+              width: SETTINGS_SPLIT_SIDEBAR_WIDTH,
+              minWidth: SETTINGS_SPLIT_SIDEBAR_WIDTH,
+              borderColor: "var(--interactive-border)",
+            }}
+          >
             <ErrorBoundary>{renderPageSidebar(settingsSlug, {})}</ErrorBoundary>
           </div>
           <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
@@ -1027,18 +1215,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   };
 
   return (
-    <div ref={containerRef} data-settings-view="true" className={cn('relative flex h-full min-h-0 flex-col overflow-hidden bg-background')}>
+    <div
+      ref={containerRef}
+      data-settings-view="true"
+      className={cn(
+        "relative flex h-full min-h-0 flex-col overflow-hidden bg-background",
+      )}
+    >
       {isMobile ? (
         <div
           className={cn(
-            'flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3',
+            "flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3",
             // The root nav list reads as a single quiet page — no divider and
             // no back arrow (the X on the right is the only way out); subpages
             // keep both.
-            mobileStage !== 'nav' && 'border-b',
-            'bg-background'
+            mobileStage !== "nav" && "border-b",
+            "bg-background",
           )}
-          style={mobileStage !== 'nav' ? { borderColor: 'var(--interactive-border)' } : undefined}
+          style={
+            mobileStage !== "nav"
+              ? { borderColor: "var(--interactive-border)" }
+              : undefined
+          }
         >
           {showBackButton ? (
             <button
@@ -1052,16 +1250,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           ) : null}
 
           <div className="min-w-0 flex-1 px-2 typography-ui-label font-medium text-foreground truncate">
-            {mobileStage === 'nav'
-              ? t('settings.view.home.title')
-              : (activePageMeta ? getPageTitle(activePageMeta.slug) : t('settings.view.home.title'))}
+            {mobileStage === "nav"
+              ? t("settings.view.home.title")
+              : activePageMeta
+                ? getPageTitle(activePageMeta.slug)
+                : t("settings.view.home.title")}
           </div>
 
           {showOpenPageSidebarButton && (
             <button
               type="button"
               onClick={handleOpenPageSidebar}
-              aria-label={t('settings.view.actions.openSectionList')}
+              aria-label={t("settings.view.actions.openSectionList")}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <Icon name="list-unordered" className="h-5 w-5" />
@@ -1072,8 +1272,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             <button
               type="button"
               onClick={onClose}
-              aria-label={t('settings.view.actions.closeSettings')}
-              title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
+              aria-label={t("settings.view.actions.closeSettings")}
+              title={t("settings.view.actions.closeSettingsWithShortcut", {
+                shortcut: shortcutKey,
+              })}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <Icon name="close" className="h-5 w-5" />
@@ -1083,11 +1285,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       ) : (
         <>
           {showBackButton && (
-            <div className={cn('absolute left-3 z-50', isWindowed ? 'top-2' : 'top-3')}>
+            <div
+              className={cn(
+                "absolute left-3 z-50",
+                isWindowed ? "top-2" : "top-3",
+              )}
+            >
               <button
                 type="button"
                 onClick={handleBack}
-                aria-label={t('settings.view.actions.back')}
+                aria-label={t("settings.view.actions.back")}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <Icon name="arrow-left-s" className="h-5 w-5" />
@@ -1095,19 +1302,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             </div>
           )}
 
-      {onClose && (
-        <div className={cn('absolute right-0.5 z-50', isWindowed ? 'top-0.5' : 'top-1')}>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t('settings.view.actions.closeSettings')}
-            title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <Icon name="close" className="h-5 w-5" />
-          </button>
-        </div>
-      )}
+          {onClose && (
+            <div
+              className={cn(
+                "absolute right-0.5 z-50",
+                isWindowed ? "top-0.5" : "top-1",
+              )}
+            >
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label={t("settings.view.actions.closeSettings")}
+                title={t("settings.view.actions.closeSettingsWithShortcut", {
+                  shortcut: shortcutKey,
+                })}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                <Icon name="close" className="h-5 w-5" />
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -1118,22 +1332,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <>
             <div
               className={cn(
-                'relative flex h-full min-h-0 flex-col overflow-hidden border-r',
+                "relative flex h-full min-h-0 flex-col overflow-hidden border-r",
                 isDesktopApp
-                  ? 'bg-sidebar'
+                  ? "bg-sidebar"
                   : runtimeCtx.isVSCode
-                    ? 'bg-background'
-                    : 'bg-sidebar',
+                    ? "bg-background"
+                    : "bg-sidebar",
               )}
               style={{
                 width: `${SETTINGS_NAV_WIDTH}px`,
                 minWidth: `${SETTINGS_NAV_WIDTH}px`,
-                borderColor: 'var(--interactive-border)',
+                borderColor: "var(--interactive-border)",
               }}
             >
-              <ErrorBoundary>
-                {renderSettingsNav()}
-              </ErrorBoundary>
+              <ErrorBoundary>{renderSettingsNav()}</ErrorBoundary>
             </div>
 
             <div className="flex-1 overflow-hidden bg-background">

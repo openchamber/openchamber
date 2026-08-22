@@ -19,6 +19,7 @@ import { resetStreamingState } from '@/sync/streaming';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
+import { clearSessionModelUsageCache } from '@/lib/analytics/session-model-usage-cache';
 import { syncDesktopSettings } from '@/lib/persistence';
 
 // Same-device transport switch (LAN⇄relay for one paired device): rebind the SDK
@@ -70,6 +71,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useGitHubPrStatusStore.getState().resetForRuntimeSwitch();
   useSessionFoldersStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   useFilesViewTabsStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
+  clearSessionModelUsageCache();
   useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
   useUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
   resetStreamingState();
