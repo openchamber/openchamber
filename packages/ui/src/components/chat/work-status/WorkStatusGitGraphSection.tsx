@@ -13,6 +13,7 @@ import {
   scheduleGitCommitDetailsIdle,
   type GitCommitDetailsController,
 } from '@/components/views/git/gitCommitDetailsController';
+import { createGitContextCommitDetailsController } from '@/components/views/git/gitContextCommitDetailsController';
 import { selectGitCommitHoverRemote } from '@/components/views/git/gitCommitRemote';
 import { createGitCommitHoverDetailsCache, preloadGitCommitHoverImage } from '@/components/views/git/gitCommitHoverCache';
 
@@ -105,16 +106,7 @@ export const WorkStatusGitGraphSection: React.FC<Props> = ({ directory, panelVis
       return null;
     }
 
-    return {
-      ...controller,
-      selectFile(comparison, file) {
-        openContextCommitDiff(directory, {
-          commitHash: comparison.commitHash,
-          parentHash: comparison.parentHash,
-          file,
-        });
-      },
-    };
+    return createGitContextCommitDetailsController(controller, directory, openContextCommitDiff);
   }, [controller, directory, openContextCommitDiff]);
 
   if (!directory || !git || !commitDetailsController) {
