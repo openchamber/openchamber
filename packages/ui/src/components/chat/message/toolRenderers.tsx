@@ -575,7 +575,7 @@ export const parseDiffToUnified = (diffText: string): UnifiedDiffHunk[] => {
 
         if (line.startsWith('Index:') || line.startsWith('===') || line.startsWith('---') || line.startsWith('+++')) {
             if (line.startsWith('Index:')) {
-                currentFile = line.split(' ')[1].split('/').pop() || 'file';
+                currentFile = line.slice('Index:'.length).trim().split('/').pop() || 'file';
             }
             i++;
             continue;
