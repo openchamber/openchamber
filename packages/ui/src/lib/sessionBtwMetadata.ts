@@ -88,7 +88,10 @@ export const withBtwSessionMarker = (
 export const withoutBtwSessionMarker = (metadata: SessionMetadataRecord): SessionMetadataRecord => {
   const openchamber = getOpenChamberMetadata(metadata);
   if (openchamber.kind !== 'btw') return metadata;
-  const { kind: _kind, originalSessionID: _original, btwBoundaryMessageID: _boundary, ...rest } = openchamber;
+  const rest: BtwMetadata = { ...openchamber };
+  delete rest.kind;
+  delete rest.originalSessionID;
+  delete rest.btwBoundaryMessageID;
   const next: SessionMetadataRecord = { ...metadata };
   if (Object.keys(rest).length > 0) {
     next.openchamber = rest;
@@ -105,7 +108,8 @@ export const withoutBtwSessionLink = (
 ): SessionMetadataRecord => {
   const openchamber = getOpenChamberMetadata(metadata);
   if (openchamber.btwSessionID !== btwSessionID) return metadata;
-  const { btwSessionID: _link, ...rest } = openchamber;
+  const rest: BtwMetadata = { ...openchamber };
+  delete rest.btwSessionID;
   const next: SessionMetadataRecord = { ...metadata };
   if (Object.keys(rest).length > 0) {
     next.openchamber = rest;
