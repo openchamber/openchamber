@@ -23,7 +23,7 @@ const clampLength = (value, maxLength) => {
 };
 
 const normalizeStatus = (value) => {
-  if (value === 'running' || value === 'success' || value === 'error' || value === 'idle') {
+  if (value === 'running' || value === 'success' || value === 'error' || value === 'denied' || value === 'idle') {
     return value;
   }
   return 'idle';

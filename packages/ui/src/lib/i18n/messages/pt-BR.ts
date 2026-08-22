@@ -266,6 +266,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.dialog.relativeTime.durationAgo": "há {duration}",
   "sessions.scheduledTasks.dialog.status.success": "Sucesso",
   "sessions.scheduledTasks.dialog.status.error": "Erro",
+  "sessions.scheduledTasks.dialog.status.denied": "Negado",
   "sessions.scheduledTasks.dialog.status.running": "Em execução",
   "sessions.scheduledTasks.dialog.status.idle": "Inativo",
   "sessions.scheduledTasks.dialog.nextRun.label": "Próximo",

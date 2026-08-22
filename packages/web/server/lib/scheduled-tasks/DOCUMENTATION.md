@@ -9,6 +9,67 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 - Runtime orchestration and execution is owned by `packages/web/server/lib/scheduled-tasks/runtime.js`.
 - This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
 
+## Preflight gate
+
+`~/.config/openchamber/preflight.json` (owned by
+`packages/web/server/lib/scheduled-tasks/preflight.js`) may configure a local
+argv command that runs before OpenChamber creates a task's agent session. A
+denial persists `lastStatus: "denied"` on the task and creates no session, so
+it spends no LLM tokens.
+
+No config file (`ENOENT`) means no gate: every run is allowed. Any other
+config read/parse failure (unreadable file, invalid JSON, missing/empty
+`command`, non-string argv entries) fails **closed** — the run is denied and
+the command is never invoked, regardless of `onError`, because `onError` only
+governs failures of the configured command itself once the config has parsed.
+
+Schema:
+
+```json
+{
+  "command": ["/path/to/check", "--flag"],
+  "timeoutMs": 5000,
+  "onError": "deny",
+  "applyTo": "all"
+}
+```
+
+- `command` (required): non-empty array of non-empty strings. `command[0]` is
+  the executable; the rest are its argv. Run via `execFile` with `shell:
+  false` — it never runs through a shell, so no argument is subject to shell
+  interpolation.
+- `timeoutMs` (optional): a positive integer, clamped to a 30&nbsp;000&nbsp;ms
+  ceiling; defaults to 5000ms when absent or invalid.
+- `onError` (optional): `"allow"` or `"deny"` (default). Governs what happens
+  when the command itself fails to execute, times out, or is killed for
+  exceeding `maxBuffer` (8&nbsp;KB of stdout) — not config-parse failures,
+  which always deny.
+- `applyTo` (optional): `"scheduled"` or `"all"` (default). `"all"` gates
+  every dispatch, **including manual "Run Now"** in the Scheduled Tasks UI —
+  not only automatically scheduled occurrences. Set `"scheduled"` to exempt
+  manual runs from the gate.
+
+Protocol: the command's `cwd` is the task's project path. It receives the run
+context as a single JSON line on stdin (`projectID`, `projectPath`, `taskID`,
+`taskName`, `reason`, `scheduledFor`) and is not otherwise given secrets or
+environment beyond its own process environment.
+
+The command's exit code and stdout together decide the outcome:
+
+- A **nonzero exit** (or a spawn/timeout/`maxBuffer` failure) denies, subject
+  to `onError: "allow"` overriding it to an allow.
+- A **zero exit** allows, *unless* stdout parses as JSON with `{"allow":
+  false, "reason": "..."}` — that JSON body denies even on a zero exit, using
+  `reason` as the persisted `lastError`. Non-JSON or unparsable stdout on a
+  zero exit is an allow.
+
+A denied `once`-schedule task is **not** consumed/disabled: since its
+occurrence already claimed a past slot, it is left `enabled` with no
+`nextRunAt` and will not fire again automatically. Re-running it requires a
+manual "Run Now" (itself subject to the gate unless `applyTo: "scheduled"`) or
+editing the task. A denied manual "Run Now" surfaces as an HTTP 403 from the
+run API rather than the generic failure response.
+
 ## Cross-instance occurrence claiming
 
 Multiple OpenChamber server processes can share the same on-disk project config
