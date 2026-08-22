@@ -105,11 +105,6 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
 
   persistRuntimeSettingsMirror(settings, getRuntimeKey());
-  setOrRemoveLocalStorage('selectedThemeId', settings.themeId || null);
-  setOrRemoveLocalStorage('selectedThemeVariant', settings.themeVariant || null);
-  setOrRemoveLocalStorage('lightThemeId', settings.lightThemeId || null);
-  setOrRemoveLocalStorage('darkThemeId', settings.darkThemeId || null);
-  setOrRemoveLocalStorage('useSystemTheme', typeof settings.useSystemTheme === 'boolean' ? String(settings.useSystemTheme) : null);
   setOrRemoveLocalStorage('lastDirectory', settings.lastDirectory || null);
   if (settings.homeDirectory) {
     localStorage.setItem('homeDirectory', settings.homeDirectory);
