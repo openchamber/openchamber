@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
-import { computeNodeStructureKey, nodeHasPinnedMembershipChange, selectFolderRootNodes, selectQuestionBadgeSessionScopes } from './sessionNodeItemUtils';
+import { computeNodeStructureKey, nodeHasPinnedMembershipChange, selectBlockingBadgeSessionScopes, selectFolderRootNodes } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
 
 const session = (id: string, title: string): Session => ({
@@ -32,7 +32,7 @@ describe('computeNodeStructureKey', () => {
   });
 });
 
-describe('selectQuestionBadgeSessionScopes', () => {
+describe('selectBlockingBadgeSessionScopes', () => {
   const withDirectory = (node: SessionNode, directory: string | null): SessionNode => ({
     ...node,
     session: { ...node.session, directory } as Session,
@@ -43,7 +43,7 @@ describe('selectQuestionBadgeSessionScopes', () => {
     const child = withDirectory({ session: session('child', 'Child'), children: [grandchild], worktree: null }, '/worktrees/feature');
     const root = withDirectory({ session: session('root', 'Root'), children: [child], worktree: null }, '/repo');
 
-    expect(selectQuestionBadgeSessionScopes(root, false, '/repo')).toEqual([
+    expect(selectBlockingBadgeSessionScopes(root, false, '/repo')).toEqual([
       { directory: '/repo', sessionIDs: ['root'] },
       { directory: '/worktrees/feature', sessionIDs: ['child', 'grandchild'] },
     ]);
@@ -53,7 +53,7 @@ describe('selectQuestionBadgeSessionScopes', () => {
     const child = withDirectory({ session: session('child', 'Child'), children: [], worktree: null }, '/worktrees/feature');
     const root = withDirectory({ session: session('root', 'Root'), children: [child], worktree: null }, '/repo');
 
-    expect(selectQuestionBadgeSessionScopes(root, true, '/repo')).toEqual([
+    expect(selectBlockingBadgeSessionScopes(root, true, '/repo')).toEqual([
       { directory: '/repo', sessionIDs: ['root'] },
     ]);
   });
@@ -61,7 +61,7 @@ describe('selectQuestionBadgeSessionScopes', () => {
   test('falls back to the group directory when the session has none', () => {
     const root: SessionNode = { session: session('root', 'Root'), children: [], worktree: null };
 
-    expect(selectQuestionBadgeSessionScopes(root, false, '/fallback')).toEqual([
+    expect(selectBlockingBadgeSessionScopes(root, false, '/fallback')).toEqual([
       { directory: '/fallback', sessionIDs: ['root'] },
     ]);
   });

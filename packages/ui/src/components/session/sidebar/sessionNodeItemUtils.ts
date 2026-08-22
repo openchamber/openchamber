@@ -72,24 +72,22 @@ export const nodeContainsSessionId = (node: SessionNode, sessionId: string | nul
   return false;
 };
 
-export type QuestionBadgeSessionScope = {
+type BlockingBadgeSessionScope = {
   directory: string;
   sessionIDs: string[];
 };
 
 /**
- * Choose which (directory, sessionIDs) scopes a sidebar row's pending-question
- * badge should count. An expanded row counts only its own session; a collapsed
+ * Choose which (directory, sessionIDs) scopes a sidebar row's blocking-request
+ * badges should count. An expanded row counts only its own session; a collapsed
  * parent row additionally rolls up the hidden descendants of its subtree,
- * grouped by the directory store each descendant actually lives in, so badges
- * stay correct for worktree/subtask sessions without bootstrapping their
- * directory stores.
+ * grouped by the directory store each descendant actually lives in.
  */
-export const selectQuestionBadgeSessionScopes = (
+export const selectBlockingBadgeSessionScopes = (
   node: SessionNode,
   isExpanded: boolean,
   fallbackDirectory: string | null,
-): QuestionBadgeSessionScope[] => {
+): BlockingBadgeSessionScope[] => {
   const sessionIDsByDirectory = new Map<string, string[]>();
   const visit = (current: SessionNode): void => {
     const directory = resolveGlobalSessionDirectory(current.session)

@@ -22,11 +22,11 @@ import { isSessionPinned, type SessionPinnedTarget } from '@/stores/useSessionPi
 import { Icon } from "@/components/icon/Icon";
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionPermissions, useSessionQuestionCount } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionBlockingRequestCounts } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
-import { nodeContainsSessionId, nodeHasPinnedMembershipChange, selectQuestionBadgeSessionScopes } from './sessionNodeItemUtils';
+import { nodeContainsSessionId, nodeHasPinnedMembershipChange, selectBlockingBadgeSessionScopes } from './sessionNodeItemUtils';
 import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
@@ -452,7 +452,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   // tick of the counter it only decides to mount.
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
-  const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined, { bootstrap: false });
   const sessionGoal = getSessionGoal(resolvedSession);
   const sessionGoalGlyph = sessionGoal ? (
     <span
@@ -471,11 +470,14 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   // expand the other. Matches the format of menuInstanceKey.
   const expansionKey = menuInstanceKey;
   const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
-  const questionBadgeSessionScopes = React.useMemo(
-    () => selectQuestionBadgeSessionScopes(node, isExpanded, sessionDirectory),
+  const blockingBadgeSessionScopes = React.useMemo(
+    () => selectBlockingBadgeSessionScopes(node, isExpanded, sessionDirectory),
     [isExpanded, node, sessionDirectory],
   );
-  const pendingQuestionCount = useSessionQuestionCount(questionBadgeSessionScopes);
+  const {
+    permissionCount: pendingPermissionCount,
+    questionCount: pendingQuestionCount,
+  } = useSessionBlockingRequestCounts(blockingBadgeSessionScopes);
   const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
@@ -681,7 +683,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     );
   }
 
-  const pendingPermissionCount = sessionPermissions.length;
   const pendingQuestionLabel = pendingQuestionCount === 1
     ? t('sessions.sidebar.session.status.questionPendingSingle')
     : t('sessions.sidebar.session.status.questionPendingMany', { count: pendingQuestionCount });
