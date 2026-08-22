@@ -63,18 +63,29 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session | n
   const forkedAtMs = typeof forked.time?.created === 'number' ? forked.time.created : Date.now();
   useBtwStore.getState().openBtw(forked.id, sessionDirectory, title, forkedAtMs);
 
-  await useSessionUIStore.getState().sendMessage(
-    input.question,
-    input.providerID,
-    input.modelID,
-    input.agent,
-    [],
-    undefined,
-    undefined,
-    input.variant,
-    'normal',
-    { sessionId: forked.id, directory: sessionDirectory },
-  );
+  try {
+    await useSessionUIStore.getState().sendMessage(
+      input.question,
+      input.providerID,
+      input.modelID,
+      input.agent,
+      [],
+      undefined,
+      undefined,
+      input.variant,
+      'normal',
+      { sessionId: forked.id, directory: sessionDirectory },
+    );
+  } catch (error) {
+    // A fork without its first question is not a usable btw session. Roll back
+    // only if this fork still owns the panel; if the user already closed it,
+    // that close already started deletion and must not affect a newer panel.
+    if (useBtwStore.getState().panel.sessionId === forked.id) {
+      useBtwStore.getState().closeBtw();
+      await destroyBtwSession(forked.id);
+    }
+    throw error;
+  }
   return forked;
 }
 

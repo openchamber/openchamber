@@ -171,9 +171,14 @@ describe('startBtwSession', () => {
     expect(sentOptions).toEqual({ sessionId: 'fork-1', directory: '/canonical/project' });
   });
 
-  test('propagates a failed send so the caller can surface it', async () => {
+  test('rolls back the fork and propagates a failed first send', async () => {
     forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/project', 100));
     sendMessageImpl = () => Promise.reject(new Error('send failed'));
+    const deleted: string[] = [];
+    deleteSessionImpl = (sessionId) => {
+      deleted.push(sessionId);
+      return Promise.resolve(true);
+    };
 
     await expect(
       startBtwSession({
@@ -184,6 +189,8 @@ describe('startBtwSession', () => {
         modelID: 'model',
       }),
     ).rejects.toThrow('send failed');
+    expect(deleted).toEqual(['fork-1']);
+    expect(useBtwStore.getState().panel.sessionId).toBeNull();
   });
 });
 
