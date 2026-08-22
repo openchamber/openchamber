@@ -2,6 +2,7 @@ import React from 'react';
 import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
+import { SessionScrollBehaviorSettings } from './SessionScrollBehaviorSettings';
 import { PasskeySettings } from './PasskeySettings';
 import { DefaultsSettings } from './DefaultsSettings';
 import { GitSettings } from './GitSettings';
@@ -219,6 +220,7 @@ const SessionsSectionContent: React.FC = () => {
     return (
         <>
             <DefaultsSettings />
+            <SessionScrollBehaviorSettings />
             <SessionRetentionSettings />
         </>
     );

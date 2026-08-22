@@ -25,6 +25,7 @@ export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'pl
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
+export type SessionScrollRestoreMode = 'restore' | 'jump-to-end';
 export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
@@ -700,6 +701,7 @@ interface UIStore {
   collapsibleThinkingBlocks: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
+  sessionScrollRestoreMode: SessionScrollRestoreMode;
   showDeletionDialog: boolean;
   /** When true, confirm before applying deferred OpenCode restart from Settings. */
   showOpenCodeRestartConfirm: boolean;
@@ -894,6 +896,7 @@ interface UIStore {
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
+  setSessionScrollRestoreMode: (value: SessionScrollRestoreMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setShowOpenCodeRestartConfirm: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
@@ -1067,6 +1070,7 @@ export const useUIStore = create<UIStore>()(
         collapsibleThinkingBlocks: true,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
+        sessionScrollRestoreMode: 'restore',
         showDeletionDialog: true,
         showOpenCodeRestartConfirm: true,
         autoDeleteEnabled: false,
@@ -1871,6 +1875,10 @@ export const useUIStore = create<UIStore>()(
           set({ activityRenderMode: value });
         },
 
+        setSessionScrollRestoreMode: (value) => {
+          set({ sessionScrollRestoreMode: value });
+        },
+
         setShowDeletionDialog: (value) => {
           set({ showDeletionDialog: value });
         },
@@ -2578,6 +2586,13 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
+          // v10 -> v11: initialize session scroll restore mode
+          if (version < 11) {
+            if (state.sessionScrollRestoreMode !== 'restore' && state.sessionScrollRestoreMode !== 'jump-to-end') {
+              state.sessionScrollRestoreMode = 'restore';
+            }
+          }
+
           // v10 -> v11: move the previous terminal font default forward.
           if (version < 11 && state.terminalFontSize === 13) {
             state.terminalFontSize = 14;
@@ -2722,6 +2737,7 @@ export const useUIStore = create<UIStore>()(
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
+          sessionScrollRestoreMode: state.sessionScrollRestoreMode,
           showDeletionDialog: state.showDeletionDialog,
           showOpenCodeRestartConfirm: state.showOpenCodeRestartConfirm,
           autoDeleteEnabled: state.autoDeleteEnabled,
