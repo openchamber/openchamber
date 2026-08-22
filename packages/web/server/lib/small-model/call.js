@@ -403,9 +403,10 @@ const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
 
 const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelID)}:generateContent`;
-  const thinkingConfig = modelID.toLowerCase().startsWith('gemini-3')
-    ? { thinkingLevel: modelID.toLowerCase().includes('flash') ? 'minimal' : 'low' }
-    : { thinkingBudget: 0 };
+  const lowerModelID = modelID.toLowerCase();
+  const thinkingConfig = lowerModelID.startsWith('gemini-3')
+    ? { thinkingLevel: lowerModelID.includes('flash') ? 'minimal' : 'low' }
+    : lowerModelID.startsWith('gemini-2') ? { thinkingBudget: 0 } : null;
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -415,13 +416,11 @@ const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, re
     },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+      ...(system && { systemInstruction: { parts: [{ text: system }] } }),
       generationConfig: {
         maxOutputTokens,
-        thinkingConfig,
-        ...(responseSchema
-          ? { responseMimeType: 'application/json', responseSchema: toGoogleSchema(responseSchema) }
-          : {}),
+        ...(thinkingConfig && { thinkingConfig }),
+        ...(responseSchema && { responseMimeType: 'application/json', responseSchema: toGoogleSchema(responseSchema) }),
       },
     }),
     signal: requestSignal(timeoutMs, signal),

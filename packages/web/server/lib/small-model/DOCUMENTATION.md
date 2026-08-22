@@ -105,7 +105,8 @@ other runtime API.
     `auth.openai.com` (single-flight) and written back to `auth.json`.
   - **Anthropic** (`type: api`): `/v1/messages` with `x-api-key`.
   - **Google** (`type: api`): `generateContent` with `x-goog-api-key`; Gemini 3
-    uses `thinkingLevel` while older Flash models use `thinkingBudget: 0`.
+    uses `thinkingLevel`, Gemini 2.x uses `thinkingBudget: 0`, and all other
+    models omit `thinkingConfig` entirely.
   - Everything else: OpenAI-compatible `/chat/completions` against the
     provider's base URL, resolved from (1) `provider.<id>.options.baseURL`
     in the OpenCode config, (2) the hardcoded `https://api.openai.com/v1`

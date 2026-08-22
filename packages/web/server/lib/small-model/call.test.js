@@ -536,6 +536,22 @@ describe('callSmallModel — Google thinking configuration', () => {
     const body = JSON.parse(lastCall(fetchMock).init.body);
     expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
   });
+
+  it('omits thinkingConfig for other Google/Gemini models', async () => {
+    fetchMock.mockResolvedValue(googleResponse('generated commit'));
+
+    await callSmallModel({
+      auth: { google: { type: 'api', key: 'google-key' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'google',
+      modelID: 'gemini-1.5-flash',
+      prompt: 'generate',
+    });
+
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.generationConfig.thinkingConfig).toBeUndefined();
+  });
 });
 
 describe('callSmallModel — GitHub Copilot endpoint routing', () => {
