@@ -24,6 +24,13 @@ both settings are `false`.
   carried a `url` into "url is required", which reads as a broken tool rather
   than a malformed call.
 
+Beyond session/schedule control, the tool exposes the agent-capabilities
+actions `fusion.list` and `fusion.run` (see
+`../agent-capabilities/DOCUMENTATION.md`). The plugin payload carries the
+calling session ID (`context.sessionID`), which the capability service uses as
+the parent for child sessions — fusion always runs on the calling session and
+ignores any `sessionId` the model passes.
+
 ## Runtime flow
 
 1. The OpenChamber HTTP listener binds and publishes its authoritative port.
@@ -42,6 +49,9 @@ both settings are `false`.
    agent-facing description. The generated schema uses the description to state
    required inputs or one non-obvious behavior, while completed calls use the
    short title in native tool metadata.
+7. `fusion.run` overrides the presentation title with the run's identity —
+   `Fusion: <prompt>` — so the transcript row shows the run itself instead of
+   a generic action label.
 
 ## Agent context budget
 

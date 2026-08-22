@@ -944,6 +944,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['background', 'push'],
     isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
   },
+  {
+    id: 'fusion.presets',
+    page: 'fusion',
+    titleKey: 'settings.fusion.dialogTitleNew',
+    descriptionKey: 'settings.page.fusion.description',
+    keywords: ['fusion', 'presets', 'model panel', 'compare models', 'multi-model', 'deliberation', 'parallel models'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
 
   {
     id: 'integrations.third-party',

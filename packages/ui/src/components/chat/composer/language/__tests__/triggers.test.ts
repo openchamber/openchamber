@@ -74,6 +74,28 @@ describe('snippet picker', () => {
     });
 });
 
+describe('fusion picker', () => {
+    test('a percent after whitespace opens the fusion picker', () => {
+        expect(at('use %deep-|')).toEqual({ kind: 'fusion', query: 'deep-' });
+    });
+
+    test('a percent at the start of the text opens it', () => {
+        expect(at('%deep-|')).toEqual({ kind: 'fusion', query: 'deep-' });
+    });
+
+    test('a percent inside a word does not open it', () => {
+        expect(at('discount50%|')).toBeNull();
+    });
+
+    test('a hash outranks a percent when adjacent', () => {
+        expect(at('#%x|')).toEqual({ kind: 'snippet', query: '%x' });
+    });
+
+    test('shell mode disables the fusion picker', () => {
+        expect(at('%deep|', { inputMode: 'shell' })).toBeNull();
+    });
+});
+
 describe('mention picker', () => {
     test('an at-sign after whitespace opens the mention picker', () => {
         expect(at('see @src/ap|')).toEqual({ kind: 'mention', query: 'src/ap' });

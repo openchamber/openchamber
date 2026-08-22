@@ -6,8 +6,11 @@ import {
     type OutgoingMessageDeps,
     type OutgoingMessageInput,
 } from '../buildOutgoingMessage';
+import { expandFusionPresets } from '../expandFusionPresets';
 
 const attachment = (id: string) => ({ id, filename: `${id}.txt` } as unknown as AttachedFile);
+
+const knownFusionNames = new Set(['deep-dive', 'deep.dive']);
 
 /**
  * Resolvers with just enough behavior to observe ordering: `@agent:name`
@@ -26,6 +29,7 @@ const deps = (overrides: Partial<OutgoingMessageDeps> = {}): OutgoingMessageDeps
     },
     sanitizeAttachments: (files) => [...(files ?? [])],
     collectSkillNames: (text) => [...text.matchAll(/\/(\w+)/g)].map((m) => m[1]),
+    expandFusionPresets: (text) => expandFusionPresets(text, knownFusionNames),
     appendComments: (text, comments) => `${text}\n[${comments.length} comments]`,
     buildSkillInstruction: (names) => (names.length ? `use: ${names.join(',')}` : null),
     ...overrides,
@@ -244,5 +248,44 @@ describe('full assembly order', () => {
             'pr-diff',
             'use: deploy',
         ]);
+    });
+});
+
+describe('fusion preset expansion', () => {
+    test('a known %preset is expanded into the full directive', () => {
+        const result = buildOutgoingMessage(
+            input({ composerText: 'compare %deep-dive please' }),
+            deps(),
+        );
+        expect(result.primaryText).toBe('compare [fusion preset: deep-dive] please');
+    });
+
+    test('a token at the start of the message is expanded', () => {
+        expect(buildOutgoingMessage(input({ composerText: '%deep-dive now' }), deps()).primaryText)
+            .toBe('[fusion preset: deep-dive] now');
+    });
+
+    test('a dotted preset name is expanded', () => {
+        expect(buildOutgoingMessage(input({ composerText: 'run %deep.dive' }), deps()).primaryText)
+            .toBe('run [fusion preset: deep.dive]');
+    });
+
+    test('an unknown percent word is left untouched', () => {
+        expect(buildOutgoingMessage(input({ composerText: '50% done, use %stranger' }), deps()).primaryText)
+            .toBe('50% done, use %stranger');
+    });
+
+    test('trailing punctuation is preserved around the directive', () => {
+        expect(buildOutgoingMessage(input({ composerText: 'run %deep-dive:' }), deps()).primaryText)
+            .toBe('run [fusion preset: deep-dive]:');
+        expect(buildOutgoingMessage(input({ composerText: '%deep-dive, please' }), deps()).primaryText)
+            .toBe('[fusion preset: deep-dive], please');
+    });
+
+    test('queued messages are expanded too', () => {
+        const result = buildOutgoingMessage(input({
+            queued: [{ content: 'one %deep-dive' }, { content: 'two' }],
+        }), deps());
+        expect(result.primaryText).toBe('one [fusion preset: deep-dive]');
     });
 });

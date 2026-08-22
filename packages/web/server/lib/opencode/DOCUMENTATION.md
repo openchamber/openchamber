@@ -33,6 +33,10 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/startup-pipeline-runtime.js`: server startup tail orchestration runtime for terminal/proxy/static/start-listen flow.
 - `packages/web/server/lib/opencode/startup-performance.js`: opt-in startup phase diagnostics with fixed labels and numeric metadata allowlists.
 - `packages/web/server/lib/agent-tool/runtime.js`: managed OpenCode custom-tool materialization, environment injection, loopback authentication, and fixed CLI action dispatch.
+- `packages/web/server/lib/agent-capabilities/session-runner.js`: shared session runner (child-session creation, model override dispatch, idle wait, result extraction) for model fusion.
+- `packages/web/server/lib/agent-capabilities/fusion-presets.js`: fusion preset listing/resolution from OpenChamber settings.
+- `packages/web/server/lib/agent-capabilities/fusion.js`: model fusion runtime — creates one isolated child session per preset model and collects every run's final output.
+- `packages/web/server/lib/agent-capabilities/routes.js`: `/api/openchamber/fusion*` route registration for UI-triggered runs and preset CRUD.
 - `packages/web/server/lib/system-prompt/runtime.js`: opt-in managed OpenCode system-prompt optimizer materialization and plugin injection.
 - `packages/web/server/lib/opencode/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
 - `packages/web/server/lib/opencode/openchamber-routes.js`: OpenChamber update and models metadata route registration.

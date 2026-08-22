@@ -2,6 +2,7 @@ import path from 'node:path';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { OpenChamberControlError, asControlError } from './error.js';
 import { OPENCHAMBER_ALL_ACTIONS } from './actions.js';
+import { listFusionPresets, resolveFusionPreset } from '../agent-capabilities/fusion-presets.js';
 import { writeScreenshot } from './screenshots.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
@@ -143,6 +144,7 @@ export const createOpenChamberControlService = (dependencies) => {
     waitForOpenCodeReady,
     sessionService,
     scheduledTaskService,
+    fusionRuntime,
     browserControl = null,
     agentMemoryActions = null,
     createClient = createOpencodeClient,
@@ -510,6 +512,36 @@ export const createOpenChamberControlService = (dependencies) => {
       }
       if (action === 'session.create' || action === 'session.send' || action === 'session.fork') {
         return executeSessionAction(action, input, contextDirectory, options.signal);
+      }
+      if (action === 'fusion.list') {
+        const settings = await readSettingsFromDiskMigrated();
+        return { presets: listFusionPresets(settings) };
+      }
+      if (action === 'fusion.run') {
+        if (typeof fusionRuntime?.execute !== 'function') {
+          throw new OpenChamberControlError('Model fusion is unavailable on this runtime', 500);
+        }
+        if (input.models !== undefined) {
+          throw new OpenChamberControlError(
+            'fusion.run accepts preset names only — create presets in Settings → OpenChamber → Fusion and pass preset',
+            400,
+          );
+        }
+        const settings = await readSettingsFromDiskMigrated();
+        const preset = resolveFusionPreset(input.preset, settings);
+        return fusionRuntime.execute({
+          // The parent is ALWAYS the calling session — the model must never
+          // choose it (input.sessionId is ignored, not normalized).
+          sessionId: asNonEmptyString(options.contextSessionId),
+          directory: asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory),
+          prompt: input.prompt,
+          models: preset.models,
+          preset: preset.name,
+          agent: asNonEmptyString(input.agent),
+          timeoutSeconds: input.timeout,
+          runId: asNonEmptyString(options.fusionRunId) || undefined,
+          signal: options.signal,
+        });
       }
       if (action.startsWith('session.')) {
         const directory = asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory);

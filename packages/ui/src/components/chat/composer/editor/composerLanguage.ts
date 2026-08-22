@@ -47,6 +47,7 @@ const EMPTY_CONTEXT: ComposerLanguageContext = {
     confirmedMentions: new Set(),
     knownSlashNames: new Set(),
     knownSnippetTriggers: new Set(),
+    knownFusionPresets: new Set(),
     attachmentFilenames: [],
 };
 

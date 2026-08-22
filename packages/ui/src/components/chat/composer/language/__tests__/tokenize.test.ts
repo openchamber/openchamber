@@ -13,6 +13,7 @@ const context = (overrides: Partial<ComposerLanguageContext> = {}): ComposerLang
     confirmedMentions: new Set(['NOTES']),
     knownSlashNames: new Set(['review', 'explore']),
     knownSnippetTriggers: new Set(['sig']),
+    knownFusionPresets: new Set(['deep-dive', 'deep.dive']),
     attachmentFilenames: [],
     ...overrides,
 });
@@ -49,6 +50,37 @@ describe('tokenizeComposer — reference constructs', () => {
 
     test('a known snippet trigger is styled as a snippet', () => {
         expect(styled('end with #sig')).toEqual([['#sig', 'mentionSnippet']]);
+    });
+
+    test('a known fusion preset token is styled as a fusion chip', () => {
+        expect(styled('run %deep-dive now')).toEqual([['%deep-dive', 'mentionFusion']]);
+    });
+
+    test('a fusion token at the start of the text is styled', () => {
+        expect(styled('%deep-dive first')).toEqual([['%deep-dive', 'mentionFusion']]);
+    });
+
+    test('a fusion token with a dotted preset name is styled', () => {
+        expect(styled('run %deep.dive')).toEqual([['%deep.dive', 'mentionFusion']]);
+    });
+
+    test('an unknown percent word stays plain prose', () => {
+        expect(styled('use %stranger')).toEqual([]);
+    });
+
+    test('percentages and in-word percents are never tokens', () => {
+        expect(styled('50% done')).toEqual([]);
+        expect(styled('discount50%')).toEqual([]);
+        expect(styled('50%off')).toEqual([]);
+    });
+
+    test('an empty preset registry leaves percent words plain', () => {
+        expect(styled('%deep-dive', context({ knownFusionPresets: new Set() }))).toEqual([]);
+    });
+
+    test('shell mode leaves a fusion token plain', () => {
+        expect(tokenizeComposer('%deep-dive', context({ inputMode: 'shell' })))
+            .toEqual([]);
     });
 
     test('an attachment citation is styled as a file', () => {

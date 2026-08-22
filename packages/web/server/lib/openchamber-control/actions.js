@@ -22,6 +22,8 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'schedule.run', title: 'Run a scheduled task', description: 'Run taskId; scope with projectId or directory' },
   { action: 'schedule.delete', title: 'Delete a scheduled task', description: 'Delete taskId; scope with projectId or directory' },
   { action: 'schedule.toggle', title: 'Enable or disable a scheduled task', description: 'Enable or disable taskId; requires the disabled boolean' },
+  { action: 'fusion.list', title: 'List fusion presets', description: 'List the user-created fusion presets (name, description, models); no parameters' },
+  { action: 'fusion.run', title: 'Run model fusion', description: 'Create one isolated child session of the CALLING session per model in the named preset and run prompt in parallel on every child with that model, returning each run final result. Requires prompt and preset — never pass sessionId (the calling session is always the parent). Fusion runs preset names ONLY, never raw model lists (pick a preset with fusion.list). Children do NOT receive the current conversation context — only prompt — so state the full task in the prompt; they may still use tools. Call only when multiple perspectives genuinely help (research, critique, compare-and-contrast, or when being wrong is expensive), not for simple tactical prompts. After the results return, YOU are the aggregator: write the final synthesized answer that states consensus across models, surfaces contradictions with each model stance, preserves unique insights, and flags blind spots — do not just pick a winner. When some models error, analyze the successful responses; one failed model never fails the run' },
 ]);
 
 const OPENCHAMBER_CONTROL_ACTIONS = Object.freeze(

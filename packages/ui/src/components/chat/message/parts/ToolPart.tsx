@@ -6,14 +6,15 @@ import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { MessageFilesDisplay } from '../../FileAttachment';
 import { getToolMetadata } from '@/lib/toolHelpers';
-import type { ToolPart as ToolPartType, ToolState as ToolStateUnion, FilePart } from '@opencode-ai/sdk/v2';
+import type { ToolPart as ToolPartType, ToolState as ToolStateUnion, FilePart, Part } from '@opencode-ai/sdk/v2';
 import { toolDisplayStyles } from '@/lib/typography';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
+import { useSessionMessageRecords, useEnsureSessionMessages, useAllLiveSessions } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
 import { sessionEvents } from '@/lib/sessionEvents';
+import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
@@ -1108,6 +1109,225 @@ const TOOL_COLLAPSED_CUSTOM_STYLE: React.CSSProperties = {
     overflow: 'visible',
 };
 
+const FUSED_PREFIX = 'Fused: ';
+
+type FusionChildRef = { model: string; sessionId: string };
+
+// The plugin persists the run's children (model + sessionId) in the part's
+// openchamber metadata envelope — the same join mechanism the Task tool uses
+// to bind its subagent card.
+const readOpenChamberChildren = (value: unknown): FusionChildRef[] | undefined => {
+    if (!value || typeof value !== 'object') return undefined;
+    const record = value as Record<string, unknown>;
+    const envelope = record.openchamber;
+    if (!envelope || typeof envelope !== 'object') return undefined;
+    const children = (envelope as Record<string, unknown>).children;
+    if (!Array.isArray(children)) return undefined;
+    const normalized = children.filter((child): child is FusionChildRef => (
+        !!child
+        && typeof child === 'object'
+        && typeof (child as { model?: unknown }).model === 'string'
+        && typeof (child as { sessionId?: unknown }).sessionId === 'string'
+    ));
+    return normalized.length > 0 ? normalized : undefined;
+};
+
+const readOpenChamberRunId = (value: unknown): string | undefined => {
+    if (!value || typeof value !== 'object') return undefined;
+    const record = value as Record<string, unknown>;
+    const envelope = record.openchamber;
+    if (!envelope || typeof envelope !== 'object') return undefined;
+    const runId = (envelope as Record<string, unknown>).runId;
+    return typeof runId === 'string' && runId.trim().length > 0 ? runId : undefined;
+};
+
+/**
+ * One fusion child session rendered with the exact subagent card: live
+ * entries streamed from the child's own session messages, plus the
+ * open-session link.
+ */
+const OpenChamberChildSummary: React.FC<{
+    childId: string;
+    directory: string;
+    subagentType: string;
+    isActive: boolean;
+    isExpanded: boolean;
+    isMobile: boolean;
+    onShowPopup: (content: ToolPopupContent) => void;
+    animateTailText: boolean;
+}> = ({ childId, directory, subagentType, isActive, isExpanded, isMobile, onShowPopup, animateTailText }) => {
+    const childSessionMessages = useSessionMessageRecords(childId, directory);
+    useEnsureSessionMessages(childId, directory);
+    const entries = React.useMemo(
+        () => buildTaskSummaryEntriesFromSession(childSessionMessages),
+        [childSessionMessages],
+    );
+
+    // The child's final answer, rendered in the subagent card's collapsible
+    // Output section instead of the generic tool JSON viewer.
+    const finalText = React.useMemo(() => {
+        let latest: ReturnType<typeof useSessionMessageRecords>[number] | null = null;
+        for (const record of childSessionMessages) {
+            const info = record?.info;
+            if (info?.role !== 'assistant' || !Number.isFinite(info.time?.completed)) continue;
+            if (!latest || (info.time.created ?? 0) >= (latest.info.time?.created ?? 0)) latest = record;
+        }
+        if (!latest) return undefined;
+        const text = Array.isArray(latest.parts)
+            ? latest.parts
+                .filter((part): part is Extract<Part, { type: 'text' }> => part?.type === 'text' && typeof part.text === 'string')
+                .map((part) => part.text)
+                .join('\n')
+                .trim()
+            : '';
+        return text || undefined;
+    }, [childSessionMessages]);
+
+    return (
+        <TaskToolSummary
+            entries={entries}
+            isExpanded={isExpanded}
+            isMobile={isMobile}
+            output={finalText}
+            sessionId={childId}
+            onShowPopup={onShowPopup}
+            input={{ subagent_type: subagentType }}
+            animateTailText={animateTailText}
+            isActive={isActive}
+        />
+    );
+};
+
+/**
+ * Group card for agent-triggered `openchamber` fusion.run tool calls. Renders
+ * one exact subagent-style card per child session.
+ *
+ * Child binding is AUTHORITATIVE, like the Task tool's metadata join:
+ * 1. The server publishes `fusion-children-created` over the OpenChamber
+ *    event channel the moment children exist (live path — streams during the
+ *    run).
+ * 2. The plugin persists `children` (model + sessionId) into the part
+ *    metadata after the run (history/reload path).
+ * 3. Live-session filtering remains a fallback for runs that raced a
+ *    reconnect before either source arrived.
+ */
+const OpenChamberCapabilityGroup: React.FC<{
+    startTime?: number;
+    runId?: string;
+    metadataChildren?: Array<{ model: string; sessionId: string }>;
+    isActive: boolean;
+    isExpanded: boolean;
+    isMobile: boolean;
+    onShowPopup: (content: ToolPopupContent) => void;
+    animateTailText: boolean;
+}> = ({ startTime, runId, metadataChildren, isActive, isExpanded, isMobile, onShowPopup, animateTailText }) => {
+    const { t } = useI18n();
+    const parentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const directory = useEffectiveDirectory();
+    const liveSessions = useAllLiveSessions();
+    const parentMessages = useSessionMessageRecords(parentSessionId ?? '', directory ?? '');
+    const [eventChildren, setEventChildren] = React.useState<Record<string, { model: string }>>({});
+
+    // A new fusion.run part must not inherit evented children from another run.
+    React.useEffect(() => {
+        setEventChildren({});
+    }, [runId, startTime]);
+
+    React.useEffect(() => {
+        if (!parentSessionId || !directory) return;
+        return subscribeOpenchamberEvents((event) => {
+            if (event.type !== 'fusion-children-created') return;
+            if (!runId || event.runId !== runId) return;
+            if (event.sessionId !== parentSessionId || event.directory !== directory) return;
+            setEventChildren((current) => {
+                let next: Record<string, { model: string }> | null = null;
+                for (const child of event.children) {
+                    if (current[child.sessionId]) continue;
+                    next ??= { ...current };
+                    next[child.sessionId] = { model: child.model };
+                }
+                return next ?? current;
+            });
+        });
+    }, [directory, parentSessionId, runId]);
+
+    const nextCapabilityStart = React.useMemo(() => {
+        if (startTime === undefined) return undefined;
+        let next: number | undefined;
+        for (const record of parentMessages) {
+            const parts = record?.parts;
+            if (!Array.isArray(parts)) continue;
+            for (const part of parts) {
+                if (part?.type !== 'tool' || part.tool !== 'openchamber') continue;
+                const partState = part.state as ToolStateWithMetadata | undefined;
+                const partInput = partState?.input;
+                const action = typeof partInput?.action === 'string' ? partInput.action : '';
+                if (action !== 'fusion.run') continue;
+                const partStart = partState?.time?.start ?? 0;
+                if (partStart > startTime && (next === undefined || partStart < next)) {
+                    next = partStart;
+                }
+            }
+        }
+        return next;
+    }, [parentMessages, startTime]);
+
+    const children = React.useMemo(() => {
+        if (!parentSessionId || !directory) return [];
+        const byId = new Map<string, { model: string }>();
+
+        for (const candidate of liveSessions) {
+            if (candidate.parentID !== parentSessionId || !candidate.title?.startsWith(FUSED_PREFIX)) continue;
+            if (startTime !== undefined && (candidate.time?.created ?? 0) < startTime) continue;
+            if (nextCapabilityStart !== undefined && (candidate.time?.created ?? 0) >= nextCapabilityStart) continue;
+            const colonIndex = candidate.title.indexOf(':');
+            byId.set(candidate.id, {
+                model: colonIndex >= 0 ? candidate.title.slice(colonIndex + 2).trim() : candidate.title,
+            });
+        }
+
+        for (const child of metadataChildren ?? []) {
+            if (child?.sessionId && child.model) byId.set(child.sessionId, { model: child.model });
+        }
+
+        for (const [sessionId, entry] of Object.entries(eventChildren)) {
+            byId.set(sessionId, entry);
+        }
+
+        return Array.from(byId, ([sessionId, entry]) => ({ sessionId, model: entry.model }));
+    }, [directory, eventChildren, liveSessions, metadataChildren, nextCapabilityStart, parentSessionId, startTime]);
+
+    if (children.length === 0 && !isActive) return null;
+
+    return (
+        <div className="mt-1 space-y-1.5">
+            {children.map((child) => (
+                <div key={child.sessionId} className="space-y-0.5">
+                    <div className="typography-meta flex items-center gap-1.5 px-1 text-muted-foreground">
+                        <span className="truncate">{child.model}</span>
+                    </div>
+                    <OpenChamberChildSummary
+                        childId={child.sessionId}
+                        directory={directory ?? ''}
+                        subagentType="fusion"
+                        isActive={isActive}
+                        isExpanded={isExpanded}
+                        isMobile={isMobile}
+                        onShowPopup={onShowPopup}
+                        animateTailText={animateTailText}
+                    />
+                </div>
+            ))}
+
+            {children.length === 0 && isActive ? (
+                <p className="typography-meta text-muted-foreground">
+                    {t('chat.agentCapabilities.inline.waitingChildren')}
+                </p>
+            ) : null}
+        </div>
+    );
+};
+
 const CODE_TAG_PROPS = { style: { background: 'transparent', backgroundColor: 'transparent' } };
 
 const TOOL_ERROR_ICON_STYLE: React.CSSProperties = { color: 'var(--status-error)' };
@@ -1698,6 +1918,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
+    const isOpenChamberCapability = (normalizedPartTool === 'openchamber' || part.tool === 'openchamber')
+        && input?.action === 'fusion.run';
 
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
@@ -1780,6 +2002,13 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const partMetadata = (part as unknown as { metadata?: unknown }).metadata;
     const time = stateWithData.time;
+
+    const openChamberMetadataChildren = React.useMemo<FusionChildRef[] | undefined>(() => (
+        readOpenChamberChildren(metadata) ?? readOpenChamberChildren(partMetadata)
+    ), [metadata, partMetadata]);
+    const openChamberMetadataRunId = React.useMemo<string | undefined>(() => (
+        readOpenChamberRunId(metadata) ?? readOpenChamberRunId(partMetadata)
+    ), [metadata, partMetadata]);
 
     const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>(() => ({
         start: typeof time?.start === 'number' ? time.start : undefined,
@@ -2073,7 +2302,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const shouldRenderTaskSummary = useDeferredExpandedContent(isTaskTool && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || !!taskSessionId));
     const shouldRenderExpandedContent = useDeferredExpandedContent(!isTaskTool && isExpanded);
 
-    if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
+    if (!shouldTreatAsFinalized && !isActive && !isTaskTool && !isOpenChamberCapability) {
         return null;
     }
 
@@ -2246,7 +2475,20 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 />
             ) : null}
 
-            {!isTaskTool ? (
+            {isOpenChamberCapability ? (
+                <OpenChamberCapabilityGroup
+                    startTime={effectiveTimeStart}
+                    runId={openChamberMetadataRunId}
+                    metadataChildren={openChamberMetadataChildren}
+                    isActive={isActive}
+                    isExpanded={isExpanded}
+                    isMobile={isMobile}
+                    onShowPopup={onShowPopup ?? (() => undefined)}
+                    animateTailText={animateTailText}
+                />
+            ) : null}
+
+            {!isTaskTool && !isOpenChamberCapability ? (
                 <div
                     ref={expandedContentRef}
                     aria-hidden={!isExpanded}

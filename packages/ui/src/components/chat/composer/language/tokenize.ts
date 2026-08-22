@@ -42,6 +42,8 @@ export interface ComposerLanguageContext {
     knownSlashNames: ReadonlySet<string>;
     /** Lowercased snippet names and aliases invocable with `#`. */
     knownSnippetTriggers: ReadonlySet<string>;
+    /** Exact fusion preset names invocable with `%` (case-sensitive). */
+    knownFusionPresets: ReadonlySet<string>;
     /** Filenames of the currently attached files, cited inline as `[name]`. */
     attachmentFilenames: readonly string[];
 }
@@ -83,6 +85,14 @@ export function tokenizeComposer(
 
     for (const token of filterKnownTokens(scanPrefixTokens(text, '#'), context.knownSnippetTriggers)) {
         ranges.push({ start: token.start, end: token.end, style: 'mentionSnippet' });
+    }
+
+    // A `%preset` inserted by the fusion picker (or typed against a known
+    // preset name). Membership is the authority, exactly like `@` mentions:
+    // an unknown `%word` stays plain prose, so percentages and `50%off`
+    // spellings never get painted as references.
+    for (const token of filterKnownTokens(scanPrefixTokens(text, '%'), context.knownFusionPresets, 'exact')) {
+        ranges.push({ start: token.start, end: token.end, style: 'mentionFusion' });
     }
 
     if (context.attachmentFilenames.length > 0 && text.includes('[')) {

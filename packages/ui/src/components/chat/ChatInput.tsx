@@ -43,6 +43,7 @@ import type { FileMentionHandle } from './FileMentionAutocomplete';
 import type { CommandAutocompleteHandle, CommandInfo } from './CommandAutocomplete';
 import type { SkillAutocompleteHandle } from './SkillAutocomplete';
 import type { SnippetAutocompleteHandle } from './SnippetAutocomplete';
+import type { FusionAutocompleteHandle, FusionPreset } from './FusionAutocomplete';
 import { cn } from "@/lib/utils";
 import { ModelControls } from './ModelControls';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
@@ -77,6 +78,7 @@ import { usePermissionStore } from '@/stores/permissionStore';
 import { togglePermissionAutoAccept } from './permissionAutoAccept';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
@@ -119,6 +121,7 @@ import {
     toServerFileUrl,
 } from './composer/attachments/filePaths';
 import { buildOutgoingMessage } from './composer/submit/buildOutgoingMessage';
+import { expandFusionPresets } from './composer/submit/expandFusionPresets';
 import {
     buildCommandVariables,
     canRunCommand,
@@ -299,6 +302,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const commandRef = React.useRef<CommandAutocompleteHandle>(null);
     const skillRef = React.useRef<SkillAutocompleteHandle>(null);
     const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
+    const fusionRef = React.useRef<FusionAutocompleteHandle>(null);
+    // Fusion presets known to the composer: the authoritative set that decides
+    // whether a `%token` is painted as a chip and expanded at send time.
+    const [fusionPresets, setFusionPresets] = React.useState<FusionPreset[]>([]);
+    // Tracks whether the registry has finished a successful load, so a send
+    // cannot race the mount-time fetch and pass a `%preset` through unexpanded.
+    const fusionPresetsLoadedRef = React.useRef(false);
     // Ref to track current message value without triggering re-renders in effects
     const messageRef = React.useRef(message);
     const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
@@ -586,6 +596,44 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         [attachedFiles],
     );
 
+    // Load the preset registry for the composer: painting `%preset` chips and
+    // expanding them at send time both need the exact persisted names. Loaded
+    // on mount so a restored or pasted `%preset` token still expands when the
+    // picker never opened, and refetched whenever the picker opens so a preset
+    // created in Settings is known as soon as the user opens it.
+    const loadFusionPresets = React.useCallback(async (): Promise<boolean> => {
+        try {
+            const response = await runtimeFetch('/api/openchamber/fusion/presets');
+            if (!response.ok) return false;
+            const body = (await response.json()) as { presets?: FusionPreset[] } | null;
+            const presets = Array.isArray(body?.presets) ? body.presets : [];
+            setFusionPresets(presets);
+            fusionPresetsLoadedRef.current = true;
+            return true;
+        } catch {
+            return false;
+        }
+    }, []);
+
+    // Ensures the registry is loaded before send-time expansion. A send can
+    // race the mount fetch, and expansion treats the registry as authoritative
+    // — an empty registry would pass a valid `%preset` through unexpanded. If
+    // the fetch is still pending (or failed), the caller blocks the send
+    // rather than silently dropping the directive.
+    const ensureFusionPresetsLoaded = React.useCallback(async (): Promise<boolean> => {
+        if (fusionPresetsLoadedRef.current) return true;
+        return loadFusionPresets();
+    }, [loadFusionPresets]);
+
+    React.useEffect(() => {
+        void loadFusionPresets();
+    }, [loadFusionPresets]);
+
+    const knownFusionPresets = React.useMemo(
+        () => new Set(fusionPresets.map((preset) => preset.name)),
+        [fusionPresets],
+    );
+
     /**
      * Everything the prompt language needs to resolve references. Rebuilt only
      * when a registry changes, so typing does not churn the tokenizer input.
@@ -596,8 +644,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         confirmedMentions: confirmedMentionsRef.current,
         knownSlashNames,
         knownSnippetTriggers,
+        knownFusionPresets,
         attachmentFilenames,
-    }), [attachmentFilenames, inputMode, knownAgentNames, knownSlashNames, knownSnippetTriggers]);
+    }), [attachmentFilenames, inputMode, knownAgentNames, knownFusionPresets, knownSlashNames, knownSnippetTriggers]);
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: readonly AttachedFile[] | undefined): AttachedFile[] => [...(files ?? [])]
@@ -1119,6 +1168,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             useSkillsStore.getState().skills.map((skill) => skill.name),
         );
 
+        // Fusion expansion treats the preset registry as authoritative: if the
+        // text carries a `%token` that expansion could own but the registry
+        // failed to load (send raced the mount fetch, or the load errored),
+        // block the send instead of passing the token through unexpanded — the
+        // model would otherwise receive a literal directive it cannot act on.
+        // Plain percentages like "50% off" have no name char after `%`, so
+        // they never match the token shape and never block.
+        if (!queuedOnly && inputSnapshot.hasContent && inputSnapshot.message.includes('%')) {
+            const tokenPattern = /\s%[A-Za-z0-9]|^%[A-Za-z0-9]/;
+            const hasPotentialToken = tokenPattern.test(` ${inputSnapshot.message.trimStart()}`);
+            if (hasPotentialToken && !(await ensureFusionPresetsLoaded())) {
+                toast.error(t('chat.agentCapabilities.fusion.pickerLoadError'));
+                return;
+            }
+        }
+
         const outgoing = buildOutgoingMessage({
             queued: queuedMessagesToSend,
             composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
@@ -1140,6 +1205,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             },
             sanitizeAttachments: sanitizeAttachmentsForSend,
             collectSkillNames: (text) => collectInlineSkillMentions(text, availableSkillNames),
+            expandFusionPresets: (text) => inputMode === 'shell' ? text : expandFusionPresets(text, knownFusionPresets),
             appendComments: (text, comments) =>
                 appendInlineComments(text, comments as InlineCommentDraft[]),
             buildSkillInstruction: buildSkillMentionInstruction,
@@ -1519,6 +1585,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 e.preventDefault();
                 e.stopPropagation();
                 snippetRef.current.handleKeyDown(e.key);
+                return;
+            }
+        }
+
+        if (openAutocomplete === 'fusion' && fusionRef.current) {
+            if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
+                e.preventDefault();
+                e.stopPropagation();
+                fusionRef.current.handleKeyDown(e.key);
                 return;
             }
         }
@@ -2070,6 +2145,35 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
             updateAutocompleteState(newMessage, nextCursor);
         });
+        closeAutocomplete();
+        composerRef.current?.focus();
+    };
+
+    // Replaces the typed %preset token with the short `%preset` form, which
+    // the composer paints as a fusion chip. The full `[fusion preset: X]`
+    // directive is expanded at send time, so the model still receives the
+    // exact preset name while the composer stays clean.
+    const handleFusionSelect = (preset: FusionPreset) => {
+        const textarea = composerRef.current;
+        const cursorPosition = textarea?.getSelection().start ?? message.length;
+        const textBeforeCursor = message.substring(0, cursorPosition);
+        const lastPercentSymbol = textBeforeCursor.lastIndexOf('%');
+        const startIndex = lastPercentSymbol !== -1 ? lastPercentSymbol : cursorPosition;
+        const token = `%${preset.name}`;
+        const newMessage = `${message.substring(0, startIndex)}${token} ${message.substring(cursorPosition)}`;
+        setMessage(newMessage);
+        const nextCursor = startIndex + token.length + 1;
+        requestAnimationFrame(() => {
+            if (composerRef.current) {
+                composerRef.current.setSelection(nextCursor);
+            }
+            updateAutocompleteState(newMessage, nextCursor);
+        });
+        // The selected preset is known by construction — make sure the
+        // composer paints the chip immediately, even before any refetch.
+        setFusionPresets((current) => (
+            current.some((entry) => entry.name === preset.name) ? current : [...current, preset]
+        ));
         closeAutocomplete();
         composerRef.current?.focus();
     };
@@ -2769,11 +2873,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         skillRef={skillRef}
                         snippetRef={snippetRef}
                         mentionRef={mentionRef}
+                        fusionRef={fusionRef}
                         onCommandSelect={handleCommandSelect}
                         onSkillSelect={handleSkillSelect}
                         onSnippetSelect={handleSnippetSelect}
                         onFileSelect={handleFileSelect}
                         onAgentSelect={handleAgentSelect}
+                        onFusionSelect={handleFusionSelect}
                         onClose={closeAutocomplete}
                     />
                     {/* Positioning context for the dictation overlay: covers the

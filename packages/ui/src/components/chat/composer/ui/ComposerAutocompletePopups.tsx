@@ -16,6 +16,7 @@ import React from 'react';
 
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '../../CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '../../FileMentionAutocomplete';
+import { FusionAutocomplete, type FusionAutocompleteHandle, type FusionPreset } from '../../FusionAutocomplete';
 import { SkillAutocomplete, type SkillAutocompleteHandle } from '../../SkillAutocomplete';
 import { SnippetAutocomplete, type SnippetAutocompleteHandle } from '../../SnippetAutocomplete';
 import type { AutocompleteKind } from '../language/triggers';
@@ -33,6 +34,7 @@ const CARET_PLACED_WIDTH: Record<AutocompleteKind, number> = {
     command: 450,
     snippet: 450,
     skill: 360,
+    fusion: 450,
 };
 
 /**
@@ -65,11 +67,13 @@ export interface ComposerAutocompletePopupsProps {
     skillRef: React.RefObject<SkillAutocompleteHandle | null>;
     snippetRef: React.RefObject<SnippetAutocompleteHandle | null>;
     mentionRef: React.RefObject<FileMentionHandle | null>;
+    fusionRef: React.RefObject<FusionAutocompleteHandle | null>;
     onCommandSelect: (command: CommandInfo) => void;
     onSkillSelect: (skillName: string) => void;
     onSnippetSelect: (snippet: unknown, trigger: string) => void;
     onFileSelect: (file: { name: string; path: string; relativePath?: string }) => void;
     onAgentSelect: (agentName: string) => void;
+    onFusionSelect: (preset: FusionPreset) => void;
     onClose: () => void;
 }
 
@@ -106,6 +110,16 @@ export function ComposerAutocompletePopups(props: ComposerAutocompletePopupsProp
                     ref={props.snippetRef}
                     searchQuery={query}
                     onSnippetSelect={props.onSnippetSelect}
+                    onClose={onClose}
+                    style={style}
+                />
+            );
+        case 'fusion':
+            return (
+                <FusionAutocomplete
+                    ref={props.fusionRef}
+                    searchQuery={query}
+                    onFusionSelect={props.onFusionSelect}
                     onClose={onClose}
                     style={style}
                 />

@@ -37,7 +37,7 @@ type MentionKind = 'file' | 'agent';
 export interface HighlightRange {
     start: number;
     end: number;
-    style: HighlightStyle | 'mentionFile' | 'mentionAgent' | 'mentionCommand' | 'mentionSnippet';
+    style: HighlightStyle | 'mentionFile' | 'mentionAgent' | 'mentionCommand' | 'mentionSnippet' | 'mentionFusion';
     /**
      * Optional explicit class, used by syntax highlighting where the style is
      * resolved dynamically (per language token) rather than from a fixed enum.
@@ -80,6 +80,7 @@ const STYLE_PRIORITY: Record<AnyStyle, number> = {
     mentionAgent: 100,
     mentionCommand: 100,
     mentionSnippet: 100,
+    mentionFusion: 100,
     code: 90,
     codeFence: 90,
     // A bare path is a visual aid, not a reference: an `@mention` covering the
@@ -103,6 +104,10 @@ const STYLE_CLASS: Record<AnyStyle, string> = {
     mentionAgent: 'text-[var(--status-success)]',
     mentionCommand: 'text-[var(--primary)]',
     mentionSnippet: 'text-[var(--status-warning)]',
+    // A fusion directive reads as a chip: primary text on a subtle surface.
+    // No padding or margin — width-changing properties are unsafe on
+    // decorations, and the brackets already give the token visual bounds.
+    mentionFusion: 'rounded-[3px] bg-[var(--surface-subtle)] text-[var(--primary)]',
     code: 'rounded-[3px] bg-[var(--surface-subtle)] text-[var(--markdown-inline-code)]',
     codeFence: 'bg-[var(--surface-subtle)] text-[var(--markdown-inline-code)]',
     // A `~path` is written for the reader's benefit, not to attach anything —

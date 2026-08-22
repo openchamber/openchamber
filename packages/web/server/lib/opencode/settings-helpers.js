@@ -1,3 +1,52 @@
+// Fusion presets: curated model panels users create in
+// Settings → OpenChamber → Fusion. The fusion tool accepts preset names
+// ONLY, so the main LLM can never invoke arbitrary (or expensive) models.
+// Each preset needs a safe unique name and 2-4 provider/model strings.
+// Module-level (exported) so the preset routes can validate with the exact
+// same rules before persisting.
+export const FUSION_PRESET_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const FUSION_PRESET_MIN_MODELS = 2;
+const FUSION_PRESET_MAX_MODELS = 4;
+const FUSION_PRESET_DESCRIPTION_MAX_LENGTH = 200;
+
+export const sanitizeFusionPresets = (value) => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const presets = [];
+  const seenNames = new Set();
+  for (const rawPreset of value) {
+    if (!rawPreset || typeof rawPreset !== 'object' || Array.isArray(rawPreset)) continue;
+    const name = typeof rawPreset.name === 'string' ? rawPreset.name.trim() : '';
+    if (!name || !FUSION_PRESET_NAME_PATTERN.test(name) || seenNames.has(name)) continue;
+    const models = [];
+    const seenModels = new Set();
+    if (Array.isArray(rawPreset.models)) {
+      for (const rawModel of rawPreset.models) {
+        const model = typeof rawModel === 'string' ? rawModel.trim() : '';
+        const slashIndex = model.indexOf('/');
+        if (slashIndex <= 0 || slashIndex === model.length - 1) continue;
+        if (seenModels.has(model)) continue;
+        seenModels.add(model);
+        models.push(model);
+        // A preset with more than the max is rejected outright rather than
+        // silently truncated — the settings UI enforces the same bound.
+        if (models.length > FUSION_PRESET_MAX_MODELS) break;
+      }
+    }
+    if (models.length < FUSION_PRESET_MIN_MODELS || models.length > FUSION_PRESET_MAX_MODELS) continue;
+    const description = typeof rawPreset.description === 'string'
+      ? rawPreset.description.trim().slice(0, FUSION_PRESET_DESCRIPTION_MAX_LENGTH)
+      : '';
+    seenNames.add(name);
+    presets.push({
+      name,
+      models,
+      ...(description ? { description } : {}),
+    });
+  }
+  return presets;
+};
 import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
 
 export const createSettingsHelpers = (dependencies) => {
@@ -882,6 +931,13 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.sttLanguage.trim();
       if (trimmed.length <= STT_LANGUAGE_MAX_LENGTH) {
         result.sttLanguage = trimmed;
+      }
+    }
+
+    if (candidate.fusionPresets !== undefined) {
+      const fusionPresets = sanitizeFusionPresets(candidate.fusionPresets);
+      if (fusionPresets !== undefined) {
+        result.fusionPresets = fusionPresets;
       }
     }
 

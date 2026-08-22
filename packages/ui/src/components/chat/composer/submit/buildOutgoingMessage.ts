@@ -64,6 +64,8 @@ export interface OutgoingMessageDeps {
     sanitizeAttachments: (files: readonly AttachedFile[] | undefined) => AttachedFile[];
     /** Skills named inline with `/name`. */
     collectSkillNames: (text: string) => string[];
+    /** Expand `%preset` tokens into `[fusion preset: preset]` directives. */
+    expandFusionPresets: (text: string) => string;
     /** Append inline review comments to a message body. */
     appendComments: (text: string, comments: readonly unknown[]) => string;
     /** Instruction telling the model which skills the user named. */
@@ -97,7 +99,11 @@ export function buildOutgoingMessage(
         noteAgent(agent.agentName);
         const mentions = deps.extractFileMentions(agent.text);
         noteSkills(mentions.text);
-        return mentions;
+        // The last transform owns the model-visible text: `%preset` becomes
+        // the full directive, and `[fusion preset: X]` itself never travels
+        // through the composer.
+        const text = deps.expandFusionPresets(mentions.text);
+        return { ...mentions, text };
     };
 
     // Queued messages come first, in the order they were queued: the oldest

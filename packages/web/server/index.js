@@ -104,6 +104,8 @@ import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
+import { createSessionRunner } from './lib/agent-capabilities/session-runner.js';
+import { createFusionRuntime } from './lib/agent-capabilities/fusion.js';
 import { createBrowserControlBroker } from './lib/browser-control/broker.js';
 import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
@@ -1281,6 +1283,25 @@ const emitSessionCreatedEvent = (event) => {
     }
   }
 };
+const emitFusionChildrenCreated = (event) => {
+  for (const client of uiOpenChamberEventClients) {
+    try {
+      writeSseEvent(client, {
+        type: 'openchamber:fusion-children-created',
+        properties: {
+          runId: event.runId,
+          sessionId: event.sessionId,
+          directory: event.directory,
+          ...(event.preset ? { preset: event.preset } : {}),
+          children: event.children,
+        },
+      });
+    } catch {
+      uiOpenChamberEventClients.delete(client);
+    }
+  }
+};
+
 /**
  * Maps a session directory onto the project whose memory it belongs to, so a
  * session running in a worktree writes to the project the panel shows.
@@ -1329,6 +1350,15 @@ const openChamberSessionService = createOpenChamberSessionService({
   emitSessionCreatedEvent,
   sessionKnowledgeRuntime,
 });
+const sessionRunner = createSessionRunner({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  waitForOpenCodeReady,
+});
+const fusionRuntime = createFusionRuntime({
+  runner: sessionRunner,
+  emitChildrenCreated: emitFusionChildrenCreated,
+});
 // Browser actions are published to whichever OpenChamber clients are connected;
 // the one owning the browser panel answers. `emitRequest` returns the number of
 // clients reached so the broker can fail fast when nobody is listening.
@@ -1359,7 +1389,6 @@ const browserControlBroker = createBrowserControlBroker({
     return delivered;
   },
 });
-
 const openChamberControlService = createOpenChamberControlService({
   readSettingsFromDiskMigrated,
   sanitizeProjects,
@@ -1368,6 +1397,7 @@ const openChamberControlService = createOpenChamberControlService({
   waitForOpenCodeReady,
   sessionService: openChamberSessionService,
   scheduledTaskService,
+  fusionRuntime,
   browserControl: browserControlBroker,
   agentMemoryActions: createAgentMemoryActions({
     agentMemoryRuntime,

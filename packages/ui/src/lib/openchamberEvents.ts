@@ -20,6 +20,15 @@ type SessionCreatedEvent = {
   dispatchedAsCommand: boolean;
 };
 
+type FusionChildrenCreatedEvent = {
+  type: 'fusion-children-created';
+  runId: string;
+  sessionId: string;
+  directory: string;
+  preset?: string;
+  children: Array<{ model: string; sessionId: string }>;
+};
+
 /**
  * One in-app browser action requested by the agent tool. Broadcast to every
  * connected client; only the one owning a browser view answers.
@@ -45,6 +54,7 @@ type AgentMemoryChangedEvent = {
 type OpenChamberEvent =
   | ScheduledTaskRanEvent
   | SessionCreatedEvent
+  | FusionChildrenCreatedEvent
   | BrowserControlRequestEvent
   | AgentMemoryChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
@@ -167,6 +177,41 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
       ...(typeof properties?.projectId === 'string' && properties.projectId.length > 0
         ? { projectId: properties.projectId }
         : {}),
+    };
+    for (const listener of listeners) {
+      listener(nextEvent);
+    }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:fusion-children-created') {
+    const properties = getEventProperties(envelope.properties);
+    const runId = typeof properties?.runId === 'string' ? properties.runId : '';
+    const sessionId = typeof properties?.sessionId === 'string' ? properties.sessionId : '';
+    const directory = typeof properties?.directory === 'string' ? properties.directory : '';
+    if (!runId || !sessionId || !directory) {
+      return;
+    }
+    const children = Array.isArray(properties?.children)
+      ? properties.children.filter((child): child is { model: string; sessionId: string } => (
+        !!child
+        && typeof child === 'object'
+        && typeof (child as { model?: unknown }).model === 'string'
+        && typeof (child as { sessionId?: unknown }).sessionId === 'string'
+      ))
+      : [];
+    if (children.length === 0) {
+      return;
+    }
+    const nextEvent: FusionChildrenCreatedEvent = {
+      type: 'fusion-children-created',
+      runId,
+      sessionId,
+      directory,
+      ...(typeof properties?.preset === 'string' && properties.preset.length > 0
+        ? { preset: properties.preset }
+        : {}),
+      children,
     };
     for (const listener of listeners) {
       listener(nextEvent);

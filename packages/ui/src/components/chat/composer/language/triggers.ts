@@ -19,7 +19,7 @@ import {
     type FileMentionAutocompleteInputSource,
 } from '../../fileMentionAutocompleteState';
 
-export type AutocompleteKind = 'command' | 'skill' | 'snippet' | 'mention';
+export type AutocompleteKind = 'command' | 'skill' | 'snippet' | 'fusion' | 'mention';
 
 export interface AutocompleteTrigger {
     kind: AutocompleteKind;
@@ -69,7 +69,7 @@ function matchCommandPalette(value: string, cursorPosition: number): Autocomplet
 function matchInlineToken(
     value: string,
     cursorPosition: number,
-    sigil: '/' | '#',
+    sigil: '/' | '#' | '%',
     kind: AutocompleteKind,
 ): AutocompleteTrigger | null {
     const textBeforeCursor = value.substring(0, cursorPosition);
@@ -98,6 +98,7 @@ export function resolveAutocompleteTrigger(
     return matchCommandPalette(value, cursorPosition)
         ?? matchInlineToken(value, cursorPosition, '/', 'skill')
         ?? matchInlineToken(value, cursorPosition, '#', 'snippet')
+        ?? matchInlineToken(value, cursorPosition, '%', 'fusion')
         ?? matchMention(value, cursorPosition, context);
 }
 

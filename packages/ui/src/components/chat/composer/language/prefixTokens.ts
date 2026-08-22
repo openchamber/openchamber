@@ -1,5 +1,6 @@
 /**
- * The composer's prefix-token grammar: `/skill`, `/command` and `#snippet`.
+ * The composer's prefix-token grammar: `/skill`, `/command`, `#snippet` and
+ * `%fusion preset`.
  *
  * Structurally these are the same construct — a sigil at a word boundary
  * followed by an identifier — and they were previously scanned by three
@@ -23,8 +24,15 @@
  */
 const TOKEN_NAME = '[A-Za-z0-9][A-Za-z0-9_-]*';
 
+/**
+ * `%` diverges deliberately: fusion preset names may contain dots (the
+ * settings layer's `FUSION_PRESET_NAME_PATTERN` allows `._-`), so the `%`
+ * scanner widens the body to match the persisted grammar.
+ */
+const FUSION_TOKEN_NAME = '[A-Za-z0-9][A-Za-z0-9._-]*';
+
 /** Sigils that introduce a prefix token. */
-export type TokenPrefix = '/' | '#';
+export type TokenPrefix = '/' | '#' | '%';
 
 export interface PrefixToken {
     /** Offset of the sigil. */
@@ -40,6 +48,7 @@ export interface PrefixToken {
 const SCANNERS: Record<TokenPrefix, RegExp> = {
     '/': new RegExp(`(^|\\s)\\/(${TOKEN_NAME})`, 'g'),
     '#': new RegExp(`(^|\\s)#(${TOKEN_NAME})`, 'g'),
+    '%': new RegExp(`(^|\\s)%(${FUSION_TOKEN_NAME})`, 'g'),
 };
 
 /**
