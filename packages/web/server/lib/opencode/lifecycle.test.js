@@ -151,6 +151,56 @@ describe('OpenCode lifecycle', () => {
     expect(terminalEvents).toHaveLength(1);
   });
 
+  it('recovers an external OPENCODE_HOST connection using its configured endpoint', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ healthy: true }),
+    }));
+    globalThis.fetch = fetchMock;
+    const runtime = createRuntime({}, {
+      openCodePort: null,
+      openCodeBaseUrl: null,
+      isExternalOpenCode: true,
+    }, {
+      ENV_CONFIGURED_OPENCODE_PORT: null,
+      ENV_CONFIGURED_OPENCODE_HOST: { origin: 'http://seamus:4095', port: 4095 },
+      ENV_EFFECTIVE_PORT: 4095,
+    });
+
+    await runtime.restartOpenCode();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://seamus:4095/global/health',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(runtime.testState.openCodePort).toBe(4095);
+    expect(runtime.testState.openCodeBaseUrl).toBe('http://seamus:4095');
+    expect(runtime.testState.lastOpenCodeError).toBeNull();
+  });
+
+  it('retains the OPENCODE_HOST port after an external re-probe fails', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      json: async () => null,
+    }));
+    const runtime = createRuntime({}, {
+      openCodePort: 4095,
+      openCodeBaseUrl: 'http://seamus:4095',
+      isExternalOpenCode: true,
+    }, {
+      ENV_CONFIGURED_OPENCODE_PORT: null,
+      ENV_CONFIGURED_OPENCODE_HOST: { origin: 'http://seamus:4095', port: 4095 },
+      ENV_EFFECTIVE_PORT: 4095,
+    });
+
+    await expect(runtime.restartOpenCode()).rejects.toThrow(
+      'External OpenCode server on port 4095 is not responding',
+    );
+
+    expect(runtime.testState.openCodePort).toBe(4095);
+    expect(runtime.testState.openCodeBaseUrl).toBe('http://seamus:4095');
+  });
+
   it('warms recently used directories after a successful bootstrap', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
