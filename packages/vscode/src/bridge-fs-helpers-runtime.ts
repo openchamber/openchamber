@@ -583,12 +583,8 @@ export const resolveFileReadPath = async (targetPath: string, requestedRoot?: st
   }
 
   try {
-    const [canonicalPath, canonicalBase] = await Promise.all([
-      fs.promises.realpath(resolved),
-      fs.promises.realpath(baseRoot).catch(() => path.resolve(baseRoot)),
-    ]);
-
-    if (!isPathInside(canonicalPath, canonicalBase)) {
+    const canonicalPath = await fs.promises.realpath(resolved);
+    if (!isPathInside(resolved, path.resolve(baseRoot))) {
       return { ok: false, status: 403, error: 'Access to file denied' };
     }
 

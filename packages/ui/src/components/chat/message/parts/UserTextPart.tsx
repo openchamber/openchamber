@@ -72,19 +72,46 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     React.useEffect(() => {
         const el = textRef.current;
         if (!el) return;
+        if (!collapsibleUserMessages || isExpanded) return;
 
         const checkTruncation = () => {
-            if (collapsibleUserMessages && !isExpanded) {
-                setIsTruncated(el.scrollHeight > el.clientHeight);
-            }
+            setIsTruncated(el.scrollHeight > el.clientHeight);
         };
 
         checkTruncation();
+        // A just-sent message mounts while its turn is still settling, so the
+        // synchronous read can land before the clamp has its final geometry.
+        // One deferred re-read covers that without waiting for an observer.
+        const initialFrame = window.requestAnimationFrame(checkTruncation);
 
+        // `el` is the clamped box: once line-clamp pins it to two lines its own
+        // size stops changing, so observing it alone freezes the first
+        // measurement. Markdown settles after mount (highlighting, late layout),
+        // and a message measured while still short would never regain the
+        // expand affordance. The children keep their natural height under the
+        // clamp, so they are what reports content growth.
         const resizeObserver = new ResizeObserver(checkTruncation);
         resizeObserver.observe(el);
 
-        return () => resizeObserver.disconnect();
+        const observeChildren = () => {
+            for (const child of Array.from(el.children)) {
+                resizeObserver.observe(child);
+            }
+        };
+        observeChildren();
+
+        // The renderer swaps subtrees as it settles; re-observe the new children.
+        const mutationObserver = new MutationObserver(() => {
+            observeChildren();
+            checkTruncation();
+        });
+        mutationObserver.observe(el, { childList: true, subtree: true });
+
+        return () => {
+            window.cancelAnimationFrame(initialFrame);
+            mutationObserver.disconnect();
+            resizeObserver.disconnect();
+        };
     }, [collapsibleUserMessages, textContent, isExpanded]);
 
     React.useEffect(() => {
@@ -115,10 +142,14 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             return;
         }
 
-        if (collapsibleUserMessages && !isExpanded && isTruncated) {
+        // Measure at click time instead of trusting the observed flag: whether
+        // the text is clipped right now is what decides if expanding does
+        // anything, and the flag can still be catching up on a fresh message.
+        if (collapsibleUserMessages && !isExpanded && element.scrollHeight > element.clientHeight) {
+            setIsTruncated(true);
             setIsExpanded(true);
         }
-    }, [collapsibleUserMessages, hasActiveSelectionInElement, isExpanded, isTruncated, openSkill]);
+    }, [collapsibleUserMessages, hasActiveSelectionInElement, isExpanded, openSkill]);
 
     const handleCollapse = React.useCallback((event: React.MouseEvent) => {
         event.stopPropagation();

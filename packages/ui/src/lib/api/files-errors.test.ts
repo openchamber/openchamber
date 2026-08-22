@@ -25,4 +25,9 @@ describe('FilesystemError', () => {
     expect(parseFilesystemErrorReason('made-up')).toBe('unknown');
     expect(parseFilesystemErrorReason(undefined)).toBe('unknown');
   });
+
+  test('recognizes filesystem errors created across runtime boundaries', () => {
+    expect(isFilesystemError({ reason: 'already-exists' })).toBe(true);
+    expect(isFilesystemError({ reason: 409 })).toBe(false);
+  });
 });

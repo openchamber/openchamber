@@ -79,6 +79,10 @@ task-required reference named by those skills. Skills are canonical for their
 detailed workflows and checklists. Treating this table as optional advice is a
 process violation.
 
+**Always load `.agents/skills/communication-style/SKILL.md` at the start of
+every task, before any analysis, tool call, or response. Apply its guidance to
+all messages and written output, not only to user-facing copy or documentation.**
+
 | Trigger | Required skill |
 |---|---|
 | Source/dependency changes, exports or package contracts, build/generated assets, or module ownership | `openchamber-change-discipline` |
@@ -123,6 +127,7 @@ Before adding guidance to a skill, identify its canonical owner. If another skil
 - Prefer focused tests and package-scoped type-check/lint for executable source changes.
 - Use workspace-wide checks for cross-workspace contracts, root tooling, dependencies, or shared generated assets.
 - Run `bun run dead-code` when source files are added/deleted/renamed or exports, types, entrypoints, or import shape change; inspect its report because it is non-blocking.
+- Run `bunx oxlint <changed-paths>` on TypeScript/JavaScript files you created or substantially rewrote. This runs the vendored `anti-slop` plugin, which rejects low-evidence typing: unjustified type assertions, `unknown`/`object`/`Record<string, unknown>` contracts, ad hoc `typeof` narrowing, and module mocking. Fix findings in code you authored. Pre-existing findings elsewhere are a known backlog: do not mass-fix them, and never silence a rule, weaken severity, or launder types to make the check pass.
 - Do not assume TypeScript/lint covers server JS, CLI JS, Electron helpers, or native behavior; run focused tests, syntax checks, builds, or runtime validation for the touched surface.
 - For docs-only or isolated config changes, run the narrowest relevant validation.
 - Report exactly what was and was not validated. Static checks alone do not prove runtime, relay, performance, or platform correctness.

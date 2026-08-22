@@ -193,7 +193,13 @@ export const useMenuActions = (
         case 'new-session':
           setActiveMainTab('chat');
           setSessionSwitcherOpen(false);
-          openNewSessionDraft();
+          {
+            const sessionState = useSessionUIStore.getState();
+            const directory = useDirectoryStore.getState().currentDirectory;
+            openNewSessionDraft(sessionState.currentSessionId && directory
+              ? { directoryOverride: directory }
+              : undefined);
+          }
           break;
 
         case 'new-worktree-session':

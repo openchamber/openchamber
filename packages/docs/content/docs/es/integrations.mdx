@@ -1,0 +1,54 @@
+---
+title: Integraciones
+description: Usa tu suscripción de Claude o Cursor como proveedor.
+---
+
+# Integraciones
+
+Una integración es un pequeño plugin que añade un proveedor a OpenChamber usando una suscripción que ya tienes. Las gestionas en **Settings → Integrations**.
+
+> **Función experimental.** Buscamos respetar las políticas de los proveedores, pero las restricciones y suspensiones de cuentas son decisión de cada proveedor. Usa las integraciones bajo tu propia responsabilidad.
+
+Integraciones disponibles:
+
+- **Claude Code** — tu plan Claude Pro o Max, sin claves de API
+- **Cursor** — los límites de modelos de tu plan de Cursor
+
+## Instalar una integración
+
+1. Abre **Settings → Integrations**.
+2. Busca la integración y elige **Install**.
+3. Reinicia OpenCode cuando se te pida — el proveedor aparece tras el reinicio.
+4. Elige **Set up** e inicia sesión. Los modelos aparecerán luego en el selector de modelos del chat.
+
+Las integraciones se instalan para tu usuario, así que funcionan en todos los proyectos. Puedes actualizarlas o eliminarlas desde la misma tarjeta en cualquier momento.
+
+## Claude Code
+
+Claude Code usa tu plan Claude Pro o Max — sin claves de API y sin una app de Claude aparte.
+
+1. Instala la integración (arriba).
+2. Elige **Set up** e inicia sesión. Si aún no tienes la CLI de Claude Code, la configuración ofrece instalarla primero y luego iniciar sesión.
+
+Claude Code es la única integración de esta página que requiere tener la CLI de su proveedor instalada y con sesión iniciada. Cursor no requiere su CLI.
+
+**Cómo se protege tu cuenta de Claude:** esta integración usa el Claude Agent SDK oficial de Anthropic y tu CLI de Claude Code instalada. No secuestra OAuth, no extrae ni reutiliza tokens del navegador, no se hace pasar por un cliente no admitido ni omite la autenticación de Anthropic. Se mantiene en la vía de acceso admitida por Anthropic, por lo que no conlleva el riesgo de baneo asociado al secuestro de tokens o a rodeos de autenticación no autorizados.
+
+## Cursor
+
+Cursor hace disponibles en OpenChamber los modelos incluidos en tu plan de Cursor.
+
+1. Instala la integración (arriba).
+2. Elige **Set up**, abre el enlace y autoriza el acceso en tu navegador. No necesitas clave de API. La lista de modelos se carga automáticamente tras iniciar sesión.
+
+## Actualizar o eliminar
+
+- **Update** instala la última versión publicada del plugin.
+- **Remove** elimina el plugin de tu configuración de OpenCode. El proveedor deja de cargarse cuando OpenCode se recarga.
+
+Si una tarjeta indica que las entradas requieren gestión manual, elige **Manage plugins** y limpia ahí los duplicados.
+
+## Relacionado
+
+- [Proveedores, modelos y agentes](/es/providers/) — conecta otros proveedores y elige modelos
+- [Uso y cuotas](/es/usage/) — sigue cuánto has usado

@@ -81,6 +81,9 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'monthly') return t('quota.window.monthly');
   if (label === 'credits') return t('quota.window.credits');
   if (label === 'credits_balance') return t('quota.window.creditsBalance');
+  if (label === 'monthly_credits') return t('quota.window.monthlyCredits');
+  if (label === 'purchased_credits') return t('quota.window.purchasedCredits');
+  if (label === 'free_credits') return t('quota.window.freeCredits');
   if (label === 'billing_cycle') return t('quota.window.billingCycle');
   if (label === 'plan_limit') return t('quota.window.planLimit');
   if (label === 'auto') return t('quota.window.auto');

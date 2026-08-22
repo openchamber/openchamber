@@ -388,6 +388,7 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
     for (let i = activeSessionMessages.length - 1; i >= 0; i -= 1) {
       const message = activeSessionMessages[i] as typeof activeSessionMessages[number] & {
         tokens?: {
+          total?: unknown;
           input?: unknown;
           output?: unknown;
           reasoning?: unknown;
@@ -395,6 +396,11 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
         };
       };
       if (message.role !== 'assistant' || !message.tokens) continue;
+      // Multi-step turns accumulate the fields across API round-trips, so
+      // summing them overstates the window. The server-reported total is the
+      // final round-trip's window; sum only when the server did not send it.
+      const reportedTotal = getTokenCount(message.tokens.total);
+      if (reportedTotal > 0) return reportedTotal;
       const total = getTokenCount(message.tokens.input)
         + getTokenCount(message.tokens.output)
         + getTokenCount(message.tokens.reasoning)

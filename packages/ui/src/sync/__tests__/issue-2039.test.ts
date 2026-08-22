@@ -73,6 +73,8 @@ mock.module("@/stores/utils/safeStorage", () => ({
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
     getDirectory: () => null,
+    getFilesystemHome: mock(async () => "/home/test"),
+    createDirectory: mock(async (path: string) => ({ success: true, path })),
     setDirectory: mock(() => undefined),
   },
 }))
@@ -327,9 +329,11 @@ describe("issue 2039 draft auto-accept", () => {
       currentSessionId: null,
       currentSessionDirectory: null,
       newSessionDraft: {
+        draftId: 0,
         open: false,
         directoryOverride: null,
         parentID: null,
+        target: "chat",
       },
     })
   })
@@ -371,6 +375,27 @@ describe("issue 2039 draft auto-accept", () => {
     expect(result).toBeNull()
     expect(createSessionCalls).toHaveLength(0)
     expect(permissionAutoAcceptCalls).toHaveLength(0)
+  })
+
+  test("transfers draft project context pins only to the session it creates", async () => {
+    useSessionUIStore.getState().openNewSessionDraft({
+      projectContextPins: { notes: ["note-a"], plans: [] },
+    })
+    useSessionUIStore.getState().setDraftProjectContextPin("plan", "plan-a", true)
+
+    await materializeOpenDraftSession({ providerID: "provider", modelID: "model" })
+
+    expect(createSessionCalls[0]?.metadata).toEqual({
+      openchamber: {
+        project_context_pins: { notes: ["note-a"], plans: ["plan-a"] },
+      },
+    })
+    expect(useSessionUIStore.getState().newSessionDraft.projectContextPins).toBe(undefined)
+
+    useSessionUIStore.getState().openNewSessionDraft()
+    await materializeOpenDraftSession({ providerID: "provider", modelID: "model" })
+
+    expect(createSessionCalls[1]?.metadata).toBe(undefined)
   })
 
   test("uses the server-authoritative directory after worktree session creation", async () => {

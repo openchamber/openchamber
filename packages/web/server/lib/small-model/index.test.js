@@ -19,15 +19,20 @@ vi.mock('./catalog.js', () => ({
   getCatalogProvider: vi.fn(),
 }));
 vi.mock('./call.js', () => ({
+  DEDICATED_WIRE_FORMAT_PROVIDERS: new Set(['github-copilot', 'copilot', 'openai', 'anthropic', 'google']),
   callSmallModel: vi.fn(),
-  resolveProviderLogin: vi.fn(({ auth, providerID }) => {
+  resolveProviderLogin: vi.fn(async ({ auth, providerID }) => {
     const entry = auth?.[providerID];
     return entry && typeof entry === 'object' ? entry : null;
   }),
 }));
+vi.mock('./runtime-providers.js', () => ({
+  getRuntimeProviderSnapshot: vi.fn(async () => null),
+}));
 
 const { generateSmallModelText, describeSmallModel, listAuthenticatedProviders } = await import('./index.js');
 const { readAuthFile } = await import('../opencode/auth.js');
+const { getRuntimeProviderSnapshot } = await import('./runtime-providers.js');
 const { readConfigLayers } = await import('../opencode/shared.js');
 const { getModelCatalog } = await import('./catalog.js');
 const { callSmallModel } = await import('./call.js');
@@ -44,6 +49,7 @@ describe('unsupported small-model providers', () => {
     readConfigLayers.mockReturnValue({ mergedConfig: {} });
     getModelCatalog.mockResolvedValue({});
     callSmallModel.mockReset();
+    getRuntimeProviderSnapshot.mockResolvedValue(null);
   });
 
   it('rejects Claude Code with an actionable error before transport dispatch', async () => {
@@ -57,8 +63,72 @@ describe('unsupported small-model providers', () => {
     expect(callSmallModel).not.toHaveBeenCalled();
   });
 
-  it('does not offer Claude Code in the Small Model picker', () => {
-    expect(listAuthenticatedProviders()).not.toContain('claude-code');
+  it('does not offer Claude Code in the Small Model picker', async () => {
+    expect(await listAuthenticatedProviders()).not.toContain('claude-code');
+  });
+
+  // A plugin can publish an OpenAI-compatible endpoint for Claude Code, but it
+  // is a façade over the Claude Agent SDK: every call spawns the CLI and
+  // spends the user's Claude subscription. The refusal is about that cost, so
+  // an available endpoint must not lift it.
+  it('still refuses Claude Code when a plugin publishes an HTTP endpoint for it', async () => {
+    getRuntimeProviderSnapshot.mockResolvedValue({
+      providers: new Map([['claude-code', { id: 'claude-code', apiKey: 'plugin-key', baseURL: 'http://127.0.0.1:60668/v1', anonymousZen: false }]]),
+      connected: new Set(['claude-code']),
+    });
+
+    await expect(generateSmallModelText({
+      prompt: 'summarize this',
+      model: 'claude-code/haiku',
+    })).rejects.toMatchObject({ code: 'small-model-provider-unsupported' });
+    expect(await listAuthenticatedProviders()).not.toContain('claude-code');
+
+    getRuntimeProviderSnapshot.mockResolvedValue(null);
+  });
+});
+
+describe('provider availability for the model pickers', () => {
+  beforeEach(() => {
+    readAuthFile.mockReturnValue({ openai: { type: 'api', key: 'sk-test' } });
+    readConfigLayers.mockReturnValue({ mergedConfig: {} });
+    getModelCatalog.mockResolvedValue({});
+    getRuntimeProviderSnapshot.mockResolvedValue(null);
+  });
+
+  const snapshot = (providers, connected) => ({
+    providers: new Map(providers.map((provider) => [provider.id, provider])),
+    connected: new Set(connected ?? providers.map((provider) => provider.id)),
+  });
+
+  it('offers a plugin provider that OpenCode resolved at runtime', async () => {
+    getRuntimeProviderSnapshot.mockResolvedValue(snapshot([
+      { id: 'llmapi', apiKey: 'plugin-key', baseURL: 'https://api.llmapi.ai/v1', anonymousZen: false },
+    ]));
+
+    expect(await listAuthenticatedProviders()).toEqual(expect.arrayContaining(['openai', 'llmapi']));
+  });
+
+  it('hides a provider with no endpoint to send a request to', async () => {
+    getRuntimeProviderSnapshot.mockResolvedValue(snapshot([
+      { id: 'endpointless', apiKey: 'plugin-key', baseURL: null, anonymousZen: false },
+    ]));
+
+    expect(await listAuthenticatedProviders()).not.toContain('endpointless');
+  });
+
+  it('never offers opencode zen without a real login', async () => {
+    // The zen sentinel is not a credential, so the snapshot carries no apiKey.
+    getRuntimeProviderSnapshot.mockResolvedValue(snapshot([
+      { id: 'opencode', apiKey: null, baseURL: 'https://opencode.ai/zen/v1', anonymousZen: true },
+    ]));
+
+    expect(await listAuthenticatedProviders()).not.toContain('opencode');
+  });
+
+  it('keeps the auth.json providers when OpenCode cannot be reached', async () => {
+    getRuntimeProviderSnapshot.mockResolvedValue(null);
+
+    expect(await listAuthenticatedProviders()).toContain('openai');
   });
 });
 

@@ -105,7 +105,7 @@ export const MobileWorkspaceDrawer: React.FC<{
   /** When set, the Changes tab opens directly into the per-file diff. */
   pendingChangesDiff: { path: string; staged: boolean } | null;
   /** Notes tab: opens a plan fullscreen (layered above the drawer). */
-  onOpenPlan: (plan: { path: string; title: string }) => void;
+  onOpenPlan: (plan: { id: string; title: string }) => void;
   /** MCP tab: jump to the MCP settings page pre-seeded with a new server draft. */
   onOpenMcpSettings: () => void;
   variant?: 'drawer' | 'panel';

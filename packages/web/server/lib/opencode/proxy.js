@@ -1,3 +1,6 @@
+import http from 'node:http';
+import https from 'node:https';
+
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 import {
@@ -10,6 +13,96 @@ import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-read
 import { recordStartupPerformance } from './startup-performance.js';
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
+
+const OPENCODE_AGENT_KEEP_ALIVE_MS = 30_000;
+// Node's own default. A lower cap evicts pooled sockets under concurrency,
+// which reintroduces exactly the per-request connection churn this agent
+// exists to prevent (measured: at 64 concurrent requests, a cap of 32 left
+// 303 sockets in TIME_WAIT versus 0 at 256).
+const OPENCODE_AGENT_MAX_FREE_SOCKETS = 256;
+// Evicts idle free sockets from our side. Without it the only thing that
+// retires an idle pooled socket is the upstream closing it. Note this is
+// distinct from `keepAliveMsecs`, which is the TCP keep-alive probe delay.
+const OPENCODE_AGENT_IDLE_TIMEOUT_MS = 60_000;
+
+const OPENCODE_AGENT_OPTIONS = {
+  keepAlive: true,
+  keepAliveMsecs: OPENCODE_AGENT_KEEP_ALIVE_MS,
+  maxSockets: Infinity,
+  maxFreeSockets: OPENCODE_AGENT_MAX_FREE_SOCKETS,
+  timeout: OPENCODE_AGENT_IDLE_TIMEOUT_MS,
+};
+
+const isHttpsProxyTarget = (target) => {
+  if (typeof target !== 'string') {
+    return false;
+  }
+  try {
+    return new URL(target).protocol === 'https:';
+  } catch {
+    return /^https:/i.test(target.trim());
+  }
+};
+
+/**
+ * Agent for proxied OpenCode API requests.
+ *
+ * When no agent is supplied, `http-proxy` falls back to `agent: false`, which
+ * both disables connection pooling and forces `Connection: close` on every
+ * proxied request (http-proxy/lib/http-proxy/common.js). That consumes one
+ * ephemeral port per request, and sustained traffic can exhaust the host's
+ * ephemeral port range — after which every process on the machine fails to
+ * open outbound connections with EADDRNOTAVAIL.
+ *
+ * The agent must match the target scheme: http-proxy dispatches through
+ * `https.request` when `target.protocol === 'https:'`
+ * (http-proxy/lib/http-proxy/passes/web-incoming.js), and an `http.Agent`
+ * would open a plaintext socket to a TLS port. External servers may be
+ * configured over https via `OPENCODE_HOST` (see env-config.js), so derive the
+ * agent class from the resolved target.
+ *
+ * `maxSockets: Infinity` preserves the unbounded concurrency of `agent: false`,
+ * so this changes connection reuse only, not request throughput.
+ */
+export const createOpenCodeProxyAgent = (target) => (
+  isHttpsProxyTarget(target)
+    ? new https.Agent(OPENCODE_AGENT_OPTIONS)
+    : new http.Agent(OPENCODE_AGENT_OPTIONS)
+);
+
+/**
+ * Lazily resolves the proxy agent, memoized per scheme.
+ *
+ * The scheme cannot be decided at registration time: `setupProxy()` runs before
+ * `bootstrapOpenCodeAtStartup()` (startup-pipeline-runtime.js), so on a cold
+ * start `state.openCodePort` is still null, `buildOpenCodeUrl()` throws
+ * (network-runtime.js) and `resolveProxyTarget()` falls back to the http
+ * loopback default. An external server configured over https via
+ * `OPENCODE_HOST` only becomes visible on `state.openCodeBaseUrl` after
+ * bootstrap completes.
+ *
+ * http-proxy-middleware rebuilds its per-request options with
+ * `Object.assign({}, this.proxyOptions)` inside `prepareProxyRequest`, which
+ * invokes getters, so exposing `agent` as a getter defers resolution to request
+ * time. Memoizing per scheme keeps a single shared pool per scheme rather than
+ * allocating an agent per request.
+ */
+const createOpenCodeProxyAgentResolver = (resolveTarget) => {
+  const agents = new Map();
+
+  return () => {
+    const target = resolveTarget();
+    const scheme = isHttpsProxyTarget(target) ? 'https:' : 'http:';
+    let agent = agents.get(scheme);
+    if (!agent) {
+      // Construct through the shared factory rather than inline, so both
+      // schemes are built from OPENCODE_AGENT_OPTIONS by the same code path.
+      agent = createOpenCodeProxyAgent(target);
+      agents.set(scheme, agent);
+    }
+    return agent;
+  };
+};
 
 export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } = {}) => {
   const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
@@ -285,15 +378,22 @@ export const registerOpenCodeProxy = (app, deps) => {
   // and direct fetch helpers use. This avoids split-brain state where /health
   // succeeds against an external host but /api/* still proxies to 127.0.0.1.
   const resolveProxyTarget = () => {
-    try {
-      const resolved = normalizeProxyTarget(buildOpenCodeUrl('/', ''));
-      if (resolved) {
-        return resolved;
+    const runtimeState = getRuntime();
+
+    // `buildOpenCodeUrl` throws while the port is unknown, and the port is
+    // nulled on several runtime paths (health-check failure, failed restart),
+    // not just cold start. Checking first keeps a degraded OpenCode from
+    // making every proxied request pay for a thrown-and-caught exception.
+    if (runtimeState.openCodePort) {
+      try {
+        const resolved = normalizeProxyTarget(buildOpenCodeUrl('/', ''));
+        if (resolved) {
+          return resolved;
+        }
+      } catch {
       }
-    } catch {
     }
 
-    const runtimeState = getRuntime();
     const externalBase = normalizeProxyTarget(runtimeState.openCodeBaseUrl);
     if (externalBase) {
       return externalBase;
@@ -767,8 +867,18 @@ export const registerOpenCodeProxy = (app, deps) => {
   });
 
   // Generic proxy for non-SSE OpenCode API routes.
+  // The agent is exposed as a getter so its class is resolved per request, not
+  // at registration: the proxy is registered before OpenCode bootstraps, so an
+  // https target configured via OPENCODE_HOST is not yet visible here. Agents
+  // are memoized per scheme, so this is still one shared pool per scheme across
+  // `apiProxy` and `interactiveOAuthProxy`.
+  const resolveOpenCodeProxyAgent = createOpenCodeProxyAgentResolver(resolveProxyTarget);
+
   const createApiProxy = (timeoutMs) => createProxyMiddleware({
     target: resolveProxyTarget(),
+    get agent() {
+      return resolveOpenCodeProxyAgent();
+    },
     changeOrigin: true,
     pathRewrite: { '^/api': '' },
     timeout: timeoutMs,

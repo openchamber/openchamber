@@ -3,8 +3,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { parseMdFile, writeMdFile } from './shared.js';
+import { parseMdFile, writeMdFile, readConfigFile, readConfigLayers, writeConfig } from './shared.js';
 import { updateAgent } from './agents.js';
+import { updateMcpConfig } from './mcp.js';
 
 const FIXTURE_DIR = path.join(os.tmpdir(), `openchamber-shared-test-${process.pid}`);
 
@@ -198,5 +199,188 @@ describe('updateAgent frontmatter preservation', () => {
       temperature: 0.7,
     });
     expect(parsed.body).toBe('Body of strateg.');
+  });
+});
+
+describe('readConfigFile / writeConfig JSONC safety (issue #2923)', () => {
+  beforeEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  const VALID_CONFIG = [
+    '{',
+    '  "$schema": "https://opencode.ai/config.json",',
+    '  // keep me',
+    '  "plugin": ["opencode-see-image"],',
+    '  "mcp": {',
+    '    "openproject": {',
+    '      "type": "remote",',
+    '      "url": "https://openproject.example.com/mcp",',
+    '      "enabled": true,',
+    '    }',
+    '  },',
+    '  "provider": {',
+    '    "ollama-cloud": {',
+    '      "npm": "@ai-sdk/openai-compatible",',
+    '      "name": "Ollama Cloud"',
+    '    }',
+    '  }',
+    '}',
+    '',
+  ].join('\n');
+
+  // JSON5-style unquoted keys after $schema — jsonc-parser returns a partial
+  // tree of only `{ $schema }` when errors are ignored.
+  const PARTIAL_PARSE_CONFIG = [
+    '{',
+    '  "$schema": "https://opencode.ai/config.json",',
+    '  plugin: ["opencode-see-image"],',
+    '  mcp: {',
+    '    openproject: {',
+    '      type: "remote",',
+    '      url: "https://openproject.example.com/mcp",',
+    '      enabled: true',
+    '    }',
+    '  },',
+    '  provider: {',
+    '    "ollama-cloud": {',
+    '      npm: "@ai-sdk/openai-compatible",',
+    '      name: "Ollama Cloud"',
+    '    }',
+    '  }',
+    '}',
+    '',
+  ].join('\n');
+
+  it('parses valid JSONC with comments and trailing commas without dropping keys', () => {
+    const file = writeFixture('opencode.jsonc', VALID_CONFIG);
+    expect(readConfigFile(file)).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      plugin: ['opencode-see-image'],
+      mcp: {
+        openproject: {
+          type: 'remote',
+          url: 'https://openproject.example.com/mcp',
+          enabled: true,
+        },
+      },
+      provider: {
+        'ollama-cloud': {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'Ollama Cloud',
+        },
+      },
+    });
+  });
+
+  it('returns an empty object for a missing or whitespace-only file', () => {
+    expect(readConfigFile(path.join(FIXTURE_DIR, 'missing.jsonc'))).toEqual({});
+    const empty = writeFixture('empty.jsonc', '   \n');
+    expect(readConfigFile(empty)).toEqual({});
+  });
+
+  it('throws INVALID_JSONC on partial-parse JSONC instead of returning a $schema-only stub', () => {
+    const file = writeFixture('opencode.jsonc', PARTIAL_PARSE_CONFIG);
+    expect(() => readConfigFile(file)).toThrow(/cannot be loaded safely/);
+    try {
+      readConfigFile(file);
+    } catch (error) {
+      expect(error.code).toBe('INVALID_JSONC');
+    }
+  });
+
+  it('throws INVALID_JSONC for a non-object JSONC root', () => {
+    const file = writeFixture('array.jsonc', '["plugin"]\n');
+    expect(() => readConfigFile(file)).toThrow(/cannot be loaded safely/);
+  });
+
+  it('refuses to overwrite an unparseable config file', () => {
+    const file = writeFixture('opencode.jsonc', PARTIAL_PARSE_CONFIG);
+    expect(() => writeConfig({ $schema: 'https://opencode.ai/config.json' }, file)).toThrow(
+      /cannot be loaded safely/,
+    );
+    expect(fs.readFileSync(file, 'utf8')).toBe(PARTIAL_PARSE_CONFIG);
+    expect(fs.existsSync(`${file}.openchamber.backup`)).toBe(false);
+  });
+
+  it('preserves a valid config across MCP updates', () => {
+    const file = writeFixture('opencode.jsonc', VALID_CONFIG);
+    const config = readConfigFile(file);
+    config.mcp.openproject.enabled = false;
+    writeConfig(config, file);
+
+    const rewritten = JSON.parse(fs.readFileSync(file, 'utf8'));
+    expect(rewritten.plugin).toEqual(['opencode-see-image']);
+    expect(rewritten.provider['ollama-cloud'].name).toBe('Ollama Cloud');
+    expect(rewritten.mcp.openproject.enabled).toBe(false);
+    expect(fs.readFileSync(`${file}.openchamber.backup`, 'utf8')).toBe(VALID_CONFIG);
+  });
+
+  it('does not wipe an unparseable user config during MCP mutation attempts', () => {
+    const file = writeFixture('opencode.jsonc', PARTIAL_PARSE_CONFIG);
+    const previousOpenCodeConfig = process.env.OPENCODE_CONFIG;
+
+    try {
+      process.env.OPENCODE_CONFIG = file;
+      expect(() => updateMcpConfig('openproject', { enabled: true })).toThrow(
+        /cannot be loaded safely/,
+      );
+      expect(fs.readFileSync(file, 'utf8')).toBe(PARTIAL_PARSE_CONFIG);
+      expect(fs.existsSync(`${file}.openchamber.backup`)).toBe(false);
+    } finally {
+      if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
+      else process.env.OPENCODE_CONFIG = previousOpenCodeConfig;
+    }
+  });
+
+  it('returns an empty object for a comment-only config file', () => {
+    const file = writeFixture('comments.jsonc', '// placeholder\n/* still empty */\n');
+    expect(readConfigFile(file)).toEqual({});
+  });
+
+  it('throws INVALID_JSONC for content that yields no JSON value at all', () => {
+    const yamlish = writeFixture('yamlish.jsonc', 'mcp:\n  openproject:\n    type: remote\n');
+    expect(() => readConfigFile(yamlish)).toThrow(/cannot be loaded safely/);
+    expect(() => writeConfig({ $schema: 'https://opencode.ai/config.json' }, yamlish)).toThrow(
+      /cannot be loaded safely/,
+    );
+    expect(fs.readFileSync(yamlish, 'utf8')).toBe('mcp:\n  openproject:\n    type: remote\n');
+    expect(fs.existsSync(`${yamlish}.openchamber.backup`)).toBe(false);
+  });
+
+  it('keeps a valid custom layer readable when a project layer is unparseable', () => {
+    const custom = writeFixture('custom.jsonc', VALID_CONFIG);
+    const projectDir = path.join(FIXTURE_DIR, 'project');
+    const projectFile = writeFixture(path.join('project', '.opencode', 'opencode.jsonc'), PARTIAL_PARSE_CONFIG);
+    const previousOpenCodeConfig = process.env.OPENCODE_CONFIG;
+
+    try {
+      process.env.OPENCODE_CONFIG = custom;
+      const layers = readConfigLayers(projectDir);
+      expect(layers.customConfig.plugin).toEqual(['opencode-see-image']);
+      expect(layers.projectConfig).toEqual({});
+      expect(layers.mergedConfig.plugin).toEqual(['opencode-see-image']);
+      expect(layers.layerErrors).toEqual([
+        expect.objectContaining({
+          path: projectFile,
+          code: 'INVALID_JSONC',
+        }),
+      ]);
+
+      updateMcpConfig('openproject', { enabled: false }, projectDir);
+      const rewritten = JSON.parse(fs.readFileSync(custom, 'utf8'));
+      expect(rewritten.plugin).toEqual(['opencode-see-image']);
+      expect(rewritten.mcp.openproject.enabled).toBe(false);
+      expect(fs.readFileSync(projectFile, 'utf8')).toBe(PARTIAL_PARSE_CONFIG);
+      expect(fs.existsSync(`${projectFile}.openchamber.backup`)).toBe(false);
+    } finally {
+      if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
+      else process.env.OPENCODE_CONFIG = previousOpenCodeConfig;
+    }
   });
 });
