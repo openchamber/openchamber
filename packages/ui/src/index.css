@@ -1018,6 +1018,18 @@ html:not(.dark) .chat-scroll {
   font-size: var(--text-code) !important;
 }
 
+.question-markdown > .markdown-content.markdown-tool {
+  font-size: inherit !important;
+}
+
+.question-markdown > .markdown-content > [data-md-block]:first-child > :first-child {
+  margin-top: 0;
+}
+
+.question-markdown > .markdown-content > [data-md-block]:last-child > :last-child {
+  margin-bottom: 0;
+}
+
 /* Reasoning markdown renders at meta size, dimmed. */
 .markdown-content.markdown-reasoning {
   font-size: var(--text-markdown);
