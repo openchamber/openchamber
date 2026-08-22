@@ -38,6 +38,7 @@ interface GitHeaderProps {
   onCheckoutBranch: (branch: string) => void;
   onCreateBranch: (name: string, remote?: GitRemote) => Promise<void>;
   onRenameBranch?: (oldName: string, newName: string) => Promise<void>;
+  onDeleteBranch?: (branch: string) => Promise<void>;
   activeIdentityProfile: GitIdentityProfile | null;
   availableIdentities: GitIdentityProfile[];
   onSelectIdentity: (profile: GitIdentityProfile) => void;
@@ -245,6 +246,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   onCheckoutBranch,
   onCreateBranch,
   onRenameBranch,
+  onDeleteBranch,
   activeIdentityProfile,
   availableIdentities,
   onSelectIdentity,
@@ -424,6 +426,8 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
               branchInfo={branchInfo}
               onCheckout={onCheckoutBranch}
               onCreate={onCreateBranch}
+              onRename={onRenameBranch}
+              onDelete={onDeleteBranch}
               remotes={remotes}
             />
           )}
