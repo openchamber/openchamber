@@ -199,10 +199,61 @@ const createTimeoutSignal = (timeoutMs: number): { signal: AbortSignal; cleanup:
   };
 };
 
-const createRuntimeOpencodeClient = (config: { baseUrl: string; directory?: string }): OpencodeClient => {
+/**
+ * Upper bound for non-streaming OpenCode read requests. Without it, a socket
+ * that neither resolves nor rejects (the half-open state described in #2470)
+ * keeps the bootstrap concurrency slot busy forever and the UI stays on
+ * "loading sessions". Long-lived streams (POST prompts, the /event SSE) are
+ * explicitly excluded in {@link createRuntimeOpencodeClient}.
+ */
+const OPENCODE_REQUEST_TIMEOUT_MS = 30_000;
+
+const isEventStreamUrl = (input: string | URL | Request): boolean => {
+  const url = typeof input === 'string'
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input.url;
+  return url.includes('/event');
+};
+
+type RuntimeOpencodeClientConfig = {
+  baseUrl: string;
+  directory?: string;
+  /** Read-request timeout in ms. Overridable so tests can use short value. */
+  requestTimeoutMs?: number;
+};
+
+export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig): OpencodeClient => {
+  const requestTimeoutMs = config.requestTimeoutMs ?? OPENCODE_REQUEST_TIMEOUT_MS;
   return createOpencodeClient({
     ...config,
-    fetch: runtimeFetch,
+    fetch: async (input: string | URL | Request, init?: RequestInit) => {
+      const method = String(
+        init?.method ?? (input instanceof Request ? input.method : 'GET'),
+      ).toUpperCase();
+      if (isEventStreamUrl(input) || method === 'POST') {
+        return runtimeFetch(input, init);
+      }
+      const timeout = createTimeoutSignal(requestTimeoutMs);
+      const callerSignal = init?.signal;
+      const supportsAny = typeof AbortSignal !== 'undefined'
+        && typeof (AbortSignal as { any?: unknown }).any === 'function';
+      const signal: AbortSignal = callerSignal && supportsAny
+        ? (AbortSignal as typeof AbortSignal & { any: (signals: AbortSignal[]) => AbortSignal })
+            .any([callerSignal, timeout.signal])
+        : (callerSignal ?? timeout.signal);
+      try {
+        return await runtimeFetch(input, { ...init, signal });
+      } catch (error) {
+        if (timeout.signal.aborted && !callerSignal?.aborted) {
+          throw new Error(`OpenCode request timed out after ${requestTimeoutMs}ms`);
+        }
+        throw error;
+      } finally {
+        timeout.cleanup();
+      }
+    },
   });
 };
 
