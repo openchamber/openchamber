@@ -1322,6 +1322,47 @@ describe.runIf(canRunGit())('getBranches', () => {
     // decide whether a base branch exists at all.
     expect(branches.all).toContain('remotes/origin/react');
   });
+
+  it('includes remote branches with no local tracking ref and prunes refs deleted on the remote (#2098)', async () => {
+    const remote = createTempDir();
+    runGit(remote, ['init', '--bare', '--initial-branch=main']);
+
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['config', 'user.email', 'test@example.com']);
+    runGit(repository, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+    runGit(repository, ['add', 'README.md']);
+    runGit(repository, ['commit', '-m', 'init']);
+    runGit(repository, ['remote', 'add', 'origin', remote]);
+    runGit(repository, ['push', '-u', 'origin', 'main']);
+    runGit(repository, ['checkout', '-b', 'feature-known']);
+    runGit(repository, ['push', '-u', 'origin', 'feature-known']);
+    // This tracking ref will go stale: the collaborator deletes the branch on
+    // the remote below, and the list must prune it.
+    runGit(repository, ['checkout', '-b', 'feature-stale']);
+    runGit(repository, ['push', '-u', 'origin', 'feature-stale']);
+    runGit(repository, ['checkout', 'main']);
+    runGit(repository, ['branch', '-D', 'feature-stale']);
+
+    // A collaborator pushes a branch straight to the remote and deletes
+    // another; this repository never fetches, so it has no local
+    // remote-tracking ref for feature-remote-only.
+    const collaborator = createTempDir();
+    runGit(collaborator, ['clone', remote, '.']);
+    runGit(collaborator, ['config', 'user.email', 'test@example.com']);
+    runGit(collaborator, ['config', 'user.name', 'Test']);
+    runGit(collaborator, ['checkout', '-b', 'feature-remote-only']);
+    runGit(collaborator, ['push', 'origin', 'feature-remote-only']);
+    runGit(collaborator, ['push', 'origin', ':feature-stale']);
+
+    const branches = await getBranches(repository);
+
+    expect(branches.all).toContain('remotes/origin/feature-remote-only');
+    expect(branches.all).toContain('remotes/origin/feature-known');
+    expect(branches.all).toContain('feature-known');
+    expect(branches.all).not.toContain('remotes/origin/feature-stale');
+  });
 });
 
 describe.runIf(canRunGit())('getRangeDiff', () => {
