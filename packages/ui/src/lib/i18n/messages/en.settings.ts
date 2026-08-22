@@ -2183,5 +2183,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  'settings.openchamber.visual.section.assistantAnswerAction': 'Assistant answer action',
+  'settings.openchamber.visual.section.assistantAnswerActionAria': 'Assistant answer action',
+  'settings.openchamber.visual.field.assistantAnswerActionAria': 'Assistant answer action: {option}',
+  'settings.openchamber.visual.field.assistantAnswerActionDescription': 'Choose what the action below an assistant answer does.',
+  'settings.openchamber.visual.option.assistantAnswerAction.startFromAnswer.label': 'Start from answer',
+  'settings.openchamber.visual.option.assistantAnswerAction.forkSession.label': 'Fork session',
   ...thirdPartyIntegrationI18n.en,
 } as const;

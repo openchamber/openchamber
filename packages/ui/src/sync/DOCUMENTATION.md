@@ -166,6 +166,7 @@ VS Code does not run the server permission-auto-accept runtime. The extension ho
 2. session create/update/delete events; recency-only updates for existing sessions are retained latest-per-session and committed once on `session.idle`/`session.error`, while structural updates and create/delete remain immediate and runtime switching discards pending updates. Display ordering reacts separately to active/settled lifecycle transitions, not to these recency publications
 3. direct mutation from session actions after successful SDK calls:
    - create
+   - fork
    - title update
    - share
    - unshare
@@ -267,6 +268,22 @@ Rules:
 Examples of global-store updates performed in `session-actions.ts`:
 
 - `createSession()` -> `upsertSession(session)`
+- `forkSession()` copies the whole session when it receives no message. When it receives a clicked message, it copies through that message.
+- `forkFromMessage()` excludes the selected user message and restores that message in the composer.
+- Both fork actions register the directory, update both session stores, and select the returned session.
+
+The OpenCode fork endpoint excludes its `messageID` boundary. `forkSession()` uses the next transcript message so the clicked message remains in the new session.
+
+Fork reconciliation maps pinned message IDs to the cloned message IDs. It removes pins for messages beyond the copied boundary.
+
+Boundary forks filter linked issues by the clicked message time. They preserve unknown metadata and remove goal, assist, compaction, and review state.
+
+Review sessions fail before the fork request. Whole-session forks retain other source metadata.
+
+OpenCode increments a fork suffix only when the source title already contains one. The shared action also checks known sessions in the fork directory.
+It uses the next available number for repeated forks from the original session. Active and archived sessions both reserve their fork numbers.
+
+Forks remain independent root sessions. They do not receive the source session as `parentID`. That field remains reserved for child sessions such as subagents.
 - `updateSessionTitle()` -> `upsertSession(result.data)`
 - `shareSession()` / `unshareSession()` -> `upsertSession(result.data)`
 - `archiveSession()` / `archiveSessions()` -> wait for server confirmation, then upsert each archived session

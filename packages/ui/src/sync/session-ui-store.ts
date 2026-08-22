@@ -34,7 +34,7 @@ import { normalizePath } from "@/lib/pathNormalization"
 import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, warmChatsRootDirectory } from "@/lib/chatDirectories"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
-import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
+import { composeStartSessionFromAnswerMessage } from "@/lib/messages/executionMeta"
 import { findLatestUserModelChoice } from "@/lib/messages/userModelChoice"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
@@ -70,6 +70,7 @@ import {
   refetchSessionMessages,
   revertToMessage as revertToMessageAction,
   unrevertSession as unrevertSessionAction,
+  forkSession as forkSessionAction,
   forkFromMessage as forkFromMessageAction,
   fetchMessagesForSession,
   type ArchiveSessionsOptions,
@@ -380,6 +381,7 @@ export type SessionUIState = {
   shareSession: (sessionId: string) => Promise<Session | null>
   unshareSession: (sessionId: string) => Promise<Session | null>
   revertToMessage: (sessionId: string, messageId: string, options?: { skipRedoPush?: boolean }) => Promise<void>
+  forkSession: (sessionId: string, throughMessageId?: string) => Promise<void>
   forkFromMessage: (sessionId: string, messageId: string) => Promise<void>
   handleSlashUndo: (sessionId: string) => Promise<void>
   handleSlashRedo: (sessionId: string, options?: { fullUnrevert?: boolean }) => Promise<void>
@@ -1864,22 +1866,39 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   },
 
   // ---------------------------------------------------------------------------
-  // forkFromMessage — delegates to session-actions (handles text + sidebar)
+  // Session forks delegate state reconciliation to session-actions.
   // ---------------------------------------------------------------------------
-  forkFromMessage: async (sessionId, messageId) => {
-    const sessions = getSyncSessions()
-    const existingSession = sessions.find((s) => s.id === sessionId)
-    if (!existingSession) return
-
+  forkSession: async (sessionId, throughMessageId) => {
     try {
-      await forkFromMessageAction(sessionId, messageId)
-
+      await forkSessionAction(sessionId, throughMessageId)
       const { toast } = await import("sonner")
-      toast.success(`Forked from ${existingSession.title}`)
+      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+      const { dictionary } = useI18nStore.getState()
+      toast.success(formatMessage(dictionary, "sessions.fork.toast.success"))
     } catch (error) {
+      if (error instanceof Error && error.message === "runtime changed") return
       console.error("Failed to fork session:", error)
       const { toast } = await import("sonner")
-      toast.error("Failed to fork session")
+      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+      const { dictionary } = useI18nStore.getState()
+      toast.error(formatMessage(dictionary, "sessions.fork.toast.error"))
+    }
+  },
+
+  forkFromMessage: async (sessionId, messageId) => {
+    try {
+      await forkFromMessageAction(sessionId, messageId)
+      const { toast } = await import("sonner")
+      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+      const { dictionary } = useI18nStore.getState()
+      toast.success(formatMessage(dictionary, "sessions.fork.toast.success"))
+    } catch (error) {
+      if (error instanceof Error && error.message === "runtime changed") return
+      console.error("Failed to fork session:", error)
+      const { toast } = await import("sonner")
+      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+      const { dictionary } = useI18nStore.getState()
+      toast.error(formatMessage(dictionary, "sessions.fork.toast.error"))
     }
   },
 
@@ -1987,13 +2006,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     // "Run as goal" rides the same arm mechanism as the composer target
     // button: sendMessage consumes the flag, stamps the goal (objective =
-    // the composed fork message) and attaches the goal-mode intro part.
+    // the composed start-from-answer message) and attaches the goal-mode intro part.
     // Set explicitly either way so a stray armed flag cannot leak into a
-    // non-goal fork.
+    // non-goal start-from-answer action.
     useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true)
 
     await get().sendMessage(
-      composeForkSessionMessage(execution.instructions, assistantPlanText),
+      composeStartSessionFromAnswerMessage(execution.instructions, assistantPlanText),
       pID,
       mID,
       execution.agent || undefined,

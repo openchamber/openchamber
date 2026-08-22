@@ -286,6 +286,7 @@ mock.module("../session-actions", () => ({
   refetchSessionMessages: mock(async () => undefined),
   revertToMessage: mock(async () => undefined),
   unrevertSession: mock(async () => undefined),
+  forkSession: mock(async () => undefined),
   forkFromMessage: mock(async () => undefined),
   fetchMessagesForSession: mock(async () => undefined),
   getSessionLastAssistantModel: () => null,

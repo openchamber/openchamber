@@ -28,6 +28,7 @@ export const createSettingsHelpers = (dependencies) => {
   const SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH = 128;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
+  const ASSISTANT_ANSWER_ACTION_VALUES = new Set(['start-from-answer', 'fork-session']);
   const TERMINAL_SHELL_VALUES = new Set(['auto', 'bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu']);
   const SIDEBAR_PROJECT_DISPLAY_MODE_VALUES = new Set(['all', 'single']);
   const SIDEBAR_SESSION_GROUPING_MODE_VALUES = new Set(['by-worktree', 'flat']);
@@ -610,6 +611,11 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
     }
+    if (candidate.assistantAnswerAction !== undefined) {
+      result.assistantAnswerAction = ASSISTANT_ANSWER_ACTION_VALUES.has(candidate.assistantAnswerAction)
+        ? candidate.assistantAnswerAction
+        : 'start-from-answer';
+    }
     if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
       result.fontSize = Math.max(50, Math.min(200, Math.round(candidate.fontSize)));
     }
@@ -927,6 +933,9 @@ export const createSettingsHelpers = (dependencies) => {
 
     return {
       ...sanitized,
+      assistantAnswerAction: ASSISTANT_ANSWER_ACTION_VALUES.has(settings?.assistantAnswerAction)
+        ? settings.assistantAnswerAction
+        : 'start-from-answer',
       hasManagedRemoteTunnelToken,
       // Tells the client whether agent memory exists in this build at all, so
       // its settings row and panel tab can be absent rather than merely off.

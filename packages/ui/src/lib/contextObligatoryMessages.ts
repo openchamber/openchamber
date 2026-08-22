@@ -46,3 +46,17 @@ export const withContextObligatoryMessage = (
     },
   };
 };
+
+export const withContextObligatoryMessages = (
+  metadata: SessionMetadataRecord,
+  messages: readonly ContextObligatoryMessage[],
+): SessionMetadataRecord => {
+  const openchamber = isRecord(metadata.openchamber) ? metadata.openchamber : {};
+  return {
+    ...metadata,
+    openchamber: {
+      ...openchamber,
+      context_obligatory_messages: [...messages],
+    },
+  };
+};

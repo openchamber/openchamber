@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 type ConfigResponse = { data: Record<string, unknown> };
+type ForkRequest = { sessionID: string; directory?: string; messageID?: string };
 
 (mock as unknown as { restore?: () => void }).restore?.();
 
@@ -10,6 +11,7 @@ let runtimeKey = 'test-runtime';
 const promptAsyncCalls: unknown[][] = [];
 const promptAsyncResults: Array<unknown> = [];
 const pathGetResults: Array<unknown> = [];
+const forkCalls: ForkRequest[] = [];
 
 const promptAsyncMock = mock(async (...args: unknown[]) => {
   promptAsyncCalls.push(args);
@@ -24,6 +26,11 @@ const pathGetMock = mock(async () => {
   return next ?? { data: { directory: '/workspace/project' } };
 });
 
+const forkMock = mock(async (params: ForkRequest) => {
+  forkCalls.push(params);
+  return { data: { id: 'session-fork', title: 'Forked' } };
+});
+
 mock.module('@opencode-ai/sdk/v2', () => ({
   createOpencodeClient: mock(() => ({
     config: {
@@ -36,6 +43,7 @@ mock.module('@opencode-ai/sdk/v2', () => ({
     },
     session: {
       promptAsync: promptAsyncMock,
+      fork: forkMock,
     },
     path: {
       get: pathGetMock,
@@ -75,6 +83,29 @@ beforeEach(() => {
   promptAsyncCalls.length = 0;
   promptAsyncResults.length = 0;
   pathGetResults.length = 0;
+  forkCalls.length = 0;
+});
+
+describe('opencodeClient session fork', () => {
+  test('omits messageID for a whole-session fork', async () => {
+    await opencodeClient.forkSession('session-a', undefined, '/workspace/project');
+
+    expect(forkCalls).toEqual([{
+      sessionID: 'session-a',
+      directory: '/workspace/project',
+    }]);
+    expect(promptAsyncCalls).toEqual([]);
+  });
+
+  test('includes messageID for a boundary fork', async () => {
+    await opencodeClient.forkSession('session-a', 'message-a', '/workspace/project');
+
+    expect(forkCalls).toEqual([{
+      sessionID: 'session-a',
+      directory: '/workspace/project',
+      messageID: 'message-a',
+    }]);
+  });
 });
 
 describe('opencodeClient directory availability', () => {

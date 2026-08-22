@@ -2193,5 +2193,11 @@ export const settingsDict = {
   "settings.openchamber.visual.field.followUpBehaviorDescription": "Choose what happens when you press Enter on a follow-up message while the agent is still responding.",
   "settings.openchamber.visual.option.followUpBehavior.steer.label": "Steer",
   "settings.openchamber.visual.option.followUpBehavior.queue.label": "Queue",
+  "settings.openchamber.visual.section.assistantAnswerAction": "Дія для відповіді асистента",
+  "settings.openchamber.visual.section.assistantAnswerActionAria": "Дія для відповіді асистента",
+  "settings.openchamber.visual.field.assistantAnswerActionAria": "Дія для відповіді асистента: {option}",
+  "settings.openchamber.visual.field.assistantAnswerActionDescription": "Виберіть дію під відповіддю асистента.",
+  "settings.openchamber.visual.option.assistantAnswerAction.startFromAnswer.label": "Почати з відповіді",
+  "settings.openchamber.visual.option.assistantAnswerAction.forkSession.label": "Розгалузити сесію",
   ...thirdPartyIntegrationI18n.uk,
 } as const;

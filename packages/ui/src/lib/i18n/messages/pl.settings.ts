@@ -2185,5 +2185,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  'settings.openchamber.visual.section.assistantAnswerAction': 'Działanie przy odpowiedzi asystenta',
+  'settings.openchamber.visual.section.assistantAnswerActionAria': 'Działanie przy odpowiedzi asystenta',
+  'settings.openchamber.visual.field.assistantAnswerActionAria': 'Działanie przy odpowiedzi asystenta: {option}',
+  'settings.openchamber.visual.field.assistantAnswerActionDescription': 'Wybierz działanie dostępne pod odpowiedzią asystenta.',
+  'settings.openchamber.visual.option.assistantAnswerAction.startFromAnswer.label': 'Rozpocznij od odpowiedzi',
+  'settings.openchamber.visual.option.assistantAnswerAction.forkSession.label': 'Rozgałęź sesję',
   ...thirdPartyIntegrationI18n.pl,
 };

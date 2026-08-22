@@ -11,6 +11,7 @@ import type { TerminalShell } from '@/lib/api/types';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { normalizeAssistantAnswerAction, type AssistantAnswerAction } from '@/lib/assistantAnswerAction';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch';
 export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal';
@@ -788,6 +789,7 @@ interface UIStore {
   stickyUserHeader: boolean;
   promptNavigatorEnabled: boolean;
   showSplitAssistantMessageActions: boolean;
+  assistantAnswerAction: AssistantAnswerAction;
   allowPromptingSubagentSessions: boolean;
   isExpandedInput: boolean;
   reportUsage: boolean;
@@ -960,6 +962,7 @@ interface UIStore {
   setStickyUserHeader: (value: boolean) => void;
   setPromptNavigatorEnabled: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
+  setAssistantAnswerAction: (value: AssistantAnswerAction) => void;
   setAllowPromptingSubagentSessions: (value: boolean) => void;
   viewPagerPage: 'left' | 'center' | 'right';
   setViewPagerPage: (page: 'left' | 'center' | 'right') => void;
@@ -1120,6 +1123,7 @@ export const useUIStore = create<UIStore>()(
         stickyUserHeader: false,
         promptNavigatorEnabled: true,
         showSplitAssistantMessageActions: false,
+        assistantAnswerAction: 'start-from-answer',
         allowPromptingSubagentSessions: false,
         draftStartersVisible: true,
         isExpandedInput: false,
@@ -2357,6 +2361,9 @@ export const useUIStore = create<UIStore>()(
         setShowSplitAssistantMessageActions: (value) => {
           set({ showSplitAssistantMessageActions: value });
         },
+        setAssistantAnswerAction: (value) => {
+          set({ assistantAnswerAction: value });
+        },
         setAllowPromptingSubagentSessions: (value) => {
           set({ allowPromptingSubagentSessions: value });
         },
@@ -2478,6 +2485,10 @@ export const useUIStore = create<UIStore>()(
                 }
               }
             }
+          }
+
+          if (version < 15) {
+            state.assistantAnswerAction = normalizeAssistantAnswerAction(String(state.assistantAnswerAction ?? ''));
           }
 
           // v12 -> v13: promote FilesView localStorage autosave toggle into the store.
@@ -2714,6 +2725,7 @@ export const useUIStore = create<UIStore>()(
           stickyUserHeader: state.stickyUserHeader,
           promptNavigatorEnabled: state.promptNavigatorEnabled,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
+          assistantAnswerAction: state.assistantAnswerAction,
           allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
           draftStartersVisible: state.draftStartersVisible,
           shortcutOverrides: state.shortcutOverrides,

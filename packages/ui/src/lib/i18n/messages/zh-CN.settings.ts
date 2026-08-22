@@ -2193,5 +2193,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  'settings.openchamber.visual.section.assistantAnswerAction': '助手回答操作',
+  'settings.openchamber.visual.section.assistantAnswerActionAria': '助手回答操作',
+  'settings.openchamber.visual.field.assistantAnswerActionAria': '助手回答操作：{option}',
+  'settings.openchamber.visual.field.assistantAnswerActionDescription': '选择助手回答下方按钮执行的操作。',
+  'settings.openchamber.visual.option.assistantAnswerAction.startFromAnswer.label': '基于回答开始新会话',
+  'settings.openchamber.visual.option.assistantAnswerAction.forkSession.label': '分叉会话',
   ...thirdPartyIntegrationI18n['zh-CN'],
 } as const;

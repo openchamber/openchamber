@@ -401,6 +401,7 @@ describe('updateDesktopSettings', () => {
         terminalShell: 'fish',
         favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
         followUpBehavior: 'steer',
+        assistantAnswerAction: 'fork-session',
         draftStarters: [{ type: 'command', name: 'runtime-a' }],
         draftStartersVisible: false,
         draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
@@ -415,6 +416,7 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().globalDraftStarters).toEqual([{ type: 'command', name: 'runtime-a' }]);
     expect(useUIStore.getState().draftStartersVisible).toBe(false);
     expect(useMessageQueueStore.getState().followUpBehavior).toBe('steer');
+    expect(useUIStore.getState().assistantAnswerAction).toBe('fork-session');
 
     switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-b.example', runtimeKey: 'preferences-b' });
     registerSettingsApi(async () => ({}), async () => ({
@@ -429,18 +431,34 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().globalDraftStarters).toBeNull();
     expect(useUIStore.getState().draftStartersVisible).toBe(true);
     expect(useMessageQueueStore.getState().followUpBehavior).toBe('queue');
+    expect(useUIStore.getState().assistantAnswerAction).toBe('start-from-answer');
+  });
+
+  test('normalizes an invalid assistant answer action to its default', async () => {
+    getWindow();
+    useUIStore.getState().setAssistantAnswerAction('fork-session');
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: JSON.parse('{"assistantAnswerAction":"invalid-action","draftStartersCraftGoalAdded":true,"draftStartersScheduleTaskAdded":true}'),
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().assistantAnswerAction).toBe('start-from-answer');
   });
 
   test('treats settings save responses as partial patches', async () => {
     getWindow();
     localStorage.setItem('selectedThemeId', 'existing-theme');
     useUIStore.getState().setTerminalShell('fish');
+    useUIStore.getState().setAssistantAnswerAction('fork-session');
     registerSettingsSave(async () => ({ showReasoningTraces: false }));
 
     await updateDesktopSettings({ showReasoningTraces: false });
 
     expect(useUIStore.getState().showReasoningTraces).toBe(false);
     expect(useUIStore.getState().terminalShell).toBe('fish');
+    expect(useUIStore.getState().assistantAnswerAction).toBe('fork-session');
     expect(localStorage.getItem('selectedThemeId')).toBe('existing-theme');
   });
 

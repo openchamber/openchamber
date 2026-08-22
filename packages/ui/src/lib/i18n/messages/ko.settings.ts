@@ -2193,5 +2193,11 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  'settings.openchamber.visual.section.assistantAnswerAction': '어시스턴트 답변 동작',
+  'settings.openchamber.visual.section.assistantAnswerActionAria': '어시스턴트 답변 동작',
+  'settings.openchamber.visual.field.assistantAnswerActionAria': '어시스턴트 답변 동작: {option}',
+  'settings.openchamber.visual.field.assistantAnswerActionDescription': '어시스턴트 답변 아래의 동작을 선택합니다.',
+  'settings.openchamber.visual.option.assistantAnswerAction.startFromAnswer.label': '답변에서 새 세션 시작',
+  'settings.openchamber.visual.option.assistantAnswerAction.forkSession.label': '세션 포크',
   ...thirdPartyIntegrationI18n.ko,
 } as const;

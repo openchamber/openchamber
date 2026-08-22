@@ -25,9 +25,15 @@ import {
   withoutReviewSessionLink,
   type SessionMetadataRecord,
 } from "@/lib/sessionReviewMetadata"
-import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
+import {
+  getContextObligatoryMessages,
+  withContextObligatoryMessage,
+  withContextObligatoryMessages,
+  type ContextObligatoryMessage,
+} from "@/lib/contextObligatoryMessages"
 import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
 import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
+import { prepareBoundaryForkMetadata } from "@/lib/sessionForkMetadata"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { getRuntimeKey } from "@/lib/runtime-switch"
@@ -2011,15 +2017,213 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   }
 }
 
+function reconcileForkedSession(
+  forkedSession: Session,
+  fallbackStore: DirectoryStoreApi,
+  fallbackDirectory: string | undefined,
+  expectedRuntimeKey: string,
+): Session {
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+
+  const responseDirectory = forkedSession.directory
+  const sessionDirectory = responseDirectory ?? fallbackDirectory ?? null
+  const session = sessionDirectory && !responseDirectory
+    ? { ...forkedSession, directory: sessionDirectory }
+    : forkedSession
+  if (sessionDirectory) registerSessionDirectory(session.id, sessionDirectory)
+  const targetStore = sessionDirectory ? dirStoreForDirectory(sessionDirectory) : fallbackStore
+  const current = targetStore.getState()
+  const sessions = [...current.session]
+  const searchResult = Binary.search(sessions, session.id, (entry) => entry.id)
+
+  if (!searchResult.found) {
+    sessions.splice(searchResult.index, 0, session)
+    targetStore.setState({
+      session: sessions,
+      sessionTotal: current.sessionTotal + 1,
+      ...sessionMutationPatch(current, session.id, false),
+    })
+  }
+
+  useGlobalSessionsStore.getState().upsertSession(session)
+  useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
+  return session
+}
+
+const FORK_TITLE_PATTERN = /^(.*) \(fork #(\d+)\)$/
+
+function getNextForkTitle(proposedTitle: string, sessions: readonly Session[]): string {
+  const proposedMatch = proposedTitle.match(FORK_TITLE_PATTERN)
+  if (!proposedMatch) return proposedTitle
+
+  const baseTitle = proposedMatch[1]
+  const proposedNumber = Number.parseInt(proposedMatch[2], 10)
+  let nextNumber = proposedNumber
+  for (const session of sessions) {
+    const match = session.title.match(FORK_TITLE_PATTERN)
+    if (!match || match[1] !== baseTitle) continue
+    const number = Number.parseInt(match[2], 10)
+    if (Number.isSafeInteger(number)) nextNumber = Math.max(nextNumber, number + 1)
+  }
+  return `${baseTitle} (fork #${nextNumber})`
+}
+
+function getKnownSessionsForForkTitle(store: DirectoryStoreApi, directory: string | null): Session[] {
+  const globalState = useGlobalSessionsStore.getState()
+  const normalizedDirectory = normalizePath(directory)
+  return [
+    ...store.getState().session,
+    ...globalState.activeSessions,
+    ...globalState.archivedSessions,
+  ].filter((session) => {
+    if (!normalizedDirectory) return true
+    const sessionDirectory = resolveGlobalSessionDirectory(session)
+    return !sessionDirectory || normalizePath(sessionDirectory) === normalizedDirectory
+  })
+}
+
+async function reconcileForkedMetadata(
+  sourceSessionId: string,
+  forkedSession: Session,
+  sourceDirectory: string | undefined,
+  forkDirectory: string | null,
+  expectedRuntimeKey: string,
+  boundaryCreatedAt?: number,
+): Promise<Session> {
+  const pinnedMessages = getContextObligatoryMessages(forkedSession)
+  const remappedMessages: ContextObligatoryMessage[] = []
+
+  if (pinnedMessages.length > 0) {
+    const [sourceResult, forkResult] = await Promise.all([
+      sdk().session.messages({ sessionID: sourceSessionId, directory: sourceDirectory }),
+      sdk().session.messages({ sessionID: forkedSession.id, directory: forkDirectory ?? undefined }),
+    ])
+    if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+
+    const sourceRecords = assertSdkData(sourceResult, "source session.messages")
+    const forkRecords = assertSdkData(forkResult, "fork session.messages")
+    if (forkRecords.length > sourceRecords.length) {
+      throw new Error("Cannot remap pinned messages because the fork transcript is longer than its source")
+    }
+
+    const forkMessageIdBySourceId = new Map<string, string>()
+    for (let index = 0; index < forkRecords.length; index += 1) {
+      const sourceMessage = sourceRecords[index]?.info
+      const forkMessage = forkRecords[index]?.info
+      if (
+        !sourceMessage
+        || !forkMessage
+        || sourceMessage.role !== forkMessage.role
+        || sourceMessage.time.created !== forkMessage.time.created
+      ) {
+        throw new Error("Cannot remap pinned messages because the fork transcript does not match its source")
+      }
+      forkMessageIdBySourceId.set(sourceMessage.id, forkMessage.id)
+    }
+
+    for (const pinnedMessage of pinnedMessages) {
+      const forkMessageId = forkMessageIdBySourceId.get(pinnedMessage.id)
+      if (forkMessageId) remappedMessages.push({ ...pinnedMessage, id: forkMessageId })
+    }
+  }
+
+  const currentMetadata = getSessionMetadata(forkedSession)
+  let metadata = pinnedMessages.length > 0
+    ? withContextObligatoryMessages(currentMetadata, remappedMessages)
+    : currentMetadata
+  if (boundaryCreatedAt !== undefined) {
+    metadata = prepareBoundaryForkMetadata(metadata, boundaryCreatedAt)
+  }
+  if (metadata === currentMetadata) return forkedSession
+
+  const updatedSession = await opencodeClient.updateSession(
+    forkedSession.id,
+    { metadata },
+    forkDirectory,
+  )
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+  return updatedSession
+}
+
+async function forkAndReconcileSession(
+  sessionId: string,
+  messageBoundaryId: string | undefined,
+  store: DirectoryStoreApi,
+  directory: string | undefined,
+  expectedRuntimeKey: string,
+  boundaryCreatedAt?: number,
+): Promise<Session> {
+  const sourceSession = store.getState().session.find((session) => session.id === sessionId)
+  if (isReviewSession(sourceSession)) throw new Error("Review sessions cannot be forked")
+
+  const forkedSession = await opencodeClient.forkSession(sessionId, messageBoundaryId, directory)
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+
+  const forkDirectory = forkedSession.directory ?? directory ?? null
+  const nextTitle = getNextForkTitle(
+    forkedSession.title,
+    getKnownSessionsForForkTitle(store, forkDirectory),
+  )
+  let titledSession = forkedSession
+  if (nextTitle !== forkedSession.title) {
+    try {
+      titledSession = await opencodeClient.updateSession(
+        forkedSession.id,
+        { title: nextTitle },
+        forkDirectory,
+      )
+    } catch (error) {
+      if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+      console.error("[session-actions] Failed to increase the fork title. The server title remains.", error)
+    }
+  }
+  const reconciledMetadataSession = await reconcileForkedMetadata(
+    sessionId,
+    titledSession,
+    directory,
+    forkDirectory,
+    expectedRuntimeKey,
+    boundaryCreatedAt,
+  )
+  return reconcileForkedSession(reconciledMetadataSession, store, directory, expectedRuntimeKey)
+}
+
 /**
- * Fork from a user message.
- *
- * 1. Extract text from the message for input restoration
- * 2. Call the runtime fork endpoint
- * 3. Insert the new session into the child store (so sidebar updates immediately)
- * 4. Switch to new session and set pending input text
+ * Copy a session through an optional message and select the returned session.
+ * OpenCode treats its message ID as an exclusive boundary, so use the next
+ * transcript message when the clicked message must remain in the fork.
+ */
+export async function forkSession(sessionId: string, throughMessageId?: string): Promise<Session> {
+  const expectedRuntimeKey = getRuntimeKey()
+  const { store, directory } = dirStoreForSession(sessionId)
+  const messages = store.getState().message[sessionId] ?? []
+  const throughMessageIndex = throughMessageId
+    ? messages.findIndex((message) => message.id === throughMessageId)
+    : -1
+  if (throughMessageId && throughMessageIndex < 0) {
+    throw new Error("Cannot fork through a message that is not loaded")
+  }
+  const exclusiveBoundaryId = throughMessageIndex >= 0
+    ? messages[throughMessageIndex + 1]?.id
+    : undefined
+  const boundaryCreatedAt = throughMessageIndex >= 0
+    ? messages[throughMessageIndex]?.time.created
+    : undefined
+  return forkAndReconcileSession(
+    sessionId,
+    exclusiveBoundaryId,
+    store,
+    directory,
+    expectedRuntimeKey,
+    boundaryCreatedAt,
+  )
+}
+
+/**
+ * Copy a session at a user message, then restore that message in the composer.
  */
 export async function forkFromMessage(sessionId: string, messageId: string): Promise<void> {
+  const expectedRuntimeKey = getRuntimeKey()
   const { store, directory } = dirStoreForSession(sessionId)
   const state = store.getState()
 
@@ -2036,19 +2240,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     .trim()
   const fileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
 
-  const forkedSession = await opencodeClient.forkSession(sessionId, messageId, directory)
-
-  // Insert new session into child store so sidebar updates immediately
-  const current = store.getState()
-  const sessions = [...current.session]
-  const searchResult = Binary.search(sessions, forkedSession.id, (s) => s.id)
-  if (!searchResult.found) {
-    sessions.splice(searchResult.index, 0, forkedSession)
-    store.setState({ session: sessions })
-  }
-
-  // Switch to new session
-  useSessionUIStore.getState().setCurrentSession(forkedSession.id)
+  await forkAndReconcileSession(sessionId, messageId, store, directory, expectedRuntimeKey)
 
   // Restore forked message text and file attachments to input
   if (messageText) {
