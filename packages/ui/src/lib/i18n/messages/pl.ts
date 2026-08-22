@@ -1248,6 +1248,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.clipboardAttachFailed': 'Nie udało się dołączyć obrazu ze schowka',
   'chat.chatInput.toast.compactFailed': 'Nie udało się skompaktować sesji',
   'chat.chatInput.toast.messageSendFailed': 'Nie udało się wysłać wiadomości. Załączniki zostały przywrócone.',
+  'chat.chatInput.toast.noModelSelected': 'Wybierz dostawcę i model przed wysłaniem.',
   'chat.chatInput.toast.openSessionFirst': 'Najpierw otwórz sesję',
   'chat.chatInput.toast.reviewFailed': 'Nie udało się przejrzeć zmian',
   'chat.chatInput.toast.planFeatureFailed': 'Nie udało się rozpocząć planowania funkcji',

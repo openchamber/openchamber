@@ -2229,6 +2229,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.toast.attachmentsTooLarge": "Os anexos são grandes demais para enviar. Tente reduzir a quantidade ou o tamanho das imagens.",
   "chat.chatInput.toast.sendAttachmentsFailed": "Não foi possível enviar os anexos. Tente com menos arquivos ou imagens menores.",
   "chat.chatInput.toast.messageSendFailed": "A mensagem não pôde ser enviada. Os anexos foram restaurados.",
+  "chat.chatInput.toast.noModelSelected": "Selecione um provedor e um modelo antes de enviar.",
   "chat.chatInput.toast.clipboardAttachFailed": "Não foi possível anexar a imagem da área de transferência",
   "chat.chatInput.toast.addedFileMentions": "Foram adicionadas {count} menção(es) de arquivo",
   "chat.chatInput.toast.attachFileFailed": "Não foi possível anexar o arquivo",

@@ -2263,6 +2263,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.attachmentsTooLarge': '첨부 파일이 너무 커서 보낼 수 없습니다. 이미지 수나 크기를 줄여 보세요.',
   'chat.chatInput.toast.sendAttachmentsFailed': '첨부 파일 전송 실패. 파일 수나 이미지 크기를 줄여 보세요.',
   'chat.chatInput.toast.messageSendFailed': '메시지 전송에 실패했습니다. 첨부 파일을 복원했습니다.',
+  'chat.chatInput.toast.noModelSelected': '전송하기 전에 제공업체와 모델을 선택하세요.',
   'chat.chatInput.toast.clipboardAttachFailed': '클립보드 이미지 첨부 실패',
   'chat.chatInput.toast.addedFileMentions': '파일 멘션 {count}개 추가됨',
   'chat.chatInput.toast.attachFileFailed': '첨부 파일 실패',
