@@ -133,6 +133,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      if (message.type === 'webviewReady') {
+        // The webview announces it can receive messages (an initial cached-state
+        // push can be dropped while its bundle is still loading), so re-send the
+        // latest connection status instead of leaving it stuck on the bootstrap
+        // value in the HTML.
+        this._sendCachedState();
+        return;
+      }
+
       if (!('id' in message) || typeof message.id !== 'string') {
         return;
       }

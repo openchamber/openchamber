@@ -129,6 +129,13 @@ export class SessionEditorPanelProvider {
     }, null, this._context.subscriptions);
 
     panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+      if (message.type === 'webviewReady') {
+        // Re-send cached state once the webview can receive messages; an early
+        // push is dropped while the bundle is still loading.
+        this._sendCachedStateToPanel(state);
+        return;
+      }
+
       if (message.type === 'restartApi') {
         await this._openCodeManager?.restart();
         return;
