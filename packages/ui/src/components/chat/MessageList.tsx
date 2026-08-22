@@ -1057,7 +1057,7 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
             // correction so the browser does not clamp the offset to the old
             // height.
             const sizeElement = sizeContainerRef.current;
-            if (sizeElement) sizeElement.style.height = `${instance.getTotalSize()}px`;
+            if (sizeElement) sizeElement.style.minHeight = `${instance.getTotalSize()}px`;
             elementScroll(offset, options, instance);
         },
         getItemKey: (index) => entriesRef.current[index]?.key ?? `index:${index}`,
@@ -1155,8 +1155,17 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
         // top edge mid-list and float over the previous turn. Padding only
         // changes when the virtual window shifts — not per scroll frame — so the
         // layout cost is negligible.
+        //
+        // The container height MUST be min-height, not a fixed height: rows are
+        // in normal flow, so when their real height briefly exceeds
+        // getTotalSize() (row content resized or a completed turn entered
+        // history before measureElement caught up) a fixed height makes the
+        // streaming-tail sibling overlap the last rows and crop them
+        // (#2094, #2095, #2119). min-height lets the container grow with its
+        // in-flow rows, pushing the tail below them, and is equivalent when
+        // measurements are exact.
         return (
-            <div ref={sizeContainerRef} className="relative w-full" style={{ height: tanstackVirtualizer.getTotalSize() }}>
+            <div ref={sizeContainerRef} className="relative w-full" style={{ minHeight: tanstackVirtualizer.getTotalSize() }}>
                 <div style={{ paddingTop: `${startOffset}px` }}>
                     {virtualItems.map((item) => {
                         const entry = renderEntries[item.index];

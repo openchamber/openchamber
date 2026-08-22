@@ -12,13 +12,20 @@ interface TurnItemProps {
 const TurnItem: React.FC<TurnItemProps> = ({ turn, stickyUserHeader = true, renderMessage }) => {
     return (
         <section
-            className="relative w-full"
+            // `isolate` makes every turn its own stacking context so paint
+            // between turns always follows DOM order. Without it the sticky
+            // header (z-20) and assistant block (z-0) of every turn share the
+            // scroll container's stacking context, and any geometric overlap
+            // between adjacent turns (e.g. virtualizer measurement lag at the
+            // history/streaming-tail seam) lets an earlier turn's stuck header
+            // paint over a later turn's content (#2094, #2095, #2119).
+            className="relative isolate w-full"
             id={`turn-${turn.turnId}`}
             data-turn-id={turn.turnId}
             data-scroll-spy-id={turn.turnId}
         >
             {stickyUserHeader ? (
-                <div className="sticky top-0 z-20 relative bg-[var(--surface-background)] [overflow-anchor:none]">
+                <div className="sticky top-0 z-20 bg-[var(--surface-background)] [overflow-anchor:none]">
                     <div className="relative z-10">
                         {renderMessage(turn.userMessage)}
                     </div>
