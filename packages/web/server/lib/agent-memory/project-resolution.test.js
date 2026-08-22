@@ -51,6 +51,15 @@ describe('resolving a session directory to its project', () => {
     expect(await resolve('/tmp/loose')).toBe(createProjectIdFromPath('/tmp/loose'));
   });
 
+  test('managed chat session directories share the Chats root store', async () => {
+    const chatsRoot = '/Users/x/.config/openchamber/chats';
+    const resolve = createResolver({ managedProjectRoots: [chatsRoot] });
+
+    expect(await resolve(`${chatsRoot}/2026-08-21/session-a`)).toBe(createProjectIdFromPath(chatsRoot));
+    expect(await resolve(`${chatsRoot}/2026-08-21/session-b`)).toBe(createProjectIdFromPath(chatsRoot));
+    expect(await resolve('/Users/x/.config/openchamber/chats-other/session-a')).not.toBe(createProjectIdFromPath(chatsRoot));
+  });
+
   test('no directory resolves to nothing rather than to some default project', async () => {
     const resolve = createResolver();
 

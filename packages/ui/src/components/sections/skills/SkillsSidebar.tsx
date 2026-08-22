@@ -439,12 +439,6 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
 }) => {
   const { t } = useI18n();
   const isMobile = isMobileDeviceViaCSS();
-  const sourceLabel = skill.source === 'claude'
-    ? t('settings.skills.sidebar.badge.claude')
-    : skill.source === 'agents'
-      ? t('settings.skills.sidebar.badge.agents')
-      : t('settings.skills.sidebar.badge.opencode');
-  const badgeClassName = 'typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1 rounded flex-shrink-0 leading-none pb-px border border-[var(--interactive-border)]/50';
   const isBuiltIn = isBuiltInSkill(skill);
   const canRename = isRenamableSkill(skill);
   const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
@@ -479,10 +473,6 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
             <span className="typography-ui-label font-normal truncate text-foreground">
               {skill.name}
             </span>
-            <span className={badgeClassName}>
-              {skill.scope}
-            </span>
-            <span className={badgeClassName}>{sourceLabel}</span>
           </div>
         </button>
 

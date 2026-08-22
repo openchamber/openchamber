@@ -28,6 +28,8 @@ import {
   getDiff,
   getFileDiff,
   validateWorktreeCreate,
+  parseBranchCreationSource,
+  getRangeFiles,
 } from './service.js';
 
 // ---------------------------------------------------------------------------
@@ -1334,5 +1336,96 @@ describe.runIf(canRunGit())('getRangeDiff', () => {
     const diff = await getRangeDiff(repository, { base: 'react', head: 'next' });
 
     expect(diff).toContain('feature.txt');
+  });
+});
+
+describe('parseBranchCreationSource', () => {
+  it('returns the source ref from the oldest creation entry', () => {
+    // Reflog lists newest entries first; creation is the last line.
+    const reflog = [
+      'commit: abc123',
+      'branch: Created from origin/main',
+    ].join('\n');
+    expect(parseBranchCreationSource(reflog)).toBe('origin/main');
+  });
+
+  it('returns null when the branch was created from a detached HEAD pointer', () => {
+    const reflog = 'branch: Created from HEAD@{0}';
+    expect(parseBranchCreationSource(reflog)).toBeNull();
+  });
+
+  it('returns null when the branch was created from a raw commit', () => {
+    const reflog = 'branch: Created from 9a3b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b';
+    expect(parseBranchCreationSource(reflog)).toBeNull();
+  });
+
+  it('returns null when there is no creation entry', () => {
+    const reflog = ['commit: abc123', 'reset: moving to HEAD'].join('\n');
+    expect(parseBranchCreationSource(reflog)).toBeNull();
+  });
+
+  it('returns null for empty input', () => {
+    expect(parseBranchCreationSource('')).toBeNull();
+    expect(parseBranchCreationSource(undefined)).toBeNull();
+  });
+});
+
+describe.runIf(canRunGit())('getRangeFiles', () => {
+  it('returns added and modified paths with their status letters', async () => {
+    const { repository } = createRepositoryWithRemote();
+    fs.writeFileSync(path.join(repository, 'added.txt'), 'new\n');
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Test\nchanged\n');
+    runGit(repository, ['add', 'added.txt', 'README.md']);
+    runGit(repository, ['commit', '-m', 'changes']);
+
+    const files = await getRangeFiles(repository, { base: 'react', head: 'next' });
+
+    expect(files).toEqual(expect.arrayContaining([
+      { path: 'added.txt', status: 'A' },
+      { path: 'README.md', status: 'M' },
+    ]));
+  });
+
+  it('reports the destination path for renamed files, including spaces', async () => {
+    const { repository } = createRepositoryWithRemote();
+    // The original file must exist in the base: rename detection pairs a
+    // deletion against an addition relative to base, not within the branch.
+    fs.writeFileSync(path.join(repository, 'old name with spaces.md'), '# Test\n');
+    runGit(repository, ['add', 'old name with spaces.md']);
+    runGit(repository, ['commit', '-m', 'add file to rename']);
+    runGit(repository, ['push', 'origin', 'HEAD:react']);
+    // Spaces in filenames exercise the -z token split: a newline split would
+    // mangle these paths long before status letters matter.
+    fs.renameSync(path.join(repository, 'old name with spaces.md'), path.join(repository, 'new name with spaces.md'));
+    runGit(repository, ['add', '-A']);
+    runGit(repository, ['commit', '-m', 'rename']);
+
+    const files = await getRangeFiles(repository, { base: 'react', head: 'next' });
+
+    const renameEntry = files.find((file) => file.status === 'R');
+    expect(renameEntry).toBeDefined();
+    expect(renameEntry.path).toBe('new name with spaces.md');
+    expect(files.some((file) => file.path === 'old name with spaces.md')).toBe(false);
+  });
+
+  it('reports the destination path for copied files', async () => {
+    const { repository } = createRepositoryWithRemote();
+    // The source must exist in the base. Copy detection needs the repository's
+    // own `diff.renames=copies` setting on top of the service's -C flag; the
+    // parser must survive whatever C entries git emits.
+    runGit(repository, ['config', 'diff.renames', 'copies']);
+    fs.writeFileSync(path.join(repository, 'copied source.md'), '# Copy me\n');
+    runGit(repository, ['add', 'copied source.md']);
+    runGit(repository, ['commit', '-m', 'add source']);
+    runGit(repository, ['push', 'origin', 'HEAD:react']);
+    fs.copyFileSync(path.join(repository, 'copied source.md'), path.join(repository, 'copied destination.md'));
+    runGit(repository, ['add', '-A']);
+    runGit(repository, ['commit', '-m', 'copy']);
+
+    const files = await getRangeFiles(repository, { base: 'react', head: 'next' });
+
+    const copyEntry = files.find((file) => file.status === 'C');
+    expect(copyEntry).toBeDefined();
+    expect(copyEntry.path).toBe('copied destination.md');
   });
 });

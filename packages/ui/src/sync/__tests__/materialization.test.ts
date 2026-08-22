@@ -119,6 +119,31 @@ describe("materializeSessionSnapshots", () => {
     expect(result.part.msg_1[0]).toBe(livePart)
   })
 
+  test("preserves a locally aborted assistant message when a stale unfinished snapshot arrives", () => {
+    const unfinishedMessage = message("msg_1")
+    if (unfinishedMessage.role !== "assistant") throw new Error("Expected assistant fixture")
+    const abortedMessage: Message = {
+      ...unfinishedMessage,
+      time: { created: 1, completed: 5000 },
+      error: { name: "MessageAbortedError", data: { message: "aborted" } },
+    }
+    const staleMessage = message("msg_1")
+    const state = {
+      message: { ses_1: [abortedMessage] },
+      part: { msg_1: [] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: staleMessage, parts: [] }],
+    )
+
+    expect(result.message).toBe(state.message)
+    expect(result.message.ses_1[0]).toBe(abortedMessage)
+    expect(result.message.ses_1[0]).not.toBe(staleMessage)
+  })
+
   test("does not preserve omitted optimistic user text parts beside server snapshot parts", () => {
     const optimisticPart = { id: "prt_optimistic", messageID: "msg_1", type: "text", text: "Hello" } as Part
     const serverPart = part("prt_server", "msg_1", "text", "Hello")

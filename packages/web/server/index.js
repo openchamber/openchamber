@@ -72,6 +72,7 @@ import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolut
 import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
+import { configureOpenCodeRuntimeProviders, resetOpenCodeRuntimeProviders } from './lib/small-model/runtime-providers.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
@@ -530,6 +531,9 @@ let openCodeApiPrefixDetected = true;
 let openCodeApiDetectionTimer = null;
 let lastOpenCodeError = null;
 let lastOpenCodeLaunchDiagnostics = null;
+let lastOpenCodeHealthFailure = null;
+let lastManagedOpenCodeProcess = null;
+let lastOpenCodeRestartDiagnostics = null;
 let isOpenCodeReady = false;
 let openCodeNotReadySince = 0;
 let isExternalOpenCode = false;
@@ -660,6 +664,11 @@ const setDetectedOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.setDete
 const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(...args);
 const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
 const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
+
+// Plugin-registered providers exist only inside the running OpenCode process.
+// Small-model callers resolve them through this connection; without it they
+// stay on the file-based resolution and plugin models remain unreachable.
+configureOpenCodeRuntimeProviders({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
 
 const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
   process.env.OPENCODE_API_PREFIX || process.env.OPENCHAMBER_API_PREFIX || ''
@@ -1089,6 +1098,9 @@ Object.defineProperties(openCodeLifecycleState, {
   openCodeApiDetectionTimer: { get: () => openCodeApiDetectionTimer, set: (value) => { openCodeApiDetectionTimer = value; } },
   lastOpenCodeError: { get: () => lastOpenCodeError, set: (value) => { lastOpenCodeError = value; } },
   lastOpenCodeLaunchDiagnostics: { get: () => lastOpenCodeLaunchDiagnostics, set: (value) => { lastOpenCodeLaunchDiagnostics = value; } },
+  lastOpenCodeHealthFailure: { get: () => lastOpenCodeHealthFailure, set: (value) => { lastOpenCodeHealthFailure = value; } },
+  lastManagedOpenCodeProcess: { get: () => lastManagedOpenCodeProcess, set: (value) => { lastManagedOpenCodeProcess = value; } },
+  lastOpenCodeRestartDiagnostics: { get: () => lastOpenCodeRestartDiagnostics, set: (value) => { lastOpenCodeRestartDiagnostics = value; } },
   isOpenCodeReady: { get: () => isOpenCodeReady, set: (value) => { isOpenCodeReady = value; } },
   openCodeNotReadySince: { get: () => openCodeNotReadySince, set: (value) => { openCodeNotReadySince = value; } },
   isExternalOpenCode: { get: () => isExternalOpenCode, set: (value) => { isExternalOpenCode = value; } },
@@ -1156,10 +1168,30 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   // process (#2638). The runtime is created later by the startup pipeline;
   // by the time any restart runs, it is assigned.
   onOpenCodeRestarted: () => {
+    // A restart reloads plugins: provider ports, credentials and the provider
+    // list itself can all differ from what was cached.
+    resetOpenCodeRuntimeProviders();
     try {
       messageStreamRuntime?.rebindUpstream();
     } catch (error) {
       console.warn('Failed to rebind message stream after OpenCode restart:', error?.message ?? error);
+    }
+    try {
+      const { sessionIds } = sessionRuntime.interruptBusySessionsAfterRestart();
+      if (sessionIds.length > 0) {
+        const multiple = sessionIds.length > 1;
+        broadcastUiNotification({
+          title: multiple ? 'Chats interrupted' : 'Chat interrupted',
+          body: multiple
+            ? 'OpenCode restarted during running responses. Send a message in each chat to continue.'
+            : 'OpenCode restarted during a running response. Send a message to continue.',
+          tag: 'opencode-restart-interrupted',
+          kind: 'opencode-restart-interrupted',
+          sessionId: sessionIds[0],
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to reconcile sessions after OpenCode restart:', error?.message ?? error);
     }
   },
   getManagedOpenCodeEnv: async () => {
@@ -1259,6 +1291,7 @@ const resolveMemoryProjectId = createMemoryProjectResolver({
     return sanitizeProjects(settings?.projects || []).map((project) => project.path);
   },
   resolvePrimaryWorktreeRoot,
+  managedProjectRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats')],
 });
 
 /**
@@ -1658,6 +1691,9 @@ async function main(options = {}) {
         isOpenCodeReady,
         lastOpenCodeError,
         lastOpenCodeLaunchDiagnostics,
+        lastOpenCodeHealthFailure,
+        lastManagedOpenCodeProcess,
+        lastOpenCodeRestartDiagnostics,
         opencodeBinaryResolved: resolvedOpencodeBinary || null,
         opencodeBinarySource: resolvedOpencodeBinarySource || null,
         opencodeLaunchBinary: launchSpec?.binary || null,

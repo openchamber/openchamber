@@ -1,16 +1,17 @@
 ---
 title: Integracje
-description: Używaj subskrypcji Claude, Command Code lub Cursor jako dostawcy.
+description: Używaj subskrypcji Claude lub Cursor jako dostawcy.
 ---
 
 # Integracje
 
 Integracja to mała wtyczka, która dodaje dostawcę do OpenChamber na podstawie subskrypcji, którą już masz. Zarządzasz nimi w **Settings → Integrations**.
 
+> **Funkcja eksperymentalna.** Staramy się przestrzegać zasad dostawców, ale ograniczenia i zawieszenia kont pozostają decyzją każdego dostawcy. Używaj integracji na własne ryzyko.
+
 Dostępne integracje:
 
 - **Claude Code** — Twój plan Claude Pro lub Max, bez kluczy API
-- **Command Code** — Twój plan Command Code
 - **Cursor** — limity modeli z Twojego planu Cursor
 
 ## Instalacja integracji
@@ -29,18 +30,9 @@ Claude Code korzysta z Twojego planu Claude Pro lub Max — bez kluczy API i bez
 1. Zainstaluj integrację (patrz wyżej).
 2. Wybierz **Set up** i zaloguj się. Jeśli nie masz jeszcze Claude Code CLI, konfiguracja zaoferuje najpierw jego instalację, a potem logowanie.
 
-Claude Code jest jedyną integracją tutaj, która wymaga zainstalowanego i zalogowanego CLI swojego dostawcy. Command Code i Cursor nie wymagają swoich CLI.
+Claude Code jest jedyną integracją tutaj, która wymaga zainstalowanego i zalogowanego CLI swojego dostawcy. Cursor nie wymaga swojego CLI.
 
 **Jak chronione jest Twoje konto Claude:** ta integracja używa oficjalnego Claude Agent SDK od Anthropic i Twojego zainstalowanego Claude Code CLI. Nie przechwytuje OAuth, nie wyodrębnia ani nie odtwarza tokenów przeglądarki, nie podszywa się pod nieobsługiwany klient i nie omija uwierzytelniania Anthropic. Działa na obsługiwanej przez Anthropic ścieżce dostępu, więc nie niesie ryzyka zablokowania konta związanego z przechwytywaniem tokenów lub nieautoryzowanymi obejściami uwierzytelniania.
-
-## Command Code
-
-Command Code korzysta z Twojego planu Command Code.
-
-1. Zainstaluj integrację (patrz wyżej).
-2. Wybierz **Set up** — w przeglądarce otworzy się strona. Zatwierdź dostęp i wróć do OpenChamber.
-
-Na maszynie bez interfejsu graficznego lub w CI ustaw zmienną środowiskową `COMMAND_CODE_API_KEY` zamiast logowania w przeglądarce.
 
 ## Cursor
 

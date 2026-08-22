@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Chat sessions:** start chats without choosing a project. They live in their own Chats section, rather than inheriting a project's repository and worktree context.
+- **Skills catalog:** browse curated GitHub skill collections in a card-based catalog with cross-source search, skill counts, stars, recent updates, and links back to each skill's repository.
+- **Diff:** the context-panel diff can now show every change on the current branch against its base branch. OpenChamber detects the base when Git knows it, or lets you choose one once when it does not.
+- **Dictation:** speech is now transcribed after you stop recording. The composer shows a live waveform and timer, and long recordings split at pauses instead of cutting words.
+- Chat: file paths in messages now open from the session's project, even if you last browsed files in another project (thanks to @tomzx).
+- Diff: creating an inline comment now opens the chat and focuses the composer for your follow-up.
+- Providers: expanded support for custom providers.
+- Small Model: summaries, goal audits, commit messages, and walkthroughs now support more providers.
+- Git: generated commit messages now match the repository's recent commit style and language.
+- Git: generating a pull request description now picks up the repository's own PR template when it has one, so the draft comes back in your project's sections and checklists instead of the built-in Summary/Why/Testing layout.
+- Sidebar: switch between the full project list and a focused view of one project. Sessions created outside OpenChamber now also appear in the sidebar and Recent list without a page refresh (thanks to @tomzx).
+- Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Chat: newly sent messages and syntax-highlighted code blocks no longer briefly flicker. Bash output can also grow with its content instead of being cut off.
+- Usage: Z.ai credit limits now appear alongside its other quota windows.
+- Git: pull-request checks in Work status stay current as their status changes.
+- UI: the default dialog close button is easier to click or tap (thanks to @rockinrimmer).
+- Desktop/Windows: the close button now aligns correctly with the rest of the window chrome.
+
 ## [1.19.0] - 2026-08-19
 
 - **Settings/Integrations:** a new Integrations settings page lists Claude Code, Command Code, and Cursor plugins with install, update, setup, and remove actions, plus Discord and Telegram Coming soon placeholders.

@@ -29,6 +29,7 @@ export type SessionGroup = {
    * instead of reading the single folderScopeKey.
    */
   folderScopes?: SessionGroupFolderScope[];
+  draftTarget?: 'chat' | 'project';
   sessions: SessionNode[];
 };
 

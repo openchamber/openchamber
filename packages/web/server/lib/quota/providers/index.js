@@ -160,6 +160,13 @@ const registry = {
 
 const pendingFetches = new Map();
 
+const normalizeQuotaProviderId = (providerId) => {
+  if (typeof providerId !== 'string') return providerId;
+  return ['command-code', 'commandcode', 'command_code', 'command code'].includes(providerId.trim().toLowerCase())
+    ? 'command-code'
+    : providerId;
+};
+
 export const listConfiguredQuotaProviders = () => {
   const configured = [];
 
@@ -203,13 +210,14 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
 };
 
 export const fetchQuotaForProvider = (providerId) => {
-  const existing = pendingFetches.get(providerId);
+  const normalizedProviderId = normalizeQuotaProviderId(providerId);
+  const existing = pendingFetches.get(normalizedProviderId);
   if (existing) return existing;
 
-  const pending = fetchQuotaForProviderUncoalesced(providerId).finally(() => {
-    if (pendingFetches.get(providerId) === pending) pendingFetches.delete(providerId);
+  const pending = fetchQuotaForProviderUncoalesced(normalizedProviderId).finally(() => {
+    if (pendingFetches.get(normalizedProviderId) === pending) pendingFetches.delete(normalizedProviderId);
   });
-  pendingFetches.set(providerId, pending);
+  pendingFetches.set(normalizedProviderId, pending);
   return pending;
 };
 

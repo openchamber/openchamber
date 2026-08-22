@@ -1,4 +1,4 @@
-import type { MainTab } from '@/stores/useUIStore';
+import type { WorkspaceSurface } from '@/stores/useUIStore';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { ROUTE_PARAMS } from './types';
 
@@ -7,7 +7,7 @@ import { ROUTE_PARAMS } from './types';
  */
 export interface AppRouteState {
   sessionId: string | null;
-  tab: MainTab;
+  tab: WorkspaceSurface;
   isSettingsOpen: boolean;
   settingsPath: string;
   diffFile: string | null;
@@ -16,7 +16,7 @@ export interface AppRouteState {
 /**
  * Default tab when none is specified.
  */
-const DEFAULT_TAB: MainTab = 'chat';
+const DEFAULT_TAB: WorkspaceSurface = 'chat';
 
 /**
  * Serialize application state to URL search parameters.

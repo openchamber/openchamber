@@ -1,16 +1,17 @@
 ---
 title: Intégrations
-description: Utilise ton abonnement Claude, Command Code ou Cursor comme fournisseur.
+description: Utilise ton abonnement Claude ou Cursor comme fournisseur.
 ---
 
 # Intégrations
 
 Une intégration est un petit plugin qui ajoute un fournisseur à OpenChamber à partir d'un abonnement que tu possèdes déjà. Tu les gères dans **Settings → Integrations**.
 
+> **Fonctionnalité expérimentale.** Nous cherchons à respecter les règles des fournisseurs, mais les restrictions et suspensions de compte relèvent de leur décision. Utilise les intégrations à tes risques.
+
 Intégrations disponibles :
 
 - **Claude Code** — ton plan Claude Pro ou Max, sans clés API
-- **Command Code** — ton plan Command Code
 - **Cursor** — les limites de modèles de ton plan Cursor
 
 ## Installer une intégration
@@ -29,18 +30,9 @@ Claude Code utilise ton plan Claude Pro ou Max — sans clés API et sans applic
 1. Installe l'intégration (ci-dessus).
 2. Choisis **Set up** et connecte-toi. Si tu n'as pas encore la CLI Claude Code, la configuration propose de l'installer d'abord, puis de te connecter.
 
-Claude Code est la seule intégration ici qui exige que la CLI de son fournisseur soit installée et connectée. Command Code et Cursor n'exigent pas leurs CLIs.
+Claude Code est la seule intégration ici qui exige que la CLI de son fournisseur soit installée et connectée. Cursor n'exige pas sa CLI.
 
 **Comment ton compte Claude reste protégé :** cette intégration utilise le Claude Agent SDK officiel d'Anthropic et ta CLI Claude Code installée. Elle ne détourne pas l'OAuth, n'extrait ni rejoue de tokens de navigateur, ne se fait pas passer pour un client non pris en charge et ne contourne pas l'authentification d'Anthropic. Elle reste sur la voie d'accès prise en charge par Anthropic et ne porte donc pas le risque de bannissement associé au détournement de tokens ou aux contournements d'authentification non autorisés.
-
-## Command Code
-
-Command Code utilise ton plan Command Code.
-
-1. Installe l'intégration (ci-dessus).
-2. Choisis **Set up** — une page s'ouvre dans le navigateur. Autorise l'accès, puis reviens dans OpenChamber.
-
-Sur une machine sans interface graphique ou en CI, définis la variable d'environnement `COMMAND_CODE_API_KEY` au lieu de te connecter via le navigateur.
 
 ## Cursor
 

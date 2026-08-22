@@ -167,6 +167,12 @@ export const highlightLinesInWorker = async (code: string, lang: string): Promis
   return result?.type === 'highlightLines' ? result.lines : null;
 };
 
+/** Return an already-tokenized line result without scheduling a worker request. */
+export const getCachedHighlightedLines = (code: string, lang: string): string[] | null => {
+  const cached = resultCache.get(cacheKeyFor('highlightLines', lang, code));
+  return cached?.type === 'highlightLines' ? cached.lines : null;
+};
+
 /**
  * Tokenize `code` with the given resolved TextMate theme and return per-line
  * styled runs with offsets — for building CodeMirror decorations that match the

@@ -1101,7 +1101,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                 <span className="typography-ui-label font-normal truncate">
                                   {getPageTitle(page.slug)}
                                 </span>
-                                {page.slug === "tunnel" && (
+                                {(page.slug === "tunnel" ||
+                                  page.slug === "integrations") && (
                                   <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
                                     {t("settings.view.badge.beta")}
                                   </span>
@@ -1116,6 +1117,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 ));
               })()
             )}
+
           </div>
         </div>
 

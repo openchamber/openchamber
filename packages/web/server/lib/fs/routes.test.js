@@ -3,6 +3,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
+import { createProjectDirectoryRuntime } from '../opencode/project-directory-runtime.js';
 
 const createRouteRegistry = () => {
   const routes = new Map();
@@ -1047,4 +1048,79 @@ describe('fs list symlink path space (issue 2627)', () => {
       expect(res.body).toEqual({ error: 'Access to directory denied', reason: 'os-permission' });
     });
   }
+});
+
+describe('fs stat directory scope (issue 3019)', () => {
+  // Wires the real project-directory runtime so the stat route resolves the
+  // workspace exactly as the server does: explicit x-opencode-directory header
+  // first, then the settings.lastDirectory fallback. The renderer's file
+  // reference probes must send the header because lastDirectory reflects the
+  // directory the UI last browsed, not the session's directory.
+  const registerStatWithProjectDirectoryRuntime = () => {
+    const projectDirectoryRuntime = createProjectDirectoryRuntime({
+      fsPromises: {
+        stat: async (targetPath) => {
+          if (targetPath === '/repo-a' || targetPath === '/repo-b') {
+            return { isDirectory: () => true };
+          }
+          return { isDirectory: () => false, isFile: () => true, size: 12 };
+        },
+        realpath: async (targetPath) => targetPath,
+      },
+      path: { resolve: (p) => path.posix.resolve(p) },
+      normalizeDirectoryPath: (p) => p,
+      readSettingsFromDiskMigrated: async () => ({ lastDirectory: '/repo-a', projects: [] }),
+      getReadSettingsFromDiskMigrated: undefined,
+      sanitizeProjects: (input) => input,
+    });
+
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path: path.posix,
+      fsPromises: {
+        realpath: async (targetPath) => targetPath,
+        stat: async () => ({ isFile: () => true, size: 12 }),
+      },
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: projectDirectoryRuntime.resolveProjectDirectory,
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    return getRoute('GET', '/api/fs/stat');
+  };
+
+  const callStat = async (handler, { headers = {}, query }) => {
+    const res = createMockResponse();
+    const req = {
+      query,
+      get: (name) => headers[name.toLowerCase()] ?? undefined,
+    };
+    await handler(req, res);
+    return res;
+  };
+
+  it('rejects a stat for a file under the session directory when only lastDirectory resolves the workspace', async () => {
+    const handler = registerStatWithProjectDirectoryRuntime();
+
+    const res = await callStat(handler, { query: { path: '/repo-b/src/index.ts', optional: 'true' } });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Path is outside of active workspace' });
+  });
+
+  it('accepts the same stat when the session directory rides the x-opencode-directory header', async () => {
+    const handler = registerStatWithProjectDirectoryRuntime();
+
+    const res = await callStat(handler, {
+      headers: { 'x-opencode-directory': '/repo-b' },
+      query: { path: '/repo-b/src/index.ts', optional: 'true' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.isFile).toBe(true);
+  });
 });

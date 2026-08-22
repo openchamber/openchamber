@@ -1,16 +1,17 @@
 ---
 title: 集成
-description: 将你的 Claude、Command Code 或 Cursor 订阅用作提供商。
+description: 将你的 Claude 或 Cursor 订阅用作提供商。
 ---
 
 # 集成
 
 集成是一个小型插件，它使用你已有的订阅为 OpenChamber 添加一个提供商。你可以在 **Settings → Integrations** 中管理它们。
 
+> **实验性功能。**我们力求遵守提供商的政策，但帐户限制和暂停仍由各提供商决定。请自行承担使用集成的风险。
+
 可用的集成：
 
 - **Claude Code** — 你的 Claude Pro 或 Max 套餐，无需 API 密钥
-- **Command Code** — 你的 Command Code 套餐
 - **Cursor** — 你的 Cursor 套餐的模型额度
 
 ## 安装集成
@@ -29,18 +30,9 @@ Claude Code 使用你的 Claude Pro 或 Max 套餐 — 无需 API 密钥，也�
 1. 安装集成（见上文）。
 2. 选择 **Set up** 并登录。如果你还没有 Claude Code CLI，安装向导会先提供安装，然后再登录。
 
-Claude Code 是这里唯一要求安装并登录其提供商 CLI 的集成。Command Code 和 Cursor 不需要它们的 CLI。
+Claude Code 是这里唯一要求安装并登录其提供商 CLI 的集成。Cursor 不需要其 CLI。
 
 **你的 Claude 账户如何受到保护：** 此集成使用 Anthropic 官方的 Claude Agent SDK 和你已安装的 Claude Code CLI。它不会劫持 OAuth，不会提取或重放浏览器令牌，不会冒充不受支持的客户端，也不会绕过 Anthropic 的身份验证。它始终运行在 Anthropic 支持的访问路径上，因此不会带来与令牌劫持或未授权身份验证变通手段相关的封号风险。
-
-## Command Code
-
-Command Code 使用你的 Command Code 套餐。
-
-1. 安装集成（见上文）。
-2. 选择 **Set up** — 浏览器中会打开一个页面。授权访问，然后返回 OpenChamber。
-
-在没有图形界面的服务器或 CI 环境中，请设置环境变量 `COMMAND_CODE_API_KEY` 来代替浏览器登录。
 
 ## Cursor
 

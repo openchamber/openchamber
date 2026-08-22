@@ -66,6 +66,28 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: 'false' })).toEqual({});
   });
 
+  it('sanitizes shared sidebar display preferences', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      sidebarProjectDisplayMode: 'single',
+      sidebarSessionGroupingMode: 'flat',
+      sidebarProjectSortOrder: 'z-a',
+      sidebarShowRecentSection: false,
+    })).toEqual({
+      sidebarProjectDisplayMode: 'single',
+      sidebarSessionGroupingMode: 'flat',
+      sidebarProjectSortOrder: 'z-a',
+      sidebarShowRecentSection: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({
+      sidebarProjectDisplayMode: 'grid',
+      sidebarSessionGroupingMode: 'project',
+      sidebarProjectSortOrder: 'random',
+      sidebarShowRecentSection: 'false',
+    })).toEqual({});
+  });
+
   it('accepts only booleans for wide chat layout', () => {
     const helpers = createTestHelpers();
 
