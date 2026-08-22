@@ -115,6 +115,7 @@ export type SyntheticContextPart = {
   text: string
   attachments?: AttachedFile[]
   synthetic?: boolean
+  metadata?: Record<string, unknown>
 }
 
 export type VSCodeActiveEditorFile = {

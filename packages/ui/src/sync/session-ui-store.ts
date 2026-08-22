@@ -138,7 +138,7 @@ export function routeMessage(params: {
   variant?: string
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
-  additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
+  additionalParts?: Array<{ text: string; synthetic?: boolean; metadata?: Record<string, unknown>; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
   delivery?: 'steer'
 }): Promise<void> {
   const requestDirectory = params.directory ?? undefined
@@ -357,7 +357,7 @@ export type SessionUIState = {
     agent?: string,
     attachments?: AttachedFile[],
     agentMentionName?: string,
-    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
+    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: Record<string, unknown> }>,
     variant?: string,
     inputMode?: "normal" | "shell",
     options?: SendMessageOptions,
@@ -1489,7 +1489,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     agent?: string,
     attachments?: AttachedFile[],
     agentMentionName?: string,
-    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
+    additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: Record<string, unknown> }>,
     variant?: string,
     inputMode?: "normal" | "shell",
     options?: SendMessageOptions,
@@ -1577,7 +1577,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         createdDraftSession.directory,
         createdDraftSession.sessionId,
       )
-      const draftPrefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> =
+      const draftPrefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: Record<string, unknown> }> =
         draftKnowledge.text ? [{ text: draftKnowledge.text, synthetic: true }] : []
       // Left undefined when nothing was added, as before: an empty array is not
       // the same as no additional parts to everything downstream.
@@ -1612,6 +1612,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         additionalParts: mergedAdditionalParts?.map((p) => ({
           text: p.text,
           synthetic: p.synthetic,
+          metadata: p.metadata,
           files: p.attachments?.map((a: AttachedFile) => ({
             type: "file" as const,
             mime: a.mimeType,
@@ -1693,7 +1694,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // Prepended so it reads as background before the message it accompanies,
     // and empty unless the session is actually missing it.
     const knowledge = await fetchSessionKnowledge(currentSessionDirectory, targetSessionId || "")
-    const prefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> =
+    const prefixParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: Record<string, unknown> }> =
       knowledge.text ? [{ text: knowledge.text, synthetic: true }] : []
     const partsWithPinnedContext = prefixParts.length > 0
       ? [...prefixParts, ...(additionalParts || [])]
@@ -1715,6 +1716,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       additionalParts: partsWithPinnedContext?.map((p) => ({
         text: p.text,
         synthetic: p.synthetic,
+        metadata: p.metadata,
         files: p.attachments?.map((a) => ({
           type: "file" as const,
           mime: a.mimeType,

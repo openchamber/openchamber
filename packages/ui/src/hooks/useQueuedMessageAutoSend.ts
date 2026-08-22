@@ -89,6 +89,7 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
     queuedMessageId: queued.id,
     primaryText: sanitizedText,
     primaryAttachments: queued.attachments ?? [],
+    additionalParts: queued.inlineCommentParts,
     agentMentionName: mention?.name,
     sendConfig: queued.sendConfig,
   };
@@ -114,7 +115,7 @@ export const sendQueuedAutoSendPayload = (
     resolved.agent,
     payload.primaryAttachments,
     payload.agentMentionName,
-    undefined,
+    payload.additionalParts,
     resolved.variant,
     'normal',
     { target },

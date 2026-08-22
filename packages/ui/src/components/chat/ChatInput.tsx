@@ -19,9 +19,10 @@ import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import { buildLinkedIssue } from '@/lib/linkedIssues';
 import { useUserMessageHistory } from "@/sync/sync-context";
-import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
+import { EMPTY_INLINE_COMMENT_DRAFTS, getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
-import { appendInlineComments } from '@/lib/messages/inlineComments';
+import { appendInlineComments, buildInlineCommentParts, isCommentCardSource } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -762,25 +763,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
     const removeInlineCommentDraft = useInlineCommentDraftStore((state) => state.removeDraft);
     const hasDrafts = draftCount > 0;
-    const [previewConsoleCount, previewAnnotationCount, reviewCount, terminalContextCount, prCommentCount, prCheckCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    // The review slot is skipped: code comments render as individual cards
+    // below, each with its own remove control, so no aggregate count is shown.
+    const [previewConsoleCount, previewAnnotationCount, , terminalContextCount, prCommentCount, prCheckCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
     const terminalContextDrafts = terminalContextCount > 0
         ? (inlineDraftKey ? useInlineCommentDraftStore.getState().drafts[inlineDraftKey] ?? [] : []).filter((draft) => draft.source === 'terminal')
         : [];
+    // Code comments become OpenCode Desktop-style cards. Terminal captures and
+    // attached context are handled separately, as counts and as message text.
+    const commentDrafts = useInlineCommentDraftStore(
+        useShallow((state) => {
+            if (!inlineDraftKey) return EMPTY_INLINE_COMMENT_DRAFTS;
+            const drafts = (state.drafts[inlineDraftKey] ?? []).filter((draft) => isCommentCardSource(draft.source));
+            return drafts.length > 0 ? drafts : EMPTY_INLINE_COMMENT_DRAFTS;
+        })
+    );
     const removePreviewDrafts = React.useCallback((source: 'preview-console' | 'preview-annotation' | 'pr-comment' | 'pr-check') => {
         if (!inlineDraftTarget) return;
         const drafts = useInlineCommentDraftStore.getState().getDrafts(inlineDraftTarget);
         for (const draft of drafts) {
             if (draft.source === source) {
-                removeInlineCommentDraft(inlineDraftTarget, draft.id);
-            }
-        }
-    }, [inlineDraftTarget, removeInlineCommentDraft]);
-    // Review comments are the inline-comment drafts that aren't preview sources.
-    const removeReviewDrafts = React.useCallback(() => {
-        if (!inlineDraftTarget) return;
-        const drafts = useInlineCommentDraftStore.getState().getDrafts(inlineDraftTarget);
-        for (const draft of drafts) {
-            if (draft.source !== 'preview-console' && draft.source !== 'preview-annotation' && draft.source !== 'terminal' && draft.source !== 'pr-comment' && draft.source !== 'pr-check') {
                 removeInlineCommentDraft(inlineDraftTarget, draft.id);
             }
         }
@@ -909,16 +911,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
         const drafts = inlineDraftTarget ? consumeDrafts(inlineDraftTarget) : [];
+        // Only code comments become cards. Terminal captures and attached
+        // context stay in the queued text, where they are visible in the sent
+        // message; a metadata-less part would be dropped as ephemeral prompt
+        // context and never shown. Cards are captured now so a queued message
+        // keeps what it was written with instead of re-reading drafts at send.
+        const textDrafts = drafts.filter((draft) => !isCommentCardSource(draft.source));
+        const commentParts = buildInlineCommentParts(drafts.filter((draft) => isCommentCardSource(draft.source)));
 
         let messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
-        if (drafts.length > 0) {
-            messageToQueue = appendInlineComments(messageToQueue, drafts);
+        if (textDrafts.length > 0) {
+            messageToQueue = appendInlineComments(messageToQueue, textDrafts);
         }
         const attachmentsToQueue = sanitizeAttachmentsForSend(attachedFiles);
 
         addToQueue(messageQueueTarget, {
             content: messageToQueue,
             attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
+            inlineCommentParts: commentParts.length > 0 ? commentParts : undefined,
             sendConfig: currentProviderId && currentModelId ? {
                 providerID: currentProviderId,
                 modelID: currentModelId,
@@ -1115,15 +1125,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             ? consumeDrafts(consumedDraftTarget)
             : [];
 
+        // Only code comments become cards. Terminal captures and attached
+        // context stay prose and ride along in the last authored body, because
+        // that is what keeps them in the sent message: a part carrying no
+        // comment metadata is treated as ephemeral prompt context and is not
+        // shown back to the user.
+        const textDrafts = drafts.filter((draft) => !isCommentCardSource(draft.source));
+        const commentCards = buildInlineCommentParts(drafts.filter((draft) => isCommentCardSource(draft.source)));
+
         const availableSkillNames = new Set(
             useSkillsStore.getState().skills.map((skill) => skill.name),
         );
 
         const outgoing = buildOutgoingMessage({
-            queued: queuedMessagesToSend,
+            queued: queuedMessagesToSend.map((queued) => ({
+                content: queued.content,
+                attachments: queued.attachments,
+                commentCards: queued.inlineCommentParts,
+            })),
             composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
             composerAttachments: attachedFiles,
-            inlineComments: drafts,
+            inlineComments: textDrafts,
+            commentCards,
             syntheticTexts: syntheticParts?.map((part) => part.text) ?? [],
             linkedIssueContext: linkedIssue?.contextText ?? null,
             linkedPr: linkedPr
@@ -2593,14 +2616,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 {hasDrafts ? (
                     <ComposerContextChips
                         terminalDrafts={terminalContextDrafts}
-                        reviewCount={reviewCount}
+                        commentDrafts={commentDrafts}
                         prCommentCount={prCommentCount}
                         prCheckCount={prCheckCount}
                         previewConsoleCount={previewConsoleCount}
                         previewAnnotationCount={previewAnnotationCount}
                         draftTarget={inlineDraftTarget}
                         onRemoveDraft={removeInlineCommentDraft}
-                        onRemoveReviewDrafts={removeReviewDrafts}
                         onRemovePreviewDrafts={removePreviewDrafts}
                         colors={currentTheme.colors}
                     />

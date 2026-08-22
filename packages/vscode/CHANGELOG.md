@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 - **Skills catalog:** browse curated GitHub skill collections in a card-based catalog with cross-source search and direct links to each skill's repository.
+- **Code comments:** comment on code without leaving it. Select lines and pick Add Comment, or use the `+` that appears in the gutter, and a comment box opens on those lines. The comment stays anchored there while you keep reading, and rides along with your next message as its own card. Removing it from the editor or from the chip above the chat drops it in both places, and sending the message clears the threads. Comments go to the session editor panel you are working in, or to the sidebar chat when no panel is focused.
 - Providers: expanded support for custom providers.
 - Sessions created outside OpenChamber now appear in the sidebar and Recent list without a page refresh (thanks to @tomzx).
 - If OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
@@ -62,7 +63,6 @@
 - Chat: Ctrl/Cmd+L now adds the selected text to the chat input, or focuses it when nothing is selected.
 
 ## [1.18.0] - 2026-08-04
-
 - **Providers:** custom OpenAI-compatible providers can now be added and edited from Settings, including their endpoint, models, credentials, headers, and configuration scope (thanks to @makeittech).
 - UI/Localization: added German interface translations (thanks to @SGD-DEV).
 - Chat/Tools: Bash output now applies terminal control characters and strips ANSI formatting, preventing progress output and rewritten lines from appearing as raw escape sequences (thanks to @catan271).
@@ -76,6 +76,7 @@
 - Sidebar: a worktree shared by more than one project no longer appears twice.
 - Sidebar: session titles no longer clip at the ends of their rows.
 - Sessions: archiving and unarchiving now stays scoped to the current workspace.
+- Chat: attaching terminal output together with a code comment now keeps the terminal context on your own message instead of appending it to the comment.
 
 ## [1.17.2] - 2026-08-01
 

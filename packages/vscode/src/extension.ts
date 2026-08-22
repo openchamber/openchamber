@@ -5,6 +5,7 @@ import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import { InlineCommentThreads, SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
@@ -467,6 +468,104 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         chatViewProvider?.createNewSessionWithPrompt(prompt);
       }
+    })
+  );
+
+  // Comments are written where the code is: the thread opens on the selected
+  // lines and stays there until the message is sent. The composer chips remain
+  // the authoritative list, so the threads follow what the webview reports.
+  const inlineCommentThreads = new InlineCommentThreads({
+    submitDraft: async (payload) => {
+      // A comment is written against code the user is reading, so it cannot
+      // require them to have opened a chat first: with no session tab open,
+      // one is opened, exactly as the toolbar's new-session button does.
+      const panelId = sessionEditorProvider?.openWithLineComment(payload, activeSessionId);
+      if (panelId) {
+        return panelId;
+      }
+      // No session editor at all (provider gone): fall back to the sidebar
+      // rather than accepting a comment that has nowhere to land.
+      if (!(await revealChatViewForPayload())) {
+        return null;
+      }
+      if (!chatViewProvider) {
+        vscode.window.showWarningMessage(t('OpenChamber: Chat sidebar is not ready'));
+        return null;
+      }
+      chatViewProvider.addLineComment(payload);
+      return SIDEBAR_SURFACE_ID;
+    },
+    removeDraft: (draftId) => {
+      // Every surface is told, because each webview holds its own draft store
+      // and only the one actually holding the draft can drop it. Removal is
+      // idempotent everywhere else.
+      sessionEditorProvider?.removeLineComment(draftId);
+      chatViewProvider?.removeLineComment(draftId);
+    },
+    reportUndelivered: () => {
+      vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: The comment never reached the chat and was discarded'));
+    },
+    avatar: vscode.Uri.joinPath(context.extensionUri, 'assets', 'app-icon.png'),
+    strings: {
+      threadLabel: ({ startLine, endLine }) => (startLine === endLine
+        ? t('Comment on line {0}', String(startLine))
+        : t('Comment on lines {0}-{1}', String(startLine), String(endLine))),
+      author: t('OpenChamber'),
+      notSent: t('Not sent yet'),
+    },
+  });
+  context.subscriptions.push(inlineCommentThreads);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.addLineComment', () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: No active editor'));
+        return;
+      }
+      // Same rule the gutter `+` follows, so the two entry points cannot
+      // disagree about where a comment is allowed.
+      if (!inlineCommentThreads.canCommentOn(editor.document.uri)) {
+        vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: File is outside the workspace'));
+        return;
+      }
+      inlineCommentThreads.openThread(editor.document.uri, editor.selection);
+    })
+  );
+
+  // Invoked by the thread's own Comment button, and by the gutter `+` flow,
+  // which both arrive as a CommentReply carrying the typed text.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.submitLineComment', async (reply: vscode.CommentReply) => {
+      await inlineCommentThreads.submitReply(reply);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.removeLineComment', (thread: vscode.CommentThread) => {
+      inlineCommentThreads.removeThread(thread);
+    })
+  );
+
+  // The webview reports its whole draft list whenever it changes; the threads
+  // follow it. Not contributed in package.json: internal wiring, not a command
+  // a user should find in the palette.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.internal.inlineCommentsSync', (payload: unknown) => {
+      const record = payload as { drafts?: unknown; surfaceId?: unknown };
+      const drafts = record?.drafts;
+      // The surface id is stamped by the provider that received the snapshot,
+      // so an untagged one cannot be attributed and is ignored rather than
+      // applied to threads it may know nothing about.
+      if (!Array.isArray(drafts) || typeof record?.surfaceId !== 'string') return;
+      inlineCommentThreads.reconcile(
+        record.surfaceId,
+        drafts.flatMap((entry) => {
+          const draft = entry as { id?: unknown; text?: unknown };
+          if (typeof draft?.id !== 'string') return [];
+          return [{ id: draft.id, text: typeof draft.text === 'string' ? draft.text : '' }];
+        })
+      );
     })
   );
 
