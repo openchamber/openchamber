@@ -199,10 +199,69 @@ const createTimeoutSignal = (timeoutMs: number): { signal: AbortSignal; cleanup:
   };
 };
 
-const createRuntimeOpencodeClient = (config: { baseUrl: string; directory?: string }): OpencodeClient => {
+// Half-open sockets (managed OpenCode process died, TCP connection lost
+// without a FIN/RST) make fetch promises hang forever: they neither resolve
+// nor reject. Directory bootstrap holds one of two concurrency slots for the
+// whole promise, so two hung directories freeze every other project on
+// "loading sessions" indefinitely (#2470). The SDK client therefore gets a
+// defensive request timeout for reads so a dead upstream fails, releases the
+// slot, and surfaces the retry button instead of an infinite spinner.
+//
+// The timeout only applies to reads:
+// - POST is excluded: `session.prompt`, `shell`, `summarize`, and `command`
+//   are long-running by design (minutes of model/tool work), so they must
+//   never be cut short.
+// - The `/event` SSE stream is excluded: it is long-lived by design. (It is
+//   also fetched through `createSseClient`, which bypasses this wrapper.)
+// - `fetch()` resolves at response headers, so large file reads are not
+//   affected; only the header wait is bounded.
+const OPENCODE_REQUEST_TIMEOUT_MS = 30_000;
+
+const isEventStreamUrl = (input: string | URL | Request): boolean => {
+  const url = typeof input === "string"
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input.url;
+  return url.includes("/event");
+};
+
+type RuntimeOpencodeClientConfig = {
+  baseUrl: string
+  directory?: string
+  /** Read-request timeout in ms. Overridable so tests can use a short value. */
+  requestTimeoutMs?: number
+}
+
+export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig): OpencodeClient => {
+  const requestTimeoutMs = config.requestTimeoutMs ?? OPENCODE_REQUEST_TIMEOUT_MS;
   return createOpencodeClient({
     ...config,
-    fetch: runtimeFetch,
+    fetch: async (input: string | URL | Request, init?: RequestInit) => {
+      const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      if (isEventStreamUrl(input) || method === "POST") {
+        return runtimeFetch(input, init);
+      }
+
+      const timeout = createTimeoutSignal(requestTimeoutMs);
+      const callerSignal = init?.signal;
+      const supportsAny = typeof AbortSignal !== "undefined" && typeof (AbortSignal as { any?: unknown }).any === "function";
+      const signal = callerSignal && supportsAny
+        ? (AbortSignal as typeof AbortSignal & { any: (signals: AbortSignal[]) => AbortSignal }).any([callerSignal, timeout.signal])
+        : (callerSignal ?? timeout.signal);
+      try {
+        return await runtimeFetch(input, { ...init, signal });
+      } catch (error) {
+        // Normalize the timeout rejection so `retry` can recognize it as
+        // transient; a caller-initiated abort keeps its own error shape.
+        if (timeout.signal.aborted && !callerSignal?.aborted) {
+          throw new Error(`OpenCode request timed out after ${requestTimeoutMs}ms`);
+        }
+        throw error;
+      } finally {
+        timeout.cleanup();
+      }
+    },
   });
 };
 
