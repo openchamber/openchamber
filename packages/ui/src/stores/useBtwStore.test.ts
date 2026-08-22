@@ -3,43 +3,36 @@ import { useBtwStore } from './useBtwStore';
 
 describe('useBtwStore', () => {
   beforeEach(() => {
-    useBtwStore.getState().closeBtw();
+    useBtwStore.setState({ byParent: {} });
   });
 
-  test('starts closed', () => {
-    expect(useBtwStore.getState().panel).toEqual({
-      sessionId: null,
-      directory: null,
-      title: null,
-      forkedAtMs: null,
-    });
+  test('starts empty', () => {
+    expect(useBtwStore.getState().byParent).toEqual({});
   });
 
-  test('openBtw records the fork identity', () => {
-    useBtwStore.getState().openBtw('fork-1', '/project', 'btw: wtf is kafka', 1234);
-    expect(useBtwStore.getState().panel).toEqual({
-      sessionId: 'fork-1',
-      directory: '/project',
-      title: 'btw: wtf is kafka',
-      forkedAtMs: 1234,
-    });
+  test('setPanelState merges patches per parent', () => {
+    useBtwStore.getState().setPanelState('parent-1', { creating: true });
+    useBtwStore.getState().setPanelState('parent-1', { collapsed: true });
+    expect(useBtwStore.getState().byParent['parent-1']).toEqual({ creating: true, collapsed: true });
   });
 
-  test('openBtw replaces an existing panel', () => {
-    useBtwStore.getState().openBtw('fork-1', '/project', 'btw: first', 1);
-    useBtwStore.getState().openBtw('fork-2', '/project', 'btw: second', 2);
-    expect(useBtwStore.getState().panel.sessionId).toBe('fork-2');
+  test('parents are independent', () => {
+    useBtwStore.getState().setPanelState('parent-1', { collapsed: true });
+    useBtwStore.getState().setPanelState('parent-2', { destroying: true });
+    expect(useBtwStore.getState().byParent['parent-1']).toEqual({ collapsed: true });
+    expect(useBtwStore.getState().byParent['parent-2']).toEqual({ destroying: true });
   });
 
-  test('closeBtw clears the panel identity', () => {
-    useBtwStore.getState().openBtw('fork-1', '/project', 'btw: wtf is kafka', 1234);
-    useBtwStore.getState().closeBtw();
-    expect(useBtwStore.getState().panel.sessionId).toBeNull();
-    expect(useBtwStore.getState().panel.forkedAtMs).toBeNull();
+  test('clearPanelState removes only its parent entry', () => {
+    useBtwStore.getState().setPanelState('parent-1', { collapsed: true });
+    useBtwStore.getState().setPanelState('parent-2', { collapsed: true });
+    useBtwStore.getState().clearPanelState('parent-1');
+    expect(useBtwStore.getState().byParent).toEqual({ 'parent-2': { collapsed: true } });
   });
 
-  test('closeBtw on an already-closed panel is a no-op', () => {
-    useBtwStore.getState().closeBtw();
-    expect(useBtwStore.getState().panel.sessionId).toBeNull();
+  test('clearPanelState on an unknown parent is a no-op', () => {
+    const before = useBtwStore.getState().byParent;
+    useBtwStore.getState().clearPanelState('missing');
+    expect(useBtwStore.getState().byParent).toBe(before);
   });
 });

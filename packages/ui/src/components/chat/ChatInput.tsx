@@ -2,7 +2,6 @@ import React from 'react';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useBtwStore } from '@/stores/useBtwStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
@@ -36,7 +35,8 @@ import {
 } from '@/lib/chatDraftPersistence';
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { BtwPanel } from './btw/BtwPanel';
-import { closeBtwPanel, startBtwSession } from '@/lib/btw';
+import { useBtwPanelState } from './btw/useBtwPanelState';
+import { destroyBtwSession, startBtwSession, type BtwSessionRef } from '@/lib/btw';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { ToolPopupContent } from './message/types';
@@ -313,17 +313,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args)),
     ).current;
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-    // btw mode: the panel is open, so this composer's sends route to the
-    // temporary fork instead of the main session.
-    const btwSessionId = useBtwStore((s) => s.panel.sessionId);
-    const btwDirectory = useBtwStore((s) => s.panel.directory);
-    const btwTitle = useBtwStore((s) => s.panel.title);
-    const isBtwActive = Boolean(btwSessionId && btwDirectory);
     const fallbackDirectory = useDirectoryStore((s) => s.currentDirectory);
     const currentDirectory = useEffectiveDirectory() ?? fallbackDirectory;
     const currentSessionDirectoryForSync = useSessionUIStore(
         React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
     );
+    // btw mode: the CURRENT session's metadata links an active btw fork and
+    // the panel is expanded, so this composer's sends route to the fork
+    // instead of the main session. Collapsed keeps the fork alive (chip stays
+    // visible) while the composer talks to the main session again.
+    const btwPanel = useBtwPanelState(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
+    const btwSessionId = btwPanel.btwSessionId;
+    const btwDirectory = btwPanel.btwDirectory;
+    const btwSessionRef = React.useMemo<BtwSessionRef | null>(
+        () => (currentSessionId && btwSessionId && btwDirectory
+            ? { parentSessionId: currentSessionId, btwSessionId, directory: btwDirectory }
+            : null),
+        [btwDirectory, btwSessionId, currentSessionId],
+    );
+    const isBtwActive = Boolean(btwSessionRef) && !btwPanel.collapsed;
     const activeRuntimeKey = getRuntimeKey();
     const chatDraftIdentity = React.useMemo(
         () => createChatDraftIdentity(
@@ -990,12 +998,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             : message || fallback;
     };
 
-    const handleCloseBtw = React.useCallback(() => {
-        closeBtwPanel(() => {
-            toast.error(t('chat.btw.toast.destroyFailed'));
-        });
-    }, [t]);
-
     const handleSubmit = async (options?: SubmitOptions) => {
         const submitRuntimeKey = getRuntimeKey();
         const queuedOnly = options?.queuedOnly ?? false;
@@ -1244,21 +1246,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     toast.error(t('chat.btw.toast.emptyArgument'));
                     return;
                 }
-                // A new btw replaces the current one: close = destroy the open
-                // fork first so forks never accumulate in the sidebar.
-                closeBtwPanel();
-                const btwDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId)
+                const targetDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId)
                     || currentDirectory
                     || null;
-                if (!btwDirectory) {
+                if (!targetDirectory) {
                     toast.error(t('chat.btw.toast.createFailed'));
                     return;
                 }
                 try {
+                    // A new btw replaces this session's current one: destroy
+                    // the previous fork first so forks never accumulate.
+                    if (btwSessionRef) {
+                        await destroyBtwSession(btwSessionRef);
+                    }
                     await startBtwSession({
                         parentSessionId: currentSessionId,
                         question,
-                        directory: btwDirectory,
+                        directory: targetDirectory,
                         providerID: providerIdToSend,
                         modelID: modelIdToSend,
                         agent: agentNameToSend,
@@ -2858,21 +2862,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             </div>
                         ) : null}
                         <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
-                            {isBtwActive ? (
-                                <div className="flex max-w-[220px] items-center gap-1 rounded-lg border border-border/70 bg-background px-1.5 py-0.5 text-xs text-muted-foreground">
-                                    <Icon name="chat-ai-3" className="size-3 shrink-0" />
-                                    <span className="min-w-0 flex-1 truncate">{btwTitle || t('chat.btw.titleFallback')}</span>
-                                    <button
-                                        type="button"
-                                        onClick={handleCloseBtw}
-                                        aria-label={t('chat.btw.destroyAria')}
-                                        title={t('chat.btw.destroyAria')}
-                                        className="flex size-4 shrink-0 items-center justify-center rounded hover:bg-interactive-hover"
-                                    >
-                                        <Icon name="close" className="size-3" />
-                                    </button>
-                                </div>
-                            ) : null}
                             <AttachedVSCodeFileChips onShowPopup={handleShowAttachmentPreview} />
                             <ActiveEditorFileSuggestion />
                         </div>
@@ -3013,7 +3002,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     className={cn('chat-input-column mt-4', draftPresentationClassName)}
                 />
             ) : null}
-            <BtwPanel />
+            {currentSessionId ? <BtwPanel parentSessionId={currentSessionId} panel={btwPanel} /> : null}
         </form>
 
         {/* Issue Picker Dialog */}

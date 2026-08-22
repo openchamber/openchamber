@@ -2,26 +2,46 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
 
 let forkSessionImpl: (sessionId: string, messageId?: string, directory?: string | null) => Promise<Session>;
+let getSessionMessagesImpl: (id: string, limit?: number, directory?: string | null) => Promise<Array<{ info: Message; parts: Part[] }>>;
 let sendMessageImpl: (...args: unknown[]) => Promise<unknown>;
 let deleteSessionImpl: (sessionId: string) => Promise<boolean>;
 let updateSessionTitleImpl: (sessionId: string, title: string) => Promise<void>;
+let patchSessionMetadataImpl: (
+  sessionId: string,
+  directory: string | null | undefined,
+  updater: (metadata: Record<string, unknown>) => Record<string, unknown>,
+) => Promise<Session>;
 const registeredDirectories: string[] = [];
 const upsertedSessions: unknown[] = [];
 const childStoreSessions: Session[] = [];
+const currentSessionSwitches: string[] = [];
+const metadataPatches: Array<{ sessionId: string; result: Record<string, unknown> }> = [];
 
 mock.module('@/lib/opencode/client', () => ({
   opencodeClient: {
     forkSession: (sessionId: string, messageId?: string, directory?: string | null) =>
       forkSessionImpl(sessionId, messageId, directory),
+    getSessionMessages: (id: string, limit?: number, directory?: string | null) =>
+      getSessionMessagesImpl(id, limit, directory),
   },
 }));
 mock.module('@/sync/session-actions', () => ({
   waitForConnectionOrThrow: () => Promise.resolve(),
   deleteSession: (sessionId: string) => deleteSessionImpl(sessionId),
   updateSessionTitle: (sessionId: string, title: string) => updateSessionTitleImpl(sessionId, title),
+  patchSessionMetadata: (
+    sessionId: string,
+    directory: string | null | undefined,
+    updater: (metadata: Record<string, unknown>) => Record<string, unknown>,
+  ) => patchSessionMetadataImpl(sessionId, directory, updater),
 }));
 mock.module('@/sync/session-ui-store', () => ({
-  useSessionUIStore: { getState: () => ({ sendMessage: (...args: unknown[]) => sendMessageImpl(...args) }) },
+  useSessionUIStore: {
+    getState: () => ({
+      sendMessage: (...args: unknown[]) => sendMessageImpl(...args),
+      setCurrentSession: (sessionId: string) => { currentSessionSwitches.push(sessionId); },
+    }),
+  },
 }));
 mock.module('@/stores/useGlobalSessionsStore', () => ({
   useGlobalSessionsStore: { getState: () => ({ upsertSession: (session: unknown) => { upsertedSessions.push(session); } }) },
@@ -36,22 +56,51 @@ mock.module('@/sync/sync-refs', () => ({
   }),
 }));
 
-const { btwSessionTitle, startBtwSession, destroyBtwSession, closeBtwPanel, filterBtwTailMessages } =
+const { btwSessionTitle, startBtwSession, destroyBtwSession, promoteBtwSession, filterBtwTailMessages } =
   await import('@/lib/btw');
 const { useBtwStore } = await import('@/stores/useBtwStore');
 
-const makeSession = (id: string, directory?: string, created = Date.now()): Session => ({
+const makeSession = (id: string, directory?: string): Session => ({
   id,
   directory,
-  title: `btw: q`,
-  time: { created, updated: created },
+  title: 'btw: q',
+  time: { created: Date.now(), updated: Date.now() },
   parentID: undefined,
   version: 1,
 }) as unknown as Session;
 
-const record = (id: string, created: number): { info: Message; parts: Part[] } => ({
-  info: { id, role: 'user', time: { created, updated: created } } as unknown as Message,
+const record = (id: string): { info: Message; parts: Part[] } => ({
+  info: { id, role: 'user', time: { created: 1 } } as unknown as Message,
   parts: [],
+});
+
+const startInput = {
+  parentSessionId: 'parent-1',
+  question: 'wtf is kafka',
+  directory: '/project',
+  providerID: 'provider',
+  modelID: 'model',
+  agent: 'build',
+  variant: 'v',
+};
+
+beforeEach(() => {
+  registeredDirectories.length = 0;
+  upsertedSessions.length = 0;
+  childStoreSessions.length = 0;
+  currentSessionSwitches.length = 0;
+  metadataPatches.length = 0;
+  useBtwStore.setState({ byParent: {} });
+  forkSessionImpl = () => Promise.reject(new Error('no forkSession stub'));
+  getSessionMessagesImpl = () => Promise.resolve([record('msg-boundary')]);
+  sendMessageImpl = () => Promise.resolve();
+  deleteSessionImpl = () => Promise.resolve(true);
+  updateSessionTitleImpl = () => Promise.resolve();
+  patchSessionMetadataImpl = (sessionId, _directory, updater) => {
+    const result = updater({});
+    metadataPatches.push({ sessionId, result });
+    return Promise.resolve(makeSession(sessionId));
+  };
 });
 
 describe('btwSessionTitle', () => {
@@ -60,212 +109,134 @@ describe('btwSessionTitle', () => {
   });
 });
 
-describe('startBtwSession', () => {
-  beforeEach(() => {
-    registeredDirectories.length = 0;
-    upsertedSessions.length = 0;
-    childStoreSessions.length = 0;
-    useBtwStore.getState().closeBtw();
-    forkSessionImpl = () => Promise.reject(new Error('no forkSession stub'));
-    sendMessageImpl = () => Promise.resolve();
-    deleteSessionImpl = () => Promise.resolve(true);
-    updateSessionTitleImpl = () => Promise.resolve();
+describe('filterBtwTailMessages', () => {
+  test('keeps only messages after the boundary id', () => {
+    const records = [record('msg-1'), record('msg-2'), record('msg-3')];
+    expect(filterBtwTailMessages(records, 'msg-2').map((r) => r.info.id)).toEqual(['msg-3']);
   });
 
-  test('forks the parent (full copy) and routes the question to the fork', async () => {
-    let forkedParent: string | null = null;
-    let forkedMessageId: string | undefined = 'sentinel';
-    let forkedDirectory: string | null | undefined = null;
-    const forkCreated = Date.now();
-    forkSessionImpl = (sessionId, messageId, directory) => {
-      forkedParent = sessionId;
-      forkedMessageId = messageId;
-      forkedDirectory = directory;
-      return Promise.resolve(makeSession('fork-1', directory ?? '/project', forkCreated));
-    };
+  test('a null boundary keeps everything (fork of an empty parent)', () => {
+    const records = [record('msg-1'), record('msg-2')];
+    expect(filterBtwTailMessages(records, null)).toBe(records);
+  });
+});
 
-    let sentOptions: unknown = null;
+describe('startBtwSession', () => {
+  test('forks, marks the fork, links the parent, and routes the question to the fork', async () => {
+    forkSessionImpl = (sessionId, messageId, directory) => {
+      expect(sessionId).toBe('parent-1');
+      expect(messageId).toBe(undefined);
+      return Promise.resolve(makeSession('fork-1', directory ?? '/project'));
+    };
     let sentText: unknown = null;
+    let sentOptions: unknown = null;
     sendMessageImpl = (...args) => {
       sentText = args[0];
       sentOptions = args[9];
       return Promise.resolve();
     };
 
-    const session = await startBtwSession({
-      parentSessionId: 'parent-1',
-      question: 'wtf is kafka',
-      directory: '/project',
-      providerID: 'provider',
-      modelID: 'model',
-      agent: 'build',
-      variant: 'v',
-    });
+    const session = await startBtwSession(startInput);
 
-    expect(session?.id).toBe('fork-1');
-    expect(forkedParent).toBe('parent-1');
-    expect(forkedMessageId).toBe(undefined);
-    expect(forkedDirectory).toBe('/project');
+    expect(session.id).toBe('fork-1');
     expect(registeredDirectories).toEqual(['fork-1:/project']);
-    expect(upsertedSessions).toHaveLength(1);
     expect(childStoreSessions.map((s) => s.id)).toEqual(['fork-1']);
     expect(sentText).toBe('wtf is kafka');
     expect(sentOptions).toEqual({ sessionId: 'fork-1', directory: '/project' });
-    expect(useBtwStore.getState().panel).toEqual({
-      sessionId: 'fork-1',
-      directory: '/project',
-      title: 'btw: wtf is kafka',
-      forkedAtMs: forkCreated,
-    });
+    expect(metadataPatches).toEqual([
+      { sessionId: 'fork-1', result: { openchamber: { kind: 'btw', originalSessionID: 'parent-1', btwBoundaryMessageID: 'msg-boundary' } } },
+      { sessionId: 'parent-1', result: { openchamber: { btwSessionID: 'fork-1' } } },
+    ]);
+    // Transient creating flag is cleared once the flow settles.
+    expect(useBtwStore.getState().byParent).toEqual({});
   });
 
-  test('renames the fork to the btw title (best-effort)', async () => {
-    forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/project', 100));
-    const renamed: Array<[string, string]> = [];
-    updateSessionTitleImpl = (sessionId, title) => {
-      renamed.push([sessionId, title]);
-      return Promise.resolve();
-    };
-    await startBtwSession({
-      parentSessionId: 'parent-1',
-      question: 'q',
-      directory: '/project',
-      providerID: 'provider',
-      modelID: 'model',
-    });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(renamed).toEqual([['fork-1', 'btw: q']]);
+  test('an empty parent produces a marker without a boundary', async () => {
+    forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/project'));
+    getSessionMessagesImpl = () => Promise.resolve([]);
+    await startBtwSession(startInput);
+    expect(metadataPatches[0]?.result).toEqual({ openchamber: { kind: 'btw', originalSessionID: 'parent-1' } });
   });
 
-  test('a failed rename does not fail the btw flow', async () => {
-    forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/project', 100));
-    updateSessionTitleImpl = () => Promise.reject(new Error('rename failed'));
-    const session = await startBtwSession({
-      parentSessionId: 'parent-1',
-      question: 'q',
-      directory: '/project',
-      providerID: 'provider',
-      modelID: 'model',
-    });
-    expect(session?.id).toBe('fork-1');
-  });
-
-  test('uses the server-canonicalized directory for routing and registration', async () => {
-    forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/canonical/project', 100));
-
-    let sentOptions: unknown = null;
-    sendMessageImpl = (...args) => {
-      sentOptions = args[9];
-      return Promise.resolve();
-    };
-
-    await startBtwSession({
-      parentSessionId: 'parent-1',
-      question: 'q',
-      directory: '/requested/project',
-      providerID: 'provider',
-      modelID: 'model',
-    });
-
-    expect(registeredDirectories).toEqual(['fork-1:/canonical/project']);
-    expect(sentOptions).toEqual({ sessionId: 'fork-1', directory: '/canonical/project' });
-  });
-
-  test('rolls back the fork and propagates a failed first send', async () => {
-    forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/project', 100));
+  test('a failed first send unlinks the parent and deletes the fork', async () => {
+    forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/project'));
     sendMessageImpl = () => Promise.reject(new Error('send failed'));
     const deleted: string[] = [];
-    deleteSessionImpl = (sessionId) => {
-      deleted.push(sessionId);
-      return Promise.resolve(true);
-    };
+    deleteSessionImpl = (sessionId) => { deleted.push(sessionId); return Promise.resolve(true); };
 
-    await expect(
-      startBtwSession({
-        parentSessionId: 'parent-1',
-        question: 'q',
-        directory: '/project',
-        providerID: 'provider',
-        modelID: 'model',
-      }),
-    ).rejects.toThrow('send failed');
+    await expect(startBtwSession(startInput)).rejects.toThrow('send failed');
+
     expect(deleted).toEqual(['fork-1']);
-    expect(useBtwStore.getState().panel.sessionId).toBeNull();
-  });
-});
-
-describe('filterBtwTailMessages', () => {
-  const forkAt = 1000;
-
-  test('keeps only messages created at or after the fork boundary', () => {
-    const records = [
-      record('inherited-1', 100),
-      record('inherited-2', 500),
-      record('question', 1010),
-      record('answer', 1500),
-    ];
-    expect(filterBtwTailMessages(records, forkAt).map((r) => r.info.id)).toEqual(['question', 'answer']);
+    // marker, link, then unlink rollback
+    expect(metadataPatches.map((p) => p.sessionId)).toEqual(['fork-1', 'parent-1', 'parent-1']);
+    expect(metadataPatches[2]?.result).toEqual({});
+    expect(useBtwStore.getState().byParent).toEqual({});
   });
 
-  test('includes a message exactly at the boundary', () => {
-    const records = [record('edge', forkAt), record('old', 999)];
-    expect(filterBtwTailMessages(records, forkAt).map((r) => r.info.id)).toEqual(['edge']);
-  });
+  test('a failed boundary fetch deletes the fork', async () => {
+    forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/project'));
+    getSessionMessagesImpl = () => Promise.reject(new Error('messages failed'));
+    const deleted: string[] = [];
+    deleteSessionImpl = (sessionId) => { deleted.push(sessionId); return Promise.resolve(true); };
 
-  test('returns an empty tail when everything predates the fork', () => {
-    const records = [record('old-1', 10), record('old-2', 900)];
-    expect(filterBtwTailMessages(records, forkAt)).toEqual([]);
+    await expect(startBtwSession(startInput)).rejects.toThrow('messages failed');
+    expect(deleted).toEqual(['fork-1']);
+    expect(metadataPatches).toEqual([]);
   });
 });
 
 describe('destroyBtwSession', () => {
-  test('deletes the session and reports success', async () => {
-    let deleted: string | null = null;
-    deleteSessionImpl = (sessionId) => {
-      deleted = sessionId;
-      return Promise.resolve(true);
-    };
-    expect(await destroyBtwSession('fork-1')).toBe(true);
-    expect(deleted).toBe('fork-1');
+  const ref = { parentSessionId: 'parent-1', btwSessionId: 'fork-1', directory: '/project' };
+
+  test('unlinks the parent and deletes the fork', async () => {
+    const deleted: string[] = [];
+    deleteSessionImpl = (sessionId) => { deleted.push(sessionId); return Promise.resolve(true); };
+    expect(await destroyBtwSession(ref)).toBe(true);
+    expect(metadataPatches).toEqual([{ sessionId: 'parent-1', result: {} }]);
+    expect(deleted).toEqual(['fork-1']);
+    expect(useBtwStore.getState().byParent).toEqual({});
   });
 
-  test('reports failure when the delete fails', async () => {
+  test('reports an unconfirmed delete and still cleans UI state', async () => {
     deleteSessionImpl = () => Promise.resolve(false);
-    expect(await destroyBtwSession('fork-1')).toBe(false);
+    expect(await destroyBtwSession(ref)).toBe(false);
+    expect(useBtwStore.getState().byParent).toEqual({});
+  });
+
+  test('a failed unlink still attempts the delete', async () => {
+    patchSessionMetadataImpl = () => Promise.reject(new Error('patch failed'));
+    const deleted: string[] = [];
+    deleteSessionImpl = (sessionId) => { deleted.push(sessionId); return Promise.resolve(true); };
+    expect(await destroyBtwSession(ref)).toBe(true);
+    expect(deleted).toEqual(['fork-1']);
   });
 });
 
-describe('closeBtwPanel', () => {
-  test('closes the panel and destroys the open fork', async () => {
-    useBtwStore.getState().openBtw('fork-1', '/project', 'btw: q', 100);
-    let deleted: string | null = null;
-    deleteSessionImpl = (sessionId) => {
-      deleted = sessionId;
-      return Promise.resolve(true);
+describe('promoteBtwSession', () => {
+  const ref = { parentSessionId: 'parent-1', btwSessionId: 'fork-1', directory: '/project' };
+
+  test('unlinks the parent, strips the marker, and navigates to the fork', async () => {
+    patchSessionMetadataImpl = (sessionId, _directory, updater) => {
+      const base = sessionId === 'fork-1'
+        ? { openchamber: { kind: 'btw', originalSessionID: 'parent-1', btwBoundaryMessageID: 'msg-1' } }
+        : { openchamber: { btwSessionID: 'fork-1' } };
+      const result = updater(base);
+      metadataPatches.push({ sessionId, result });
+      return Promise.resolve(makeSession(sessionId));
     };
-    closeBtwPanel();
-    expect(useBtwStore.getState().panel.sessionId).toBeNull();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(deleted).toBe('fork-1');
+
+    await promoteBtwSession(ref);
+
+    expect(metadataPatches).toEqual([
+      { sessionId: 'parent-1', result: {} },
+      { sessionId: 'fork-1', result: {} },
+    ]);
+    expect(currentSessionSwitches).toEqual(['fork-1']);
   });
 
-  test('does nothing when no panel is open', async () => {
-    let deleteCalled = false;
-    deleteSessionImpl = () => {
-      deleteCalled = true;
-      return Promise.resolve(true);
-    };
-    closeBtwPanel();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(deleteCalled).toBe(false);
-  });
-
-  test('invokes onDestroyFailed when the delete fails', async () => {
-    useBtwStore.getState().openBtw('fork-1', '/project', 'btw: q', 100);
-    deleteSessionImpl = () => Promise.resolve(false);
-    let notified = false;
-    closeBtwPanel(() => { notified = true; });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(notified).toBe(true);
+  test('a failed unlink aborts the promote without navigating', async () => {
+    patchSessionMetadataImpl = () => Promise.reject(new Error('patch failed'));
+    await expect(promoteBtwSession(ref)).rejects.toThrow('patch failed');
+    expect(currentSessionSwitches).toEqual([]);
   });
 });

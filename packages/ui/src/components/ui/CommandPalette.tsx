@@ -18,6 +18,7 @@ import {
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { isBtwSession } from '@/lib/sessionBtwMetadata';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import {
   EMPTY_SESSION_ORDER_RANKS,
@@ -308,7 +309,9 @@ export const CommandPalette: React.FC = () => {
   // Sessions
   // ---------------------------------------------------------------------------
   const orderedActiveSessions = React.useMemo(() => {
-    return orderSessionsByLifecycleScopes(activeSessions, pinnedSessionIds, sessionOrderRanks);
+    // btw forks stay hidden until promoted to a full session
+    const visibleSessions = activeSessions.filter((session) => !isBtwSession(session));
+    return orderSessionsByLifecycleScopes(visibleSessions, pinnedSessionIds, sessionOrderRanks);
   }, [activeSessions, pinnedSessionIds, sessionOrderRanks]);
 
   const allBranches = useGitAllBranches();
