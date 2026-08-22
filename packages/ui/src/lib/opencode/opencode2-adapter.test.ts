@@ -21,6 +21,8 @@ type PromptAsyncCall = (input: {
   messageID: string;
   delivery: 'steer';
   format?: { type: string };
+  agent?: string;
+  model?: { providerID: string; modelID: string };
   parts: Array<{ type: 'text'; text: string }>;
 }, options: { signal: AbortSignal; headers: HeadersInit }) => Promise<{ data?: boolean; error?: Error }>;
 
