@@ -1,3 +1,8 @@
+## [Unreleased]
+
+- Scheduled Tasks can show when a local preflight policy denied a run instead
+  of reporting it as successful.
+
 ## [1.19.0] - 2026-08-19
 
 - **Settings/Integrations:** a new Integrations settings page lists Claude Code, Command Code, and Cursor plugins with install, update, setup, and remove actions, plus Discord and Telegram Coming soon placeholders.

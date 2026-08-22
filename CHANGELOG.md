@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Scheduled Tasks:** an optional local preflight command can now block an
+  automatic or manual task before it creates an agent session; blocked tasks
+  show as Denied with the policy reason instead of appearing to have succeeded.
+
 ## [1.19.0] - 2026-08-19
 
 - **Settings/Integrations:** a new Integrations settings page lists Claude Code, Command Code, and Cursor plugins with install, update, setup, and remove actions, plus Discord and Telegram Coming soon placeholders.
