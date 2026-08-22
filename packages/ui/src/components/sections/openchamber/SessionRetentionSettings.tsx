@@ -87,7 +87,7 @@ export const SessionRetentionSettings: React.FC = () => {
             max={MAX_DAYS}
             step={1}
             aria-label={t('settings.openchamber.sessionRetention.field.retentionPeriodAria')}
-            className="w-20 tabular-nums"
+            className="w-24 tabular-nums"
           />
           <span className="typography-ui-label text-muted-foreground">{t('settings.openchamber.sessionRetention.field.days')}</span>
           <Button
