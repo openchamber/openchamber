@@ -23,6 +23,19 @@ import {
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
+
+/**
+ * 单个 part 可累积的 text/output 上限（约 2MB）。
+ * 防止单条命令输出量极大（如遍历大型 node_modules）时无限追加，
+ * 导致 reducer 内存暴涨 + React 渲染卡死（OpenChamber 窗口冻结 / 后台高 CPU 内存）。
+ */
+const MAX_PART_TEXT_SIZE = 2 * 1024 * 1024
+
+function capPartText(value: string): string {
+  return value.length > MAX_PART_TEXT_SIZE
+    ? value.slice(0, MAX_PART_TEXT_SIZE)
+    : value
+}
 const FINAL_TOOL_STATUSES = new Set(["completed", "error", "aborted", "failed", "timeout", "cancelled"])
 
 type DedupeMetadata = {
@@ -507,7 +520,11 @@ export function applyDirectoryEvent(
       const next = [...parts]
       next[partIndex] = {
         ...existing,
-        [props.field]: shouldDedupe ? appendNonOverlappingDelta(existingValue, props.delta) : (existingValue ?? "") + props.delta,
+        [props.field]: capPartText(
+          shouldDedupe
+            ? appendNonOverlappingDelta(existingValue, props.delta)
+            : (existingValue ?? "") + props.delta
+        ),
         __dedupeNextDeltaFields: dedupeFields.filter((field) => field !== props.field),
       } as unknown as Part
       draft.part[props.messageID] = next
