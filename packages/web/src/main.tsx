@@ -8,6 +8,7 @@ import {
   requestEmbeddedSessionRuntimeBootstrap,
 } from '@openchamber/ui/components/layout/contextPanelEmbeddedChat';
 import '@openchamber/ui/index.css';
+import '@openchamber/ui/styles/katex-css';
 import '@openchamber/ui/styles/fonts';
 
 declare global {
