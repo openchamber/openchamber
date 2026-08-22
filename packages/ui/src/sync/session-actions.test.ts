@@ -10,6 +10,8 @@ let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?
 let questionReplyError: unknown | null = null
 let questionRejectError: unknown | null = null
 let permissionReplyError: unknown | null = null
+let pendingQuestionsForDismiss: QuestionRequest[] = []
+let pendingQuestionsForDismissShouldThrow = false
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionUpdateResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
@@ -36,14 +38,16 @@ const mockScopedClient = {
     reply: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reply", params })
       if (questionReplyError) {
-        return Promise.resolve({ error: questionReplyError, response: { status: 404 } })
+        const status = (questionReplyError as { status?: number })?.status ?? 404
+        return Promise.resolve({ error: questionReplyError, response: { status } })
       }
       return Promise.resolve({ data: true })
     }),
     reject: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reject", params })
       if (questionRejectError) {
-        return Promise.resolve({ error: questionRejectError, response: { status: 404 } })
+        const status = (questionRejectError as { status?: number })?.status ?? 404
+        return Promise.resolve({ error: questionRejectError, response: { status } })
       }
       return Promise.resolve({ data: true })
     }),
@@ -127,6 +131,10 @@ mock.module("@/lib/opencode/client", () => ({
     getDirectory: () => "/test/project",
     getFilesystemHome: mock(async () => "/home/test"),
     getSdkClient: () => mockSdk,
+    listPendingQuestions: mock(async () => {
+      if (pendingQuestionsForDismissShouldThrow) throw new Error("question.list failed")
+      return pendingQuestionsForDismiss
+    }),
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
       return Promise.resolve(true)
@@ -1651,6 +1659,9 @@ describe("dismissOpenQuestionsForSession", () => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
     questionReplyError = null
+    questionRejectError = null
+    pendingQuestionsForDismiss = []
+    pendingQuestionsForDismissShouldThrow = false
   })
 
   test("returns false and rejects nothing when no questions are pending", async () => {
@@ -1717,6 +1728,69 @@ describe("dismissOpenQuestionsForSession", () => {
     expect(rejectCalls[0].params.requestID).toBe("q-stale")
     // The stale entry is cleared from the store even though the server reported not-found.
     expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("rolls back the optimistic clear when the reject fails non-404 and the backend still reports pending", async () => {
+    // Issue #2448: a failed dismiss used to leave the question orphaned — gone
+    // from the store but still pending on the backend, with no answerable form.
+    const question = buildQuestion("q-500", "session-a")
+    const store = createStore({}, {
+      session: [{ id: "session-a", time: { created: 1 } } as Session],
+      question: { "session-a": [question] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+    questionRejectError = Object.assign(new Error("question.reject failed (500)"), { status: 500 })
+    // Authoritative re-check: the backend still considers the question pending.
+    pendingQuestionsForDismiss = [question]
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    expect(dismissed).toBe(true)
+    // The question is restored so the answerable form stays visible.
+    expect(store.getState().question["session-a"]).toHaveLength(1)
+    expect(store.getState().question["session-a"]?.[0]?.id).toBe("q-500")
+  })
+
+  test("does not roll back when the authoritative re-check says the question was resolved", async () => {
+    const question = buildQuestion("q-500", "session-a")
+    const store = createStore({}, {
+      session: [{ id: "session-a", time: { created: 1 } } as Session],
+      question: { "session-a": [question] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+    questionRejectError = Object.assign(new Error("question.reject failed (500)"), { status: 500 })
+    // Another client answered the question while the reject was in flight.
+    pendingQuestionsForDismiss = []
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    expect(dismissed).toBe(true)
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("rolls back conservatively when the authoritative re-check itself fails", async () => {
+    const question = buildQuestion("q-500", "session-a")
+    const store = createStore({}, {
+      session: [{ id: "session-a", time: { created: 1 } } as Session],
+      question: { "session-a": [question] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+    questionRejectError = Object.assign(new Error("question.reject failed (500)"), { status: 500 })
+    pendingQuestionsForDismissShouldThrow = true
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    expect(dismissed).toBe(true)
+    expect(store.getState().question["session-a"]).toHaveLength(1)
   })
 })
 

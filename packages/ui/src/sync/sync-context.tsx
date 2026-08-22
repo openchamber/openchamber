@@ -1209,6 +1209,65 @@ const updateRoutingIndexFromEvent = (
 }
 
 /**
+ * Materialize sessions referenced by pending questions that the store does not
+ * know yet (e.g. a subagent session created during an SSE gap). Without this,
+ * a pending question from a new session could never surface as an answerable
+ * form: subtree scoping, the sidebar, and trimSessions all derive session
+ * identity from `state.session` (issue #2448). Best-effort — a session that
+ * cannot be resolved here (or belongs to another directory) is not
+ * materialized; the caller drops its question group for this pass and the next
+ * event/reconnect resync recovers it.
+ */
+async function materializeQuestionSessions(
+  directory: string,
+  store: StoreApi<DirectoryStore>,
+  grouped: Record<string, QuestionRequest[]>,
+): Promise<void> {
+  const sessionIds = Object.keys(grouped)
+  if (sessionIds.length === 0) return
+  const known = new Set(store.getState().session.map((session) => session.id))
+  const missing = sessionIds.filter((sessionId) => !known.has(sessionId))
+  if (missing.length === 0) return
+
+  const scopedClient = opencodeClient.getScopedSdkClient(directory)
+  await Promise.all(missing.map(async (sessionId) => {
+    try {
+      const response = await retry(async () => {
+        const result = await scopedClient.session.get({ sessionID: sessionId, directory })
+        assertSdkSuccess(result, "session.get")
+        return result
+      })
+      const session = response?.data
+      if (!session?.id) return
+      // listPendingQuestions merges an unscoped global fetch (client.ts), so a
+      // session resolved here may belong to another directory. Only materialize
+      // sessions owned by this directory — otherwise a foreign session row leaks
+      // into this per-directory store (issue #2448 review).
+      if (session.directory && normalizeEventDirectory(session.directory) !== normalizeEventDirectory(directory)) {
+        return
+      }
+      const nextSession = stripSessionDiffSnapshots(session)
+      store.setState((state: DirectoryStore) => {
+        const sessionIndex = state.session.findIndex((item) => item.id === nextSession.id)
+        if (sessionIndex >= 0) {
+          if (haveEquivalentSyncSnapshots(state.session[sessionIndex], nextSession)) return state
+          const sessions = [...state.session]
+          sessions[sessionIndex] = nextSession
+          return { session: sessions }
+        }
+        const sessions = [...state.session, nextSession].sort((a, b) => cmp(a.id, b.id))
+        const sessionTotal = nextSession.parentID ? state.sessionTotal : state.sessionTotal + 1
+        return { session: sessions, sessionTotal }
+      })
+    } catch {
+      // Best-effort: an unresolvable/foreign session is not materialized, and
+      // the caller drops its question group for this pass (the attribution
+      // filter runs next). The next event/reconnect resync recovers it.
+    }
+  }))
+}
+
+/**
  * Re-fetch pending questions and permissions for a directory and merge them
  * into the directory's child store, preserving any in-flight SSE updates that
  * arrived while the request was pending. Used by reconnect/materialization
@@ -1224,15 +1283,16 @@ export async function resyncBlockingRequestsForDirectory(
   options?: { includePermissions?: boolean },
 ) {
   const before = store.getState()
-  const candidateIds = new Set<string>(candidateSessionIds ?? [
+  const knownSessionIds = new Set<string>([
     ...before.session.map((session) => session.id),
     ...Object.keys(before.message ?? {}),
     ...Object.keys(before.session_status ?? {}),
     ...Object.keys(before.question ?? {}),
     ...Object.keys(before.permission ?? {}),
   ])
-  if (candidateIds.size === 0) return
-  const candidates = Array.from(candidateIds)
+  const candidates = candidateSessionIds ?? Array.from(knownSessionIds)
+  if (candidates.length === 0) return
+  const candidateSet = new Set(candidates)
 
   // Re-fetch pending questions that may have been asked during an SSE gap,
   // reconnect window, or directory materialization gap.
@@ -1242,15 +1302,33 @@ export async function resyncBlockingRequestsForDirectory(
     )
     const pendingQuestions = await opencodeClient.listPendingQuestions({ directories: [directory] })
     const grouped: Record<string, QuestionRequest[]> = {}
-    for (const question of pendingQuestions) {
-      if (!question?.id || !question.sessionID) continue
-      if (!candidateIds.has(question.sessionID)) continue
-      const list = grouped[question.sessionID]
-      if (list) list.push(question)
-      else grouped[question.sessionID] = [question]
+    for (const q of pendingQuestions) {
+      if (!q?.id || !q.sessionID) continue
+      const list = grouped[q.sessionID]
+      if (list) list.push(q)
+      else grouped[q.sessionID] = [q]
     }
     for (const sessionId of Object.keys(grouped)) {
       grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    }
+
+    // The directory-scoped list may reference sessions the store does not know
+    // yet (created during an SSE gap). Materialize them so a pending question
+    // from a new/subagent session surfaces as an answerable form (issue #2448).
+    await materializeQuestionSessions(directory, store, grouped)
+
+    // listPendingQuestions merges an unscoped global fetch (client.ts), so the
+    // list can include questions for sessions owned by OTHER directories. Only
+    // surface/merge questions attributed to THIS directory: sessions in the
+    // recovery candidate set (explicit candidates, or every session known when
+    // no candidates are given), or sessions successfully materialized in this
+    // pass. Anything else would pollute this store, fire wrong "Open session"
+    // toasts, and could leak a foreign session row (issue #2448 review).
+    for (const sessionId of Object.keys(grouped)) {
+      if (candidateSet.has(sessionId)) continue
+      if (!knownSessionIds.has(sessionId)
+        && store.getState().session.some((session) => session.id === sessionId)) continue
+      delete grouped[sessionId]
     }
 
     for (const [sessionId, questions] of Object.entries(grouped)) {
@@ -1305,7 +1383,7 @@ export async function resyncBlockingRequestsForDirectory(
     const grouped: Record<string, PermissionRequest[]> = {}
     for (const permission of pendingPermissions) {
       if (!permission?.id || !permission.sessionID) continue
-      if (!candidateIds.has(permission.sessionID)) continue
+      if (!knownSessionIds.has(permission.sessionID)) continue
       const list = grouped[permission.sessionID]
       if (list) list.push(permission)
       else grouped[permission.sessionID] = [permission]
