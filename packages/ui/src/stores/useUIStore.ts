@@ -825,6 +825,7 @@ interface UIStore {
   contextRailOrder: string[];
   contextEditorTreeVisible: boolean;
   contextEditorTreeWidth: number;
+  gitCommitDiffWidth: number;
   notesPanelHeight: number;
   /** Expanded collapsible sections of the in-chat work-status panel, by id. */
   workStatusExpandedSections: Record<string, boolean>;
@@ -1019,6 +1020,7 @@ interface UIStore {
   setContextRailOrder: (order: string[]) => void;
   toggleContextEditorTree: () => void;
   setContextEditorTreeWidth: (width: number) => void;
+  setGitCommitDiffWidth: (width: number) => void;
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor) => void;
   openContextDiff: (directory: string, filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
@@ -1226,6 +1228,7 @@ export const useUIStore = create<UIStore>()(
         contextRailOrder: [],
         contextEditorTreeVisible: true,
         contextEditorTreeWidth: 240,
+        gitCommitDiffWidth: 420,
         notesPanelHeight: 112,
         workStatusExpandedSections: {},
         workStatusScrollTop: 0,
@@ -1433,6 +1436,13 @@ export const useUIStore = create<UIStore>()(
             return;
           }
           set({ contextEditorTreeWidth: Math.min(480, Math.max(200, Math.round(width))) });
+        },
+
+        setGitCommitDiffWidth: (width) => {
+          if (!Number.isFinite(width)) {
+            return;
+          }
+          set({ gitCommitDiffWidth: Math.min(900, Math.max(320, Math.round(width))) });
         },
 
         // Rail entry point: activates the most recent tab of the requested
@@ -2970,6 +2980,7 @@ export const useUIStore = create<UIStore>()(
           contextRailOrder: state.contextRailOrder,
           contextEditorTreeVisible: state.contextEditorTreeVisible,
           contextEditorTreeWidth: state.contextEditorTreeWidth,
+          gitCommitDiffWidth: state.gitCommitDiffWidth,
           notesPanelHeight: state.notesPanelHeight,
           workStatusExpandedSections: state.workStatusExpandedSections,
           workStatusScrollTop: state.workStatusScrollTop,

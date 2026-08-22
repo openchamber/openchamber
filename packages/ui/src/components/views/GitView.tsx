@@ -75,7 +75,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { getGitViewRenderMode } from './git/gitViewRenderMode';
 import { createGitCommitDetailsController, scheduleGitCommitDetailsIdle } from './git/gitCommitDetailsController';
-import { createGitContextCommitDetailsController } from './git/gitContextCommitDetailsController';
+import { GitCommitDiffSidePanel } from './git/GitCommitDiffSidePanel';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
@@ -315,8 +315,9 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const { screenWidth } = useDeviceInfo();
   const gitReviewLayout = useUIStore((state) => state.gitReviewLayout);
   const openContextDiff = useUIStore((state) => state.openContextDiff);
-  const openContextCommitDiff = useUIStore((state) => state.openContextCommitDiff);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const gitCommitDiffWidth = useUIStore((state) => state.gitCommitDiffWidth);
+  const setGitCommitDiffWidth = useUIStore((state) => state.setGitCommitDiffWidth);
 
   const prStatusBranch = status?.current ?? null;
   const prChipStatus = useGitHubPrStatusStore((state) => {
@@ -728,18 +729,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
       commitDetailsController?.dispose();
     };
   }, [commitDetailsController]);
-
-  const graphCommitDetailsController = React.useMemo(() => {
-    if (!commitDetailsController || !currentDirectory) {
-      return null;
-    }
-
-    return createGitContextCommitDetailsController(
-      commitDetailsController,
-      currentDirectory,
-      openContextCommitDiff,
-    );
-  }, [commitDetailsController, currentDirectory, openContextCommitDiff]);
 
   React.useEffect(() => {
     if (!currentDirectory) return;
@@ -2332,12 +2321,12 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     />
   );
 
-  const graphPaneContent = graphCommitDetailsController && currentDirectory ? (
+  const graphPaneContent = commitDetailsController && currentDirectory ? (
     <GitGraphPanel
       directory={currentDirectory}
       git={git}
       isActive={isActive}
-      commitDetailsController={graphCommitDetailsController}
+      commitDetailsController={commitDetailsController}
       onCopyHash={handleCopyCommitHash}
       hoverRemoteName={hoverRemoteName}
       hoverRemoteUrl={hoverRemoteUrl}
@@ -2404,33 +2393,44 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         )}
 
       <div className="flex-1 min-h-0 overflow-hidden">
-        <ScrollableOverlay
-          as={ScrollShadow}
-          ref={actionPanelScrollRef}
-          outerClassName="h-full min-h-0"
-          className={cn('px-4', 'pt-1 pb-4')}
-          disableHorizontal
-          preventOverscroll
-        >
-          <div className="h-full min-h-0">
-            {renderMode === 'workspace-panes' ? (
-              <GitWorkspacePanes
-                directory={currentDirectory}
-                changes={changesPaneContent}
-                commit={commitPaneContent}
-                graph={graphPaneContent}
-                graphHeaderControls={currentDirectory && git ? (
-                  <GitGraphControls directory={currentDirectory} git={git} />
-                ) : undefined}
-              />
-            ) : (
-              <div className="flex min-h-full flex-col gap-4 py-2">
-                {changesPaneContent}
-                {commitPaneContent}
+        <div className="flex h-full min-h-0">
+          {commitDetailsController ? (
+            <GitCommitDiffSidePanel
+              controller={commitDetailsController}
+              width={gitCommitDiffWidth}
+              onWidthChange={setGitCommitDiffWidth}
+            />
+          ) : null}
+          <div className="min-w-0 flex-1 h-full min-h-0 overflow-hidden">
+            <ScrollableOverlay
+              as={ScrollShadow}
+              ref={actionPanelScrollRef}
+              outerClassName="h-full min-h-0"
+              className={cn('px-4', 'pt-1 pb-4')}
+              disableHorizontal
+              preventOverscroll
+            >
+              <div className="h-full min-h-0">
+                {renderMode === 'workspace-panes' ? (
+                  <GitWorkspacePanes
+                    directory={currentDirectory}
+                    changes={changesPaneContent}
+                    commit={commitPaneContent}
+                    graph={graphPaneContent}
+                    graphHeaderControls={currentDirectory && git ? (
+                      <GitGraphControls directory={currentDirectory} git={git} />
+                    ) : undefined}
+                  />
+                ) : (
+                  <div className="flex min-h-full flex-col gap-4 py-2">
+                    {changesPaneContent}
+                    {commitPaneContent}
+                  </div>
+                )}
               </div>
-            )}
+            </ScrollableOverlay>
           </div>
-        </ScrollableOverlay>
+        </div>
       </div>
 
       <Dialog
