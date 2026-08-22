@@ -19,6 +19,7 @@ import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { destroyBtwSession, filterBtwTailMessages, promoteBtwSession, type BtwSessionRef } from '@/lib/btw';
 import type { BtwPanelState } from './useBtwPanelState';
 import { ChatSurfaceProvider } from '../ChatSurfaceContext';
+import { useMobileAutocompleteMaxHeight } from '../useMobileAutocompleteMaxHeight';
 import ChatMessage from '../ChatMessage';
 import { PermissionCard } from '../PermissionCard';
 import { QuestionCard } from '../QuestionCard';
@@ -384,6 +385,17 @@ const BtwExpandedSheet: React.FC<{
     const bodyRef = React.useRef<HTMLDivElement | null>(null);
     const contentRef = React.useRef<HTMLDivElement | null>(null);
     const handleBodyScroll = useAutoScroll(bodyRef, contentRef, !data.isEmpty);
+    // With the on-screen keyboard open the composer (this panel's anchor)
+    // rises, and a vh-based cap would push the panel under the app header.
+    // Same protection as the composer autocomplete popups: clamp the scroll
+    // body to the space actually available above the anchor. The hook measures
+    // room for the scroll body itself, but the panel header and bottom spacer
+    // sit inside the same frame above/below it — reserve their height too.
+    const BTW_FRAME_CHROME_PX = 48;
+    const availableMaxHeight = useMobileAutocompleteMaxHeight(bodyRef, true, 520 + BTW_FRAME_CHROME_PX);
+    const mobileMaxHeight = availableMaxHeight !== undefined
+        ? Math.max(120, availableMaxHeight - BTW_FRAME_CHROME_PX)
+        : undefined;
 
     return (
         <BtwFrame title={title} actions={actions} onTitleClick={onTitleClick} titleClickLabel={titleClickLabel} collapsed={false}>
@@ -393,6 +405,7 @@ const BtwExpandedSheet: React.FC<{
                     bodyRef={bodyRef}
                     contentRef={contentRef}
                     onBodyScroll={handleBodyScroll}
+                    maxHeight={mobileMaxHeight}
                 />
             </ChatSurfaceProvider>
         </BtwFrame>
@@ -404,7 +417,8 @@ const BtwMessages: React.FC<{
     bodyRef: React.RefObject<HTMLDivElement | null>;
     contentRef: React.RefObject<HTMLDivElement | null>;
     onBodyScroll: (event: React.UIEvent<HTMLDivElement>) => void;
-}> = ({ data, bodyRef, contentRef, onBodyScroll }) => {
+    maxHeight?: number;
+}> = ({ data, bodyRef, contentRef, onBodyScroll, maxHeight }) => {
     const { t } = useI18n();
 
     if (data.isEmpty) {
@@ -423,6 +437,7 @@ const BtwMessages: React.FC<{
             size={32}
             data-scroll-shadow="true"
             className="max-h-[min(55vh,520px)] min-h-0 overflow-y-auto px-3 py-1"
+            style={maxHeight !== undefined ? { maxHeight } : undefined}
         >
             <div ref={contentRef}>
                 {data.messageRecords.map((record, index) => (
