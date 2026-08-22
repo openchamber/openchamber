@@ -113,6 +113,7 @@ export interface AgentConfig {
   permission?: PermissionConfig | null;
 
   disable?: boolean;
+  hidden?: boolean;
   scope?: AgentScope;
 }
 
@@ -171,6 +172,10 @@ export const isAgentHidden = (agent: Agent): boolean => {
 // Helper to filter only visible (non-hidden) agents
 export const filterVisibleAgents = (agents: Agent[]): Agent[] =>
   agents.filter((agent) => !isAgentHidden(agent));
+
+// Hidden custom agents remain manageable even though pickers exclude them.
+export const isAgentManageable = (agent: Agent): boolean =>
+  !isAgentHidden(agent) || !isAgentBuiltIn(agent);
 
 const CONFIG_EVENT_SOURCE = "useAgentsStore";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -252,6 +257,7 @@ export interface AgentDraft {
   mode?: "primary" | "subagent" | "all";
   permission?: PermissionConfig;
   disable?: boolean;
+  hidden?: boolean;
 }
 
 interface AgentsStore {
@@ -411,6 +417,7 @@ export const useAgentsStore = create<AgentsStore>()(
             if (config.prompt) agentConfig.prompt = config.prompt;
             if (config.permission) agentConfig.permission = config.permission;
             if (config.disable !== undefined) agentConfig.disable = config.disable;
+            if (config.hidden !== undefined) agentConfig.hidden = config.hidden;
             if (config.scope) agentConfig.scope = config.scope;
 
             console.log('[AgentsStore] Agent config to save:', agentConfig);
