@@ -32,8 +32,8 @@
 
 ### Components
 
-- `SidebarHeader.tsx`: Top header UI for add-project, session search, selection mode, project sort, and the display menu (recent toggle, collapse/expand all).
 - A successful add/create/clone from the project-directory dialog transitions to a new-session draft targeted at that project, matching the project's `+` action; changing project metadata alone must not leave the visible session or draft on a different directory.
+- `SidebarHeader.tsx`: Top header UI for add-project, session search, selection mode, project sort, grouping/display preferences, project-name casing, automatic empty-project closure, and collapse/expand all.
 - `SidebarNav.tsx`: Text navigation rows above the tree (New session, Scheduled, Multi-run, Archive); hidden in VS Code.
 - `SidebarActivitySections.tsx`: Global top section renderer for OpenChamber-managed `chats` followed by optional project-only `recent` sessions, styled as zone headers. The desktop sticky identity overlay follows the activity header whose sentinel has crossed the scroller edge, so a small scroll cannot relabel Chats as Recent.
 - `SidebarFooter.tsx`: Static footer with icon-only settings, shortcuts, and about actions.
@@ -66,7 +66,6 @@
 - `types.ts`: Shared sidebar types (`SessionNode`, `SessionGroup`, summary/search metadata).
 - `activitySections.ts`: Persisted top-section storage/helpers for the current `recent` session list.
 - `sessionBootstrapDemands.ts`: Builds the deduplicated directory demand plan. Selected directories rank above active projects, expanded groups, visible collapsed groups, and background/collapsed projects.
-- `utils.tsx`: Shared sidebar utilities (path normalization, dedupe, archived scope keys, project relation checks, text highlight, labels, compact/default date formatting). Shared session ranking lives in `sync/session-ordering.ts`.
 
 ## Loading rules
 
@@ -87,3 +86,10 @@
 - Empty successful lists, unresolved loads, and failed loads are separate UI states. Failed groups expose Retry and retain prior data.
 - Directory permission failures remain visible even when stale sessions are retained. Flat groups inspect every represented root/worktree directory; local Desktop may open the native picker for the exact failed directory, while other runtimes keep the ordinary Retry action.
 - Pins and folder assignments are not pruned from the first startup snapshot or from optimistic mutations. Confirmed local deletion and routed external deletion clean immediately; a later authoritative omission after an established baseline covers missed external delete events.
+- `utils.tsx`: Shared sidebar utilities (path normalization, sorting, dedupe, archived scope keys, project relation checks, text highlight, labels, compact/default date formatting). Shared session ranking lives in `sync/session-ordering.ts`.
+
+## Project preferences
+
+- Sidebar display preferences are local and persisted by `useSessionDisplayStore`.
+- Preserving folder-name casing affects labels generated for newly added projects; existing and manually edited labels remain unchanged.
+- Automatic project closure runs only after a confirmed archive/delete and only when the global active-session snapshot is complete. Archived sessions do not keep a project open.

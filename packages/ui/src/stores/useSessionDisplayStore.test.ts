@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { beforeEach } from 'bun:test';
 import { migrateSessionDisplayState, useSessionDisplayStore } from './useSessionDisplayStore';
 
 describe('useSessionDisplayStore project sorting', () => {
@@ -32,7 +33,6 @@ describe('useSessionDisplayStore project sorting', () => {
     expect(migrated.showArchivedSessions).toBe(true);
   });
 });
-
 describe('useSessionDisplayStore project display', () => {
   test('defaults to showing all projects without a selected single project', () => {
     expect(useSessionDisplayStore.getState().projectDisplayMode).toBe('all');
@@ -53,5 +53,29 @@ describe('useSessionDisplayStore project display', () => {
       singleProjectId: null,
       sessionGroupingMode: 'by-worktree',
     });
+  });
+});
+
+describe('useSessionDisplayStore project preferences', () => {
+  beforeEach(() => {
+    useSessionDisplayStore.setState({
+      preserveProjectNameCasing: true,
+      autoCloseEmptyProjects: false,
+    });
+  });
+
+  test('preserves project name casing by default while leaving auto-close disabled', () => {
+    const state = useSessionDisplayStore.getState();
+    expect(state.preserveProjectNameCasing).toBe(true);
+    expect(state.autoCloseEmptyProjects).toBe(false);
+  });
+
+  test('toggles project preferences independently', () => {
+    useSessionDisplayStore.getState().togglePreserveProjectNameCasing();
+    expect(useSessionDisplayStore.getState().preserveProjectNameCasing).toBe(false);
+    expect(useSessionDisplayStore.getState().autoCloseEmptyProjects).toBe(false);
+
+    useSessionDisplayStore.getState().toggleAutoCloseEmptyProjects();
+    expect(useSessionDisplayStore.getState().autoCloseEmptyProjects).toBe(true);
   });
 });

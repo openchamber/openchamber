@@ -43,6 +43,7 @@ mock.module("../session-ui-store", () => ({
 
 mock.module("../sync-refs", () => ({
   getSyncSessionDirectory: () => null,
+  getAllSyncSessions: () => [],
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registerSessionDirectoryCalls.push({ sessionID, directory })
   },
@@ -59,6 +60,7 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
   mergeSessionDirectoryMetadata: (incoming: Session) => incoming,
   mergeLiveSessionWithGlobalSession: (incoming: Session) => incoming,
   resolveGlobalSessionDirectory: () => null,
+  refreshGlobalSessionsAfterPending: async () => ({ activeSessions: [], archivedSessions: [] }),
 }))
 
 mock.module("@/stores/useConfigStore", () => ({

@@ -57,10 +57,10 @@ import { setActiveSession } from "./sync-context"
 import {
   createSession as createSessionAction,
   deleteSession as deleteSessionAction,
-  deleteSessions as deleteSessionsAction,
   archiveSession as archiveSessionAction,
-  archiveSessions as archiveSessionsAction,
   unarchiveSession as unarchiveSessionAction,
+  deleteSessions as deleteSessionsAction,
+  archiveSessions as archiveSessionsAction,
   unarchiveSessions as unarchiveSessionsAction,
   updateSessionTitle as updateSessionTitleAction,
   shareSession as shareSessionAction,
@@ -1739,11 +1739,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   deleteSession: async (id, options) => deleteSessionAction(id, options),
 
-  deleteSessions: async (ids, options) => {
-    const result = await deleteSessionsAction(ids, options)
-
-    return result
-  },
+  deleteSessions: (ids, options) => deleteSessionsAction(ids, options),
 
   archiveSession: (id) => archiveSessionAction(id),
 

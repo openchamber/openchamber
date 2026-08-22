@@ -20,6 +20,10 @@ const globalUpsertedSessions: unknown[] = []
 const globalRemovedSessionIds: string[] = []
 const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
+let autoCloseEmptyProjects = false
+let autoCloseProjects: Array<{ id: string; path: string }> = []
+let globalSessionRefreshCalls = 0
+let beforeGlobalSessionRefresh: (() => void) | null = null
 
 const mockScopedClient = {
   permission: {
@@ -174,6 +178,23 @@ mock.module("@/stores/useConfigStore", () => ({
   },
 }))
 
+mock.module("@/stores/useProjectsStore", () => ({
+  useProjectsStore: {
+    getState: () => ({
+      projects: autoCloseProjects,
+      removeProject: (id: string) => {
+        autoCloseProjects = autoCloseProjects.filter((project) => project.id !== id)
+      },
+    }),
+  },
+}))
+
+mock.module("@/stores/useSessionDisplayStore", () => ({
+  useSessionDisplayStore: {
+    getState: () => ({ autoCloseEmptyProjects }),
+  },
+}))
+
 // Mock useSessionUIStore
 mock.module("./session-ui-store", () => ({
   useSessionUIStore: {
@@ -183,6 +204,7 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-b") return "/other/project"
         return null
       },
+      availableWorktreesByProject: new Map(),
       currentSessionId: null,
       setCurrentSession: () => {},
       setWorktreeMetadata: () => {},
@@ -215,6 +237,11 @@ mock.module("./input-store", () => ({
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
   resolveGlobalSessionDirectory: (session: SessionWithDirectory) => session.directory ?? session.project?.worktree ?? null,
+  refreshGlobalSessionsAfterPending: async () => {
+    globalSessionRefreshCalls += 1
+    beforeGlobalSessionRefresh?.()
+    return { activeSessions: [], archivedSessions: [] }
+  },
   mergeSessionDirectoryMetadata: (incoming: Session, existing?: SessionWithDirectory | null): SessionWithDirectory => {
     if (!existing) return incoming as SessionWithDirectory
     const next = { ...(incoming as SessionWithDirectory) }
@@ -229,6 +256,8 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
     getState: () => ({
       activeSessions: [],
       archivedSessions: [],
+      hasLoaded: true,
+      status: "ready",
       upsertSession: (session: unknown) => {
         globalUpsertedSessions.push(session)
       },
@@ -247,6 +276,7 @@ mock.module("./session-deletion-cleanup", () => ({
 
 mock.module("./sync-refs", () => ({
   getSyncSessionDirectory: () => null,
+  getAllSyncSessions: () => [],
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registeredSessionDirectories.push({ sessionID, directory })
   },
@@ -617,6 +647,42 @@ describe("confirmed session removal", () => {
 
     expect(result).toEqual({ archivedIds: ["session-a", "session-b"], failedIds: [] })
     expect(source.getState().session).toEqual([])
+  })
+})
+
+describe("empty-project auto-close", () => {
+  beforeEach(() => {
+    autoCloseEmptyProjects = true
+    autoCloseProjects = [{ id: "project-a", path: "/test/project" }]
+    globalSessionRefreshCalls = 0
+    beforeGlobalSessionRefresh = null
+  })
+
+  test("coalesces concurrent evaluations for the same directory", async () => {
+    const { closeProjectsWithoutActiveSessionsForDirectories } = await import("./session-actions")
+
+    const first = closeProjectsWithoutActiveSessionsForDirectories(["/test/project"])
+    const second = closeProjectsWithoutActiveSessionsForDirectories(["/test/project"])
+
+    await Promise.all([first, second])
+
+    expect(globalSessionRefreshCalls).toBe(1)
+    autoCloseEmptyProjects = false
+  })
+
+  test("does not remove a project after the runtime changes during refresh", async () => {
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://auto-close-a.test", runtimeKey: "auto-close-a" })
+    beforeGlobalSessionRefresh = () => {
+      switchRuntimeEndpoint({ apiBaseUrl: "http://auto-close-b.test", runtimeKey: "auto-close-b" })
+    }
+    const { closeProjectsWithoutActiveSessionsForDirectories } = await import("./session-actions")
+
+    await closeProjectsWithoutActiveSessionsForDirectories(["/test/project"])
+
+    expect(autoCloseProjects).toEqual([{ id: "project-a", path: "/test/project" }])
+    autoCloseEmptyProjects = false
+    beforeGlobalSessionRefresh = null
   })
 })
 
