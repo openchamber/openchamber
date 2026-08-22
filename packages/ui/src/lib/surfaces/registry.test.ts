@@ -59,6 +59,18 @@ describe('getVisibleContextRailSurfaces', () => {
     expect(getVisibleContextRailSurfaces(baseOptions).some((s) => s.id === 'browser')).toBe(true);
   });
 
+  test('hides the pr surface for other git providers but keeps it for github/gitlab/gitea', () => {
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, gitProvider: 'other' }).some((s) => s.id === 'pr')).toBe(false);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, gitProvider: 'gitlab' }).some((s) => s.id === 'pr')).toBe(true);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, gitProvider: 'github' }).some((s) => s.id === 'pr')).toBe(true);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, gitProvider: 'gitea' }).some((s) => s.id === 'pr')).toBe(true);
+  });
+
+  test('keeps the pr surface while the git provider is unknown', () => {
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, gitProvider: null }).some((s) => s.id === 'pr')).toBe(true);
+    expect(getVisibleContextRailSurfaces(baseOptions).some((s) => s.id === 'pr')).toBe(true);
+  });
+
   test('respects the persisted user rail order', () => {
     const surfaces = getVisibleContextRailSurfaces({ ...baseOptions, railOrder: ['git', 'context'] });
     expect(surfaces.slice(0, 2).map((surface) => surface.id)).toEqual(['git', 'context']);

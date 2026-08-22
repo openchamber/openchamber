@@ -1,0 +1,337 @@
+import React from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { toast } from '@/components/ui';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { useGiteaAuthStore } from '@/stores/useGiteaAuthStore';
+import type { GiteaAuthStatus } from '@/lib/api/types';
+import { useDeviceInfo } from '@/lib/device';
+import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { Icon } from '@/components/icon/Icon';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { ProviderApiBaseUrlInput } from '@/components/sections/shared/ProviderApiBaseUrlInput';
+import { ProviderDetectUrlsInput } from '@/components/sections/shared/ProviderDetectUrlsInput';
+import { useGitProviderDomainsStore } from '@/stores/useGitProviderDomainsStore';
+
+const getBaseUrlHost = (baseUrl?: string | null): string => {
+  if (!baseUrl) return '';
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl;
+  }
+};
+
+export const GiteaSettings: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
+  const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
+  const runtimeGitea = getRegisteredRuntimeAPIs()?.gitea;
+  const status = useGiteaAuthStore((state) => state.status);
+  const isLoading = useGiteaAuthStore((state) => state.isLoading);
+  const hasChecked = useGiteaAuthStore((state) => state.hasChecked);
+  const refreshStatus = useGiteaAuthStore((state) => state.refreshStatus);
+  const setStatus = useGiteaAuthStore((state) => state.setStatus);
+
+  const [isBusy, setIsBusy] = React.useState(false);
+  const [accessToken, setAccessToken] = React.useState('');
+  // Prefill the connect form with the server-side default API base URL when the
+  // user has not typed one yet; the per-account base URL still wins on connect.
+  const [baseUrl, setBaseUrl] = React.useState(
+    useGitProviderDomainsStore((state) => state.apiBaseUrls.gitea),
+  );
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        if (!hasChecked) {
+          await refreshStatus(runtimeGitea);
+        }
+      } catch (error) {
+        console.warn('Failed to load Gitea auth status:', error);
+      }
+    })();
+  }, [hasChecked, refreshStatus, runtimeGitea]);
+
+  const connect = React.useCallback(async () => {
+    const trimmedToken = accessToken.trim();
+    const trimmedBaseUrl = baseUrl.trim();
+    if (!trimmedToken) {
+      toast.error(t('settings.gitea.page.errors.invalidToken'));
+      return;
+    }
+    // Base URL is required for Gitea/Forgejo — there is no default instance.
+    if (!trimmedBaseUrl) {
+      toast.error(t('settings.gitea.page.errors.failed'));
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const payload = runtimeGitea
+        ? await runtimeGitea.authConnect({ accessToken: trimmedToken, baseUrl: trimmedBaseUrl })
+        : await (async () => {
+            const response = await runtimeFetch('/api/gitea/auth/connect', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({ accessToken: trimmedToken, baseUrl: trimmedBaseUrl }),
+            });
+            const body = (await response.json().catch(() => null)) as GiteaAuthStatus | { error?: string } | null;
+            if (!response.ok || !body) {
+              throw new Error((body as { error?: string } | null)?.error || response.statusText);
+            }
+            return body as GiteaAuthStatus;
+          })();
+
+      setStatus(payload);
+      setAccessToken('');
+      setBaseUrl('');
+      toast.success(t('settings.gitea.page.toast.connected'));
+    } catch (error) {
+      console.error('Failed to connect Gitea:', error);
+      toast.error(t('settings.gitea.page.errors.failed'));
+    } finally {
+      setIsBusy(false);
+    }
+  }, [accessToken, baseUrl, runtimeGitea, setStatus, t]);
+
+  const disconnect = React.useCallback(async () => {
+    setIsBusy(true);
+    try {
+      if (runtimeGitea) {
+        await runtimeGitea.authDisconnect();
+      } else {
+        const response = await runtimeFetch('/api/gitea/auth', {
+          method: 'DELETE',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) {
+          throw new Error(response.statusText);
+        }
+      }
+      toast.success(t('settings.gitea.page.toast.disconnected'));
+      await refreshStatus(runtimeGitea, { force: true });
+    } catch (error) {
+      console.error('Failed to disconnect Gitea:', error);
+      toast.error(t('settings.gitea.page.toast.disconnectFailed'));
+    } finally {
+      setIsBusy(false);
+    }
+  }, [refreshStatus, runtimeGitea, t]);
+
+  const activateAccount = React.useCallback(async (accountId: string) => {
+    if (!accountId) return;
+    setIsBusy(true);
+    try {
+      const payload = runtimeGitea
+        ? await runtimeGitea.authActivate(accountId)
+        : await (async () => {
+            const response = await runtimeFetch('/api/gitea/auth/activate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({ accountId }),
+            });
+            const body = (await response.json().catch(() => null)) as GiteaAuthStatus | { error?: string } | null;
+            if (!response.ok || !body) {
+              throw new Error((body as { error?: string } | null)?.error || response.statusText);
+            }
+            return body as GiteaAuthStatus;
+          })();
+
+      setStatus(payload);
+      toast.success(t('settings.gitea.page.toast.accountSwitched'));
+    } catch (error) {
+      console.error('Failed to switch Gitea account:', error);
+      toast.error(t('settings.gitea.page.toast.accountSwitchFailed'));
+    } finally {
+      setIsBusy(false);
+    }
+  }, [runtimeGitea, setStatus, t]);
+
+  if (isLoading) {
+    return null;
+  }
+
+  const connected = Boolean(status?.connected);
+  const user = status?.user;
+  const accounts = status?.accounts ?? [];
+  const otherAccounts = accounts.filter((account) => !account.current);
+  const currentAccount = accounts.find((account) => account.current) ?? (accounts.length > 0 ? accounts[0] : null);
+  const currentBaseUrlHost = getBaseUrlHost(currentAccount?.baseUrl);
+
+  const sectionContent = (
+    <>
+      <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
+        {connected ? (
+          <div className={cn('px-4 py-3', isMobile ? 'flex flex-col gap-3' : 'flex items-center justify-between gap-4')}>
+            <div className={cn('flex min-w-0 items-center gap-4', isMobile ? 'w-full' : undefined)}>
+              {user?.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt={user.username ? t('settings.gitea.page.avatarAlt.withLogin', { login: user.username }) : t('settings.gitea.page.avatarAlt.fallback')}
+                  className="h-10 w-10 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)] object-cover"
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
+                  <Icon name="server" className="h-4 w-4 text-muted-foreground" />
+                </div>
+              )}
+
+              <div className="min-w-0 flex-1">
+                <div className="typography-ui-label text-foreground">
+                  {user?.name?.trim() || user?.username || 'Gitea'}
+                </div>
+                <div className={cn('flex items-center gap-2 typography-meta text-muted-foreground mt-0.5', isMobile ? 'flex-wrap' : 'truncate')}>
+                  <Icon name="server" className="h-3.5 w-3.5 shrink-0" />
+                  <span>{t('settings.gitea.page.connectedAs')}</span>
+                  <span className="font-mono">{user?.username || t('settings.gitea.page.label.unknownUser')}</span>
+                  <span className="opacity-50">•</span>
+                  <span className="font-mono">{currentBaseUrlHost}</span>
+                </div>
+              </div>
+            </div>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={disconnect}
+              disabled={isBusy}
+              className={cn('text-[var(--status-error)] hover:text-[var(--status-error)]', isMobile ? 'w-full' : undefined)}
+            >
+              {t('settings.gitea.page.actions.disconnect')}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4 px-4 py-4">
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor="gitea-access-token" className="typography-settings-field-label text-foreground">
+                {t('settings.gitea.page.accessToken.label')}
+              </label>
+              <Input
+                id="gitea-access-token"
+                type="password"
+                value={accessToken}
+                onChange={(event) => setAccessToken(event.target.value)}
+                placeholder={t('settings.gitea.page.accessToken.placeholder')}
+                className="h-9 max-w-[24rem]"
+              />
+            </div>
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor="gitea-base-url" className="typography-settings-field-label text-foreground">
+                {t('settings.gitea.page.baseUrl.label')}
+              </label>
+              <Input
+                id="gitea-base-url"
+                type="text"
+                value={baseUrl}
+                onChange={(event) => setBaseUrl(event.target.value)}
+                placeholder={t('settings.gitea.page.baseUrl.placeholder')}
+                className="h-9 max-w-[24rem]"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="typography-ui-label text-foreground">{t('settings.gitea.page.status.notConnected')}</span>
+              <Button
+                size="sm"
+                variant="default"
+                onClick={connect}
+                disabled={isBusy || !accessToken.trim() || !baseUrl.trim()}
+              >
+                {t('settings.gitea.page.actions.connect')}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {otherAccounts.length > 0 && (
+          <div className="mt-2 border-t border-[var(--surface-subtle)] pt-2 px-2 pb-1">
+            <div className="typography-micro text-muted-foreground mb-2 px-1">
+              {t('settings.gitea.page.label.otherAccounts')}
+            </div>
+            <div className="space-y-1">
+              {otherAccounts.map((account) => {
+                const accountUser = account.user;
+                return (
+                  <div
+                    key={account.id}
+                    className="flex items-center justify-between gap-3 rounded-md border border-[var(--surface-subtle)] bg-[var(--surface-muted)] px-3 py-2"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      {accountUser?.avatarUrl ? (
+                        <img
+                          src={accountUser.avatarUrl}
+                          alt={accountUser.username ? t('settings.gitea.page.avatarAlt.withLogin', { login: accountUser.username }) : t('settings.gitea.page.avatarAlt.fallback')}
+                          className="h-6 w-6 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)] object-cover"
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
+                          <Icon name="server" className="h-3 w-3 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex flex-col">
+                        <span className="typography-ui-label text-foreground truncate">
+                          {accountUser?.name?.trim() || accountUser?.username || 'Gitea'}
+                        </span>
+                        {accountUser?.username && (
+                          <span className="typography-micro text-muted-foreground truncate">
+                            <span className="font-mono">{accountUser.username}</span>
+                            <span className="mx-1 opacity-50">·</span>
+                            <span className="font-mono">{getBaseUrlHost(account.baseUrl)}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => activateAccount(account.id)}
+                      disabled={isBusy}
+                    >
+                      {t('settings.gitea.page.actions.switch')}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className={cn('flex flex-col gap-4', embedded ? 'border-t border-[var(--surface-subtle)] pt-4' : 'pt-4')}>
+        {connected ? (
+          <>
+            <ProviderApiBaseUrlInput provider="gitea" />
+            <ProviderDetectUrlsInput provider="gitea" />
+          </>
+        ) : (
+          <p className="typography-meta text-muted-foreground">
+            {t('settings.gitProviders.overridesLocked.description', { provider: t('settings.git.tabs.gitea') })}
+          </p>
+        )}
+      </div>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div data-settings-item="git.gitea-account" className="p-4">
+        {sectionContent}
+      </div>
+    );
+  }
+
+  return (
+    <SettingsSection
+      title={t('settings.gitea.page.title')}
+      description={t('settings.gitea.page.description')}
+      info={t('settings.gitea.page.tooltip.connectAccount')}
+      settingsItem="git.gitea-account"
+    >
+      {sectionContent}
+    </SettingsSection>
+  );
+};

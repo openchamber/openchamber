@@ -237,6 +237,42 @@ const stripDerived = (source: Record<string, unknown>): Record<string, unknown> 
   return next;
 };
 
+const GIT_PROVIDER_KEYS = ['github', 'gitlab', 'gitea'];
+
+// Light shape check for the `gitProviders` settings section coming from the
+// webview: reject non-objects outright, coerce detectUrls to a string array and
+// apiBaseUrl to a trimmed string, and drop empty provider entries. Keeps a
+// malformed payload from landing on disk (the shared settings file).
+const sanitizeGitProviders = (input: unknown): Record<string, unknown> | undefined => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return undefined;
+  }
+  const source = input as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const key of GIT_PROVIDER_KEYS) {
+    const entry = source[key];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const apiBaseUrl = typeof record.apiBaseUrl === 'string' ? record.apiBaseUrl.trim() : '';
+    const detectUrls = Array.isArray(record.detectUrls)
+      ? record.detectUrls.filter((value): value is string => typeof value === 'string')
+      : [];
+    const provider: Record<string, unknown> = {};
+    if (apiBaseUrl) {
+      provider.apiBaseUrl = apiBaseUrl;
+    }
+    if (detectUrls.length > 0) {
+      provider.detectUrls = detectUrls;
+    }
+    if (Object.keys(provider).length > 0) {
+      result[key] = provider;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+};
+
 let eagerMigrationAttempted = false;
 
 // Read the merged persisted settings: shared file is canonical (synced with
@@ -326,6 +362,15 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     const budget = restChanges.sessionGoalDefaultBudget;
     if (typeof budget !== 'number' || !Number.isFinite(budget) || budget <= 0) {
       delete restChanges.sessionGoalDefaultBudget;
+    }
+  }
+
+  if ('gitProviders' in restChanges) {
+    const gitProviders = sanitizeGitProviders(restChanges.gitProviders);
+    if (gitProviders) {
+      restChanges.gitProviders = gitProviders;
+    } else {
+      delete restChanges.gitProviders;
     }
   }
 

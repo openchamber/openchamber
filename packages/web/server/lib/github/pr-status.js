@@ -2,6 +2,9 @@ import { stat } from 'node:fs/promises';
 import { getRemotes, getStatus } from '../git/index.js';
 import { resolveGitHubRepoFromDirectory } from './repo/index.js';
 import { noteIfGitHubRateLimit } from './rate-limit.js';
+import { getProviderApiBaseUrl, githubWebOriginFromApiBase } from '../git-providers/config.js';
+
+const getGitHubWebOrigin = () => githubWebOriginFromApiBase(getProviderApiBaseUrl('github'));
 
 const directoryExists = async (dir) => {
   if (!dir) return false;
@@ -295,7 +298,7 @@ const expandRepoNetwork = async (octokit, candidates) => {
       pushCandidate({
         owner: parent.owner.login,
         repo: parent.name,
-        url: parent.html_url || `https://github.com/${parent.owner.login}/${parent.name}`,
+        url: parent.html_url || `${getGitHubWebOrigin()}/${parent.owner.login}/${parent.name}`,
       }, candidate.remoteName, candidate.priority + 0.1);
     }
 
@@ -304,7 +307,7 @@ const expandRepoNetwork = async (octokit, candidates) => {
       pushCandidate({
         owner: source.owner.login,
         repo: source.name,
-        url: source.html_url || `https://github.com/${source.owner.login}/${source.name}`,
+        url: source.html_url || `${getGitHubWebOrigin()}/${source.owner.login}/${source.name}`,
       }, candidate.remoteName, candidate.priority + 0.2);
     }
   }

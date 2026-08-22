@@ -5,6 +5,8 @@ import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { Button } from '@/components/ui/button';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { PullRequestView } from '@/components/views/PullRequestView';
+import { GitLabMrView } from '@/components/views/GitLabMrView';
+import { GiteaPrView } from '@/components/views/GiteaPrView';
 import { TerminalView } from '@/components/views/TerminalView';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
@@ -23,6 +25,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
+import { useGitProvider, type GitProvider } from '@/lib/gitProvider';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
@@ -108,7 +111,8 @@ const getRelativePathLabel = (filePath: string | null, directory: string): strin
 
 const getModeLabel = (
   mode: ContextPanelMode,
-  t: TranslateFn
+  t: TranslateFn,
+  gitProvider: GitProvider | null,
 ): string => {
   if (mode === 'chat') return t('contextPanel.mode.chat');
   if (mode === 'file') return t('contextPanel.mode.files');
@@ -117,7 +121,7 @@ const getModeLabel = (
   if (mode === 'plan') return t('contextPanel.mode.plan');
   if (mode === 'browser') return t('contextPanel.mode.browser');
   if (mode === 'git') return t('layout.rightSidebar.git');
-  if (mode === 'pr') return t('contextPanel.mode.pr');
+  if (mode === 'pr') return gitProvider === 'gitlab' ? t('contextPanel.mode.mr') : t('contextPanel.mode.pr');
   if (mode === 'notes') return t('contextRail.surface.notes');
   if (mode === 'terminal') return t('layout.mainTab.terminal');
   return t('contextPanel.mode.context');
@@ -144,7 +148,8 @@ const getFileNameFromPath = (path: string | null): string | null => {
 const getTabLabel = (
   tab: { mode: ContextPanelMode; label: string | null; targetPath: string | null; dedupeKey?: string; sessionTitleFallback?: string | null; stagedDiff?: boolean },
   sessionTitleById: ReadonlyMap<string, string>,
-  t: TranslateFn
+  t: TranslateFn,
+  gitProvider: GitProvider | null,
 ): string => {
   if (tab.mode === 'chat') {
     const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
@@ -183,12 +188,13 @@ const getTabLabel = (
     return t('contextPanel.mode.diff');
   }
 
-  return getModeLabel(tab.mode, t);
+  return getModeLabel(tab.mode, t, gitProvider);
 };
 
 const getTabIcon = (
   tab: { mode: ContextPanelMode; targetPath: string | null },
   faviconByOrigin: Record<string, string> = {},
+  gitProvider: GitProvider | null,
 ): React.ReactNode | undefined => {
   if (tab.mode === 'file') {
     return tab.targetPath
@@ -209,7 +215,7 @@ const getTabIcon = (
   }
 
   if (tab.mode === 'pr') {
-    return <Icon name="github" className="h-3.5 w-3.5" />;
+    return <Icon name={gitProvider === 'gitlab' ? 'gitlab' : gitProvider === 'gitea' ? 'gitea' : 'github'} className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'notes') {
@@ -440,6 +446,7 @@ export const ContextPanel: React.FC = () => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
+  const gitProvider = useGitProvider(effectiveDirectory);
 
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
@@ -919,24 +926,24 @@ export const ContextPanel: React.FC = () => {
   );
 
   const tabItems = React.useMemo(() => activeModeTabs.map((tab) => {
-    const rawLabel = getTabLabel(tab, sessionTitleById, t);
+    const rawLabel = getTabLabel(tab, sessionTitleById, t, gitProvider);
     const label = truncateTabLabel(rawLabel, CONTEXT_TAB_LABEL_MAX_CHARS);
     const tabPathLabel = getRelativePathLabel(tab.targetPath, effectiveDirectory);
     return {
       id: tab.id,
       label,
-      icon: getTabIcon(tab, faviconByOrigin),
+      icon: getTabIcon(tab, faviconByOrigin, gitProvider),
       title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
       closeLabel: t('contextPanel.tab.closeTabAria', { label }),
     };
-  }), [activeModeTabs, effectiveDirectory, faviconByOrigin, sessionTitleById, t]);
+  }), [activeModeTabs, effectiveDirectory, faviconByOrigin, gitProvider, sessionTitleById, t]);
 
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent />
         : activeTab?.mode === 'git'
             ? <React.Suspense fallback={null}><GitView isActive={isOpen} /></React.Suspense>
             : activeTab?.mode === 'pr'
-                ? <PullRequestView />
+                ? (gitProvider === 'github' ? <PullRequestView /> : gitProvider === 'gitlab' ? <GitLabMrView /> : gitProvider === 'gitea' ? <GiteaPrView /> : null)
             : activeTab?.mode === 'notes'
                 ? <ProjectContextPanel />
         : activeTab?.mode === 'plan'
@@ -1001,9 +1008,9 @@ export const ContextPanel: React.FC = () => {
         />
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">
-          {activeTab ? getTabIcon(activeTab, faviconByOrigin) : null}
+          {activeTab ? getTabIcon(activeTab, faviconByOrigin, gitProvider) : null}
           <span className="truncate typography-ui-label text-foreground">
-            {activeTab ? getModeLabel(activeTab.mode, t) : null}
+            {activeTab ? getModeLabel(activeTab.mode, t, gitProvider) : null}
           </span>
         </div>
       )}

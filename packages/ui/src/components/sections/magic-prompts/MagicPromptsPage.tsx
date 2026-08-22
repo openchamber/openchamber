@@ -85,6 +85,22 @@ const PROMPT_PAGE_MAP: Record<string, PromptPageConfig> = {
       { id: 'github.pr.comment.single.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
     ],
   },
+  'gitlab.pr.review': {
+    titleKey: 'settings.magicPrompts.page.group.gitlabPrReview.title',
+    descriptionKey: 'settings.magicPrompts.page.group.gitlabPrReview.description',
+    blocks: [
+      { id: 'gitlab.pr.review.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
+      { id: 'gitlab.pr.review.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
+  'gitlab.issue.review': {
+    titleKey: 'settings.magicPrompts.page.group.gitlabIssueReview.title',
+    descriptionKey: 'settings.magicPrompts.page.group.gitlabIssueReview.description',
+    blocks: [
+      { id: 'gitlab.issue.review.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
+      { id: 'gitlab.issue.review.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
   'git.conflict.resolve': {
     titleKey: 'settings.magicPrompts.page.group.gitConflictResolve.title',
     descriptionKey: 'settings.magicPrompts.page.group.gitConflictResolve.description',

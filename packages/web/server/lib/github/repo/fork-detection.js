@@ -1,4 +1,7 @@
 import { resolveGitHubRepoFromDirectory } from './index.js';
+import { getProviderApiBaseUrl, githubWebOriginFromApiBase } from '../../git-providers/config.js';
+
+const getGitHubWebOrigin = () => githubWebOriginFromApiBase(getProviderApiBaseUrl('github'));
 
 const REPO_METADATA_TTL_MS = 5 * 60_000;
 const REPO_METADATA_CACHE_MAX_ENTRIES = 200;
@@ -75,7 +78,7 @@ export async function resolveRepoNetwork(octokit, directory, remoteName = 'origi
       result.push({
         owner: parent.owner.login,
         repo: parent.name,
-        url: parent.html_url || `https://github.com/${parent.owner.login}/${parent.name}`,
+        url: parent.html_url || `${getGitHubWebOrigin()}/${parent.owner.login}/${parent.name}`,
         source: 'upstream',
       });
     }
@@ -89,7 +92,7 @@ export async function resolveRepoNetwork(octokit, directory, remoteName = 'origi
       result.push({
         owner: source.owner.login,
         repo: source.name,
-        url: source.html_url || `https://github.com/${source.owner.login}/${source.name}`,
+        url: source.html_url || `${getGitHubWebOrigin()}/${source.owner.login}/${source.name}`,
         source: 'upstream',
       });
     }

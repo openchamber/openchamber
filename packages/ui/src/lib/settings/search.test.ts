@@ -14,6 +14,7 @@ const runtimeCtx = {
   isWindows: false,
   isLinux: false,
   isWindowsArm64: false,
+  gitProvidersConnected: { github: false, gitlab: false, gitea: false },
 };
 
 describe('settings search', () => {

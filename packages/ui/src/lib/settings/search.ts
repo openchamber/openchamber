@@ -29,6 +29,8 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isLinux: boolean;
   // Windows ARM64 — temporary workaround gate (see opencode#19130).
   isWindowsArm64: boolean;
+  // Git provider override fields only render once an account is connected.
+  gitProvidersConnected: { github: boolean; gitlab: boolean; gitea: boolean };
 }
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -507,6 +509,60 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['github', 'account', 'oauth', 'prs', 'issues'],
   },
   {
+    id: 'git.gitlab-account',
+    page: 'git',
+    titleKey: 'settings.gitlab.page.actions.connect',
+    keywords: ['gitlab', 'account', 'pat', 'personal access token', 'issues', 'merge requests'],
+  },
+  {
+    id: 'git.github-api-base-url',
+    page: 'git',
+    titleKey: 'settings.github.page.apiBaseUrl.label',
+    descriptionKey: 'settings.github.page.apiBaseUrl.description',
+    keywords: ['github', 'api', 'base url', 'enterprise', 'self-hosted', 'server'],
+    isAvailable: (ctx) => ctx.gitProvidersConnected.github,
+  },
+  {
+    id: 'git.github-detect-urls',
+    page: 'git',
+    titleKey: 'settings.github.page.detectUrls.label',
+    descriptionKey: 'settings.github.page.detectUrls.description',
+    keywords: ['github', 'detect', 'remote', 'host', 'domain', 'ssh', 'url', 'self-hosted'],
+    isAvailable: (ctx) => ctx.gitProvidersConnected.github,
+  },
+  {
+    id: 'git.gitlab-api-base-url',
+    page: 'git',
+    titleKey: 'settings.gitlab.page.apiBaseUrl.label',
+    descriptionKey: 'settings.gitlab.page.apiBaseUrl.description',
+    keywords: ['gitlab', 'api', 'base url', 'self-hosted', 'server', 'instance'],
+    isAvailable: (ctx) => ctx.gitProvidersConnected.gitlab,
+  },
+  {
+    id: 'git.gitlab-detect-urls',
+    page: 'git',
+    titleKey: 'settings.gitlab.page.detectUrls.label',
+    descriptionKey: 'settings.gitlab.page.detectUrls.description',
+    keywords: ['gitlab', 'detect', 'remote', 'host', 'domain', 'ssh', 'url', 'self-hosted'],
+    isAvailable: (ctx) => ctx.gitProvidersConnected.gitlab,
+  },
+  {
+    id: 'git.gitea-api-base-url',
+    page: 'git',
+    titleKey: 'settings.gitea.page.apiBaseUrl.label',
+    descriptionKey: 'settings.gitea.page.apiBaseUrl.description',
+    keywords: ['gitea', 'forgejo', 'api', 'base url', 'self-hosted', 'server', 'instance'],
+    isAvailable: (ctx) => ctx.gitProvidersConnected.gitea,
+  },
+  {
+    id: 'git.gitea-detect-urls',
+    page: 'git',
+    titleKey: 'settings.gitea.page.detectUrls.label',
+    descriptionKey: 'settings.gitea.page.detectUrls.description',
+    keywords: ['gitea', 'forgejo', 'detect', 'remote', 'host', 'domain', 'ssh', 'url', 'self-hosted'],
+    isAvailable: (ctx) => ctx.gitProvidersConnected.gitea,
+  },
+  {
     id: 'git.identities',
     page: 'git',
     titleKey: 'settings.gitIdentities.page.section.title',
@@ -573,6 +629,20 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.openchamber.worktrees.setup.waitForCommands',
     keywords: ['worktree', 'setup commands', 'bootstrap', 'wait'],
+  },
+  {
+    id: 'projects.git-providers',
+    page: 'projects',
+    titleKey: 'settings.projects.page.gitProviders.title',
+    descriptionKey: 'settings.projects.page.gitProviders.description',
+    keywords: ['github', 'gitlab', 'gitea', 'api base url', 'self-hosted', 'override', 'enterprise', 'server', 'provider', 'forge'],
+  },
+  {
+    id: 'projects.git-providers.provider',
+    page: 'projects',
+    titleKey: 'settings.projects.page.gitProviders.provider.label',
+    descriptionKey: 'settings.projects.page.gitProviders.provider.description',
+    keywords: ['github', 'gitlab', 'gitea', 'provider', 'forge', 'auto-detect', 'detection'],
   },
   {
     id: 'remote-instances.client-auth',

@@ -18,6 +18,7 @@ import {
   normalizeCombo,
 } from '@/lib/shortcuts';
 import { getVisibleContextRailSurfaces } from '@/lib/surfaces/registry';
+import { useGitProvider } from '@/lib/gitProvider';
 import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstrap';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -39,6 +40,9 @@ export const useKeyboardShortcuts = () => {
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const currentShortcutDirectory = useDirectoryStore((s) => s.currentDirectory);
   const effectiveDirectory = useEffectiveDirectory();
+  // Mirrors the rail's provider-aware 'pr' surface: the digit-shortcut list
+  // must agree with the rail on whether the PR/MR surface is visible.
+  const gitProvider = useGitProvider(effectiveDirectory);
 
   // The terminal lives in the context panel; these mirror the rail behavior.
   const toggleTerminalSurface = React.useCallback(() => {
@@ -507,6 +511,7 @@ export const useKeyboardShortcuts = () => {
           isVSCode: isVSCodeRuntime(),
           screenWidth: window.innerWidth,
           tabs: panelState?.tabs ?? [],
+          gitProvider,
         });
         const target = visibleSurfaces[switchSurfaceDigit - 1];
         if (!target) {
@@ -709,6 +714,7 @@ export const useKeyboardShortcuts = () => {
     currentSessionId,
     currentDirectory,
     effectiveDirectory,
+    gitProvider,
     activeProject?.id,
     activeProject?.path,
     shortcutOverrides,

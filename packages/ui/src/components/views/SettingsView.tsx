@@ -9,6 +9,9 @@ import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useGitLabAuthStore } from '@/stores/useGitLabAuthStore';
+import { useGiteaAuthStore } from '@/stores/useGiteaAuthStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
@@ -236,6 +239,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp, isMobile), [isDesktopApp, isMobile]);
 
+  const githubConnected = useGitHubAuthStore((state) => state.status?.connected ?? false);
+  const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
+  const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
+  const gitlabConnected = useGitLabAuthStore((state) => state.status?.connected ?? false);
+  const gitlabAuthChecked = useGitLabAuthStore((state) => state.hasChecked);
+  const refreshGitLabAuthStatus = useGitLabAuthStore((state) => state.refreshStatus);
+  const giteaConnected = useGiteaAuthStore((state) => state.status?.connected ?? false);
+  const giteaAuthChecked = useGiteaAuthStore((state) => state.hasChecked);
+  const refreshGiteaAuthStatus = useGiteaAuthStore((state) => state.refreshStatus);
+
+  // Populate git provider connection state on mount so search availability for
+  // the provider override fields matches what the settings page will render.
+  // refreshStatus dedupes when already checked and falls back to runtimeFetch.
+  React.useEffect(() => {
+    if (!githubAuthChecked) {
+      void refreshGitHubAuthStatus();
+    }
+    if (!gitlabAuthChecked) {
+      void refreshGitLabAuthStatus();
+    }
+    if (!giteaAuthChecked) {
+      void refreshGiteaAuthStatus();
+    }
+  }, [githubAuthChecked, refreshGitHubAuthStatus, gitlabAuthChecked, refreshGitLabAuthStatus, giteaAuthChecked, refreshGiteaAuthStatus]);
+
   const visiblePages = React.useMemo(() => {
     const allowedPages = visiblePageSlugs ? new Set<SettingsPageSlug>(visiblePageSlugs) : null;
     return SETTINGS_PAGE_METADATA
@@ -394,12 +422,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const settingsSearchResults = React.useMemo(() => {
     return buildSettingsSearchResults({
       query: settingsSearchQuery,
-      runtimeCtx: { ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, isLinux, isWindowsArm64 },
+      runtimeCtx: {
+        ...runtimeCtx,
+        isDesktopLocalOrigin,
+        isMac,
+        isWindows,
+        isLinux,
+        isWindowsArm64,
+        gitProvidersConnected: { github: githubConnected, gitlab: gitlabConnected, gitea: giteaConnected },
+      },
       visiblePageSlugs,
       t,
       getPageTitle,
     });
-  }, [getPageTitle, isWindowsArm64, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
+  }, [getPageTitle, githubConnected, gitlabConnected, giteaConnected, isWindowsArm64, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
     if (result.id.startsWith('agents.')) {
@@ -667,7 +703,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'snippets':
         return <SnippetsPage />;
       case 'git':
-        return <GitPage />;
+        return <GitPage revealItemId={pendingSearchItemId} />;
       case 'integrations':
         return (
           <IntegrationsPage
@@ -690,7 +726,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       default:
         return null;
     }
-  }, [openChamberSectionBySlug, openPage, openThirdPartyProviderSetup, renderUnavailable, runtimeCtx, t]);
+  }, [openChamberSectionBySlug, openPage, openThirdPartyProviderSetup, pendingSearchItemId, renderUnavailable, runtimeCtx, t]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {

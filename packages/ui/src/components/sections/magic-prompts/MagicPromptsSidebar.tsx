@@ -36,6 +36,13 @@ export const MagicPromptsSidebar: React.FC<MagicPromptsSidebarProps> = ({ onItem
         ],
       },
       {
+        groupKey: 'settings.magicPrompts.sidebar.group.gitlab',
+        items: [
+          { id: 'gitlab.pr.review', titleKey: 'settings.magicPrompts.sidebar.item.gitlabPrReview' },
+          { id: 'gitlab.issue.review', titleKey: 'settings.magicPrompts.sidebar.item.gitlabIssueReview' },
+        ],
+      },
+      {
         groupKey: 'settings.magicPrompts.sidebar.group.planning',
         items: [
           { id: 'plan.todo', titleKey: 'settings.magicPrompts.sidebar.item.planTodo' },

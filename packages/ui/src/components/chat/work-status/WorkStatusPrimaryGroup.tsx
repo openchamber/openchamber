@@ -3,7 +3,10 @@ import { useI18n } from '@/lib/i18n';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
-import { useFreshestPrVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
+import { getGitHubPrStatusKey, usePrVisualSummary, useFreshestPrVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
+import { useGitLabMrForBranch } from '@/lib/gitlabMrStatus';
+import { useGiteaPrForBranch } from '@/lib/giteaPrStatus';
+import { useGitProvider } from '@/lib/gitProvider';
 import { useSession, useSessionMessages } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -109,6 +112,13 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // fan-out the PR-status concurrency gate exists to prevent.
   const prSummary = useFreshestPrVisualSummaryForBranch(directory, branch);
 
+  // GitLab merge requests and Gitea pull requests ride the same shared TTL
+  // cache as the git view and the walkthrough, so every surface that reports
+  // the branch's request stays consistent without extra requests.
+  const gitProvider = useGitProvider(directory);
+  const { mr: gitLabMr } = useGitLabMrForBranch(directory, branch);
+  const { pr: giteaPr } = useGiteaPrForBranch(directory, branch);
+
   // `getCurrentModel` is an imperative getter: its reference never changes, so
   // calling it in render subscribes to nothing. Subscribe to the selected model
   // ids and recompute the limits from those.
@@ -197,7 +207,27 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
 
   const cost = typeof session?.cost === 'number' && session.cost > 0 ? session.cost : null;
   const hasSession = showSession && (usagePercent !== null || cost !== null || Boolean(goalRow));
-  const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel);
+  const hasGitLabMr = gitProvider === 'gitlab' && gitLabMr !== null;
+  const hasGiteaPr = gitProvider === 'gitea' && giteaPr !== null;
+  const gitLabMrVisualState = gitLabMr
+    ? gitLabMr.state === 'merged'
+      ? 'merged'
+      : gitLabMr.state === 'closed'
+        ? 'closed'
+        : gitLabMr.draft
+          ? 'draft'
+          : 'open'
+    : null;
+  const giteaPrVisualState = giteaPr
+    ? giteaPr.state === 'merged'
+      ? 'merged'
+      : giteaPr.state === 'closed'
+        ? 'closed'
+        : giteaPr.draft
+          ? 'draft'
+          : 'open'
+    : null;
+  const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel || hasGitLabMr || hasGiteaPr);
 
   useReportWorkStatusPresence('session-repository', hasSession || hasRepository);
 
@@ -277,6 +307,42 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                   <WorkStatusValue tone="error">{`−${changed.deletions}`}</WorkStatusValue>
                 </>
               ) : undefined}
+            />
+          ) : null}
+
+          {hasGitLabMr && gitLabMr ? (
+            <WorkStatusRow
+              icon="gitlab"
+              onClick={directory ? () => openSurface('pr') : undefined}
+              ariaLabel={t('chat.workStatus.action.openMr')}
+              iconColor={`var(--pr-${gitLabMrVisualState})`}
+              label={gitLabMr.title || t('chat.workStatus.mr.untitled')}
+              value={(
+                <WorkStatusPill
+                  color={`var(--pr-${gitLabMrVisualState})`}
+                  background={`color-mix(in srgb, var(--pr-${gitLabMrVisualState}) 18%, transparent)`}
+                >
+                  {gitLabMr.draft ? t('chat.workStatus.pr.draft') : `!${gitLabMr.number}`}
+                </WorkStatusPill>
+              )}
+            />
+          ) : null}
+
+          {hasGiteaPr && giteaPr ? (
+            <WorkStatusRow
+              icon="gitea"
+              onClick={directory ? () => openSurface('pr') : undefined}
+              ariaLabel={t('chat.workStatus.action.openPr')}
+              iconColor={`var(--pr-${giteaPrVisualState})`}
+              label={giteaPr.title || t('chat.workStatus.pr.untitled')}
+              value={(
+                <WorkStatusPill
+                  color={`var(--pr-${giteaPrVisualState})`}
+                  background={`color-mix(in srgb, var(--pr-${giteaPrVisualState}) 18%, transparent)`}
+                >
+                  {giteaPr.draft ? t('chat.workStatus.pr.draft') : `#${giteaPr.number}`}
+                </WorkStatusPill>
+              )}
             />
           ) : null}
 

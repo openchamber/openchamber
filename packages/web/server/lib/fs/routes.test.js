@@ -286,6 +286,32 @@ const callRead = async (handler, query) => {
   return res;
 };
 
+const registerStat = (fsPromises) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      ...fsPromises,
+    },
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('GET', '/api/fs/stat');
+};
+
+const callStat = async (handler, query) => {
+  const res = createMockResponse();
+  await handler({ query }, res);
+  return res;
+};
+
 const callRaw = async (handler, query) => {
   const res = createMockResponse();
   await handler({ query }, res);
@@ -681,6 +707,46 @@ describe('fs read', () => {
     expect(fsPromises.readFile).toHaveBeenCalledTimes(4);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Read retry exhausted for /repo/file.txt'));
     warn.mockRestore();
+  });
+});
+
+describe('fs stat', () => {
+  it('returns exists:false for an outside-workspace path when optional', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
+    };
+    const handler = registerStat(fsPromises);
+
+    const res = await callStat(handler, { path: '/outside/plan.md', optional: 'true' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ path: '/outside/plan.md', exists: false });
+    expect(fsPromises.stat).not.toHaveBeenCalled();
+  });
+
+  it('still rejects an outside-workspace path when not optional', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
+    };
+    const handler = registerStat(fsPromises);
+
+    const res = await callStat(handler, { path: '/outside/plan.md' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Path is outside of active workspace' });
+    expect(fsPromises.stat).not.toHaveBeenCalled();
+  });
+
+  it('returns stat data for an in-workspace file', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
+    };
+    const handler = registerStat(fsPromises);
+
+    const res = await callStat(handler, { path: '/repo/file.txt' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ path: '/repo/file.txt', isFile: true, size: 3 });
   });
 });
 

@@ -12,6 +12,7 @@ import { useSessionUIStore } from "@/sync/session-ui-store";
 import { useSelectionStore } from "@/sync/selection-store";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { updateDesktopSettings } from "@/lib/persistence";
+import { useGitProviderDomainsStore } from "@/stores/useGitProviderDomainsStore";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution";
@@ -65,6 +66,8 @@ interface OpenChamberDefaults {
     sttModel?: string;
     sttLocalModel?: string;
     sttLanguage?: string;
+    /** Raw `gitProviders` section of server settings (per-provider apiBaseUrl/detectUrls). */
+    gitProviders?: unknown;
 }
 
 const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
@@ -103,6 +106,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                     const sttModel = typeof data?.sttModel === 'string' ? data.sttModel.trim() : undefined;
                     const sttLocalModel = typeof data?.sttLocalModel === 'string' ? data.sttLocalModel.trim() : undefined;
                     const sttLanguage = typeof data?.sttLanguage === 'string' ? data.sttLanguage.trim() : undefined;
+                    const gitProviders = data?.gitProviders;
 
                     return finish('runtime-settings', {
                         defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
@@ -118,6 +122,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                         sttModel,
                         sttLocalModel,
                         sttLanguage,
+                        gitProviders,
                     });
                 }
             } catch {
@@ -149,6 +154,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
         const sttModel = typeof data?.sttModel === 'string' ? data.sttModel.trim() : undefined;
         const sttLocalModel = typeof data?.sttLocalModel === 'string' ? data.sttLocalModel.trim() : undefined;
         const sttLanguage = typeof data?.sttLanguage === 'string' ? data.sttLanguage.trim() : undefined;
+        const gitProviders = data?.gitProviders;
 
         return finish('settings-route', {
             defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
@@ -164,6 +170,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
             sttModel,
             sttLocalModel,
             sttLanguage,
+            gitProviders,
         });
     } catch (error) {
         markStartupTrace('config.defaults:error', { error: error instanceof Error ? error.message : String(error) });
@@ -705,12 +712,28 @@ const toDirectoryKey = (directory: string | null | undefined): string => {
 
 const fromDirectoryKey = (key: string): string | null => (key === DIRECTORY_KEY_GLOBAL ? null : key);
 
+/**
+ * The directory store is part of this store's circular import cluster
+ * (useConfigStore → persistence → session-ui-store → useConfigStore, with
+ * useDirectoryStore in the same strongly-connected component). In the bundled
+ * chunk its module body may not have run yet when this module evaluates, so the
+ * static import binding is in TDZ. Read it through the window registration that
+ * useDirectoryStore publishes as soon as it initializes; fall back to the
+ * client directory, which the directory store seeds at the same time.
+ */
+const getDirectoryStore = (): typeof useDirectoryStore | null => {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+    return window.__zustand_directory_store__ ?? null;
+};
+
 const resolveInitialDirectoryKey = (): string => {
     if (typeof window === 'undefined') {
         return DIRECTORY_KEY_GLOBAL;
     }
 
-    const directory = opencodeClient.getDirectory() ?? useDirectoryStore.getState().currentDirectory;
+    const directory = opencodeClient.getDirectory() ?? getDirectoryStore()?.getState().currentDirectory;
     return toConfigDirectoryKey(directory);
 };
 
@@ -2007,6 +2030,18 @@ export const useConfigStore = create<ConfigStore>()(
                             ]);
 
                             const safeAgents = Array.isArray(agents) ? agents : [];
+
+                            // Seed the git provider domains store from the server
+                            // `gitProviders` settings (authoritative); the runtime
+                            // settings path or the fetch path above provided them.
+                            // Failure here must not break the agent load.
+                            if (openChamberDefaults.gitProviders !== undefined) {
+                                try {
+                                    useGitProviderDomainsStore.getState().hydrateFromServer(openChamberDefaults.gitProviders);
+                                } catch {
+                                    // Ignore — non-authoritative state stays as-is.
+                                }
+                            }
 
                             const providerLoad = _inFlightProviders.get(directoryKey);
                             if (providerLoad) {
@@ -3410,14 +3445,24 @@ if (!unsubscribeConfigStoreSyncConfigChanges) {
 }
 
 if (typeof window !== "undefined" && !unsubscribeConfigStoreDirectoryChanges) {
-    unsubscribeConfigStoreDirectoryChanges = useDirectoryStore.subscribe((state, prevState) => {
-        const nextKey = toDirectoryKey(state.currentDirectory);
-        const prevKey = toDirectoryKey(prevState.currentDirectory);
-        if (nextKey === prevKey) {
-            return;
-        }
+    // useDirectoryStore's module body may not have run yet when this module
+    // evaluates (the two stores share a circular import cluster, and the
+    // bundled chunk can evaluate either body first). Defer subscription setup
+    // until after module evaluation completes so the import binding is no
+    // longer in TDZ. The subscription is registered before any user-driven
+    // directory change can occur; the initial directory is reconciled by
+    // initializeApp.
+    queueMicrotask(() => {
+        if (unsubscribeConfigStoreDirectoryChanges) return;
+        unsubscribeConfigStoreDirectoryChanges = useDirectoryStore.subscribe((state, prevState) => {
+            const nextKey = toDirectoryKey(state.currentDirectory);
+            const prevKey = toDirectoryKey(prevState.currentDirectory);
+            if (nextKey === prevKey) {
+                return;
+            }
 
-        markStartupTrace('directoryStore:changed', { previous: prevKey, next: nextKey });
-        void useConfigStore.getState().activateDirectory(state.currentDirectory);
+            markStartupTrace('directoryStore:changed', { previous: prevKey, next: nextKey });
+            void useConfigStore.getState().activateDirectory(state.currentDirectory);
+        });
     });
 }
