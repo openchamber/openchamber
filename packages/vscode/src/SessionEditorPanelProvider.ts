@@ -49,6 +49,29 @@ export class SessionEditorPanelProvider {
   private _lastActiveEditorFilePayload: ActiveEditorFilePayload | null = null;
   private readonly _webviewDevServerUrl: string | null;
 
+  /**
+   * The webview only leaves its initial loading screen once it receives a
+   * `connectionStatus: connected` message. VS Code drops postMessage calls
+   * made before the webview's acquireVsCodeApi bridge is ready (common in
+   * code-server / slow or flaky networks), so a single send can be lost
+   * forever. Re-send at staggered delays until the target panel is replaced.
+   */
+  private _scheduleCachedStateRetries(panelId: string, entry: SessionPanelState): void {
+    if (this._cachedStatus !== 'connected') {
+      return;
+    }
+    const delaysMs = [500, 1500, 3500, 7000, 12000, 20000];
+    for (const delayMs of delaysMs) {
+      setTimeout(() => {
+        // Only re-send if this exact panel is still registered.
+        if (this._panels.get(panelId)?.panel !== entry.panel) {
+          return;
+        }
+        this._sendCachedStateToPanel(entry);
+      }, delayMs);
+    }
+  }
+
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
@@ -116,6 +139,9 @@ export class SessionEditorPanelProvider {
 
     void this.updateTheme(vscode.window.activeColorTheme.kind);
     this._sendCachedStateToPanel(state);
+    // The webview bridge may not be ready yet; keep re-sending so a dropped
+    // `connectionStatus` can never leave the webview stuck on its loading screen.
+    this._scheduleCachedStateRetries(panelId, state);
     void this._broadcastActiveEditorFile();
 
     panel.onDidDispose(() => {
@@ -186,6 +212,15 @@ export class SessionEditorPanelProvider {
 
     for (const entry of this._panels.values()) {
       this._sendCachedStateToPanel(entry);
+    }
+
+    // When we become connected, keep re-sending at staggered delays so the
+    // webview cannot miss the transition (postMessage is dropped if the
+    // webview bridge is not ready yet).
+    if (status === 'connected') {
+      for (const [panelId, entry] of this._panels.entries()) {
+        this._scheduleCachedStateRetries(panelId, entry);
+      }
     }
   }
 

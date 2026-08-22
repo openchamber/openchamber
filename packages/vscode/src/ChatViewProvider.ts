@@ -58,6 +58,33 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly _MESSAGE_TIMEOUT = 5000; // 5 seconds
   private readonly _MAX_RETRIES = 3;
 
+  /**
+   * The webview only leaves its initial loading screen once it receives a
+   * `connectionStatus: connected` message. VS Code drops postMessage calls
+   * made before the webview's acquireVsCodeApi bridge is ready (common in
+   * code-server / slow or flaky networks), so a single send can be lost
+   * forever. Re-send at staggered delays until the target view is replaced.
+   */
+  private _scheduleCachedStateRetries(targetView: vscode.WebviewView | undefined): void {
+    if (this._cachedStatus !== 'connected') {
+      return;
+    }
+    const view = targetView ?? this._view;
+    if (!view) {
+      return;
+    }
+    const delaysMs = [500, 1500, 3500, 7000, 12000, 20000];
+    for (const delayMs of delaysMs) {
+      setTimeout(() => {
+        // Only re-send if this exact view is still the active one.
+        if (this._view !== view) {
+          return;
+        }
+        this._sendCachedState();
+      }, delayMs);
+    }
+  }
+
   private _createMessageId(): string {
     return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
@@ -102,6 +129,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     // Send cached connection status and API URL (may have been set before webview was resolved)
     this._sendCachedState();
+    // The webview bridge may not be ready yet; keep re-sending so a dropped
+    // `connectionStatus` can never leave the webview stuck on its loading screen.
+    this._scheduleCachedStateRetries(webviewView);
 
     // Send current active editor file state to the new webview
     this._lastActiveEditorFilePayload = null;
@@ -185,6 +215,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     
     // Send to webview if it exists
     this._sendCachedState();
+
+    // When we become connected, keep re-sending at staggered delays so the
+    // webview cannot miss the transition (postMessage is dropped if the
+    // webview bridge is not ready yet).
+    if (status === 'connected') {
+      this._scheduleCachedStateRetries(this._view);
+    }
   }
 
   public addTextToInput(text: string) {
