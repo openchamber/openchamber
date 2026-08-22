@@ -6,6 +6,8 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.authCookie': 'Auth-Cookie',
   'settings.providers.page.openCodeGo.apiKey': 'API-Schlüssel',
   'settings.providers.page.openCodeGo.help': 'Kopieren Sie die Workspace-ID aus der Dashboard-URL und den Auth-Cookie aus den Browser-Entwicklertools. OpenChamber liest niemals den Browser-Cookie-Speicher aus.',
+  'settings.providers.page.ollamaCloud.help': 'Fügen Sie das Session-Cookie von ollama.com ein (suchen Sie in den Browser-Entwicklertools nach session=...). Dies ist nicht Ihr lokaler Ollama-API-Schlüssel oder -Endpunkt. OpenChamber liest niemals den Browser-Cookie-Speicher aus.',
+  'settings.providers.page.ollamaCloud.cookie': 'Session-Cookie',
   'settings.providers.page.openCodeGo.save': 'Speichern und validieren',
   'settings.providers.page.openCodeGo.replace': 'Ersetzen',
   'settings.providers.page.openCodeGo.validate': 'Validieren',

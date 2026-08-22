@@ -6,6 +6,8 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.authCookie': '驗證 Cookie',
   'settings.providers.page.openCodeGo.apiKey': 'API 金鑰',
   'settings.providers.page.openCodeGo.help': '從控制面板網址複製工作區 ID，並從瀏覽器開發者工具複製 auth Cookie。OpenChamber 絕不會掃描瀏覽器 Cookie 儲存空間。',
+  'settings.providers.page.ollamaCloud.help': '貼上 ollama.com 的工作階段 Cookie（在瀏覽器開發者工具中尋找 session=...）。這不是您的本機 Ollama API 金鑰或端點。OpenChamber 絕不會掃描瀏覽器 Cookie 儲存空間。',
+  'settings.providers.page.ollamaCloud.cookie': '工作階段 Cookie',
   'settings.providers.page.openCodeGo.save': '儲存並驗證',
   'settings.providers.page.openCodeGo.replace': '取代',
   'settings.providers.page.openCodeGo.validate': '驗證',

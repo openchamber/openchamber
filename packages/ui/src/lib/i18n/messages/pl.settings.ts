@@ -6,6 +6,8 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.authCookie': 'Plik cookie uwierzytelniania',
   'settings.providers.page.openCodeGo.apiKey': 'Klucz API',
   'settings.providers.page.openCodeGo.help': 'Skopiuj ID z adresu panelu i cookie auth z narzędzi deweloperskich przeglądarki. OpenChamber nigdy nie skanuje plików cookie przeglądarki.',
+  'settings.providers.page.ollamaCloud.help': 'Wklej cookie sesji z ollama.com (poszukaj session=... w narzędziach deweloperskich przeglądarki). To nie jest Twój lokalny klucz API ani endpoint Ollama. OpenChamber nigdy nie skanuje plików cookie przeglądarki.',
+  'settings.providers.page.ollamaCloud.cookie': 'Cookie sesji',
   'settings.providers.page.openCodeGo.save': 'Zapisz i sprawdź',
   'settings.providers.page.openCodeGo.replace': 'Zastąp',
   'settings.providers.page.openCodeGo.validate': 'Sprawdź',

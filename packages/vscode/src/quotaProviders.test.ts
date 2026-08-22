@@ -699,3 +699,66 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
     fsMock.readFileSync = ORIGINAL_FS.readFileSync;
   });
 });
+
+describe('Ollama Cloud quota provider (VS Code parity)', () => {
+  const credentialPath = path.join(temporaryQuotaDataDirectory, 'quota', 'ollama-cloud.json');
+
+  beforeEach(() => {
+    fs.mkdirSync(path.dirname(credentialPath), { recursive: true });
+    fs.writeFileSync(credentialPath, JSON.stringify({ cookie: 'session=secret' }));
+  });
+
+  afterEach(() => {
+    fs.rmSync(credentialPath, { force: true });
+  });
+
+  test('reports authentication failure on 401', async () => {
+    stubFetchFailing(async () => ({}), { ok: false, status: 401 });
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Ollama Cloud authentication failed');
+  });
+
+  test('reports authentication failure on 403', async () => {
+    stubFetchFailing(async () => ({}), { ok: false, status: 403 });
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Ollama Cloud authentication failed');
+  });
+
+  test('reports authentication failure when redirected to /signin', async () => {
+    stubFetchReturning(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      url: 'https://ollama.com/signin',
+      text: async () => '<html>Sign in</html>',
+    }));
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Ollama Cloud authentication failed');
+  });
+
+  test('returns usage windows for a valid cookie', async () => {
+    stubFetchReturning(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      url: 'https://ollama.com/settings',
+      text: async () => '<html>Session usage 50%</html>',
+    }));
+
+    const result = await fetchQuotaForProvider('ollama-cloud');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.configured, true);
+    assert.equal(result.usage!.windows.session!.usedPercent, 50);
+  });
+});
