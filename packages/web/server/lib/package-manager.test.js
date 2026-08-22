@@ -9,8 +9,10 @@ vi.mock('node:child_process', () => ({
 const {
   checkForUpdates,
   detectPackageManager,
+  detectPackageManagerDetails,
   executeUpdate,
   getCurrentVersion,
+  getUpdateCommand,
 } = await import('./package-manager.js');
 
 /** Helper: create a fetch mock that routes by URL pattern */
@@ -329,5 +331,25 @@ describe('CLI update exports', () => {
   it('exports package-manager helpers used by the update command', () => {
     expect(typeof detectPackageManager).toBe('function');
     expect(typeof executeUpdate).toBe('function');
+  });
+
+  it('uses an absolute command override for the forced package manager', () => {
+    const originalPackageManager = process.env.OPENCHAMBER_PACKAGE_MANAGER;
+    const originalPackageManagerCommand = process.env.OPENCHAMBER_PACKAGE_MANAGER_COMMAND;
+    process.env.OPENCHAMBER_PACKAGE_MANAGER = 'npm';
+    process.env.OPENCHAMBER_PACKAGE_MANAGER_COMMAND = '/opt/OpenChamber Runtime/npm';
+
+    try {
+      expect(detectPackageManagerDetails()).toMatchObject({
+        packageManager: 'npm',
+        packageManagerCommand: '/opt/OpenChamber Runtime/npm',
+      });
+      expect(getUpdateCommand('npm')).toBe("'/opt/OpenChamber Runtime/npm' install -g @openchamber/web@latest");
+    } finally {
+      if (originalPackageManager === undefined) delete process.env.OPENCHAMBER_PACKAGE_MANAGER;
+      else process.env.OPENCHAMBER_PACKAGE_MANAGER = originalPackageManager;
+      if (originalPackageManagerCommand === undefined) delete process.env.OPENCHAMBER_PACKAGE_MANAGER_COMMAND;
+      else process.env.OPENCHAMBER_PACKAGE_MANAGER_COMMAND = originalPackageManagerCommand;
+    }
   });
 });

@@ -274,6 +274,7 @@ type DesktopServicesMenuProps = {
   isDesktopServicesOpen: boolean;
   setIsDesktopServicesOpen: React.Dispatch<React.SetStateAction<boolean>>;
   refreshCurrentInstanceLabel: () => Promise<void>;
+  refreshRemoteUpdate: () => Promise<void>;
   shortcutLabel: (actionId: string) => string;
   remoteUpdateInfo: UpdateInfo | null;
   remoteUpdateChecking: boolean;
@@ -289,6 +290,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   isDesktopServicesOpen,
   setIsDesktopServicesOpen,
   refreshCurrentInstanceLabel,
+  refreshRemoteUpdate,
   shortcutLabel,
   remoteUpdateInfo,
   remoteUpdateChecking,
@@ -303,6 +305,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         setIsDesktopServicesOpen(open);
         if (open) {
           void refreshCurrentInstanceLabel();
+          void refreshRemoteUpdate();
         }
       }}
     >
@@ -738,6 +741,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
 
     setRemoteUpdateChecking(true);
+    setRemoteUpdateInfo(null);
     setRemoteUpdateError(null);
     try {
       // Status-only poll: must not count as usage on the remote server's install id.
@@ -1885,6 +1889,7 @@ export const Header: React.FC<HeaderProps> = ({
         isDesktopServicesOpen={isDesktopServicesOpen}
         setIsDesktopServicesOpen={setIsDesktopServicesOpen}
         refreshCurrentInstanceLabel={refreshCurrentInstanceLabel}
+        refreshRemoteUpdate={checkRemoteInstanceUpdate}
         shortcutLabel={shortcutLabel}
         remoteUpdateInfo={remoteUpdateInfo}
         remoteUpdateChecking={remoteUpdateChecking}

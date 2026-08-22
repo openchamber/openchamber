@@ -12,6 +12,13 @@ function resolveSystemdServiceUnit(environment) {
   return SYSTEMD_SERVICE_UNIT_PATTERN.test(unit) ? unit : null;
 }
 
+function shouldRestartOnUpdateExit(environment) {
+  const value = typeof environment.OPENCHAMBER_UPDATE_RESTART_ON_EXIT === 'string'
+    ? environment.OPENCHAMBER_UPDATE_RESTART_ON_EXIT.trim().toLowerCase()
+    : '';
+  return value === '1' || value === 'true';
+}
+
 function quotePosixShell(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
@@ -131,50 +138,88 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       const systemdServiceUnit = isForegroundService ? resolveSystemdServiceUnit(process.env) : null;
 
       if (isForegroundService) {
-        if (!systemdServiceUnit) {
-          return res.status(409).json({
-            error: 'Foreground servers must be updated by their service manager. Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, or run openchamber update and restart the service.',
+        if (systemdServiceUnit) {
+          const updateJobName = `openchamber-update-${Date.now()}`;
+          const updateLogPath = `journalctl --user-unit ${updateJobName}.service`;
+          const updateScript = [
+            'set -eu',
+            updateCmd,
+            `systemctl --user restart ${quotePosixShell(systemdServiceUnit)}`,
+          ].join('\n');
+          const systemdRun = spawnSync('systemd-run', [
+            '--user',
+            `--unit=${updateJobName}`,
+            '--collect',
+            '--service-type=exec',
+            `--setenv=PATH=${process.env.PATH || ''}`,
+            '/bin/sh',
+            '-c',
+            updateScript,
+          ], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            timeout: 5000,
+          });
+
+          if (systemdRun.status !== 0) {
+            const detail = (systemdRun.stderr || systemdRun.stdout || '').trim();
+            return res.status(409).json({
+              error: detail || `Could not queue update job for ${systemdServiceUnit}`,
+            });
+          }
+
+          return res.json({
+            success: true,
+            message: 'Update queued; OpenChamber will restart after installation completes',
+            version: updateInfo.version,
+            packageManager: pm,
+            autoRestart: true,
+            restartManager: 'systemd',
+            jobId: updateJobName,
+            logPath: updateLogPath,
           });
         }
 
-        const updateJobName = `openchamber-update-${Date.now()}`;
-        const updateLogPath = `journalctl --user-unit ${updateJobName}.service`;
-        const updateScript = [
-          'set -eu',
-          updateCmd,
-          `systemctl --user restart ${quotePosixShell(systemdServiceUnit)}`,
-        ].join('\n');
-        const systemdRun = spawnSync('systemd-run', [
-          '--user',
-          `--unit=${updateJobName}`,
-          '--collect',
-          '--service-type=exec',
-          `--setenv=PATH=${process.env.PATH || ''}`,
-          '/bin/sh',
-          '-c',
-          updateScript,
-        ], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          timeout: 5000,
-        });
+        if (process.platform !== 'win32' && shouldRestartOnUpdateExit(process.env)) {
+          const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
+          const updateScript = [
+            'set -eu',
+            'sleep 1',
+            updateCmd,
+            `kill -TERM ${process.pid}`,
+          ].join('\n');
+          let logFd = null;
+          try {
+            fs.mkdirSync(path.dirname(updateLogPath), { recursive: true });
+            logFd = fs.openSync(updateLogPath, 'a');
+            const child = spawnChild('/bin/sh', ['-c', updateScript], {
+              detached: true,
+              stdio: ['ignore', logFd, logFd],
+              env: process.env,
+            });
+            child.unref();
+          } finally {
+            if (logFd !== null) {
+              fs.closeSync(logFd);
+            }
+          }
 
-        if (systemdRun.status !== 0) {
-          const detail = (systemdRun.stderr || systemdRun.stdout || '').trim();
-          return res.status(409).json({
-            error: detail || `Could not queue update job for ${systemdServiceUnit}`,
+          return res.json({
+            success: true,
+            message: 'Update queued; OpenChamber will exit after installation completes',
+            version: updateInfo.version,
+            packageManager: pm,
+            autoRestart: true,
+            restartManager: 'process-manager',
+            logPath: updateLogPath,
           });
         }
 
-        return res.json({
-          success: true,
-          message: 'Update queued; OpenChamber will restart after installation completes',
-          version: updateInfo.version,
-          packageManager: pm,
-          autoRestart: true,
-          restartManager: 'systemd',
-          jobId: updateJobName,
-          logPath: updateLogPath,
+        const serviceManagerGuidance = process.platform === 'win32'
+          ? 'Run openchamber update and restart the service.'
+          : 'Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, set OPENCHAMBER_UPDATE_RESTART_ON_EXIT=true for a restart-on-exit supervisor, or run openchamber update and restart the service.';
+        return res.status(409).json({
+          error: `Foreground servers must be updated by their service manager. ${serviceManagerGuidance}`,
         });
       }
 
