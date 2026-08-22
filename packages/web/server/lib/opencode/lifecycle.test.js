@@ -2,11 +2,12 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
+const spawnSyncMock = vi.fn();
 const recordStartupPerformanceMock = vi.fn();
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
-  spawnSync: vi.fn(),
+  spawnSync: spawnSyncMock,
 }));
 vi.mock('./startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
@@ -20,6 +21,7 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   spawnMock.mockReset();
+  spawnSyncMock.mockReset();
   recordStartupPerformanceMock.mockReset();
   globalThis.fetch = originalFetch;
   if (typeof originalOpencodeBinary === 'string') {
@@ -789,5 +791,72 @@ describe('OpenCode lifecycle', () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(2);
     await server.close();
+  });
+});
+
+describe('killProcessOnPort on Windows', () => {
+  const originalPlatform = process.platform;
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
+  });
+
+  const setPlatform = (platform) => {
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  };
+
+  it('force-kills the process listening on the target port via taskkill', () => {
+    setPlatform('win32');
+    const orphanPid = 54321;
+    spawnSyncMock.mockImplementation((cmd) => {
+      if (cmd === 'powershell') {
+        return { stdout: `${orphanPid}\r\n` };
+      }
+      return { stdout: '' };
+    });
+
+    const runtime = createRuntime();
+    runtime.killProcessOnPort(45678);
+
+    expect(spawnSyncMock).toHaveBeenCalledWith(
+      'powershell',
+      expect.arrayContaining([expect.stringContaining('-LocalPort 45678')]),
+      expect.objectContaining({ windowsHide: true })
+    );
+    expect(spawnSyncMock).toHaveBeenCalledWith(
+      'taskkill',
+      ['/PID', String(orphanPid), '/F'],
+      expect.objectContaining({ windowsHide: true })
+    );
+  });
+
+  it('never force-kills its own process id', () => {
+    setPlatform('win32');
+    spawnSyncMock.mockImplementation((cmd) => {
+      if (cmd === 'powershell') {
+        return { stdout: `${process.pid}\r\n` };
+      }
+      return { stdout: '' };
+    });
+
+    const runtime = createRuntime();
+    runtime.killProcessOnPort(45678);
+
+    expect(spawnSyncMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
+  });
+
+  it('does nothing when no process is listening on the target port', () => {
+    setPlatform('win32');
+    spawnSyncMock.mockImplementation((cmd) => {
+      if (cmd === 'powershell') {
+        return { stdout: '' };
+      }
+      return { stdout: '' };
+    });
+
+    const runtime = createRuntime();
+    runtime.killProcessOnPort(45678);
+
+    expect(spawnSyncMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
   });
 });
