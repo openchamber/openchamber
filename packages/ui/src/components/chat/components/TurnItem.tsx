@@ -18,13 +18,13 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, stickyUserHeader = true, rend
             data-scroll-spy-id={turn.turnId}
         >
             {stickyUserHeader ? (
-                <div className="sticky top-0 z-20 relative bg-[var(--surface-background)] [overflow-anchor:none]">
+                <div className="sticky top-0 z-20 relative bg-[var(--surface-background)] pb-4 sm:pb-8 [overflow-anchor:none]">
                     <div className="relative z-10">
                         {renderMessage(turn.userMessage)}
                     </div>
                     <div
                         aria-hidden="true"
-                        className="pointer-events-none absolute inset-x-0 top-full z-0 h-4 bg-gradient-to-b from-[var(--surface-background)] to-transparent sm:h-8"
+                        className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-4 bg-gradient-to-b from-[var(--surface-background)] to-transparent sm:h-8"
                     />
                 </div>
             ) : (
