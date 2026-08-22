@@ -3062,7 +3062,7 @@ export const dict = {
   'quota.window.premium': 'Premium Interactions',
   'quota.window.chat': 'Chat Requests',
   'quota.window.completions': 'Completions',
-  'quota.window.premiumInteractions': 'Premium interactions',
+  'quota.window.premiumInteractions': 'AI Credits',
   'chat.workStatus.ariaLabel': 'Work status',
   'chat.workStatus.context.label': 'Context',
   'chat.workStatus.git.changedFileSingle': '{count} file changed',

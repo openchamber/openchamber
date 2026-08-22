@@ -3062,7 +3062,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.premium': 'Premium Interactions',
   'quota.window.chat': 'Chat Requests',
   'quota.window.completions': 'Completions',
-  'quota.window.premiumInteractions': 'Premium interactions',
+  'quota.window.premiumInteractions': 'AI 크레딧',
   'chat.workStatus.ariaLabel': '작업 상태',
   'chat.workStatus.context.label': '컨텍스트',
   'chat.workStatus.git.changedFileSingle': '파일 {count}개 변경됨',

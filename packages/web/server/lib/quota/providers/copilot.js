@@ -31,9 +31,7 @@ const buildCopilotWindows = (payload) => {
     });
   };
 
-  addWindow('chat', quota.chat);
-  addWindow('completions', quota.completions);
-  addWindow('premium', quota.premium_interactions);
+  addWindow('premium_interactions', quota.premium_interactions);
 
   return windows;
 };
@@ -144,7 +142,9 @@ export const fetchQuotaAddon = async () => {
 
     const payload = await response.json();
     const windows = buildCopilotWindows(payload);
-    const premium = windows.premium ? { premium: windows.premium } : windows;
+    const premium = windows.premium_interactions
+      ? { premium_interactions: windows.premium_interactions }
+      : windows;
 
     return buildResult({
       providerId: providerIdAddon,

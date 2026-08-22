@@ -3063,7 +3063,7 @@ export const dict: Record<I18nKey, string> = {
   "quota.window.premium": "Premium Interactions",
   "quota.window.chat": "Chat Requests",
   "quota.window.completions": "Completions",
-  "quota.window.premiumInteractions": "Premium interactions",
+  "quota.window.premiumInteractions": "Кредити ШІ",
   'chat.workStatus.ariaLabel': 'Стан роботи',
   'chat.workStatus.context.label': 'Контекст',
   'chat.workStatus.git.changedFileSingle': 'Змінено {count} файл',

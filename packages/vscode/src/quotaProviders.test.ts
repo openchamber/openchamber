@@ -20,6 +20,7 @@ const AUTH = JSON.stringify({
   'command-code': { type: 'oauth', access: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
+  'github-copilot': { access: 'test-token' },
   anthropic: { access: 'test-token', refresh: 'test-refresh' },
 });
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
@@ -245,6 +246,26 @@ describe('Codex quota provider (VS Code parity)', () => {
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.credits!.usedPercent, 36);
     assert.equal(result.usage!.windows.credits!.valueLabel, '2675 / 7500 used');
+  });
+});
+
+describe('GitHub Copilot quota provider (VS Code parity)', () => {
+  test('exposes only premium interactions as the primary usage window', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      quota_reset_date: '2026-09-01T00:00:00Z',
+      quota_snapshots: {
+        chat: { entitlement: 100, remaining: 80 },
+        completions: { entitlement: 1000, remaining: 900 },
+        premium_interactions: { entitlement: 300, remaining: 225 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['premium_interactions']);
+    assert.equal(result.usage!.windows.premium_interactions!.usedPercent, 25);
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, '225 / 300 left');
   });
 });
 

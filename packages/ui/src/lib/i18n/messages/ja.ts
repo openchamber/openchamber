@@ -3061,7 +3061,7 @@ export const dict: Record<I18nKey, string> = {
   'onboarding.localSetup.actions.checkAndContinue': 'インストール完了、確認して続行',
   'onboarding.localSetup.status.autoContinue': '検出され次第自動的に続行します。',
   'updateDialog.changelog.title': '新機能',
-  'quota.window.premiumInteractions': 'プレミアムインタラクション',
+  'quota.window.premiumInteractions': 'AIクレジット',
 
   'chat.workStatus.ariaLabel': '作業状況',
   'chat.workStatus.context.label': 'コンテキスト',

@@ -1487,9 +1487,7 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
     });
   };
 
-  addWindow('chat', quota.chat as Record<string, unknown> | undefined);
-  addWindow('completions', quota.completions as Record<string, unknown> | undefined);
-  addWindow('premium', quota.premium_interactions as Record<string, unknown> | undefined);
+  addWindow('premium_interactions', quota.premium_interactions as Record<string, unknown> | undefined);
 
   return windows;
 };
@@ -1587,7 +1585,9 @@ const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
 
     const payload = await response.json() as Record<string, unknown>;
     const windows = buildCopilotWindows(payload);
-    const premium = windows.premium ? { premium: windows.premium } : windows;
+    const premium = windows.premium_interactions
+      ? { premium_interactions: windows.premium_interactions }
+      : windows;
 
     return buildResult({
       providerId: 'github-copilot-addon',

@@ -2755,7 +2755,7 @@ export const dict = {
   'quota.window.premium': 'Interactions premium',
   'quota.window.chat': 'Requêtes de chat',
   'quota.window.completions': 'Complétions',
-  'quota.window.premiumInteractions': 'Interactions premium',
+  'quota.window.premiumInteractions': 'Crédits IA',
   'layout.mainTab.diagram': 'Diagramme',
   'mobile.nav.aria': 'Navigation mobile',
   'mobile.connect.welcome.title': 'Se connecter à OpenChamber',
