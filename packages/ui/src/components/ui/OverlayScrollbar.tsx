@@ -43,6 +43,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   const metricsFrameRef = React.useRef<number | null>(null);
   const isDraggingRef = React.useRef(false);
   const isHoveringRef = React.useRef(false);
+  const isHoveringContainerRef = React.useRef(false);
   const lastUserIntentAtRef = React.useRef(0);
   const dragStartRef = React.useRef<{
     pointerX: number;
@@ -124,11 +125,23 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     if (hideTimeoutRef.current) {
       clearTimeout(hideTimeoutRef.current);
     }
-    // Don't schedule hide if hovering over the thumb
-    if (isHoveringRef.current) {
+    // Don't even schedule if we're already hovering something at this instant.
+    if (isHoveringRef.current || isHoveringContainerRef.current) {
       return;
     }
-    hideTimeoutRef.current = setTimeout(() => setVisible(false), hideDelayMs);
+    hideTimeoutRef.current = setTimeout(() => {
+      // Re-check hover state at fire time, not just schedule time: the thumb is a
+      // DOM sibling of the container (an absolutely-positioned overlay on top of
+      // it), not a descendant, so moving the pointer from the container onto the
+      // thumb fires the container's mouseleave (arming this timer) BEFORE the
+      // thumb's mouseenter (which would otherwise have cancelled it). Without this
+      // re-check, the thumb would vanish out from under a pointer that's now
+      // resting on it, ~hideDelayMs after the hand-off.
+      if (isHoveringRef.current || isHoveringContainerRef.current) {
+        return;
+      }
+      setVisible(false);
+    }, hideDelayMs);
   }, [hideDelayMs]);
 
   const markUserIntent = React.useCallback(() => {
@@ -179,7 +192,29 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       }
     };
 
+    const onContainerMouseEnter = () => {
+      isHoveringContainerRef.current = true;
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+        hideTimeoutRef.current = null;
+      }
+      if (!suppressVisibility) {
+        updateMetrics();
+        setVisible(true);
+      }
+    };
+    const onContainerMouseLeave = () => {
+      isHoveringContainerRef.current = false;
+      scheduleHide();
+    };
+
     container.addEventListener("scroll", onScroll, { passive: true });
+    // Reveal on hover in addition to the existing scroll-triggered visibility above,
+    // so users can find the affordance without having to scroll first. Not gated by
+    // userIntentOnly/desktop-runtime -- hovering directly over the scrollable area is
+    // itself deliberate user intent, on every platform that has a pointer.
+    container.addEventListener("mouseenter", onContainerMouseEnter);
+    container.addEventListener("mouseleave", onContainerMouseLeave);
     if (userIntentOnly) {
       container.addEventListener("wheel", markUserIntent, { passive: true });
       container.addEventListener("touchstart", markUserIntent, { passive: true });
@@ -211,6 +246,8 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
 
     return () => {
       container.removeEventListener("scroll", onScroll);
+      container.removeEventListener("mouseenter", onContainerMouseEnter);
+      container.removeEventListener("mouseleave", onContainerMouseLeave);
       container.removeEventListener("input", onInput, true);
       container.removeEventListener("load", onLoad, true);
       if (userIntentOnly) {
@@ -226,7 +263,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       if (metricsFrameRef.current) cancelAnimationFrame(metricsFrameRef.current);
     };
-  }, [containerRef, handleScroll, markUserIntent, observeMutations, scheduleMetricsUpdate, syncObservedElements, updateMetrics, userIntentOnly]);
+  }, [containerRef, handleScroll, markUserIntent, observeMutations, scheduleHide, scheduleMetricsUpdate, suppressVisibility, syncObservedElements, updateMetrics, userIntentOnly]);
 
   React.useEffect(() => {
     if (!suppressVisibility) {
