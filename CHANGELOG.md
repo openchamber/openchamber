@@ -49,6 +49,7 @@ All notable changes to this project will be documented in this file.
 - Desktop: browser pages served from a self-signed loopback HTTPS address now load instead of being blocked by the certificate warning.
 - Browser: typing a comment on a page no longer triggers app shortcuts.
 - Skills Catalog: the source is now named ClawHub instead of "ClawdHub" (thanks to @makeittech).
+- Settings: an explicitly set `OPENCODE_BINARY` environment variable is no longer discarded when settings contain an empty opencodeBinary value; the environment variable keeps pointing the managed OpenCode server at the binary you chose.
 
 ## [1.18.4] - 2026-08-14
 
