@@ -1,23 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { PreflightDeniedError } from './preflight.js';
-
-const sdk = vi.hoisted(() => ({
-  sessionCreates: [],
-  createOpencodeClient: () => ({
-    session: {
-      create: async () => {
-        sdk.sessionCreates.push(Date.now());
-        return { data: { id: `sess-${sdk.sessionCreates.length}` } };
-      },
-    },
-    command: { list: async () => ({ data: [] }) },
-  }),
-}));
-
-vi.mock('@opencode-ai/sdk/v2', () => ({
-  createOpencodeClient: sdk.createOpencodeClient,
-}));
-
 import { createScheduledTasksRuntime } from './runtime.js';
 
 const UTC = (y, mo, d, h, mi, s = 0) => Date.UTC(y, mo, d, h, mi, s);
@@ -92,7 +74,6 @@ const denyingPreflight = (reason = 'blocked by policy') => ({
 describe('scheduled task preflight denial', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    sdk.sessionCreates.length = 0;
     globalThis.fetch = vi.fn(async () => ({ ok: true, text: async () => '' }));
   });
 
@@ -113,7 +94,7 @@ describe('scheduled task preflight denial', () => {
     await vi.advanceTimersByTimeAsync(HOUR + 3_000);
 
     expect(preflight.evaluate).toHaveBeenCalledOnce();
-    expect(sdk.sessionCreates.length).toBe(0);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
 
     const [task] = await projectConfigRuntime.listScheduledTasks('p1');
     expect(task.state.lastStatus).toBe('denied');
@@ -136,7 +117,7 @@ describe('scheduled task preflight denial', () => {
 
     await vi.advanceTimersByTimeAsync(HOUR + 3_000);
 
-    expect(sdk.sessionCreates.length).toBe(0);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
     const [task] = await projectConfigRuntime.listScheduledTasks('p1');
     expect(task.state.lastStatus).toBe('denied');
     // A denied once task is not disabled/consumed: it stays enabled, inert
@@ -161,7 +142,7 @@ describe('scheduled task preflight denial', () => {
     expect(result.ok).toBe(false);
     expect(result.status).toBe('denied');
     expect(result.error).toBe('manual runs are blocked');
-    expect(sdk.sessionCreates.length).toBe(0);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
 
     runtime.stop();
   });
@@ -189,7 +170,7 @@ describe('scheduled task preflight denial', () => {
     expect(result.reason).toBe('completion-state-failed');
     expect(result.error).toBe('manual runs are blocked');
     expect(result.persistError).toMatch(/timeout acquiring project config lock/);
-    expect(sdk.sessionCreates.length).toBe(0);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
 
     runtime.stop();
   });

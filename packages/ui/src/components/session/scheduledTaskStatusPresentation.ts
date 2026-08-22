@@ -6,20 +6,20 @@ type Translate = (key: I18nKey, params?: I18nParams) => string;
 
 export type StatusTone = 'success' | 'error' | 'warning' | 'muted';
 
-export const STATUS_META: Record<
+export const STATUS_META = {
+  success: { tone: 'success', Icon: 'checkbox-circle' },
+  error: { tone: 'error', Icon: 'error-warning' },
+  denied: { tone: 'error', Icon: 'shield' },
+  running: { tone: 'warning', Icon: 'loader-4', spin: true },
+  idle: { tone: 'muted', Icon: 'pulse' },
+} satisfies Record<
   ScheduledTaskStatus,
   {
     tone: StatusTone;
     Icon: IconName;
     spin?: boolean;
   }
-> = {
-  success: { tone: 'success', Icon: 'checkbox-circle' },
-  error: { tone: 'error', Icon: 'error-warning' },
-  denied: { tone: 'error', Icon: 'shield' },
-  running: { tone: 'warning', Icon: 'loader-4', spin: true },
-  idle: { tone: 'muted', Icon: 'pulse' },
-};
+>;
 
 export const getScheduledTaskStatusLabel = (status: ScheduledTaskStatus, t: Translate): string => {
   if (status === 'success') return t('sessions.scheduledTasks.dialog.status.success');
