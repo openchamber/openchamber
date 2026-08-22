@@ -8,6 +8,7 @@ export const createSettingsHelpers = (dependencies) => {
     normalizeTunnelSessionTtlMs,
     normalizeTunnelProvider,
     normalizeTunnelMode,
+    normalizeTailscaleHttpsPort,
     normalizeOptionalPath,
     normalizeManagedRemoteTunnelHostname,
     normalizeManagedRemoteTunnelPresets,
@@ -411,6 +412,12 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.tunnelMode === 'string') {
       result.tunnelMode = normalizeTunnelMode(candidate.tunnelMode);
+    }
+    if (Object.prototype.hasOwnProperty.call(candidate, 'tailscaleHttpsPort')) {
+      const port = normalizeTailscaleHttpsPort(candidate.tailscaleHttpsPort);
+      if (port !== null) {
+        result.tailscaleHttpsPort = port;
+      }
     }
     if (candidate.managedLocalTunnelConfigPath === null) {
       result.managedLocalTunnelConfigPath = null;

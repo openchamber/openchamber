@@ -1,11 +1,11 @@
 ---
 title: Desktop Tunnels
-description: Create Cloudflare or Ngrok tunnels from the desktop app.
+description: Create Cloudflare, Ngrok, or Tailscale tunnels from the desktop app.
 ---
 
 # Desktop Tunnels
 
-The desktop app can create a public tunnel from **Settings → OpenChamber → Tunnel**. You do not need to start OpenChamber from the CLI for this path.
+The desktop app can create a tunnel from **Settings → OpenChamber → Tunnel**. You do not need to start OpenChamber from the CLI for this path.
 
 ## Install a provider
 
@@ -22,14 +22,28 @@ Cloudflare uses `cloudflared`. Ngrok requires an ngrok account and an authtoken 
 ngrok config add-authtoken <your-ngrok-token>
 ```
 
+Tailscale requires its `tailscale` CLI and `tailscaled` daemon to be installed, running, and logged in. OpenChamber does not install or manage `tailscaled`.
+
 ## Start from the app
 
 1. Open **Settings → OpenChamber → Tunnel**.
-2. Choose **Cloudflare** or **Ngrok**.
-3. Start a quick tunnel.
+2. Choose **Cloudflare**, **Ngrok**, or **Tailscale**.
+3. Start a tunnel. For Tailscale, use `private-network` for tailnet-only Tailscale Serve or `quick` for public Tailscale Funnel.
 4. Scan the generated QR code from your phone.
 
-Ngrok currently supports quick tunnels. Cloudflare supports quick tunnels and managed Cloudflare modes.
+Ngrok currently supports quick tunnels. Cloudflare supports quick tunnels and managed Cloudflare modes. Tailscale supports `private-network` and `quick` in this MVP.
+
+## Tailscale MVP
+
+Tailscale `private-network` runs Tailscale Serve in the foreground and is tailnet-only. Tailscale `quick` runs Tailscale Funnel in the foreground and exposes the service to the public internet.
+
+Both modes default to frontend HTTPS port `443`. For `private-network` (Tailscale Serve), the desktop UI uses a custom numeric input accepting any integer port from `1` through `65535`; for `quick` (Tailscale Funnel), it uses a fixed selector limited to `443`, `8443`, and `10000`. The frontend port is separate from the backend `--port`, which remains the local OpenChamber port. The Tailscale listener is node-global, so an existing listener can conflict with the selected frontend port; stop or reconfigure it, or choose another port allowed by the mode.
+
+Funnel requires MagicDNS and HTTPS to be enabled for your tailnet, plus permission in your tailnet policy. OpenChamber authentication still applies. Tailscale `ts.net` certificate names can appear in Certificate Transparency logs.
+
+Tailscale supports multiple paths, but OpenChamber intentionally does not expose path multiplexing yet because OpenChamber subpath compatibility is not established.
+
+OpenChamber still uses a foreground lifecycle. It does not support `--bg`, persistence, Tailscale reset support, Docker bundling, `sudo`, or daemon management.
 
 ## Access protection
 

@@ -239,7 +239,7 @@ const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
 const LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS = 30_000;
 const OPENCODE_SHUTDOWN_GRACE_MS = 100;
-const { autoUpdater } = updaterPkg;
+const autoUpdater = app.isPackaged ? updaterPkg.autoUpdater : null;
 
 const state = {
   serverHandle: null,

@@ -431,6 +431,36 @@ describe('updateDesktopSettings', () => {
     expect(useMessageQueueStore.getState().followUpBehavior).toBe('queue');
   });
 
+  test('preserves Tailscale tunnel preferences from server settings', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    const syncedSettings: SettingsPayload[] = [];
+    const handleSettingsSynced = (event: Event) => {
+      syncedSettings.push((event as CustomEvent<SettingsPayload>).detail);
+    };
+    window.addEventListener('openchamber:settings-synced', handleSettingsSynced);
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: { tunnelProvider: 'tailscale', tunnelMode: 'private-network', tailscaleHttpsPort: 9443 },
+      source: 'web',
+    }));
+
+    try {
+      await syncDesktopSettings();
+    } finally {
+      window.removeEventListener('openchamber:settings-synced', handleSettingsSynced);
+    }
+
+    expect({
+      tunnelProvider: syncedSettings.at(-1)?.tunnelProvider,
+      tunnelMode: syncedSettings.at(-1)?.tunnelMode,
+      tailscaleHttpsPort: syncedSettings.at(-1)?.tailscaleHttpsPort,
+    }).toEqual({
+      tunnelProvider: 'tailscale',
+      tunnelMode: 'private-network',
+      tailscaleHttpsPort: 9443,
+    });
+  });
+
   test('treats settings save responses as partial patches', async () => {
     getWindow();
     localStorage.setItem('selectedThemeId', 'existing-theme');

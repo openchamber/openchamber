@@ -1200,9 +1200,17 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.tunnelMode === 'string') {
     const mode = candidate.tunnelMode.trim().toLowerCase();
-    if (mode === 'quick' || mode === 'managed-remote' || mode === 'managed-local') {
+    if (mode === 'quick' || mode === 'private-network' || mode === 'managed-remote' || mode === 'managed-local') {
       result.tunnelMode = mode;
     }
+  }
+  if (
+    typeof candidate.tailscaleHttpsPort === 'number'
+    && Number.isInteger(candidate.tailscaleHttpsPort)
+    && candidate.tailscaleHttpsPort >= 1
+    && candidate.tailscaleHttpsPort <= 65535
+  ) {
+    result.tailscaleHttpsPort = candidate.tailscaleHttpsPort;
   }
   if (candidate.tunnelBootstrapTtlMs === null) {
     result.tunnelBootstrapTtlMs = null;

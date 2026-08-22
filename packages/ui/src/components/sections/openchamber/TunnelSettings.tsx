@@ -16,8 +16,13 @@ import { openExternalUrl } from '@/lib/url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
-import { SettingsSection, SettingsGroupTitle, SETTINGS_SELECT_SIZE, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsGroupTitle, SettingsFieldRow, SETTINGS_SELECT_SIZE, SETTINGS_SELECT_ROW_TRIGGER_CLASS, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
+import {
+  TAILSCALE_FUNNEL_HTTPS_PORTS,
+  parseTailscaleHttpsPort,
+  tailscaleHttpsPortFor,
+} from './tailscaleHttpsPort';
 
 type TunnelState =
   | 'checking'
@@ -29,7 +34,7 @@ type TunnelState =
   | 'error';
 
 type TtlOption = { value: string; label: string; ms: number | null };
-type TunnelMode = 'quick' | 'managed-remote' | 'managed-local';
+type TunnelMode = 'quick' | 'private-network' | 'managed-remote' | 'managed-local';
 type ApiTunnelMode = TunnelMode;
 
 interface ManagedRemoteTunnelPreset {
@@ -59,6 +64,11 @@ const MANAGED_REMOTE_TUNNEL_DOC_URL = 'https://developers.cloudflare.com/cloudfl
 const MANAGED_LOCAL_TUNNEL_DOC_URL = 'https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/configuration-file/';
 
 const TUNNEL_MODE_OPTIONS: Array<{ value: TunnelMode; labelKey: string; tooltipKey: string }> = [
+  {
+    value: 'private-network',
+    labelKey: 'settings.openchamber.tunnel.option.mode.privateNetwork.label',
+    tooltipKey: 'settings.openchamber.tunnel.option.mode.privateNetwork.tooltip',
+  },
   {
     value: 'quick',
     labelKey: 'settings.openchamber.tunnel.option.mode.quick.label',
@@ -144,10 +154,12 @@ interface TunnelStartResponse {
 interface TunnelProviderModeDescriptor {
   key: TunnelMode;
   label: string;
+  supports?: string[];
 }
 
 interface TunnelProviderCapability {
   provider: string;
+  defaults?: { mode: TunnelMode };
   modes?: TunnelProviderModeDescriptor[];
 }
 
@@ -166,7 +178,7 @@ interface TunnelDependencyInstallInfo {
   installCommand: string;
 }
 
-const getProviderDependencyName = (provider: string): string => (provider === 'ngrok' ? 'ngrok' : 'cloudflared');
+const getProviderDependencyName = (provider: string): string => (provider === 'ngrok' ? 'ngrok' : provider === 'tailscale' ? 'tailscale' : 'cloudflared');
 
 const getClientInstallPlatform = (): string => {
   if (typeof window !== 'undefined' && typeof window.__OPENCHAMBER_PLATFORM__ === 'string') {
@@ -197,6 +209,10 @@ const getFallbackInstallCommand = (provider: string, platform = getClientInstall
       return 'brew install ngrok';
     }
     return 'https://ngrok.com/download';
+  }
+
+  if (provider === 'tailscale') {
+    return 'https://tailscale.com/download';
   }
 
   if (platform === 'win32') {
@@ -240,13 +256,17 @@ const getProviderLabel = (provider: string): string => {
 };
 
 const ProviderOptionLabel: React.FC<{ provider: string }> = ({ provider }) => {
-  const label = getProviderLabel(provider);
-  const isCloudflare = provider === 'cloudflare';
-  const isNgrok = provider === 'ngrok';
+  const { t } = useI18n();
+  const label = provider === 'tailscale'
+    ? t('settings.openchamber.tunnel.provider.tailscale')
+    : getProviderLabel(provider);
 
   return (
     <span className="flex items-center gap-2">
-      <Icon name="cloud" className={cn('size-4 shrink-0', isCloudflare || isNgrok ? 'text-[var(--status-warning)]' : 'text-muted-foreground')} />
+      <Icon
+        name="cloud"
+        className="size-4 shrink-0 text-muted-foreground"
+      />
       <span>{label}</span>
     </span>
   );
@@ -255,6 +275,9 @@ const ProviderOptionLabel: React.FC<{ provider: string }> = ({ provider }) => {
 const toUiTunnelMode = (mode: string | null | undefined): TunnelMode => {
   if (mode === 'quick') {
     return 'quick';
+  }
+  if (mode === 'private-network') {
+    return 'private-network';
   }
   if (mode === 'managed-remote') {
     return 'managed-remote';
@@ -364,6 +387,8 @@ export const TunnelSettings: React.FC = () => {
   const [dependencyInstallInfo, setDependencyInstallInfo] = React.useState<TunnelDependencyInstallInfo>(() => createTunnelDependencyInstallInfo('cloudflare'));
   const [providerCapabilities, setProviderCapabilities] = React.useState<TunnelProviderCapability[]>([]);
   const [tunnelMode, setTunnelMode] = React.useState<TunnelMode>('quick');
+  const [tailscaleHttpsPort, setTailscaleHttpsPort] = React.useState(443);
+  const [tailscaleHttpsPortInput, setTailscaleHttpsPortInput] = React.useState('443');
   const [managedLocalConfigPath, setManagedLocalConfigPath] = React.useState<string | null>(null);
   const [managedRemoteTunnelPresets, setManagedRemoteTunnelPresets] = React.useState<ManagedRemoteTunnelPreset[]>([]);
   const [expandedManagedRemoteTunnels, setExpandedManagedRemoteTunnels] = React.useState<Record<string, boolean>>({});
@@ -466,17 +491,25 @@ export const TunnelSettings: React.FC = () => {
   const selectedProviderCapability = React.useMemo(() => {
     return providerCapabilities.find((capability) => capability.provider === tunnelProvider) ?? null;
   }, [providerCapabilities, tunnelProvider]);
+  const supportsHttpsPort = tunnelProvider === 'tailscale'
+    && selectedProviderCapability?.modes
+      ?.find((mode) => mode.key === tunnelMode)
+      ?.supports?.includes('httpsPort') === true;
+  const parsedTailscaleHttpsPortInput = parseTailscaleHttpsPort(tailscaleHttpsPortInput);
+  const isTailscaleHttpsPortInputInvalid = tunnelProvider === 'tailscale'
+    && tunnelMode === 'private-network'
+    && parsedTailscaleHttpsPortInput === null;
   const tunnelModeOptions = React.useMemo(() => {
     const supportedModes = new Set(
       selectedProviderCapability?.modes
         ?.map((mode) => mode.key)
-        .filter((mode): mode is TunnelMode => mode === 'quick' || mode === 'managed-remote' || mode === 'managed-local')
+        .filter((mode): mode is TunnelMode => mode === 'quick' || mode === 'private-network' || mode === 'managed-remote' || mode === 'managed-local')
     );
     if (supportedModes.size === 0) {
-      return TUNNEL_MODE_OPTIONS;
+      return TUNNEL_MODE_OPTIONS.filter((option) => option.value !== 'private-network' || tunnelProvider === 'tailscale');
     }
     return TUNNEL_MODE_OPTIONS.filter((option) => supportedModes.has(option.value));
-  }, [selectedProviderCapability]);
+  }, [selectedProviderCapability, tunnelProvider]);
   const providerSupportsManagedModes = React.useMemo(
     () => tunnelModeOptions.some((option) => option.value === 'managed-remote' || option.value === 'managed-local'),
     [tunnelModeOptions],
@@ -552,6 +585,10 @@ export const TunnelSettings: React.FC = () => {
       const loadedProvider = typeof settingsData?.tunnelProvider === 'string' && settingsData.tunnelProvider.trim().length > 0
         ? settingsData.tunnelProvider.trim().toLowerCase()
         : 'cloudflare';
+      const persistedTailscaleHttpsPort = parseTailscaleHttpsPort(settingsData?.tailscaleHttpsPort) ?? 443;
+      const loadedTailscaleHttpsPort = loadedProvider === 'tailscale'
+        ? tailscaleHttpsPortFor(loadedProvider, loadedMode, persistedTailscaleHttpsPort) ?? 443
+        : persistedTailscaleHttpsPort;
       const loadedManagedLocalConfigPath = typeof settingsData?.managedLocalTunnelConfigPath === 'string'
         ? settingsData.managedLocalTunnelConfigPath.trim() || null
         : null;
@@ -578,6 +615,8 @@ export const TunnelSettings: React.FC = () => {
       setTunnelProvider(loadedProvider);
       setProviderCapabilities(Array.isArray(providersData?.providers) ? providersData.providers : []);
       setTunnelMode(loadedMode);
+      setTailscaleHttpsPort(loadedTailscaleHttpsPort);
+      setTailscaleHttpsPortInput(String(loadedTailscaleHttpsPort));
       setManagedLocalConfigPath(loadedManagedLocalConfigPath);
       setManagedRemoteTunnelPresets(presets);
       setSelectedPresetId(selectedId);
@@ -775,6 +814,7 @@ export const TunnelSettings: React.FC = () => {
   const saveTunnelSettings = React.useCallback(async (payload: {
     tunnelProvider?: string;
     tunnelMode?: TunnelMode;
+    tailscaleHttpsPort?: number;
     managedLocalTunnelConfigPath?: string | null;
     managedRemoteTunnelPresets?: ManagedRemoteTunnelPreset[];
     managedRemoteTunnelPresetTokens?: Record<string, string>;
@@ -789,6 +829,10 @@ export const TunnelSettings: React.FC = () => {
       }
       if (Object.prototype.hasOwnProperty.call(payload, 'tunnelProvider') && typeof payload.tunnelProvider === 'string') {
         setTunnelProvider(payload.tunnelProvider);
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'tailscaleHttpsPort') && payload.tailscaleHttpsPort) {
+        setTailscaleHttpsPort(payload.tailscaleHttpsPort);
+        setTailscaleHttpsPortInput(String(payload.tailscaleHttpsPort));
       }
       if (Object.prototype.hasOwnProperty.call(payload, 'managedLocalTunnelConfigPath')) {
         setManagedLocalConfigPath(payload.managedLocalTunnelConfigPath ?? null);
@@ -850,12 +894,29 @@ export const TunnelSettings: React.FC = () => {
     setManagedRemoteValidationError(null);
     setErrorMessage(null);
     const capability = providerCapabilities.find((entry) => entry.provider === provider);
-    const defaultMode = capability?.modes?.some((mode) => mode.key === tunnelMode)
-      ? tunnelMode
-      : toUiTunnelMode(capability?.modes?.[0]?.key);
-    await saveTunnelSettings({ tunnelProvider: provider, tunnelMode: defaultMode });
+    const defaultMode = capability?.defaults?.mode
+      ?? (capability?.modes?.some((mode) => mode.key === tunnelMode)
+        ? tunnelMode
+        : toUiTunnelMode(capability?.modes?.[0]?.key));
+    const nextPort = tailscaleHttpsPortFor(
+      provider,
+      defaultMode,
+      parsedTailscaleHttpsPortInput ?? tailscaleHttpsPort,
+    );
+    await saveTunnelSettings({
+      tunnelProvider: provider,
+      tunnelMode: defaultMode,
+      ...(nextPort === undefined ? {} : { tailscaleHttpsPort: nextPort }),
+    });
     void refreshTunnelDependencyCheck(provider);
-  }, [providerCapabilities, refreshTunnelDependencyCheck, saveTunnelSettings, tunnelMode]);
+  }, [
+    parsedTailscaleHttpsPortInput,
+    providerCapabilities,
+    refreshTunnelDependencyCheck,
+    saveTunnelSettings,
+    tailscaleHttpsPort,
+    tunnelMode,
+  ]);
 
   const handleBrowseManagedLocalConfig = React.useCallback(async () => {
     const result = await requestFileAccess({
@@ -924,6 +985,11 @@ export const TunnelSettings: React.FC = () => {
       return;
     }
 
+    if (isTailscaleHttpsPortInputInvalid) {
+      toast.error(t('settings.openchamber.tunnel.field.tailscaleHttpsPortError'));
+      return;
+    }
+
     setState('starting');
 
     try {
@@ -953,6 +1019,13 @@ export const TunnelSettings: React.FC = () => {
         body: JSON.stringify({
           provider: tunnelProvider,
           mode: tunnelMode,
+          ...(tunnelProvider === 'tailscale' ? {
+            tailscaleHttpsPort: tailscaleHttpsPortFor(
+              tunnelProvider,
+              tunnelMode,
+              parsedTailscaleHttpsPortInput ?? tailscaleHttpsPort,
+            ),
+          } : {}),
           ...(tunnelMode === 'managed-remote' && selectedPreset ? {
             managedRemoteTunnelPresetId: selectedPreset.id,
             managedRemoteTunnelPresetName: selectedPreset.name,
@@ -979,9 +1052,12 @@ export const TunnelSettings: React.FC = () => {
 
       const startedUrl = typeof data.url === 'string' ? data.url : '';
       if (!startedUrl) {
+        const missingUrlMessage = tunnelProvider === 'tailscale'
+          ? t('settings.openchamber.tunnel.toast.startedButNoUrl')
+          : t('settings.openchamber.tunnel.toast.startedButNoPublicUrl');
         setState('error');
-        setErrorMessage(t('settings.openchamber.tunnel.toast.startedButNoPublicUrl'));
-        toast.error(t('settings.openchamber.tunnel.toast.startedButNoPublicUrl'));
+        setErrorMessage(missingUrlMessage);
+        toast.error(missingUrlMessage);
         return;
       }
 
@@ -1027,6 +1103,7 @@ export const TunnelSettings: React.FC = () => {
       toast.error(t('settings.openchamber.tunnel.toast.startFailed'));
     }
   }, [
+    isTailscaleHttpsPortInputInvalid,
     managedLocalConfigExtensionError,
     managedRemoteTunnelPresets,
     saveTunnelSettings,
@@ -1034,6 +1111,8 @@ export const TunnelSettings: React.FC = () => {
     sessionTokensByPresetId,
     t,
     tunnelProvider,
+    tailscaleHttpsPort,
+    parsedTailscaleHttpsPortInput,
     tunnelMode,
     managedLocalConfigPath,
   ]);
@@ -1102,11 +1181,24 @@ export const TunnelSettings: React.FC = () => {
       setState('idle');
     }
 
+    const nextPort = tailscaleHttpsPortFor(
+      tunnelProvider,
+      value,
+      parsedTailscaleHttpsPortInput ?? tailscaleHttpsPort,
+    );
     await saveTunnelSettings({
       tunnelMode: value,
       managedRemoteTunnelPresets,
+      ...(nextPort === undefined ? {} : { tailscaleHttpsPort: nextPort }),
     });
-  }, [managedRemoteTunnelPresets, saveTunnelSettings, state]);
+  }, [
+    managedRemoteTunnelPresets,
+    parsedTailscaleHttpsPortInput,
+    saveTunnelSettings,
+    state,
+    tailscaleHttpsPort,
+    tunnelProvider,
+  ]);
 
   const persistSelectedPreset = React.useCallback(async (preset: ManagedRemoteTunnelPreset, presets: ManagedRemoteTunnelPreset[]) => {
     try {
@@ -1261,6 +1353,7 @@ export const TunnelSettings: React.FC = () => {
               {renderedSessionRecords.map((record) => {
                 const isQuick = record.mode === 'quick';
                 const isManagedRemote = record.mode === 'managed-remote';
+                const isPrivateNetwork = record.mode === 'private-network';
                 const modeBadgeClass = isQuick
                   ? 'border-[var(--status-warning-border)] bg-[var(--status-warning-background)] text-[var(--status-warning)]'
                   : isManagedRemote
@@ -1271,9 +1364,11 @@ export const TunnelSettings: React.FC = () => {
                   : 'text-muted-foreground/50';
                 const modeLabel = isQuick
                   ? t('settings.openchamber.tunnel.badge.quick')
-                  : isManagedRemote
-                    ? t('settings.openchamber.tunnel.badge.remote')
-                    : t('settings.openchamber.tunnel.badge.local');
+                  : isPrivateNetwork
+                    ? t('settings.openchamber.tunnel.badge.privateNetwork')
+                    : isManagedRemote
+                      ? t('settings.openchamber.tunnel.badge.remote')
+                      : t('settings.openchamber.tunnel.badge.local');
 
                 return (
                   <div
@@ -1310,7 +1405,11 @@ export const TunnelSettings: React.FC = () => {
               <p className={SETTINGS_CALLOUT_TITLE_CLASS}>
                 {t('settings.openchamber.tunnel.notAvailable.dependencyNotFound', { dependency: displayedDependencyInstallInfo.dependency })}
               </p>
-              <p className="typography-meta text-muted-foreground/70">{t('settings.openchamber.tunnel.notAvailable.installHint')}</p>
+              <p className="typography-meta text-muted-foreground/70">
+                {t(tunnelProvider === 'tailscale'
+                  ? 'settings.openchamber.tunnel.notAvailable.tailscaleInstallHint'
+                  : 'settings.openchamber.tunnel.notAvailable.installHint')}
+              </p>
               <code className="typography-code block rounded bg-muted/50 px-2 py-1 text-xs text-foreground">
                 {displayedDependencyInstallInfo.installCommand}
               </code>
@@ -1333,7 +1432,7 @@ export const TunnelSettings: React.FC = () => {
               >
                 <SelectTrigger size={SETTINGS_SELECT_SIZE} className="max-w-[16rem]">
                   <SelectValue placeholder={t('settings.openchamber.tunnel.field.providerPlaceholder')}>
-                    {getProviderLabel(tunnelProvider)}
+                    <ProviderOptionLabel provider={tunnelProvider} />
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -1369,16 +1468,91 @@ export const TunnelSettings: React.FC = () => {
                         }}
                         disabled={isSavingMode || state === 'starting' || state === 'stopping'}
                       >
-                        {tUnsafe(option.labelKey)}
+                        {tUnsafe(tunnelProvider === 'tailscale' && option.value === 'quick'
+                          ? 'settings.openchamber.tunnel.option.mode.tailscaleQuick.label'
+                          : option.labelKey)}
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent sideOffset={8} className="max-w-xs">
-                      {tUnsafe(option.tooltipKey)}
+                      {tUnsafe(tunnelProvider === 'tailscale' && option.value === 'quick'
+                        ? 'settings.openchamber.tunnel.option.mode.tailscaleQuick.tooltip'
+                        : option.tooltipKey)}
                     </TooltipContent>
                   </Tooltip>
                 ))}
               </div>
             </div>
+
+            {supportsHttpsPort && (
+              <SettingsFieldRow
+                settingsItem="tunnel.https-port"
+                label={t('settings.openchamber.tunnel.field.tailscaleHttpsPort')}
+                description={(
+                  <span id="tailscale-https-port-help">
+                    {t(tunnelMode === 'private-network'
+                      ? 'settings.openchamber.tunnel.field.tailscaleServeHttpsPortDescription'
+                      : 'settings.openchamber.tunnel.field.tailscaleFunnelHttpsPortDescription')}
+                  </span>
+                )}
+                controlClassName={tunnelMode === 'private-network' ? 'items-start' : undefined}
+              >
+                {tunnelMode === 'private-network' ? (
+                  <div className="w-full max-w-48 space-y-1">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      step={1}
+                      inputMode="numeric"
+                      value={tailscaleHttpsPortInput}
+                      onChange={(event) => setTailscaleHttpsPortInput(event.target.value)}
+                      onBlur={(event) => {
+                        const nextFocus = event.relatedTarget;
+                        if (nextFocus instanceof Element && nextFocus.closest('[data-settings-item="tunnel.type"]')) return;
+                        if (parsedTailscaleHttpsPortInput !== null) {
+                          void saveTunnelSettings({ tailscaleHttpsPort: parsedTailscaleHttpsPortInput });
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') event.currentTarget.blur();
+                      }}
+                      disabled={isSavingMode || state === 'starting' || state === 'stopping'}
+                      aria-label={t('settings.openchamber.tunnel.field.tailscaleHttpsPort')}
+                      aria-describedby={`tailscale-https-port-help${isTailscaleHttpsPortInputInvalid ? ' tailscale-https-port-error' : ''}`}
+                      aria-invalid={isTailscaleHttpsPortInputInvalid}
+                      className="h-8 rounded-md px-3 tabular-nums"
+                    />
+                    {isTailscaleHttpsPortInputInvalid && (
+                      <p id="tailscale-https-port-error" role="alert" className="typography-meta text-[var(--status-error)]">
+                        {t('settings.openchamber.tunnel.field.tailscaleHttpsPortError')}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <Select
+                    value={String(tailscaleHttpsPort)}
+                    onValueChange={(value) => {
+                      void saveTunnelSettings({ tailscaleHttpsPort: Number(value) });
+                    }}
+                    disabled={isSavingMode || state === 'starting' || state === 'stopping'}
+                  >
+                    <SelectTrigger
+                      size={SETTINGS_SELECT_SIZE}
+                      className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+                      aria-label={t('settings.openchamber.tunnel.field.tailscaleHttpsPort')}
+                      aria-describedby="tailscale-https-port-help"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TAILSCALE_FUNNEL_HTTPS_PORTS.map((port) => (
+                        <SelectItem key={port} value={String(port)}>{port}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </SettingsFieldRow>
+            )}
           </div>
 
           <div data-settings-item="tunnel.ttl" className="mt-2 grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
@@ -1433,9 +1607,11 @@ export const TunnelSettings: React.FC = () => {
                 <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
                 <div>
                   <p className="typography-meta text-[var(--status-warning)]">
-                    {t('settings.openchamber.tunnel.option.mode.quick.tooltip')}
+                    {t(tunnelProvider === 'tailscale'
+                      ? 'settings.openchamber.tunnel.warning.tailscaleFunnelPublic'
+                      : 'settings.openchamber.tunnel.option.mode.quick.tooltip')}
                   </p>
-                  {providerSupportsManagedModes && (
+                  {tunnelProvider !== 'tailscale' && providerSupportsManagedModes && (
                     <p className="typography-meta mt-1 text-[var(--status-warning)]">
                       {t('settings.openchamber.tunnel.warning.quickModeReliability')}
                     </p>
@@ -1752,7 +1928,9 @@ export const TunnelSettings: React.FC = () => {
                     )}
                     <p className="typography-meta text-[var(--status-info)]">
                       {t('settings.openchamber.tunnel.note.startModeAndGenerateLink', {
-                        mode: tUnsafe(TUNNEL_MODE_OPTIONS.find((option) => option.value === tunnelMode)?.labelKey ?? 'settings.openchamber.tunnel.option.mode.quick.label'),
+                        mode: tUnsafe(tunnelProvider === 'tailscale' && tunnelMode === 'quick'
+                          ? 'settings.openchamber.tunnel.option.mode.tailscaleQuick.label'
+                          : TUNNEL_MODE_OPTIONS.find((option) => option.value === tunnelMode)?.labelKey ?? 'settings.openchamber.tunnel.option.mode.quick.label'),
                       })}
                     </p>
                   </div>
@@ -1829,7 +2007,11 @@ export const TunnelSettings: React.FC = () => {
             </div>
 
             <div>
-              <p className="typography-meta mb-1 text-muted-foreground/70">{t('settings.openchamber.tunnel.field.publicUrlHint')}</p>
+              <p className="typography-meta mb-1 text-muted-foreground/70">
+                {t(tunnelProvider === 'tailscale' && tunnelMode === 'private-network'
+                  ? 'settings.openchamber.tunnel.field.tailnetUrlHint'
+                  : 'settings.openchamber.tunnel.field.publicUrlHint')}
+              </p>
               <code className="typography-code block truncate rounded bg-muted/50 px-2 py-1 text-xs text-foreground">
                 {tunnelInfo.url}
               </code>

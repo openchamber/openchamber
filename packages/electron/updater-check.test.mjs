@@ -5,6 +5,23 @@ import { checkForDesktopUpdate } from './updater-check.mjs';
 
 const compareVersions = (left, right) => left.localeCompare(right, undefined, { numeric: true });
 
+test('reports no update when the updater is unavailable in development', async () => {
+  const result = await checkForDesktopUpdate({
+    autoUpdater: null,
+    currentVersion: '1.0.0',
+    pendingUpdate: { version: '2.0.0' },
+    compareVersions,
+  });
+
+  assert.deepEqual(result, {
+    available: false,
+    updateInfo: null,
+    updateResult: null,
+    nextVersion: '1.0.0',
+    pendingUpdate: null,
+  });
+});
+
 test('signals failed checks without replacing an existing pending update', async () => {
   const pendingUpdate = { version: '2.0.0', electronUpdate: { id: 'existing' } };
   await assert.rejects(

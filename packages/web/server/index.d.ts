@@ -33,6 +33,7 @@ export declare function parseArgs(argv?: string[]): {
   tryCfTunnel: boolean;
   tunnelProvider?: string;
   tunnelMode?: string;
+  tailscaleHttpsPort?: number | string;
   tunnelConfigPath?: string | null;
   tunnelToken?: string;
   tunnelHostname?: string;

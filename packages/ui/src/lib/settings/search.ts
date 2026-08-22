@@ -884,14 +884,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'tunnel',
     titleKey: 'settings.openchamber.tunnel.field.provider',
     descriptionKey: 'settings.openchamber.tunnel.description',
-    keywords: ['remote access', 'cloudflare', 'ngrok'],
+    keywords: ['remote access', 'cloudflare', 'ngrok', 'tailscale', 'tailnet'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'tunnel.type',
     page: 'tunnel',
     titleKey: 'settings.openchamber.tunnel.field.tunnelType',
-    keywords: ['quick', 'managed remote', 'managed local'],
+    keywords: ['quick', 'managed remote', 'managed local', 'private network', 'serve', 'funnel'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

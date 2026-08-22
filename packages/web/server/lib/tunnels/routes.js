@@ -17,9 +17,11 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     upsertManagedRemoteTunnelToken,
     resolveManagedRemoteTunnelToken,
     TUNNEL_MODE_QUICK,
+    TUNNEL_MODE_PRIVATE_NETWORK,
     TUNNEL_MODE_MANAGED_LOCAL,
     TUNNEL_MODE_MANAGED_REMOTE,
     TUNNEL_PROVIDER_CLOUDFLARE,
+    TUNNEL_PROVIDER_TAILSCALE,
     TunnelServiceError,
     getActivePort,
     getRuntimeManagedRemoteTunnelHostname,
@@ -37,6 +39,9 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     }
     if (mode === TUNNEL_MODE_MANAGED_REMOTE) {
       return TUNNEL_MODE_MANAGED_REMOTE;
+    }
+    if (mode === TUNNEL_MODE_PRIVATE_NETWORK) {
+      return TUNNEL_MODE_PRIVATE_NETWORK;
     }
     return TUNNEL_MODE_QUICK;
   };
@@ -71,6 +76,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     hostname,
     token,
     configPath,
+    tailscaleHttpsPort,
     selectedPresetId,
     selectedPresetName,
   }) => {
@@ -95,6 +101,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       configPath,
       token,
       hostname,
+      tailscaleHttpsPort,
     });
 
     console.log(`Tunnel active (${result.provider}): ${result.publicUrl}`);
@@ -445,6 +452,8 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     });
 
     app.post('/api/openchamber/tunnel/start', async (_req, res) => {
+      let previousController = getActiveTunnelController();
+      let startAttempted = false;
       try {
         const settings = await readSettingsFromDiskMigrated();
         if (typeof _req?.body?.provider === 'string' && _req.body.provider.trim().length > 0) {
@@ -454,7 +463,14 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           }
         }
         const provider = normalizeTunnelProvider(_req?.body?.provider ?? settings?.tunnelProvider);
-        const modeInput = _req?.body?.mode ?? settings?.tunnelMode;
+        const selectedProvider = tunnelProviderRegistry.get(provider);
+        const currentProvider = tunnelService.resolveActiveProvider() || normalizeTunnelProvider(settings?.tunnelProvider);
+        const hasExplicitMode = typeof _req?.body?.mode === 'string' && _req.body.mode.trim().length > 0;
+        const modeInput = hasExplicitMode
+          ? _req.body.mode
+          : provider !== currentProvider
+            ? selectedProvider?.capabilities?.defaults?.mode
+            : settings?.tunnelMode ?? selectedProvider?.capabilities?.defaults?.mode;
         const intent = typeof _req?.body?.intent === 'string' ? _req.body.intent.trim().toLowerCase() : undefined;
         const mode = typeof modeInput === 'string'
           ? modeInput.trim().toLowerCase()
@@ -492,6 +508,10 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         const requestSessionTtlMs = typeof _req?.body?.sessionTtlMs === 'number' && Number.isFinite(_req.body.sessionTtlMs)
           ? normalizeTunnelSessionTtlMs(_req.body.sessionTtlMs)
           : undefined;
+        const hasExplicitTailscaleHttpsPort = Object.prototype.hasOwnProperty.call(_req?.body || {}, 'tailscaleHttpsPort');
+        const tailscaleHttpsPort = provider === TUNNEL_PROVIDER_TAILSCALE
+          ? (hasExplicitTailscaleHttpsPort ? _req.body.tailscaleHttpsPort : settings?.tailscaleHttpsPort)
+          : undefined;
         const bootstrapTtlMs = requestConnectTtlMs ?? (settings?.tunnelBootstrapTtlMs === null
           ? null
           : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs));
@@ -502,6 +522,8 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         const previousProvider = tunnelService.resolveActiveProvider();
         const previousUrl = tunnelService.getPublicUrl();
 
+        previousController = getActiveTunnelController();
+        startAttempted = true;
         const { publicUrl, provider: activeProvider, providerMetadata } = await startTunnelWithNormalizedRequest({
           provider,
           mode,
@@ -509,6 +531,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           hostname,
           token,
           configPath: requestConfigPath,
+          tailscaleHttpsPort,
           selectedPresetId,
           selectedPresetName,
         });
@@ -568,8 +591,11 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         });
       } catch (error) {
         console.error('Failed to start tunnel:', error);
-        setActiveTunnelController(null);
-        tunnelAuthController.clearActiveTunnel();
+        const activeController = getActiveTunnelController();
+        if (startAttempted && (!activeController || activeController !== previousController)) {
+          tunnelAuthController.clearActiveTunnel();
+        }
+        setActiveTunnelController(activeController);
         if (error instanceof TunnelServiceError) {
           const status = error.code === 'missing_dependency'
             ? 400

@@ -7,6 +7,15 @@ const isMissingUpdateFeedError = (error) => {
 };
 
 export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendingUpdate, compareVersions }) => {
+  if (!autoUpdater) {
+    return {
+      available: false,
+      updateInfo: null,
+      updateResult: null,
+      nextVersion: currentVersion,
+      pendingUpdate: null,
+    };
+  }
   let updateResult;
   try {
     updateResult = await autoUpdater.checkForUpdates();

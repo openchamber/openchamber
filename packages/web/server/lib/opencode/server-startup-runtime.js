@@ -88,6 +88,7 @@ export const createServerStartupRuntime = (dependencies) => {
                 hostname: startupTunnelRequest.hostname,
                 token: startupTunnelRequest.token,
                 configPath: startupTunnelRequest.configPath,
+                tailscaleHttpsPort: startupTunnelRequest.tailscaleHttpsPort,
                 selectedPresetId: '',
                 selectedPresetName: '',
               });

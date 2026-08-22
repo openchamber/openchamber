@@ -16,6 +16,7 @@ import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.j
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
 import { createNgrokTunnelProvider } from './lib/tunnels/providers/ngrok.js';
+import { createTailscaleTunnelProvider } from './lib/tunnels/providers/tailscale.js';
 import { createRequestSecurityRuntime } from './lib/security/request-security.js';
 import {
   getUnauthenticatedLanErrorMessage,
@@ -26,13 +27,16 @@ import {
   TUNNEL_MODE_MANAGED_LOCAL,
   TUNNEL_MODE_MANAGED_REMOTE,
   TUNNEL_MODE_QUICK,
+  TUNNEL_MODE_PRIVATE_NETWORK,
   TUNNEL_PROVIDER_CLOUDFLARE,
+  TUNNEL_PROVIDER_TAILSCALE,
   TunnelServiceError,
   isSupportedTunnelMode,
   normalizeOptionalPath,
   normalizeTunnelStartRequest,
   normalizeTunnelMode,
   normalizeTunnelProvider,
+  normalizeTailscaleHttpsPort,
 } from './lib/tunnels/types.js';
 import { prepareNotificationLastMessage } from './lib/notifications/index.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
@@ -332,6 +336,7 @@ const settingsHelpers = createSettingsHelpers({
   normalizeTunnelSessionTtlMs,
   normalizeTunnelProvider,
   normalizeTunnelMode,
+  normalizeTailscaleHttpsPort,
   normalizeOptionalPath,
   normalizeManagedRemoteTunnelHostname,
   normalizeManagedRemoteTunnelPresets,
@@ -544,6 +549,7 @@ let globalWatcherStartPromise = null;
 const tunnelProviderRegistry = createTunnelProviderRegistry([
   createCloudflareTunnelProvider(),
   createNgrokTunnelProvider(),
+  createTailscaleTunnelProvider(),
 ]);
 tunnelProviderRegistry.seal();
 const tunnelAuthController = createTunnelAuth();
@@ -1061,9 +1067,11 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
   upsertManagedRemoteTunnelToken,
   resolveManagedRemoteTunnelToken,
   TUNNEL_MODE_QUICK,
+  TUNNEL_MODE_PRIVATE_NETWORK,
   TUNNEL_MODE_MANAGED_LOCAL,
   TUNNEL_MODE_MANAGED_REMOTE,
   TUNNEL_PROVIDER_CLOUDFLARE,
+  TUNNEL_PROVIDER_TAILSCALE,
   TunnelServiceError,
   getActiveTunnelController: () => activeTunnelController,
   setActiveTunnelController: (value) => {
@@ -1575,7 +1583,8 @@ async function main(options = {}) {
     || options.tunnelConfigPath === null
     || typeof options.tunnelConfigPath === 'string'
     || typeof options.tunnelToken === 'string'
-    || typeof options.tunnelHostname === 'string';
+    || typeof options.tunnelHostname === 'string'
+    || options.tailscaleHttpsPort !== undefined;
   const startupTunnelRequest = shouldUseCanonicalTunnelConfig
     ? normalizeTunnelStartRequest({
         provider: normalizeTunnelProvider(options.tunnelProvider),
@@ -1583,6 +1592,7 @@ async function main(options = {}) {
         configPath: normalizeOptionalPath(options.tunnelConfigPath),
         token: typeof options.tunnelToken === 'string' ? options.tunnelToken.trim() : '',
         hostname: normalizeManagedRemoteTunnelHostname(options.tunnelHostname),
+        tailscaleHttpsPort: options.tailscaleHttpsPort,
       })
     : (tryCfTunnel
       ? {
@@ -1943,6 +1953,7 @@ async function main(options = {}) {
     },
     syncToHmrState,
     TUNNEL_MODE_QUICK,
+    TUNNEL_MODE_PRIVATE_NETWORK,
     TUNNEL_MODE_MANAGED_LOCAL,
     TUNNEL_MODE_MANAGED_REMOTE,
     host,

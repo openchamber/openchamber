@@ -116,7 +116,8 @@ export type DesktopSettings = {
   autoDeleteAfterDays?: number;
   sessionRetentionAction?: 'archive' | 'delete';
   tunnelProvider?: string;
-  tunnelMode?: 'quick' | 'managed-remote' | 'managed-local';
+  tunnelMode?: 'quick' | 'private-network' | 'managed-remote' | 'managed-local';
+  tailscaleHttpsPort?: number;
   tunnelBootstrapTtlMs?: number | null;
   tunnelSessionTtlMs?: number;
   managedLocalTunnelConfigPath?: string | null;

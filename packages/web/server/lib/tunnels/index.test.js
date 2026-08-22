@@ -6,13 +6,14 @@ import {
   TUNNEL_MODE_QUICK,
   TUNNEL_PROVIDER_CLOUDFLARE,
   TUNNEL_PROVIDER_NGROK,
+  TUNNEL_PROVIDER_TAILSCALE,
 } from './types.js';
 
 const createProvider = ({ provider, start, stop, resolvePublicUrl }) => ({
   id: provider,
   capabilities: {
     provider,
-    modes: [{ key: TUNNEL_MODE_QUICK, intent: TUNNEL_INTENT_EPHEMERAL_PUBLIC }],
+    modes: [{ key: TUNNEL_MODE_QUICK, intent: TUNNEL_INTENT_EPHEMERAL_PUBLIC, supports: ['httpsPort'] }],
   },
   checkAvailability: async () => ({ available: true }),
   start,
@@ -89,5 +90,47 @@ describe('createTunnelService', () => {
     expect(ngrokStarted).toBe(true);
     expect(result.provider).toBe(TUNNEL_PROVIDER_NGROK);
     expect(result.publicUrl).toBe('https://demo.ngrok-free.app');
+  });
+
+
+  it('replaces an active Tailscale tunnel when the HTTPS frontend port changes', async () => {
+    let controller = {
+      provider: TUNNEL_PROVIDER_TAILSCALE,
+      mode: TUNNEL_MODE_QUICK,
+      tailscaleHttpsPort: 443,
+      stop: () => {},
+      getPublicUrl: () => 'https://tailscale.example',
+    };
+    let stopped = false;
+    let started = false;
+    const tailscaleProvider = createProvider({
+      provider: TUNNEL_PROVIDER_TAILSCALE,
+      stop: () => { stopped = true; },
+      start: async () => {
+        started = true;
+        return {
+          mode: TUNNEL_MODE_QUICK,
+          tailscaleHttpsPort: 8443,
+          getPublicUrl: () => 'https://tailscale-new.example',
+        };
+      },
+    });
+    const service = createTunnelService({
+      registry: createRegistry({ [TUNNEL_PROVIDER_TAILSCALE]: tailscaleProvider }),
+      getController: () => controller,
+      setController: (next) => { controller = next; },
+      getActivePort: () => 3000,
+    });
+
+    const result = await service.start({
+      provider: TUNNEL_PROVIDER_TAILSCALE,
+      mode: TUNNEL_MODE_QUICK,
+      tailscaleHttpsPort: 8443,
+    });
+
+    expect(stopped).toBe(true);
+    expect(started).toBe(true);
+    expect(result.publicUrl).toBe('https://tailscale-new.example');
+    expect(controller.tailscaleHttpsPort).toBe(8443);
   });
 });
