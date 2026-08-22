@@ -1,3 +1,6 @@
+- Scheduled Tasks can show when a local preflight policy denied a run instead
+  of reporting it as successful.
+
 ## [1.22.0] - 2026-08-30
 
 - Switching sessions is now visually stable, without conversation jumps or partial rendering.
