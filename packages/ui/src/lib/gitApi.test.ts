@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { GitAPI, GitStatus } from "./api/types"
-import { getGitStatus, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from "./gitApi"
+import { createGitTag, getGitHistory, getGitHistoryMergeBase, getGitHistoryRefs, getGitStatus, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from "./gitApi"
 
 const status: GitStatus = {
   current: "main",
@@ -49,7 +49,59 @@ describe("getGitStatus", () => {
   })
 })
 
+describe("git history runtime dispatch", () => {
+  test("forwards history requests to runtime git APIs", async () => {
+    const calls: Array<unknown> = []
+    const runtimeGit = {
+      getGitHistoryRefs: async (directory: string) => {
+        calls.push(["refs", directory])
+        return { refs: [], current: null, upstream: null, base: null, snapshot: "snap" }
+      },
+      getGitHistory: async (directory: string, options: { refs: string[]; cursor?: string; limit?: number }) => {
+        calls.push(["history", directory, options])
+        return { items: [], nextCursor: null, hasMore: false, refsSnapshot: "snap" }
+      },
+      getGitHistoryMergeBase: async (directory: string, options: { refs: string[] }) => {
+        calls.push(["merge-base", directory, options])
+        return { mergeBase: null }
+      },
+    } as Partial<GitAPI> as GitAPI
+
+    await withRuntimeGit(runtimeGit, async () => {
+      await getGitHistoryRefs("/repo")
+      await getGitHistory("/repo", { refs: ["HEAD"], limit: 10 })
+      await getGitHistoryMergeBase("/repo", { refs: ["HEAD", "refs/heads/main"] })
+    })
+
+    expect(calls).toEqual([
+      ["refs", "/repo"],
+      ["history", "/repo", { refs: ["HEAD"], limit: 10 }],
+      ["merge-base", "/repo", { refs: ["HEAD", "refs/heads/main"] }],
+    ])
+  })
+})
+
 describe("git index mutations", () => {
+  test("forwards create tag requests to runtime git APIs when available", async () => {
+    let received: { directory: string; name: string; commitHash: string } | null = null
+    const runtimeGit = {
+      createGitTag: async (directory: string, name: string, commitHash: string) => {
+        received = { directory, name, commitHash }
+        return { success: true, tag: name }
+      },
+    } as Partial<GitAPI> as GitAPI
+
+    await withRuntimeGit(runtimeGit, async () => {
+      await createGitTag("/repo", "v1.2.3", "0123456789abcdef0123456789abcdef01234567")
+    })
+
+    expect(received).toEqual({
+      directory: "/repo",
+      name: "v1.2.3",
+      commitHash: "0123456789abcdef0123456789abcdef01234567",
+    })
+  })
+
   test("forwards bulk stage requests to runtime git APIs", async () => {
     let received: { directory: string; paths: string[] } | null = null
     const runtimeGit = {

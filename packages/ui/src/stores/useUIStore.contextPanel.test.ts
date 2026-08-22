@@ -1,9 +1,30 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import type { GitCommitChangedFile } from '@/lib/api/types';
 import { CONTEXT_SURFACES, sortContextSurfaces } from '../lib/surfaces/registry';
-import { useUIStore } from './useUIStore';
+import { useUIStore, type GitCommitDiffTarget } from './useUIStore';
+
+const buildCommitChangedFile = (overrides: Partial<GitCommitChangedFile> = {}): GitCommitChangedFile => ({
+  path: 'src/new-name.ts',
+  originalPath: 'src/old-name.ts',
+  status: 'R',
+  kind: 'file',
+  originalObjectId: '1'.repeat(64),
+  objectId: '2'.repeat(64),
+  insertions: 7,
+  deletions: 3,
+  isBinary: false,
+  ...overrides,
+});
+
+const buildCommitDiffTarget = (overrides: Partial<GitCommitDiffTarget> = {}): GitCommitDiffTarget => ({
+  commitHash: 'a'.repeat(40),
+  parentHash: null,
+  file: buildCommitChangedFile(),
+  ...overrides,
+});
 
 beforeEach(() => {
-  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
+  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [], gitRepositoryPaneStates: {} });
 });
 
 describe('useUIStore context panel tabs', () => {
@@ -27,6 +48,134 @@ describe('useUIStore context panel tabs', () => {
     const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
     expect(tabs).toHaveLength(1);
     expect(tabs[0]?.readOnly).toBe(false);
+  });
+
+  test('openContextCommitDiff stores a normalized historical diff target and keeps diff tabs singleton', () => {
+    const directory = '/repo';
+    const firstTarget = buildCommitDiffTarget();
+    const secondTarget = buildCommitDiffTarget({
+      commitHash: 'b'.repeat(40),
+      parentHash: 'c'.repeat(40),
+      file: buildCommitChangedFile({
+        path: 'src/second.ts',
+        originalPath: 'src/first.ts',
+        status: 'R',
+        objectId: 'd'.repeat(40),
+        originalObjectId: 'e'.repeat(40),
+      }),
+    });
+
+    useUIStore.getState().openContextCommitDiff(directory, firstTarget);
+
+    let panel = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(panel?.isOpen).toBe(true);
+    expect(panel?.activeTabId).toBe('diff');
+    expect(panel?.tabs).toHaveLength(1);
+    expect(panel?.tabs[0]?.targetPath).toBe('src/new-name.ts');
+    expect(panel?.tabs[0]?.commitDiffTarget).toEqual(firstTarget);
+
+    useUIStore.getState().openContextCommitDiff(directory, secondTarget);
+
+    panel = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(panel?.tabs).toHaveLength(1);
+    expect(panel?.tabs[0]?.id).toBe('diff');
+    expect(panel?.tabs[0]?.targetPath).toBe('src/second.ts');
+    expect(panel?.tabs[0]?.commitDiffTarget).toEqual(secondTarget);
+  });
+
+  test('migrate retains valid historical diff targets and clears malformed ones', () => {
+    const migrate = useUIStore.persist.getOptions().migrate;
+    const migrated = migrate?.({
+      contextPanelByDirectory: {
+        '/repo-valid': {
+          isOpen: true,
+          tabs: [{
+            mode: 'diff',
+            targetPath: 'src/valid.ts',
+            commitDiffTarget: buildCommitDiffTarget({
+              commitHash: 'f'.repeat(64),
+              parentHash: 'a'.repeat(40),
+              file: buildCommitChangedFile({
+                path: 'src/valid.ts',
+                originalPath: 'src/valid-before.ts',
+                kind: 'symlink',
+                originalObjectId: 'b'.repeat(40),
+                objectId: 'c'.repeat(64),
+              }),
+            }),
+          }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-commit': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-commit.ts', commitDiffTarget: buildCommitDiffTarget({ commitHash: 'not-a-hash' }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-parent': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-parent.ts', commitDiffTarget: buildCommitDiffTarget({ parentHash: 'xyz' }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-counts': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-counts.ts', commitDiffTarget: buildCommitDiffTarget({ file: buildCommitChangedFile({ insertions: -1 }) }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-status': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-status.ts', commitDiffTarget: buildCommitDiffTarget({ file: buildCommitChangedFile({ status: 'X' as GitCommitChangedFile['status'] }) }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-kind': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-kind.ts', commitDiffTarget: buildCommitDiffTarget({ file: buildCommitChangedFile({ kind: 'folder' as GitCommitChangedFile['kind'] }) }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-path': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-path.ts', commitDiffTarget: buildCommitDiffTarget({ file: buildCommitChangedFile({ path: '   ' }) }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-object': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-object.ts', commitDiffTarget: buildCommitDiffTarget({ file: buildCommitChangedFile({ objectId: 'oops' }) }) }],
+          activeTabId: 'diff',
+        },
+        '/repo-bad-binary': {
+          isOpen: true,
+          tabs: [{ mode: 'diff', targetPath: 'src/invalid-binary.ts', commitDiffTarget: buildCommitDiffTarget({ file: buildCommitChangedFile({ isBinary: 'true' as unknown as boolean }) }) }],
+          activeTabId: 'diff',
+        },
+      },
+    }, 16);
+
+    const state = JSON.parse(JSON.stringify(migrated ?? {})) as {
+      contextPanelByDirectory?: Record<string, { tabs?: Array<{ commitDiffTarget?: GitCommitDiffTarget | null }> }>;
+    };
+
+    expect(state.contextPanelByDirectory?.['/repo-valid']?.tabs?.[0]?.commitDiffTarget).toEqual({
+      commitHash: 'f'.repeat(64),
+      parentHash: 'a'.repeat(40),
+      file: {
+        path: 'src/valid.ts',
+        originalPath: 'src/valid-before.ts',
+        status: 'R',
+        kind: 'symlink',
+        originalObjectId: 'b'.repeat(40),
+        objectId: 'c'.repeat(64),
+        insertions: 7,
+        deletions: 3,
+        isBinary: false,
+      },
+    });
+    expect(state.contextPanelByDirectory?.['/repo-bad-commit']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-parent']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-counts']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-status']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-kind']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-path']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-object']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
+    expect(state.contextPanelByDirectory?.['/repo-bad-binary']?.tabs?.[0]?.commitDiffTarget ?? null).toBeNull();
   });
 });
 
@@ -201,5 +350,59 @@ describe('context panel tab limits', () => {
     const tabs = state?.tabs ?? [];
     expect(tabs.some((tab) => tab.id === state?.activeTabId)).toBe(true);
     expect(tabs.some((tab) => tab.targetPath === 'http://localhost:3019/')).toBe(true);
+  });
+});
+
+describe('useUIStore git repository pane state', () => {
+  test('stores repository-scoped pane state by runtime and normalized directory', () => {
+    useUIStore.getState().setGitRepositoryPaneState('/repo///', {
+      graphCollapsed: false,
+      graphHeight: 999,
+      graphFilterMode: 'manual',
+      graphManualRefIds: ['refs/tags/v1', 'refs/tags/v1', ' refs/heads/main '],
+    }, 'runtime-a');
+
+    const runtimeA = useUIStore.getState().getGitRepositoryPaneState('/repo', 'runtime-a');
+    const runtimeB = useUIStore.getState().getGitRepositoryPaneState('/repo', 'runtime-b');
+
+    expect(runtimeA.graphCollapsed).toBe(false);
+    expect(runtimeA.graphHeight).toBe(720);
+    expect('previewWidth' in runtimeA).toBe(false);
+    expect(runtimeA.graphFilterMode).toBe('manual');
+    expect(runtimeA.graphManualRefIds).toEqual(['refs/heads/main', 'refs/tags/v1']);
+    expect(runtimeB).toEqual({
+      changesCollapsed: false,
+      graphCollapsed: true,
+      graphHeight: 280,
+      graphFilterMode: 'auto',
+      graphManualRefIds: [],
+    });
+  });
+
+  test('sanitizes persisted repository pane state during migration and discards legacy preview width', () => {
+    const migrated = useUIStore.persist.getOptions().migrate?.({
+      gitRepositoryPaneStates: {
+        '["runtime-a","/repo"]': {
+          graphCollapsed: false,
+          graphHeight: 10,
+          previewWidth: 10,
+          graphFilterMode: 'manual',
+          graphManualRefIds: ['refs/tags/v1', '', 'refs/tags/v1'],
+        },
+      },
+    }, 15);
+
+    const paneStates = JSON.parse(JSON.stringify(migrated)).gitRepositoryPaneStates;
+
+    expect(paneStates).toEqual({
+        '["runtime-a","/repo"]': {
+          changesCollapsed: false,
+          graphCollapsed: false,
+          graphHeight: 180,
+          graphFilterMode: 'manual',
+          graphManualRefIds: ['refs/tags/v1'],
+          },
+    });
+    expect('previewWidth' in paneStates['["runtime-a","/repo"]']).toBe(false);
   });
 });

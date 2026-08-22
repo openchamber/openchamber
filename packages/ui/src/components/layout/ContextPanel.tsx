@@ -13,6 +13,7 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 // into the eager startup graph even when no such tab is open.
 const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/walkthrough/WalkthroughView').then((m) => ({ default: m.WalkthroughView })));
 const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((m) => ({ default: m.DiffView })));
+const ContextCommitDiffView = lazyWithChunkRecovery(() => import('@/components/views/git/ContextCommitDiffView').then((m) => ({ default: m.ContextCommitDiffView })));
 const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((m) => ({ default: m.FilesView })));
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((m) => ({ default: m.PlanView })));
@@ -35,6 +36,7 @@ import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/run
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
 import { Icon } from "@/components/icon/Icon";
+import { getDiffTabRenderKind } from './contextPanelDiffTabs';
 import {
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
@@ -1206,18 +1208,36 @@ export const ContextPanel: React.FC = () => {
               activeTab?.id !== tab.id && 'hidden'
             )}
           >
-            <React.Suspense fallback={null}>
-              <DiffView
-                hideStackedFileSidebar
-                stackedDefaultCollapsedAll
-                pinSelectedFileHeaderToTopOnNavigate
-                showOpenInEditorAction
-                diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
-                onDiffScopeChange={handleDiffScopeChange}
-                targetFilePath={tab.targetPath}
-                flushContent
-              />
-            </React.Suspense>
+            {(() => {
+              const commitDiffTarget = tab.commitDiffTarget;
+              return getDiffTabRenderKind(tab) === 'commit' && commitDiffTarget ? (
+              <React.Suspense fallback={null}>
+                <ContextCommitDiffView
+                  directory={directoryKey}
+                  target={commitDiffTarget}
+                  onClose={() => {
+                    if (!directoryKey) {
+                      return;
+                    }
+                    closeContextPanelTab(directoryKey, tab.id);
+                  }}
+                />
+              </React.Suspense>
+              ) : (
+              <React.Suspense fallback={null}>
+                <DiffView
+                  hideStackedFileSidebar
+                  stackedDefaultCollapsedAll
+                  pinSelectedFileHeaderToTopOnNavigate
+                  showOpenInEditorAction
+                  diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
+                  onDiffScopeChange={handleDiffScopeChange}
+                  targetFilePath={tab.targetPath}
+                  flushContent
+                />
+              </React.Suspense>
+              );
+            })()}
           </div>
         ))}
         {hasTerminalTab ? (

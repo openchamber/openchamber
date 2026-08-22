@@ -17,6 +17,7 @@ export const WORK_STATUS_SECTION_IDS = [
   'subagents',
   'tasks',
   'mcp',
+  'gitGraph',
   'pinned',
   'contextSources',
 ] as const;
@@ -30,6 +31,7 @@ export const WORK_STATUS_SECTION_LABEL_KEYS: Record<WorkStatusSectionId, I18nKey
   subagents: 'chat.workStatus.section.subagents',
   tasks: 'chat.workStatus.section.tasks',
   mcp: 'chat.workStatus.section.mcp',
+  gitGraph: 'chat.workStatus.section.gitGraph',
   pinned: 'chat.workStatus.section.pinned',
   contextSources: 'chat.workStatus.section.contextBreakdown',
 };

@@ -1,13 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  createGitTag,
+  getGitHistory,
+  getGitHistoryMergeBase,
+  getGitHistoryRefs,
   getGitBranches,
   getGitStatus,
+  getCommitFileDiff,
+  getCommitFiles,
   gitFetch,
   stageGitFile,
   stageGitFiles,
   unstageGitFile,
   unstageGitFiles,
 } from './gitApiHttp';
+import type {
+  GitCommitChangesRequest,
+  GitCommitFilePreviewRequest,
+} from './api/types';
 
 type FetchCall = {
   input: RequestInfo | URL;
@@ -57,6 +67,24 @@ const captureError = async (callback: () => Promise<void>): Promise<unknown> => 
 };
 
 describe('gitApiHttp index mutations', () => {
+  test('sends create tag payloads with the commit hash', async () => {
+    installWindowMock();
+    const calls = installFetchMock();
+    try {
+      await createGitTag('/repo', 'v1.2.3', '0123456789abcdef0123456789abcdef01234567');
+
+      expect(calls).toHaveLength(1);
+      expect(String(calls[0].input)).toBe('/api/git/tags?directory=%2Frepo');
+      expect(calls[0].init?.method).toBe('POST');
+      expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+        name: 'v1.2.3',
+        commitHash: '0123456789abcdef0123456789abcdef01234567',
+      });
+    } finally {
+      restoreMocks();
+    }
+  });
+
   test('sends bulk stage payloads as paths', async () => {
     installWindowMock();
     const calls = installFetchMock();
@@ -178,6 +206,61 @@ describe('gitApiHttp request priority', () => {
 
       expect(calls).toHaveLength(1);
       expect(calls[0].init?.priority).toBe(undefined);
+    } finally {
+      restoreMocks();
+    }
+  });
+});
+
+describe('gitApiHttp history requests', () => {
+  test('serializes repeated refs without comma ambiguity', async () => {
+    installWindowMock();
+    const calls = installFetchMock();
+    try {
+      await getGitHistoryRefs('/repo');
+      await getGitHistory('/repo', { refs: ['HEAD', 'refs/heads/main'], cursor: 'cursor', limit: 25 });
+      await getGitHistoryMergeBase('/repo', { refs: ['HEAD', 'refs/heads/main'] });
+
+      expect(String(calls[0].input)).toBe('/api/git/history/refs?directory=%2Frepo');
+      expect(String(calls[1].input)).toBe('/api/git/history?directory=%2Frepo&refs=HEAD&refs=refs%2Fheads%2Fmain&cursor=cursor&limit=25');
+      expect(String(calls[2].input)).toBe('/api/git/history/merge-base?directory=%2Frepo&refs=HEAD&refs=refs%2Fheads%2Fmain');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('serializes the all selector without explicit refs', async () => {
+    installWindowMock();
+    const calls = installFetchMock();
+    try {
+      await getGitHistory('/repo', { all: true, cursor: 'cursor', limit: 25 });
+
+      expect(String(calls[0].input)).toBe('/api/git/history?directory=%2Frepo&all=true&cursor=cursor&limit=25');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('accepts object requests for commit file history helpers', async () => {
+    installWindowMock();
+    const calls = installFetchMock();
+    try {
+      const changesRequest: GitCommitChangesRequest = {
+        commitHash: 'abc123',
+        parentHash: null,
+      };
+      const previewRequest: GitCommitFilePreviewRequest = {
+        commitHash: 'abc123',
+        parentHash: 'def456',
+        originalPath: null,
+        modifiedPath: 'new/name.ts',
+      };
+
+      await getCommitFiles('/repo', changesRequest);
+      await getCommitFileDiff('/repo', previewRequest);
+
+      expect(String(calls[0].input)).toBe('/api/git/commit-files?directory=%2Frepo&commitHash=abc123&parentHash=__ROOT__');
+      expect(String(calls[1].input)).toBe('/api/git/commit-file-diff?directory=%2Frepo&commitHash=abc123&parentHash=def456&originalPath=__ROOT__&modifiedPath=new%2Fname.ts');
     } finally {
       restoreMocks();
     }

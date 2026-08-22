@@ -161,11 +161,12 @@ export const ContextPanelRail: React.FC = () => {
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const workStatusPanelVisible = useUIStore((state) => state.workStatusPanelVisible);
   const contextRailOrder = useUIStore((state) => state.contextRailOrder);
+  const gitReviewLayout = useUIStore((state) => state.gitReviewLayout);
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
-  const { screenWidth } = useDeviceInfo();
+  const { isMobile, screenWidth } = useDeviceInfo();
   const gitStatus = useGitStatus(directoryKey || null);
 
   const surfaceSwitchPrefix = React.useMemo(
@@ -257,11 +258,13 @@ export const ContextPanelRail: React.FC = () => {
     return getVisibleContextRailSurfaces({
       railOrder: contextRailOrder,
       planModeEnabled,
+      reviewLayout: gitReviewLayout,
+      isMobile,
       isVSCode: isVSCodeRuntime(),
       screenWidth,
       tabs,
     });
-  }, [contextRailOrder, planModeEnabled, screenWidth, tabs]);
+  }, [contextRailOrder, gitReviewLayout, isMobile, planModeEnabled, screenWidth, tabs]);
 
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const { active, over } = event;

@@ -1,6 +1,7 @@
 import type {
   GitHubAPI,
   GitHubAuthStatus,
+  GitHubCommitDetails,
   GitHubIssueCommentsResult,
   GitHubIssueGetResult,
   GitHubIssuesListResult,
@@ -25,6 +26,168 @@ import type { RuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
 interface WebGitHubAPIOptions {
   urls: RuntimeUrlResolver;
 }
+
+type RawScalar = string | number | boolean | null;
+
+type RawGitHubUserSummaryObject = {
+  login?: RawScalar;
+  id?: RawScalar;
+  avatarUrl?: RawScalar;
+  name?: RawScalar;
+  email?: RawScalar;
+};
+
+type RawGitHubUserSummaryPayload = RawScalar | RawGitHubUserSummaryObject;
+
+type RawGitHubCommitDetailsObject = {
+  connected?: RawScalar;
+  url?: RawScalar;
+  author?: RawGitHubUserSummaryPayload;
+  error?: RawScalar;
+};
+
+type RawGitHubCommitDetailsPayload = RawScalar | RawGitHubCommitDetailsObject;
+
+type RawCommitDetailsFieldValue =
+  | RawScalar
+  | RawGitHubUserSummaryObject
+  | RawGitHubCommitDetailsObject
+  | undefined;
+
+type ParsedField<T> =
+  | { ok: true; value: T }
+  | { ok: false };
+
+const valueTag = (value: RawCommitDetailsFieldValue): string => {
+  return Object.prototype.toString.call(value);
+};
+
+const isBooleanValue = (value: RawCommitDetailsFieldValue): value is boolean => {
+  return valueTag(value) === '[object Boolean]';
+};
+
+const isNumberValue = (value: RawCommitDetailsFieldValue): value is number => {
+  return valueTag(value) === '[object Number]';
+};
+
+const isStringValue = (value: RawCommitDetailsFieldValue): value is string => {
+  return valueTag(value) === '[object String]';
+};
+
+const isGitHubUserSummaryPayloadObject = (value: RawGitHubUserSummaryPayload | undefined): value is Exclude<RawGitHubUserSummaryPayload, RawScalar> => {
+  return valueTag(value) === '[object Object]';
+};
+
+const isGitHubCommitDetailsPayloadObject = (value: RawGitHubCommitDetailsPayload | null): value is Exclude<RawGitHubCommitDetailsPayload, RawScalar> => {
+  return valueTag(value) === '[object Object]';
+};
+
+const parseRequiredBooleanField = (value: RawCommitDetailsFieldValue): ParsedField<boolean> => {
+  if (!isBooleanValue(value)) {
+    return { ok: false };
+  }
+  return { ok: true, value };
+};
+
+const parseOptionalNumberField = (value: RawCommitDetailsFieldValue): ParsedField<number | undefined> => {
+  if (value == null) {
+    return { ok: true, value: undefined };
+  }
+  if (!isNumberValue(value)) {
+    return { ok: false };
+  }
+  return { ok: true, value };
+};
+
+const parseOptionalStringField = (value: RawCommitDetailsFieldValue): ParsedField<string | undefined> => {
+  if (value == null) {
+    return { ok: true, value: undefined };
+  }
+  if (!isStringValue(value)) {
+    return { ok: false };
+  }
+  return { ok: true, value };
+};
+
+const parseOptionalNullableStringField = (value: RawCommitDetailsFieldValue): ParsedField<string | null | undefined> => {
+  if (value === undefined) {
+    return { ok: true, value: undefined };
+  }
+  if (value === null) {
+    return { ok: true, value: null };
+  }
+  if (!isStringValue(value)) {
+    return { ok: false };
+  }
+  return { ok: true, value };
+};
+
+const parseGitHubUserSummaryField = (value: RawGitHubUserSummaryPayload | undefined): ParsedField<GitHubUserSummary | null | undefined> => {
+  if (value === undefined) {
+    return { ok: true, value: undefined };
+  }
+  if (value === null) {
+    return { ok: true, value: null };
+  }
+  if (!isGitHubUserSummaryPayloadObject(value)) {
+    return { ok: false };
+  }
+
+  const loginField = parseOptionalStringField(value.login);
+  if (!loginField.ok || !loginField.value) {
+    return { ok: false };
+  }
+
+  const idField = parseOptionalNumberField(value.id);
+  const avatarUrlField = parseOptionalStringField(value.avatarUrl);
+  const nameField = parseOptionalStringField(value.name);
+  const emailField = parseOptionalStringField(value.email);
+  if (!idField.ok || !avatarUrlField.ok || !nameField.ok || !emailField.ok) {
+    return { ok: false };
+  }
+
+  return {
+    ok: true,
+    value: {
+      login: loginField.value,
+      id: idField.value,
+      avatarUrl: avatarUrlField.value,
+      name: nameField.value,
+      email: emailField.value,
+    },
+  };
+};
+
+const parseGitHubCommitDetailsPayload = (value: RawGitHubCommitDetailsPayload | null): GitHubCommitDetails | null => {
+  if (!isGitHubCommitDetailsPayloadObject(value)) {
+    return null;
+  }
+
+  const connectedField = parseRequiredBooleanField(value.connected);
+  const urlField = parseOptionalNullableStringField(value.url);
+  const authorField = parseGitHubUserSummaryField(value.author);
+  if (!connectedField.ok || !urlField.ok || !authorField.ok) {
+    return null;
+  }
+
+  const details: GitHubCommitDetails = {
+    connected: connectedField.value,
+  };
+  if (urlField.value !== undefined) {
+    details.url = urlField.value;
+  }
+  if (authorField.value !== undefined) {
+    details.author = authorField.value;
+  }
+  return details;
+};
+
+const parseGitHubErrorMessage = (value: RawGitHubCommitDetailsPayload | null): string | null => {
+  if (!isGitHubCommitDetailsPayloadObject(value) || !isStringValue(value.error)) {
+    return null;
+  }
+  return value.error;
+};
 
 const jsonOrNull = async <T>(response: Response): Promise<T | null> => {
   return (await response.json().catch(() => null)) as T | null;
@@ -108,6 +271,27 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
       throw new Error(payload?.error || response.statusText || 'Failed to fetch GitHub user');
     }
     return payload;
+  },
+
+  async commitDetails(directory: string, hash: string, remote?: string): Promise<GitHubCommitDetails> {
+    const params = new URLSearchParams({ directory, hash });
+    if (remote) {
+      params.set('remote', remote);
+    }
+    const response = await runtimeFetch(
+      `/api/github/commit/details?${params.toString()}`,
+      { method: 'GET', headers: { Accept: 'application/json' } },
+    );
+    const payload = await jsonOrNull<RawGitHubCommitDetailsPayload>(response);
+    const details = parseGitHubCommitDetailsPayload(payload);
+    if (!response.ok || !details) {
+      const errorMessage = parseGitHubErrorMessage(payload);
+      const message = errorMessage
+        ? errorMessage
+        : response.statusText || 'Failed to load commit details';
+      throw new Error(message);
+    }
+    return details;
   },
 
   async prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus> {

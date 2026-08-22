@@ -9,6 +9,8 @@ import {
 const baseOptions = {
   railOrder: [],
   planModeEnabled: true,
+  reviewLayout: 'separate',
+  isMobile: false,
   isVSCode: false,
   screenWidth: 1200,
   tabs: [],
@@ -62,5 +64,30 @@ describe('getVisibleContextRailSurfaces', () => {
   test('respects the persisted user rail order', () => {
     const surfaces = getVisibleContextRailSurfaces({ ...baseOptions, railOrder: ['git', 'context'] });
     expect(surfaces.slice(0, 2).map((surface) => surface.id)).toEqual(['git', 'context']);
+  });
+
+  test('hides the diff launcher only for combined desktop review', () => {
+    const existingTabs = [{ mode: 'diff' as const }];
+
+    expect(
+      getVisibleContextRailSurfaces({
+        ...baseOptions,
+        reviewLayout: 'combined',
+        isMobile: false,
+        isVSCode: false,
+        tabs: existingTabs,
+      }).some((surface) => surface.id === 'diff'),
+    ).toBe(false);
+    expect(existingTabs).toEqual([{ mode: 'diff' }]);
+  });
+
+  test('keeps the diff launcher for separate, mobile, and VS Code review', () => {
+    expect(getVisibleContextRailSurfaces(baseOptions).some((surface) => surface.id === 'diff')).toBe(true);
+    expect(
+      getVisibleContextRailSurfaces({ ...baseOptions, reviewLayout: 'combined', isMobile: true }).some((surface) => surface.id === 'diff'),
+    ).toBe(true);
+    expect(
+      getVisibleContextRailSurfaces({ ...baseOptions, reviewLayout: 'combined', isVSCode: true }).some((surface) => surface.id === 'diff'),
+    ).toBe(true);
   });
 });

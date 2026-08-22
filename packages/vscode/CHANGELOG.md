@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 - **Skills catalog:** browse curated GitHub skill collections in a card-based catalog with cross-source search and direct links to each skill's repository.
+- **Git:** the history graph now supports branch and tag filters, incoming and outgoing markers, and paged history (thanks to @mattv8).
 - Providers: expanded support for custom providers.
 - Sessions created outside OpenChamber now appear in the sidebar and Recent list without a page refresh (thanks to @tomzx).
 - If OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).

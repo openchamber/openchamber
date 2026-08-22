@@ -49,6 +49,7 @@ type AppearanceSlice = {
   mobileKeyboardMode: MobileKeyboardMode;
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
   gitChangesViewMode: 'flat' | 'tree';
+  gitReviewLayout: 'separate' | 'combined';
 };
 
 let initialized = false;
@@ -99,6 +100,7 @@ export const startAppearanceAutoSave = (): void => {
     mobileKeyboardMode: useUIStore.getState().mobileKeyboardMode,
     diffLayoutPreference: useUIStore.getState().diffLayoutPreference,
     gitChangesViewMode: useUIStore.getState().gitChangesViewMode,
+    gitReviewLayout: useUIStore.getState().gitReviewLayout,
   };
 
   useUIStore.subscribe((state) => {
@@ -141,6 +143,7 @@ export const startAppearanceAutoSave = (): void => {
       mobileKeyboardMode: state.mobileKeyboardMode,
       diffLayoutPreference: state.diffLayoutPreference,
       gitChangesViewMode: state.gitChangesViewMode,
+      gitReviewLayout: state.gitReviewLayout,
     };
 
     const diff: Partial<DesktopSettings> = {};
@@ -260,6 +263,9 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.gitChangesViewMode !== previous.gitChangesViewMode) {
       diff.gitChangesViewMode = current.gitChangesViewMode;
+    }
+    if (current.gitReviewLayout !== previous.gitReviewLayout) {
+      diff.gitReviewLayout = current.gitReviewLayout;
     }
 
     previous = current;

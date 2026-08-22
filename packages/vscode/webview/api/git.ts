@@ -6,6 +6,10 @@
 import { sendBridgeMessage } from './bridge';
 import type {
   GitAPI,
+  GitHistoryMergeBaseResponse,
+  GitHistoryOptions,
+  GitHistoryPage,
+  GitHistoryRefsResponse,
   GitStatus,
   GitDiffResponse,
   GetGitDiffOptions,
@@ -29,8 +33,10 @@ import type {
   GitPullResult,
   GitLogResponse,
   GitLogOptions,
+  GitCommitChangesRequest,
   GitCommitFilesResponse,
-  CommitFileDiffResponse,
+  GitCommitFilePreviewRequest,
+  GitCommitFilePreviewResponse,
   GitIdentitySummary,
   GitIdentityProfile,
   GitRemote,
@@ -71,6 +77,27 @@ export const createVSCodeGitAPI = (): GitAPI => ({
 
   getGitStatus: async (directory: string, options?: { mode?: 'light' }): Promise<GitStatus> => {
     return sendBridgeMessage<GitStatus>('api:git/status', { directory, mode: options?.mode });
+  },
+
+  getGitHistoryRefs: async (directory: string): Promise<GitHistoryRefsResponse> => {
+    return sendBridgeMessage<GitHistoryRefsResponse>('api:git/history/refs', { directory });
+  },
+
+  getGitHistory: async (directory: string, options: GitHistoryOptions): Promise<GitHistoryPage> => {
+    return sendBridgeMessage<GitHistoryPage>('api:git/history', {
+      directory,
+      ...(options.refs ? { refs: options.refs } : {}),
+      ...(options.all === true ? { all: true } : {}),
+      ...(options.cursor ? { cursor: options.cursor } : {}),
+      ...(options.limit != null ? { limit: options.limit } : {}),
+    });
+  },
+
+  getGitHistoryMergeBase: async (directory: string, options: { refs: string[] }): Promise<GitHistoryMergeBaseResponse> => {
+    return sendBridgeMessage<GitHistoryMergeBaseResponse>('api:git/history/merge-base', {
+      directory,
+      refs: options.refs,
+    });
   },
 
   getGitDiff: async (directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse> => {
@@ -288,6 +315,15 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     });
   },
 
+  createGitTag: async (directory: string, name: string, commitHash: string): Promise<{ success: boolean; tag: string }> => {
+    return sendBridgeMessage<{ success: boolean; tag: string }>('api:git/tags', {
+      directory,
+      method: 'POST',
+      name,
+      commitHash,
+    });
+  },
+
   renameBranch: async (directory: string, oldName: string, newName: string): Promise<{ success: boolean; branch: string }> => {
     return sendBridgeMessage<{ success: boolean; branch: string }>('api:git/branches/rename', {
       directory,
@@ -308,19 +344,21 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     });
   },
 
-  getCommitFiles: async (directory: string, hash: string): Promise<GitCommitFilesResponse> => {
+  getCommitFiles: async (directory: string, request: GitCommitChangesRequest): Promise<GitCommitFilesResponse> => {
     return sendBridgeMessage<GitCommitFilesResponse>('api:git/commit-files', {
       directory,
-      hash,
+      hash: request.commitHash,
+      parentHash: request.parentHash,
     });
   },
 
-  getCommitFileDiff: async (directory: string, hash: string, filePath: string, isBinary: boolean): Promise<CommitFileDiffResponse> => {
-    return sendBridgeMessage<CommitFileDiffResponse>('api:git/commit-file-diff', {
+  getCommitFileDiff: async (directory: string, request: GitCommitFilePreviewRequest): Promise<GitCommitFilePreviewResponse> => {
+    return sendBridgeMessage<GitCommitFilePreviewResponse>('api:git/commit-file-diff', {
       directory,
-      hash,
-      path: filePath,
-      binary: isBinary,
+      hash: request.commitHash,
+      parentHash: request.parentHash,
+      originalPath: request.originalPath,
+      modifiedPath: request.modifiedPath,
     });
   },
 

@@ -603,6 +603,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     recentEfforts: defaults.recentEfforts,
     diffLayoutPreference: defaults.diffLayoutPreference,
     gitChangesViewMode: defaults.gitChangesViewMode,
+    gitReviewLayout: defaults.gitReviewLayout,
     directoryShowHidden: true,
     filesViewShowGitignored: false,
     dictationEnabled: true,
@@ -1026,6 +1027,11 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     && (settings.gitChangesViewMode === 'flat' || settings.gitChangesViewMode === 'tree')) {
     if (settings.gitChangesViewMode !== store.gitChangesViewMode) {
       store.setGitChangesViewMode(settings.gitChangesViewMode);
+    }
+  }
+  if (settings.gitReviewLayout === 'separate' || settings.gitReviewLayout === 'combined') {
+    if (settings.gitReviewLayout !== store.gitReviewLayout) {
+      store.setGitReviewLayout(settings.gitReviewLayout);
     }
   }
   if (typeof settings.directoryShowHidden === 'boolean') {
@@ -1602,6 +1608,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     && (candidate.gitChangesViewMode === 'flat' || candidate.gitChangesViewMode === 'tree')
   ) {
     result.gitChangesViewMode = candidate.gitChangesViewMode;
+  }
+  if (candidate.gitReviewLayout === 'separate' || candidate.gitReviewLayout === 'combined') {
+    result.gitReviewLayout = candidate.gitReviewLayout;
   }
   if (typeof candidate.directoryShowHidden === 'boolean') {
     result.directoryShowHidden = candidate.directoryShowHidden;
