@@ -184,6 +184,23 @@
     display: list-item !important;
   }
 
+  /* Bidi: let each block derive direction from its first strong character,
+     so mixed Arabic/English text renders in the correct order */
+  .markdown-content p,
+  .markdown-content li,
+  .markdown-content h1,
+  .markdown-content h2,
+  .markdown-content h3,
+  .markdown-content h4,
+  .markdown-content h5,
+  .markdown-content h6,
+  .markdown-content td,
+  .markdown-content th,
+  .markdown-content blockquote {
+    unicode-bidi: plaintext;
+    text-align: start;
+  }
+
   /* Remove focus rings globally (except inputs/textareas/dropdowns/selects/explicit accent rings) */
   *:focus:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]):not(.focus-ring-accent):not([data-focus-ring="accent"]) {
     outline: none !important;
