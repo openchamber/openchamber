@@ -1706,6 +1706,14 @@ export async function respondToQuestion(
     if (assertSdkData(result, "question.reply") !== true) {
       throw new Error("Question reply failed")
     }
+    // A successful reply is authoritative: the backend resolved the question,
+    // so clear it from the local store deterministically instead of waiting
+    // for the SSE `question.replied` event. A lost event (SSE gap) would leave
+    // the question pending forever, which keeps the session in "waiting for
+    // answer" — the next task's thinking and final response never render
+    // (issues #2911, #2448). The later SSE event is a no-op (the reducer only
+    // removes when present).
+    removeQuestionRequestFromChildStores(sessionId, requestId)
   } catch (error) {
     if (isQuestionRequestNotFoundError(error)) {
       removeQuestionRequestFromChildStores(sessionId, requestId)
@@ -1731,6 +1739,11 @@ export async function rejectQuestion(
     if (assertSdkData(result, "question.reject") !== true) {
       throw new Error("Question rejection failed")
     }
+    // A successful rejection is authoritative: the backend resolved the
+    // question, so clear it from the local store deterministically (see
+    // respondToQuestion for the lost-SSE-event rationale — issues #2911,
+    // #2448). The later SSE `question.rejected` event is a no-op.
+    removeQuestionRequestFromChildStores(sessionId, requestId)
   } catch (error) {
     if (isQuestionRequestNotFoundError(error)) {
       removeQuestionRequestFromChildStores(sessionId, requestId)
@@ -1762,6 +1775,10 @@ export async function rejectQuestion(
  * abort the session so the OpenCode runner reaches `idle` — otherwise the new
  * prompt arrives while the run is still active and is discarded by the runner's
  * `ensureRunning`.
+ *
+ * A successful reject clears the local store deterministically (see
+ * {@link rejectQuestion}) so a lost `question.rejected` SSE event cannot leave
+ * the session in the pending "waiting for answer" state (issues #2911, #2448).
  */
 export async function dismissOpenQuestionsForSession(sessionId: string): Promise<boolean> {
   if (!sessionId) return false

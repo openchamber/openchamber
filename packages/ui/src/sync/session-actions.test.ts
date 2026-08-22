@@ -1462,6 +1462,99 @@ describe("rejectQuestion passes directory", () => {
   })
 })
 
+function sessionFixture(id: string): Session {
+  // SAFETY: the question flow only reads session id/time; the fixture is
+  // intentionally minimal and matches the existing fixtures in this file.
+  return { id, time: { created: 1 } } as Session
+}
+
+function actionsSdk(): OpencodeClient {
+  // SAFETY: mockSdk implements the question/permission/session surface that
+  // session-actions uses; this cast is the established pattern in this file.
+  return mockSdk as never
+}
+
+describe("question dismissal clears pending state without the SSE echo (issues #2911, #2448)", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    scopedClientDirectories.length = 0
+    questionReplyError = null
+    questionRejectError = null
+  })
+
+  test("rejectQuestion clears the question from the child store on success", async () => {
+    const question = buildQuestion("q-1", "session-a")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      question: { "session-a": [question] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, rejectQuestion } = await import("./session-actions")
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    await rejectQuestion("session-a", "q-1")
+
+    // The backend confirmed the rejection. The local pending state must be gone
+    // even if the SSE `question.rejected` event is lost (SSE gap), otherwise the
+    // session stays in "waiting for answer" and the next task never renders
+    // thinking/final response (issues #2911, #2448).
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("respondToQuestion clears the question from the child store on success", async () => {
+    const question = buildQuestion("q-1", "session-a")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      question: { "session-a": [question] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    await respondToQuestion("session-a", "q-1", [["Yes"]])
+
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("dismissOpenQuestionsForSession leaves the store cleared when the reject succeeds", async () => {
+    const question = buildQuestion("q-root", "session-a")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      question: { "session-a": [question] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, dismissOpenQuestionsForSession } = await import("./session-actions")
+    setActionRefs(actionsSdk(), childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenQuestionsForSession("session-a")
+
+    expect(dismissed).toBe(true)
+    // The optimistic clear already removed it before the round-trip; the
+    // successful reject must not resurrect it.
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+
+  test("reply/reject actions on an already-cleared store stay no-ops (SSE echo equivalent)", async () => {
+    // A later (or duplicated) SSE echo for an already-cleared request must not
+    // error or resurrect state — the reducer only removes when present.
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      question: {},
+    })
+
+    const { setActionRefs, rejectQuestion, respondToQuestion } = await import("./session-actions")
+    setActionRefs(actionsSdk(), createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await respondToQuestion("session-a", "q-gone", [["Yes"]])
+    await rejectQuestion("session-a", "q-gone")
+
+    expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+})
+
 describe("blocking request reply routing and stale recovery (issue OPE-236)", () => {
   const materializationCalls: Array<{ directory: string; sessionID: string; messageID: string }> = []
   const enqueueMaterialization = (directory: string, sessionID: string, messageID: string) => {
