@@ -1,11 +1,26 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Agent, Message } from '@opencode-ai/sdk/v2';
+import type { InlineCommentPartPayload } from '@/lib/messages/inlineComments';
 import type { QueuedMessage } from '../stores/messageQueueStore';
 import { ChildStoreManager } from '@/sync/child-store';
 import { setSyncRefs } from '@/sync/sync-refs';
 
 let visibleAgents: Agent[] = [];
 const sendMessageCalls: unknown[][] = [];
+
+const commentPart: InlineCommentPartPayload = {
+  text: 'The user made the following comment regarding line 1 of a.ts: note',
+  synthetic: true,
+  metadata: {
+    opencodeComment: {
+      path: 'a.ts',
+      selection: { startLine: 1, endLine: 1, startChar: 0, endChar: 0 },
+      comment: 'note',
+      preview: 'const x = 1',
+      origin: 'file',
+    },
+  },
+};
 
 const getVisibleAgentsMock = mock(() => visibleAgents);
 
@@ -268,6 +283,7 @@ describe('buildQueuedAutoSendPayload', () => {
         id: 'queued-1',
         content: 'queued message',
         createdAt: 1,
+        inlineCommentParts: [commentPart],
       },
     ]);
 
@@ -291,7 +307,7 @@ describe('buildQueuedAutoSendPayload', () => {
       'agent-1',
       [],
       undefined,
-      undefined,
+      [commentPart],
       'variant-1',
       'normal',
       {
