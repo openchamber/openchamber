@@ -1702,7 +1702,16 @@ const AssistantMessageBody = React.memo(({
         && hasAnchoredActivitySegments
         && Boolean(toggleActivityGroup);
 
-    const shouldDeferSortedInlineText = isSortedRenderMode && !hasStopFinish;
+    // A message that asked a question is blocked until the user answers — it
+    // never reaches finish === 'stop', so the normal "defer text until final
+    // output" rule would hide the context the model produced before the
+    // question indefinitely (OPE-199). Render such messages' text inline,
+    // matching OpenCode's display.
+    const hasQuestionTool = React.useMemo(() => {
+        return toolParts.some((toolPart) => toolPart.tool === 'question');
+    }, [toolParts]);
+
+    const shouldDeferSortedInlineText = isSortedRenderMode && !hasStopFinish && !hasQuestionTool;
     const showErrorMessage = Boolean(errorMessage);
     const errorIconName = errorVariant === 'info' ? 'information' : 'error-warning';
     const shouldShowMessageActions = hasCopyableText;
