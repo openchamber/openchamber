@@ -187,3 +187,30 @@ describe('Markdown images', () => {
     expect(html).not.toContain('data-openchamber-markdown-image');
   });
 });
+
+describe('CJK-aware link parsing', () => {
+  const hrefOf = (html: string): string | null => /<a\b[^>]*href="([^"]*)"/.exec(html)?.[1] ?? null;
+
+  test('bare URL followed by a CJK annotation trims the annotation from the href', () => {
+    const html = renderMarkdownSync('访问 https://example.com/docs（中文说明）了解更多');
+    expect(hrefOf(html)).toBe('https://example.com/docs');
+  });
+
+  test('bare URL followed by CJK punctuation trims the punctuation', () => {
+    expect(hrefOf(renderMarkdownSync('地址 https://example.com/guide，详见'))).toBe(
+      'https://example.com/guide',
+    );
+    expect(hrefOf(renderMarkdownSync('官网 https://example.com。'))).toBe('https://example.com');
+  });
+
+  test('correct links are unaffected', () => {
+    expect(hrefOf(renderMarkdownSync('官方文档见 [这里](https://docs.example.com)（中文说明）'))).toBe(
+      'https://docs.example.com',
+    );
+    expect(hrefOf(renderMarkdownSync('[下载](https://dl.example.com/安装包（正式版）)'))).toBe(
+      'https://dl.example.com/安装包（正式版）',
+    );
+    expect(hrefOf(renderMarkdownSync('[a](url(1))'))).toBe('url(1)');
+    expect(hrefOf(renderMarkdownSync('[a](url "title")'))).toBe('url');
+  });
+});
