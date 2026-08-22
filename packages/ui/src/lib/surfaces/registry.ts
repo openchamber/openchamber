@@ -35,6 +35,19 @@ export type ContextSurfaceDescriptor = {
    * until the user manually resizes this surface.
    */
   defaultWidthFraction: number;
+  /**
+   * Default panel height as a fraction of the available content area, used
+   * while the panel is bottom-docked and until the user manually resizes this
+   * surface. Required rather than optional-with-fallback so a new surface
+   * cannot silently inherit its width fraction as a height.
+   *
+   * Deliberately uniform across every surface: unlike the width dock, where
+   * the panel is switched between deliberately, bottom-dock surface switches
+   * happen in place, and differing defaults make the panel jump vertically
+   * under the chat. Keep new surfaces at the same value unless there is a
+   * specific reason to differ.
+   */
+  defaultHeightFraction: number;
 };
 
 export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
@@ -42,6 +55,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'context',
     descriptionKey: 'contextRail.surface.context.description',
     defaultWidthFraction: 0.45,
+    defaultHeightFraction: 0.4,
     mode: 'context',
     icon: 'donut-chart-fill',
     labelKey: 'contextPanel.mode.context',
@@ -51,6 +65,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'git',
     descriptionKey: 'contextRail.surface.git.description',
     defaultWidthFraction: 2 / 5,
+    defaultHeightFraction: 0.4,
     mode: 'git',
     icon: 'git-branch',
     labelKey: 'layout.rightSidebar.git',
@@ -60,6 +75,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'pr',
     descriptionKey: 'contextRail.surface.pr.description',
     defaultWidthFraction: 0.45,
+    defaultHeightFraction: 0.4,
     mode: 'pr',
     icon: 'github',
     labelKey: 'contextPanel.mode.pr',
@@ -69,6 +85,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'diff',
     descriptionKey: 'contextRail.surface.diff.description',
     defaultWidthFraction: 3 / 5,
+    defaultHeightFraction: 0.4,
     mode: 'diff',
     icon: 'arrow-left-right',
     labelKey: 'contextPanel.mode.diff',
@@ -78,6 +95,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'walkthrough',
     descriptionKey: 'contextRail.surface.walkthrough.description',
     defaultWidthFraction: 3 / 5,
+    defaultHeightFraction: 0.4,
     mode: 'walkthrough',
     icon: 'route',
     labelKey: 'contextPanel.mode.walkthrough',
@@ -87,6 +105,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'editor',
     descriptionKey: 'contextRail.surface.editor.description',
     defaultWidthFraction: 3 / 5,
+    defaultHeightFraction: 0.4,
     mode: 'file',
     icon: 'file-edit',
     labelKey: 'contextPanel.mode.files',
@@ -96,6 +115,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'terminal',
     descriptionKey: 'contextRail.surface.terminal.description',
     defaultWidthFraction: 3 / 5,
+    defaultHeightFraction: 0.4,
     mode: 'terminal',
     icon: 'terminal-box',
     labelKey: 'layout.mainTab.terminal',
@@ -108,6 +128,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     // content column, and a third of the window leaves the content column too
     // narrow to read a note in.
     defaultWidthFraction: 3 / 5,
+    defaultHeightFraction: 0.4,
     mode: 'notes',
     icon: 'book-marked',
     labelKey: 'contextRail.surface.notes',
@@ -117,6 +138,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'plan',
     descriptionKey: 'contextRail.surface.plan.description',
     defaultWidthFraction: 0.45,
+    defaultHeightFraction: 0.4,
     mode: 'plan',
     icon: 'file-text',
     labelKey: 'contextPanel.mode.plan',
@@ -126,6 +148,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'browser',
     descriptionKey: 'contextRail.surface.browser.description',
     defaultWidthFraction: 0.45,
+    defaultHeightFraction: 0.4,
     mode: 'browser',
     icon: 'global',
     labelKey: 'contextPanel.mode.browser',
@@ -135,6 +158,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'chat',
     descriptionKey: 'contextRail.surface.chat.description',
     defaultWidthFraction: 0.45,
+    defaultHeightFraction: 0.4,
     mode: 'chat',
     icon: 'chat-4',
     labelKey: 'contextPanel.mode.chat',
@@ -144,6 +168,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
 
 const SURFACE_BY_ID = new Map(CONTEXT_SURFACES.map((surface) => [surface.id, surface]));
 const FRACTION_BY_MODE = new Map(CONTEXT_SURFACES.map((surface) => [surface.mode, surface.defaultWidthFraction]));
+const HEIGHT_FRACTION_BY_MODE = new Map(CONTEXT_SURFACES.map((surface) => [surface.mode, surface.defaultHeightFraction]));
 
 // Tablet width and up: below this the walkthrough cannot show a stop and its
 // code side by side, which is the whole point of the surface.
@@ -151,6 +176,10 @@ export const WALKTHROUGH_MIN_WIDTH = 768;
 
 export const getContextSurfaceWidthFraction = (mode: ContextPanelMode): number => {
   return FRACTION_BY_MODE.get(mode) ?? 1 / 2;
+};
+
+export const getContextSurfaceHeightFraction = (mode: ContextPanelMode): number => {
+  return HEIGHT_FRACTION_BY_MODE.get(mode) ?? 0.4;
 };
 
 const isContextSurfaceId = (value: unknown): value is ContextSurfaceId => {

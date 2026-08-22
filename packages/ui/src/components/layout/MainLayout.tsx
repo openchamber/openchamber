@@ -67,6 +67,7 @@ export const MainLayout: React.FC = () => {
     const isScheduledTasksPageOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
     const isArchivePageOpen = useUIStore((state) => state.isArchivePageOpen);
     const worktreesPageProjectId = useUIStore((state) => state.worktreesPageProjectId);
+    const contextPanelDock = useUIStore((state) => state.contextPanelDock);
     // Any full-page surface replacing the chat area. While open, the chat and
     // secondary views are fully hidden (not just covered) so none of their
     // floating chrome bleeds through, and selecting a session / draft / main
@@ -440,9 +441,10 @@ export const MainLayout: React.FC = () => {
                                         {/* Holds the chat and the context panel together, so its
                                             width does not move when the context panel opens. The
                                             work-status panel measures this rather than the chat,
-                                            which the context panel animates. */}
-                                        <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true" data-chat-area="true">
-                                            <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
+                                            which the context panel animates. When the context panel
+                                            docks to the bottom, this stacks vertically (flex-col). */}
+                                        <div className={cn('relative flex flex-1 min-h-0 min-w-0 overflow-hidden', contextPanelDock === 'bottom' && 'flex-col')} data-page-scroll-lock="true" data-chat-area="true">
+                                            <main className="flex-1 min-h-0 overflow-hidden bg-background relative" data-page-scroll-lock="true">
                                                 <div className={cn('absolute inset-0', (!isChatActive || isSurfacePageOpen) && 'invisible')}>
                                                     <ErrorBoundary><ChatView active={isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
                                                 </div>

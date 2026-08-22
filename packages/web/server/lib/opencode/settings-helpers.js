@@ -604,6 +604,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.expandedEditorToolbar === 'boolean') {
       result.expandedEditorToolbar = candidate.expandedEditorToolbar;
     }
+    if (candidate.contextPanelDock === 'right' || candidate.contextPanelDock === 'bottom') {
+      result.contextPanelDock = candidate.contextPanelDock;
+    }
     if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
       result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
     }
