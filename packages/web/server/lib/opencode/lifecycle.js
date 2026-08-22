@@ -1,5 +1,8 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import { stripAppImageArgv0Leak } from '../inherited-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
@@ -10,10 +13,10 @@ const parsePositiveInt = (value, fallback) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-const HEALTH_CHECK_TIMEOUT_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS, 5000);
+const HEALTH_CHECK_TIMEOUT_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS, 30000);
 const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
   process.env.OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES,
-  20
+  40
 );
 const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
 const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
@@ -21,7 +24,11 @@ const OPENCODE_HEALTH_PATH = '/global/health';
 // Last-used directory plus the three most recently opened projects — deeper
 // tails are unlikely to be the user's first click and just add background work.
 const WARMUP_DIRECTORY_LIMIT = 4;
-const WARMUP_REQUEST_TIMEOUT_MS = 30000;
+// WARMUP_REQUEST_TIMEOUT_MS was 30000 in the original PR (#2917); upstream
+// commit 77d51d207 reduced it to 5000 once warmup runs with bounded
+// concurrency (2). Taking the upstream value because it is the contract
+// already shipped on main and covered by existing tests.
+const WARMUP_REQUEST_TIMEOUT_MS = 5000;
 const MANAGED_STDERR_TAIL_MAX_BYTES = 32 * 1024;
 const HEALTH_FAILURE_DETAIL_MAX_LENGTH = 256;
 
@@ -81,6 +88,34 @@ const classifyHealthProbeError = (error) => {
   }
   return { class: 'error', detail: getHealthFailureDetail(error) };
 };
+
+// Pure resolution of the default scoped config dir for the managed server.
+// Exported for tests; production callers pass the real env/fs.
+const resolveDefaultManagedConfigDir = ({ platform = process.platform, appData = process.env.APPDATA, homedir = os.homedir, existsSyncFn = existsSync } = {}) => {
+  if (platform !== 'win32') return null;
+  const base = appData || path.join(homedir(), '.config');
+  // Canonicalize candidate to all-backslashes so the returned value and the
+  // probe keys match what callers (and Windows path APIs) emit. On real
+  // Windows hosts, path.join already produces backslashes, so the replace is
+  // a no-op there; it only matters on POSIX CI hosts where path.join leaves
+  // backslashes as literals in mixed-separator strings.
+  const candidate = path.join(base, 'openchamber', 'managed-config').replace(/\//g, '\\');
+  const configPath = path.join(candidate, 'opencode.jsonc');
+  // Probe all separator styles so callers can mock either form and real
+  // Windows path APIs (which normalize to backslashes) still resolve:
+  // path.join may produce mixed separators on POSIX hosts when input
+  // contains backslashes, so we canonicalize both directions.
+  if (
+    existsSyncFn(configPath)
+    || existsSyncFn(configPath.replace(/\\/g, '/'))
+    || existsSyncFn(configPath.replace(/\//g, '\\'))
+  ) {
+    return candidate;
+  }
+  return null;
+};
+
+export { resolveDefaultManagedConfigDir };
 
 export const createOpenCodeLifecycleRuntime = (deps) => {
   const {
@@ -675,6 +710,16 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       ? getManagedOpenCodeShellEnvSnapshot() || {}
       : {};
     const managedOpenCodeEnv = await getManagedOpenCodeEnv();
+    // Optional scoped config dir for the managed server (e.g. a lean config that
+    // avoids heavy plugins/daemons which can starve the managed event loop).
+    // Explicit env override wins; otherwise no var is injected and the managed
+    const managedConfigDir = (() => {
+      const override = process.env.OPENCHAMBER_OPENCODE_CONFIG_DIR;
+      if (override) return override;
+      // Never clobber a user-provided OPENCODE_CONFIG_DIR with the default.
+      if (process.env.OPENCODE_CONFIG_DIR) return null;
+      return resolveDefaultManagedConfigDir();
+    })();
     recordStartupPerformance('opencode.environment.ready', {
       attempt,
       durationMs: performance.now() - phaseStartedAt,
@@ -693,6 +738,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           ...shellEnv,
           ...process.env,
           ...managedOpenCodeEnv,
+          ...(managedConfigDir ? { OPENCODE_CONFIG_DIR: managedConfigDir } : {}),
           PATH: envPath,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
         })),
@@ -1108,9 +1154,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   // session stores. Without warming, the user's first session open pays it
   // interactively (the chat waits on the message fetch until the directory
   // finishes initializing). Warm the most recently used directories right
-  // after readiness so the work overlaps UI startup instead. Sequential and
-  // best-effort: a failed or slow directory never blocks the others for long,
-  // and a restart invalidates the pass via the port/readiness guard.
+  // after readiness so the work overlaps UI startup instead. Runs the
+  // warmup requests with bounded concurrency so a slow directory cannot
+  // serialize the whole pass (observed: 30s x 4 dirs = 120s of managed
+  // startup where health checks already started timing out). Best-effort:
+  // a failed or slow directory never blocks the others for long, and a
+  // restart invalidates the pass via the port/readiness guard.
+  const WARMUP_CONCURRENCY = 2;
   const warmOpenCodeDirectories = async () => {
     let directories = [];
     try {
@@ -1121,8 +1171,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     if (!Array.isArray(directories) || directories.length === 0) return;
 
     const warmedPort = state.openCodePort;
-    for (const directory of directories.slice(0, WARMUP_DIRECTORY_LIMIT)) {
-      if (typeof directory !== 'string' || !directory) continue;
+    const targets = directories
+      .slice(0, WARMUP_DIRECTORY_LIMIT)
+      .filter((directory) => typeof directory === 'string' && directory);
+    const warmOne = async (directory) => {
       if (!state.isOpenCodeReady || state.openCodePort !== warmedPort) return;
       let timeout = null;
       try {
@@ -1139,7 +1191,18 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       } finally {
         if (timeout) clearTimeout(timeout);
       }
-    }
+    };
+    // Consume the targets with bounded parallelism (up to WARMUP_CONCURRENCY
+    // in flight).
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(WARMUP_CONCURRENCY, targets.length) }, async () => {
+      while (cursor < targets.length) {
+        const directory = targets[cursor];
+        cursor += 1;
+        await warmOne(directory);
+      }
+    });
+    await Promise.allSettled(workers);
   };
 
   /**

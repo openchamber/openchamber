@@ -1159,7 +1159,19 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
         directories.push(project.path);
       }
     }
-    return [...new Set(directories)];
+    // Skip transient worktrees that the managed server would otherwise
+    // bootstrap at startup: each warmed directory spawns an internal server
+    // that self-fetches /global/event, and dozens of them saturate Bun's
+    // single-threaded event loop for minutes (observed: 24 servers, 42
+    // self-connections, health checks timing out). Mission Control and
+    // Claude worktrees are recreated on demand and have no lasting sessions.
+    // Normalize to forward slashes first: settings can store mixed Windows
+    // separators, and the filter must match both \ and /.
+    const isTransientWorktree = (dir) => {
+      const normalized = String(dir).replace(/\\/g, '/');
+      return /(?:^|\/)\.omo\/wt-/.test(normalized) || /(?:^|\/)\.claude\/worktrees\//.test(normalized);
+    };
+    return [...new Set(directories)].filter((dir) => !isTransientWorktree(dir));
   },
   // A managed restart can move OpenCode to a NEW port (the old one may stay
   // occupied by an orphaned process, e.g. killProcessOnPort is a no-op on

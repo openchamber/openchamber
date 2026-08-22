@@ -136,6 +136,37 @@ OpenChamber tool injection. Managed launch env strips AppImage `ARGV0` before
 spawn so zsh-backed OpenCode tools do not rewrite child argv[0] to the AppImage
 path (#2588).
 
+### Managed OpenCode health-check tolerance
+
+The managed process health check uses these defaults, both overrideable:
+
+- `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS` (default `30000`): per-probe
+  timeout for `GET /global/health` on the managed server.
+- `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES` (default `40`):
+  consecutive failures before the managed process is restarted. Genuinely
+  exited processes still restart immediately via the process-liveness check;
+  the threshold only guards a hung-but-alive server during heavy bootstrap.
+  Counting is rate-limited by the health-check interval (default 15 s).
+
+### Scoped config for the managed server
+
+The managed OpenCode process can be launched with a dedicated config directory
+so heavy plugins/daemons that starve the Bun event loop during bootstrap are
+not loaded. Resolution order:
+
+1. `OPENCHAMBER_OPENCODE_CONFIG_DIR` env var (explicit override).
+2. An inherited `OPENCODE_CONFIG_DIR` — if the user already set it, it wins
+   and no scoped dir is injected.
+3. Windows only: `%APPDATA%\openchamber\managed-config\opencode.jsonc` when
+   that file exists (default convention; nothing creates it automatically).
+
+When a scoped dir is active, `OPENCODE_CONFIG_DIR` is injected into the managed
+spawn environment and the child reads its config from that directory instead of
+the user's global config. UI config edits that write to the user global layer
+(providers/agents/MCP) are therefore not visible to the managed server until
+mirrored into the scoped config — an intentional tradeoff for a lean managed
+runtime.
+
 Before spawn, `applyProviderEnvAliases` fills unset Google credential aliases
 from any present sibling (`GOOGLE_GENERATIVE_AI_API_KEY`, `GOOGLE_API_KEY`,
 `GEMINI_API_KEY`) so a shell that only exports `GEMINI_API_KEY` still satisfies

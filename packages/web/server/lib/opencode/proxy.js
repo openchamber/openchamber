@@ -782,7 +782,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       if (rawUrl.includes('directory=')) return next();
 
       const fetchWindowsSessionList = async (sessionPath) => {
-        const result = await fetchSessionListPayload(sessionPath, { req, timeoutMs: 10000 });
+        const result = await fetchSessionListPayload(sessionPath, { req, timeoutMs: 30000 });
         if (!result.upstream.ok || !Array.isArray(result.payload)) return null;
         return sanitizeSessionListPayload(result.payload);
       };
@@ -809,9 +809,11 @@ export const registerOpenCodeProxy = (app, deps) => {
             .map((session) => (session && typeof session.id === 'string' ? session.id : null))
             .filter((id) => typeof id === 'string')
         );
-        const extraSessions = [];
-        let successfulProjectReads = 0;
-        for (const dir of projectDirs) {
+        // Fetch every project directory in parallel: the managed server can be
+        // slow under heavy storage contention (large opencode.db, concurrent
+        // TUI instances), so serial fetches multiply the wall time. The total
+        // wait is bounded by the slowest project, not the sum.
+        const projectFetches = projectDirs.map(async (dir) => {
           const candidates = Array.from(new Set([
             dir,
             dir.replace(/\\/g, '/'),
@@ -821,17 +823,23 @@ export const registerOpenCodeProxy = (app, deps) => {
             const encoded = encodeURIComponent(candidateDir);
             try {
               const dirSessions = await fetchWindowsSessionList(`/session?directory=${encoded}`);
-              if (dirSessions) {
-                successfulProjectReads += 1;
-              }
-              for (const session of dirSessions || []) {
-                const id = session && typeof session.id === 'string' ? session.id : null;
-                if (id && !seen.has(id)) {
-                  seen.add(id);
-                  extraSessions.push(session);
-                }
-              }
+              return { ok: true, dirSessions: dirSessions || [] };
             } catch {
+              // try the next path variant
+            }
+          }
+          return { ok: false, dirSessions: [] };
+        });
+        const projectResults = await Promise.all(projectFetches);
+        const extraSessions = [];
+        let successfulProjectReads = 0;
+        for (const { ok, dirSessions } of projectResults) {
+          if (ok) successfulProjectReads += 1;
+          for (const session of dirSessions) {
+            const id = session && typeof session.id === 'string' ? session.id : null;
+            if (id && !seen.has(id)) {
+              seen.add(id);
+              extraSessions.push(session);
             }
           }
         }

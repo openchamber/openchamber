@@ -91,6 +91,18 @@ OpenChamber-specific alias for selecting the WSL distro. `OPENCODE_WSL_DISTRO` t
 
 Secret used to sign UI authentication tokens. Use a long random value for persistent service deployments.
 
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+Per-probe timeout (ms) for the managed OpenCode server health check. Default `30000`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+Consecutive health-check failures before the managed OpenCode server is restarted. Default `40`. A genuinely exited process still restarts immediately; this threshold only guards a hung-but-alive server during heavy bootstrap.
+
+### `OPENCHAMBER_OPENCODE_CONFIG_DIR`
+
+Optional config directory for the managed OpenCode server, so it can run with a lean config (e.g. without heavy plugins that starve the Bun event loop during bootstrap). When unset, an inherited `OPENCODE_CONFIG_DIR` wins, then on Windows only `%APPDATA%\openchamber\managed-config` is used when its `opencode.jsonc` exists. When a scoped dir is active, UI config edits that write to the user global layer are not visible to the managed server until mirrored into the scoped config.
+
 ## Terminal and Git
 
 ### `OPENCHAMBER_TERMINAL_SHELL`
