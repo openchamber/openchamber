@@ -1354,6 +1354,14 @@ describe('parseBranchCreationSource', () => {
     expect(parseBranchCreationSource(reflog)).toBeNull();
   });
 
+  it('returns null when the branch was created from the current HEAD without a named source', () => {
+    // `git switch -c <branch>` / `git checkout -b <branch>` from the current
+    // branch record `branch: Created from HEAD` in the reflog (git 2.x). The
+    // source branch name is not recorded, so no base can be derived from it.
+    const reflog = 'branch: Created from HEAD';
+    expect(parseBranchCreationSource(reflog)).toBeNull();
+  });
+
   it('returns null when the branch was created from a raw commit', () => {
     const reflog = 'branch: Created from 9a3b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b';
     expect(parseBranchCreationSource(reflog)).toBeNull();
