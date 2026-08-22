@@ -5,6 +5,7 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { MessageFilesDisplay } from '../../FileAttachment';
+import { toServerFileUrl } from '@/components/chat/composer/attachments/filePaths';
 import { getToolMetadata } from '@/lib/toolHelpers';
 import type { ToolPart as ToolPartType, ToolState as ToolStateUnion, FilePart } from '@opencode-ai/sdk/v2';
 import { toolDisplayStyles } from '@/lib/typography';
@@ -51,6 +52,7 @@ import {
     type TaskToolSummaryEntry,
 } from './taskToolModel';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
+import { parseVisionRunOutput } from './visionToolModel';
 import { useI18n } from '@/lib/i18n';
 import {
     extractFirstChangedLineFromDiff,
@@ -1234,6 +1236,8 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
+    const isVisionRun = (part.tool === 'openchamber' || normalizeToolName(part.tool) === 'openchamber')
+        && (input as { action?: unknown } | undefined)?.action === 'vision.run';
     const rawOutput = getToolOutput(part.tool, stateWithData.output, metadata?.output, state.status);
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const rawOutputString = typeof rawOutput === 'string' ? rawOutput : '';
@@ -1527,6 +1531,96 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 </div>,
                 { className: 'p-1' },
             );
+        }
+
+        if (isVisionRun) {
+            const parsed = parseVisionRunOutput(outputString);
+            const description = typeof parsed.data?.description === 'string' ? parsed.data.description : '';
+            const visionModel = typeof parsed.data?.model === 'string' ? parsed.data.model : '';
+            const imagePath = typeof parsed.data?.imagePath === 'string' && parsed.data.imagePath.trim()
+                ? parsed.data.imagePath
+                : typeof input?.imagePath === 'string' && input.imagePath.trim()
+                    ? input.imagePath
+                    : '';
+            const imageFilename = (typeof parsed.data?.imageFilename === 'string' && parsed.data.imageFilename)
+                || (imagePath ? imagePath.split('/').pop() : '')
+                || '';
+            const imageMime = typeof parsed.data?.imageMime === 'string' && parsed.data.imageMime.startsWith('image/')
+                ? parsed.data.imageMime
+                : 'image/*';
+            const imageSize = typeof parsed.data?.imageSize === 'number' ? parsed.data.imageSize : undefined;
+            const visionImageUrl = imagePath ? toServerFileUrl(imagePath) : '';
+
+            const openVisionImage = () => {
+                if (!onShowPopup || !visionImageUrl) return;
+                onShowPopup({
+                    open: true,
+                    title: imageFilename || t('chat.toolPart.vision.imageAlt'),
+                    content: '',
+                    metadata: {
+                        tool: 'image-preview',
+                        filename: imageFilename,
+                        mime: imageMime,
+                        size: imageSize,
+                    },
+                    image: {
+                        url: visionImageUrl,
+                        mimeType: imageMime,
+                        filename: imageFilename,
+                        size: imageSize,
+                    },
+                });
+            };
+
+            if (parsed.error) {
+                return (
+                    <div
+                        className="typography-meta p-2 rounded-xl border"
+                        style={{
+                            backgroundColor: 'var(--status-error-background)',
+                            color: 'var(--status-error)',
+                            borderColor: 'var(--status-error-border)',
+                        }}
+                    >
+                        {parsed.error}
+                    </div>
+                );
+            }
+
+            if (description) {
+                return renderScrollableBlock(
+                    <div className="space-y-2">
+                        {visionImageUrl ? (
+                            <button
+                                type="button"
+                                onClick={openVisionImage}
+                                className="group flex w-fit max-w-full items-center gap-2 text-left"
+                                aria-label={t('chat.toolPart.vision.imageAlt')}
+                            >
+                                <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md border border-[var(--surface-border)] bg-[var(--surface-subtle)]">
+                                    <FileTypeIcon filePath={imageFilename || 'image.png'} className="absolute inset-0 m-auto h-6 w-6" />
+                                    <img
+                                        src={visionImageUrl}
+                                        alt={t('chat.toolPart.vision.imageAlt')}
+                                        className="relative h-full w-full object-cover"
+                                        onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                                    />
+                                </span>
+                                <span className="typography-micro max-w-[16rem] truncate text-muted-foreground group-hover:text-foreground">
+                                    {imageFilename}
+                                </span>
+                            </button>
+                        ) : null}
+                        {visionModel ? (
+                            <div className="typography-micro text-muted-foreground">
+                                {t('chat.toolPart.vision.modelLabel', { model: visionModel })}
+                            </div>
+                        ) : null}
+                        <div className="typography-meta whitespace-pre-wrap break-words text-foreground">{description}</div>
+                    </div>,
+                    { maxHeightClass: 'max-h-[46vh]' }
+                );
+            }
         }
 
         if (isWriteLikeTool) {

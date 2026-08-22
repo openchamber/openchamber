@@ -2320,6 +2320,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolPart.copiedOutput': '출력 복사됨',
   'chat.toolPart.copyOutputFailed': '출력을 복사하지 못했습니다',
   'chat.toolPart.openSubtask': '{type} 하위 작업 열기',
+  'chat.toolPart.vision.modelLabel': '{model}(이)가 설명함',
+  'chat.toolPart.vision.imageAlt': '비전 도구가 설명한 이미지',
   'chat.todo.total': '전체',
   'chat.todo.inProgress': '진행 중',
   'chat.todo.pending': '대기 중',

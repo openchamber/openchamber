@@ -2290,6 +2290,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolPart.copiedOutput': '已複製輸出',
   'chat.toolPart.copyOutputFailed': '複製輸出失敗',
   'chat.toolPart.openSubtask': '開啟{type}子任務',
+  'chat.toolPart.vision.modelLabel': '由 {model} 描述',
+  'chat.toolPart.vision.imageAlt': '由視覺工具描述的圖片',
   'chat.todo.total': '總計',
   'chat.todo.inProgress': '進行中',
   'chat.todo.pending': '待處理',

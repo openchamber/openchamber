@@ -2025,6 +2025,8 @@ export const dict = {
   'chat.toolPart.noOutputProduced': 'Aucune sortie produite',
   'chat.toolPart.output': 'Sortie',
   'chat.toolPart.openSubtask': 'Ouvrir la sous-tâche {type}',
+  'chat.toolPart.vision.modelLabel': 'Décrite par {model}',
+  'chat.toolPart.vision.imageAlt': 'Image décrite par l’outil de vision',
   'chat.todo.total': 'Total',
   'chat.todo.inProgress': 'En cours',
   'chat.todo.pending': 'En attente',

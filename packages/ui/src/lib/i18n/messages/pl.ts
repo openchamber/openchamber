@@ -1398,6 +1398,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.toolPart.moreErrors': '+{count} kolejnych błędów',
   'chat.toolPart.noOutputProduced': 'Brak wygenerowanego wyniku',
   'chat.toolPart.openSubtask': 'Otwórz podzadanie typu {type}',
+  'chat.toolPart.vision.modelLabel': 'Opisano przez {model}',
+  'chat.toolPart.vision.imageAlt': 'Obraz opisany przez narzędzie wizji',
   'chat.toolPart.output': 'Wyjście',
   'chat.toolPart.showRawJson': 'Pokaż surowy JSON',
   'chat.toolPart.showFormattedJson': 'Pokaż sformatowany JSON',

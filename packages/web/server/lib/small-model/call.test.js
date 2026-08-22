@@ -874,3 +874,195 @@ describe('callSmallModel — structured output', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('callSmallModel — image payloads', () => {
+  let fetchMock;
+  let originalFetch;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    readConfig.mockReset();
+    readConfig.mockReturnValue({});
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const IMAGES = [{ mimeType: 'image/png', base64: 'aGVsbG8=' }];
+
+  it('sends image_url parts alongside text on OpenAI-compatible providers', async () => {
+    fetchMock.mockResolvedValue(ok('described'));
+
+    const text = await callSmallModel({
+      auth: { openai: { type: 'api', key: 'sk-openai' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'openai',
+      modelID: 'gpt-5',
+      prompt: 'what is in this image?',
+      images: IMAGES,
+    });
+
+    expect(text).toBe('described');
+    const { url, init } = lastCall(fetchMock);
+    expect(url).toBe('https://api.openai.com/v1/chat/completions');
+    const body = JSON.parse(init.body);
+    expect(body.messages[0].content).toEqual([
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,aGVsbG8=' } },
+      { type: 'text', text: 'what is in this image?' },
+    ]);
+  });
+
+  it('keeps the user message a plain string when no images are provided', async () => {
+    fetchMock.mockResolvedValue(ok('described'));
+
+    await callSmallModel({
+      auth: { openai: { type: 'api', key: 'sk-openai' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'openai',
+      modelID: 'gpt-5',
+      prompt: 'hello',
+    });
+
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.messages[0].content).toBe('hello');
+  });
+
+  it('sends Anthropic image source blocks', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ content: [{ type: 'text', text: 'described' }] }),
+    });
+
+    const text = await callSmallModel({
+      auth: { anthropic: { type: 'api', key: 'sk-ant' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'anthropic',
+      modelID: 'claude-sonnet-4',
+      prompt: 'what is in this image?',
+      images: IMAGES,
+    });
+
+    expect(text).toBe('described');
+    const { url, init } = lastCall(fetchMock);
+    expect(url).toBe('https://api.anthropic.com/v1/messages');
+    const body = JSON.parse(init.body);
+    expect(body.messages[0].content).toEqual([
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' } },
+      { type: 'text', text: 'what is in this image?' },
+    ]);
+  });
+
+  it('sends Google inline_data parts', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'described' }] } }] }),
+    });
+
+    const text = await callSmallModel({
+      auth: { google: { type: 'api', key: 'google-key' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'google',
+      modelID: 'gemini-3-flash',
+      prompt: 'what is in this image?',
+      images: IMAGES,
+    });
+
+    expect(text).toBe('described');
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.contents[0].parts).toEqual([
+      { inline_data: { mime_type: 'image/png', data: 'aGVsbG8=' } },
+      { text: 'what is in this image?' },
+    ]);
+  });
+
+  it('sends input_image parts through the Responses wire format', async () => {
+    const copilotAuth = {
+      'github-copilot': { type: 'oauth', access: 'test-token', refresh: 'test-token' },
+    };
+    fetchMock.mockImplementation(async (url) => {
+      if (String(url).endsWith('/models')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [{ id: 'gpt-5-codex', supported_endpoints: ['/responses'] }] }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ output_text: 'described' }),
+      };
+    });
+
+    const text = await callSmallModel({
+      auth: copilotAuth,
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'github-copilot',
+      modelID: 'gpt-5-codex',
+      prompt: 'what is in this image?',
+      images: IMAGES,
+    });
+
+    expect(text).toBe('described');
+    const { init } = lastCall(fetchMock);
+    const body = JSON.parse(init.body);
+    expect(body.input[0].content).toEqual([
+      { type: 'input_image', image_url: 'data:image/png;base64,aGVsbG8=' },
+      { type: 'input_text', text: 'what is in this image?' },
+    ]);
+  });
+
+  it('sends input_image parts on the ChatGPT-plan codex backend', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => [
+        'data: {"type":"response.output_text.delta","delta":"desc"}',
+        'data: [DONE]',
+      ].join('\n'),
+    });
+
+    const text = await callSmallModel({
+      auth: { openai: { type: 'oauth', access: 'token', refresh: 'refresh', expires: Date.now() + 3_600_000 } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'openai',
+      modelID: 'gpt-5.4-mini',
+      prompt: 'what is in this image?',
+      images: IMAGES,
+    });
+
+    expect(text).toBe('desc');
+    const { url, init } = lastCall(fetchMock);
+    expect(url).toContain('chatgpt.com/backend-api/codex/responses');
+    const body = JSON.parse(init.body);
+    expect(body.input[0].content).toEqual([
+      { type: 'input_image', image_url: 'data:image/png;base64,aGVsbG8=' },
+      { type: 'input_text', text: 'what is in this image?' },
+    ]);
+  });
+
+  it('rejects malformed image entries', async () => {
+    await expect(callSmallModel({
+      auth: { openai: { type: 'api', key: 'sk-openai' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'openai',
+      modelID: 'gpt-5',
+      prompt: 'hello',
+      images: [{ mimeType: 'text/plain', base64: '' }],
+    })).rejects.toThrow('each image requires a base64 body and an image/* mimeType');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

@@ -9,6 +9,7 @@ import { NotificationSettings } from './NotificationSettings';
 import { GitHubSettings } from './GitHubSettings';
 import { VoiceSettings } from './VoiceSettings';
 import { TunnelSettings } from './TunnelSettings';
+import { VisionSettings } from './VisionSettings';
 import { OpenCodeCliSettings } from './OpenCodeCliSettings';
 import { OpenChamberToolsSettings } from './OpenChamberToolsSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
@@ -84,6 +85,8 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 return <VoiceSectionContent />;
             case 'tunnel':
                 return <TunnelSectionContent />;
+            case 'vision':
+                return <VisionSectionContent />;
             default:
                 return null;
         }
@@ -100,6 +103,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         notifications: t('settings.page.notifications.title'),
         voice: t('settings.page.voice.title'),
         tunnel: t('settings.page.tunnel.title'),
+        vision: t('settings.page.vision.title'),
     }[section];
 
     const pageDescription = {
@@ -113,6 +117,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         notifications: t('settings.page.notifications.description'),
         voice: t('settings.page.voice.description'),
         tunnel: t('settings.page.tunnel.description'),
+        vision: t('settings.page.vision.description'),
     }[section];
 
     return (
@@ -255,4 +260,13 @@ const TunnelSectionContent: React.FC = () => {
         return null;
     }
     return <TunnelSettings />;
+};
+
+// Vision section: vision model + prompt for the agent vision tool. Hidden in
+// VS Code, where the OpenChamber server does not inject its agent tool.
+const VisionSectionContent: React.FC = () => {
+    if (isVSCodeRuntime()) {
+        return null;
+    }
+    return <VisionSettings />;
 };

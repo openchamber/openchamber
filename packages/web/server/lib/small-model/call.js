@@ -23,6 +23,24 @@ const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
 
+// Images arrive as base64 bodies with their mime type (data URL split by the
+// caller). The shape is validated at the entrypoint so each wire format can
+// build its image blocks without re-checking.
+const normalizeImages = (images) => {
+  if (images === undefined || images === null) return [];
+  if (!Array.isArray(images)) throw new Error('images must be an array');
+  return images.map((entry) => {
+    const mimeType = typeof entry?.mimeType === 'string' ? entry.mimeType : '';
+    const base64 = typeof entry?.base64 === 'string' ? entry.base64 : '';
+    if (!mimeType.startsWith('image/') || !base64) {
+      throw new Error('each image requires a base64 body and an image/* mimeType');
+    }
+    return { mimeType, base64 };
+  });
+};
+
+const buildImageDataUrl = ({ mimeType, base64 }) => `data:${mimeType};base64,${base64}`;
+
 const httpError = async (response, provider) => {
   const body = await response.text().catch(() => '');
   const snippet = body ? `: ${body.slice(0, 300)}` : '';
@@ -144,7 +162,7 @@ const ensureFreshOpenaiOauth = async (entry) => {
 // Wire formats
 // ---------------------------------------------------------------------------
 
-const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, extraBody, responseSchema, timeoutMs, signal }) => {
+const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system, images = [], maxOutputTokens, providerLabel, extraBody, responseSchema, timeoutMs, signal }) => {
   const trimmedBase = baseURL.replace(/\/+$/, '');
   console.log('[small-model:diagnostic] request', {
     provider: providerLabel,
@@ -153,6 +171,7 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
     thinkingDisabled: extraBody?.thinking?.type === 'disabled',
     promptChars: prompt.length,
     systemChars: system?.length ?? 0,
+    imageCount: images.length,
     inputChars: prompt.length + (system?.length ?? 0),
   });
   const response = await fetch(`${trimmedBase}/chat/completions`, {
@@ -166,7 +185,15 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
       model: modelID,
       messages: [
         ...(system ? [{ role: 'system', content: system }] : []),
-        { role: 'user', content: prompt },
+        {
+          role: 'user',
+          content: images.length > 0
+            ? [
+                ...images.map((image) => ({ type: 'image_url', image_url: { url: buildImageDataUrl(image) } })),
+                { type: 'text', text: prompt },
+              ]
+            : prompt,
+        },
       ],
       max_tokens: maxOutputTokens,
       stream: false,
@@ -235,7 +262,7 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
   return text;
 };
 
-const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, responseSchema, timeoutMs, signal }) => {
+const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, images = [], maxOutputTokens, providerLabel, responseSchema, timeoutMs, signal }) => {
   const trimmedBase = baseURL.replace(/\/+$/, '');
   const response = await fetch(`${trimmedBase}/responses`, {
     method: 'POST',
@@ -249,7 +276,10 @@ const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, 
       ...(system ? { instructions: system } : {}),
       input: [{
         role: 'user',
-        content: [{ type: 'input_text', text: prompt }],
+        content: [
+          ...images.map((image) => ({ type: 'input_image', image_url: buildImageDataUrl(image) })),
+          { type: 'input_text', text: prompt },
+        ],
       }],
       max_output_tokens: maxOutputTokens,
       ...(responseSchema
@@ -287,7 +317,7 @@ const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, 
   return text;
 };
 
-const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTokens, providerLabel, responseSchema, timeoutMs, signal }) => {
+const callMessages = async ({ url, headers, modelID, prompt, system, images = [], maxOutputTokens, providerLabel, responseSchema, timeoutMs, signal }) => {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -299,7 +329,18 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
       model: modelID,
       max_tokens: maxOutputTokens,
       ...(system ? { system } : {}),
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{
+        role: 'user',
+        content: images.length > 0
+          ? [
+              ...images.map((image) => ({
+                type: 'image',
+                source: { type: 'base64', media_type: image.mimeType, data: image.base64 },
+              })),
+              { type: 'text', text: prompt },
+            ]
+          : prompt,
+      }],
       // The messages API has no response_format; a forced single-tool call is
       // the supported way to get schema-shaped output.
       ...(responseSchema
@@ -340,7 +381,7 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
   return text;
 };
 
-const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => callMessages({
+const callAnthropic = async ({ apiKey, modelID, prompt, system, images = [], maxOutputTokens, responseSchema, timeoutMs, signal }) => callMessages({
   url: 'https://api.anthropic.com/v1/messages',
   headers: {
     'x-api-key': apiKey,
@@ -349,6 +390,7 @@ const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens,
   modelID,
   prompt,
   system,
+  images,
   maxOutputTokens,
   providerLabel: 'Anthropic',
   responseSchema,
@@ -401,7 +443,7 @@ const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
   throw new Error(`GitHub Copilot model "${modelID}" has no supported text endpoint`);
 };
 
-const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => {
+const callGoogle = async ({ apiKey, modelID, prompt, system, images = [], maxOutputTokens, responseSchema, timeoutMs, signal }) => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelID)}:generateContent`;
   const thinkingConfig = modelID.toLowerCase().startsWith('gemini-3')
     ? { thinkingLevel: modelID.toLowerCase().includes('flash') ? 'minimal' : 'low' }
@@ -414,7 +456,13 @@ const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, re
       'x-goog-api-key': apiKey,
     },
     body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      contents: [{
+        role: 'user',
+        parts: [
+          ...images.map((image) => ({ inline_data: { mime_type: image.mimeType, data: image.base64 } })),
+          { text: prompt },
+        ],
+      }],
       ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
       generationConfig: {
         maxOutputTokens,
@@ -441,7 +489,11 @@ const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, re
 
 // ChatGPT-plan traffic goes to the codex backend, which only speaks the
 // streaming Responses API — collect the output_text deltas from the SSE body.
-const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, system, timeoutMs, signal }) => {
+// Image parts use the same `input_image` shape the documented Responses API
+// takes: OpenCode's own codex plugin forwards /v1/responses-shaped bodies
+// (image parts included) to this endpoint unchanged, and models.dev lists the
+// ChatGPT-plan codex models as image-input capable.
+const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, system, images = [], timeoutMs, signal }) => {
   const response = await fetch(CODEX_RESPONSES_URL, {
     method: 'POST',
     headers: {
@@ -459,7 +511,10 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
         {
           type: 'message',
           role: 'user',
-          content: [{ type: 'input_text', text: prompt }],
+          content: [
+            ...images.map((image) => ({ type: 'input_image', image_url: buildImageDataUrl(image) })),
+            { type: 'input_text', text: prompt },
+          ],
         },
       ],
       // The codex backend rejects max_output_tokens (OpenCode forces it to
@@ -603,8 +658,9 @@ export async function resolveProviderLogin({ auth, workingDirectory, providerID 
     || null;
 }
 
-export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) {
+export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, images, maxOutputTokens, responseSchema, timeoutMs, signal }) {
   const tokens = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : DEFAULT_MAX_OUTPUT_TOKENS;
+  const normalizedImages = normalizeImages(images);
   const providerConfig = readProviderConfig(workingDirectory, providerID);
   const runtimeProvider = await getRuntimeProvider(providerID);
   // Match OpenCode's resolveSDK precedence: config `provider.<id>.options`
@@ -654,6 +710,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
       modelID,
       prompt,
       system,
+      images: normalizedImages,
       maxOutputTokens: tokens,
       providerLabel: 'GitHub Copilot',
       responseSchema,
@@ -693,6 +750,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
       modelID,
       prompt,
       system,
+      images: normalizedImages,
       timeoutMs,
       signal,
     });
@@ -706,10 +764,10 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
   }
 
   if (providerID === 'anthropic') {
-    return callAnthropic({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
+    return callAnthropic({ apiKey, modelID, prompt, system, images: normalizedImages, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
   }
   if (providerID === 'google') {
-    return callGoogle({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
+    return callGoogle({ apiKey, modelID, prompt, system, images: normalizedImages, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
   }
 
   // Everything else: OpenAI-compatible chat completions against the catalog's
@@ -755,6 +813,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     modelID,
     prompt,
     system,
+    images: normalizedImages,
     maxOutputTokens: tokens,
     providerLabel: provider?.name || providerID,
     extraBody,

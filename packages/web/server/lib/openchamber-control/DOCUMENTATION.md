@@ -9,12 +9,17 @@ other.
 
 ## Boundaries
 
-- `service.js` validates and executes the fixed project, model, session, and
-  scheduled-task action allowlist. `actions.js` marks CLI-only actions with
-  `agentExposed: false` (currently `schedule.status`); the agent tool consumes
-  the filtered `OPENCHAMBER_AGENT_TOOL_*` exports. `schedule.toggle` requires
-  the `disabled` boolean and replaces separate enable/disable actions;
-  `schedule.list` also returns scheduler status as `scheduler`.
+- `service.js` validates and executes the fixed project, model, session,
+  scheduled-task, and vision action allowlist. `actions.js` marks CLI-only
+  actions with `agentExposed: false` (currently `schedule.status`); the agent
+  tool consumes the filtered `OPENCHAMBER_AGENT_TOOL_*` exports.
+  `schedule.toggle` requires the `disabled` boolean and replaces separate
+  enable/disable actions; `schedule.list` also returns scheduler status as
+  `scheduler`.
+- `vision.run` delegates to the vision runtime
+  (`../agent-capabilities/vision.js`), which owns image validation and the
+  direct provider call; the service only threads `imagePath`, `question`, the
+  context directory, and the caller's abort signal through.
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation.

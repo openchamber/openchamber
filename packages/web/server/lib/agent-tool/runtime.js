@@ -79,6 +79,8 @@ const ALL_PARAMETER_PROPERTIES = {
   cron: { type: 'string', description: 'Cron expression' },
   timezone: { type: 'string', description: 'IANA timezone' },
   disabled: { type: 'boolean', description: 'true disables and false enables; required for schedule.toggle' },
+  imagePath: { type: 'string', description: 'Absolute or directory-relative path to an image file to describe; required for vision.run' },
+  question: { type: 'string', description: 'Optional focused question about the image; appended to the configured vision prompt' },
   url: { type: 'string', description: 'http(s) URL for browser.open' },
   selector: { type: 'string', description: 'CSS selector from a browser.snapshot result' },
   text: { type: 'string', description: 'Visible label to match when no selector is given' },

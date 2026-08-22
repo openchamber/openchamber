@@ -18,6 +18,7 @@ import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes.js';
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
+import { registerVisionRoutes } from '../agent-capabilities/vision-routes.js';
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
@@ -197,6 +198,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerOpenChamberControlRoutes(app, { controlService: openChamberControlService });
 
+    registerVisionRoutes(app, {
+      readSettingsFromDiskMigrated,
+      persistSettings,
+    });
     registerMarkdownImageGrantRoutes(app, {
       fsPromises,
       path,

@@ -63,6 +63,9 @@ both settings are `false`.
 - Optional behavior switches (`worktree`, `goal`, `agent`, `variant`, `wait`)
   state their default and an explicit "only when the user asks" rule so agents
   do not invent worktrees, goal mode, or waits the user never requested.
+- `vision.run` (`imagePath` required, `question` optional) lets a model without
+  image input ask the user-configured vision model to describe an image — see
+  `../agent-capabilities/DOCUMENTATION.md`.
 - Detailed combination rules are enforced by the shared control service and
   returned as actionable usage errors only after an invalid call. Per-action
   examples and a repeated per-action parameter schema are intentionally omitted.

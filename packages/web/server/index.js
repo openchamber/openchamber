@@ -112,6 +112,7 @@ import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
+import { createVisionRuntime } from './lib/agent-capabilities/vision.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import webPush from 'web-push';
 
@@ -1329,6 +1330,11 @@ const openChamberSessionService = createOpenChamberSessionService({
   emitSessionCreatedEvent,
   sessionKnowledgeRuntime,
 });
+const visionService = createVisionRuntime({
+  readSettingsFromDiskMigrated,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+});
 // Browser actions are published to whichever OpenChamber clients are connected;
 // the one owning the browser panel answers. `emitRequest` returns the number of
 // clients reached so the broker can fail fast when nobody is listening.
@@ -1368,6 +1374,7 @@ const openChamberControlService = createOpenChamberControlService({
   waitForOpenCodeReady,
   sessionService: openChamberSessionService,
   scheduledTaskService,
+  visionService,
   browserControl: browserControlBroker,
   agentMemoryActions: createAgentMemoryActions({
     agentMemoryRuntime,

@@ -53,6 +53,7 @@ describe('agent tool action allowlist', () => {
     'schedule.run',
     'schedule.delete',
     'schedule.toggle',
+    'vision.run',
   ])('delegates %s to the shared control service', async (action) => {
     const { runtime, executeAction } = await createRuntime();
     const input = { action, projectId: 'project-1' };
@@ -109,6 +110,12 @@ describe('managed agent tool runtime', () => {
       'Wait for current session activity to become idle. Omit by default; use only when the user asks or the next step requires the completed result',
     );
     expect(hooks.tool.openchamber.args.parameters.properties.sessionId).toEqual({ type: 'string' });
+    expect(hooks.tool.openchamber.args.parameters.properties.imagePath.description).toBe(
+      'Absolute or directory-relative path to an image file to describe; required for vision.run',
+    );
+    expect(hooks.tool.openchamber.args.parameters.properties.question.description).toBe(
+      'Optional focused question about the image; appended to the configured vision prompt',
+    );
     expect(source).not.toContain('title: "OpenChamber"');
     expect(source).not.toContain('@opencode-ai/plugin');
     expect(source).not.toContain(preparedEnv.OPENCHAMBER_AGENT_TOOL_TOKEN);

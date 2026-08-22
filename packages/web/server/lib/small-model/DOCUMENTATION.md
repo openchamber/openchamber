@@ -125,6 +125,16 @@ other runtime API.
     content/reasoning lengths without logging prompts, response text, or
     credentials. Goal audit parsing similarly emits
     `[session-goal:diagnostic]` structural verdict metadata.
+- **Images**: `callSmallModel({ images: [{ mimeType, base64 }] })` sends image
+  parts alongside the prompt (`vision.run` uses this). Support differs per
+  wire format: `image_url` content parts for OpenAI-compatible chat,
+  `input_image` for the Responses API and the ChatGPT-plan codex backend,
+  Anthropic `image` source blocks for `/v1/messages`, and Google
+  `inline_data` parts. Entries are validated at the entrypoint (base64 body +
+  `image/*` mimeType). The codex path mirrors OpenCode's own plugin, which
+  forwards `/v1/responses`-shaped bodies (image parts included) to the codex
+  endpoint unchanged, and models.dev lists the ChatGPT-plan codex models as
+  image-input capable.
 - `catalog.js` — models.dev catalog via the shared in-process cache
   (`../opencode/models-metadata.js`, also serving
    `/api/openchamber/models-metadata`).
