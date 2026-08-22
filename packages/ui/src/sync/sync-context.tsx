@@ -294,6 +294,11 @@ type PendingSessionMaterialization = {
 const SESSION_MATERIALIZATION_COOLDOWN_MS = 5_000
 const pendingSessionMaterializations = new Map<string, PendingSessionMaterialization>()
 
+// In-flight guard for the immediate status poll fired when an assistant
+// message completes (see maybePollStatusAfterMessageCompletion). Keyed by
+// directory so a burst of completing messages shares one status fetch.
+const messageCompletionStatusPolls = new Set<string>()
+
 function enqueueSessionMaterialization(
   directory: string,
   sessionID: string,
@@ -682,6 +687,49 @@ async function resyncDirectorySessionStatuses(
     }
   }
   return nextStatuses
+}
+
+/**
+ * Immediately re-check the session status after an assistant message
+ * completes. The turn-ending `session.idle` event can be delayed or lost; left
+ * alone, the busy spinner keeps showing until the next watchdog poll tick
+ * (up to ~5s) and its escalation (up to ~10s). One cheap status fetch right
+ * after the completion confirms the turn really ended, mirroring the watchdog
+ * escalation: the monotonic pass confirms/raises busy but never lowers it, and
+ * when the snapshot reports the session idle while the store still believes it
+ * busy, an authoritative resync settles the status immediately.
+ *
+ * Bounded: one in-flight fetch per directory, only for sessions the store
+ * currently believes active, best-effort (the watchdog poll remains the
+ * backstop). This narrows recovery latency without restructuring the polling
+ * design.
+ */
+export function maybePollStatusAfterMessageCompletion(
+  directory: string,
+  store: StoreApi<DirectoryStore>,
+  sessionID: string,
+): void {
+  if (!directory || directory === "global" || !sessionID) return
+  const current = store.getState().session_status?.[sessionID]
+  if (!current || current.type === "idle") return
+  if (messageCompletionStatusPolls.has(directory)) return
+
+  messageCompletionStatusPolls.add(directory)
+  void (async () => {
+    try {
+      const statuses = await runBackgroundNetworkTask(() =>
+        resyncDirectorySessionStatuses(directory, store, [sessionID], "monotonic"))
+      if (!statuses) return
+      if (needsSnapshotAfterStatusPoll(store.getState(), sessionID, statuses[sessionID])) {
+        await runBackgroundNetworkTask(() =>
+          resyncDirectorySessionStatuses(directory, store, [sessionID], "authoritative"))
+      }
+    } catch {
+      // Best-effort — the watchdog poll retries on its own cadence.
+    } finally {
+      messageCompletionStatusPolls.delete(directory)
+    }
+  })()
 }
 
 // After a monotonic poll, decide whether to escalate to a full authoritative
@@ -1803,6 +1851,12 @@ export function handleEvent(
           reason: "empty-assistant-message",
           messageID,
         })
+      }
+      // An assistant message that finished is strong evidence the turn may
+      // have ended; if the session.idle event was delayed or lost, settle the
+      // busy status immediately instead of waiting for the next watchdog poll.
+      if (info.role === "assistant" && typeof info.time?.completed === "number") {
+        maybePollStatusAfterMessageCompletion(resolvedDirectory, store, sessionID)
       }
     }
   } else {

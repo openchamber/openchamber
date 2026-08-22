@@ -58,6 +58,18 @@ const findTrailingAssistantMessage = (messages: Message[] | undefined): Message 
   return null
 }
 
+/**
+ * The server stamps `time.completed` on an assistant message only after its
+ * whole response (text + every tool call) finished. A completed trailing
+ * message therefore means the message itself is done even when the turn keeps
+ * running (next step, follow-up tool phase) — it must not stay marked as
+ * streaming, or the typing indicator and the part-update suspension linger on
+ * finished content until the session settles.
+ */
+const isTrailingMessageComplete = (message: Message): boolean => {
+  return typeof (message as { time?: { completed?: unknown } }).time?.completed === "number"
+}
+
 export function updateStreamingState(state: State, now = Date.now()) {
   countSyncPerformance("streamingFullReconciliations")
   const currentStore = useStreamingStore.getState()
@@ -101,6 +113,18 @@ export function updateStreamingState(state: State, now = Date.now()) {
     const streamingMsg = findTrailingAssistantMessage(messages)
 
     if (!streamingMsg) {
+      const prevId = currentStreamingIds.get(sessionID)
+      if (prevId) {
+        completeStreamingMessage(sessionID, prevId)
+      }
+      continue
+    }
+
+    // The trailing assistant message already finished (time.completed), so
+    // nothing is streaming right now even though the session stays busy for
+    // the rest of the turn. Complete any previously streaming message instead
+    // of re-marking the finished one as streaming.
+    if (isTrailingMessageComplete(streamingMsg)) {
       const prevId = currentStreamingIds.get(sessionID)
       if (prevId) {
         completeStreamingMessage(sessionID, prevId)
@@ -218,6 +242,14 @@ export function updateChangedStreamingSessions(state: State, previous: State, no
     const streamingMessage = findTrailingAssistantMessage(state.message[sessionID])
 
     if (!streamingMessage) {
+      if (previousMessageID) complete(sessionID, previousMessageID)
+      continue
+    }
+
+    // Completed trailing message while the turn keeps running: nothing is
+    // streaming — clear the marker and any previous streaming message instead
+    // of keeping the finished message flagged as streaming.
+    if (isTrailingMessageComplete(streamingMessage)) {
       if (previousMessageID) complete(sessionID, previousMessageID)
       continue
     }

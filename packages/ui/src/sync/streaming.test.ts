@@ -18,6 +18,12 @@ const message = (id: string, role: "user" | "assistant"): Message => ({
   role,
 } as unknown as Message)
 
+const completedAssistantMessage = (id: string): Message => ({
+  id,
+  role: "assistant",
+  time: { created: 1, completed: 100 },
+} as unknown as Message)
+
 const stateWithMessages = (messages: Message[], status: SessionStatus = { type: "busy" } as SessionStatus): State => ({
   ...INITIAL_STATE,
   session_status: {
@@ -162,5 +168,73 @@ describe("updateStreamingState", () => {
     expect(streaming.streamingMessageIds.get("ses_1")).toBe("msg_assistant_2")
     expect(streaming.messageStreamStates.get("msg_assistant_1")?.phase).toBe("completed")
     expect(streaming.messageStreamStates.get("msg_assistant_2")?.phase).toBe("streaming")
+  })
+
+  test("completes a streaming message when the trailing assistant message finishes while the session stays busy", () => {
+    updateStreamingState(stateWithMessages([
+      message("msg_user_1", "user"),
+      message("msg_assistant_1", "assistant"),
+    ]))
+    expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBe("msg_assistant_1")
+
+    // The message completed (time.completed) but the turn keeps running
+    // (next step / tool phase) — the finished message must not stay marked
+    // as streaming with the typing indicator and part-update suspension on it.
+    updateStreamingState(stateWithMessages([
+      message("msg_user_1", "user"),
+      completedAssistantMessage("msg_assistant_1"),
+    ]))
+
+    const streaming = useStreamingStore.getState()
+    expect(streaming.streamingMessageIds.get("ses_1")).toBeNull()
+    expect(streaming.messageStreamStates.get("msg_assistant_1")?.phase).toBe("completed")
+  })
+
+  test("does not mark an already-completed trailing assistant message as streaming", () => {
+    updateStreamingState(stateWithMessages([
+      message("msg_user_1", "user"),
+      completedAssistantMessage("msg_assistant_1"),
+    ]))
+
+    const streaming = useStreamingStore.getState()
+    expect(streaming.streamingMessageIds.get("ses_1") ?? null).toBeNull()
+    expect(streaming.messageStreamStates.has("msg_assistant_1")).toBe(false)
+  })
+
+  test("incrementally clears the streaming marker when the trailing message completes while busy", () => {
+    const previous = stateWithMessages([
+      message("msg_user_1", "user"),
+      message("msg_assistant_1", "assistant"),
+    ])
+    updateStreamingState(previous, 10)
+    expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBe("msg_assistant_1")
+
+    const next = stateWithMessages([
+      message("msg_user_1", "user"),
+      completedAssistantMessage("msg_assistant_1"),
+    ])
+    updateChangedStreamingSessions(next, previous, 20)
+
+    const streaming = useStreamingStore.getState()
+    expect(streaming.streamingMessageIds.get("ses_1")).toBeNull()
+    expect(streaming.messageStreamStates.get("msg_assistant_1")?.phase).toBe("completed")
+  })
+
+  test("keeps the next assistant message streaming after an intermediate message completed while busy", () => {
+    const previous = stateWithMessages([
+      message("msg_user_1", "user"),
+      completedAssistantMessage("msg_assistant_1"),
+    ])
+    updateStreamingState(previous, 10)
+    expect(useStreamingStore.getState().streamingMessageIds.get("ses_1") ?? null).toBeNull()
+
+    const next = stateWithMessages([
+      message("msg_user_1", "user"),
+      completedAssistantMessage("msg_assistant_1"),
+      message("msg_assistant_2", "assistant"),
+    ])
+    updateChangedStreamingSessions(next, previous, 20)
+
+    expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBe("msg_assistant_2")
   })
 })
