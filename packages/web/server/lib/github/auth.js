@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { readJsonFileWithBackupSync } from '../opencode/settings-file.js';
 
 const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -162,9 +163,7 @@ function writeAuthList(list) {
 
 function readSettingsFile() {
   try {
-    if (fs.existsSync(SETTINGS_FILE)) {
-      return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {};
-    }
+    return readJsonFileWithBackupSync(fs, SETTINGS_FILE) || {};
   } catch {
     // ignore
   }

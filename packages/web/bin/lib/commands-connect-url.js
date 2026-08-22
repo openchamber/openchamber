@@ -17,6 +17,7 @@ import { createClientPairingRuntime } from '../../server/lib/client-auth/pairing
 import { createRelayIdentityRuntime } from '../../server/lib/relay/identity.js';
 import { DEFAULT_RELAY_URL } from '../../server/lib/relay/service.js';
 import { bytesToBase64Url } from '../../server/lib/relay/e2ee.js';
+import { readJsonFileWithBackup } from '../../server/lib/opencode/settings-file.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -59,14 +60,16 @@ function createSettingsAccessors() {
   const settingsPath = path.join(getOpenChamberDataDir(), SETTINGS_FILE_NAME);
   const readSettingsFromDiskMigrated = async () => {
     try {
-      return JSON.parse(await fs.promises.readFile(settingsPath, 'utf8'));
+      return await readJsonFileWithBackup(fs.promises, settingsPath);
     } catch {
       return {};
     }
   };
   const writeSettingsToDisk = async (settings) => {
     await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
-    await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+    const temporaryPath = `${settingsPath}.tmp-${process.pid}-${Date.now()}`;
+    await fs.promises.writeFile(temporaryPath, JSON.stringify(settings, null, 2), 'utf8');
+    await fs.promises.rename(temporaryPath, settingsPath);
   };
   return { readSettingsFromDiskMigrated, writeSettingsToDisk };
 }

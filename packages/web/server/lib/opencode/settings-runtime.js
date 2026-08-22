@@ -1,4 +1,5 @@
 import { createProjectIdFromPath } from '../projects/project-id.js';
+import { readJsonFileWithBackup } from './settings-file.js';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
@@ -474,8 +475,7 @@ export const createSettingsRuntime = (deps) => {
 
   const readSettingsFromDisk = async () => {
     try {
-      const raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(raw);
+      const parsed = await readJsonFileWithBackup(fsPromises, SETTINGS_FILE_PATH);
       if (parsed && typeof parsed === 'object') {
         return parsed;
       }
@@ -497,20 +497,18 @@ export const createSettingsRuntime = (deps) => {
   // the empty spread. Here only a genuinely missing file means "no settings";
   // any other failure (including a non-object payload) throws.
   const readSettingsFromDiskStrict = async () => {
-    let raw;
     try {
-      raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
+      const parsed = await readJsonFileWithBackup(fsPromises, SETTINGS_FILE_PATH);
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('Settings file is malformed (non-object payload)');
+      }
+      return parsed;
     } catch (error) {
       if (error && typeof error === 'object' && error.code === 'ENOENT') {
         return {};
       }
       throw error;
     }
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-      throw new Error('Settings file is malformed (non-object payload)');
-    }
-    return parsed;
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
