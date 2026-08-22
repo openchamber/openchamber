@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
 - Chat: newly sent messages and syntax-highlighted code blocks no longer briefly flicker. Bash output can also grow with its content instead of being cut off.
 - Usage: Z.ai credit limits now appear alongside its other quota windows.
+- Usage: pace and prediction are back on quota rows in the work status panel and the Usage settings page, which again show whether usage is on track, too fast, or used up, plus the predicted final usage at the end of the window; a "Show predictions" toggle controls the extra rows (thanks to @JElfferich).
 - Git: pull-request checks in Work status stay current as their status changes.
 - UI: the default dialog close button is easier to click or tap (thanks to @rockinrimmer).
 - Desktop/Windows: the close button now aligns correctly with the rest of the window chrome.

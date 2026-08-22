@@ -539,6 +539,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['quota', 'work', 'status', 'panel'],
   },
   {
+    id: 'usage.show-predictions',
+    page: 'usage',
+    titleKey: 'settings.usage.sidebar.field.showPredictions',
+    keywords: ['quota', 'pace', 'prediction', 'forecast'],
+  },
+  {
     id: 'usage.model-quotas',
     page: 'usage',
     titleKey: 'settings.usage.page.section.modelQuotas',

@@ -8,6 +8,8 @@ import type { QuotaProviderId, UsageWindow } from '@/types';
 export type UsageLimitRow = {
   key: string;
   label: string;
+  /** Raw provider window key (e.g. "5h", "weekly") before localization. */
+  windowKey: string;
   subtitle?: string;
   window: UsageWindow;
 };
@@ -48,7 +50,7 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
         const rows: UsageLimitRow[] = [];
 
         for (const [label, window] of Object.entries(result?.usage?.windows ?? {})) {
-          rows.push({ key: `window-${label}`, label: formatWindowLabel(label), window });
+          rows.push({ key: `window-${label}`, label: formatWindowLabel(label), windowKey: label, window });
         }
 
         const modelEntries = Object.entries(result?.usage?.models ?? {});
@@ -63,6 +65,7 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
           rows.push({
             key: `model-${modelName}-${label}`,
             label: formatWindowLabel(label),
+            windowKey: label,
             subtitle: getDisplayModelName(modelName),
             window,
           });

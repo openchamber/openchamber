@@ -329,6 +329,10 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     }
   }
 
+  if ('usageShowPredValues' in restChanges && typeof restChanges.usageShowPredValues !== 'boolean') {
+    delete restChanges.usageShowPredValues;
+  }
+
   if (typeof restChanges.opencodeBinary === 'string') {
     restChanges.opencodeBinary = restChanges.opencodeBinary.trim();
   }

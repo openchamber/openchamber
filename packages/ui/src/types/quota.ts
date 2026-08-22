@@ -27,7 +27,7 @@ export interface UsageWindow {
   remainingPercent: number | null;
   windowSeconds: number | null;
   resetAfterSeconds: number | null;
-  resetAt: number | null;
+  resetAt: number | string | null;
   resetAtFormatted: string | null;
   resetAfterFormatted: string | null;
   valueLabel?: string | null;
