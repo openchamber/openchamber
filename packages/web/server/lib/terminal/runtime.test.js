@@ -147,13 +147,17 @@ describe('terminal runtime', () => {
 
   it('creates client-identified sessions and forwards bounded resize operations', async () => {
     const harness = createHarness();
+    const ipcEnv = Object.fromEntries(['NODE_CHANNEL_FD', 'BUN_WATCH_PID'].map((key) => [key, process.env[key]]));
+    process.env.NODE_CHANNEL_FD = '3';
+    process.env.BUN_WATCH_PID = '123';
     try {
       const response = createResponse();
       await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-1', cwd: '/repo', cols: 120, rows: 40, themeMode: 'light', terminalBackground: '#faf8f0', terminalForeground: '#1b1b1b' } }, response);
       expect(response.body).toEqual({ sessionId: 'term-1', cols: 120, rows: 40, status: 'running' });
       expect(harness.processes[0].options.cwd).toBe('/repo');
       expect(harness.processes[0].options.env.COLORFGBG).toBe('0;15');
-      expect(harness.processes[0].options.env.NODE_CHANNEL_FD).toBe('');
+      expect(harness.processes[0].options.env.NODE_CHANNEL_FD).toBeUndefined();
+      expect(harness.processes[0].options.env.BUN_WATCH_PID).toBeUndefined();
       expect(harness.processes[0].options.env).not.toHaveProperty('ARGV0');
       expect(harness.processes[0].options.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
       if (process.platform === 'linux') {
@@ -176,7 +180,13 @@ describe('terminal runtime', () => {
       const invalid = createResponse();
       harness.routes.post.get('/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 1001, rows: 60 } }, invalid);
       expect(invalid.statusCode).toBe(400);
-    } finally { await harness.runtime.shutdown(); }
+    } finally {
+      for (const [key, value] of Object.entries(ipcEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await harness.runtime.shutdown();
+    }
   });
 
   it('strips AppImage ARGV0 from PTY child environments', async () => {
