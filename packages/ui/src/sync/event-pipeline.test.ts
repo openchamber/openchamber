@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test"
+import { beforeEach, describe, expect, test } from "bun:test"
 import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
+import { __resetOpenChamberEventBusForTesting, isWsEventPipelineActive } from "../lib/openchamberEventBus"
 
 const failAfter = (ms: number) => new Promise<never>((_, reject) => {
   setTimeout(() => reject(new Error("Timed out waiting for event pipeline flush")), ms)
@@ -68,6 +69,10 @@ function createSdk(events: Event[], streamFinished: () => void): OpencodeClient 
 }
 
 describe("createEventPipeline", () => {
+  beforeEach(() => {
+    __resetOpenChamberEventBusForTesting();
+  });
+
   test("delivers one ordered batch per directory flush", async () => {
     let resolveStreamFinished!: () => void
     const streamFinished = new Promise<void>((resolve) => {
@@ -258,5 +263,50 @@ describe("createEventPipeline", () => {
     } finally {
       pipeline.cleanup()
     }
+  })
+
+  test("SSE transport does not report WS pipeline as active (regression)", async () => {
+    let resolveStreamFinished!: () => void
+    const streamFinished = new Promise<void>((resolve) => {
+      resolveStreamFinished = resolve
+    })
+    const pipeline = createEventPipeline({
+      sdk: createSdk([
+        partUpdatedEvent("a"),
+      ], resolveStreamFinished),
+      onEvents: () => {},
+      transport: "sse",
+      heartbeatTimeoutMs: 1_000,
+    })
+
+    try {
+      await streamFinished
+      // markConnected() fired during SSE — wsActive must stay false.
+      // Before the fix this was unconditionally true, causing consumers
+      // to close their EventSource fallbacks while the bus stayed silent.
+      expect(isWsEventPipelineActive()).toBe(false)
+    } finally {
+      pipeline.cleanup()
+    }
+  })
+
+  test("cleanup resets WS pipeline to inactive", async () => {
+    let resolveStreamFinished!: () => void
+    const streamFinished = new Promise<void>((resolve) => {
+      resolveStreamFinished = resolve
+    })
+    const pipeline = createEventPipeline({
+      sdk: createSdk([
+        partUpdatedEvent("a"),
+      ], resolveStreamFinished),
+      onEvents: () => {},
+      transport: "sse",
+      heartbeatTimeoutMs: 1_000,
+    })
+
+    await streamFinished
+    pipeline.cleanup()
+
+    expect(isWsEventPipelineActive()).toBe(false)
   })
 })
