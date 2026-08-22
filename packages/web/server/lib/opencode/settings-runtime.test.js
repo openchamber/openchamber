@@ -39,6 +39,24 @@ const createRuntime = async () => {
 };
 
 describe('settings runtime', () => {
+  it('round-trips shared sidebar preferences through settings.json', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    const preferences = {
+      sidebarProjectDisplayMode: 'single',
+      sidebarSessionGroupingMode: 'flat',
+      sidebarProjectSortOrder: 'date-added',
+      sidebarShowRecentSection: false,
+    };
+    try {
+      await runtime.persistSettings(preferences);
+
+      await expect(runtime.readSettingsFromDisk()).resolves.toEqual(preferences);
+      await expect(fsPromises.readFile(settingsFilePath, 'utf8')).resolves.toBe(JSON.stringify(preferences, null, 2));
+    } finally {
+      await cleanup();
+    }
+  });
+
   it.skipIf(process.platform === 'win32')('writes settings with restrictive directory and file permissions', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     try {

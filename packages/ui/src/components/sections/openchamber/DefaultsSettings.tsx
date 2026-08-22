@@ -21,6 +21,7 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 
 const getDisplayModel = (
   storedModel: string | undefined
@@ -275,8 +276,11 @@ export const DefaultsSettings: React.FC = () => {
     [walkthroughModelOverride]
   );
   React.useEffect(() => {
-    // Both pickers filter by the same authenticated-provider list, and the
-    // walkthrough picker is always visible, so this is always worth fetching.
+    // Both pickers offer the same providers — the walkthrough runs through the
+    // small model — and the walkthrough picker is always visible, so this is
+    // always worth fetching. The server answers with the providers it has a
+    // credential and an endpoint for, including plugin-registered ones that
+    // exist only inside the running OpenCode.
     let cancelled = false;
     (async () => {
       try {
@@ -387,6 +391,7 @@ export const DefaultsSettings: React.FC = () => {
               <AgentSelector
                 agentName={defaultAgent || ''}
                 onChange={handleAgentChange}
+                filter={(agent) => isPrimaryMode(agent.mode)}
                 className={SETTINGS_CUSTOM_TRIGGER_CLASS}
               />
             </SettingsFieldRow>

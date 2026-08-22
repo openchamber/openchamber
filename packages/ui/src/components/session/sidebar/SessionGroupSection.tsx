@@ -58,6 +58,7 @@ type Props = {
   normalizedSessionSearchQuery: string;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
   visibleSessionCount?: number;
+  sessionBatchSize?: number;
   collapsedGroups: Set<string>;
   hideDirectoryControls: boolean;
   collapsedFolderIds: Set<string>;
@@ -76,7 +77,7 @@ type Props = {
     renderContext?: 'project' | 'recent',
     renderExtras?: SessionNodeRenderExtras,
   ) => React.ReactNode;
-  showMoreGroupSessions: (groupKey: string, currentVisibleCount: number) => void;
+  showMoreGroupSessions: (groupKey: string, currentVisibleCount: number, increment?: number) => void;
   resetGroupSessionLimit: (groupKey: string) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
@@ -84,7 +85,7 @@ type Props = {
   setActiveProjectIdOnly: (id: string) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; targetFolderId?: string }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; targetFolderId?: string; target?: 'chat' | 'project' }) => void;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   renamingFolderId: string | null;
@@ -190,6 +191,7 @@ const areGroupPropsEqual = (prev: Props, next: Props): boolean => {
   if (prev.compactBodyPadding !== next.compactBodyPadding) return false;
   if (prev.groupSearchDataByGroup !== next.groupSearchDataByGroup) return false;
   if (prev.visibleSessionCount !== next.visibleSessionCount) return false;
+  if (prev.sessionBatchSize !== next.sessionBatchSize) return false;
 
   if (prev.collapsedGroups !== next.collapsedGroups
     && prev.collapsedGroups.has(prev.groupKey) !== next.collapsedGroups.has(next.groupKey)) {
@@ -288,6 +290,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     normalizedSessionSearchQuery,
     groupSearchDataByGroup,
     visibleSessionCount,
+    sessionBatchSize,
     collapsedGroups,
     hideDirectoryControls,
     collapsedFolderIds,
@@ -401,7 +404,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
       setIsRequestingBootstrapAccess(false);
     }
   }, [canGrantBootstrapAccess, failedBootstrapDirectory, isRequestingBootstrapAccess, retryFailedBootstrap]);
-  const maxVisible = hideDirectoryControls ? 10 : 5;
+  const maxVisible = sessionBatchSize ?? (hideDirectoryControls ? 10 : 5);
   const nonArchivedVisibleCount = Math.max(maxVisible, visibleSessionCount ?? maxVisible);
   const groupMatchesSearch = hasSessionSearchQuery ? searchData?.groupMatches === true : false;
   const shouldFilterGroupContents = hasSessionSearchQuery;
@@ -878,7 +881,12 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
               if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
               setActiveMainTab('chat');
               if (mobileVariant) setSessionSwitcherOpen(false);
-              openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: scopeDirectory ?? group.directory, targetFolderId: folder.id });
+               openNewSessionDraft({
+                 selectedProjectId: projectId,
+                 directoryOverride: scopeDirectory ?? group.directory,
+                 targetFolderId: folder.id,
+                 target: group.draftTarget,
+               });
             }}
             hideActions={false}
             archivedBucket={group.isArchivedBucket === true}
@@ -1059,7 +1067,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
       {remainingCount > 0 ? (
         <button
           type="button"
-          onClick={() => showMoreGroupSessions(groupKey, visibleSessions.length)}
+          onClick={() => showMoreGroupSessions(groupKey, visibleSessions.length, sessionBatchSize ?? 7)}
           className="mt-0.5 flex items-center justify-start rounded-md pl-[26px] pr-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
         >
           {t('sessions.sidebar.group.showMore')}

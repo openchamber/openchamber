@@ -9,6 +9,8 @@ import type { SessionNode } from '../types';
 import { isPathWithinProject } from '../utils';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
 export type SwitcherItem = {
   node: SessionNode;
@@ -51,6 +53,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
   const sessionOrderRanks = useSessionOrderingStore((state) => state.rankById);
   const branchesByDirectory = useGitAllBranches();
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
 
   // Worktree sessions live OUTSIDE their project's path, so prefix matching
   // can't resolve their project — and their branch is known from worktree
@@ -114,6 +117,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
 
     const parents = activeSessions
       .filter((session) => !session.time?.archived)
+      .filter((session) => !isVSCode || !isChatDirectoryPath(resolveGlobalSessionDirectory(session)))
       .filter((session) => !(session as Session & { parentID?: string | null }).parentID)
       .filter((session) => {
         if (!scopeProjectId) return true;
@@ -151,7 +155,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
         },
       };
     });
-  }, [activeSessions, branchesByDirectory, enabled, findProjectForDirectory, maxParents, pinnedSessionIds, scopeProjectId, sessionOrderRanks, worktreeInfoByPath]);
+  }, [activeSessions, branchesByDirectory, enabled, findProjectForDirectory, isVSCode, maxParents, pinnedSessionIds, scopeProjectId, sessionOrderRanks, worktreeInfoByPath]);
 
   return items;
 };

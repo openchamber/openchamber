@@ -73,6 +73,8 @@ mock.module("@/stores/utils/safeStorage", () => ({
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
     getDirectory: () => null,
+    getFilesystemHome: mock(async () => "/home/test"),
+    createDirectory: mock(async (path: string) => ({ success: true, path })),
     setDirectory: mock(() => undefined),
   },
 }))
@@ -327,9 +329,11 @@ describe("issue 2039 draft auto-accept", () => {
       currentSessionId: null,
       currentSessionDirectory: null,
       newSessionDraft: {
+        draftId: 0,
         open: false,
         directoryOverride: null,
         parentID: null,
+        target: "chat",
       },
     })
   })

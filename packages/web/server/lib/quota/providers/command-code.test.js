@@ -69,4 +69,17 @@ describe('Command Code quota provider', () => {
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer test-token');
     vi.unstubAllGlobals();
   });
+
+  it('recognizes Command Code auth entries under supported provider ID variants', async () => {
+    for (const providerId of ['commandcode', 'command_code', 'command code']) {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ org: { id: 'org-1' } })))
+        .mockResolvedValueOnce(new Response(JSON.stringify(creditsPayload)));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await fetchQuota({ [providerId]: { type: 'oauth', access: 'test-token' } });
+      expect(result).toMatchObject({ providerId: 'command-code', ok: true, configured: true });
+      vi.unstubAllGlobals();
+    }
+  });
 });
