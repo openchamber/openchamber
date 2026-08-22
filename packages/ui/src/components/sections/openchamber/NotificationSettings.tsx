@@ -7,11 +7,15 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { getClientPlatform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { reportSettingsSaveState } from '@/lib/persistence';
 import {
   SettingsSection,
   SettingsTwoColumn,
   SettingsCheckboxRow,
+  SettingsControlGroup,
   SettingsGroupTitle,
+  SettingsStackedField,
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 
@@ -40,6 +44,43 @@ const TEMPLATE_EVENT_LABEL_KEYS = {
   error: 'settings.notifications.page.template.event.error',
   question: 'settings.notifications.page.template.event.question',
 } as const satisfies Record<NotificationTemplateEvent, string>;
+
+type MessengerProviderId = 'slack' | 'discord';
+
+interface MessengerProviderState {
+  enabled: boolean;
+  webhookConfigured: boolean;
+}
+
+type MessengerSettingsState = Record<MessengerProviderId, MessengerProviderState>;
+
+// Provider display names are product names (not translated); example URLs are
+// literal endpoint formats, also exempt from translation.
+const MESSENGER_PROVIDERS: ReadonlyArray<{
+  id: MessengerProviderId;
+  name: string;
+  urlPlaceholder: string;
+}> = [
+  { id: 'slack', name: 'Slack', urlPlaceholder: 'https://hooks.slack.com/services/...' },
+  { id: 'discord', name: 'Discord', urlPlaceholder: 'https://discord.com/api/webhooks/...' },
+];
+
+const parseMessengerSettings = (data: unknown): MessengerSettingsState | null => {
+  if (!data || typeof data !== 'object') return null;
+  const candidate = data as Record<string, unknown>;
+  const parseEntry = (value: unknown): MessengerProviderState | null => {
+    if (!value || typeof value !== 'object') return null;
+    const entry = value as Record<string, unknown>;
+    return {
+      enabled: entry.enabled === true,
+      webhookConfigured: entry.webhookConfigured === true,
+    };
+  };
+  const slack = parseEntry(candidate.slack);
+  const discord = parseEntry(candidate.discord);
+  if (!slack || !discord) return null;
+  return { slack, discord };
+};
 
 export const NotificationSettings: React.FC = () => {
   const { t } = useI18n();
@@ -73,6 +114,146 @@ export const NotificationSettings: React.FC = () => {
   const [pushSupported, setPushSupported] = React.useState(false);
   const [pushSubscribed, setPushSubscribed] = React.useState(false);
   const [pushBusy, setPushBusy] = React.useState(false);
+
+  // Messenger (Slack/Discord) webhook settings live on the server only —
+  // webhook URLs are write-only secrets, so the client sees just
+  // enabled + webhookConfigured flags. `null` means "not loaded yet";
+  // a failed load renders an explicit error instead of empty defaults.
+  const [messengerSettings, setMessengerSettings] = React.useState<MessengerSettingsState | null>(null);
+  const [messengerLoadFailed, setMessengerLoadFailed] = React.useState(false);
+  const [messengerInputs, setMessengerInputs] = React.useState<Record<MessengerProviderId, string>>({
+    slack: '',
+    discord: '',
+  });
+  const [messengerBusy, setMessengerBusy] = React.useState<MessengerProviderId | null>(null);
+
+  const loadMessengerSettings = React.useCallback(async (): Promise<void> => {
+    try {
+      const response = await runtimeFetch('/api/notifications/messengers', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        throw new Error(`Messenger settings request failed (${response.status})`);
+      }
+      const parsed = parseMessengerSettings(await response.json().catch(() => null));
+      if (!parsed) {
+        throw new Error('Messenger settings response malformed');
+      }
+      setMessengerSettings(parsed);
+      setMessengerLoadFailed(false);
+    } catch (error) {
+      console.warn('Failed to load messenger settings:', error);
+      setMessengerLoadFailed(true);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadMessengerSettings();
+  }, [loadMessengerSettings]);
+
+  const putMessengerUpdate = async (
+    update: Partial<Record<MessengerProviderId, { enabled?: boolean; webhookUrl?: string | null }>>,
+  ): Promise<{ ok: boolean; code?: string }> => {
+    reportSettingsSaveState('saving');
+    try {
+      const response = await runtimeFetch('/api/notifications/messengers', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(update),
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { code?: string } | null;
+        reportSettingsSaveState('error');
+        return { ok: false, code: typeof data?.code === 'string' ? data.code : undefined };
+      }
+      const parsed = parseMessengerSettings(await response.json().catch(() => null));
+      if (parsed) {
+        setMessengerSettings(parsed);
+      }
+      reportSettingsSaveState('saved');
+      return { ok: true };
+    } catch (error) {
+      console.warn('Failed to update messenger settings:', error);
+      reportSettingsSaveState('error');
+      return { ok: false };
+    }
+  };
+
+  const handleMessengerToggle = async (provider: MessengerProviderId, enabled: boolean) => {
+    setMessengerBusy(provider);
+    try {
+      const result = await putMessengerUpdate({ [provider]: { enabled } });
+      if (!result.ok) {
+        toast.error(t('settings.notifications.page.messengers.toast.saveFailed'));
+      }
+    } finally {
+      setMessengerBusy(null);
+    }
+  };
+
+  const handleMessengerSaveWebhook = async (provider: MessengerProviderId, providerName: string) => {
+    const webhookUrl = messengerInputs[provider].trim();
+    if (!webhookUrl) return;
+    setMessengerBusy(provider);
+    try {
+      const result = await putMessengerUpdate({ [provider]: { webhookUrl } });
+      if (result.ok) {
+        setMessengerInputs((current) => ({ ...current, [provider]: '' }));
+      } else if (result.code === 'invalid-webhook-url') {
+        toast.error(t('settings.notifications.page.messengers.toast.invalidUrl', { messenger: providerName }));
+      } else {
+        toast.error(t('settings.notifications.page.messengers.toast.saveFailed'));
+      }
+    } finally {
+      setMessengerBusy(null);
+    }
+  };
+
+  const handleMessengerRemoveWebhook = async (provider: MessengerProviderId) => {
+    setMessengerBusy(provider);
+    try {
+      const result = await putMessengerUpdate({ [provider]: { webhookUrl: null } });
+      if (!result.ok) {
+        toast.error(t('settings.notifications.page.messengers.toast.saveFailed'));
+      }
+    } finally {
+      setMessengerBusy(null);
+    }
+  };
+
+  const handleMessengerTest = async (provider: MessengerProviderId, providerName: string) => {
+    const pendingUrl = messengerInputs[provider].trim();
+    setMessengerBusy(provider);
+    try {
+      const response = await runtimeFetch('/api/notifications/messengers/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(pendingUrl ? { provider, webhookUrl: pendingUrl } : { provider }),
+      });
+      if (response.ok) {
+        toast.success(t('settings.notifications.page.messengers.toast.testSent', { messenger: providerName }));
+      } else {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        if (data?.error === 'invalid-webhook-url') {
+          toast.error(t('settings.notifications.page.messengers.toast.invalidUrl', { messenger: providerName }));
+        } else {
+          toast.error(t('settings.notifications.page.messengers.toast.testFailed', { messenger: providerName }));
+        }
+      }
+    } catch (error) {
+      console.warn('Messenger test failed:', error);
+      toast.error(t('settings.notifications.page.messengers.toast.testFailed', { messenger: providerName }));
+    } finally {
+      setMessengerBusy(null);
+    }
+  };
 
   React.useEffect(() => {
     if (!isBrowser) {
@@ -605,6 +786,113 @@ export const NotificationSettings: React.FC = () => {
 
           </>
         )}
+
+        <SettingsSection
+          settingsItem="notifications.messengers"
+          title={t('settings.notifications.page.messengers.title')}
+          info={t('settings.notifications.page.messengers.info')}
+        >
+          {messengerLoadFailed ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="typography-meta text-[var(--status-error)]">
+                {t('settings.notifications.page.messengers.loadFailed')}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void loadMessengerSettings()}
+              >
+                {t('settings.notifications.page.messengers.retryAction')}
+              </Button>
+            </div>
+          ) : messengerSettings ? (
+            <div className="space-y-6">
+              {MESSENGER_PROVIDERS.map(({ id, name, urlPlaceholder }) => {
+                const providerState = messengerSettings[id];
+                const inputValue = messengerInputs[id];
+                const busy = messengerBusy === id;
+                return (
+                  <SettingsControlGroup
+                    key={id}
+                    title={name}
+                    settingsItem={`notifications.messengers.${id}`}
+                  >
+                    <div className={SETTINGS_OPTION_STACK_CLASS}>
+                      <SettingsCheckboxRow
+                        checked={providerState.enabled}
+                        disabled={busy}
+                        onChange={(checked) => void handleMessengerToggle(id, checked)}
+                        label={t('settings.notifications.page.messengers.enableLabel', { messenger: name })}
+                        ariaLabel={t('settings.notifications.page.messengers.enableAria', { messenger: name })}
+                      />
+
+                      <SettingsStackedField
+                        label={t('settings.notifications.page.messengers.webhookLabel')}
+                        description={
+                          providerState.webhookConfigured
+                            ? t('settings.notifications.page.messengers.webhookConfigured')
+                            : undefined
+                        }
+                        descriptionPlacement="after"
+                      >
+                        <Input
+                          value={inputValue}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setMessengerInputs((current) => ({ ...current, [id]: value }));
+                          }}
+                          type="url"
+                          autoComplete="off"
+                          spellCheck={false}
+                          className="h-8"
+                          placeholder={
+                            providerState.webhookConfigured
+                              ? t('settings.notifications.page.messengers.replacePlaceholder')
+                              : urlPlaceholder
+                          }
+                          aria-label={t('settings.notifications.page.messengers.webhookAria', { messenger: name })}
+                        />
+                      </SettingsStackedField>
+
+                      <div className="flex flex-wrap items-center gap-2 py-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={busy || inputValue.trim().length === 0}
+                          onClick={() => void handleMessengerSaveWebhook(id, name)}
+                        >
+                          {t('settings.notifications.page.messengers.saveAction')}
+                        </Button>
+                        {providerState.webhookConfigured && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => void handleMessengerRemoveWebhook(id)}
+                          >
+                            {t('settings.notifications.page.messengers.removeAction')}
+                          </Button>
+                        )}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={busy || (!providerState.webhookConfigured && inputValue.trim().length === 0)}
+                          onClick={() => void handleMessengerTest(id, name)}
+                        >
+                          {t('settings.notifications.page.messengers.testAction')}
+                        </Button>
+                      </div>
+                    </div>
+                  </SettingsControlGroup>
+                );
+              })}
+            </div>
+          ) : null}
+        </SettingsSection>
 
         {isBrowser && (
           <SettingsSection

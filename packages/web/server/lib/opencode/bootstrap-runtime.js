@@ -62,6 +62,9 @@ export const createBootstrapRuntime = (dependencies) => {
       fetchFreeZenModels,
       getCachedZenModels,
       setAutoAcceptSession,
+      getMessengerSettingsPublic,
+      updateMessengerSettings,
+      sendMessengerTest,
       agentToolRuntime,
     } = options;
 
@@ -138,6 +141,9 @@ export const createBootstrapRuntime = (dependencies) => {
       markUserMessageSent: sessionRuntime.markUserMessageSent,
       setPushInitialized,
       setAutoAcceptSession,
+      getMessengerSettingsPublic,
+      updateMessengerSettings,
+      sendMessengerTest,
     });
 
     registerOpenChamberRoutes(app, {

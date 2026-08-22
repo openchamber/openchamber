@@ -11,6 +11,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     broadcastUiNotification,
     sendPushToAllUiSessions,
     sendApnsToAllUiSessions,
+    sendMessengerNotification,
     isAnyInteractiveClientVisible,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
@@ -75,13 +76,16 @@ export const createNotificationTriggerRuntime = (deps) => {
   };
 
   // Fan a notification out to every delivery channel: browser web-push (full templated
-  // payload) and native iOS APNs (generic model-based text). Both share the dedup tag and
-  // `requireNoSse` focus gate; a failure in one channel must not block the other.
+  // payload), native iOS APNs (generic model-based text), and configured messenger
+  // webhooks (Slack/Discord). All share the dedup tag; a failure in one channel must
+  // not block the others.
   const fanoutPush = (payload, options) => {
     // Presence-aware routing: if any interactive (non-mobile) client — desktop/web/vscode — is
     // currently visible, it already shows the in-app notification, so skip the native push to the
     // phone. Gated on the desktop's visibility (reliable), never the phone's own. When we skip we
     // also skip toApnsGenericPayload, so the badge isn't incremented for an undelivered push.
+    // Messenger webhooks are NOT presence-gated: they post to a channel, not a device, so
+    // delivery is decided only by the messenger settings (and the trigger gates above).
     const interactiveVisible = isAnyInteractiveClientVisible?.() === true;
     return Promise.all([
       Promise.resolve(sendPushToAllUiSessions?.(payload, options)).catch((error) => {
@@ -92,6 +96,9 @@ export const createNotificationTriggerRuntime = (deps) => {
         : Promise.resolve(sendApnsToAllUiSessions?.(toApnsGenericPayload(payload), options)).catch((error) => {
             console.warn('[APNs] fanout failed:', error?.message ?? error);
           }),
+      Promise.resolve(sendMessengerNotification?.(payload)).catch((error) => {
+        console.warn('[Messengers] fanout failed:', error?.message ?? error);
+      }),
     ]);
   };
 
