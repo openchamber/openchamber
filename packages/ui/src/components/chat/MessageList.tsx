@@ -7,7 +7,10 @@ import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContexts
 import TurnItem from './components/TurnItem';
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
-import { useTurnRecords } from './hooks/useTurnRecords';
+import {
+    collectTrailingUngroupedMessages,
+    useTurnRecords,
+} from './hooks/useTurnRecords';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
 import { getNormalizedMessageForDisplay, hasCompactionPart } from './lib/messageDisplayNormalization';
@@ -28,8 +31,12 @@ import {
     getShellBridgeAssistantDetails,
     type ShellBridgeDetails,
 } from './lib/shellBridge';
+import {
+    DEFAULT_HISTORY_MESSAGE_SIZE,
+    estimateHistoryEntrySize,
+    resolveHistoryWindowing,
+} from './lib/historyWindowing';
 
-const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
 const EMPTY_UNGROUPED_MESSAGE_IDS = new Set<string>();
 const TIMELINE_CACHE_LIMIT = 16;
@@ -50,14 +57,6 @@ const sameKeys = (a: readonly string[] | undefined, b: readonly string[] | undef
 type TanstackVirtualizerInstance = ReactVirtualizer<HTMLDivElement, HTMLDivElement>;
 type HistoryEngine = 'none' | 'tanstack';
 
-const TANSTACK_ESTIMATED_ENTRY_SIZE = 320;
-const TANSTACK_OVERSCAN = 8;
-// Touch flings cover more distance between paints than desktop wheels; a
-// larger window keeps fast mobile scrolling over mounted rows.
-const TANSTACK_MOBILE_OVERSCAN = 16;
-const resolveTanstackOverscan = (): number => (
-    isMobileSurfaceRuntime() ? TANSTACK_MOBILE_OVERSCAN : TANSTACK_OVERSCAN
-);
 // Post-prepend anchor hold: measurements of freshly
 // prepended rows settle over multiple frames, so a single restore can be
 // invalidated by the next measurement pass. Re-assert the anchor until it
@@ -67,6 +66,7 @@ const ANCHOR_HOLD_MAX_FRAMES = 180;
 // Adaptive estimate bounds: only trust the session average once a few rows
 // are measured, and keep it inside sane turn-height bounds.
 const TANSTACK_ESTIMATE_MIN_SAMPLES = 5;
+const TANSTACK_ESTIMATE_MAX_SAMPLES = 32;
 const TANSTACK_ESTIMATE_MIN = 120;
 const TANSTACK_ESTIMATE_MAX = 1200;
 // "At bottom" tolerance for resize-adjustment decisions.
@@ -388,6 +388,11 @@ type RenderEntry =
         nextMessage?: ChatMessageEntry;
     }
     | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean; nextEntryFirstMessage?: ChatMessageEntry };
+
+const getRenderEntryMessageCount = (entry: RenderEntry | undefined): number => {
+    if (!entry) return 1;
+    return entry.kind === 'turn' ? entry.turn.assistantMessages.length + 1 : 1;
+};
 
 type TurnUiState = { isExpanded: boolean };
 
@@ -937,6 +942,7 @@ type StaticHistoryListProps = {
     scrollRef?: React.RefObject<HTMLDivElement | null>;
     registerTanstackVirtualizer?: (virtualizer: TanstackVirtualizerInstance | null) => void;
     virtualizerKey: string;
+    overscan: number;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: () => void;
@@ -950,8 +956,20 @@ type StaticHistoryListProps = {
     reviewTransferDirection?: ReviewTransferDirection | null;
 };
 
-const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, registerTanstackVirtualizer, virtualizerKey, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, reviewTransferDirection }: StaticHistoryListProps) => {
+const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, registerTanstackVirtualizer, virtualizerKey, overscan, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, reviewTransferDirection }: StaticHistoryListProps) => {
     const isTanstack = engine === 'tanstack';
+    const wasTanstackRef = React.useRef(isTanstack);
+    const transitionOffsetRef = React.useRef<number | null>(null);
+    if (isTanstack && !wasTanstackRef.current) {
+        const element = scrollRef?.current;
+        if (element) {
+            const distanceFromEnd = element.scrollHeight - element.clientHeight - element.scrollTop;
+            transitionOffsetRef.current = distanceFromEnd <= TANSTACK_AT_END_THRESHOLD_PX
+                ? Number.MAX_SAFE_INTEGER
+                : element.scrollTop;
+        }
+    }
+    wasTanstackRef.current = isTanstack;
 
     // --- Quiet-window prepend (mobile) --------------------------------------
     // Gesture tracking for the deferred-prepend decision. Refs only: reading
@@ -1040,18 +1058,24 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
     ));
 
     const sizeContainerRef = React.useRef<HTMLDivElement | null>(null);
+    const entryMessageCounts = React.useMemo(() => new Map(
+        renderEntries.map((entry) => [entry.key, getRenderEntryMessageCount(entry)]),
+    ), [renderEntries]);
     // Adaptive estimate: rows this session has actually measured are a far
     // better predictor for the still-unmeasured ones than a fixed constant.
     // Smaller estimate error → smaller anchor corrections when prepended rows
     // measure in → less visible drift. The ref keeps estimateSize's identity
     // stable so updating the average never triggers a global remeasure.
-    const estimatedEntrySizeRef = React.useRef(TANSTACK_ESTIMATED_ENTRY_SIZE);
+    const estimatedMessageSizeRef = React.useRef(DEFAULT_HISTORY_MESSAGE_SIZE);
     const tanstackVirtualizer = useTanstackVirtualizer<HTMLDivElement, HTMLDivElement>({
         count: renderEntries.length,
         enabled: isTanstack,
         getScrollElement: () => scrollRef?.current ?? null,
-        estimateSize: () => estimatedEntrySizeRef.current,
-        overscan: resolveTanstackOverscan(),
+        estimateSize: (index) => estimateHistoryEntrySize(
+            getRenderEntryMessageCount(entriesRef.current[index]),
+            estimatedMessageSizeRef.current,
+        ),
+        overscan,
         scrollToFn: (offset, options, instance) => {
             // Expose the new total height before core writes an anchor
             // correction so the browser does not clamp the offset to the old
@@ -1065,7 +1089,7 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
         // viewport must not move what the user is reading, and iOS-specific
         // touch/momentum deferral for those adjustments lives in the core.
         anchorTo: 'end',
-        initialOffset: () => Number.MAX_SAFE_INTEGER,
+        initialOffset: () => transitionOffsetRef.current ?? Number.MAX_SAFE_INTEGER,
         initialMeasurementsCache: initialMeasurements,
     });
     // Only compensate scroll for rows growing ABOVE the viewport (history
@@ -1085,10 +1109,24 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
         const sizes = tanstackVirtualizer.itemSizeCache;
         if (sizes.size >= TANSTACK_ESTIMATE_MIN_SAMPLES) {
             let total = 0;
-            for (const size of sizes.values()) total += size;
-            estimatedEntrySizeRef.current = Math.min(
+            let messageCount = 0;
+            let sampleCount = 0;
+            for (const [key, size] of sizes) {
+                // The configured keys are entry IDs. Keep an index fallback
+                // for restored/default-key caches from another engine state.
+                const indexedEntry = typeof key === 'number' ? entriesRef.current[key] : undefined;
+                const count = entryMessageCounts.get(String(key))
+                    ?? (indexedEntry ? getRenderEntryMessageCount(indexedEntry) : undefined);
+                if (count === undefined) continue;
+                total += size;
+                messageCount += count;
+                sampleCount += 1;
+                if (sampleCount >= TANSTACK_ESTIMATE_MAX_SAMPLES) break;
+            }
+            if (messageCount === 0) return;
+            estimatedMessageSizeRef.current = Math.min(
                 TANSTACK_ESTIMATE_MAX,
-                Math.max(TANSTACK_ESTIMATE_MIN, Math.round(total / sizes.size)),
+                Math.max(TANSTACK_ESTIMATE_MIN, Math.round(total / messageCount)),
             );
         }
     });
@@ -1378,15 +1416,30 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }), [baseDisplayMessages, retryOverlay]);
 
     const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
-    const { projection, staticTurns, streamingTurn } = useTurnRecords(displayMessages, {
+    const { projection, staticTurns, streamingTurn, keepLastTurnLive } = useTurnRecords(displayMessages, {
         sessionKey,
         showTextJustificationActivity: chatRenderMode === 'sorted',
         showTurnChangedFiles,
         planModeEnabled,
+        sessionIsWorking,
+        activeStreamingMessageId,
     });
+    const trailingUngroupedMessages = React.useMemo(() => {
+        return collectTrailingUngroupedMessages(
+            displayMessages,
+            projection.ungroupedMessageIds,
+            keepLastTurnLive,
+        );
+    }, [displayMessages, keepLastTurnLive, projection.ungroupedMessageIds]);
     const hasUngroupedStaticEntries = projection.ungroupedMessageIds.size > 0;
     const staticEntryMessages = hasUngroupedStaticEntries ? displayMessages : EMPTY_STATIC_ENTRY_MESSAGES;
-    const staticEntryUngroupedIds = hasUngroupedStaticEntries ? projection.ungroupedMessageIds : EMPTY_UNGROUPED_MESSAGE_IDS;
+    const staticEntryUngroupedIds = React.useMemo(() => {
+        if (!hasUngroupedStaticEntries) return EMPTY_UNGROUPED_MESSAGE_IDS;
+        if (trailingUngroupedMessages.length === 0) return projection.ungroupedMessageIds;
+        const ids = new Set(projection.ungroupedMessageIds);
+        trailingUngroupedMessages.forEach((message) => ids.delete(message.info.id));
+        return ids;
+    }, [hasUngroupedStaticEntries, projection.ungroupedMessageIds, trailingUngroupedMessages]);
     const staticRenderEntries = React.useMemo<RenderEntry[]>(() => streamPerfMeasure('ui.message_list.render_entries_ms', () => {
         const turnEntries = staticTurns.map((turn) => ({
             kind: 'turn' as const,
@@ -1428,43 +1481,42 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return orderedEntries;
     }), [projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns]);
 
-    const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
+    const liveTailEntries = React.useMemo<RenderEntry[]>(() => {
+        const entries: RenderEntry[] = [];
         if (streamingTurn) {
-            return {
+            entries.push({
                 kind: 'turn',
                 key: `turn:${streamingTurn.turnId}`,
                 turn: streamingTurn,
                 isLastTurn: streamingTurn.turnId === projection.lastTurnId,
-            } satisfies RenderEntry;
+                nextEntryFirstMessage: trailingUngroupedMessages[0],
+            });
         }
 
-        if (projection.ungroupedMessageIds.size === 0) {
-            return undefined;
-        }
+        const trailingStart = displayMessages.length - trailingUngroupedMessages.length;
+        trailingUngroupedMessages.forEach((message, index) => {
+            const messageIndex = trailingStart + index;
+            entries.push({
+                kind: 'ungrouped',
+                key: `msg:${message.info.id}`,
+                message,
+                previousMessage: messageIndex > 0 ? displayMessages[messageIndex - 1] : undefined,
+                nextMessage: messageIndex < displayMessages.length - 1 ? displayMessages[messageIndex + 1] : undefined,
+            });
+        });
+        return entries;
+    }, [displayMessages, projection.lastTurnId, streamingTurn, trailingUngroupedMessages]);
 
-        const lastMessage = displayMessages[displayMessages.length - 1];
-        if (!lastMessage || !projection.ungroupedMessageIds.has(lastMessage.info.id)) {
-            return undefined;
-        }
-
-        return {
-            kind: 'ungrouped',
-            key: `msg:${lastMessage.info.id}`,
-            message: lastMessage,
-            previousMessage: displayMessages.length > 1 ? displayMessages[displayMessages.length - 2] : undefined,
-            nextMessage: undefined,
-        } satisfies RenderEntry;
-    }, [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, streamingTurn]);
-
-    if (trailingStreamingEntry) {
+    if (liveTailEntries.length > 0) {
         streamPerfCount('ui.message_list.render.streaming');
     }
 
     // Depend on the trailing entry's first message (stable while its assistant
     // streams), not the trailing entry itself, so streaming updates do not
     // recreate every static entry and re-render every turn block.
-    const trailingEntryFirstMessage = trailingStreamingEntry
-        ? (trailingStreamingEntry.kind === 'turn' ? trailingStreamingEntry.turn.userMessage : trailingStreamingEntry.message)
+    const firstLiveTailEntry = liveTailEntries[0];
+    const trailingEntryFirstMessage = firstLiveTailEntry
+        ? (firstLiveTailEntry.kind === 'turn' ? firstLiveTailEntry.turn.userMessage : firstLiveTailEntry.message)
         : undefined;
     const historyEntries = React.useMemo<RenderEntry[]>(() => {
         return staticRenderEntries.map((entry, index) => {
@@ -1483,23 +1535,30 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             return { ...entry, nextEntryFirstMessage };
         });
     }, [staticRenderEntries, trailingEntryFirstMessage]);
+    const allEntries = React.useMemo(() => {
+        return liveTailEntries.length > 0 ? [...historyEntries, ...liveTailEntries] : historyEntries;
+    }, [historyEntries, liveTailEntries]);
+
     // Mobile always starts with the same virtualized engine it will use after
     // pagination. Switching a short list from normal DOM to TanStack during a
     // prepend remounts the history subtree, and the newly enabled end-anchored
     // virtualizer initializes at the bottom before it has prior keyed state.
     // Desktop keeps the small-list threshold where that transition is not tied
     // to the explicit mobile load-older interaction.
-    const shouldVirtualizeHistory = isMobileSurfaceRuntime()
-        || historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
+    const historyWindowing = React.useMemo(() => resolveHistoryWindowing({
+        entryCount: historyEntries.length,
+        maxEntryMessageCount: historyEntries.reduce(
+            (maximum, entry) => Math.max(maximum, getRenderEntryMessageCount(entry)),
+            0,
+        ),
+        isMobile: isMobileSurfaceRuntime(),
+    }), [historyEntries]);
+    const shouldVirtualizeHistory = historyEntries.length > 0 && historyWindowing.shouldVirtualize;
     const historyEngine: HistoryEngine = shouldVirtualizeHistory ? 'tanstack' : 'none';
     const tanstackVirtualizerRef = React.useRef<TanstackVirtualizerInstance | null>(null);
     const registerTanstackVirtualizer = React.useCallback((virtualizer: TanstackVirtualizerInstance | null) => {
         tanstackVirtualizerRef.current = virtualizer;
     }, []);
-
-    const allEntries = React.useMemo(() => {
-        return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
-    }, [historyEntries, trailingStreamingEntry]);
 
     const stableHistoryContentChange = useStableEvent((reason?: ContentChangeReason) => {
         onMessageContentChange(reason);
@@ -1654,7 +1713,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return true;
                 }
 
-                const targetIsTail = trailingStreamingEntry !== undefined && index >= historyEntries.length;
+                const targetIsTail = liveTailEntries.length > 0 && index >= historyEntries.length;
                 if (targetIsTail) {
                     return false;
                 }
@@ -1671,7 +1730,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
                 return scrollMessageElementIntoView(messageId, behavior)
                     || (
-                        trailingStreamingEntry !== undefined && index >= historyEntries.length
+                        liveTailEntries.length > 0 && index >= historyEntries.length
                             ? false
                             : scrollHistoryIndexIntoView(index)
                     );
@@ -1814,7 +1873,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             objectRef.current = null;
         };
-    }, [findMessageElement, historyEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
+    }, [findMessageElement, historyEntries.length, liveTailEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, turnIndexMap, ref]);
 
     const disableFadeIn = false;
 
@@ -1835,6 +1894,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 scrollRef={scrollRef}
                                 registerTanstackVirtualizer={registerTanstackVirtualizer}
                                 virtualizerKey={sessionKey}
+                                overscan={historyWindowing.overscan}
                                 onMessageContentChange={stableHistoryContentChange}
                                 getAnimationHandlers={stableGetAnimationHandlers}
                                 scrollToBottom={stableScrollToBottom}
@@ -1848,9 +1908,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 reviewTransferDirection={reviewTransferDirection}
                             />
                         </FadeInDisabledProvider>
-                        {trailingStreamingEntry ? (
+                        {liveTailEntries.map((entry) => (
                             <StreamingTailContent
-                                entry={trailingStreamingEntry}
+                                key={entry.key}
+                                entry={entry}
                                 directory={directory}
                                 onMessageContentChange={stableTailContentChange}
                                 getAnimationHandlers={stableGetAnimationHandlers}
@@ -1868,7 +1929,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 activeStreamingPhase={activeStreamingPhase}
                                 reviewTransferDirection={reviewTransferDirection}
                             />
-                        ) : null}
+                        ))}
                     </div>
                 </FadeInDisabledProvider>
 

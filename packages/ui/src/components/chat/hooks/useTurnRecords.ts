@@ -9,13 +9,55 @@ interface UseTurnRecordsOptions {
     showTextJustificationActivity: boolean;
     showTurnChangedFiles: boolean;
     planModeEnabled: boolean;
+    sessionIsWorking: boolean;
+    activeStreamingMessageId: string | null | undefined;
 }
 
 export interface TurnRecordsResult {
     projection: TurnProjectionResult;
     staticTurns: TurnProjectionResult['turns'];
     streamingTurn: TurnProjectionResult['turns'][number] | undefined;
+    keepLastTurnLive: boolean;
 }
+
+export interface LiveTurnPartition<TTurn> {
+    staticTurns: TTurn[];
+    streamingTurn: TTurn | undefined;
+}
+
+export const shouldKeepLastTurnLive = (
+    sessionIsWorking: boolean,
+    activeStreamingMessageId: string | null | undefined,
+    lastTurn: Pick<TurnRecord, 'assistantMessages'> | undefined,
+): boolean => activeStreamingMessageId != null
+    || (sessionIsWorking && (lastTurn?.assistantMessages.length ?? 0) === 0);
+
+export const collectTrailingUngroupedMessages = <TMessage extends { info: { id: string } }>(
+    messages: readonly TMessage[],
+    ungroupedMessageIds: ReadonlySet<string>,
+    enabled: boolean,
+): TMessage[] => {
+    if (!enabled || ungroupedMessageIds.size === 0) return [];
+
+    let start = messages.length;
+    while (start > 0 && ungroupedMessageIds.has(messages[start - 1].info.id)) {
+        start -= 1;
+    }
+    return messages.slice(start);
+};
+
+export const partitionLiveTurn = <TTurn,>(
+    turns: readonly TTurn[],
+    keepLastTurnLive: boolean,
+): LiveTurnPartition<TTurn> => {
+    if (!keepLastTurnLive || turns.length === 0) {
+        return { staticTurns: [...turns], streamingTurn: undefined };
+    }
+    return {
+        staticTurns: turns.slice(0, -1),
+        streamingTurn: turns[turns.length - 1],
+    };
+};
 
 export const useTurnRecords = (
     messages: ChatMessageEntry[],
@@ -81,10 +123,18 @@ export const useTurnRecords = (
         });
     }, [messages, options.showTextJustificationActivity, options.showTurnChangedFiles, options.sessionKey, options.planModeEnabled]);
 
+    const keepLastTurnLive = shouldKeepLastTurnLive(
+        options.sessionIsWorking,
+        options.activeStreamingMessageId,
+        projection.turns[projection.turns.length - 1],
+    );
+    const livePartition = React.useMemo(
+        () => partitionLiveTurn(projection.turns, keepLastTurnLive),
+        [keepLastTurnLive, projection.turns],
+    );
+
     const staticTurns = React.useMemo(() => {
-        const nextStatic = projection.turns.length <= 1
-            ? []
-            : projection.turns.slice(0, -1);
+        const nextStatic = livePartition.staticTurns;
         const previousStatic = staticTurnsRef.current;
 
         if (previousStatic.length === nextStatic.length) {
@@ -102,22 +152,21 @@ export const useTurnRecords = (
 
         staticTurnsRef.current = nextStatic;
         return nextStatic;
-    }, [projection.turns]);
+    }, [livePartition.staticTurns]);
 
     const streamingTurn = React.useMemo(() => {
-        const nextStreamingTurn = projection.turns.length === 0
-            ? undefined
-            : projection.turns[projection.turns.length - 1];
+        const nextStreamingTurn = livePartition.streamingTurn;
         if (streamingTurnRef.current === nextStreamingTurn) {
             return streamingTurnRef.current;
         }
         streamingTurnRef.current = nextStreamingTurn;
         return nextStreamingTurn;
-    }, [projection.turns]);
+    }, [livePartition.streamingTurn]);
 
     return {
         projection,
         staticTurns,
         streamingTurn,
+        keepLastTurnLive,
     };
 };
