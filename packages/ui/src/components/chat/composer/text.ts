@@ -104,3 +104,61 @@ export function shouldWrapSelectionAsLink(url: string, selected: string): boolea
         && selected.trim().length > 0
         && !selected.includes('](');
 }
+
+const MARKDOWN_WRAP_PAIRS: Record<string, [string, string]> = {
+    '`': ['`', '`'],
+    '*': ['*', '*'],
+    '_': ['_', '_'],
+    '~': ['~', '~'],
+    '(': ['(', ')'],
+    '[': ['[', ']'],
+    '{': ['{', '}'],
+    '"': ['"', '"'],
+    "'": ["'", "'"],
+};
+
+/**
+ * Markdown source-mode conveniences handled before CodeMirror inserts a key.
+ * The returned text change and selection belong to one editor transaction so
+ * the caret cannot be applied against the previous document.
+ */
+export function getMarkdownAutoPairEdit(
+    value: string,
+    key: string,
+    selectionStart: number,
+    selectionEnd: number,
+): {
+    from: number;
+    to: number;
+    insert: string;
+    selectionStart: number;
+    selectionEnd: number;
+} | null {
+    const pair = MARKDOWN_WRAP_PAIRS[key];
+    if (selectionEnd > selectionStart && pair) {
+        const selected = value.slice(selectionStart, selectionEnd);
+        const [open, close] = pair;
+        return {
+            from: selectionStart,
+            to: selectionEnd,
+            insert: `${open}${selected}${close}`,
+            selectionStart: selectionStart + open.length,
+            selectionEnd: selectionEnd + open.length,
+        };
+    }
+
+    if (key === '`' && selectionStart === selectionEnd) {
+        const before = value.slice(0, selectionStart);
+        if (/(^|\n)``$/.test(before)) {
+            return {
+                from: selectionStart,
+                to: selectionEnd,
+                insert: '`\n\n```',
+                selectionStart: selectionStart + 2,
+                selectionEnd: selectionStart + 2,
+            };
+        }
+    }
+
+    return null;
+}

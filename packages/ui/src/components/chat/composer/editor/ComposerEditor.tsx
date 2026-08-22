@@ -63,8 +63,8 @@ export interface ComposerEditorHandle {
     selectAll(): void;
     /** Replace the current selection, leaving the caret after the insertion. */
     insertText(text: string): void;
-    /** Replace an explicit range; the caret lands at `caret` or after the text. */
-    replaceRange(from: number, to: number, text: string, caret?: number): void;
+    /** Replace a range; selection defaults to a caret after the inserted text. */
+    replaceRange(from: number, to: number, text: string, selectionStart?: number, selectionEnd?: number): void;
     /** Viewport coordinates of the caret, for positioning popups. */
     caretCoords(position?: number): { top: number; bottom: number; left: number } | null;
     /** The scrollable element, for measuring and scroll compensation. */
@@ -516,12 +516,13 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                     userEvent: 'input.type',
                 });
             },
-            replaceRange(from, to, text, caret) {
+            replaceRange(from, to, text, selectionStart, selectionEnd = selectionStart) {
                 const view = viewRef.current;
                 if (!view) return;
+                const anchor = selectionStart ?? from + text.length;
                 view.dispatch({
                     changes: { from, to, insert: text },
-                    selection: { anchor: caret ?? from + text.length },
+                    selection: { anchor, head: selectionEnd ?? anchor },
                     userEvent: 'input.type',
                 });
             },

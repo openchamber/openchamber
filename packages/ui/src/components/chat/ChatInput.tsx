@@ -104,6 +104,7 @@ import {
     appendInlineText,
     appendWithLineBreaks,
     buildImagePasteInsertion,
+    getMarkdownAutoPairEdit,
     shouldWrapSelectionAsLink,
     withInlineInsertionBoundaries,
 } from './composer/text';
@@ -1570,38 +1571,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const selEnd = ta?.getSelection().end ?? -1;
 
             if (ta && selStart >= 0) {
-                const applyEdit = (next: string, caretStart: number, caretEnd: number) => {
+                const edit = getMarkdownAutoPairEdit(message, e.key, selStart, selEnd);
+                if (edit) {
                     e.preventDefault();
-                    setMessage(next);
-                    composerRef.current?.setSelection(caretStart, caretEnd);
-                    updateAutocompleteState(next, caretEnd);
-                };
-
-                // Wrap the current selection: select text, press ` * _ ~ ( [ { " '
-                const WRAP_PAIRS: Record<string, [string, string]> = {
-                    '`': ['`', '`'], '*': ['*', '*'], '_': ['_', '_'], '~': ['~', '~'],
-                    '(': ['(', ')'], '[': ['[', ']'], '{': ['{', '}'],
-                    '"': ['"', '"'], "'": ["'", "'"],
-                };
-                if (selEnd > selStart && WRAP_PAIRS[e.key]) {
-                    const [open, close] = WRAP_PAIRS[e.key];
-                    const selected = message.slice(selStart, selEnd);
-                    const next = `${message.slice(0, selStart)}${open}${selected}${close}${message.slice(selEnd)}`;
-                    applyEdit(next, selStart + open.length, selEnd + open.length);
+                    ta.replaceRange(
+                        edit.from,
+                        edit.to,
+                        edit.insert,
+                        edit.selectionStart,
+                        edit.selectionEnd,
+                    );
                     return;
-                }
-
-                // Typing the third backtick at line start expands into a fenced
-                // code block with the caret on the empty middle line (Slack-like).
-                if (e.key === '`' && selStart === selEnd) {
-                    const before = message.slice(0, selStart);
-                    if (/(^|\n)``$/.test(before)) {
-                        const after = message.slice(selEnd);
-                        const next = `${before}\`\n\n\`\`\`${after}`;
-                        const caret = before.length + 2; // after the completed ``` and first newline
-                        applyEdit(next, caret, caret);
-                        return;
-                    }
                 }
             }
         }
