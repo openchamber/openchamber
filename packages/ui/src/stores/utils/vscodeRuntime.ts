@@ -1,18 +1,14 @@
 import type { RuntimeAPIs } from '@/lib/api/types';
+import {
+  getVSCodeBootstrapConfig,
+  isVSCodeBootstrapPresent,
+  type VSCodeBootstrapConfig,
+} from '@/lib/vscodeBootstrap';
 
-export interface VSCodeBootstrapConfig {
-  workspaceFolder?: unknown;
-  workspaceFolders?: unknown;
-}
-
-export const getVSCodeBootstrapConfig = (): VSCodeBootstrapConfig | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-  return (window as unknown as { __VSCODE_CONFIG__?: VSCodeBootstrapConfig }).__VSCODE_CONFIG__ ?? null;
-};
+export type { VSCodeBootstrapConfig };
+export { getVSCodeBootstrapConfig };
 
 export const isVSCodeRuntime = (
   runtimeApis: RuntimeAPIs | null,
-  bootstrapConfig = getVSCodeBootstrapConfig(),
-): boolean => Boolean(bootstrapConfig || runtimeApis?.runtime?.isVSCode);
+  bootstrapConfig: VSCodeBootstrapConfig | null = getVSCodeBootstrapConfig(),
+): boolean => Boolean(isVSCodeBootstrapPresent(bootstrapConfig) || runtimeApis?.runtime?.isVSCode);
