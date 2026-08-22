@@ -206,11 +206,11 @@ const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDi
   const resolvedBase = path.resolve(baseDirectory || os.homedir());
 
   if (isPathWithinRoot(resolved, resolvedBase, path, os)) {
-    return { ok: true, base: resolvedBase, resolved };
+    return { ok: true, base: resolvedBase, resolved, insideWorkspace: true };
   }
 
   if (isPathWithinRoot(resolved, openchamberUserConfigRoot, path, os)) {
-    return { ok: true, base: path.resolve(openchamberUserConfigRoot), resolved };
+    return { ok: true, base: path.resolve(openchamberUserConfigRoot), resolved, insideWorkspace: true };
   }
 
   return { ok: false, error: 'Path is outside of active workspace' };
@@ -239,7 +239,7 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
       }
       const candidateResolved = path.resolve(candidate);
       if (isPathWithinRoot(resolved, candidateResolved, path, os)) {
-        return { ok: true, base: candidateResolved, resolved };
+        return { ok: true, base: candidateResolved, resolved, insideWorkspace: true };
       }
     }
   } catch (error) {
@@ -333,7 +333,7 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
     });
   }
 
-  return resolveWorkspacePathFromContext({
+  const resolved = await resolveWorkspacePathFromContext({
     req,
     targetPath,
     resolveProjectDirectory,
@@ -342,6 +342,49 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
     normalizeDirectoryPath,
     openchamberUserConfigRoot,
   });
+  if (resolved.ok || resolved.error !== 'Path is outside of active workspace') {
+    return resolved;
+  }
+
+  // The active project directory is validated with fs.realpath, so the base
+  // is canonical while the client (and the file tree) addresses files under
+  // the user-visible, possibly symlinked root (a workspace-internal symlinked
+  // folder, or a project root that is itself a symlink). Accept paths that
+  // are lexically inside the raw directory the client sent; symlink
+  // resolution happens afterwards, so direct paths outside the workspace
+  // remain rejected and the canonical containment check still applies to
+  // every path that is not inside the workspace.
+  const rawHeaderDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+  const rawHeaderEncoding = typeof req.get === 'function' ? req.get('x-opencode-directory-encoding') : null;
+  const decodedHeaderDirectory = rawHeaderDirectory && rawHeaderEncoding === 'uri'
+    ? (() => {
+      try {
+        return decodeURIComponent(rawHeaderDirectory);
+      } catch {
+        return rawHeaderDirectory;
+      }
+    })()
+    : rawHeaderDirectory;
+  const queryDirectory = Array.isArray(req.query?.directory)
+    ? req.query.directory[0]
+    : req.query?.directory;
+  const lexicalBase = [decodedHeaderDirectory, queryDirectory]
+    .find((value) => typeof value === 'string' && value.trim().length > 0);
+  if (lexicalBase) {
+    const lexical = resolveWorkspacePath({
+      targetPath,
+      baseDirectory: lexicalBase,
+      path,
+      os,
+      normalizeDirectoryPath,
+      openchamberUserConfigRoot,
+    });
+    if (lexical.ok) {
+      return lexical;
+    }
+  }
+
+  return resolved;
 };
 
 const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, buildAugmentedPath, commandTimeoutMs }) => {
@@ -785,7 +828,14 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const canonicalPath = await fsPromises.realpath(resolved.resolved);
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os) && !resolved.insideWorkspace) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
 
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
@@ -835,7 +885,14 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const canonicalPath = await fsPromises.realpath(resolved.resolved);
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os) && !resolved.insideWorkspace) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
 
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
@@ -899,7 +956,14 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const canonicalPath = await fsPromises.realpath(resolved.resolved);
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os) && !resolved.insideWorkspace) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
 
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
@@ -977,7 +1041,14 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const canonicalPath = await fsPromises.realpath(resolved.resolved);
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os) && !resolved.insideWorkspace) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
 
       const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
@@ -1464,7 +1535,13 @@ export const registerFsRoutes = (app, dependencies) => {
     };
 
     try {
-      requestedPath = path.resolve(normalizeDirectoryPath(rawPath));
+      // Keep the listing directory canonical (realpath-resolved) so readdir
+      // and git check-ignore operate on the real directory, but expose entry
+      // paths under the requested (user-visible) directory. This keeps paths
+      // inside the workspace addressable when the requested directory is a
+      // symlink to a folder outside the project root — otherwise the file
+      // tree hands back canonical paths that the read/stat/raw routes reject.
+      const requestedPath = path.resolve(normalizeDirectoryPath(rawPath));
       resolvedPath = await realpathCache.resolve(requestedPath);
 
       const stats = await fsPromises.stat(resolvedPath);
@@ -1524,8 +1601,8 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const entries = await Promise.all(
         dirents.map(async (dirent) => {
-          const physicalEntryPath = path.join(resolvedPath, dirent.name);
-          if (respectGitignore && ignoredPaths.has(physicalEntryPath)) {
+          const entryPath = path.join(requestedPath, dirent.name);
+          if (respectGitignore && ignoredPaths.has(entryPath)) {
             return null;
           }
 
