@@ -34,6 +34,7 @@ import {
 
 import { cn } from '@/lib/utils';
 import type { ComposerLanguageContext } from '../language/tokenize';
+import type { ComposerAutoCorrect } from './autocorrect';
 import { composerLanguage, setLanguageContext } from './composerLanguage';
 import type { ComposerEditorViewStore } from './viewStore';
 import { composerEditorTheme, composerSelectionExtension } from './theme';
@@ -89,8 +90,11 @@ export interface ComposerEditorProps {
     placeholder?: string;
     editable?: boolean;
     spellCheck?: boolean;
-    /** Mobile keyboards; ignored on desktop. */
-    autoCorrect?: boolean;
+    /**
+     * The content element's autocorrect keyword. See `autocorrect.ts` for the
+     * case-sensitive CodeMirror workaround.
+     */
+    autoCorrect?: ComposerAutoCorrect;
     autoCapitalize?: 'none' | 'sentences';
     /** Fill the available height instead of growing with the content. */
     fillContainer?: boolean;
@@ -157,7 +161,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             placeholder,
             editable = true,
             spellCheck = false,
-            autoCorrect = false,
+            autoCorrect = 'off',
             autoCapitalize = 'none',
             fillContainer = false,
             maxLines = 8,
@@ -287,7 +291,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                         }),
                         EditorView.contentAttributes.of({
                             spellcheck: String(handlersRef.current.spellCheck ?? false),
-                            autocorrect: handlersRef.current.autoCorrect ? 'on' : 'off',
+                            autocorrect: handlersRef.current.autoCorrect ?? 'off',
                             autocapitalize: handlersRef.current.autoCapitalize ?? 'none',
                             ...(handlersRef.current['aria-label']
                                 ? { 'aria-label': handlersRef.current['aria-label'] }
@@ -454,7 +458,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             if (!view) return;
             const content = view.contentDOM;
             content.setAttribute('spellcheck', String(spellCheck));
-            content.setAttribute('autocorrect', autoCorrect ? 'on' : 'off');
+            content.setAttribute('autocorrect', autoCorrect);
             content.setAttribute('autocapitalize', autoCapitalize);
         }, [autoCapitalize, autoCorrect, spellCheck]);
 

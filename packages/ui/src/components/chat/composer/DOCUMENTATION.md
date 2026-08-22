@@ -112,6 +112,14 @@ token: themes define `--interactive-selection` with its own alpha, so mixing it
 with transparent again is nearly invisible. The iOS system overlay owns its
 visible selection fill.
 
+The content element keeps the existing correction policy: on in the mobile UI,
+off elsewhere. CodeMirror also reads the attribute and reverts Apple and
+Android's insert-period-on-double-space only when its value is exactly `off`.
+`editor/autocorrect.ts` uses the HTML standard's
+[ASCII case-insensitive `autocorrect` keywords](https://html.spec.whatwg.org/multipage/interaction.html#attr-autocorrect)
+to keep desktop word correction off while avoiding that CodeMirror-only
+revert. Its platform checks deliberately match CodeMirror's own browser flags.
+
 `composerLanguage.ts` retokenizes the whole document on every change. The
 composer holds a prompt, not a source file: it is short enough that a full pass
 is cheaper and far simpler than incremental mapping, and it keeps the editor
