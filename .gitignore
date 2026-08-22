@@ -73,3 +73,10 @@ workspaces/
 .maintenance-clone
 test-results/
 artifacts/
+
+# Local OpenCode runtime config overrides the user's global opencode config.
+# A committed copy here silently disables plugins like oh-my-openagent and
+# model providers defined in ~/.config/opencode/opencode.jsonc.
+# Use .opencode/opencode.example.json (if present) as a template instead.
+.opencode/opencode.json
+.opencode/opencode.jsonc
