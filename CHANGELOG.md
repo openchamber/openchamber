@@ -49,6 +49,7 @@ All notable changes to this project will be documented in this file.
 - Desktop: browser pages served from a self-signed loopback HTTPS address now load instead of being blocked by the certificate warning.
 - Browser: typing a comment on a page no longer triggers app shortcuts.
 - Skills Catalog: the source is now named ClawHub instead of "ClawdHub" (thanks to @makeittech).
+- Project actions: Auto-discover is now hidden for projects where no dev server can be detected (no matching project action, no supported dev-server script, no index.html) instead of always appearing and failing on click, while an active Auto-discover run still keeps its stop control and projects with no configured actions still keep the toolbar entry as an Add new action menu (thanks to @lukelabonte).
 
 ## [1.18.4] - 2026-08-14
 
