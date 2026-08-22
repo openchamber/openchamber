@@ -63,9 +63,32 @@ export class SessionEditorPanelProvider {
   }
 
   public createOrShowNewSession(): void {
+    // Without an open workspace folder there is no directory to start the
+    // session against; opening a draft would fall back to the last session's
+    // directory in shared UI state (the bug this fixes). Mirror the sidebar
+    // flow's guard and tell the user instead.
+    const firstFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!firstFolder) {
+      vscode.window.showInformationMessage('OpenChamber: No folder is open. Open a folder to start a new session.');
+      return;
+    }
+
     // Generate unique panel ID for new session drafts
     const panelId = `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    this._createPanel(panelId, t('New Session'), null);
+    const state = this._createPanel(panelId, t('New Session'), null);
+
+    // Start the new session against the currently open workspace folder — the
+    // same `newSession` command the sidebar flow posts. Without it the draft
+    // falls back to the last session's directory in shared UI state.
+    const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
+    state.panel.webview.postMessage({
+      type: 'command',
+      command: 'newSession',
+      payload: {
+        directory: normalizeWindowsDriveLetter(firstFolder.uri.fsPath),
+        workspaceFolders,
+      },
+    });
   }
 
   public createOrShow(sessionId: string, title?: string): void {
@@ -85,7 +108,7 @@ export class SessionEditorPanelProvider {
     this._createPanel(sessionId, sessionTitle, sessionId);
   }
 
-  private _createPanel(panelId: string, title: string, initialSessionId: string | null): void {
+  private _createPanel(panelId: string, title: string, initialSessionId: string | null): SessionPanelState {
     const distUri = vscode.Uri.joinPath(this._extensionUri, 'dist');
 
     const panel = vscode.window.createWebviewPanel(
@@ -166,6 +189,8 @@ export class SessionEditorPanelProvider {
         void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
       }
     }, null, this._context.subscriptions);
+
+    return state;
   }
 
   public updateTheme(kind: vscode.ColorThemeKind) {

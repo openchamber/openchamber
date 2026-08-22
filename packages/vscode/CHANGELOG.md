@@ -22,6 +22,7 @@
 - Attachments: extracted Office and OpenDocument content is now capped and presented more compactly, preventing large documents and their images from overwhelming the message context.
 - Projects: project names now match the folder name exactly, so `.ssh` and `opencode-claude` are no longer shown as `.Ssh` and `Opencode Claude`; names you renamed yourself are kept.
 - Skills Catalog: the source is now named ClawHub instead of "ClawdHub" (thanks to @makeittech).
+- The "Open New Session in Editor" button in the editor title bar now starts the session in the currently open workspace folder instead of the folder of the last session.
 
 ## [1.18.4] - 2026-08-14
 
