@@ -625,6 +625,22 @@ export const McpPage: React.FC = () => {
   const [showImportDialog, setShowImportDialog] = React.useState(false);
   const [importJsonText, setImportJsonText] = React.useState('');
   const [importError, setImportError] = React.useState<string | null>(null);
+  const [showToolsDialog, setShowToolsDialog] = React.useState(false);
+  const [isLoadingTools, setIsLoadingTools] = React.useState(false);
+  const [toolsError, setToolsError] = React.useState<string | null>(null);
+  const [mcpTools, setMcpTools] = React.useState<Array<{
+    name: string;
+    description?: string;
+    title?: string;
+    inputSchema?: unknown;
+  }>>([]);
+  const [toolsServerInfo, setToolsServerInfo] = React.useState<{
+    name?: string;
+    title?: string;
+    version?: string;
+  } | null>(null);
+  const [toolsTruncated, setToolsTruncated] = React.useState(false);
+  const [expandedToolSchemas, setExpandedToolSchemas] = React.useState<Record<string, boolean>>({});
   const runtimeActionKey = React.useMemo(
     () => buildMcpRuntimeActionKey(selectedMcpName, currentDirectory),
     [currentDirectory, selectedMcpName],
@@ -1227,6 +1243,111 @@ export const McpPage: React.FC = () => {
       setIsTestingConnection(false);
     }
   }, [currentDirectory, enabled, requireSavedConfig, selectedMcpName, t, testConnectionMcp]);
+
+  const buildToolsProbeBody = React.useCallback(() => {
+    const environment = Object.fromEntries(
+      envEntries
+        .filter((entry) => entry.key.trim())
+        .map((entry) => [entry.key.trim(), entry.value]),
+    );
+    const headers = Object.fromEntries(
+      headerEntries
+        .filter((entry) => entry.key.trim())
+        .map((entry) => [entry.key.trim(), entry.value]),
+    );
+    const timeoutValue = timeout.trim() ? Number(timeout) : undefined;
+
+    const body: Record<string, unknown> = {
+      name: (isNewServer ? draftName : selectedMcpName)?.trim() || undefined,
+      type: mcpType,
+      enabled,
+      environment,
+    };
+
+    if (mcpType === 'local') {
+      body.command = command.filter((part) => part.trim().length > 0);
+    } else {
+      body.url = url.trim();
+      body.headers = headers;
+      if (timeoutValue !== undefined && Number.isFinite(timeoutValue) && timeoutValue > 0) {
+        body.timeout = timeoutValue;
+      }
+      if (!oauthEnabled) {
+        body.oauth = false;
+      } else {
+        const oauth: Record<string, string> = {};
+        if (oauthClientId.trim()) oauth.clientId = oauthClientId.trim();
+        if (oauthClientSecret.trim()) oauth.clientSecret = oauthClientSecret.trim();
+        if (oauthScope.trim()) oauth.scope = oauthScope.trim();
+        if (oauthRedirectUri.trim()) oauth.redirectUri = oauthRedirectUri.trim();
+        if (Object.keys(oauth).length > 0) {
+          body.oauth = oauth;
+        }
+      }
+    }
+
+    return body;
+  }, [
+    command,
+    draftName,
+    enabled,
+    envEntries,
+    headerEntries,
+    isNewServer,
+    mcpType,
+    oauthClientId,
+    oauthClientSecret,
+    oauthEnabled,
+    oauthRedirectUri,
+    oauthScope,
+    selectedMcpName,
+    timeout,
+    url,
+  ]);
+
+  const handleShowTools = React.useCallback(async () => {
+    if (mcpType === 'local' && command.filter((part) => part.trim()).length === 0) {
+      toast.error(t('settings.mcp.page.toast.localCommandRequired'));
+      return;
+    }
+    if (mcpType === 'remote' && !url.trim()) {
+      toast.error(t('settings.mcp.page.toast.remoteUrlRequired'));
+      return;
+    }
+
+    setShowToolsDialog(true);
+    setIsLoadingTools(true);
+    setToolsError(null);
+    setMcpTools([]);
+    setToolsServerInfo(null);
+    setToolsTruncated(false);
+    setExpandedToolSchemas({});
+
+    try {
+      const directory = currentDirectory?.trim() || undefined;
+      const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+      const response = await runtimeFetch(`/api/config/mcp-tools/probe${query}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(directory ? { 'x-opencode-directory': directory } : {}),
+        },
+        body: JSON.stringify(buildToolsProbeBody()),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || t('settings.mcp.page.toast.listToolsFailed'));
+      }
+      const tools = Array.isArray(payload?.tools) ? payload.tools : [];
+      setMcpTools(tools.filter((tool: { name?: unknown }) => typeof tool?.name === 'string' && tool.name.trim()));
+      setToolsServerInfo(payload?.serverInfo && typeof payload.serverInfo === 'object' ? payload.serverInfo : null);
+      setToolsTruncated(payload?.truncated === true);
+    } catch (err) {
+      setToolsError(err instanceof Error ? err.message : t('settings.mcp.page.toast.listToolsFailed'));
+    } finally {
+      setIsLoadingTools(false);
+    }
+  }, [buildToolsProbeBody, command, currentDirectory, mcpType, t, url]);
 
   React.useEffect(() => {
     if (!isAuthPolling || !selectedMcpName) {
@@ -1855,6 +1976,17 @@ export const McpPage: React.FC = () => {
           >
             {isSaving ? t('settings.common.actions.saving') : isNewServer ? t('settings.common.actions.create') : t('settings.common.actions.saveChanges')}
           </Button>
+          <Button
+            variant="outline"
+            size="xs"
+            className="!font-normal gap-1"
+            onClick={() => void handleShowTools()}
+            disabled={isLoadingTools}
+            data-settings-item="mcp.tools"
+          >
+            <Icon name="tools" className="h-3.5 w-3.5" />
+            {isLoadingTools ? t('settings.mcp.page.actions.loadingTools') : t('settings.mcp.page.actions.showTools')}
+          </Button>
           {!isNewServer && (
             <Button
               variant="destructive"
@@ -1939,6 +2071,106 @@ export const McpPage: React.FC = () => {
               size="sm"
             >
               {t('settings.common.actions.import')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MCP tools list */}
+      <Dialog
+        open={showToolsDialog}
+        onOpenChange={(open) => {
+          if (!open && !isLoadingTools) {
+            setShowToolsDialog(false);
+            setToolsError(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{t('settings.mcp.page.toolsDialog.title')}</DialogTitle>
+            <DialogDescription>
+              {toolsServerInfo?.name
+                ? t('settings.mcp.page.toolsDialog.descriptionWithServer', {
+                    server: toolsServerInfo.title || toolsServerInfo.name,
+                  })
+                : t('settings.mcp.page.toolsDialog.description')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="min-h-0 flex-1 overflow-y-auto space-y-3 pr-1">
+            {isLoadingTools && (
+              <p className="typography-meta text-muted-foreground">{t('settings.mcp.page.toolsDialog.loading')}</p>
+            )}
+            {!isLoadingTools && toolsError && (
+              <p className="typography-meta text-[var(--status-error)]">{toolsError}</p>
+            )}
+            {!isLoadingTools && !toolsError && mcpTools.length === 0 && (
+              <p className="typography-meta text-muted-foreground">{t('settings.mcp.page.toolsDialog.empty')}</p>
+            )}
+            {!isLoadingTools && !toolsError && toolsTruncated && (
+              <p className="typography-meta text-[var(--status-warning)]">
+                {t('settings.mcp.page.toolsDialog.truncated', { count: mcpTools.length })}
+              </p>
+            )}
+            {!isLoadingTools && !toolsError && mcpTools.map((tool) => {
+              const expanded = Boolean(expandedToolSchemas[tool.name]);
+              const hasSchema = tool.inputSchema !== undefined;
+              return (
+                <div key={tool.name} className="border-b border-[var(--interactive-border)] pb-3 last:border-b-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 space-y-1">
+                      <div className="font-mono typography-meta text-foreground break-all">{tool.name}</div>
+                      {(tool.title || tool.description) && (
+                        <p className="typography-micro text-muted-foreground">
+                          {tool.title && tool.description && tool.title !== tool.description
+                            ? `${tool.title} — ${tool.description}`
+                            : (tool.description || tool.title)}
+                        </p>
+                      )}
+                    </div>
+                    {hasSchema && (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="!font-normal shrink-0 text-muted-foreground"
+                        onClick={() => setExpandedToolSchemas((current) => ({
+                          ...current,
+                          [tool.name]: !current[tool.name],
+                        }))}
+                      >
+                        {expanded
+                          ? t('settings.mcp.page.toolsDialog.hideSchema')
+                          : t('settings.mcp.page.toolsDialog.showSchema')}
+                      </Button>
+                    )}
+                  </div>
+                  {expanded && hasSchema && (
+                    <pre className="mt-2 overflow-x-auto rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] p-2 font-mono typography-micro text-foreground/90 whitespace-pre-wrap break-all">
+                      {JSON.stringify(tool.inputSchema, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => void handleShowTools()}
+              disabled={isLoadingTools}
+              className="text-foreground"
+            >
+              {isLoadingTools ? t('settings.mcp.page.actions.loadingTools') : t('settings.mcp.page.actions.refreshTools')}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowToolsDialog(false)}
+              disabled={isLoadingTools}
+              className="text-foreground"
+            >
+              {t('settings.common.actions.cancel')}
             </Button>
           </DialogFooter>
         </DialogContent>

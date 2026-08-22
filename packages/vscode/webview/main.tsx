@@ -651,6 +651,24 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
+  // Deliberately kept outside the `/api/config/mcp/:name` namespace: any single
+  // static segment there (e.g. "tools") would collide with a legally-named MCP
+  // server and silently hijack that server's create/get/update/delete request.
+  if (pathname === '/api/config/mcp-tools/probe') {
+    const body = await extractJsonBody(input, init, method);
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/mcp-tools', { method: 'POST', body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = /not found/i.test(message) ? 404
+        : /required|invalid|disabled|not supported|must be/i.test(message) ? 400
+          : 502;
+      return new Response(JSON.stringify({ error: message }), { status, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   if (pathname === '/api/config/mcp') {
     const verb = method;
     const body = await extractJsonBody(input, init, method);
