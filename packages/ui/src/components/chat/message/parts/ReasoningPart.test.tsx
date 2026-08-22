@@ -1,9 +1,11 @@
 import React from 'react';
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { Part } from '@opencode-ai/sdk/v2';
 
 import { I18nProvider } from '@/lib/i18n';
-import { ReasoningTimelineBlock } from './ReasoningPart';
+import ReasoningPart, { ReasoningTimelineBlock } from './ReasoningPart';
+import type { StreamPhase } from '../types';
 
 // A reasoning text whose summary (first 120 chars) fits in the header but
 // whose expanded body content should only appear when the disclosure is open.
@@ -111,5 +113,82 @@ describe('ReasoningTimelineBlock', () => {
 
     expect(markup).toContain('Planning accessible icon labels with translations');
     expect(markup).not.toContain('&lt;!-- --&gt;');
+  });
+});
+
+// Regression tests for issue #2020: a persisted reasoning part must not be
+// presented as live streaming just because cached data lacks `time.end` or a
+// stream phase. Live activity derives from the live stream phase only.
+describe('ReasoningPart streaming gating (issue #2020)', () => {
+  // Short enough (< 80 chars) that the collapsed header summary contains the
+  // complete text, letting us assert full content on first paint.
+  const SHORT_REASONING = 'Persisted reasoning text that is already fully available.';
+
+  const BUSY_INDICATOR = 'animate-busy-pulse';
+
+  const makeReasoningPart = (time?: { start?: number; end?: number }): Part =>
+    ({
+      id: 'prt_reasoning_2020',
+      sessionID: 'ses_2020',
+      messageID: 'msg_2020',
+      type: 'reasoning',
+      text: SHORT_REASONING,
+      time,
+    }) as unknown as Part;
+
+  // Server rendering reads the UI store's initial state, which is
+  // chatRenderMode 'live' — the mode in which the streaming presentation is
+  // reachable and the issue reproduces.
+  const renderPart = (part: Part, streamPhase?: StreamPhase): string =>
+    renderToStaticMarkup(
+      <I18nProvider>
+        <ReasoningPart part={part} messageId="msg_2020" streamPhase={streamPhase} />
+      </I18nProvider>,
+    );
+
+  test('reasoning without time.end and without a live stream phase renders complete, not streaming', () => {
+    // Freshly opened completed session: cached part never received `time.end`
+    // and no message-level stream phase is available. The full text is already
+    // local, so the block must render as finished content on first paint.
+    const markup = renderPart(makeReasoningPart({ start: 1_000 }), undefined);
+
+    expect(markup).not.toContain(BUSY_INDICATOR);
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain(SHORT_REASONING);
+  });
+
+  test('reasoning without time.end in a completed message renders complete, not streaming', () => {
+    const markup = renderPart(makeReasoningPart({ start: 1_000 }), 'completed');
+
+    expect(markup).not.toContain(BUSY_INDICATOR);
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain(SHORT_REASONING);
+  });
+
+  test('reasoning with time.end is never treated as streaming, even when the phase claims streaming', () => {
+    const markup = renderPart(makeReasoningPart({ start: 1_000, end: 2_000 }), 'streaming');
+
+    expect(markup).not.toContain(BUSY_INDICATOR);
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain(SHORT_REASONING);
+  });
+
+  test('live in-progress reasoning still renders as streaming', () => {
+    // Genuinely live: the message-level stream phase reports streaming and the
+    // part has not ended. The block auto-expands and shows the busy indicator.
+    const markup = renderPart(makeReasoningPart({ start: 1_000 }), 'streaming');
+
+    expect(markup).toContain(BUSY_INDICATOR);
+    expect(markup).toContain('aria-expanded="true"');
+  });
+
+  test('remounting a completed reasoning part does not re-trigger the streaming presentation', () => {
+    const part = makeReasoningPart({ start: 1_000 });
+    const first = renderPart(part, undefined);
+    const second = renderPart(part, undefined);
+
+    expect(second).toBe(first);
+    expect(second).not.toContain(BUSY_INDICATOR);
+    expect(second).toContain(SHORT_REASONING);
   });
 });
