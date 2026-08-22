@@ -1038,6 +1038,13 @@ export const settingsDict = {
 
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Włącz sprawdzanie pisowni w polach tekstowych',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Włącz sprawdzanie pisowni w polach tekstowych',
+  'settings.openchamber.visual.field.largeTextPaste': 'Wklejanie dużego tekstu',
+  'settings.openchamber.visual.field.largeTextPasteHint': 'Przy wklejaniu ponad około 2000 znaków lub 25 wierszy wybierz, czy dołączyć tekst jako plik, wkleić go w treści, czy pytać za każdym razem.',
+  'settings.openchamber.visual.field.largeTextPasteAria': 'Zachowanie przy wklejaniu dużego tekstu',
+  'settings.openchamber.visual.field.largeTextPasteOptionAria': 'Wklejanie dużego tekstu: {option}',
+  'settings.openchamber.visual.option.largeTextPaste.ask.label': 'Pytaj za każdym razem',
+  'settings.openchamber.visual.option.largeTextPaste.attach.label': 'Dołącz jako plik',
+  'settings.openchamber.visual.option.largeTextPaste.inline.label': 'Wklej w treści',
   'settings.openchamber.visual.field.fontSizePercentageAria': 'Procentowy rozmiar czcionki',
   'settings.openchamber.visual.field.inputBarOffset': 'Przesunięcie paska wpisywania',
   'settings.openchamber.visual.field.inputBarOffsetTooltip': 'Podnieś pasek wpisywania, aby uniknąć zasłaniania przez systemowe elementy ekranu, takie jak pasek gestów.',
