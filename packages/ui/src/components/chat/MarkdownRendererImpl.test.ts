@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { parseFileReference, type ParsedFileReference } from './fileReferenceParser';
+import { localPathFromFileUrl, parseFileReference, type ParsedFileReference } from './fileReferenceParser';
 
 const parse = (value: string): ParsedFileReference | null => parseFileReference(value);
 
@@ -94,5 +94,19 @@ describe('parseFileReference', () => {
     test('range form takes precedence over line-only when suffix matches digits-dash-digits', () => {
         const result = parse('src/foo.ts:42-58');
         expect(result).toEqual({ path: 'src/foo.ts', line: 42, endLine: 58 });
+    });
+});
+
+describe('localPathFromFileUrl', () => {
+    test('converts local file URLs to absolute paths', () => {
+        expect(localPathFromFileUrl('file:///private/tmp/report%20viewer.html')).toBe('/private/tmp/report viewer.html');
+        expect(localPathFromFileUrl('file://localhost/private/tmp/REPORT.md')).toBe('/private/tmp/REPORT.md');
+        expect(localPathFromFileUrl('file:///C:/Users/test/report.html')).toBe('C:/Users/test/report.html');
+    });
+
+    test('rejects non-file URLs and remote file hosts', () => {
+        expect(localPathFromFileUrl('https://example.com/report.html')).toBeNull();
+        expect(localPathFromFileUrl('file://remote-host/share/report.html')).toBeNull();
+        expect(localPathFromFileUrl('file:///tmp/bad%ZZpath')).toBeNull();
     });
 });

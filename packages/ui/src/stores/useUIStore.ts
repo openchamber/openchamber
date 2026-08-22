@@ -11,10 +11,17 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { TerminalShell } from '@/lib/api/types';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
-export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
-export type PendingDiffScope = 'working' | 'staged' | 'turn';
-export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal';
+/**
+ * The primary view on mobile and the desktop's promoted full-screen view.
+ * Desktop context-panel content is not represented here.
+ */
+export type WorkspaceSurface = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
+/** @deprecated Use WorkspaceSurface. */
+export type MainTab = WorkspaceSurface;
+export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch';
+export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
@@ -34,6 +41,10 @@ type ContextPanelTab = {
   id: string;
   mode: ContextPanelMode;
   targetPath: string | null;
+  /** Saved project plan this tab shows, for `plan` tabs opened from the notes
+      panel. Project plans are addressed by id because their markdown is
+      server-owned and has no client-visible path. */
+  projectPlanId: string | null;
   dedupeKey: string;
   label: string | null;
   sessionTitleFallback: string | null;
@@ -46,6 +57,7 @@ type ContextPanelTab = {
 type ContextPanelTabDescriptor = {
   mode: ContextPanelMode;
   targetPath?: string | null;
+  projectPlanId?: string | null;
   dedupeKey?: string | null;
   label?: string | null;
   sessionTitleFallback?: string | null;
@@ -71,7 +83,9 @@ type PendingFileNavigation = {
   column: number;
 };
 
-export type MainTabGuard = (nextTab: MainTab) => boolean;
+export type WorkspaceSurfaceGuard = (nextSurface: WorkspaceSurface) => boolean;
+/** @deprecated Use WorkspaceSurfaceGuard. */
+export type MainTabGuard = WorkspaceSurfaceGuard;
 export type EventStreamStatus =
   | 'idle'
   | 'connecting'
@@ -119,10 +133,13 @@ const isLegacyDefaultTemplates = (value: unknown): boolean => {
 const CONTEXT_PANEL_DEFAULT_WIDTH = 380;
 const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
+/** Per surface, not per panel: see clampContextPanelTabs. */
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
 const LEFT_SIDEBAR_MIN_WIDTH = 280;
-const activeMainTabByRuntime = new Map<string, MainTab>();
+const activeSurfaceByRuntime = new Map<string, WorkspaceSurface>();
+/** Separates browser tabs opened in the same millisecond. */
+let browserTabSequence = 0;
 
 const runtimeMemoryKey = (value?: string | null): string => {
   const key = (value ?? getRuntimeKey()).trim();
@@ -188,7 +205,7 @@ const normalizeContextTabLabel = (value: string | null | undefined): string | nu
 };
 
 const normalizePendingDiffScope = (value: unknown): PendingDiffScope | null => {
-  return value === 'working' || value === 'staged' || value === 'turn' ? value : null;
+  return value === 'working' || value === 'staged' || value === 'turn' || value === 'branch' ? value : null;
 };
 
 const buildDefaultContextPanelTabDedupeKey = (mode: ContextPanelMode, targetPath: string | null): string => {
@@ -196,7 +213,7 @@ const buildDefaultContextPanelTabDedupeKey = (mode: ContextPanelMode, targetPath
     return targetPath || mode;
   }
 
-  if (mode === 'preview') {
+  if (mode === 'browser') {
     return targetPath || mode;
   }
 
@@ -237,6 +254,9 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     id: buildContextPanelTabID(descriptor.mode, dedupeKey),
     mode: descriptor.mode,
     targetPath: normalizedTargetPath,
+    projectPlanId: typeof descriptor.projectPlanId === 'string' && descriptor.projectPlanId.trim()
+      ? descriptor.projectPlanId.trim()
+      : null,
     dedupeKey,
     label: normalizeContextTabLabel(descriptor.label),
     sessionTitleFallback: normalizeContextTabLabel(descriptor.sessionTitleFallback),
@@ -247,26 +267,43 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
   };
 };
 
-const clampContextPanelTabs = (tabs: ContextPanelTab[], maxTabs: number, activeTabId: string | null): ContextPanelTab[] => {
-  if (tabs.length <= maxTabs) {
-    return tabs;
+/**
+ * Keeps each surface's tab count in hand.
+ *
+ * The limit is per mode because the strip is per mode: a user looking at diffs
+ * only ever sees diff tabs, so evicting one to make room for a browser tab
+ * takes away something they cannot see being taken. Modes compete for screen
+ * space separately, so they get separate budgets.
+ */
+const clampContextPanelTabs = (
+  tabs: ContextPanelTab[],
+  maxTabsPerMode: number,
+  activeTabId: string | null,
+): ContextPanelTab[] => {
+  const counts = new Map<ContextPanelMode, number>();
+  for (const tab of tabs) counts.set(tab.mode, (counts.get(tab.mode) ?? 0) + 1);
+  const over = [...counts.entries()].filter(([, count]) => count > maxTabsPerMode);
+  if (over.length === 0) return tabs;
+
+  const removeSet = new Set<string>();
+  for (const [mode, count] of over) {
+    const modeTabs = tabs.filter((tab) => tab.mode === mode);
+    const removable = [...modeTabs]
+      .sort((a, b) => a.touchedAt - b.touchedAt)
+      .filter((tab) => tab.id !== activeTabId);
+    // Never drop the tab being opened or looked at; if that leaves the mode one
+    // over its budget, one extra tab beats losing the one in use.
+    for (const tab of removable.slice(0, count - maxTabsPerMode)) removeSet.add(tab.id);
   }
 
-  const tabsByTouch = [...tabs].sort((a, b) => a.touchedAt - b.touchedAt);
-  const removable = tabsByTouch.filter((tab) => tab.id !== activeTabId);
-  const removeCount = tabs.length - maxTabs;
-  if (removeCount <= 0 || removable.length === 0) {
-    return tabs.slice(-maxTabs);
-  }
-
-  const removeSet = new Set(removable.slice(0, removeCount).map((tab) => tab.id));
-  return tabs.filter((tab) => !removeSet.has(tab.id));
+  return removeSet.size === 0 ? tabs : tabs.filter((tab) => !removeSet.has(tab.id));
 };
 
 const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
   if (!Array.isArray(tabs)) {
     return [];
   }
+  const dropBrowserTabs = isVSCodeRuntime();
 
   const result: ContextPanelTab[] = [];
   const seen = new Set<string>();
@@ -279,6 +316,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     const candidate = entry as {
       mode?: unknown;
       targetPath?: unknown;
+      projectPlanId?: unknown;
       dedupeKey?: unknown;
       label?: unknown;
       sessionTitleFallback?: unknown;
@@ -288,7 +326,16 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    if (candidate.mode !== 'diff' && candidate.mode !== 'walkthrough' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'preview' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal') {
+    // Legacy 'preview' tabs are converted to 'browser' by the v14 migration;
+    // anything still carrying an unknown mode here is discarded rather than
+    // resurrected into a tab the panel cannot render.
+    if (candidate.mode !== 'diff' && candidate.mode !== 'walkthrough' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal') {
+      continue;
+    }
+
+    // State is shared with the desktop and web surfaces, which do have a
+    // browser; inside VS Code such a tab would have no surface to belong to.
+    if (dropBrowserTabs && candidate.mode === 'browser') {
       continue;
     }
 
@@ -308,6 +355,9 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       id,
       mode: candidate.mode,
       targetPath,
+      projectPlanId: typeof candidate.projectPlanId === 'string' && candidate.projectPlanId.trim()
+        ? candidate.projectPlanId.trim()
+        : null,
       dedupeKey,
       label: normalizeContextTabLabel(typeof candidate.label === 'string' ? candidate.label : null),
       sessionTitleFallback: normalizeContextTabLabel(typeof candidate.sessionTitleFallback === 'string' ? candidate.sessionTitleFallback : null),
@@ -523,7 +573,7 @@ const sanitizeContextPanelByDirectory = (
     if (candidate.widthByMode && typeof candidate.widthByMode === 'object') {
       for (const [mode, value] of Object.entries(candidate.widthByMode as Record<string, unknown>)) {
         if (
-          (mode === 'diff' || mode === 'file' || mode === 'context' || mode === 'plan' || mode === 'chat' || mode === 'preview' || mode === 'browser' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'terminal')
+          (mode === 'diff' || mode === 'file' || mode === 'context' || mode === 'plan' || mode === 'chat' || mode === 'browser' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'terminal')
           && typeof value === 'number'
           && Number.isFinite(value)
         ) {
@@ -577,7 +627,6 @@ interface UIStore {
   contextEditorTreeVisible: boolean;
   contextEditorTreeWidth: number;
   notesPanelHeight: number;
-  todoPanelHeight: number;
   /** Expanded collapsible sections of the in-chat work-status panel, by id. */
   workStatusExpandedSections: Record<string, boolean>;
   /** Scroll offset of that panel, so it survives being unmounted. */
@@ -607,8 +656,12 @@ interface UIStore {
   workStatusHiddenSections: string[];
   isSessionSwitcherOpen: boolean;
   isSessionDropdownOpen: boolean;
-  activeMainTab: MainTab;
-  mainTabGuard: MainTabGuard | null;
+  activeSurface: WorkspaceSurface;
+  surfaceGuard: WorkspaceSurfaceGuard | null;
+  /** @deprecated Use activeSurface. */
+  activeMainTab: WorkspaceSurface;
+  /** @deprecated Use surfaceGuard. */
+  mainTabGuard: WorkspaceSurfaceGuard | null;
   sidebarOpenBeforeFullscreenTab: boolean | null;
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
@@ -635,6 +688,13 @@ interface UIStore {
   settingsPage: string;
   settingsHasOpenedOnce: boolean;
   settingsProjectsSelectedId: string | null;
+  /**
+   * Project the Settings pages are looking at. `null` follows the app's active
+   * project. Settings browses another project's configuration without moving
+   * the chat, the session list or the file tree, so this is its own state and
+   * not a second writer of the active project.
+   */
+  settingsProjectPath: string | null;
   settingsRemoteInstancesSelectedId: string | null;
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
@@ -718,6 +778,22 @@ interface UIStore {
   persistChatDraft: boolean;
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
+  agentWebToolEnabled: boolean;
+  agentMemoryToolEnabled: boolean;
+  /**
+   * Whether this build has agent memory at all. Server-owned and not
+   * persisted: an unreleased feature must not come back from a stale cache.
+   */
+  agentMemoryFeatureAvailable: boolean;
+  /**
+   * When the user last looked at each memory scope, keyed by scope. Drives the
+   * new/changed badges; there is no stored review state.
+   */
+  agentMemoryViewedAt: Record<string, number>;
+  /** Width of the project context panel's section sidebar, in pixels. */
+  projectContextSidebarWidth: number;
+  /** Active tab of the project context panel (notes/todos/plans). */
+  projectContextTab: string;
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
@@ -758,6 +834,7 @@ interface UIStore {
   openContextPlan: (directory: string) => void;
   openContextPreview: (directory: string, url: string) => void;
   openContextBrowser: (directory: string, url?: string) => void;
+  openNewContextBrowserTab: (directory: string) => void;
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
@@ -774,13 +851,16 @@ interface UIStore {
   setWorkStatusOverlayOpen: (open: boolean) => void;
   setWorkStatusSectionVisible: (sectionId: string, visible: boolean) => void;
   setWorkStatusHiddenSections: (sectionIds: string[]) => void;
-  setTodoPanelHeight: (height: number) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
-  setActiveMainTab: (tab: MainTab) => void;
+  setActiveSurface: (surface: WorkspaceSurface) => void;
+  /** @deprecated Use setActiveSurface. */
+  setActiveMainTab: (surface: WorkspaceSurface) => void;
   prepareForRuntimeSwitch: (runtimeKey?: string | null) => void;
   restoreForRuntimeSwitch: (runtimeKey?: string | null) => void;
-  setMainTabGuard: (guard: MainTabGuard | null) => void;
+  setSurfaceGuard: (guard: WorkspaceSurfaceGuard | null) => void;
+  /** @deprecated Use setSurfaceGuard. */
+  setMainTabGuard: (guard: WorkspaceSurfaceGuard | null) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean, scope?: PendingDiffScope | null) => void;
   setPendingDiagramFile: (filePath: string | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
@@ -810,6 +890,7 @@ interface UIStore {
   setSidebarSection: (section: SidebarSection) => void;
   setSettingsPage: (slug: string) => void;
   setSettingsProjectsSelectedId: (projectId: string | null) => void;
+  setSettingsProjectPath: (path: string | null) => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
@@ -890,6 +971,12 @@ interface UIStore {
   setPersistChatDraft: (value: boolean) => void;
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setAgentControlToolEnabled: (value: boolean) => void;
+  setAgentWebToolEnabled: (value: boolean) => void;
+  setAgentMemoryToolEnabled: (value: boolean) => void;
+  setAgentMemoryFeatureAvailable: (value: boolean) => void;
+  markAgentMemoryViewed: (key: string, viewedAt: number) => void;
+  setProjectContextSidebarWidth: (width: number) => void;
+  setProjectContextTab: (value: string) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
@@ -946,9 +1033,10 @@ export const useUIStore = create<UIStore>()(
         workStatusPanelFits: false,
         workStatusOverlayOpen: false,
         workStatusHiddenSections: [],
-        todoPanelHeight: 259,
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
+        activeSurface: 'chat',
+        surfaceGuard: null,
         activeMainTab: 'chat',
         mainTabGuard: null,
         sidebarOpenBeforeFullscreenTab: null,
@@ -975,6 +1063,7 @@ export const useUIStore = create<UIStore>()(
         settingsPage: 'home',
         settingsHasOpenedOnce: false,
         settingsProjectsSelectedId: null,
+        settingsProjectPath: null,
         settingsRemoteInstancesSelectedId: null,
         eventStreamStatus: 'idle',
         eventStreamHint: null,
@@ -1048,6 +1137,12 @@ export const useUIStore = create<UIStore>()(
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: !isWindowsArm64(),
         agentControlToolEnabled: true,
+        agentWebToolEnabled: true,
+        agentMemoryToolEnabled: false,
+        agentMemoryFeatureAvailable: false,
+        agentMemoryViewedAt: {},
+        projectContextSidebarWidth: 168,
+        projectContextTab: 'notes',
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
@@ -1166,10 +1261,10 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          // Content-driven modes need a payload (a preview URL or session);
-          // the rail renders them disabled until content exists. 'file' opens
-          // an empty editor whose embedded tree picks the first file.
-          if (mode === 'preview' || mode === 'chat') {
+          // Content-driven modes need a payload (a session to split); the rail
+          // renders them disabled until content exists. 'file' opens an empty
+          // editor whose embedded tree picks the first file.
+          if (mode === 'chat') {
             return;
           }
 
@@ -1262,36 +1357,41 @@ export const useUIStore = create<UIStore>()(
         openContextPreview: (directory, url) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedUrl = (url || '').trim();
-          if (!normalizedDirectory || !normalizedUrl) {
+          if (!normalizedDirectory || !normalizedUrl || isVSCodeRuntime()) {
             return;
           }
 
-          let label: string | null = null;
-          try {
-            const parsed = new URL(normalizedUrl);
-            if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-              label = parsed.host || parsed.hostname || 'Preview';
-            }
-          } catch {
-            // ignore invalid URL
-          }
-
+          // No stored label: a browser tab is named after wherever it has
+          // navigated to, which the panel derives from targetPath.
           get().openContextPanelTab(normalizedDirectory, {
-            mode: 'preview',
+            mode: 'browser',
             targetPath: normalizedUrl,
             dedupeKey: normalizedUrl,
-            label,
+            label: null,
+          });
+        },
+        // Always a new tab, never the existing one: the whole point of asking
+        // for one is to keep what is already open.
+        openNewContextBrowserTab: (directory) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory || isVSCodeRuntime()) return;
+          browserTabSequence += 1;
+          get().openContextPanelTab(normalizedDirectory, {
+            mode: 'browser',
+            targetPath: '',
+            dedupeKey: `browser:new:${Date.now()}-${browserTabSequence}`,
+            label: null,
           });
         },
         openContextBrowser: (directory, url = '') => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) return;
+          if (!normalizedDirectory || isVSCodeRuntime()) return;
           const targetUrl = typeof url === 'string' && url.trim().length > 0 ? url.trim() : '';
           get().openContextPanelTab(normalizedDirectory, {
             mode: 'browser',
             targetPath: targetUrl,
-            dedupeKey: 'desktop-browser',
-            label: 'Browser',
+            dedupeKey: targetUrl || 'browser',
+            label: null,
           });
         },
 
@@ -1537,9 +1637,6 @@ export const useUIStore = create<UIStore>()(
           set({ workStatusHiddenSections: [...new Set(sectionIds)] });
         },
 
-        setTodoPanelHeight: (height) => {
-          set({ todoPanelHeight: height });
-        },
 
         setSessionSwitcherOpen: (open) => {
           if (get().isSessionSwitcherOpen === open) {
@@ -1555,29 +1652,33 @@ export const useUIStore = create<UIStore>()(
           set({ isSessionDropdownOpen: open });
         },
 
-        setMainTabGuard: (guard) => {
-          if (get().mainTabGuard === guard) {
+        setSurfaceGuard: (guard) => {
+          if (get().surfaceGuard === guard) {
             return;
           }
-          set({ mainTabGuard: guard });
+          set({ surfaceGuard: guard, mainTabGuard: guard });
         },
 
-        setActiveMainTab: (tab) => {
-          const guard = get().mainTabGuard;
-          if (guard && !guard(tab)) {
+        setMainTabGuard: (guard) => get().setSurfaceGuard(guard),
+
+        setActiveSurface: (surface) => {
+          const guard = get().surfaceGuard;
+          if (guard && !guard(surface)) {
             return;
           }
-          activeMainTabByRuntime.set(runtimeMemoryKey(), tab);
-          set({ activeMainTab: tab });
+          activeSurfaceByRuntime.set(runtimeMemoryKey(), surface);
+          set({ activeSurface: surface, activeMainTab: surface });
         },
+
+        setActiveMainTab: (surface) => get().setActiveSurface(surface),
 
         prepareForRuntimeSwitch: (runtimeKey?: string | null) => {
-          activeMainTabByRuntime.set(runtimeMemoryKey(runtimeKey), get().activeMainTab);
+          activeSurfaceByRuntime.set(runtimeMemoryKey(runtimeKey), get().activeSurface);
         },
 
         restoreForRuntimeSwitch: (runtimeKey?: string | null) => {
-          const restored = activeMainTabByRuntime.get(runtimeMemoryKey(runtimeKey)) ?? 'chat';
-          set({ activeMainTab: restored });
+          const restored = activeSurfaceByRuntime.get(runtimeMemoryKey(runtimeKey)) ?? 'chat';
+          set({ activeSurface: restored, activeMainTab: restored });
         },
 
         setPendingDiffFile: (filePath, staged = false, scope = null) => {
@@ -1601,11 +1702,11 @@ export const useUIStore = create<UIStore>()(
         },
 
         navigateToDiff: (filePath, staged = false, scope = null) => {
-          const guard = get().mainTabGuard;
+          const guard = get().surfaceGuard;
           if (guard && !guard('diff')) {
             return;
           }
-          set({ pendingDiffFile: filePath, pendingDiffStaged: staged, pendingDiffScope: scope, activeMainTab: 'diff' });
+          set({ pendingDiffFile: filePath, pendingDiffStaged: staged, pendingDiffScope: scope, activeSurface: 'diff', activeMainTab: 'diff' });
         },
 
         consumePendingDiffFile: () => {
@@ -1617,11 +1718,11 @@ export const useUIStore = create<UIStore>()(
         },
 
         navigateToDiagram: (filePath) => {
-          const guard = get().mainTabGuard;
+          const guard = get().surfaceGuard;
           if (guard && !guard('diagram')) {
             return;
           }
-          set({ pendingDiagramFile: filePath, activeMainTab: 'diagram' });
+          set({ pendingDiagramFile: filePath, activeSurface: 'diagram', activeMainTab: 'diagram' });
         },
 
         consumePendingDiagramFile: () => {
@@ -1726,6 +1827,11 @@ export const useUIStore = create<UIStore>()(
 
         setSettingsPage: (slug) => {
           set({ settingsPage: slug });
+        },
+
+        setSettingsProjectPath: (path) => {
+          const trimmed = path?.trim();
+          set({ settingsProjectPath: trimmed ? trimmed : null });
         },
 
         setSettingsProjectsSelectedId: (projectId) => {
@@ -2264,6 +2370,30 @@ export const useUIStore = create<UIStore>()(
         setAgentControlToolEnabled: (value) => {
           set({ agentControlToolEnabled: value });
         },
+        setAgentWebToolEnabled: (value) => {
+          set({ agentWebToolEnabled: value });
+        },
+        setAgentMemoryToolEnabled: (value) => {
+          set({ agentMemoryToolEnabled: value });
+        },
+        setAgentMemoryFeatureAvailable: (value) => {
+          set({ agentMemoryFeatureAvailable: value });
+        },
+        setProjectContextSidebarWidth: (width) => {
+          set({ projectContextSidebarWidth: width });
+        },
+        markAgentMemoryViewed: (key, viewedAt) => {
+          set((state) => ({
+            // Never moves backwards: a stale unmount landing after a newer look
+            // would otherwise resurrect badges the user has already cleared.
+            agentMemoryViewedAt: viewedAt > (state.agentMemoryViewedAt[key] ?? 0)
+              ? { ...state.agentMemoryViewedAt, [key]: viewedAt }
+              : state.agentMemoryViewedAt,
+          }));
+        },
+        setProjectContextTab: (value) => {
+          set({ projectContextTab: value });
+        },
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
         },
@@ -2368,12 +2498,73 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 13,
+        version: 15,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v14 -> v15: rename the historic main-tab field. The selected
+          // mobile or promoted desktop view remains unchanged.
+          if (version < 15) {
+            state.activeSurface = state.activeMainTab;
+            state.activeMainTab = state.activeSurface;
+          }
+
+          // v13 -> v14: the separate 'preview' surface merged into 'browser'.
+          // Stored preview tabs keep their URL and become browser tabs; their
+          // id encodes the mode, so it is rebuilt rather than left dangling.
+          // Persisted widths recorded under 'preview' carry over only when the
+          // user has not already sized the browser surface.
+          if (version < 14) {
+            const byDirectory = state.contextPanelByDirectory;
+            if (byDirectory && typeof byDirectory === 'object') {
+              for (const directoryState of Object.values(byDirectory as Record<string, unknown>)) {
+                if (!directoryState || typeof directoryState !== 'object') continue;
+                const entry = directoryState as Record<string, unknown>;
+
+                const widths = entry.widthByMode;
+                if (widths && typeof widths === 'object') {
+                  const widthRecord = widths as Record<string, unknown>;
+                  if (widthRecord.preview !== undefined) {
+                    if (widthRecord.browser === undefined) widthRecord.browser = widthRecord.preview;
+                    delete widthRecord.preview;
+                  }
+                }
+
+                if (!Array.isArray(entry.tabs)) continue;
+                const seenIds = new Set<string>();
+                const migrated: Array<Record<string, unknown>> = [];
+                for (const rawTab of entry.tabs as Array<unknown>) {
+                  if (!rawTab || typeof rawTab !== 'object') continue;
+                  const tab = rawTab as Record<string, unknown>;
+                  if (tab.mode !== 'preview') {
+                    if (typeof tab.id === 'string') seenIds.add(tab.id);
+                    migrated.push(tab);
+                    continue;
+                  }
+
+                  const targetPath = typeof tab.targetPath === 'string' ? tab.targetPath : '';
+                  const dedupeKey = typeof tab.dedupeKey === 'string' && tab.dedupeKey.trim()
+                    ? tab.dedupeKey.trim()
+                    : (targetPath || 'browser');
+                  const id = dedupeKey === 'browser' ? 'browser' : `browser:${dedupeKey}`;
+                  // A converted tab can collide with a browser tab on the same
+                  // URL; keep the existing one rather than producing duplicates.
+                  if (seenIds.has(id)) continue;
+                  seenIds.add(id);
+                  migrated.push({ ...tab, mode: 'browser', id, dedupeKey });
+                }
+                entry.tabs = migrated;
+
+                if (typeof entry.activeTabId === 'string' && entry.activeTabId.startsWith('preview')) {
+                  const nextActive = migrated.find((tab) => typeof tab.id === 'string');
+                  entry.activeTabId = nextActive && typeof nextActive.id === 'string' ? nextActive.id : null;
+                }
+              }
+            }
+          }
 
           // v12 -> v13: promote FilesView localStorage autosave toggle into the store.
           if (version < 13) {
@@ -2427,9 +2618,6 @@ export const useUIStore = create<UIStore>()(
             }
             if (typeof state.notesPanelHeight !== 'number' || !Number.isFinite(state.notesPanelHeight)) {
               state.notesPanelHeight = 112;
-            }
-            if (typeof state.todoPanelHeight !== 'number' || !Number.isFinite(state.todoPanelHeight)) {
-              state.todoPanelHeight = 259;
             }
           }
 
@@ -2528,9 +2716,10 @@ export const useUIStore = create<UIStore>()(
           workStatusScrollTop: state.workStatusScrollTop,
           workStatusPanelEnabled: state.workStatusPanelEnabled,
           workStatusHiddenSections: state.workStatusHiddenSections,
-          todoPanelHeight: state.todoPanelHeight,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
-          activeMainTab: state.activeMainTab,
+          activeSurface: state.activeSurface,
+          // Keep the deprecated mirror synchronized while consumers migrate.
+          activeMainTab: state.activeSurface,
           sidebarSection: state.sidebarSection,
           settingsPage: state.settingsPage,
           settingsHasOpenedOnce: state.settingsHasOpenedOnce,
@@ -2592,6 +2781,10 @@ export const useUIStore = create<UIStore>()(
           persistChatDraft: state.persistChatDraft,
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           agentControlToolEnabled: state.agentControlToolEnabled,
+          agentWebToolEnabled: state.agentWebToolEnabled,
+          agentMemoryToolEnabled: state.agentMemoryToolEnabled,
+          agentMemoryViewedAt: state.agentMemoryViewedAt,
+          projectContextSidebarWidth: state.projectContextSidebarWidth,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,

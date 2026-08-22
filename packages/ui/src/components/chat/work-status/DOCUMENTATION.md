@@ -25,6 +25,8 @@ It is **not** a context-panel surface. It is not registered in
 `lib/surfaces/registry.ts`, has no rail icon, no tab, no persisted width and no
 resizer. It is a card floating inside the chat column — rounded border, faint
 fill, its own margin — rather than a docked pane flush against the window edge.
+When it overlays the transcript, it uses the shared `oc-glass-panel` surface;
+the inline card keeps its lighter, non-blurred fill instead.
 
 ## Placement
 
@@ -43,15 +45,23 @@ exactly as it already does when the context panel opens.
 
 - the user switched it off;
 - the runtime is mobile or VS Code;
-- the context panel is open for the active directory;
+- the context panel is open for the directory the app is effectively on —
+  looked up through `useEffectiveDirectory` and `normalizeContextPanelDirectoryKey`,
+  the same key the rail and the panel use. It is deliberately **not** the
+  directory this panel reports about: a managed Chat reports about none, and
+  that empty key answered "closed" for a context panel that was plainly open;
 - the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` of transcript alongside
   `WORK_STATUS_PANEL_WIDTH` of panel.
 
 `ChatContainer` additionally suppresses it in mini-chat and in expanded-input
-mode, and the panel does not appear on a new-session draft: that branch returns
-its own layout before the one that hosts the panel. The repository readouts
-would apply there — branch and working-tree state inform what to ask for — so
-this is a gap worth closing rather than a decision.
+mode. It remains available on a new-session draft: when the draft targets a
+project or pending worktree, the panel uses that directory for project, MCP,
+and usage readouts before a session exists.
+
+Managed Chats never render or warm the Project repository section. A Chat draft
+also passes no fallback directory to the panel, so an active project's branch
+cannot leak into the draft while directory-independent sections remain
+available.
 
 `rowRef` is a **callback ref, not an object ref**. An object ref gives no signal
 when the node attaches, so the measuring effect read `.current`, found nothing
@@ -80,14 +90,15 @@ and therefore displaces nothing.
 ## Data sources
 
 Everything is read from already-warm caches. The panel adds no aggregated
-endpoint and no polling of its own.
+endpoint; quota data refreshes through the shared fixed three-minute quota timer,
+which requests only providers enabled for this panel.
 
 | Block | Source | Notes |
 |---|---|---|
 | Context + cost | `contextUsage.ts` over `useSessionMessages`, `Session.cost` | see below — the store getters cannot serve this |
-| Branch, ahead/behind, attention | `useGitStore` directory state | warmed via `runBackgroundNetworkTask(ensureStatus)` |
+| Branch, ahead/behind, attention | `useGitStore` directory state | warmed via `runBackgroundNetworkTask(ensureStatus)` and refreshed from Git mutation hints |
 | Changed files | `useGitStore` status `files` + `diffStats` | working tree, not session-authored edits |
-| PR + checks | `usePrVisualSummary` | **read-only** |
+| PR + checks | `useFreshestPrVisualSummaryForBranch` | **read-only**; follows the freshest remote-keyed entry for the branch |
 | Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses` | |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
@@ -143,6 +154,10 @@ The panel never calls `startWatching`. PR watching is owned by the background
 tracker, and its concurrency gate exists because per-consumer PR fetches once
 saturated the browser's connection pool and stalled startup for ~20s. A panel
 that started a watch per open session would reintroduce exactly that fan-out.
+The PR surface can watch a concrete remote while passive readers initially know
+only the automatic remote key, so the panel reads the freshest entry for the
+directory and branch across remote keys. This keeps its PR and checks rows in
+sync with the live PR surface without adding another request owner.
 
 ### Changed files come from git status, not the session
 
@@ -168,7 +183,7 @@ from aggregating message summaries, not from `Session.summary`.
 
 Ordering is by durability, not category:
 
-1. **Session** (goal, context, cost), **Repository** (attention, branch,
+1. **Session** (goal, context, cost), **Project** (attention, branch,
    changes, PR, checks) and **Usage** — true for as long as the session is
    open. Usage sits here rather than lower down because a spent quota stops the
    work outright;
@@ -201,12 +216,21 @@ section decides for itself that it has nothing to say, so they report through
 `presenceContext.ts` and the panel collapses when none rendered. Deriving that
 at the panel level would mean duplicating every data source the sections read.
 
+There is one deliberate exception: when the user hides every section, the card
+stays visible with a localized empty state and section controls. Collapsing that
+state would also hide the only recovery path. A panel with enabled sections but
+no data still follows the presence reports and collapses as before.
+
 The scroll offset resets on session change: restoring one session's offset into
 another's shorter panel lands somewhere arbitrary.
 
 The Subagents section opens itself when subagents appear where there were none,
 on that edge only: re-expanding on every count change would fight a user who
 just collapsed it.
+
+Its expanded list is capped at eight rows and scrolls independently, so a
+session with many subagents does not crowd every section below it out of the
+panel.
 
 ## Tasks
 
@@ -313,8 +337,8 @@ Two readouts had no loader of their own and appeared only after the user opened
 the matching header dropdown:
 
 - **MCP** — `McpDropdown` was the only mount-time caller of `refresh()`.
-- **Usage** — `useQuotaAutoRefresh` merely schedules an interval; the *first*
-  fetch was performed by the dropdown's open handler.
+- **Usage** — `useQuotaAutoRefresh` schedules the shared fixed three-minute
+  refresh; the *first* fetch was performed by the dropdown's open handler.
 - **Skills** — `loadSkills()` ran only when the composer's slash autocomplete
   opened, so the context-sources count was whatever happened to be cached. The
   section loads them itself, keyed on the directory, since skills are
@@ -323,8 +347,14 @@ the matching header dropdown:
 
 The panel now performs these itself, silently and through the
 background-network gate, so it cannot compete with chat bootstrap traffic for
-sockets. A panel that reports a subsystem's state cannot depend on an unrelated
+sockets. Usage additionally provides an explicit refresh action in its section
+header. A panel that reports a subsystem's state cannot depend on an unrelated
 component having been mounted or opened.
+
+The repository section follows the same ownership rule. It subscribes directly
+to `sessionEvents` Git refresh hints and refreshes its directory's shared Git
+cache, rather than relying on the composer's former changed-files row or on the
+Git context surface being opened first.
 
 ## Persisted panel state
 

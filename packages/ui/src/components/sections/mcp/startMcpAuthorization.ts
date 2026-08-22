@@ -1,7 +1,8 @@
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { applyPendingOpenCodeRestart } from '@/lib/opencode/deferredRestart';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { openExternalUrl } from '@/lib/url';
-import { focusDesktopWindow, isDesktopShell } from '@/lib/desktop';
+import { focusDesktopWindow, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { MCP_OAUTH_CALLBACK_PATH, parseMcpOAuthCallbackStateKey } from './mcpOAuth';
@@ -32,6 +33,20 @@ type McpAuthorizationStart = {
   authorizationUrl: string;
   /** False when the runtime refused to open a browser; the caller then offers a manual paste. */
   opened: boolean;
+  /**
+   * True when OpenCode runs the whole flow itself over its fixed loopback
+   * listener: it opened the browser, waits for the callback, and exchanges the
+   * code. There is no URL to display and no state to correlate — callers watch
+   * runtime status until it turns `connected`.
+   */
+  nativeFlow?: boolean;
+  /**
+   * Native flow only: resolves when OpenCode finishes the whole exchange (or
+   * rejects when it fails) — the precise "authorization is over" signal, since
+   * runtime status alone cannot distinguish a completed reauthorization from
+   * the still-connected state it started in.
+   */
+  completion?: Promise<void>;
 };
 
 class McpAuthorizationError extends Error {}
@@ -105,6 +120,46 @@ const clearPendingContext = async (state: string | null): Promise<void> => {
     .catch(() => undefined);
 };
 
+/**
+ * One-time migration for the native desktop flow: earlier versions wrote this
+ * app's per-launch callback URL into the server's config, and OpenCode derives
+ * its listener from that field — pointed at OUR port, it either fails to bind
+ * or the callback lands on a flow that never registered it. Clearing the field
+ * returns OpenCode to its fixed default port. Applied immediately when the
+ * write gets queued behind Apply & Restart, for the same reason as the
+ * callback-URL write below: authorization runs against the live runtime.
+ */
+const clearCustomRedirectUriForNativeFlow = async (name: string): Promise<void> => {
+  if (!useMcpConfigStore.getState().getMcpByName(name)) {
+    await useMcpConfigStore.getState().loadMcpConfigs();
+  }
+  const configStore = useMcpConfigStore.getState();
+  const existing = configStore.getMcpByName(name);
+  const currentOAuth = existing && 'oauth' in existing && existing.oauth ? existing.oauth : null;
+  if (!existing || !currentOAuth?.redirectUri) return;
+
+  const saved = await configStore.updateMcp(name, {
+    oauthEnabled: true,
+    oauthClientId: currentOAuth.clientId ?? '',
+    oauthClientSecret: currentOAuth.clientSecret ?? '',
+    oauthScope: currentOAuth.scope ?? '',
+    oauthRedirectUri: '',
+  });
+  if (!saved.ok) {
+    throw new McpAuthorizationError(saved.message || 'Failed to reset the authorization callback URL');
+  }
+  if (saved.restartDeferred) {
+    const applied = await applyPendingOpenCodeRestart();
+    if (!applied.ok) {
+      throw new McpAuthorizationError(
+        applied.requiresManualRestart
+          ? 'The callback settings changed, but OpenCode must be restarted manually before authorization can start.'
+          : 'Failed to apply the callback settings. Use Apply & Restart, then authorize again.',
+      );
+    }
+  }
+};
+
 /** How long the user plausibly spends authorising before giving up on them. */
 const AUTHORIZATION_WATCH_MS = 3 * 60_000;
 const AUTHORIZATION_POLL_MS = 1_500;
@@ -129,14 +184,33 @@ const waitForAuthorizationThenFocus = async (name: string, directory: string | n
 export const startMcpAuthorization = async (input: {
   name: string;
   directory?: string | null;
-  /** VS Code cannot receive our callback route, so it keeps OpenCode's own redirect. */
-  skipRedirectUriBootstrap?: boolean;
 }): Promise<McpAuthorizationStart> => {
   const { name, directory } = input;
   let queuedState: string | null = null;
 
+  // Runtimes where the system browser provably lives on the same machine as
+  // OpenCode — desktop with the LOCAL embedded server, and VS Code (the
+  // extension always spawns its own local OpenCode): OpenCode's own flow works
+  // end-to-end over its FIXED loopback port (19876) — no config writes, no
+  // OpenCode restarts, no dependence on this app's per-launch port. The custom
+  // callback URL below stays for every case where the browser cannot reach
+  // OpenCode's loopback: remote instances, hosted web, mobile — and the plain
+  // web runtime too, because same-origin says nothing about the browser being
+  // on the server's machine.
+  if (isVSCodeRuntime() || (isDesktopShell() && getRuntimeKey() === 'local')) {
+    await clearCustomRedirectUriForNativeFlow(name);
+    const completion = useMcpStore.getState().authenticate(name, directory ?? null);
+    completion
+      .then(() => focusDesktopWindow())
+      .catch(() => {
+        // Recorded as a runtime diagnostic by the store; the status card and
+        // the caller's completion handling surface it.
+      });
+    return { authorizationUrl: '', opened: true, nativeFlow: true, completion };
+  }
+
   try {
-    if (!input.skipRedirectUriBootstrap) {
+    {
       // The config has to be loaded before its absence can mean anything. On
       // the first authorization after launch the store is often still empty,
       // and reading it then reported "no redirect URI" for a server that had
@@ -175,6 +249,25 @@ export const startMcpAuthorization = async (input: {
           throw new McpAuthorizationError(
             saved.message || 'Failed to save the authorization callback URL',
           );
+        }
+        // Config mutations accumulate behind Apply & Restart now, but the
+        // authorization flow runs against the LIVE OpenCode runtime: with the
+        // write still queued, OpenCode hands out its own loopback redirect and
+        // the callback never reaches us. The user just clicked Authorize —
+        // explicit intent — so apply the queued changes right away and start
+        // the flow against the runtime that actually has our callback URL.
+        if (saved.restartDeferred) {
+          const applied = await applyPendingOpenCodeRestart();
+          if (applied.requiresManualRestart) {
+            throw new McpAuthorizationError(
+              'The callback URL was saved, but OpenCode must be restarted manually before authorization can start.',
+            );
+          }
+          if (!applied.ok) {
+            throw new McpAuthorizationError(
+              'Failed to apply the saved callback URL. Use Apply & Restart, then authorize again.',
+            );
+          }
         }
       }
     }

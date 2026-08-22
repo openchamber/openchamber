@@ -26,8 +26,6 @@ export const OpenCodeCliSettings: React.FC = () => {
   const [isSaving, setIsSaving] = React.useState(false);
   const showOpenCodeUpdateNotifications = useUIStore((state) => state.showOpenCodeUpdateNotifications);
   const setShowOpenCodeUpdateNotifications = useUIStore((state) => state.setShowOpenCodeUpdateNotifications);
-  const agentControlToolEnabled = useUIStore((state) => state.agentControlToolEnabled);
-  const setAgentControlToolEnabled = useUIStore((state) => state.setAgentControlToolEnabled);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -102,11 +100,6 @@ export const OpenCodeCliSettings: React.FC = () => {
     void updateDesktopSettings({ showOpenCodeUpdateNotifications: enabled });
   }, [setShowOpenCodeUpdateNotifications]);
 
-  const handleAgentControlToolChange = React.useCallback((enabled: boolean) => {
-    setAgentControlToolEnabled(enabled);
-    void updateDesktopSettings({ agentControlToolEnabled: enabled });
-  }, [setAgentControlToolEnabled]);
-
   return (
     <SettingsSection title={t('settings.openchamber.opencodeCli.title')}>
       <div className="space-y-0.5">
@@ -159,15 +152,6 @@ export const OpenCodeCliSettings: React.FC = () => {
               ariaLabel={t('settings.openchamber.opencodeCli.field.showUpdateNotificationsAria')}
             />
           )}
-
-          <SettingsCheckboxRow
-            settingsItem="sessions.agent-control-tool"
-            checked={agentControlToolEnabled}
-            onChange={handleAgentControlToolChange}
-            label={t('settings.openchamber.opencodeCli.field.agentControlTool')}
-            ariaLabel={t('settings.openchamber.opencodeCli.field.agentControlToolAria')}
-            info={t('settings.openchamber.opencodeCli.field.agentControlToolInfo')}
-          />
 
           <div className="flex justify-start py-1.5">
             <Button

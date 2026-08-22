@@ -111,8 +111,6 @@ const jobKey = (repoRoot, sourceKeyValue) => `${repoRoot}\0${sourceKeyValue}`;
  * would imply progress where there is none. `retrying` appears only when a
  * provider rejects the schema and the prompt-side fallback runs.
  */
-export const GENERATION_STAGES = ['collecting', 'asking', 'retrying', 'assembling'];
-
 const setStage = (repoRoot, sourceKeyValue, stage) => {
   const job = jobs.get(jobKey(repoRoot, sourceKeyValue));
   if (job) job.stage = stage;

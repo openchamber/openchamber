@@ -20,6 +20,7 @@ import {
   firstUnansweredPrompt,
   parseAuthPrompts,
   parseAuthorization,
+  shouldOpenAuthorizationUrl,
   visiblePrompts,
   type AuthPrompt,
   type OAuthAuthorization,
@@ -173,7 +174,10 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
       return;
     }
 
-    if (authorization.url) {
+    // Claude Code CLI owns its OAuth flow and opens the browser itself. Its
+    // plugin URL is informational only; opening it creates a misleading docs
+    // tab alongside the real sign-in page.
+    if (authorization.url && shouldOpenAuthorizationUrl(providerId, authorization.url)) {
       void openExternalUrl(authorization.url);
     }
 

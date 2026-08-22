@@ -68,6 +68,21 @@ type SdkResult<T> = {
   response?: { status?: number };
 };
 
+type DirectoryAvailability = "available" | "missing" | "unknown";
+
+const isMissingDirectoryError = (error: unknown): boolean => {
+  if (error instanceof FilesystemError) {
+    return error.reason === "not-found" || error.reason === "not-directory";
+  }
+  if (error && typeof error === "object") {
+    const code = (error as { code?: unknown }).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return true;
+    }
+  }
+  return /\bENOENT\b|\bENOTDIR\b|no such file or directory/i.test(formatSdkError(error));
+};
+
 function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
   if (result.error) {
     const status = result.response?.status;
@@ -506,17 +521,28 @@ class OpencodeService {
    * This is intentionally NOT the same as local filesystem access in the UI runtime.
    */
   async probeDirectory(directory: string): Promise<boolean> {
+    return (await this.getDirectoryAvailability(directory)) === "available";
+  }
+
+  /**
+   * Distinguishes a confirmed-missing directory from an unavailable probe.
+   * Offline, permission, and other transport failures stay `unknown` so callers
+   * do not treat a temporary outage as proof the path was deleted.
+   */
+  async getDirectoryAvailability(directory: string): Promise<DirectoryAvailability> {
     const normalized = this.normalizeCandidatePath(directory);
     if (!normalized) {
-      return false;
+      return "unknown";
     }
     try {
-      const response = await this.client.path.get({ directory: normalized });
-      const info = response.data as { directory?: unknown } | undefined;
-      const returned = typeof info?.directory === 'string' ? info.directory : null;
-      return Boolean(returned && returned.trim().length > 0);
-    } catch {
-      return false;
+      const response = await this.client.path.get({ directory: normalized }) as SdkResult<{ directory?: unknown }>;
+      if (response.error) {
+        return isMissingDirectoryError(response.error) ? "missing" : "unknown";
+      }
+      const returned = typeof response.data?.directory === "string" ? response.data.directory.trim() : "";
+      return returned ? "available" : "unknown";
+    } catch (error) {
+      return isMissingDirectoryError(error) ? "missing" : "unknown";
     }
   }
 
@@ -1701,7 +1727,7 @@ class OpencodeService {
   // File System Operations
   async createDirectory(
     dirPath: string,
-    options?: { allowOutsideWorkspace?: boolean }
+    options?: { allowOutsideWorkspace?: boolean; asProject?: boolean }
   ): Promise<{ success: boolean; path: string }> {
     const desktopFiles = getDesktopFilesApi();
     if (desktopFiles?.createDirectory) {
@@ -1711,6 +1737,24 @@ class OpencodeService {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(message || 'Failed to create directory');
       }
+    }
+
+    if (options?.asProject) {
+      const response = await runtimeFetch(`${this.baseUrl}/opencode/directory`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ path: dirPath, create: true }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Failed to create project directory' }));
+        throw new Error(error.error || 'Failed to create project directory');
+      }
+
+      const result = await response.json();
+      return { success: true, path: result.path };
     }
 
     const payload = {

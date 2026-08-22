@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
+import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
@@ -31,6 +32,7 @@ import {
   setLinuxAutostartEnabled,
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
+import { shouldAllowBrowserPanelCertificateError } from './browser-panel-security.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
@@ -306,6 +308,9 @@ const readDesktopMinimizeToTrayStatus = () => {
   };
 };
 
+// Close-to-tray gate. The persisted key is still `desktopMinimizeToTrayEnabled`
+// (settings written by earlier versions), but the behavior it controls is the
+// window close path only; minimize stays a normal taskbar/dock minimize.
 const shouldHideMainWindowToTray = (browserWindow) => {
   if (process.platform !== 'win32' && process.platform !== 'linux') return false;
   if (!state.trayController) return false;
@@ -556,10 +561,15 @@ const writeJsonFile = async (filePath, data) => {
   // Atomic: write to a temp file then rename. Readers never see a partial
   // JSON file that could parse-error and get coerced to {}.
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
-  if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
-  await fsp.rename(tmp, filePath);
-  if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
+  try {
+    await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+    if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
+    await replaceFileWithRetry(tmp, filePath);
+    if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
+  } catch (error) {
+    await fsp.rm(tmp, { force: true }).catch(() => {});
+    throw error;
+  }
 };
 
 const readSettingsRoot = () => {
@@ -1127,6 +1137,85 @@ const injectRuntimeConfigIntoHtml = (html) => {
   if (html.includes('<head>')) return html.replace('<head>', `<head>${initScript}`);
   if (html.includes('</head>')) return html.replace('</head>', `${initScript}</head>`);
   return `${initScript}${html}`;
+};
+
+/**
+ * The browser panel's own session, kept separate from OpenChamber's.
+ *
+ * Every page the user opens in the panel shares this partition, which is what
+ * lets a dev-server login persist between sessions without touching the app's
+ * own storage.
+ */
+const BROWSER_PANEL_PARTITION = 'persist:openchamber-browser';
+
+/**
+ * Denies device and location access to pages shown in the browser panel.
+ *
+ * Electron grants permission requests by default when no handler is set. The
+ * panel loads whatever address the user types, so that default would hand a
+ * page the camera, the microphone, or the user's location without anything
+ * being asked or shown — a browser people would not tolerate.
+ *
+ * This denies rather than prompts: a prompt is the right end state, but a
+ * silent grant is the one outcome that must not stay. Denials are logged so a
+ * page that legitimately needs something is diagnosable rather than mysterious.
+ */
+const MAX_FAVICON_BYTES = 512 * 1024;
+const FAVICON_MIME_TYPES = new Set([
+  'image/x-icon',
+  'image/vnd.microsoft.icon',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml',
+]);
+
+/**
+ * Resolves a web contents id to a browser-panel view, or refuses.
+ *
+ * These commands take an id from the renderer, and an id is guessable. Without
+ * this a compromised renderer could point capture or the debugger at another
+ * window's contents. Membership of the panel's own session is the proof: only
+ * views created with that partition have it, and nothing else in the app does.
+ */
+const resolveBrowserPanelContents = (rawId) => {
+  const id = Number.isFinite(rawId) ? Math.trunc(rawId) : null;
+  if (id === null || id < 0) throw new Error('webContentsId is required');
+  const target = webContents.fromId(id);
+  if (!target || target.isDestroyed()) throw new Error('WebContents not found');
+  if (target.session !== session.fromPartition(BROWSER_PANEL_PARTITION)) {
+    throw new Error('That view is not a browser panel page');
+  }
+  return target;
+};
+
+const hardenBrowserPanelSession = () => {
+  const panelSession = session.fromPartition(BROWSER_PANEL_PARTITION);
+
+  app.on('certificate-error', (event, contents, url, error, _certificate, callback) => {
+    if (contents.session === panelSession && shouldAllowBrowserPanelCertificateError({ url, error })) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+
+  panelSession.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    log.info('[electron] browser panel denied a permission request', {
+      permission,
+      origin: details?.requestingUrl || '',
+    });
+    callback(false);
+  });
+
+  // Asked before some features even request; answering here keeps a page from
+  // reporting a capability it would then be denied.
+  panelSession.setPermissionCheckHandler(() => false);
+
+  // Serial, HID and USB device pickers.
+  panelSession.setDevicePermissionHandler(() => false);
 };
 
 const registerPackagedUiProtocol = () => {
@@ -1900,36 +1989,6 @@ const emitToAllWindows = (event, detail) => {
   }
 };
 
-// macOS vibrancy: the native NSVisualEffectView needs a moment to settle after
-// the window is shown/restored. Until then the renderer keeps the sidebar solid
-// to avoid a flash of raw transparency; once ready it switches to the
-// translucent overlay. We toggle this readiness over the same IPC bridge.
-// Apply vibrancy to a live, on-screen window. Done after show (not in the
-// BrowserWindow constructor) because macOS otherwise leaves the material
-// uncomposited on a cold launch until the window gets a state change.
-const applyMacVibrancy = (browserWindow) => {
-  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
-  try {
-    browserWindow.setVibrancy('sidebar');
-  } catch {}
-};
-
-const setMacVibrancyReady = (browserWindow, ready) => {
-  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
-  emitToWindow(browserWindow, 'openchamber:vibrancy-ready', { ready });
-};
-
-const scheduleMacVibrancyReady = (browserWindow, delayMs = 160) => {
-  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
-  setMacVibrancyReady(browserWindow, false);
-  const timer = setTimeout(() => {
-    if (browserWindow.isDestroyed() || browserWindow.isMinimized() || !browserWindow.isVisible()) return;
-    setMacVibrancyReady(browserWindow, true);
-  }, delayMs);
-  if (typeof timer?.unref === 'function') timer.unref();
-};
-
-
 const setTaskbarProgress = (value) => {
   if (process.platform !== 'win32') return;
   for (const browserWindow of BrowserWindow.getAllWindows()) {
@@ -2359,8 +2418,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   const desktopMacosMajor = String(macosMajorVersion());
   const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
   const usesCustomTitleBar = process.platform === 'darwin' || usesFramelessChrome;
-  // macOS vibrancy, on by default; users can disable it (Appearance settings).
-  const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const trayEnabled = process.platform !== 'darwin' || readSettingsRoot().desktopMacMenuBarEnabled !== false;
   const titleBarOverlayEnabled = false;
   const autoHidesNativeMenuBar = process.platform !== 'darwin';
@@ -2376,11 +2433,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     minHeight: MIN_WINDOW_HEIGHT,
     icon: windowIconPath,
     show: false,
-    backgroundColor: useVibrancy ? '#00000000' : '#151313',
-    // Vibrancy is applied after the window is shown (see applyMacVibrancy), not
-    // here: setting it in the constructor leaves the material uncomposited on a
-    // cold launch until a window event. No `transparent: true` either — vibrancy
-    // alone is enough and composites reliably once applied to a live window.
+    backgroundColor: '#151313',
     frame: usesFramelessChrome ? false : undefined,
     autoHideMenuBar: autoHidesNativeMenuBar,
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
@@ -2396,7 +2449,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
         `--openchamber-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
         `--openchamber-home=${desktopHome}`,
         `--openchamber-macos-major=${desktopMacosMajor}`,
-        `--openchamber-mac-vibrancy=${useVibrancy ? '1' : '0'}`,
         `--openchamber-tray-enabled=${trayEnabled ? '1' : '0'}`,
         `--openchamber-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
         `--openchamber-relay-host-id=${rendererRuntimeConfig.relayHostId || ''}`,
@@ -2419,6 +2471,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
   browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__ocTitleBarOverlayEnabled = titleBarOverlayEnabled;
+  browserWindow.on('app-command', (event, command) => {
+    if (command === 'browser-backward') event.preventDefault();
+  });
 
   if (useSaved && saved.maximized) {
     browserWindow.maximize();
@@ -2447,18 +2502,11 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     };
     browserWindow.on('minimize', () => {
       refreshTrafficLights();
-      setMacVibrancyReady(browserWindow, false);
     });
     browserWindow.on('restore', () => {
       refreshTrafficLights();
       setTimeout(refreshTrafficLights, 250);
-      scheduleMacVibrancyReady(browserWindow, 180);
     });
-    // Only suppress vibrancy around the minimize/restore cycle (it flashes raw
-    // transparency during the genie animation). A plain show — cold launch from
-    // the dock, un-hide — must NOT suppress, or the sidebar gets stuck solid
-    // when the post-show `ready` re-enable is skipped while the window is still
-    // animating in.
     browserWindow.on('show', refreshTrafficLights);
     browserWindow.on('focus', refreshTrafficLights);
   }
@@ -2613,7 +2661,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     }
     browserWindow.show();
     browserWindow.focus();
-    if (useVibrancy) applyMacVibrancy(browserWindow);
   });
 
   if (url) {
@@ -2777,8 +2824,6 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
   const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
-  // macOS vibrancy, on by default; users can disable it (Appearance settings).
-  const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const trayEnabled = process.platform !== 'darwin' || readSettingsRoot().desktopMacMenuBarEnabled !== false;
   const browserWindow = new BrowserWindow({
     title: 'OpenChamber Mini Chat',
@@ -2788,11 +2833,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     minHeight: MINI_CHAT_MIN_WINDOW_HEIGHT,
     icon: getWindowIconPath(),
     show: false,
-    backgroundColor: useVibrancy ? '#00000000' : '#151313',
-    // Vibrancy is applied after the window is shown (see applyMacVibrancy), not
-    // here: setting it in the constructor leaves the material uncomposited on a
-    // cold launch until a window event. No `transparent: true` either — vibrancy
-    // alone is enough and composites reliably once applied to a live window.
+    backgroundColor: '#151313',
     frame: usesFramelessChrome ? false : undefined,
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' || usesFramelessChrome ? 'hidden' : 'default',
@@ -2844,17 +2885,13 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
         browserWindow.setTrafficLightPosition({ x: 16, y: 17 });
       } catch {}
     };
-    // Suppress vibrancy only around minimize/restore, never on a plain show.
     browserWindow.on('show', refreshTrafficLights);
     browserWindow.on('focus', refreshTrafficLights);
-    browserWindow.on('minimize', () => setMacVibrancyReady(browserWindow, false));
-    browserWindow.on('restore', () => scheduleMacVibrancyReady(browserWindow, 180));
   }
 
   browserWindow.once('ready-to-show', () => {
     browserWindow.show();
     browserWindow.focus();
-    if (useVibrancy) applyMacVibrancy(browserWindow);
   });
 
   browserWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -3701,6 +3738,28 @@ const runSpecChain = (specs, appName) => {
   throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
 };
 
+// The tunnel client lives in the web package (it already has a WebSocket
+// client) and is loaded only if the user actually previews a remote dev server.
+let devTunnelClientPromise = null;
+const getDevTunnelClient = async () => {
+  if (!devTunnelClientPromise) {
+    devTunnelClientPromise = import('@openchamber/web/server/lib/dev-tunnel/client.js')
+      .then(({ createDevTunnelClient }) => createDevTunnelClient({ logger: log }))
+      .catch((error) => {
+        devTunnelClientPromise = null;
+        throw error;
+      });
+  }
+  return devTunnelClientPromise;
+};
+
+const closeAllDevTunnels = () => {
+  if (!devTunnelClientPromise) return;
+  const pending = devTunnelClientPromise;
+  devTunnelClientPromise = null;
+  pending.then((client) => client.closeAll()).catch(() => {});
+};
+
 const handleInvoke = async (browserWindow, command, args = {}) => {
   switch (command) {
     case 'desktop_start_window_drag':
@@ -3792,11 +3851,131 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { supported: true, enabled, active };
     }
 
+    // Dev-server tunnels: bind a loopback port here and pipe it to a dev server
+    // on the remote OpenChamber host, so the browser panel loads a real origin
+    // instead of a rewritten page. Deliberately absent from
+    // COMMANDS_SAFE_FOR_REMOTE — a remote page must never open local listeners.
+    case 'desktop_dev_tunnel_open': {
+      const baseUrl = typeof args.baseUrl === 'string' ? args.baseUrl.trim() : '';
+      const port = Number.isFinite(args.port) ? Math.trunc(args.port) : 0;
+      if (!baseUrl) throw new Error('baseUrl is required');
+      if (!(port > 0 && port <= 65535)) throw new Error('A valid port is required');
+
+      const headers = {};
+      const requestHeaders = args.requestHeaders && typeof args.requestHeaders === 'object' ? args.requestHeaders : {};
+      for (const [name, value] of Object.entries(requestHeaders)) {
+        if (typeof value === 'string' && value) headers[name] = value;
+      }
+      if (typeof args.clientToken === 'string' && args.clientToken) {
+        headers.Authorization = `Bearer ${args.clientToken}`;
+      }
+
+      const client = await getDevTunnelClient();
+      const result = await client.open({ baseUrl, port, headers });
+      return { localPort: result.localPort, reused: result.reused, url: `http://127.0.0.1:${result.localPort}/` };
+    }
+
+    case 'desktop_dev_tunnel_close': {
+      const baseUrl = typeof args.baseUrl === 'string' ? args.baseUrl.trim() : '';
+      const port = Number.isFinite(args.port) ? Math.trunc(args.port) : 0;
+      if (!baseUrl || !(port > 0)) return { closed: false };
+      const client = await getDevTunnelClient();
+      return { closed: client.close({ baseUrl, port }) };
+    }
+
+    /**
+     * Forces prefers-color-scheme for one previewed page.
+     *
+     * nativeTheme.themeSource is app-wide and would drag OpenChamber's own
+     * appearance along with it, so this goes through the page's own emulation
+     * instead. The debugger session has to stay attached: emulation is part of
+     * that session and resets the moment it detaches.
+     */
+    case 'desktop_browser_set_color_scheme': {
+      const scheme = args.scheme === 'light' || args.scheme === 'dark' ? args.scheme : 'system';
+      const target = resolveBrowserPanelContents(args.webContentsId);
+
+      if (!target.debugger.isAttached()) {
+        try {
+          target.debugger.attach('1.3');
+        } catch {
+          // DevTools owns the only debugger session a page can have.
+          throw new Error('Close DevTools for this page before changing its appearance');
+        }
+      }
+
+      await target.debugger.sendCommand('Emulation.setEmulatedMedia', scheme === 'system'
+        ? { features: [] }
+        : { features: [{ name: 'prefers-color-scheme', value: scheme }] });
+
+      if (scheme === 'system') {
+        // Nothing left to emulate; give the session back so DevTools can attach.
+        try { target.debugger.detach(); } catch { /* already gone */ }
+      }
+      return { scheme };
+    }
+
+    /**
+     * Fetches a page's favicon for the tab strip.
+     *
+     * Done here, in the panel's own session, rather than by the renderer: the
+     * icon often sits behind the same login as the page, and letting the app's
+     * own origin request it would both fail on those and quietly send traffic
+     * to third-party hosts from OpenChamber itself. The bytes come back as a
+     * data URL so nothing else has to fetch anything.
+     */
+    case 'desktop_browser_fetch_favicon': {
+      const target = typeof args.url === 'string' ? args.url.trim() : '';
+      let parsed;
+      try {
+        parsed = new URL(target);
+      } catch {
+        throw new Error('A favicon URL is required');
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('Unsupported favicon URL');
+      }
+
+      const response = await electronNet.fetch(parsed.toString(), {
+        session: session.fromPartition(BROWSER_PANEL_PARTITION),
+      });
+      if (!response.ok) throw new Error(`Favicon request failed (${response.status})`);
+
+      const mime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (!FAVICON_MIME_TYPES.has(mime)) throw new Error('Favicon is not an image');
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      // A tab icon is a few kilobytes; anything of a different order is not one,
+      // and is not worth holding in memory for every tab.
+      if (buffer.length === 0 || buffer.length > MAX_FAVICON_BYTES) {
+        throw new Error('Favicon is not a usable size');
+      }
+      return { dataUrl: `data:${mime};base64,${buffer.toString('base64')}` };
+    }
+
+    // Scoped to the browser panel's own partition, so clearing it can never
+    // touch OpenChamber's session or any other window's storage.
+    case 'desktop_browser_clear_data': {
+      // Exact match, not a prefix: a prefix would also accept a partition that
+      // merely starts with this name, which is not what the comment above
+      // promises and would quietly stop being true if one were ever added.
+      const partition = typeof args.partition === 'string' ? args.partition.trim() : '';
+      if (partition !== BROWSER_PANEL_PARTITION) {
+        throw new Error('Unsupported browser partition');
+      }
+      const storages = [];
+      if (args.cookies === true) storages.push('cookies');
+      if (args.cache === true) storages.push('localstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage');
+      if (storages.length === 0) return { cleared: false };
+
+      const browserSession = session.fromPartition(partition);
+      await browserSession.clearStorageData({ storages });
+      if (args.cache === true) await browserSession.clearCache();
+      return { cleared: true };
+    }
+
     case 'desktop_browser_capture_page': {
-      const wcId = Number.isFinite(args.webContentsId) ? Math.trunc(args.webContentsId) : null;
-      if (wcId === null || wcId < 0) throw new Error('webContentsId is required');
-      const wc = webContents.fromId(wcId);
-      if (!wc || wc.isDestroyed()) throw new Error('WebContents not found');
+      const wc = resolveBrowserPanelContents(args.webContentsId);
       const image = await wc.capturePage();
       const buffer = image.toJPEG(82);
       return {
@@ -4205,26 +4384,6 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
     }
 
-    case 'desktop_set_vibrancy': {
-      // Vibrancy + transparent backing are window-creation options, so the
-      // change only takes effect on a fresh launch. Persist the preference,
-      // then relaunch the app.
-      const enabled = args.enabled === true;
-      await mutateSettingsRoot((root) => {
-        root.desktopVibrancy = enabled;
-      });
-      setImmediate(() => {
-        try {
-          prepareForQuit();
-          app.relaunch();
-          app.exit(0);
-        } catch (err) {
-          log.error('[electron] desktop_set_vibrancy relaunch failed', err);
-        }
-      });
-      return { enabled, requiresRestart: true };
-    }
-
     case 'desktop_check_for_updates': {
       assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
@@ -4473,14 +4632,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
       return null;
 
+    // Minimize always goes to the taskbar/dock, even with tray background mode
+    // on: hiding the window here would drop the taskbar entry and make the
+    // in-app minimize button behave differently from the native one. Only
+    // closing hands the window to the tray.
     case 'desktop_minimize_current_window':
       if (browserWindow && !browserWindow.isDestroyed()) {
-        if (shouldHideMainWindowToTray(browserWindow)) {
-          debounceWindowStatePersist(browserWindow, true);
-          browserWindow.hide();
-        } else {
-          browserWindow.minimize();
-        }
+        browserWindow.minimize();
       }
       return null;
 
@@ -5156,6 +5314,8 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   state.quitRequested = true;
+  // Loopback listeners would otherwise outlive the window that needed them.
+  closeAllDevTunnels();
 
   if (state.installingUpdate) {
     return;
@@ -5229,6 +5389,7 @@ app.whenReady().then(async () => {
   });
   nativeTheme.themeSource = readThemeSource();
   registerPackagedUiProtocol();
+  hardenBrowserPanelSession();
   setupAutoUpdater();
 
   if (process.platform === 'darwin') {

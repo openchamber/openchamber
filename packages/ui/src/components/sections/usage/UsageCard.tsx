@@ -1,8 +1,6 @@
-import React from 'react';
 import type { UsageWindow } from '@/types';
-import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel } from '@/lib/quota';
 import { UsageProgressBar } from './UsageProgressBar';
-import { PaceIndicator } from './PaceIndicator';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useUIStore } from '@/stores/useUIStore';
@@ -25,25 +23,12 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   onToggle,
 }) => {
   const displayMode = useQuotaStore((state) => state.displayMode);
-  const showPredValues = useQuotaStore((state) => state.showPredValues);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const displayPercent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
   const barLabel = displayMode === 'remaining' ? 'remaining' : 'used';
   const percentLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
   const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
   const windowLabel = formatWindowLabel(title);
-
-  const paceInfo = React.useMemo(() => {
-    return calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, title);
-  }, [window.usedPercent, window.resetAt, window.windowSeconds, title]);
-
-  const expectedMarkerPercent = React.useMemo(() => {
-    if (!paceInfo || paceInfo.dailyAllocationPercent === null) {
-      return null;
-    }
-    const expectedUsed = calculateExpectedUsagePercent(paceInfo.elapsedRatio);
-    return displayMode === 'remaining' ? 100 - expectedUsed : expectedUsed;
-  }, [paceInfo, displayMode]);
 
   return (
     <div className="py-3">
@@ -72,7 +57,6 @@ export const UsageCard: React.FC<UsageCardProps> = ({
         <UsageProgressBar
           percent={displayPercent}
           tonePercent={window.usedPercent}
-          expectedMarkerPercent={expectedMarkerPercent}
           className="h-1.5"
         />
         <div className="mt-1 flex items-center justify-between">
@@ -85,11 +69,6 @@ export const UsageCard: React.FC<UsageCardProps> = ({
         </div>
       </div>
 
-      {paceInfo && showPredValues && (
-        <div className="mt-1.5">
-          <PaceIndicator paceInfo={paceInfo} />
-        </div>
-      )}
     </div>
   );
 };

@@ -17,7 +17,7 @@
 
 import {
   SherpaOfflineRecognizerEngine,
-  SherpaRealtimeTranscriptionSession,
+  SherpaSegmentTranscriptionSession,
 } from './sherpa-recognizer.js';
 import { SherpaTtsEngine } from './sherpa-tts.js';
 import { getLocalSttModelDir, getLocalSttModelSpec } from './model-catalog.js';
@@ -126,7 +126,7 @@ async function handleRequest(message) {
     case 'session.create': {
       cleanupSession(message.sessionId);
       const engine = getEngine(message.modelsDir, message.modelId);
-      const session = new SherpaRealtimeTranscriptionSession({ engine });
+      const session = new SherpaSegmentTranscriptionSession({ engine });
       session.on('committed', (payload) => {
         sendToParent({ type: 'session.committed', sessionId: message.sessionId, payload });
       });

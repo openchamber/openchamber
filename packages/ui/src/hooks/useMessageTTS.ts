@@ -12,7 +12,7 @@ import { useSayTTS } from './useSayTTS';
 import { useLocalTTS } from './useLocalTTS';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { sanitizeForTTS } from '@/lib/voice/summarize';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { requestSmallModel } from '@/lib/smallModelRequest';
 
 // Below this length the reply is comfortable to listen to as-is; summarizing
 // would only add latency.
@@ -25,7 +25,7 @@ async function summarizeForSpeech(
     preferred: { providerID?: string; modelID?: string },
 ): Promise<string | null> {
     try {
-        const response = await runtimeFetch('/api/small-model/generate', {
+        const response = await requestSmallModel({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

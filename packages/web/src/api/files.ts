@@ -7,6 +7,7 @@ import type {
 import {
   FilesystemError,
   parseFilesystemErrorReason,
+  type FilesystemErrorReason,
 } from '@openchamber/ui/lib/api/files-errors';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 
@@ -29,6 +30,13 @@ type WebDirectoryListResponse = {
   directory?: string;
   path?: string;
   entries?: WebDirectoryEntry[];
+};
+
+type WebFileUploadResponse = {
+  success?: boolean;
+  path?: string;
+  error?: string;
+  reason?: FilesystemErrorReason;
 };
 
 const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryListResponse): DirectoryListResult => {
@@ -222,6 +230,36 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     };
   },
 
+  async uploadFile(path: string, file: Blob, options): Promise<{ success: boolean; path: string }> {
+    const target = normalizePath(path);
+    const response = await runtimeFetch('/api/fs/upload', {
+      method: 'POST',
+      query: {
+        path: target,
+        overwrite: options?.overwrite ? 'true' : undefined,
+      },
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        ...directoryHeaders(getDirectory, options?.directory),
+      },
+      body: file,
+    });
+
+    if (!response.ok) {
+      const error: WebFileUploadResponse = await response.json().catch(() => ({ error: response.statusText }));
+      throw new FilesystemError(error.error || 'Failed to upload file', {
+        reason: parseFilesystemErrorReason(error.reason),
+        status: response.status,
+      });
+    }
+
+    const result: WebFileUploadResponse = await response.json().catch(() => ({}));
+    return {
+      success: Boolean(result.success),
+      path: result.path ? normalizePath(result.path) : target,
+    };
+  },
+
   async delete(path: string): Promise<{ success: boolean }> {
     const target = normalizePath(path);
     const response = await runtimeFetch('/api/fs/delete', {
@@ -285,10 +323,20 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     }
 
     const blob = await response.blob();
+    const filename = target.split('/').pop() || 'file';
+    const capacitor = (window as typeof window & {
+      Capacitor?: { isNativePlatform?: () => boolean };
+    }).Capacitor;
+    const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+    if (capacitor?.isNativePlatform?.() === true && navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file] });
+      return;
+    }
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = target.split('/').pop() || 'file';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

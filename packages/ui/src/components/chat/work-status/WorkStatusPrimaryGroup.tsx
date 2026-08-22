@@ -3,13 +3,16 @@ import { useI18n } from '@/lib/i18n';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
-import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { useFreshestPrVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
 import { useSession, useSessionMessages } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { normalizeProjectPath } from '@/lib/projectResolution';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveUsageTone } from '@/lib/quota';
+import { sessionEvents } from '@/lib/sessionEvents';
+import { normalizePath } from '@/lib/pathNormalization';
 import { computeContextUsage } from './contextUsage';
 import {
   WorkStatusCallout,
@@ -49,6 +52,8 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   const session = useSession(sessionId ?? '', directory ?? undefined);
   const { git } = useRuntimeAPIs();
   const ensureStatus = useGitStore((state) => state.ensureStatus);
+  const fetchStatus = useGitStore((state) => state.fetchStatus);
+  const clearDiffCache = useGitStore((state) => state.clearDiffCache);
 
   const gitStatus = useGitStore(
     React.useCallback(
@@ -60,43 +65,49 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // Warm the shared git cache through the background-network gate so the panel
   // never competes with the chat's own bootstrap traffic for sockets.
   React.useEffect(() => {
-    if (!directory || !git) return;
+    if (!showRepository || !directory || !git) return;
     void runBackgroundNetworkTask(() => ensureStatus(directory, git));
-  }, [directory, git, ensureStatus]);
+  }, [directory, git, ensureStatus, showRepository]);
+
+  // Own the live invalidation for the repository readout. The desktop
+  // composer's changed-files row no longer renders, so this panel must not
+  // depend on ChatInput (or an opened Git surface) to refresh the shared cache
+  // on its behalf.
+  React.useEffect(() => {
+    if (!showRepository || !directory || !git) return;
+    return sessionEvents.onGitRefreshHint((hint) => {
+      if (normalizePath(hint.directory) !== normalizePath(directory)) return;
+      if (hint.paths?.length) {
+        clearDiffCache(directory, hint.paths);
+      }
+      void fetchStatus(directory, git, { silent: true });
+    });
+  }, [clearDiffCache, directory, fetchStatus, git, showRepository]);
 
   const branch = gitStatus?.current?.trim() || null;
 
-  // The panel's directory can be a worktree, so the project is the registered
-  // one whose path contains it — longest match wins, since projects can nest.
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  // Worktrees normally sit beside rather than beneath their project directory,
+  // so a prefix match alone cannot find their owning project. Reuse the shared
+  // session-directory resolver, which consults the discovered worktree map.
   const projectLabel = useProjectsStore(
     React.useCallback((state) => {
-      const normalizedDirectory = normalizeProjectPath(directory ?? null);
-      if (!normalizedDirectory) return null;
-      let best: { path: string; label: string } | null = null;
-      for (const project of state.projects) {
-        const projectPath = normalizeProjectPath(project.path);
-        if (!projectPath) continue;
-        const contains = normalizedDirectory === projectPath
-          || normalizedDirectory.startsWith(`${projectPath}/`);
-        if (!contains) continue;
-        if (best && best.path.length >= projectPath.length) continue;
-        const label = project.label?.trim()
-          || projectPath.split('/').filter(Boolean).pop()
-          || projectPath;
-        best = { path: projectPath, label };
-      }
-      return best?.label ?? null;
-    }, [directory]),
+      const project = resolveProjectForSessionDirectory(
+        state.projects,
+        availableWorktreesByProject,
+        directory,
+      );
+      if (!project) return null;
+      return project.label?.trim()
+        || project.path.split('/').filter(Boolean).pop()
+        || project.path;
+    }, [availableWorktreesByProject, directory]),
   );
 
   // Read-only: PR watching is owned by the background tracker. Starting a watch
   // here would multiply GitHub requests per open session, which is exactly the
   // fan-out the PR-status concurrency gate exists to prevent.
-  const prKey = React.useMemo(
-    () => (directory && branch ? getGitHubPrStatusKey(directory, branch) : null),
-    [directory, branch],
-  );
-  const prSummary = usePrVisualSummary(prKey);
+  const prSummary = useFreshestPrVisualSummaryForBranch(directory, branch);
 
   // `getCurrentModel` is an imperative getter: its reference never changes, so
   // calling it in render subscribes to nothing. Subscribe to the selected model
@@ -223,7 +234,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
 
       {hasRepository ? (
         <WorkStatusSection
-          title={t('chat.workStatus.section.repository')}
+          title={t('chat.workStatus.section.project')}
           summary={projectLabel}
         >
           {attentionLabel ? <WorkStatusCallout>{attentionLabel}</WorkStatusCallout> : null}

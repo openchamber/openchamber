@@ -187,10 +187,6 @@ const sanitizePersistedSelectedProviderId = (providerId: string | undefined): st
     providerId === ADD_PROVIDER_SENTINEL ? "" : (providerId ?? "")
 );
 
-const preserveAddProviderSelection = (currentSelectedProviderId: string | undefined, nextProviderId: string): string => (
-    currentSelectedProviderId === ADD_PROVIDER_SENTINEL ? ADD_PROVIDER_SENTINEL : nextProviderId
-);
-
 const normalizeOptionalString = (value: unknown): string | undefined => {
     if (typeof value !== "string") {
         return undefined;
@@ -295,6 +291,7 @@ const resolveDefaultAgentModelSelection = ({
     agents,
     providers,
     projectDefaultModel,
+    projectDefaultVariant,
     settingsDefaultAgent,
     settingsDefaultModel,
     settingsDefaultVariant,
@@ -304,6 +301,7 @@ const resolveDefaultAgentModelSelection = ({
     agents: Agent[];
     providers: ProviderWithModelList[];
     projectDefaultModel?: string;
+    projectDefaultVariant?: string;
     settingsDefaultAgent?: string;
     settingsDefaultModel?: string;
     settingsDefaultVariant?: string;
@@ -359,7 +357,9 @@ const resolveDefaultAgentModelSelection = ({
         if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
             providerId = parsed.providerId;
             modelId = parsed.modelId;
-            variant = resolveVariant(providerId, modelId, projectDefaultModel ? undefined : settingsDefaultVariant);
+            // A project default carries its own variant; the settings variant
+            // belongs to the settings model and must not leak onto it.
+            variant = resolveVariant(providerId, modelId, projectDefaultModel ? projectDefaultVariant : settingsDefaultVariant);
         }
     }
 
@@ -1101,7 +1101,7 @@ interface ConfigStore {
     cycleCurrentVariant: () => void;
     getCurrentModelVariants: () => string[];
     setAgent: (agentName: string | undefined) => void;
-    applyDefaultModelAgentSelection: (options?: { projectDefaultModel?: string }) => void;
+    applyDefaultModelAgentSelection: (options?: { projectDefaultModel?: string; projectDefaultVariant?: string }) => void;
     applyOpenCodeConfigDefaults: (directory?: string | null, source?: string, config?: Config) => void;
     setSelectedProvider: (providerId: string) => void;
     setSettingsDefaultModel: (model: string | undefined) => void;
@@ -1137,6 +1137,26 @@ declare global {
 const _inFlightProviders = new Map<string, Promise<void>>();
 const _inFlightAgents = new Map<string, Promise<boolean>>();
 let _initializeAppInFlight: Promise<void> | null = null;
+
+/**
+ * Providers of one project. Returns a stored array, so components can select it
+ * directly and re-render only when that project's list is replaced.
+ *
+ * Settings pages browse a project the app is not on; everything else wants the
+ * active one, which is what an omitted directory resolves to.
+ */
+export const selectProvidersForDirectory = (
+    state: Pick<ConfigStore, "providers" | "directoryScoped" | "activeDirectoryKey">,
+    directory?: string | null,
+): ProviderWithModelList[] => {
+    const directoryKey = toConfigDirectoryKey(directory);
+    if (directoryKey === state.activeDirectoryKey) {
+        return state.providers;
+    }
+    return state.directoryScoped[directoryKey]?.providers ?? EMPTY_PROVIDERS;
+};
+
+const EMPTY_PROVIDERS: ProviderWithModelList[] = [];
 
 export const useConfigStore = create<ConfigStore>()(
     devtools(
@@ -1609,10 +1629,13 @@ export const useConfigStore = create<ConfigStore>()(
                                 const currentSelectedProviderId = state.activeDirectoryKey === directoryKey
                                     ? state.selectedProviderId
                                     : baseSnapshot.selectedProviderId;
-                                // Preserve the add-provider sentinel so a background refresh does not
-                                // navigate the user out of the in-progress add-provider form (issue #1765).
-                                const selectedProviderId = currentSelectedProviderId === ADD_PROVIDER_SENTINEL
-                                    || processedProviders.some((provider) => provider.id === currentSelectedProviderId)
+                                // The Providers settings selection belongs to the user, not to this
+                                // loader. A refresh may report a different provider set — an OpenCode
+                                // restart drops plugin-registered providers until they re-register —
+                                // and re-deriving a selection here yanked the open provider away
+                                // mid-edit. Keep whatever is selected; only fill in an empty one.
+                                // The add-provider sentinel is kept for the same reason (issue #1765).
+                                const selectedProviderId = currentSelectedProviderId
                                     ? currentSelectedProviderId
                                     : (resolvedModel?.providerId ?? processedProviders[0]?.id ?? "");
 
@@ -1723,12 +1746,17 @@ export const useConfigStore = create<ConfigStore>()(
                                         nextState.currentProviderId = parsed.providerId;
                                         nextState.currentModelId = parsed.modelId;
                                         nextState.currentVariant = currentVariant;
-                                        nextState.selectedProviderId = parsed.providerId;
 
                                         nextSnapshot.currentProviderId = parsed.providerId;
                                         nextSnapshot.currentModelId = parsed.modelId;
                                         nextSnapshot.currentVariant = currentVariant;
-                                        nextSnapshot.selectedProviderId = parsed.providerId;
+
+                                        // Only adopt this as the settings selection when the user has
+                                        // none; a failed refresh must not move an existing one.
+                                        if (!state.selectedProviderId) {
+                                            nextState.selectedProviderId = parsed.providerId;
+                                            nextSnapshot.selectedProviderId = parsed.providerId;
+                                        }
                                     }
                                 }
                             }
@@ -1771,14 +1799,12 @@ export const useConfigStore = create<ConfigStore>()(
                             ...baseSnapshot,
                             currentProviderId: providerId,
                             currentModelId: newModelId,
-                            selectedProviderId: providerId,
                             selectionSource: "manual",
                         };
 
                         return {
                             currentProviderId: providerId,
                             currentModelId: newModelId,
-                            selectedProviderId: providerId,
                             selectionSource: "manual",
                             directoryScoped: {
                                 ...state.directoryScoped,
@@ -2456,7 +2482,6 @@ export const useConfigStore = create<ConfigStore>()(
                                     currentProviderId: providerId,
                                     currentModelId: modelId,
                                     currentVariant: variant,
-                                    selectedProviderId: preserveAddProviderSelection(state.selectedProviderId, providerId),
                                     selectionSource: "manual",
                                 };
 
@@ -2464,7 +2489,6 @@ export const useConfigStore = create<ConfigStore>()(
                                     currentProviderId: providerId,
                                     currentModelId: modelId,
                                     currentVariant: variant,
-                                    selectedProviderId: preserveAddProviderSelection(state.selectedProviderId, providerId),
                                     selectionSource: "manual",
                                     directoryScoped: {
                                         ...state.directoryScoped,
@@ -2583,6 +2607,7 @@ export const useConfigStore = create<ConfigStore>()(
                         agents,
                         providers,
                         projectDefaultModel: options?.projectDefaultModel,
+                        projectDefaultVariant: options?.projectDefaultVariant,
                         settingsDefaultAgent,
                         settingsDefaultModel,
                         settingsDefaultVariant,
@@ -2616,7 +2641,6 @@ export const useConfigStore = create<ConfigStore>()(
                                     currentProviderId: resolvedProviderId,
                                     currentModelId: resolvedModelId,
                                     currentVariant: resolvedVariant,
-                                    selectedProviderId: preserveAddProviderSelection(state.selectedProviderId, resolvedProviderId),
                                 }
                                 : {}),
                             selectionSource: "auto",
@@ -2635,7 +2659,6 @@ export const useConfigStore = create<ConfigStore>()(
                             nextState.currentProviderId = resolvedProviderId;
                             nextState.currentModelId = resolvedModelId;
                             nextState.currentVariant = resolvedVariant;
-                            nextState.selectedProviderId = preserveAddProviderSelection(state.selectedProviderId, resolvedProviderId);
                         }
 
                         return nextState;
@@ -2717,7 +2740,6 @@ export const useConfigStore = create<ConfigStore>()(
                         const currentProviderId = isActive ? state.currentProviderId : baseSnapshot.currentProviderId;
                         const currentModelId = isActive ? state.currentModelId : baseSnapshot.currentModelId;
                         const currentVariant = isActive ? state.currentVariant : baseSnapshot.currentVariant;
-                        const currentSelectedProviderId = isActive ? state.selectedProviderId : baseSnapshot.selectedProviderId;
                         const nextSelection = resolveSelectionWithManualGuard({
                             agents,
                             providers,
@@ -2742,7 +2764,6 @@ export const useConfigStore = create<ConfigStore>()(
                                     currentProviderId: nextSelection.providerId,
                                     currentModelId: nextSelection.modelId,
                                     currentVariant: nextSelection.variant,
-                                    selectedProviderId: preserveAddProviderSelection(currentSelectedProviderId, nextSelection.providerId),
                                 }
                                 : {}),
                             selectionSource: nextSelection.selectionSource,
@@ -2761,7 +2782,6 @@ export const useConfigStore = create<ConfigStore>()(
                                     state.currentProviderId !== nextSelection.providerId
                                     || state.currentModelId !== nextSelection.modelId
                                     || state.currentVariant !== nextSelection.variant
-                                    || state.selectedProviderId !== preserveAddProviderSelection(currentSelectedProviderId, nextSelection.providerId)
                                 ))
                             ));
 
@@ -2781,7 +2801,6 @@ export const useConfigStore = create<ConfigStore>()(
                                 nextState.currentProviderId = nextSelection.providerId;
                                 nextState.currentModelId = nextSelection.modelId;
                                 nextState.currentVariant = nextSelection.variant;
-                                nextState.selectedProviderId = preserveAddProviderSelection(currentSelectedProviderId, nextSelection.providerId);
                             }
                         }
 

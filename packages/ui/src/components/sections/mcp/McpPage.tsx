@@ -7,6 +7,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import {
+  selectMcpServersForDirectory,
   useMcpConfigStore,
   envRecordToArray,
   type McpDraft,
@@ -18,7 +19,8 @@ import {
   applyImportedMcpToDraft,
 } from './mcpImport';
 import { useMcpStore } from '@/stores/useMcpStore';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { usePendingOpenCodeRestartStore } from '@/stores/usePendingOpenCodeRestartStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -439,6 +441,7 @@ const StatusBadge: React.FC<{
     failed: { text: 'text-[var(--status-error)]', bg: 'bg-[var(--status-error)]/10' },
     needs_auth: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
     needs_client_registration: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
+    awaiting_restart: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
   };
 
   const colors = colorClassMap[status] ?? { text: 'text-muted-foreground', bg: '' };
@@ -554,7 +557,6 @@ export const McpPage: React.FC = () => {
   );
   const {
     selectedMcpName,
-    mcpServers,
     mcpDraft,
     setMcpDraft,
     setSelectedMcp,
@@ -564,7 +566,6 @@ export const McpPage: React.FC = () => {
     deleteMcp,
   } = useMcpConfigStore(useShallow((s) => ({
     selectedMcpName: s.selectedMcpName,
-    mcpServers: s.mcpServers,
     mcpDraft: s.mcpDraft,
     setMcpDraft: s.setMcpDraft,
     setSelectedMcp: s.setSelectedMcp,
@@ -574,18 +575,22 @@ export const McpPage: React.FC = () => {
     deleteMcp: s.deleteMcp,
   })));
 
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const currentDirectory = useSettingsDirectory();
   const isVSCodeAuthRuntime = React.useMemo(() => isVSCodeRuntime(), []);
-  const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));
-  const mcpDiagnostics = useMcpStore((state) => state.getDiagnosticForDirectory(currentDirectory ?? null));
+  const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory));
+  const mcpDiagnostics = useMcpStore((state) => state.getDiagnosticForDirectory(currentDirectory));
   const refreshStatus = useMcpStore((state) => state.refresh);
   const connectMcp = useMcpStore((state) => state.connect);
   const disconnectMcp = useMcpStore((state) => state.disconnect);
   const completeAuthMcp = useMcpStore((state) => state.completeAuth);
   const clearAuthMcp = useMcpStore((state) => state.clearAuth);
   const testConnectionMcp = useMcpStore((state) => state.testConnection);
+  const pendingRestartChanges = usePendingOpenCodeRestartStore((state) => state.changes);
 
-  const selectedServer = selectedMcpName ? getMcpByName(selectedMcpName) : null;
+  const mcpServers = useMcpConfigStore((state) => selectMcpServersForDirectory(state, currentDirectory));
+  const selectedServer = selectedMcpName ? getMcpByName(selectedMcpName, currentDirectory) : null;
   const isNewServer = Boolean(mcpDraft && mcpDraft.name === selectedMcpName && !selectedServer);
 
   // ── form state ──
@@ -905,7 +910,7 @@ export const McpPage: React.FC = () => {
     };
     setIsSaving(true);
     try {
-      const result = isNewServer ? await createMcp(draft) : await updateMcp(name, draft);
+      const result = isNewServer ? await createMcp(draft, currentDirectory) : await updateMcp(name, draft, currentDirectory);
       if (result.ok) {
         await clearPendingMcpAuthContext(authStateKey);
         resetTransientAuthState();
@@ -937,7 +942,7 @@ export const McpPage: React.FC = () => {
   const handleDelete = async () => {
     if (!selectedMcpName) return;
     setIsDeleting(true);
-    const result = await deleteMcp(selectedMcpName);
+    const result = await deleteMcp(selectedMcpName, currentDirectory);
     if (result.ok) {
       await clearPendingMcpAuthContext(authStateKey);
       resetTransientAuthState();
@@ -964,7 +969,7 @@ export const McpPage: React.FC = () => {
       } else {
         await connectMcp(selectedMcpName, currentDirectory);
         await refreshStatus({ directory: currentDirectory, silent: true });
-        const nextStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory ?? null)[selectedMcpName];
+        const nextStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory)[selectedMcpName];
         if (nextStatus?.status === 'connected') {
           toast.success(t('settings.mcp.page.toast.connected'));
         } else if (nextStatus?.status === 'needs_auth') {
@@ -1026,21 +1031,46 @@ export const McpPage: React.FC = () => {
     const actionKey = runtimeActionKey;
     let queuedStateKey: string | null = null;
     try {
-      const currentStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory ?? null)[selectedMcpName]?.status;
+      const currentStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory)[selectedMcpName]?.status;
       authPollStartsFromNeedsAuthRef.current = currentStatus === 'needs_auth' || currentStatus === 'needs_client_registration';
 
       // One implementation for every surface that can authorise; the page
       // used to own this flow while the dropdown and the work-status panel
       // called plain `connect`, which cannot start OAuth at all.
-      const { authorizationUrl: nextAuthUrl, opened } = await startMcpAuthorization({
+      const { authorizationUrl: nextAuthUrl, opened, nativeFlow, completion } = await startMcpAuthorization({
         name: selectedMcpName,
         directory: currentDirectory,
-        // Only VS Code keeps OpenCode's own redirect. Skipping whenever some
-        // value was stored left a stale one — a dead loopback port from an
-        // earlier launch — unrepairable from this page; the bootstrap already
-        // rewrites nothing when the stored value is right.
-        skipRedirectUriBootstrap: isVSCodeAuthRuntime,
       });
+
+      if (nativeFlow) {
+        // OpenCode opened the browser and completes the flow itself; there is
+        // no URL or state to track. The completion promise is the authoritative
+        // end signal — status polling alone cannot tell a finished
+        // reauthorization from the still-connected state it started in.
+        if (runtimeActionKeyRef.current !== actionKey) return;
+        setAuthUrl(null);
+        setAuthStateKey(null);
+        setIsAuthPolling(true);
+        authPollAttemptsRef.current = 0;
+        toast.message(t('settings.mcp.page.toast.completeAuthorizationInBrowser'));
+        completion
+          ?.then(() => {
+            if (runtimeActionKeyRef.current !== actionKey) return;
+            setIsAuthPolling(false);
+            authPollAttemptsRef.current = 0;
+            authPollStartsFromNeedsAuthRef.current = false;
+            toast.success(t('settings.mcp.page.toast.authorizationCompleted'));
+          })
+          .catch((completionError) => {
+            if (runtimeActionKeyRef.current !== actionKey) return;
+            setIsAuthPolling(false);
+            authPollAttemptsRef.current = 0;
+            authPollStartsFromNeedsAuthRef.current = false;
+            toast.error(normalizeMcpAuthErrorMessage(completionError, t('settings.mcp.page.toast.authorizationFailed'), tUnsafe));
+          });
+        return;
+      }
+
       const stateKey = parseMcpOAuthCallbackStateKey(new URL(nextAuthUrl).searchParams);
       queuedStateKey = stateKey;
 
@@ -1209,7 +1239,7 @@ export const McpPage: React.FC = () => {
       void (async () => {
         authPollAttemptsRef.current += 1;
         await refreshStatus({ directory: currentDirectory, silent: true });
-        const nextStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory ?? null)[selectedMcpName];
+        const nextStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory)[selectedMcpName];
 
         if (!nextStatus) {
           return;
@@ -1269,6 +1299,12 @@ export const McpPage: React.FC = () => {
   const runtimeStatus = mcpStatus[selectedMcpName];
   const runtimeDiagnostic = selectedMcpName ? mcpDiagnostics[selectedMcpName] : undefined;
   const effectiveRuntimeStatus = runtimeStatus ?? runtimeDiagnostic;
+  // Saved into the config but queued behind Apply & Restart: OpenCode does not
+  // know this server yet, so every runtime action (connect, authorize, clear
+  // auth) can only fail with "server not found". The page says that instead of
+  // offering the buttons.
+  const isAwaitingRestart = !isNewServer && !effectiveRuntimeStatus
+    && pendingRestartChanges.some((change) => change.scope === 'mcp' && change.id.startsWith(`mcp:${selectedMcpName}:`));
   const isConnected = runtimeStatus?.status === 'connected';
   const needsAuthorization = runtimeStatus?.status === 'needs_auth' || runtimeStatus?.status === 'needs_client_registration';
   // Must be the very URI `startMcpAuthorization` writes into the config, not a
@@ -1305,6 +1341,8 @@ export const McpPage: React.FC = () => {
         return t('settings.mcp.page.status.label.needsAuth');
       case 'needs_client_registration':
         return t('settings.mcp.page.status.label.needsRegistration');
+      case 'awaiting_restart':
+        return t('settings.mcp.page.status.label.awaitingRestart');
       default:
         return status;
     }
@@ -1315,12 +1353,17 @@ export const McpPage: React.FC = () => {
       <SettingsPageLayout
         title={isNewServer ? t('settings.mcp.page.header.newServer') : selectedMcpName}
         titleAccessory={!isNewServer ? (
-          <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} getStatusLabel={getStatusLabel} variant="pill" />
+          <StatusBadge
+            status={isAwaitingRestart ? 'awaiting_restart' : effectiveRuntimeStatus?.status}
+            enabled={enabled}
+            getStatusLabel={getStatusLabel}
+            variant="pill"
+          />
         ) : undefined}
         description={isNewServer
           ? t('settings.mcp.page.header.configureNewServer')
           : t('settings.mcp.page.header.transport', { type: mcpType === 'local' ? t('settings.mcp.page.transport.local') : t('settings.mcp.page.transport.remote') })}
-        headerEnd={!isNewServer ? (
+        headerEnd={!isNewServer && !isAwaitingRestart ? (
           <div className="flex flex-wrap items-center gap-2">
           <Button
             variant={isConnected ? 'outline' : 'default'}
@@ -1340,11 +1383,15 @@ export const McpPage: React.FC = () => {
                 onClick={() => void handleStartAuthorization()}
                 disabled={isAuthorizing || !enabled}
               >
+                {/* "Reauthorize" only once a working authorization exists (the
+                    server is connected); every other state — needs_auth,
+                    failed, still unknown — reads "Authorize" so the label does
+                    not imply stored credentials that may not be there. */}
                 {isAuthorizing
                   ? t('settings.mcp.page.actions.starting')
-                  : needsAuthorization
-                    ? t('settings.mcp.page.actions.authorize')
-                    : t('settings.mcp.page.actions.reauthorize')}
+                  : isConnected
+                    ? t('settings.mcp.page.actions.reauthorize')
+                    : t('settings.mcp.page.actions.authorize')}
               </Button>
               <Button
                 variant="ghost"
@@ -1375,8 +1422,26 @@ export const McpPage: React.FC = () => {
 
 
 
+        {/* Saved but queued behind Apply & Restart: dynamic status the user
+            must see, or the missing action buttons read as a broken page. */}
+        {isAwaitingRestart && (
+          <SettingsSection divider={false}>
+            <div className="rounded-lg border p-3 border-[var(--status-warning-border)] bg-[var(--status-warning-background)]">
+              <div className="min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.mcp.page.status.runtimeStatus')}</span>
+                  <StatusBadge status="awaiting_restart" enabled={enabled} getStatusLabel={getStatusLabel} />
+                </div>
+                <p className="typography-meta text-muted-foreground">
+                  {t('settings.mcp.page.status.description.awaitingRestart')}
+                </p>
+              </div>
+            </div>
+          </SettingsSection>
+        )}
+
         {/* Runtime Status - Simplified for connected, expanded for errors */}
-        {!isNewServer && shouldShowFullStatusCard(effectiveRuntimeStatus?.status, authUrl, needsAuthorization, isAuthPolling) && (
+        {!isNewServer && !isAwaitingRestart && shouldShowFullStatusCard(effectiveRuntimeStatus?.status, authUrl, needsAuthorization, isAuthPolling) && (
           <SettingsSection divider={false}>
             <div className={cn('rounded-lg border p-3', statusCardClass(effectiveRuntimeStatus?.status))}>
               <div className="space-y-4">

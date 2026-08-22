@@ -66,6 +66,28 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: 'false' })).toEqual({});
   });
 
+  it('sanitizes shared sidebar display preferences', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      sidebarProjectDisplayMode: 'single',
+      sidebarSessionGroupingMode: 'flat',
+      sidebarProjectSortOrder: 'z-a',
+      sidebarShowRecentSection: false,
+    })).toEqual({
+      sidebarProjectDisplayMode: 'single',
+      sidebarSessionGroupingMode: 'flat',
+      sidebarProjectSortOrder: 'z-a',
+      sidebarShowRecentSection: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({
+      sidebarProjectDisplayMode: 'grid',
+      sidebarSessionGroupingMode: 'project',
+      sidebarProjectSortOrder: 'random',
+      sidebarShowRecentSection: 'false',
+    })).toEqual({});
+  });
+
   it('accepts only booleans for wide chat layout', () => {
     const helpers = createTestHelpers();
 
@@ -464,6 +486,41 @@ describe('settings helpers', () => {
       expect(sanitized.recentEfforts).toEqual(payload.recentEfforts);
       expect(sanitized.favoriteModels).toEqual(payload.favoriteModels);
       expect(sanitized.recentModels).toEqual(payload.recentModels);
+    });
+  });
+
+  describe('session retention settings persistence', () => {
+    it('round-trips sessionRetentionAction archive and delete through the sanitizer', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: 'archive' })).toEqual({
+        sessionRetentionAction: 'archive',
+      });
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: 'delete' })).toEqual({
+        sessionRetentionAction: 'delete',
+      });
+    });
+
+    it('rejects invalid sessionRetentionAction values', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: 'remove' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: true })).toEqual({});
+    });
+
+    it('survives a full settings payload containing sessionRetentionAction (regression)', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      const payload = {
+        autoDeleteEnabled: true,
+        autoDeleteAfterDays: 60,
+        sessionRetentionAction: 'delete',
+      };
+
+      const sanitized = helpers.sanitizeSettingsUpdate(payload);
+
+      expect(sanitized.autoDeleteEnabled).toBe(true);
+      expect(sanitized.autoDeleteAfterDays).toBe(60);
+      expect(sanitized.sessionRetentionAction).toBe('delete');
     });
   });
 });

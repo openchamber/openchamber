@@ -3,9 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-export type ManagedProvider = 'opencode-go' | 'ollama-cloud' | 'cursor';
+export type ManagedProvider = 'ollama-cloud' | 'cursor';
 export type ManagedCredential = Record<string, string>;
-const providers = new Set<ManagedProvider>(['opencode-go', 'ollama-cloud', 'cursor']);
+const providers = new Set<ManagedProvider>(['ollama-cloud', 'cursor']);
 const directory = () => path.join(process.env.OPENCHAMBER_DATA_DIR ? path.resolve(process.env.OPENCHAMBER_DATA_DIR) : path.join(os.homedir(), '.config', 'openchamber'), 'quota');
 const target = (provider: ManagedProvider) => {
   if (!providers.has(provider)) throw new Error('Unsupported credential provider');
@@ -15,12 +15,6 @@ const clean = (value: unknown) => typeof value === 'string' && !/[\r\n]/.test(va
 
 export const normalizeCredential = (provider: ManagedProvider, value: unknown): ManagedCredential | null => {
   const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  if (provider === 'opencode-go') {
-    const workspaceId = clean(data.workspaceId);
-    let authCookie = clean(data.authCookie);
-    if (authCookie.startsWith('auth=')) authCookie = authCookie.slice(5).trim();
-    return workspaceId && authCookie ? { workspaceId, authCookie } : null;
-  }
   if (provider === 'ollama-cloud') return clean(data.cookie) ? { cookie: clean(data.cookie) } : null;
   const accessToken = clean(data.accessToken);
   const refreshToken = clean(data.refreshToken);
@@ -34,7 +28,7 @@ export const readCredential = (provider: ManagedProvider) => {
 export const credentialStatus = (provider: ManagedProvider) => {
   const value = readCredential(provider);
   if (!value) return { configured: false };
-  return { configured: true, ...(provider === 'opencode-go' ? { workspaceId: value.workspaceId } : {}), ...(provider === 'cursor' ? { hasRefreshToken: Boolean(value.refreshToken) } : {}), secretMasked: '••••••••' };
+  return { configured: true, ...(provider === 'cursor' ? { hasRefreshToken: Boolean(value.refreshToken) } : {}), secretMasked: '••••••••' };
 };
 export const writeCredential = (provider: ManagedProvider, value: ManagedCredential) => {
   const dir = directory(); const file = target(provider); const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -44,6 +38,9 @@ export const writeCredential = (provider: ManagedProvider, value: ManagedCredent
   return credentialStatus(provider);
 };
 export const deleteCredential = (provider: ManagedProvider) => { try { fs.unlinkSync(target(provider)); } catch (error) { if ((error as { code?: string }).code !== 'ENOENT') throw error; } };
+export const deleteLegacyOpenCodeGoCredential = () => {
+  try { fs.unlinkSync(path.join(directory(), 'opencode-go.json')); } catch (error) { if ((error as { code?: string }).code !== 'ENOENT') throw error; }
+};
 
 export const importCursorCredential = () => {
   const db = path.join(os.homedir(), 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');

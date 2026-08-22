@@ -147,8 +147,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         terminalControllerRef.current?.focus();
     }, [useTouchTerminalInput]);
 
-    const activeMainTab = useUIStore((state) => state.activeMainTab);
-    const isTerminalActive = activeMainTab === 'terminal';
+    const activeSurface = useUIStore((state) => state.activeSurface);
+    const isTerminalActive = activeSurface === 'terminal';
     const isTerminalVisible = visible ?? isTerminalActive;
     const [hasOpenedTerminalViewport, setHasOpenedTerminalViewport] = React.useState(isTerminalVisible);
 

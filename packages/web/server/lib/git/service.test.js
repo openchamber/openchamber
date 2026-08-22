@@ -27,6 +27,9 @@ import {
   applyHunk,
   getDiff,
   getFileDiff,
+  validateWorktreeCreate,
+  parseBranchCreationSource,
+  getRangeFiles,
 } from './service.js';
 
 // ---------------------------------------------------------------------------
@@ -807,6 +810,134 @@ describe('createWorktree', () => {
 });
 
 // ---------------------------------------------------------------------------
+// createWorktree from a forked GitHub PR head (issue #2422)
+// ---------------------------------------------------------------------------
+
+describe('createWorktree from a forked GitHub PR', () => {
+  const withDataHome = async (test) => {
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+    try {
+      await test(dataHome);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  };
+
+  const publishForkHead = (repository, forkBare, branchName) => {
+    fs.writeFileSync(path.join(repository, 'FORK.md'), `# ${branchName}\n`);
+    runGit(repository, ['add', 'FORK.md']);
+    runGit(repository, ['commit', '-m', `fork ${branchName}`]);
+    const sha = runGit(repository, ['rev-parse', 'HEAD']).trim();
+    runGit(repository, ['push', forkBare, `HEAD:refs/heads/${branchName}`]);
+    return sha;
+  };
+
+  const getBranchTrackingRemote = (directory, branch) => {
+    try {
+      return runGit(directory, ['config', '--get', `branch.${branch}.remote`]).trim();
+    } catch {
+      return '';
+    }
+  };
+
+  const forkWorktreeInput = ({ fork, worktreeName }) => ({
+    mode: 'existing',
+    branchName: 'feature/login',
+    worktreeName,
+    existingBranch: 'remotes/pr-alice/feature/login',
+    setUpstream: true,
+    upstreamRemote: 'pr-alice',
+    upstreamBranch: 'feature/login',
+    ensureRemoteName: 'pr-alice',
+    ensureRemoteUrl: fork,
+  });
+
+  it('creates a worktree from a reachable fork head remote', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { repository } = createRepositoryWithRemote();
+      const fork = createTempDir();
+      runGit(fork, ['init', '--bare']);
+      const sha = publishForkHead(repository, fork, 'feature/login');
+
+      const created = await createWorktree(repository, forkWorktreeInput({
+        fork,
+        worktreeName: 'pr-42',
+      }));
+
+      expect(created.branch).toBe('feature/login');
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(sha);
+      await expect.poll(() => fs.existsSync(path.join(created.path, 'FORK.md')), { timeout: 5_000 }).toBe(true);
+      expect(runGit(repository, ['remote', 'get-url', 'pr-alice']).trim()).toBe(fork);
+      await expect.poll(
+        () => getBranchTrackingRemote(created.path, 'feature/login') === 'pr-alice',
+        { timeout: 5_000 }
+      ).toBe(true);
+    });
+  }, 30_000);
+
+  it('rejects an unreachable fork with an actionable error and no worktree', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { repository } = createRepositoryWithRemote();
+      const missingFork = path.join(createTempDir(), 'missing-fork.git');
+      const before = runGit(repository, ['worktree', 'list', '--porcelain']);
+
+      await expect(createWorktree(repository, forkWorktreeInput({
+        fork: missingFork,
+        worktreeName: 'pr-42-unreachable',
+      }))).rejects.toThrow(/Unable to (reach|fetch)/i);
+
+      expect(runGit(repository, ['worktree', 'list', '--porcelain'])).toBe(before);
+
+      const validation = await validateWorktreeCreate(repository, forkWorktreeInput({
+        fork: missingFork,
+        worktreeName: 'pr-42-unreachable',
+      }));
+      expect(validation.ok).toBe(false);
+      expect(validation.errors.some((error) => /Unable to (reach|fetch)/i.test(error.message))).toBe(true);
+    });
+  }, 30_000);
+
+  it('does not write upstream tracking when the upstream ref cannot be fetched', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { repository } = createRepositoryWithRemote();
+      runGit(repository, ['branch', 'feature/tracking']);
+      const emptyRemote = createTempDir();
+      runGit(emptyRemote, ['init', '--bare']);
+      runGit(repository, ['remote', 'add', 'broken-upstream', emptyRemote]);
+
+      const created = await createWorktree(repository, {
+        mode: 'existing',
+        branchName: 'feature/tracking-wt',
+        worktreeName: 'feature-tracking-wt',
+        existingBranch: 'feature/tracking',
+        setUpstream: true,
+        upstreamRemote: 'broken-upstream',
+        upstreamBranch: 'does-not-exist',
+      });
+
+      await expect.poll(
+        () => getWorktreeBootstrapStatus(created.path).then((status) => status.status === 'ready' || status.status === 'failed'),
+        { timeout: 5_000 }
+      ).toBe(true);
+
+      expect(getBranchTrackingRemote(created.path, 'feature/tracking-wt')).toBe('');
+    });
+  }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
 // removeWorktree
 // ---------------------------------------------------------------------------
 
@@ -1205,5 +1336,96 @@ describe.runIf(canRunGit())('getRangeDiff', () => {
     const diff = await getRangeDiff(repository, { base: 'react', head: 'next' });
 
     expect(diff).toContain('feature.txt');
+  });
+});
+
+describe('parseBranchCreationSource', () => {
+  it('returns the source ref from the oldest creation entry', () => {
+    // Reflog lists newest entries first; creation is the last line.
+    const reflog = [
+      'commit: abc123',
+      'branch: Created from origin/main',
+    ].join('\n');
+    expect(parseBranchCreationSource(reflog)).toBe('origin/main');
+  });
+
+  it('returns null when the branch was created from a detached HEAD pointer', () => {
+    const reflog = 'branch: Created from HEAD@{0}';
+    expect(parseBranchCreationSource(reflog)).toBeNull();
+  });
+
+  it('returns null when the branch was created from a raw commit', () => {
+    const reflog = 'branch: Created from 9a3b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b';
+    expect(parseBranchCreationSource(reflog)).toBeNull();
+  });
+
+  it('returns null when there is no creation entry', () => {
+    const reflog = ['commit: abc123', 'reset: moving to HEAD'].join('\n');
+    expect(parseBranchCreationSource(reflog)).toBeNull();
+  });
+
+  it('returns null for empty input', () => {
+    expect(parseBranchCreationSource('')).toBeNull();
+    expect(parseBranchCreationSource(undefined)).toBeNull();
+  });
+});
+
+describe.runIf(canRunGit())('getRangeFiles', () => {
+  it('returns added and modified paths with their status letters', async () => {
+    const { repository } = createRepositoryWithRemote();
+    fs.writeFileSync(path.join(repository, 'added.txt'), 'new\n');
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Test\nchanged\n');
+    runGit(repository, ['add', 'added.txt', 'README.md']);
+    runGit(repository, ['commit', '-m', 'changes']);
+
+    const files = await getRangeFiles(repository, { base: 'react', head: 'next' });
+
+    expect(files).toEqual(expect.arrayContaining([
+      { path: 'added.txt', status: 'A' },
+      { path: 'README.md', status: 'M' },
+    ]));
+  });
+
+  it('reports the destination path for renamed files, including spaces', async () => {
+    const { repository } = createRepositoryWithRemote();
+    // The original file must exist in the base: rename detection pairs a
+    // deletion against an addition relative to base, not within the branch.
+    fs.writeFileSync(path.join(repository, 'old name with spaces.md'), '# Test\n');
+    runGit(repository, ['add', 'old name with spaces.md']);
+    runGit(repository, ['commit', '-m', 'add file to rename']);
+    runGit(repository, ['push', 'origin', 'HEAD:react']);
+    // Spaces in filenames exercise the -z token split: a newline split would
+    // mangle these paths long before status letters matter.
+    fs.renameSync(path.join(repository, 'old name with spaces.md'), path.join(repository, 'new name with spaces.md'));
+    runGit(repository, ['add', '-A']);
+    runGit(repository, ['commit', '-m', 'rename']);
+
+    const files = await getRangeFiles(repository, { base: 'react', head: 'next' });
+
+    const renameEntry = files.find((file) => file.status === 'R');
+    expect(renameEntry).toBeDefined();
+    expect(renameEntry.path).toBe('new name with spaces.md');
+    expect(files.some((file) => file.path === 'old name with spaces.md')).toBe(false);
+  });
+
+  it('reports the destination path for copied files', async () => {
+    const { repository } = createRepositoryWithRemote();
+    // The source must exist in the base. Copy detection needs the repository's
+    // own `diff.renames=copies` setting on top of the service's -C flag; the
+    // parser must survive whatever C entries git emits.
+    runGit(repository, ['config', 'diff.renames', 'copies']);
+    fs.writeFileSync(path.join(repository, 'copied source.md'), '# Copy me\n');
+    runGit(repository, ['add', 'copied source.md']);
+    runGit(repository, ['commit', '-m', 'add source']);
+    runGit(repository, ['push', 'origin', 'HEAD:react']);
+    fs.copyFileSync(path.join(repository, 'copied source.md'), path.join(repository, 'copied destination.md'));
+    runGit(repository, ['add', '-A']);
+    runGit(repository, ['commit', '-m', 'copy']);
+
+    const files = await getRangeFiles(repository, { base: 'react', head: 'next' });
+
+    const copyEntry = files.find((file) => file.status === 'C');
+    expect(copyEntry).toBeDefined();
+    expect(copyEntry.path).toBe('copied destination.md');
   });
 });

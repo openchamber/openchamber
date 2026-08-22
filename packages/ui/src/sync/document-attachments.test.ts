@@ -82,7 +82,10 @@ describe("document attachment extraction", () => {
       "xl/_rels/workbook.xml.rels": relationships([{ id: "rIdSheet", target: "worksheets/sheet1.xml" }]),
       "xl/sharedStrings.xml": `<sst><si><t>Revenue</t></si></sst>`,
       "xl/worksheets/sheet1.xml": `
-        <worksheet xmlns:r="r"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><v>42</v></c></row></sheetData><drawing r:id="rIdDrawing"/></worksheet>`,
+        <worksheet xmlns:r="r"><sheetData>
+          <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1"><v>42</v></c></row>
+          <row r="2"><c r="A2" t="inlineStr"><is><t>North</t></is></c><c r="B2"><v>17</v></c></row>
+        </sheetData><drawing r:id="rIdDrawing"/></worksheet>`,
       "xl/worksheets/_rels/sheet1.xml.rels": relationships([{ id: "rIdDrawing", target: "../drawings/drawing1.xml" }]),
       "xl/drawings/drawing1.xml": `
         <xdr:wsDr xmlns:xdr="xdr" xmlns:a="a" xmlns:r="r"><xdr:oneCellAnchor><xdr:from><xdr:col>1</xdr:col><xdr:row>2</xdr:row></xdr:from><a:blip r:embed="rIdImage"/></xdr:oneCellAnchor></xdr:wsDr>`,
@@ -94,9 +97,25 @@ describe("document attachment extraction", () => {
     const text = await result?.textFile.text() ?? ""
 
     expect(text.includes("## Sheet: Summary")).toBe(true)
-    expect(text.includes("A1: Revenue | B1: 42")).toBe(true)
+    expect(text.includes("Range: A1:B2\nRevenue\t42\nNorth\t17")).toBe(true)
     expect(text.includes("Image at B3: [budget-image-1.webp]")).toBe(true)
     expect(result?.images[0]?.name).toBe("budget-image-1.webp")
+  })
+
+  test("quotes TSV values and keeps sparse XLSX rows coordinate-based", async () => {
+    const file = zippedFile("sparse.xlsx", {
+      "xl/workbook.xml": `<workbook xmlns:r="r"><sheets><sheet name="Data" r:id="sheet"/></sheets></workbook>`,
+      "xl/_rels/workbook.xml.rels": relationships([{ id: "sheet", target: "worksheets/sheet1.xml" }]),
+      "xl/worksheets/sheet1.xml": `<worksheet><sheetData>
+        <row r="1"><c r="A1" t="inlineStr"><is><t>line 1&#10;line 2</t></is></c><c r="B1" t="inlineStr"><is><t>say &quot;hi&quot;</t></is></c></row>
+        <row r="2"><c r="A2" t="inlineStr"><is><t>first</t></is></c><c r="XFD2" t="inlineStr"><is><t>last</t></is></c></row>
+      </sheetData></worksheet>`,
+    })
+
+    const text = await (await extractDocumentAttachments(file))?.textFile.text() ?? ""
+
+    expect(text.includes('Range: A1:B1\n"line 1\nline 2"\t"say ""hi"""')).toBe(true)
+    expect(text.includes("Cells: A2\tfirst | XFD2\tlast")).toBe(true)
   })
 
   test("extracts OpenDocument text, presentations, spreadsheets, and image positions", async () => {
@@ -196,7 +215,7 @@ describe("document attachment extraction", () => {
 
   test("does not retain images whose citations fall beyond the text limit", async () => {
     const file = zippedFile("long.docx", {
-      "word/document.xml": `<w:document xmlns:w="w" xmlns:a="a" xmlns:r="r"><w:body><w:p><w:t>${"x".repeat(2_000_100)}</w:t></w:p><w:p><a:blip r:embed="image"/></w:p></w:body></w:document>`,
+      "word/document.xml": `<w:document xmlns:w="w" xmlns:a="a" xmlns:r="r"><w:body><w:p><w:t>${"x".repeat(500_100)}</w:t></w:p><w:p><a:blip r:embed="image"/></w:p></w:body></w:document>`,
       "word/_rels/document.xml.rels": relationships([{ id: "image", target: "media/image.png" }]),
       "word/media/image.png": pngBytes(),
     })
@@ -204,7 +223,7 @@ describe("document attachment extraction", () => {
     const result = await extractDocumentAttachments(file)
     const text = await result?.textFile.text() ?? ""
 
-    expect(text.length <= 2_000_000).toBe(true)
+    expect(text.length <= 500_000).toBe(true)
     expect(text.endsWith("[Document text truncated by OpenChamber]\n")).toBe(true)
     expect(text.includes("[long-image-1.png]")).toBe(false)
     expect(result?.images).toEqual([])

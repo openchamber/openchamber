@@ -77,12 +77,40 @@ describe('useSkillsStore directory resolution', () => {
     });
 
     invalidateSkillsLoadCache(activeProjectPath);
+    invalidateSkillsLoadCache('/workspace/other-project');
     useSkillsStore.setState({
       selectedSkillName: null,
       skills: [],
+      skillsByDirectory: {},
       isLoading: false,
       skillDraft: null,
     });
+  });
+
+  test('loading another project leaves the active project\'s skills alone', async () => {
+    // Settings can browse a project the app is not on. Chat autocompletes read
+    // `skills`, so that list must keep describing the active project.
+    const activeSkills = [{
+      name: 'active-only',
+      path: `${activeProjectPath}/.agents/skills/active-only/SKILL.md`,
+      scope: 'project' as const,
+      source: 'agents' as const,
+      description: 'Active project skill',
+      group: undefined,
+      renamable: false,
+    }];
+    useSkillsStore.setState({
+      skills: activeSkills,
+      skillsByDirectory: { [activeProjectPath]: activeSkills },
+    });
+
+    const loaded = await useSkillsStore.getState().loadSkills('/workspace/other-project');
+
+    expect(loaded).toBe(true);
+    expect(runtimeFetchCalls[0]?.url).toContain(`directory=${encodeURIComponent('/workspace/other-project')}`);
+    const state = useSkillsStore.getState();
+    expect(state.skills).toEqual(activeSkills);
+    expect(state.skillsByDirectory['/workspace/other-project']?.map((skill) => skill.name)).toEqual(['repo-local-skill']);
   });
 
   test('loadSkills scopes discovery to the active project even when client directory is unset', async () => {

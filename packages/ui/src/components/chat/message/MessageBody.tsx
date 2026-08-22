@@ -21,7 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 
-import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
+import { MarkdownImageGallery, SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { flattenAssistantTextParts, suggestPlanTitleFromText } from '@/lib/messages/messageText';
@@ -41,7 +41,7 @@ import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
-import { createProjectPlanFile } from '@/lib/openchamberConfig';
+import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
@@ -56,6 +56,7 @@ import {
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { getAgentColor } from '@/lib/agentColors';
+import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -725,10 +726,13 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                 )}
                 style={useStickyScrollableUserContent ? { maxHeight: 'calc(var(--chat-scroll-height, 100dvh) * 0.4)' } : undefined}
             >
+                {/* Positional keys, not part ids: the server echo of a just-sent
+                    message swaps the optimistic part id, and id-based keys would
+                    remount the text subtree (blank frame + height jump). */}
                 {userContentParts.map((part, index) => {
                     if (isSubtaskPart(part)) {
                         return (
-                            <React.Fragment key={part.id ?? `user-subtask-${index}`}>
+                            <React.Fragment key={`user-subtask-${index}`}>
                                 <UserSubtaskPart part={part} />
                             </React.Fragment>
                         );
@@ -736,7 +740,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
 
                     if (isShellActionPart(part)) {
                         return (
-                            <React.Fragment key={part.id ?? `user-shell-${index}`}>
+                            <React.Fragment key={`user-shell-${index}`}>
                                 <UserShellActionPart part={part} />
                             </React.Fragment>
                         );
@@ -751,7 +755,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                         }
                     }
                     return (
-                        <React.Fragment key={part.id ?? `user-text-${index}`}>
+                        <React.Fragment key={`user-text-${index}`}>
                             <UserTextPart
                                 part={part}
                                 messageId={messageId}
@@ -1211,6 +1215,11 @@ const AssistantMessageBody = React.memo(({
     const assistantTextParts = React.useMemo(() => {
         return visibleParts.filter((part) => part.type === 'text');
     }, [visibleParts]);
+    const finalizedAssistantMarkdownContents = React.useMemo(() => (
+        isMessageCompleted
+            ? assistantTextParts.map(extractTextContent).filter((text) => text.trim().length > 0)
+            : []
+    ), [assistantTextParts, isMessageCompleted]);
     const assistantPlanText = React.useMemo(() => flattenAssistantTextParts(assistantTextParts), [assistantTextParts]);
     const suggestedPlanTitle = React.useMemo(() => suggestPlanTitleFromText(assistantPlanText), [assistantPlanText]);
 
@@ -1503,7 +1512,7 @@ const AssistantMessageBody = React.memo(({
 
             setIsSavingPlan(true);
             try {
-                const created = await createProjectPlanFile(currentProjectRef, {
+                const created = await useProjectContextStore.getState().createPlan(currentProjectRef, {
                     title,
                     body: assistantPlanText,
                 });
@@ -1511,9 +1520,6 @@ const AssistantMessageBody = React.memo(({
                     toast.error(t('chat.messageBody.toast.savePlanFailed'));
                     return;
                 }
-                window.dispatchEvent(new CustomEvent('openchamber:project-plan-saved', {
-                    detail: { projectId: currentProjectRef.id },
-                }));
                 setIsPlanDialogOpen(false);
                 toast.success(t('chat.messageBody.toast.planSaved'));
             } finally {
@@ -1612,6 +1618,13 @@ const AssistantMessageBody = React.memo(({
                         }
                         throw new Error(payload.error || 'Failed to save image in VS Code');
                     }
+                } else if (isCapacitorMobileApp()) {
+                    const blob = await fetch(dataUrl).then((response) => response.blob());
+                    const file = new File([blob], fileName, { type: blob.type || 'image/png' });
+                    if (!navigator.canShare?.({ files: [file] })) {
+                        throw new Error('Image sharing is unavailable in this mobile runtime');
+                    }
+                    await navigator.share({ files: [file] });
                 } else {
                     const link = document.createElement('a');
                     link.download = fileName;
@@ -2228,6 +2241,12 @@ const AssistantMessageBody = React.memo(({
                     )}
                 </div>
                 <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} />
+                <MarkdownImageGallery
+                    sessionId={sessionId}
+                    messageId={messageId}
+                    contents={finalizedAssistantMarkdownContents}
+                    onShowPopup={onShowPopup}
+                />
                 {shouldRenderStandaloneActionsAfterContent && (
                     <div className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
                         <div className="flex items-center gap-1.5" data-message-action-group="true">
