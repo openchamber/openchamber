@@ -202,7 +202,7 @@ export const dict = {
   'multirun.launcher.attachments.attach': 'Attacher',
   'multirun.launcher.attachments.tooltip': 'Mêmes fichiers envoyés à toutes les exécutions',
   'multirun.launcher.models.label': 'Modèles',
-  'multirun.launcher.models.info': 'Sélectionnez les modèles 2-{max}. Le même modèle peut être ajouté plusieurs fois.',
+  'multirun.launcher.models.info': 'Sélectionnez 2 modèles ou plus. Le même modèle peut être ajouté plusieurs fois.',
   'multirun.launcher.toast.fileTooLarge': 'Le fichier "{fileName}" est trop volumineux (max 10 Mo)',
   'multirun.launcher.toast.attachFailed': 'Échec de la connexion de "{fileName}"',
   'multirun.launcher.toast.attachedSingle': 'Fichier {count} joint',

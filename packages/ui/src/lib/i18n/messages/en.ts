@@ -370,7 +370,7 @@ export const dict = {
   'multirun.launcher.attachments.attach': 'Attach',
   'multirun.launcher.attachments.tooltip': 'Same files sent to all runs',
   'multirun.launcher.models.label': 'Models',
-  'multirun.launcher.models.info': 'Select 2-{max} models. Same model can be added multiple times.',
+  'multirun.launcher.models.info': 'Select 2 or more models. Same model can be added multiple times.',
   'multirun.launcher.toast.fileTooLarge': 'File "{fileName}" is too large (max 10MB)',
   'multirun.launcher.toast.attachFailed': 'Failed to attach "{fileName}"',
   'multirun.launcher.toast.attachedSingle': 'Attached {count} file',

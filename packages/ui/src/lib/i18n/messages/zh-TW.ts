@@ -384,7 +384,7 @@ export const dict: Record<I18nKey, string> = {
   'multirun.launcher.attachments.attach': '附加',
   'multirun.launcher.attachments.tooltip': '相同檔案會傳送到所有執行',
   'multirun.launcher.models.label': '模型',
-  'multirun.launcher.models.info': '選擇 2-{max} 個模型。同一模型可重複加入。',
+  'multirun.launcher.models.info': '選擇 2 個或更多模型。同一模型可重複加入。',
   'multirun.launcher.toast.fileTooLarge': '檔案「{fileName}」過大（最大 10MB）',
   'multirun.launcher.toast.attachFailed': '附加「{fileName}」失敗',
   'multirun.launcher.toast.attachedSingle': '已附加 {count} 個檔案',

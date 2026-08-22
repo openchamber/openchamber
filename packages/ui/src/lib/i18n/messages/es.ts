@@ -371,7 +371,7 @@ export const dict: Record<I18nKey, string> = {
   "multirun.launcher.attachments.attach": "Adjuntar",
   "multirun.launcher.attachments.tooltip": "Archivos idénticos enviados a todas las ejecuciones",
   "multirun.launcher.models.label": "Modelos",
-  "multirun.launcher.models.info": "Selecciona 2-{max} modelos. El mismo modelo puede añadirse varias veces.",
+  "multirun.launcher.models.info": "Selecciona 2 o más modelos. El mismo modelo puede añadirse varias veces.",
   "multirun.launcher.toast.fileTooLarge": "El archivo \"{fileName}\" es demasiado grande (máximo 10MB)",
   "multirun.launcher.toast.attachFailed": "No se pudo adjuntar \"{fileName}\"",
   "multirun.launcher.toast.attachedSingle": "Archivo adjuntado ({count})",

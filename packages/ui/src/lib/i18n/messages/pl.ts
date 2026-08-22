@@ -504,7 +504,7 @@ export const dict: Record<I18nKey, string> = {
   'multirun.launcher.attachments.attach': 'Dołącz',
   'multirun.launcher.attachments.tooltip': 'Te same pliki wysłane do wszystkich uruchomień',
   'multirun.launcher.models.label': 'Modele',
-  'multirun.launcher.models.info': 'Wybierz od 2 do {max} modeli. Ten sam model może być dodany wielokrotnie.',
+  'multirun.launcher.models.info': 'Wybierz 2 lub więcej modeli. Ten sam model może być dodany wielokrotnie.',
   'multirun.launcher.toast.fileTooLarge': 'Plik "{fileName}" jest zbyt duży (max 10MB)',
   'multirun.launcher.toast.attachFailed': 'Nie udało się dołączyć "{fileName}"',
   'multirun.launcher.toast.attachedSingle': 'Dołączono {count} plik',

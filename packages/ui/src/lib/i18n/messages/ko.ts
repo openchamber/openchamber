@@ -371,7 +371,7 @@ export const dict: Record<I18nKey, string> = {
   'multirun.launcher.attachments.attach': '첨부',
   'multirun.launcher.attachments.tooltip': '같은 파일을 모든 실행에 보냅니다',
   'multirun.launcher.models.label': '모델',
-  'multirun.launcher.models.info': '모델을 2~{max}개 선택하세요. 같은 모델을 여러 번 추가할 수 있습니다.',
+  'multirun.launcher.models.info': '모델을 2개 이상 선택하세요. 같은 모델을 여러 번 추가할 수 있습니다.',
   'multirun.launcher.toast.fileTooLarge': '파일 "{fileName}"이 너무 큽니다(최대 10MB)',
   'multirun.launcher.toast.attachFailed': '"{fileName}" 첨부 실패',
   'multirun.launcher.toast.attachedSingle': '파일 {count}개 첨부됨',

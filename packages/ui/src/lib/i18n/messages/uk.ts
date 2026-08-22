@@ -371,7 +371,7 @@ export const dict: Record<I18nKey, string> = {
   "multirun.launcher.attachments.attach": "Прикріпити",
   "multirun.launcher.attachments.tooltip": "Ті самі файли буде надіслано в усі запуски",
   "multirun.launcher.models.label": "Моделі",
-  "multirun.launcher.models.info": "Вибрати моделі 2-{max}. Ту саму модель можна додавати кілька разів.",
+  "multirun.launcher.models.info": "Вибрати 2 або більше моделей. Ту саму модель можна додавати кілька разів.",
   "multirun.launcher.toast.fileTooLarge": "Файл \"{fileName}\" завеликий (макс. 10 МБ)",
   "multirun.launcher.toast.attachFailed": "Не вдалося вкласти \"{fileName}\"",
   "multirun.launcher.toast.attachedSingle": "Прикріплено файл: {count}",

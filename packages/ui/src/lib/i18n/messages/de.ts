@@ -348,7 +348,7 @@ export const dict = {
   'multirun.launcher.attachments.attach': 'Anhängen',
   'multirun.launcher.attachments.tooltip': 'Denselben Dateien an alle Durchläufe senden',
   'multirun.launcher.models.label': 'Modelle',
-  'multirun.launcher.models.info': 'Wählen Sie 2-{max} Modelle. Das gleiche Modell kann mehrfach hinzugefügt werden.',
+  'multirun.launcher.models.info': 'Wählen Sie 2 oder mehr Modelle. Das gleiche Modell kann mehrfach hinzugefügt werden.',
   'multirun.launcher.toast.fileTooLarge': 'Datei "{fileName}" ist zu groß (max. 10MB)',
   'multirun.launcher.toast.attachFailed': 'Fehler beim Anhängen von "{fileName}"',
   'multirun.launcher.toast.attachedSingle': '{count} Datei angehängt',
