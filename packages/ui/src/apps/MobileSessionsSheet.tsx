@@ -620,14 +620,10 @@ const SessionRow: React.FC<{
               onToggleChildren?.();
             }}
           >
-            {isStreaming || showUnreadDot ? (
-              <span
-                className={cn(
-                  'size-1.5 rounded-full',
-                  isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-                )}
-                aria-hidden
-              />
+            {isStreaming ? (
+              <Icon name="loader-4" className="size-3.5 animate-spin text-primary" />
+            ) : showUnreadDot ? (
+              <span className="size-1.5 rounded-full bg-[var(--status-info)]" aria-hidden />
             ) : (
               <RiArrowDownSLine className={cn('size-[18px] transition-transform duration-150', expanded ? 'rotate-0' : '-rotate-90')} />
             )}

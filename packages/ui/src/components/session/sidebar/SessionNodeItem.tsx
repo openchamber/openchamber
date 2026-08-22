@@ -687,18 +687,20 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     : t('sessions.sidebar.session.status.questionPendingMany', { count: pendingQuestionCount });
   const showUnreadStatus = !isMovingToWorktree && !isStreaming && needsAttention && !isActive;
   const showStatusMarker = isStreaming || showUnreadStatus;
-  // Both states are the same static dot; only the color separates "running"
-  // from "unread". The elapsed-turn readout on the right carries the motion
-  // that a spinner used to, at one repaint per second instead of per frame.
+  // Shape, not colour, separates the two states: the counter beside the marker
+  // renders in both, and it is absent whenever no turn start was recorded.
   const statusMarkerLabel = isStreaming
     ? t('sessions.sidebar.session.status.active')
     : t('sessions.sidebar.session.status.unread');
-  const statusMarkerContent = (
+  const statusMarkerContent = isStreaming ? (
+    <Icon
+      name="loader-4"
+      className="h-3 w-3 animate-spin text-primary"
+      aria-label={statusMarkerLabel}
+    />
+  ) : (
     <span
-      className={cn(
-        'h-1.5 w-1.5 rounded-full',
-        isStreaming ? 'bg-primary' : 'bg-[var(--status-info)]',
-      )}
+      className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
       aria-label={statusMarkerLabel}
       title={statusMarkerLabel}
     />

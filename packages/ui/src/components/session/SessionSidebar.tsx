@@ -19,6 +19,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { Icon } from '@/components/icon/Icon';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
@@ -245,14 +246,15 @@ const ProjectAggregateStatusIndicator: React.FC<{ directories: Array<string | nu
     return false;
   }, [directorySet]));
 
-  // Aggregate header: dot only. A collapsed project can hold several running
-  // turns, so a single elapsed counter would have nothing to count.
+  // Aggregate header: spinner while any session below runs, then the unread dot.
+  // No elapsed counter — a collapsed project can hold several running turns, so
+  // a single counter would have nothing to count.
   if (hasBusySession) {
     return (
-      <span
-        className="h-1.5 w-1.5 rounded-full bg-primary"
+      <Icon
+        name="loader-4"
+        className="h-3 w-3 animate-spin text-primary"
         aria-label={t('sessions.sidebar.session.status.active')}
-        title={t('sessions.sidebar.session.status.active')}
       />
     );
   }
