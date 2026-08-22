@@ -124,6 +124,34 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ messageStreamTransport: 'websocket' })).toEqual({});
   });
 
+  it('accepts inputHistoryScope as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryScope: 'global' })).toEqual({
+      inputHistoryScope: 'global',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryScope: 'session' })).toEqual({
+      inputHistoryScope: 'session',
+    });
+  });
+
+  it('rejects invalid inputHistoryScope values', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ inputHistoryScope: 'workspace' })).toEqual({});
+  });
+
+  it('defaults inputHistoryScope to global in formatted settings responses', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.formatSettingsResponse({ inputHistoryScope: 'session' })).toMatchObject({
+      inputHistoryScope: 'session',
+    });
+    expect(helpers.formatSettingsResponse({})).toMatchObject({
+      inputHistoryScope: 'global',
+    });
+  });
+
   it('sanitizes the persisted terminal shell', () => {
     const helpers = createTestHelpers();
 

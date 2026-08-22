@@ -1,6 +1,7 @@
 import type { ProjectEntry, RuntimeAPIs, TerminalShell } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
+import type { InputHistoryScope } from '@/lib/inputHistoryScope';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
@@ -172,6 +173,7 @@ export type DesktopSettings = {
   weekStartPreference?: 'auto' | 'sunday' | 'monday';
   chatRenderMode?: 'sorted' | 'live';
   messageStreamTransport?: 'auto' | 'ws' | 'sse';
+  inputHistoryScope?: InputHistoryScope;
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';

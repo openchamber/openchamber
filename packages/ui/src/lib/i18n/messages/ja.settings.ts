@@ -2152,5 +2152,10 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'エージェントが応答している間にフォローアップメッセージで Enter を押したときの動作を選択します。',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'ステア',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'キュー',
+  'settings.openchamber.visual.field.inputHistoryScope': '入力履歴の範囲',
+  'settings.openchamber.visual.field.inputHistoryScopeDescription': '送信したプロンプトを、このランタイムに接続されたすべてのプロジェクトで呼び出せるようにするか、現在のセッションだけにするかを選びます。',
+  'settings.openchamber.visual.section.inputHistoryScopeAria': '入力履歴の範囲',
+  'settings.openchamber.visual.option.inputHistoryScope.global.label': 'すべてのプロジェクト',
+  'settings.openchamber.visual.option.inputHistoryScope.session.label': '現在のセッション',
   ...thirdPartyIntegrationI18n.ja,
 } as const;

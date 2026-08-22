@@ -10,6 +10,7 @@ import { getDirectoryState } from '@/sync/sync-refs';
 import { useDirectorySync } from '@/sync/sync-context';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { createInputHistorySubmission } from '@/stores/useInputHistoryStore';
 
 type SessionStatusType = 'idle' | 'busy' | 'retry';
 
@@ -87,6 +88,7 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
 
   return {
     queuedMessageId: queued.id,
+    historySubmissions: [createInputHistorySubmission(queued.content, queued.attachments ?? [])],
     primaryText: sanitizedText,
     primaryAttachments: queued.attachments ?? [],
     agentMentionName: mention?.name,
@@ -116,9 +118,12 @@ export const sendQueuedAutoSendPayload = (
     payload.agentMentionName,
     undefined,
     resolved.variant,
-    'normal',
-    { target },
-  );
+      'normal',
+      {
+        target,
+        historySubmissions: payload.historySubmissions,
+      },
+    );
 };
 
 const resolveSessionSendConfig = (sessionId: string) => {

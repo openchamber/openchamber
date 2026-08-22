@@ -91,8 +91,21 @@ import { clearLastActiveSession, persistLastActiveSession, readLastActiveSession
 import { persistWorktreeTopology, readPersistedWorktreeTopology } from "./worktree-topology-cache"
 import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
 import { contextTokensFromBreakdown } from "@/stores/utils/tokenUtils"
+import {
+  createInputHistoryIdentity,
+  useInputHistoryStore,
+  type InputHistorySubmission,
+} from '@/stores/useInputHistoryStore'
 
 export type { AttachedFile }
+
+function appendInputHistorySubmissions(
+  identity: ReturnType<typeof createInputHistoryIdentity>,
+  submissions: readonly InputHistorySubmission[],
+): void {
+  if (!identity || submissions.length === 0) return
+  useInputHistoryStore.getState().appendSubmissions(identity, submissions)
+}
 
 type GoalCommand = { name: string; template?: string }
 
@@ -139,6 +152,7 @@ export function routeMessage(params: {
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
+  appendSubmissions?: () => void
   delivery?: 'steer'
 }): Promise<void> {
   const requestDirectory = params.directory ?? undefined
@@ -181,6 +195,7 @@ export function routeMessage(params: {
         agent: params.agent,
         directory: requestDirectory,
         files: params.files,
+        appendSubmissions: params.appendSubmissions,
         send: (messageID) => opencodeClient.sendCommand({
           runtimeKey: params.runtimeKey,
           id: params.sessionId,
@@ -208,6 +223,7 @@ export function routeMessage(params: {
     agent: params.agent,
     directory: requestDirectory,
     files: params.files,
+    appendSubmissions: params.appendSubmissions,
     send: (messageID) => opencodeClient.sendMessage({
       runtimeKey: params.runtimeKey,
       id: params.sessionId,
@@ -236,6 +252,7 @@ type SendMessageOptions = {
   target?: CapturedSendTarget
   sessionId?: string
   directory?: string
+  historySubmissions?: InputHistorySubmission[]
   /** Immutable copy of the new-session draft at submit time; used instead of the live draft. */
   draftSnapshot?: NewSessionDraftState
   delivery?: 'steer'
@@ -1495,6 +1512,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     options?: SendMessageOptions,
   ) => {
     const capturedTarget = options?.target
+    const capturedRuntimeKey = capturedTarget?.runtimeKey ?? getRuntimeKey()
     if (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey()) {
       throw new Error("Message was not sent because the runtime changed.")
     }
@@ -1584,6 +1602,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const mergedAdditionalParts = draftPrefixParts.length > 0
         ? [...draftPrefixParts, ...(draftParts || [])]
         : draftParts
+      const historyIdentity = createInputHistoryIdentity(
+        capturedRuntimeKey,
+        createdDraftSession.directory ?? '',
+        createdDraftSession.sessionId,
+      )
+      const appendSubmissions = historyIdentity && options?.historySubmissions?.length
+        ? () => appendInputHistorySubmissions(historyIdentity, options.historySubmissions ?? [])
+        : undefined
 
       notifyMessageSent(createdDraftSession.sessionId)
 
@@ -1608,6 +1634,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         variant,
         inputMode,
         files,
+        appendSubmissions,
         delivery: options?.delivery,
         additionalParts: mergedAdditionalParts?.map((p) => ({
           text: p.text,
@@ -1698,6 +1725,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const partsWithPinnedContext = prefixParts.length > 0
       ? [...prefixParts, ...(additionalParts || [])]
       : additionalParts
+    const currentHistoryIdentity = createInputHistoryIdentity(
+      capturedRuntimeKey,
+      currentSessionDirectory ?? '',
+      targetSessionId || '',
+    )
+    const appendSubmissions = currentHistoryIdentity && options?.historySubmissions?.length
+      ? () => appendInputHistorySubmissions(currentHistoryIdentity, options.historySubmissions ?? [])
+      : undefined
 
     await routeMessage({
       runtimeKey: capturedTarget?.runtimeKey,
@@ -1711,6 +1746,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       variant,
       inputMode,
       files,
+      appendSubmissions,
       delivery: options?.delivery,
       additionalParts: partsWithPinnedContext?.map((p) => ({
         text: p.text,

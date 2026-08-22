@@ -2152,5 +2152,10 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Choose what happens when you press Enter on a follow-up message while the agent is still responding.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steer',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Queue',
+  'settings.openchamber.visual.field.inputHistoryScope': '輸入歷史範圍',
+  'settings.openchamber.visual.field.inputHistoryScopeDescription': '選擇已送出的提示詞要在連接到這個執行環境的所有專案中都能回叫，還是只限目前工作階段。',
+  'settings.openchamber.visual.section.inputHistoryScopeAria': '輸入歷史範圍',
+  'settings.openchamber.visual.option.inputHistoryScope.global.label': '所有專案',
+  'settings.openchamber.visual.option.inputHistoryScope.session.label': '目前工作階段',
   ...thirdPartyIntegrationI18n['zh-TW'],
 } as const;

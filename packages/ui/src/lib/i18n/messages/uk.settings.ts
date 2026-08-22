@@ -2152,5 +2152,10 @@ export const settingsDict = {
   "settings.openchamber.visual.field.followUpBehaviorDescription": "Choose what happens when you press Enter on a follow-up message while the agent is still responding.",
   "settings.openchamber.visual.option.followUpBehavior.steer.label": "Steer",
   "settings.openchamber.visual.option.followUpBehavior.queue.label": "Queue",
+  "settings.openchamber.visual.field.inputHistoryScope": "Обсяг історії введення",
+  "settings.openchamber.visual.field.inputHistoryScopeDescription": "Виберіть, чи згадувати надіслані промпти в усіх проєктах, підключених до цього рантайму, чи лише в поточній сесії.",
+  "settings.openchamber.visual.section.inputHistoryScopeAria": "Обсяг історії введення",
+  "settings.openchamber.visual.option.inputHistoryScope.global.label": "Усі проєкти",
+  "settings.openchamber.visual.option.inputHistoryScope.session.label": "Поточна сесія",
   ...thirdPartyIntegrationI18n.uk,
 } as const;

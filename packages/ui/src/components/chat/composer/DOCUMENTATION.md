@@ -23,7 +23,7 @@ existing mobile fixed-position rules unchanged.
 |---|---|
 | `language/` | What the text *means*: `@` references, `/` and `#` tokens, markdown, and which picker a caret asks for |
 | `editor/` | The CodeMirror view that renders the language and owns the caret |
-| `state/` | Composer state with a lifecycle: drafts, mobile shell, history, popup placement, draft targeting |
+| `state/` | Composer-local lifecycle state: ArrowUp/ArrowDown browsing, draft stash/restore, mobile shell, popup placement, draft targeting |
 | `submit/` | Turning what the user has into what gets sent |
 | `attachments/` | Files: paths, drop payloads |
 | `ui/` | Presentation |
@@ -138,6 +138,24 @@ and the send path reading the same grammar.
   exist yet (a worktree being created). It must survive not appearing in the
   branch list, or the selector snaps back to the project root mid-creation.
 
+## Input recall ownership
+
+Prompt recall has two owners on purpose.
+
+- `packages/ui/src/stores/useInputHistoryStore.ts` owns the persisted source of
+  truth. It keeps the runtime-scoped global bucket and the runtime + directory
+  + session bucket, each capped at 40 entries.
+- `state/useMessageHistory.ts` owns only keyboard traversal through whichever
+  bucket the composer was given. It stashes the current draft on entry and
+  restores it on the way back out.
+- `ChatInput.tsx` owns the recalled-entry presentation. If the user edits a
+  recalled prompt, the UI may show an overlay state for "this came from
+  history", but that edit does not rewrite stored history.
+
+Transcript visibility is not part of this contract anymore. Revert markers may
+hide older user messages from the chat timeline, but they do not decide what
+ArrowUp and ArrowDown can recall.
+
 ## Mobile
 
 `state/useMobileComposerShell.ts` and `state/useMobileViewportPin.ts` are
@@ -155,12 +173,14 @@ hardware.
 
 The package has no DOM test environment, so coverage stops at the state and
 logic layers: the language, the submit assembly, path and drop handling, text
-splicing, message history, and the CodeMirror language extension at the
+splicing, input-history traversal, and the CodeMirror language extension at the
 `EditorState` level.
 
 Rendering, focus, keyboard behavior, IME and WKWebView are **not covered by
-tests** and are verified by hand. Do not report a change to them as validated
-on the strength of type-check and unit tests.
+tests** and are verified by hand. That includes ArrowUp and ArrowDown recall,
+caret placement after recall, restored drafts, and any edited-entry overlay.
+Do not report a change to them as validated on the strength of type-check and
+unit tests.
 
 Run tests per file (`bun test <path>`): `mock.module` is process-global, so
 suites that install module mocks are order-dependent.
