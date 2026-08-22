@@ -197,6 +197,25 @@ export const nodeHasPinnedMembershipChange = (
 };
 
 /**
+ * Visibility classes for the row's right-edge badges (pending permissions /
+ * questions). The hover actions paint over the row's right edge, and they are
+ * also forced visible while the row menu is open — without hover, so the
+ * hover reveal padding does not apply and the actions would cover the badges.
+ * The badges therefore yield exactly like the date/branch metadata label:
+ * hidden while the actions are hover-revealed or the menu is open. Rows with
+ * always-visible actions reserve permanent padding instead, so their badges
+ * never conflict and must stay visible.
+ */
+export const selectRowBadgeVisibilityClass = (input: {
+  actionsAlwaysVisible: boolean;
+  menuOpen: boolean;
+  hideOnHoverClass: string;
+}): string => {
+  if (input.actionsAlwaysVisible) return '';
+  return `transition-opacity duration-150 ${input.menuOpen ? 'opacity-0' : input.hideOnHoverClass}`;
+};
+
+/**
  * Resolve the session id whose sidebar menu is open, or null if no
  * menu is open. Only one row can have its menu open at a time.
  */
