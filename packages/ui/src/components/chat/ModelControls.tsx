@@ -915,25 +915,29 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 ? useSelectionStore.getState().getSessionAgentSelection(currentSessionId)
                 : null;
             if (savedAgentName) {
-                if (currentAgentName !== savedAgentName) {
-                    setAgent(savedAgentName);
-                }
-
                 const savedModel = getAgentModelForSession(currentSessionId, savedAgentName);
                 if (savedModel) {
                     const result = tryApplyModelSelection(savedModel.providerId, savedModel.modelId, savedAgentName);
                     if (result === 'applied') {
+                        if (currentAgentName !== savedAgentName) {
+                            setAgent(savedAgentName);
+                        }
                         return 'resolved';
                     }
                     if (result === 'provider-missing') {
                         return 'waiting';
                     }
+                } else if (currentAgentName !== savedAgentName) {
+                    setAgent(savedAgentName);
                 }
             }
 
             if (savedSessionModel) {
                 const result = tryApplyModelSelection(savedSessionModel.providerId, savedSessionModel.modelId, savedAgentName || currentAgentName || undefined);
                 if (result === 'applied') {
+                    if (savedAgentName && currentAgentName !== savedAgentName) {
+                        setAgent(savedAgentName);
+                    }
                     return 'resolved';
                 }
                 if (result === 'provider-missing') {
@@ -947,16 +951,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     continue;
                 }
 
-                if (currentAgentName !== agent.name) {
-                    setAgent(agent.name);
-                }
-
-                const existingSelection = useSelectionStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current;
-                if (!existingSelection) {
-                    saveSessionAgentSelection(currentSessionId, agent.name);
-                }
                 const result = tryApplyModelSelection(selection.providerId, selection.modelId, agent.name);
                 if (result === 'applied') {
+                    if (currentAgentName !== agent.name) {
+                        setAgent(agent.name);
+                    }
+                    const existingSelection = useSelectionStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current;
+                    if (!existingSelection) {
+                        saveSessionAgentSelection(currentSessionId, agent.name);
+                    }
                     return 'resolved';
                 }
                 if (result === 'provider-missing') {

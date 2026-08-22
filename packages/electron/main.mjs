@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
+import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
@@ -563,7 +564,7 @@ const writeJsonFile = async (filePath, data) => {
   try {
     await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
     if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
-    await fsp.rename(tmp, filePath);
+    await replaceFileWithRetry(tmp, filePath);
     if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
   } catch (error) {
     await fsp.rm(tmp, { force: true }).catch(() => {});
