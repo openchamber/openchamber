@@ -5,6 +5,12 @@ import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { tryParseJsonOutput } from '../toolRenderers';
 import { getStreamingThrottleText } from '../../hooks/useStreamingTextThrottle';
 import { getToolDescriptionFallback } from './toolRenderUtils';
+import {
+    getToolJsonViewMode,
+    parseToolJsonViewMode,
+    resolveToolJsonViewStorage,
+    setToolJsonViewMode,
+} from './toolJsonViewPreference';
 
 describe('getToolOutput', () => {
     test('prefers state.output for completed tools', () => {
@@ -148,6 +154,51 @@ describe('OpenChamber tool output', () => {
             data: { projects: [] },
         };
         expect(tryParseJsonOutput(JSON.stringify(result))).toEqual({ data: result, isJson: true });
+    });
+});
+
+describe('tool JSON view preference', () => {
+    test('persists the selected mode for future command outputs', () => {
+        setToolJsonViewMode('raw');
+        expect(getToolJsonViewMode()).toBe('raw');
+    });
+
+    test('uses summary when no valid preference exists', () => {
+        expect(parseToolJsonViewMode(null)).toBe('summary');
+        expect(parseToolJsonViewMode('unknown')).toBe('summary');
+    });
+
+    test('shares the fallback preference through the same-origin top frame', () => {
+        const createMemoryStorage = (): Storage => {
+            const values = new Map<string, string>();
+            return {
+                getItem: (key) => values.get(key) ?? null,
+                setItem: (key, value) => {
+                    values.set(key, value);
+                },
+                removeItem: (key) => {
+                    values.delete(key);
+                },
+                clear: () => values.clear(),
+                key: (index) => Array.from(values.keys())[index] ?? null,
+                get length() {
+                    return values.size;
+                },
+            };
+        };
+        const firstFrameStorage = createMemoryStorage();
+        const secondFrameStorage = createMemoryStorage();
+        const topWindow: Pick<Window, '__openchamberToolJsonViewStorage'> = {};
+
+        const firstResolvedStorage = resolveToolJsonViewStorage(firstFrameStorage, topWindow);
+        firstResolvedStorage.setItem('openchamber:tool-json-view-mode', 'formatted');
+
+        const secondResolvedStorage = resolveToolJsonViewStorage(secondFrameStorage, topWindow);
+        expect(topWindow.__openchamberToolJsonViewStorage).toBe(firstFrameStorage);
+        expect(secondResolvedStorage).toBe(firstFrameStorage);
+        expect(secondFrameStorage.getItem('openchamber:tool-json-view-mode')).toBeNull();
+        expect(parseToolJsonViewMode(secondResolvedStorage.getItem('openchamber:tool-json-view-mode')))
+            .toBe('formatted');
     });
 });
 

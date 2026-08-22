@@ -69,6 +69,7 @@ import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { getToolDescriptionFallback } from './toolRenderUtils';
 import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
+import { getToolJsonViewMode, setToolJsonViewMode, type ToolJsonViewMode } from './toolJsonViewPreference';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -665,17 +666,20 @@ const ToolScrollableTextOutput: React.FC<{
     const renderedOutput = getToolOutputText(output, part, metadata);
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
     const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
-    const [jsonViewMode, setJsonViewMode] = React.useState<'summary' | 'formatted' | 'raw'>('summary');
+    const [jsonViewMode, setJsonViewMode] = React.useState<ToolJsonViewMode>(getToolJsonViewMode);
     const [copiedJson, setCopiedJson] = React.useState(false);
 
     React.useEffect(() => {
-        setJsonViewMode('summary');
+        if (jsonResult.isJson) {
+            setJsonViewMode(getToolJsonViewMode());
+        }
         setCopiedJson(false);
-    }, [renderedOutput]);
+    }, [jsonResult.isJson, renderedOutput]);
 
-    const handleJsonViewChange = React.useCallback((view: 'summary' | 'formatted' | 'raw', event: React.MouseEvent<HTMLButtonElement>) => {
+    const handleJsonViewChange = React.useCallback((view: ToolJsonViewMode, event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
         setJsonViewMode(view);
+        setToolJsonViewMode(view);
     }, []);
 
     const handleCopyOutput = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
