@@ -3895,7 +3895,15 @@ export async function getWorktrees(directory) {
       path: entry.worktree,
     }));
   } catch (error) {
-    console.warn('Failed to list worktrees, returning empty list:', error?.message || error);
+    // Worktrees are an optional feature. When the caller passes a directory
+    // that is not inside any git repository (for example, the managed
+    // OpenCode's working directory or an unconfigured project path), git
+    // exits with "fatal: not a git repository ...". Treat that as an
+    // authoritative empty result so the route handler can still respond
+    // 200 [] and the desktop main.log stays free of noise.
+    if (!isNotGitRepositoryError(error)) {
+      console.warn('Failed to list worktrees, returning empty list:', error?.message || error);
+    }
     return [];
   }
 }
