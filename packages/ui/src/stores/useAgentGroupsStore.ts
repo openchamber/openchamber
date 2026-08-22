@@ -7,6 +7,7 @@ import { deleteSessionInDirectory } from '@/sync/session-actions';
 import { retry } from '@/sync/retry';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { getOpenChamberInternalSessionGeneration, visibleOpenCodeSessions } from '@/lib/sessionInternalMetadata';
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -189,6 +190,21 @@ interface AgentGroupsActions {
 
 type Store = AgentGroupsState & AgentGroupsActions;
 
+export async function listVisibleAgentGroupSessions(
+  api: ReturnType<typeof opencodeClient.getApiClient>,
+  directory: string,
+): Promise<Session[]> {
+  const result = await retry(async () => {
+    const internalSessionGeneration = getOpenChamberInternalSessionGeneration();
+    const response = await api.session.list({ directory });
+    if (response.error) {
+      throw new Error(`session.list failed for ${directory}: ${String(response.error)}`);
+    }
+    return { response, internalSessionGeneration };
+  });
+  return visibleOpenCodeSessions(result.response.data ?? [], result.internalSessionGeneration);
+}
+
 export const useAgentGroupsStore = create<Store>()(
   (set, get) => ({
     groups: [],
@@ -231,14 +247,7 @@ export const useAgentGroupsStore = create<Store>()(
 
         const fetchDir = async (dir: string) => {
           try {
-            const res = await retry(async () => {
-              const result = await api.session.list({ directory: dir });
-              if ((result as { error?: unknown }).error) {
-                throw new Error(`session.list failed for ${dir}: ${String((result as { error?: unknown }).error)}`);
-              }
-              return result;
-            });
-            const list = Array.isArray(res.data) ? res.data : [];
+            const list = await listVisibleAgentGroupSessions(api, dir);
             for (const s of list) if (s?.id) allSessions.push(s);
           } catch {
             failedDirectories.add(dir);

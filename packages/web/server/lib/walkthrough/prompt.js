@@ -77,7 +77,7 @@ ${outline}
 
 // Used only when a provider rejects a schema request: the shape has to travel
 // in the prompt instead of the request body.
-export const JSON_SHAPE_INSTRUCTION = `
+export const WALKTHROUGH_JSON_INSTRUCTION = `
 Return ONLY a JSON object, with no prose around it and no markdown fences, in exactly this shape:
 {"title": string, "focus": string, "chapters": [{"title": string, "icon": "bug"|"wrench"|"path"|"flask"|"doc"|"gear", "blurb": string, "stops": [{"title": string, "hunks": [string], "importance": "critical"|"normal"|"context", "prose": string}]}]}`;
 

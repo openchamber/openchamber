@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createGlobalUiEventBroadcaster, createMessageStreamWsRuntime } from './runtime.js';
 
@@ -506,6 +506,43 @@ describe('message stream websocket runtime', () => {
       directory: 'global',
     });
 
+    socket.close();
+    await runtime.close();
+  });
+
+  it('classifies directory events before raw and synthetic forwarding while preserving ordinary traffic', async () => {
+    const server = new EventEmitter();
+    const synthetic = vi.fn();
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {},
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload(payload, emitSynthetic) {
+        synthetic(payload);
+        emitSynthetic({ type: 'openchamber:session-status', properties: { sessionID: payload.properties?.sessionID } });
+      },
+      classifyDirectoryEvent: async (payload) => payload.properties?.sessionID === 'ses_internal'
+        || payload.properties?.info?.metadata?.openchamber?.internalSession?.kind === 'walkthrough-inference',
+      wsClients: new Set(),
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (_url, options) => createSseResponse({
+        signal: options.signal,
+        holdOpen: true,
+        blocks: [
+          'id: evt-1\ndata: {"type":"session.created","properties":{"info":{"id":"ses_internal","metadata":{"openchamber":{"internalSession":{"kind":"walkthrough-inference"}}}}}}\n\nid: evt-2\ndata: {"type":"session.status","properties":{"sessionID":"ses_internal"}}\n\nid: evt-3\ndata: {"type":"session.status","properties":{"sessionID":"ses_user"}}\n\n',
+        ],
+      }),
+    });
+    const socket = new FakeSocket();
+    runtime.wsServer.emit('connection', socket, { url: '/api/event/ws?directory=%2Frepo' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const events = socket.sent.filter((frame) => frame.type === 'event');
+    expect(events.some((frame) => frame.payload?.properties?.sessionID === 'ses_internal')).toBe(false);
+    expect(events.some((frame) => frame.payload?.properties?.sessionID === 'ses_user')).toBe(true);
+    expect(synthetic).toHaveBeenCalledTimes(1);
     socket.close();
     await runtime.close();
   });

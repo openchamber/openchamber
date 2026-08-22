@@ -18,6 +18,17 @@ const COPILOT_MODELS_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_000;
 
 const USER_AGENT = 'opencode/1.0 openchamber';
+const OPENAI_COMPATIBLE_ADAPTERS = new Set(['@ai-sdk/openai', '@ai-sdk/openai-compatible']);
+const PLUGIN_PROTOCOL_STATUSES = new Set([404, 405, 415, 501]);
+const isPluginProtocolFailure = (error) => {
+  const status = Number(error?.status);
+  if (PLUGIN_PROTOCOL_STATUSES.has(status)) return true;
+  const networkCode = error?.cause?.code?.constructor === String ? error.cause.code : '';
+  if (['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND'].includes(networkCode)) return true;
+  if (status !== 400) return false;
+  const message = error?.message?.constructor === String ? error.message : '';
+  return /(?:unknown|unsupported|invalid|missing) (?:route|endpoint|path|method|content.?type)|cannot (?:post|send)\b/i.test(message);
+};
 
 const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -32,6 +43,20 @@ const httpError = async (response, provider) => {
     status: response.status,
     provider,
   });
+};
+
+const structuredOutputHttpError = async (response, provider, responseSchema) => {
+  const error = await httpError(response, provider);
+  if (
+    responseSchema
+    && response.status >= 400
+    && response.status < 500
+    && /json.?schema|structured.?output|response.?format|schema is not supported/i.test(error.message)
+  ) {
+    error.code = 'structured-output-unsupported';
+    error.schemaRefusal = true;
+  }
+  return error;
 };
 
 // Callers own two independent reasons to stop: their own abort signal (user
@@ -189,7 +214,7 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
     ok: response.ok,
   });
   if (!response.ok) {
-    throw await httpError(response, providerLabel);
+    throw await structuredOutputHttpError(response, providerLabel, responseSchema);
   }
   const payload = await response.json();
   const message = payload?.choices?.[0]?.message;
@@ -588,6 +613,11 @@ const runtimeCredential = (providerID, runtime) => (
     : null
 );
 
+const pluginTransportRequired = (providerID, modelID, cause) => Object.assign(
+  new Error(`Provider "${providerID}" requires its OpenCode plugin transport for model "${modelID}"`, { cause }),
+  { code: 'plugin-transport-required', providerID, modelID },
+);
+
 /**
  * Same credential resolution the request path uses: config
  * `provider.<id>.options.apiKey` wins, then the runtime credential OpenCode
@@ -712,6 +742,16 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     return callGoogle({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
   }
 
+  const runtimeModel = runtimeProvider?.models?.get(modelID);
+  const runtimeOnlyProvider = Boolean(runtimeProvider && !providerConfig && !getCatalogProvider(catalog, providerID));
+  if (
+    runtimeOnlyProvider
+    && runtimeModel?.adapter
+    && !OPENAI_COMPATIBLE_ADAPTERS.has(runtimeModel.adapter)
+  ) {
+    throw pluginTransportRequired(providerID, modelID);
+  }
+
   // Everything else: OpenAI-compatible chat completions against the catalog's
   // base URL for that provider (openai itself included). When a custom provider
   // is not in the catalog (e.g. a user-configured OpenAI-compatible proxy),
@@ -749,17 +789,24 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     || lowerModel.includes('minimax-m3');
   const extraBody = supportsThinkingToggle ? { thinking: { type: 'disabled' } } : undefined;
 
-  return callOpenaiCompatible({
-    baseURL,
-    headers: { Authorization: `Bearer ${apiKey}` },
-    modelID,
-    prompt,
-    system,
-    maxOutputTokens: tokens,
-    providerLabel: provider?.name || providerID,
-    extraBody,
-    responseSchema,
-    timeoutMs,
-    signal,
-  });
+  try {
+    return await callOpenaiCompatible({
+      baseURL,
+      headers: { Authorization: `Bearer ${apiKey}` },
+      modelID,
+      prompt,
+      system,
+      maxOutputTokens: tokens,
+      providerLabel: provider?.name || providerID,
+      extraBody,
+      responseSchema,
+      timeoutMs,
+      signal,
+    });
+  } catch (error) {
+    if (runtimeOnlyProvider && isPluginProtocolFailure(error)) {
+      throw pluginTransportRequired(providerID, modelID, error);
+    }
+    throw error;
+  }
 }

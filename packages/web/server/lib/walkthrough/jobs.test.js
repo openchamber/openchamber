@@ -27,6 +27,7 @@ const {
   __testing: walkthroughTesting,
 } = await import('./index.js');
 const { describeSmallModel, generateSmallModelText } = await import('../small-model/index.js');
+const generateWalkthroughText = vi.fn();
 const { getDiff } = await import('../git/service.js');
 
 // bun's vitest shim has no `vi.waitFor`.
@@ -71,6 +72,7 @@ describe('generation jobs', () => {
     });
     getDiff.mockImplementation(async (_dir, options) => (options?.staged ? '' : PATCH));
     generateSmallModelText.mockReset();
+    generateWalkthroughText.mockReset();
   });
 
   afterEach(async () => {
@@ -154,6 +156,40 @@ describe('generation jobs', () => {
     await generateWalkthrough({ directory: '/repo', source: SOURCE });
 
     expect(generateSmallModelText.mock.calls.at(-1)[0].maxOutputTokens).toBe(96_000);
+  });
+
+  it('uses an OpenCode session only when direct dispatch requires plugin transport', async () => {
+    generateSmallModelText.mockRejectedValue(Object.assign(new Error('plugin fetch required'), {
+      code: 'plugin-transport-required',
+    }));
+    generateWalkthroughText.mockResolvedValue({ text: RESPONSE });
+
+    await generateWalkthrough({ directory: '/repo', source: SOURCE }, {
+      openCodeBaseUrl: 'http://127.0.0.1:4096',
+      openCodeAuthHeaders: { Authorization: 'Basic test' },
+      generateWalkthroughText,
+    });
+
+    expect(generateSmallModelText).toHaveBeenCalledOnce();
+    expect(generateWalkthroughText).toHaveBeenCalledWith(expect.objectContaining({
+      model: expect.objectContaining({ providerID: 'anthropic', modelID: 'claude-haiku-4-5' }),
+      baseUrl: 'http://127.0.0.1:4096',
+      headers: { Authorization: 'Basic test' },
+    }));
+  });
+
+  it.each([
+    Object.assign(new Error('invalid model'), { status: 400 }),
+    Object.assign(new Error('not authorized'), { status: 401, code: 'no-provider-login' }),
+    Object.assign(new Error('rate limited'), { status: 429 }),
+    Object.assign(new Error('provider unavailable'), { status: 503 }),
+    Object.assign(new Error('context too small'), { code: 'context-too-small' }),
+    Object.assign(new Error('output exhausted'), { code: 'output-exhausted' }),
+  ])('does not hide an ordinary direct failure behind the session fallback', async (failure) => {
+    generateSmallModelText.mockRejectedValue(failure);
+
+    await expect(generateWalkthrough({ directory: '/repo', source: SOURCE })).rejects.toThrow();
+    expect(generateWalkthroughText).not.toHaveBeenCalled();
   });
 
   it('serves the cache once the job has finished, without calling the model again', async () => {
@@ -255,7 +291,13 @@ describe('generation stages', () => {
     generateSmallModelText.mockImplementation(async () => {
       attempt += 1;
       seen.push(getGenerationStage('/repo', 'working-tree:all'));
-      if (attempt === 1) throw Object.assign(new Error('bad request'), { status: 400 });
+      if (attempt === 1) {
+        throw Object.assign(new Error('schema unsupported'), {
+          code: 'structured-output-unsupported',
+          status: 400,
+          schemaRefusal: true,
+        });
+      }
       return { text: RESPONSE };
     });
 
@@ -285,7 +327,13 @@ describe('schema refusal memory', () => {
     const sentSchema = [];
     generateSmallModelText.mockImplementation(async ({ responseSchema }) => {
       sentSchema.push(Boolean(responseSchema));
-      if (responseSchema) throw Object.assign(new Error('bad request'), { status: 400 });
+      if (responseSchema) {
+        throw Object.assign(new Error('schema unsupported'), {
+          code: 'structured-output-unsupported',
+          status: 400,
+          schemaRefusal: true,
+        });
+      }
       return { text: RESPONSE };
     });
 
@@ -297,6 +345,50 @@ describe('schema refusal memory', () => {
       options?.staged ? '' : PATCH.replace('const added = true;', 'const added = false;')
     ));
     await generateWalkthrough({ directory: '/repo', source: SOURCE });
+
+    expect(sentSchema).toEqual([true, false, false]);
+  });
+
+  it('does not retry or remember a generic client error as schema refusal', async () => {
+    generateSmallModelText.mockRejectedValue(Object.assign(new Error('invalid model'), { status: 400 }));
+
+    await expect(generateWalkthrough({ directory: '/repo', source: SOURCE })).rejects.toThrow('invalid model');
+
+    expect(generateSmallModelText).toHaveBeenCalledOnce();
+  });
+
+  it('remembers an explicit OpenCode structured-output refusal across generations', async () => {
+    describeSmallModel.mockResolvedValue({
+      providerID: 'plugin-provider',
+      modelID: 'structured-refusal-test',
+      source: 'request',
+      inputCharBudget: 1_000_000,
+      structuredOutput: null,
+    });
+    generateSmallModelText.mockRejectedValue(Object.assign(new Error('plugin fetch required'), {
+      code: 'plugin-transport-required',
+    }));
+    const sentSchema = [];
+    generateWalkthroughText.mockImplementation(async ({ responseSchema }) => {
+      sentSchema.push(Boolean(responseSchema));
+      if (responseSchema) {
+        throw Object.assign(new Error('model did not produce structured output'), {
+          code: 'structured-output-unsupported',
+          schemaRefusal: true,
+        });
+      }
+      return { text: RESPONSE };
+    });
+    const deps = {
+      openCodeBaseUrl: 'http://127.0.0.1:4096',
+      generateWalkthroughText,
+    };
+
+    await generateWalkthrough({ directory: '/repo', source: SOURCE }, deps);
+    getDiff.mockImplementation(async (_dir, options) => (
+      options?.staged ? '' : PATCH.replace('const added = true;', 'const added = false;')
+    ));
+    await generateWalkthrough({ directory: '/repo', source: SOURCE }, deps);
 
     expect(sentSchema).toEqual([true, false, false]);
   });

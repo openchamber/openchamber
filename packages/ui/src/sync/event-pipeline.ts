@@ -20,6 +20,7 @@ import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { syncDebug } from "./debug"
 import { countSyncPerformance } from "./performance-diagnostics"
+import { getOpenChamberInternalSessionGeneration } from "@/lib/sessionInternalMetadata"
 
 const FLUSH_FRAME_MS = 33
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
@@ -40,11 +41,11 @@ const RETRY_BACKOFF_CAP_VISIBLE_MS = 5_000
 const RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS = 60_000
 const RETRY_BACKOFF_MAX_EXPONENT = 8
 type EventPipelineDelivery = {
-  onEvent: (directory: string, payload: Event) => void
+  onEvent: (directory: string, payload: Event, internalSessionGeneration: number) => void
   onEvents?: never
 } | {
   onEvent?: never
-  onEvents: (directory: string, payloads: readonly Event[]) => void
+  onEvents: (directory: string, payloads: readonly Event[], internalSessionGeneration: number) => void
 }
 
 export type EventPipelineInput = {
@@ -261,6 +262,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     wsReadyTimeoutMs = DEFAULT_WS_READY_TIMEOUT_MS,
   } = input
   const abort = new AbortController()
+  const internalSessionGeneration = getOpenChamberInternalSessionGeneration()
   let disconnected = false
   let lastEventId: string | undefined
   let wsFallbackUntil = 0
@@ -321,9 +323,9 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       countSyncPerformance("pipelineDeliveredEvents")
     }
     if (onEvents) {
-      onEvents(directory, events)
+      onEvents(directory, events, internalSessionGeneration)
     } else if (onEvent) {
-      for (const payload of events) onEvent(directory, payload)
+      for (const payload of events) onEvent(directory, payload, internalSessionGeneration)
     }
 
     d.buffer.length = 0

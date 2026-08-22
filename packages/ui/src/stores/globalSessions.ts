@@ -3,6 +3,7 @@ import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { retry } from "@/sync/retry";
 import { stripSessionListDetails } from "@/sync/sanitize";
 import { startSessionLoadPerformanceEvent } from "@/sync/session-load-performance";
+import { getOpenChamberInternalSessionGeneration, rememberOpenChamberInternalSession } from '@/lib/sessionInternalMetadata';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
 export type GlobalSessionRecord = Session & {
@@ -27,47 +28,20 @@ const toNumber = (value: string | null): number | null => {
     return Number.isFinite(parsed) ? parsed : null;
 };
 
-const readResponseHeader = (response: unknown, header: string): string | null => {
-    if (!response || typeof response !== "object") {
-        return null;
-    }
-    const container = response as { headers?: unknown };
-    const headers = container.headers;
-    if (!headers || typeof headers !== "object") {
-        return null;
-    }
-
-    const maybeGet = headers as { get?: (name: string) => string | null };
-    if (typeof maybeGet.get === "function") {
-        return maybeGet.get(header);
-    }
-
-    const maybeRecord = headers as Record<string, unknown>;
-    const direct = maybeRecord[header] ?? maybeRecord[header.toLowerCase()];
-    return typeof direct === "string" ? direct : null;
-};
-
-const formatSdkError = (error: unknown): string => {
-    if (error instanceof Error) return error.message;
-    if (typeof error === "string") return error;
-    if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
-        return (error as { message: string }).message;
-    }
-    try {
-        return JSON.stringify(error);
-    } catch {
-        return String(error);
-    }
-};
+const readResponseHeader = (response: { headers?: Headers } | undefined, header: string): string | null => (
+    response?.headers?.get(header) ?? null
+);
 
 const unwrapSessionList = (
-    result: { data?: Session[]; error?: unknown; response?: { status?: number } },
+    result: Awaited<ReturnType<OpencodeClient["experimental"]["session"]["list"]>>,
     operation: string,
 ): GlobalSessionRecord[] => {
-    if (result.error) {
+    if ("error" in result && result.error) {
         const status = result.response?.status;
-        const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`);
+        const detail = result.error instanceof Error ? result.error.message : JSON.stringify(result.error);
+        const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${detail}`);
         if (status !== undefined) {
+            // SAFETY: status is an intentional local extension used by retry callers.
             (error as Error & { status?: number }).status = status;
         }
         throw error;
@@ -75,11 +49,12 @@ const unwrapSessionList = (
 
     if (!Array.isArray(result.data)) {
         const error = new Error(`${operation} returned no data`);
+        // SAFETY: status is an intentional local extension used by retry callers.
         (error as Error & { status?: number }).status = 503;
         throw error;
     }
 
-    return result.data as GlobalSessionRecord[];
+    return result.data;
 };
 
 /**
@@ -102,7 +77,7 @@ const isArchivedSession = (session: GlobalSessionRecord): boolean => Boolean(ses
  */
 export const splitGlobalSessionsByArchived = <T extends GlobalSessionRecord>(
     sessions: T[],
-): { active: T[]; archived: T[] } => {
+) => {
     const active: T[] = [];
     const archived: T[] = [];
     for (const session of sessions) {
@@ -148,19 +123,21 @@ export async function listGlobalSessionPages(
             operation,
             caller: cursor === undefined ? "initial-page" : "pagination",
         });
-        const { response, payload } = await runBackgroundNetworkTask(() => retry(
+        const { response, payload, internalSessionGeneration } = await runBackgroundNetworkTask(() => retry(
             async () => {
                 attempts += 1;
-                const response = await apiClient.experimental.session.list({
-                    ...(options.directory ? { directory: options.directory } : {}),
+                const internalSessionGeneration = getOpenChamberInternalSessionGeneration();
+                const request: Parameters<typeof apiClient.experimental.session.list>[0] = {
                     archived: options.archived,
-                    ...(options.roots !== undefined ? { roots: options.roots } : {}),
                     limit: options.pageSize,
-                    ...(cursor !== undefined ? { cursor } : {}),
-                });
+                };
+                if (options.directory) request.directory = options.directory;
+                if (options.roots !== undefined) request.roots = options.roots;
+                if (cursor !== undefined) request.cursor = cursor;
+                const response = await apiClient.experimental.session.list(request);
                 const payload = unwrapSessionList(response, "experimental.session.list")
-                    .map((session) => stripSessionListDetails(session) as GlobalSessionRecord);
-                return { response, payload };
+                    .map((session) => stripSessionListDetails(session));
+                return { response, payload, internalSessionGeneration };
             },
             { attempts: 3, delay: 500, retryIf: () => true },
         )).catch((error) => {
@@ -184,6 +161,7 @@ export async function listGlobalSessionPages(
             if (!session?.id || seenIds.has(session.id)) continue;
             seenIds.add(session.id);
             appended += 1;
+            if (rememberOpenChamberInternalSession(session, internalSessionGeneration)) continue;
             if (options.archived && narrowToArchived && !isArchivedSession(session)) continue;
             all.push(session);
             accepted.push(session);
@@ -197,10 +175,10 @@ export async function listGlobalSessionPages(
 
         // Prefer server header; fall back to last session's `time.updated`
         // (cursor semantics on server = "updated strictly before this timestamp").
-        const headerCursor = toNumber(readResponseHeader(response, "x-next-cursor"));
+        const headerCursor = toNumber(readResponseHeader(response.response, "x-next-cursor"));
         const lastUpdated = payload[payload.length - 1]?.time?.updated;
         const nextCursor = headerCursor
-            ?? (typeof lastUpdated === "number" && Number.isFinite(lastUpdated) ? lastUpdated : undefined);
+            ?? (Number.isFinite(lastUpdated) ? lastUpdated : undefined);
 
         if (nextCursor === undefined) break;
         // Loop guard: cursor must move backwards in time.

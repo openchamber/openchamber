@@ -5,7 +5,7 @@ let currentSessions: Session[] = []
 const upsertedSessions: Session[] = []
 const removedSessionIds: string[] = []
 let runtimeKey = "runtime-a"
-let runtimeWillChange: (() => void) | null = null
+const runtimeWillChangeCallbacks: Array<() => void> = []
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
   isGlobalSessionRecencyOnlyUpdate: (existing: Session, incoming: Session) => (
@@ -30,8 +30,11 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
 mock.module("@/lib/runtime-switch", () => ({
   getRuntimeKey: () => runtimeKey,
   subscribeRuntimeEndpointWillChange: (callback: () => void) => {
-    runtimeWillChange = callback
-    return () => undefined
+    runtimeWillChangeCallbacks.push(callback)
+    return () => {
+      const index = runtimeWillChangeCallbacks.indexOf(callback)
+      if (index >= 0) runtimeWillChangeCallbacks.splice(index, 1)
+    }
   },
 }))
 import { applySessionEventToGlobalSessions } from "../session-event-router"
@@ -49,6 +52,11 @@ const buildEvent = (session: Session): Event => ({
   },
 } as Event)
 
+const buildCreatedEvent = (session: Session): Event => ({
+  type: "session.created",
+  properties: { info: session },
+} as Event)
+
 const buildDeleteEvent = (sessionId: string): Event => ({
   type: "session.deleted",
   properties: { sessionID: sessionId },
@@ -61,7 +69,7 @@ const buildLifecycleEvent = (type: "session.idle" | "session.error", sessionId: 
 
 describe("applySessionEventToGlobalSessions", () => {
   beforeEach(() => {
-    runtimeWillChange?.()
+    runtimeWillChangeCallbacks.forEach((callback) => callback())
     runtimeKey = "runtime-a"
     currentSessions = []
     upsertedSessions.length = 0
@@ -111,9 +119,23 @@ describe("applySessionEventToGlobalSessions", () => {
     applySessionEventToGlobalSessions(buildEvent(buildSession("Initial", { created: 1, updated: 20 })))
 
     runtimeKey = "runtime-b"
-    runtimeWillChange?.()
+    runtimeWillChangeCallbacks.forEach((callback) => callback())
     applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", "ses_1"))
 
     expect(upsertedSessions).toEqual([])
   })
+
+  test("ignores internal session create and update events", () => {
+    const internal = {
+      ...buildSession("Walkthrough", { created: 1, updated: 10 }),
+      metadata: { openchamber: { internalSession: { kind: "walkthrough-inference", version: 1 } } },
+    } as Session
+
+    applySessionEventToGlobalSessions(buildCreatedEvent(internal))
+    applySessionEventToGlobalSessions(buildEvent({ ...internal, time: { created: 1, updated: 20 } }))
+    applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", internal.id))
+
+    expect(upsertedSessions).toEqual([])
+  })
+
 })

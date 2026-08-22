@@ -4,23 +4,28 @@
 // client is still there.
 const clientIsGone = (res) => res.writableEnded || res.destroyed;
 
-export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
+export function registerWalkthroughRoutes(app, { getWalkthroughService, buildOpenCodeUrl, getOpenCodeAuthHeaders }) {
+  const serviceDeps = (getPullRequestDiff) => {
+    const deps = { getPullRequestDiff };
+    if (buildOpenCodeUrl instanceof Function) deps.openCodeBaseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+    if (getOpenCodeAuthHeaders instanceof Function) deps.openCodeAuthHeaders = getOpenCodeAuthHeaders();
+    return deps;
+  };
   const respondWithError = (res, error, fallback) => {
     const statusCode = Number(error?.statusCode) || 500;
     if (statusCode >= 500) {
       console.error(`${fallback}:`, error);
     }
-    res.status(statusCode).json({
-      error: error?.message || fallback,
-      ...(error?.code ? { code: error.code } : {}),
-      ...(error?.model ? { model: error.model } : {}),
-      ...(Number.isFinite(error?.requiredChars) ? { requiredChars: error.requiredChars } : {}),
-      ...(Number.isFinite(error?.availableChars) ? { availableChars: error.availableChars } : {}),
-    });
+    const payload = { error: error?.message || fallback };
+    if (error?.code) payload.code = error.code;
+    if (error?.model) payload.model = error.model;
+    if (Number.isFinite(error?.requiredChars)) payload.requiredChars = error.requiredChars;
+    if (Number.isFinite(error?.availableChars)) payload.availableChars = error.availableChars;
+    res.status(statusCode).json(payload);
   };
 
   const readSource = (value) => {
-    if (typeof value !== 'string' || !value) return null;
+    if (value?.constructor !== String || !value) return null;
     try {
       return JSON.parse(value);
     } catch {
@@ -31,7 +36,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
   app.get('/api/walkthrough', async (req, res) => {
     try {
       const { getWalkthrough, getPullRequestDiff } = await getWalkthroughService();
-      const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
+      const directory = req.query.directory?.constructor === String ? req.query.directory : '';
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -40,10 +45,10 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
         {
           directory,
           source: readSource(req.query.source),
-          model: typeof req.query.model === 'string' ? req.query.model : undefined,
-          language: typeof req.query.language === 'string' ? req.query.language : undefined,
+          model: req.query.model?.constructor === String ? req.query.model : undefined,
+          language: req.query.language?.constructor === String ? req.query.language : undefined,
         },
-        { getPullRequestDiff },
+        serviceDeps(getPullRequestDiff),
       );
       res.json(result);
     } catch (error) {
@@ -59,7 +64,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
     try {
       const { generateWalkthrough, getPullRequestDiff } = await getWalkthroughService();
       const { directory, source, force, model, language } = req.body || {};
-      if (!directory || typeof directory !== 'string') {
+      if (!directory || directory.constructor !== String) {
         return res.status(400).json({ error: 'directory is required' });
       }
 
@@ -68,10 +73,10 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
           directory,
           source,
           force: force === true,
-          model: typeof model === 'string' ? model : undefined,
-          language: typeof language === 'string' ? language : undefined,
+          model: model?.constructor === String ? model : undefined,
+          language: language?.constructor === String ? language : undefined,
         },
-        { getPullRequestDiff },
+        serviceDeps(getPullRequestDiff),
       );
       if (clientIsGone(res)) return;
       res.json(result);
@@ -86,7 +91,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
   app.get('/api/walkthrough/progress', async (req, res) => {
     try {
       const { getGenerationStage, getRepositoryRootFor } = await getWalkthroughService();
-      const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
+      const directory = req.query.directory?.constructor === String ? req.query.directory : '';
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -102,7 +107,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
     try {
       const { cancelWalkthroughGeneration } = await getWalkthroughService();
       const { directory, source } = req.body || {};
-      if (!directory || typeof directory !== 'string') {
+      if (!directory || directory.constructor !== String) {
         return res.status(400).json({ error: 'directory is required' });
       }
 

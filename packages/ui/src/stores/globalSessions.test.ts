@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2'
+import type { Event } from '@opencode-ai/sdk/v2/client'
 
 import { filterManagedChatsForRuntime, listGlobalSessionPages, splitGlobalSessionsByArchived } from './globalSessions'
+import { isOpenChamberInternalSessionEvent, resetOpenChamberInternalSessions } from '@/lib/sessionInternalMetadata'
 
 describe('managed Chats runtime visibility', () => {
   const session = (id: string, directory: string): Session => ({
@@ -26,6 +28,66 @@ describe('managed Chats runtime visibility', () => {
 })
 
 describe('listGlobalSessionPages', () => {
+  test('a stale runtime response filters marked sessions without repopulating the current registry', async () => {
+    let resolveList: ((value: { data: Session[]; response: { headers: Headers } }) => void) | undefined
+    const apiClient = {
+      experimental: { session: { list: () => new Promise((resolve) => { resolveList = resolve }) } },
+    } as unknown as OpencodeClient
+    const loading = listGlobalSessionPages(apiClient, { archived: false, pageSize: 500 })
+    await Promise.resolve()
+    resetOpenChamberInternalSessions()
+    resolveList?.({
+      data: [{
+        id: 'ses_runtime_collision',
+        slug: 'runtime-collision',
+        projectID: 'project',
+        directory: '/runtime-a',
+        title: 'Internal',
+        version: '1',
+        metadata: { openchamber: { internalSession: { kind: 'walkthrough-inference' } } },
+        time: { created: 1, updated: 2 },
+      }],
+      response: { headers: new Headers() },
+    })
+
+    expect(await loading).toEqual([])
+    // SAFETY: This fixture contains the SDK session.created fields consumed by the public event predicate.
+    const currentRuntimeEvent = {
+      id: 'evt_current_runtime',
+      type: 'session.created',
+      properties: { info: {
+        id: 'ses_runtime_collision', slug: 'runtime-collision', projectID: 'project', directory: '/runtime-b',
+        title: 'User session', version: '1', time: { created: 3, updated: 3 },
+      } },
+    } as Event
+    expect(isOpenChamberInternalSessionEvent(currentRuntimeEvent)).toBe(false)
+  })
+
+  test('registers a marked session from the successful runtime-B retry attempt', async () => {
+    let attempts = 0
+    const marked = {
+      id: 'ses_retry_runtime', slug: 'retry-runtime', projectID: 'project', directory: '/runtime-b',
+      title: 'Internal', version: '1', time: { created: 1, updated: 2 },
+      metadata: { openchamber: { internalSession: { kind: 'walkthrough-inference' } } },
+    }
+    const apiClient = {
+      experimental: { session: { list: async () => {
+        attempts += 1
+        if (attempts === 1) {
+          resetOpenChamberInternalSessions()
+          throw new Error('runtime A disconnected')
+        }
+        return { data: [marked], response: { headers: new Headers() } }
+      } } },
+    } as unknown as OpencodeClient
+
+    expect(await listGlobalSessionPages(apiClient, { archived: false, pageSize: 500 })).toEqual([])
+    // SAFETY: The fixture contains the SDK session.idle fields consumed by the event predicate.
+    expect(isOpenChamberInternalSessionEvent({
+      id: 'evt_retry_runtime', type: 'session.idle', properties: { sessionID: marked.id },
+    } as Event)).toBe(true)
+  })
+
   test('sanitizes session list records before returning them', async () => {
     const apiClient = {
       experimental: {
@@ -158,6 +220,28 @@ describe('listGlobalSessionPages', () => {
     const sessions = await listGlobalSessionPages(apiClient, { archived: false, pageSize: 500 })
 
     expect(sessions.map((session) => session.id)).toEqual(['ses_active_1', 'ses_active_2'])
+  })
+
+  test('filters internal sessions from list pages without stopping pagination', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const apiClient = {
+      experimental: { session: { list: async (options: Record<string, unknown>) => {
+        calls.push(options)
+        if (options.cursor === undefined) return {
+          data: [
+            { id: 'ses_internal', time: { updated: 20 }, metadata: { openchamber: { internalSession: { kind: 'walkthrough-inference', version: 1 } } } },
+            { id: 'ses_visible', time: { updated: 10 } },
+          ],
+          response: { headers: new Headers({ 'x-next-cursor': '10' }) },
+        }
+        return { data: [{ id: 'ses_visible_2', time: { updated: 5 } }], response: { headers: new Headers() } }
+      } } },
+    } as unknown as OpencodeClient
+
+    const sessions = await listGlobalSessionPages(apiClient, { directory: '/repo', archived: false, pageSize: 2 })
+
+    expect(calls).toHaveLength(2)
+    expect(sessions.map((session) => session.id)).toEqual(['ses_visible', 'ses_visible_2'])
   })
 
   test('returns the inclusive response unfiltered when narrowing is disabled', async () => {

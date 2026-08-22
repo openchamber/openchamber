@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPermissionAutoAcceptRuntime } from './runtime.js';
 
-const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0] } = {}) => {
+const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], isInternalSessionEvent, isInternalSession } = {}) => {
   let settings = stored ?? { permissionAutoAccept: { sessions: {} } };
   let eventHandler;
   let statusHandler;
@@ -16,6 +16,8 @@ const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0] } = {}) => {
     persistSettings: async (changes) => { settings = { ...settings, ...changes }; },
     fetchImpl: fetchImpl ?? vi.fn(async () => new Response('[]')),
     retryDelaysMs,
+    isInternalSessionEvent,
+    isInternalSession,
   });
   runtime.start();
   return {
@@ -59,6 +61,42 @@ describe('permission auto-accept runtime', () => {
     await expect(runtime.isSessionAutoAccepting('grandchild', '/project')).resolves.toBe(false);
     await runtime.setSessionPolicy('child', true);
     await expect(runtime.isSessionAutoAccepting('grandchild', '/project')).resolves.toBe(true);
+  });
+
+  it('does not retain internal sessions for permission side effects', async () => {
+    const predicate = vi.fn((payload) => payload.properties?.info?.id === 'internal');
+    const { runtime, emit } = createRuntime({
+      isInternalSessionEvent: predicate,
+    });
+    emit({ type: 'session.created', properties: { info: { id: 'internal', parentID: 'root' } } });
+    expect(predicate).toHaveBeenCalledWith(expect.objectContaining({ type: 'session.created' }));
+    await expect(runtime.isSessionAutoAccepting('child', '/project')).resolves.toBe(false);
+  });
+
+  it('durably classifies a live permission before replying after restart', async () => {
+    const fetchImpl = vi.fn(async () => Response.json({}));
+    const { emit } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { internal: true } } },
+      fetchImpl,
+      isInternalSession: async (sessionId) => sessionId === 'internal',
+    });
+    emit({ type: 'permission.asked', properties: { id: 'perm_live', sessionID: 'internal' } });
+    await flush();
+    expect(fetchImpl).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('durably classifies pending permissions before reconciliation replies', async () => {
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      if (new URL(url).pathname === '/permission') return Response.json([{ id: 'perm_pending', sessionID: 'internal' }]);
+      return Response.json({});
+    });
+    const { runtime } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { internal: true } } },
+      fetchImpl,
+      isInternalSession: async (sessionId) => sessionId === 'internal',
+    });
+    await runtime.reconcilePending();
+    expect(fetchImpl.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
 
   it('fetches missing subagent lineage before replying', async () => {

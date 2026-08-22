@@ -19,7 +19,9 @@ other runtime API.
   OpenCode process. A plugin registers its provider from the `config` hook and
   supplies the credential from its `auth` loader, so neither reaches
   `opencode.json` nor `auth.json`; `GET /provider` is the only place they
-  become visible. The module caches one snapshot (30s TTL, shared in-flight
+  become visible. The snapshot retains each model's `api.npm` adapter and
+  endpoint so callers can distinguish an unsupported direct wire format. The
+  module caches one snapshot (30s TTL, shared in-flight
   request) and answers `null` — never an empty provider list — when OpenCode is
   unreachable, so a momentary outage cannot retract providers. It is wired once
   from `server/index.js` and reset on OpenCode restart, which reloads plugins
@@ -114,7 +116,12 @@ other runtime API.
     the same shape: config `options.apiKey`, then the runtime credential, then
     the auth.json entry. Configured API keys honor OpenCode's `{env:NAME}` and
     `{file:path}` substitutions; file contents and resolved credentials remain
-    server-side.
+     server-side. A runtime-only provider whose model declares another adapter,
+     or whose endpoint answers with a narrow route/method/content-type protocol
+     rejection, throws `code: 'plugin-transport-required'`. Walkthrough uses
+     that code for its OpenCode-session fallback; auth, rate limits, invalid
+     model errors, provider outages, cancellation, and timeout are not fallback
+     signals.
   - The runtime credential is refused for providers listed in
     `OWN_CREDENTIAL_HANDLING`. Their branches need the stored entry rather than
     a bearer token: the clearest case is the ChatGPT-plan `openai` login, whose
@@ -165,9 +172,10 @@ working models from the picker than broken ones, and a provider that silently
 vanishes explains nothing while one that fails on use says why.
 
 So availability stops at credential and endpoint, and the protocol verdict is
-left to the call. A provider whose protocol lives in a plugin's `fetch` stays
-selectable and fails when used — which is what it did before this resolution
-existed.
+left to the call. Walkthrough can recover from the narrow
+`plugin-transport-required` verdict through OpenCode itself. Other Small Model
+features still report the direct transport limitation instead of silently
+creating sessions.
 
 Claude Code is refused unconditionally. A plugin can publish an
 OpenAI-compatible endpoint for it, but that endpoint is a façade over the

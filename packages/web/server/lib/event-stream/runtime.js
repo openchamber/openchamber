@@ -39,8 +39,8 @@ export function createGlobalUiEventBroadcaster({
     if (hasWsClients) {
       for (const socket of Array.from(wsClients)) {
         const sent = sendMessageStreamWsEvent(socket, payload, {
-          directory: typeof options.directory === 'string' && options.directory.length > 0 ? options.directory : 'global',
-          eventId: typeof options.eventId === 'string' && options.eventId.length > 0 ? options.eventId : undefined,
+          directory: options.directory?.constructor === String && options.directory.length > 0 ? options.directory : 'global',
+          eventId: options.eventId?.constructor === String && options.eventId.length > 0 ? options.eventId : undefined,
         });
         if (!sent) {
           wsClients.delete(socket);
@@ -65,6 +65,7 @@ export function createMessageStreamWsRuntime({
   upstreamReconnectDelayMs = DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
   fetchImpl = fetch,
   globalEventHub = null,
+  classifyDirectoryEvent,
 }) {
   const wsServer = new WebSocketServer({
     noServer: true,
@@ -95,7 +96,7 @@ export function createMessageStreamWsRuntime({
   });
 
   wsServer.on('connection', (socket, req) => {
-    const rawUrl = typeof req?.url === 'string' ? req.url : MESSAGE_STREAM_GLOBAL_WS_PATH;
+    const rawUrl = req?.url?.constructor === String ? req.url : MESSAGE_STREAM_GLOBAL_WS_PATH;
     const pathname = parseRequestPathname(rawUrl);
     const requestUrl = new URL(rawUrl, 'http://127.0.0.1');
     const isGlobalStream = pathname === MESSAGE_STREAM_GLOBAL_WS_PATH;
@@ -127,6 +128,7 @@ export function createMessageStreamWsRuntime({
       upstreamStallTimeoutMs,
       upstreamReconnectDelayMs,
       fetchImpl,
+      classifyEvent: classifyDirectoryEvent,
     });
   });
 

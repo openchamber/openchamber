@@ -4,13 +4,13 @@ const REQUEST_TIMEOUT_MS = 5000;
 const SESSION_CACHE_LIMIT = 10000;
 
 const normalizePolicy = (value) => {
-  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const source = value && Object.prototype.toString.call(value) === '[object Object]' ? value : {};
   const sessions = {};
-  const entries = source.sessions && typeof source.sessions === 'object' && !Array.isArray(source.sessions)
+  const entries = source.sessions && Object.prototype.toString.call(source.sessions) === '[object Object]'
     ? Object.entries(source.sessions)
     : [];
   for (const [sessionId, enabled] of entries) {
-    if (sessionId && typeof enabled === 'boolean') sessions[sessionId] = enabled;
+    if (sessionId && enabled?.constructor === Boolean) sessions[sessionId] = enabled;
   }
   const revision = Number.isSafeInteger(source.revision) && source.revision >= 0 ? source.revision : 0;
   return { sessions, revision };
@@ -28,6 +28,8 @@ export function createPermissionAutoAcceptRuntime({
   fetchImpl = fetch,
   retryDelaysMs = RETRY_DELAYS_MS,
   requestTimeoutMs = REQUEST_TIMEOUT_MS,
+  isInternalSessionEvent = () => false,
+  isInternalSession = async () => false,
 }) {
   let policy = normalizePolicy();
   let loaded = false;
@@ -72,8 +74,8 @@ export function createPermissionAutoAcceptRuntime({
   };
 
   const setSessionPolicy = async (sessionId, enabled, directory) => {
-    if (typeof sessionId !== 'string' || !sessionId.trim()) throw new TypeError('sessionId is required');
-    if (typeof enabled !== 'boolean') throw new TypeError('enabled must be a boolean');
+    if (sessionId?.constructor !== String || !sessionId.trim()) throw new TypeError('sessionId is required');
+    if (enabled?.constructor !== Boolean) throw new TypeError('enabled must be a boolean');
     await load();
     const result = await persistUpdate((current) => ({
       ...current,
@@ -85,10 +87,10 @@ export function createPermissionAutoAcceptRuntime({
   };
 
   const rememberSession = (info, directoryHint) => {
-    if (!info || typeof info.id !== 'string' || !info.id) return;
+    if (!info || info.id?.constructor !== String || !info.id) return;
     sessions.set(info.id, {
-      parentID: typeof info.parentID === 'string' && info.parentID ? info.parentID : null,
-      directory: typeof info.directory === 'string' && info.directory ? info.directory : directoryHint,
+      parentID: info.parentID?.constructor === String && info.parentID ? info.parentID : null,
+      directory: info.directory?.constructor === String && info.directory ? info.directory : directoryHint,
     });
     if (sessions.size > SESSION_CACHE_LIMIT) {
       sessions.delete(sessions.keys().next().value);
@@ -98,16 +100,17 @@ export function createPermissionAutoAcceptRuntime({
   const request = async (path, { directory, method = 'GET', body } = {}) => {
     const url = new URL(buildOpenCodeUrl(path, ''));
     if (directory) url.searchParams.set('directory', directory);
-    const response = await fetchImpl(url, {
+    const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
+    const init = {
       method,
-      headers: {
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-        ...getOpenCodeAuthHeaders(),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
+      headers,
       signal: AbortSignal.timeout(requestTimeoutMs),
-    });
+    };
+    if (body) {
+      headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(body);
+    }
+    const response = await fetchImpl(url, init);
     if (!response.ok) {
       const error = new Error(`OpenCode request failed (${response.status})`);
       error.status = response.status;
@@ -146,6 +149,13 @@ export function createPermissionAutoAcceptRuntime({
 
   const replyOnce = async (permission, directory) => {
     if (!permission?.id || !permission?.sessionID) return false;
+    try {
+      if (await isInternalSession(permission.sessionID, directory)) return false;
+    } catch {
+      // Classification is an authorization boundary. If durable metadata
+      // cannot be read, leave the permission for manual handling.
+      return false;
+    }
     await load();
     if (!(await isSessionAutoAccepting(permission.sessionID, directory))) return false;
     await request(`/permission/${encodeURIComponent(permission.id)}/reply`, {
@@ -178,7 +188,7 @@ export function createPermissionAutoAcceptRuntime({
 
   async function reconcilePending({ directories = [] } = {}) {
     const normalizedDirectories = Array.from(new Set(
-      directories.filter((directory) => typeof directory === 'string' && directory.trim()).map((directory) => directory.trim()),
+      directories.filter((directory) => directory?.constructor === String && directory.trim()).map((directory) => directory.trim()),
     ));
     const key = normalizedDirectories.length > 0 ? normalizedDirectories.join('\n') : 'all';
     const existing = reconcilePromises.get(key);
@@ -210,8 +220,9 @@ export function createPermissionAutoAcceptRuntime({
 
   const processEvent = (event) => {
     const raw = event?.payload;
-    const payload = raw?.payload && typeof raw.payload === 'object' ? raw.payload : raw;
-    const directory = typeof event?.directory === 'string' && event.directory !== 'global' ? event.directory : undefined;
+    const payload = raw?.payload && Object.prototype.toString.call(raw.payload) === '[object Object]' ? raw.payload : raw;
+    const directory = event?.directory?.constructor === String && event.directory !== 'global' ? event.directory : undefined;
+    if (isInternalSessionEvent(payload)) return;
     if (payload?.type === 'session.created' || payload?.type === 'session.updated') {
       rememberSession(payload.properties?.info, directory);
       return;
@@ -257,7 +268,7 @@ export function registerPermissionAutoAcceptRoutes(app, runtime) {
 
   app.put('/api/permission-auto-accept/sessions/:sessionId', async (req, res) => {
     try {
-      const directory = typeof req.body?.directory === 'string' ? req.body.directory : undefined;
+      const directory = req.body?.directory?.constructor === String ? req.body.directory : undefined;
       res.json(await runtime.setSessionPolicy(req.params.sessionId, req.body?.enabled, directory));
     } catch (error) {
       res.status(error instanceof TypeError ? 400 : 500).json({ error: error?.message });

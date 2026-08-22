@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
+import {
+  isOpenChamberInternalSessionEvent,
+  resetOpenChamberInternalSessions,
+} from "@/lib/sessionInternalMetadata"
 
 const failAfter = (ms: number) => new Promise<never>((_, reject) => {
   setTimeout(() => reject(new Error("Timed out waiting for event pipeline flush")), ms)
@@ -68,6 +72,56 @@ function createSdk(events: Event[], streamFinished: () => void): OpencodeClient 
 }
 
 describe("createEventPipeline", () => {
+  test("an old pipeline flush suppresses marked events without contaminating the new runtime", async () => {
+    let resolveStreamFinished!: () => void
+    const streamFinished = new Promise<void>((resolve) => { resolveStreamFinished = resolve })
+    const markedInfo = {
+      id: "ses_collision", slug: "collision", projectID: "project", directory: "/runtime-a",
+      title: "Internal", version: "1", time: { created: 1, updated: 1 },
+      metadata: { openchamber: { internalSession: { kind: "walkthrough-inference" } } },
+    }
+    // SAFETY: The fixture includes the complete SDK session.created contract used by the pipeline.
+    const marked = {
+      id: "evt_internal_a",
+      type: "session.created",
+      properties: {
+        sessionID: markedInfo.id,
+        info: markedInfo,
+      },
+    } as Event
+    const delivered: boolean[] = []
+    const pipeline = createEventPipeline({
+      sdk: createSdk([marked], resolveStreamFinished),
+      transport: "sse",
+      onEvents: (_directory, events, generation) => {
+        delivered.push(...events.map((event) => isOpenChamberInternalSessionEvent(event, generation)))
+      },
+    })
+    await Promise.race([streamFinished, failAfter(500)])
+    resetOpenChamberInternalSessions()
+    pipeline.cleanup()
+
+    expect(delivered).toEqual([true])
+    const ordinaryB = {
+      id: "evt_user_b", type: "session.created",
+      properties: { info: {
+        id: "ses_collision", slug: "collision", projectID: "project", directory: "/runtime-b",
+        title: "User", version: "1", time: { created: 2, updated: 2 },
+      } },
+    } as Event
+    expect(isOpenChamberInternalSessionEvent(ordinaryB)).toBe(false)
+
+    const markedB = {
+      ...marked,
+      id: "evt_internal_b",
+      properties: { sessionID: markedInfo.id, info: { ...markedInfo, directory: "/runtime-b" } },
+    } as Event
+    expect(isOpenChamberInternalSessionEvent(markedB)).toBe(true)
+    expect(isOpenChamberInternalSessionEvent({
+      id: "evt_idle_b", type: "session.idle", properties: { sessionID: "ses_collision" },
+    } as Event)).toBe(true)
+  })
+
   test("delivers one ordered batch per directory flush", async () => {
     let resolveStreamFinished!: () => void
     const streamFinished = new Promise<void>((resolve) => {

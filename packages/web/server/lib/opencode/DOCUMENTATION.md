@@ -45,6 +45,11 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/theme-runtime.js`: custom theme JSON validation and theme directory loading runtime for settings utility routes.
 - `packages/web/server/lib/opencode/proxy.js`: OpenCode API/SSE forwarding and readiness-gate route registration.
 - `packages/web/server/lib/opencode/session-runtime.js`: session status/attention/activity runtime for OpenCode SSE events.
+- `packages/web/server/lib/opencode/internal-sessions.js`: canonical metadata predicate and bounded id registry for OpenChamber-owned inference sessions. Walkthrough creates these only when direct inference reports that a plugin-owned transport is required. The server has one active OpenCode runtime; its registry resets when that runtime restarts/rebinds. The ordered global event boundary suppresses classified events before replay, clients, notifications, activity, assist, goal, context, and permission side effects.
+  Directory WebSocket streams apply the same classification before raw or
+  synthetic forwarding. Unknown id-only events share one short-deadline lookup
+  per session; lookup failure forwards traffic and is cached briefly before a
+  retry, while later metadata-bearing events remain authoritative.
 - `packages/web/server/lib/opencode/watcher.js`: global SSE watcher runtime for push/session event fanout.
 - `packages/web/server/lib/opencode/shared.js`: shared utilities for config, markdown, skills, and git helpers.
 - `packages/web/server/lib/ui-auth/ui-auth.js`: UI session authentication runtime (outside OpenCode module).

@@ -358,6 +358,7 @@ describe('callSmallModel — custom provider config', () => {
         apiKey: 'plugin-key',
         baseURL: 'https://api.llmapi.ai/v1',
         anonymousZen: false,
+        models: new Map([['claude-opus-4-8', { adapter: '@ai-sdk/openai-compatible', endpoint: null }]]),
       });
       const fetchMock = vi.fn(async () => ok('done'));
       vi.stubGlobal('fetch', fetchMock);
@@ -374,6 +375,126 @@ describe('callSmallModel — custom provider config', () => {
       const { url, init } = lastCall(fetchMock);
       expect(url).toBe('https://api.llmapi.ai/v1/chat/completions');
       expect(init.headers.Authorization).toBe('Bearer plugin-key');
+    });
+
+    it('reports when a runtime-only provider needs a non-compatible plugin adapter', async () => {
+      readConfig.mockReturnValue({});
+      getRuntimeProvider.mockResolvedValue({
+        id: 'llmapi',
+        apiKey: 'plugin-key',
+        baseURL: 'https://api.llmapi.ai/v1',
+        anonymousZen: false,
+        models: new Map([['claude-opus-4-8', { adapter: '@ai-sdk/anthropic', endpoint: null }]]),
+      });
+
+      await expect(callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'llmapi',
+        modelID: 'claude-opus-4-8',
+        prompt: 'hi',
+      })).rejects.toMatchObject({
+        code: 'plugin-transport-required',
+        providerID: 'llmapi',
+        modelID: 'claude-opus-4-8',
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('falls back for a runtime-only endpoint that rejects the compatible protocol', async () => {
+      readConfig.mockReturnValue({});
+      getRuntimeProvider.mockResolvedValue({
+        id: 'llmapi',
+        apiKey: 'plugin-key',
+        baseURL: 'https://api.llmapi.ai/v1',
+        anonymousZen: false,
+        models: new Map([['model', { adapter: '@ai-sdk/openai-compatible', endpoint: null }]]),
+      });
+      fetchMock.mockResolvedValue(new Response('unknown route', { status: 404 }));
+
+      await expect(callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'llmapi',
+        modelID: 'model',
+        prompt: 'hi',
+      })).rejects.toMatchObject({ code: 'plugin-transport-required' });
+    });
+
+    it('falls back when the runtime-only plugin endpoint exists only inside its custom fetch', async () => {
+      readConfig.mockReturnValue({});
+      getRuntimeProvider.mockResolvedValue({
+        id: 'llmapi',
+        apiKey: 'plugin-key',
+        baseURL: 'http://127.0.0.1:1',
+        anonymousZen: false,
+        models: new Map([['model', { adapter: '@ai-sdk/openai-compatible', endpoint: null }]]),
+      });
+      fetchMock.mockRejectedValue(Object.assign(new Error('connect failed'), {
+        cause: { code: 'ECONNREFUSED' },
+      }));
+
+      await expect(callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'llmapi',
+        modelID: 'model',
+        prompt: 'hi',
+      })).rejects.toMatchObject({ code: 'plugin-transport-required' });
+    });
+
+    it.each([400, 401, 403, 429, 500, 503])('preserves ordinary HTTP %s failures from runtime providers', async (status) => {
+      readConfig.mockReturnValue({});
+      getRuntimeProvider.mockResolvedValue({
+        id: 'llmapi',
+        apiKey: 'plugin-key',
+        baseURL: 'https://api.llmapi.ai/v1',
+        anonymousZen: false,
+        models: new Map([['model', { adapter: '@ai-sdk/openai-compatible', endpoint: null }]]),
+      });
+      fetchMock.mockResolvedValue(new Response('invalid model', { status }));
+
+      const error = await callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'llmapi',
+        modelID: 'model',
+        prompt: 'hi',
+      }).then(() => null, (caught) => caught);
+      expect(error).toMatchObject({ status });
+      expect(error.code).toBeUndefined();
+    });
+
+    it('classifies an explicit HTTP schema rejection without treating generic 400s as refusal', async () => {
+      readConfig.mockReturnValue({});
+      getRuntimeProvider.mockResolvedValue({
+        id: 'llmapi',
+        apiKey: 'plugin-key',
+        baseURL: 'https://api.llmapi.ai/v1',
+        anonymousZen: false,
+        models: new Map([['model', { adapter: '@ai-sdk/openai-compatible', endpoint: null }]]),
+      });
+      fetchMock.mockResolvedValue(new Response(JSON.stringify({
+        error: { message: 'response_format json_schema is not supported' },
+      }), { status: 400 }));
+
+      await expect(callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'llmapi',
+        modelID: 'model',
+        prompt: 'hi',
+        responseSchema: { type: 'object' },
+      })).rejects.toMatchObject({
+        code: 'structured-output-unsupported',
+        schemaRefusal: true,
+        status: 400,
+      });
     });
 
     it('keeps the ChatGPT-plan login on its own transport instead of the runtime key', async () => {

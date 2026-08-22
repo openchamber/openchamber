@@ -1,9 +1,10 @@
 import { getRepositoryRoot } from '../git/service.js';
 import { describeSmallModel, generateSmallModelText } from '../small-model/index.js';
+import { generateWalkthroughText } from './inference.js';
 import { buildDigest } from './digest.js';
 import { indexHunks } from './hunks.js';
 import { normalizeLanguage } from './languages.js';
-import { buildPrompt, JSON_SHAPE_INSTRUCTION } from './prompt.js';
+import { buildPrompt, WALKTHROUGH_JSON_INSTRUCTION } from './prompt.js';
 import { normalizeWalkthrough, parseModelJson, responseSchema } from './schema.js';
 import {
   buildCacheKey,
@@ -470,18 +471,35 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     );
   }
 
-  const run = (options) => generateSmallModelText({
-    prompt: options.prompt,
-    system: options.system,
-    directory,
-    model: `${model.providerID}/${model.modelID}`,
-    responseSchema: options.responseSchema,
-    onOverflow: 'error',
-    timeoutMs: generationTimeoutMs(hunkCount),
-    // The number the input budget was already reduced by, not a fresh guess.
-    maxOutputTokens: model.outputTokens ?? MIN_OUTPUT_TOKENS,
-    signal,
-  });
+  const run = async (options) => {
+    try {
+      return await (deps.generateSmallModelText ?? generateSmallModelText)({
+        prompt: options.prompt,
+        system: options.system,
+        directory,
+        model: `${model.providerID}/${model.modelID}`,
+        responseSchema: options.responseSchema,
+        onOverflow: 'error',
+        timeoutMs: generationTimeoutMs(hunkCount),
+        // The number the input budget was already reduced by, not a fresh guess.
+        maxOutputTokens: model.outputTokens ?? MIN_OUTPUT_TOKENS,
+        signal,
+      });
+    } catch (error) {
+      if (error?.code !== 'plugin-transport-required') throw error;
+      return (deps.generateWalkthroughText ?? generateWalkthroughText)({
+        prompt: options.prompt,
+        system: options.system,
+        directory,
+        model,
+        responseSchema: options.responseSchema,
+        timeoutMs: generationTimeoutMs(hunkCount),
+        signal,
+        baseUrl: deps.openCodeBaseUrl,
+        headers: deps.openCodeAuthHeaders,
+      });
+    }
+  };
 
   // Roughly half the catalog does not declare `structured_output`, and some of
   // those providers reject the schema outright. A rejected request shape is not
@@ -490,7 +508,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   const withSchema = () => run({ prompt, system, responseSchema });
   const withoutSchema = () => run({
     prompt,
-    system: `${system}\n${JSON_SHAPE_INSTRUCTION}`,
+    system: `${system}\n${WALKTHROUGH_JSON_INSTRUCTION}`,
     responseSchema: undefined,
   });
 
@@ -512,8 +530,8 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     return null;
   };
 
-  const refusesSchema = (error) => error?.code === 'structured-output-unsupported'
-    || (Number(error?.status) >= 400 && Number(error?.status) < 500);
+  const refusesSchema = (error) => error?.code === 'structured-output-unsupported';
+  const remembersSchemaRefusal = (error) => error?.schemaRefusal === true;
 
   let raw;
   let usedSchema = false;
@@ -536,7 +554,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
       if (failure) throw failure;
       if (!refusesSchema(error)) throw error;
 
-      schemaRefusedBy.add(modelKey(model));
+      if (remembersSchemaRefusal(error)) schemaRefusedBy.add(modelKey(model));
       setStage(repoRoot, key, 'retrying');
       try {
         raw = await withoutSchema();

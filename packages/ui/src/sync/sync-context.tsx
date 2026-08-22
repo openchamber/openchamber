@@ -43,6 +43,7 @@ import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./recon
 import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { getOpenChamberInternalSessionGeneration, isOpenChamberInternalSessionEvent, visibleOpenCodeSessions } from "@/lib/sessionInternalMetadata"
 import {
   processVSCodePermissionAutoAccept,
   processVSCodeReconciledPermissionAutoAccept,
@@ -1455,7 +1456,9 @@ export function handleEvent(
   skipVSCodeAutoAccept = false,
   streamingDirectory?: string,
   batch?: DirectoryEventBatch,
+  internalSessionGeneration?: number,
 ) {
+  if (isOpenChamberInternalSessionEvent(payload, internalSessionGeneration)) return
   if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
     const properties = (payload as unknown as { properties?: unknown }).properties
     if (properties && typeof properties === "object") {
@@ -1483,7 +1486,7 @@ export function handleEvent(
     return
   }
 
-  applySessionEventToGlobalSessions(payload)
+  applySessionEventToGlobalSessions(payload, internalSessionGeneration)
   // Keep the cross-project status map current for ALL directories (mirrors the
   // global-session handling above). Child stores remain the primary source for
   // synced directories; this map covers sessions a child store doesn't list
@@ -2251,7 +2254,7 @@ export function SyncProvider(props: {
       routeDirectory: (directory, payload) => {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
-      onEvents: (directory, payloads) => {
+      onEvents: (directory, payloads, internalSessionGeneration) => {
         // Track ALL stream activity (including heartbeats) as proof of
         // connection health. The watchdog stale check uses this to distinguish
         // a genuinely dead stream (no heartbeats for 20s) from a quiet-but-
@@ -2271,7 +2274,7 @@ export function SyncProvider(props: {
                 dispatchOpenCodeUpdateAvailable({ version })
               }
             }
-            handleEvent(directory, payload, childStores, routingIndex, runtimeKey, false, currentDirectoryRef.current, batch)
+            handleEvent(directory, payload, childStores, routingIndex, runtimeKey, false, currentDirectoryRef.current, batch, internalSessionGeneration)
           }
         } finally {
           publishDirectoryEventBatch(batch)
@@ -2340,8 +2343,9 @@ export function SyncProvider(props: {
       if (parentSessionIds.length === 0) return
       try {
         const scopedClient = opencodeClient.getScopedSdkClient(directory)
-        const result: unknown = await runBackgroundNetworkTask(() => scopedClient.session.list({ directory, limit: 200 }))
-        const allSessions = ((result as { data?: unknown }).data ?? []) as Session[]
+        const internalSessionGeneration = getOpenChamberInternalSessionGeneration()
+        const result = await runBackgroundNetworkTask(() => scopedClient.session.list({ directory, limit: 200 }))
+        const allSessions = visibleOpenCodeSessions(result.data ?? [], internalSessionGeneration)
         const state = store.getState()
         const existingIds = new Set(state.session.map((s) => s.id))
         const parentIdSet = new Set(parentSessionIds)

@@ -72,23 +72,33 @@ export function resetOpenCodeRuntimeProviders() {
 function parseProviderListing(payload) {
   const providers = new Map();
   const connected = new Set();
-  if (!payload || typeof payload !== 'object') return { providers, connected };
+  if (!payload || payload.constructor !== Object) return { providers, connected };
 
-  const text = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
-  const record = (value) => (value && typeof value === 'object' ? value : {});
+  const text = (value) => (value?.constructor === String && value.trim() ? value.trim() : null);
+  const record = (value) => (value?.constructor === Object ? value : {});
   const endpoint = (value) => text(value)?.replace(/\/+$/, '') ?? null;
 
   for (const raw of Array.isArray(payload.all) ? payload.all : []) {
     const id = text(record(raw).id);
     if (!id) continue;
     const options = record(record(raw).options);
-    const firstModel = record(Object.values(record(record(raw).models))[0]);
+    const rawModels = record(record(raw).models);
+    const firstModel = record(Object.values(rawModels)[0]);
+    const models = new Map();
+    for (const [modelID, rawModel] of Object.entries(rawModels)) {
+      const api = record(record(rawModel).api);
+      models.set(modelID, {
+        adapter: text(api.npm),
+        endpoint: endpoint(api.url),
+      });
+    }
     const declaredKey = text(options.apiKey);
     providers.set(id, {
       id,
       source: text(record(raw).source),
       apiKey: declaredKey === ZEN_ANONYMOUS_API_KEY ? null : (declaredKey ?? text(record(raw).key)),
       baseURL: endpoint(options.baseURL) ?? endpoint(record(firstModel.api).url),
+      models,
       // True only for the zen-without-login case: a provider that is present
       // and usable through OpenCode, but that we must not call ourselves.
       anonymousZen: declaredKey === ZEN_ANONYMOUS_API_KEY,
@@ -152,5 +162,3 @@ export async function getRuntimeProvider(providerID) {
   const current = await getRuntimeProviderSnapshot();
   return current?.providers.get(providerID) ?? null;
 }
-
-

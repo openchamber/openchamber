@@ -30,6 +30,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       messageStreamWsClients,
       triggerHealthCheck,
       upstreamStallTimeoutMs,
+      classifyDirectoryEvent,
       terminalHeartbeatIntervalMs,
       terminalRebindWindowMs,
       terminalMaxRebindsPerWindow,
@@ -99,6 +100,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       wsClients: messageStreamWsClients,
       triggerHealthCheck,
       upstreamStallTimeoutMs,
+      classifyDirectoryEvent,
     });
 
     setupProxy(app);

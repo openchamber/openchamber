@@ -10,6 +10,7 @@ mock.module('@/lib/runtime-auth', () => ({
 }));
 
 const { createEventPipeline } = await import('../event-pipeline');
+const { resetOpenChamberInternalSessions } = await import('@/lib/sessionInternalMetadata');
 
 const originalDocument = globalThis.document;
 const originalWindow = globalThis.window;
@@ -65,6 +66,7 @@ class FakeWebSocket {
 }
 
 afterEach(() => {
+  resetOpenChamberInternalSessions();
   globalThis.document = originalDocument;
   globalThis.window = originalWindow;
   globalThis.WebSocket = originalWebSocket;
@@ -123,6 +125,7 @@ async function runPipelineWithEvents(events, waitMs = 80) {
   const sdk = createSdkWithEvents(events, hold);
   const { cleanup } = createEventPipeline({
     sdk,
+    transport: 'sse',
     onEvent: (directory, payload) => {
       received.push({ directory, payload });
     },

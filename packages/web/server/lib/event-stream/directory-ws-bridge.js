@@ -26,6 +26,7 @@ export function acceptDirectoryMessageStreamWsConnection({
   upstreamStallTimeoutMs,
   upstreamReconnectDelayMs,
   fetchImpl,
+  classifyEvent = async () => false,
 }) {
   const controller = new AbortController();
   let upstreamConnected = false;
@@ -71,16 +72,22 @@ export function acceptDirectoryMessageStreamWsConnection({
   });
 
   const run = async () => {
+    let forwardQueue = Promise.resolve();
     const forwardEvent = ({ envelope, payload }) => {
       const directory = requestedDirectory || envelope?.directory || 'global';
-
-      sendMessageStreamWsEvent(socket, payload, {
+      const forwardingOptions = {
         directory,
-        eventId: typeof envelope?.eventId === 'string' && envelope.eventId.length > 0 ? envelope.eventId : undefined,
-      });
-
-      processForwardedEventPayload(payload, (syntheticPayload) => {
-        sendMessageStreamWsEvent(socket, syntheticPayload, { directory: 'global' });
+        eventId: envelope?.eventId?.constructor === String && envelope.eventId.length > 0 ? envelope.eventId : undefined,
+      };
+      forwardQueue = forwardQueue.then(async () => {
+        if (await classifyEvent(payload, directory)) return;
+        sendMessageStreamWsEvent(socket, payload, forwardingOptions);
+        processForwardedEventPayload(payload, (syntheticPayload) => {
+          sendMessageStreamWsEvent(socket, syntheticPayload, { directory: 'global' });
+        });
+      }).catch(() => {
+        // Classification failure is fail-open for transport availability.
+        sendMessageStreamWsEvent(socket, payload, forwardingOptions);
       });
     };
 

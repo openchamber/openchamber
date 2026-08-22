@@ -59,6 +59,10 @@ describe('OpenCode runtime provider snapshot', () => {
     const provider = await getRuntimeProvider('llmapi');
 
     expect(provider).toMatchObject({ apiKey: 'plugin-key', baseURL: 'https://api.llmapi.ai/v1' });
+    expect(provider.models.get('claude-opus-4-8')).toEqual({
+      adapter: '@ai-sdk/anthropic',
+      endpoint: null,
+    });
     expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:4096/provider');
     expect(fetchMock.mock.calls[0][1].headers).toMatchObject({ Authorization: 'Basic test' });
   });

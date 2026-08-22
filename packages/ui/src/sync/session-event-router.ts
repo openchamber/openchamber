@@ -4,6 +4,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from "@/lib/runtime
 import { streamPerfCount, streamPerfMark } from "@/stores/utils/streamDebug"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
+import { isOpenChamberInternalSessionEvent } from "@/lib/sessionInternalMetadata"
 
 const pendingGlobalSessionUpdates = new Map<string, { runtimeKey: string; session: Session }>()
 
@@ -40,22 +41,25 @@ const getSessionInfoFromPayload = (event: Event): Session | null => {
     return null
   }
 
-  const properties = (event as { properties?: unknown }).properties
-  if (!properties || typeof properties !== "object") {
+  // SAFETY: OpenCode session lifecycle events own a properties object; this
+  // narrow view reads only their shared info field before validating it.
+  const properties = (event as { properties?: { info?: Partial<Session> } }).properties
+  if (!properties) {
     return null
   }
 
-  const info = (properties as { info?: unknown }).info
-  if (!info || typeof info !== "object") {
+  const info = properties.info
+  if (!info) {
     return null
   }
 
-  const session = info as Partial<Session>
-  if (typeof session.id !== "string" || !session.time) {
+  if (info.id?.constructor !== String || !info.time) {
     return null
   }
 
-  return stripSessionDiffSnapshots(session as Session)
+  // SAFETY: id and time are the required Session fields consumed by this
+  // boundary; the SDK event contract supplies the remaining session fields.
+  return stripSessionDiffSnapshots(info as Session)
 }
 
 const getGlobalSessionSnapshot = (sessionId: string): Session | null => {
@@ -63,10 +67,12 @@ const getGlobalSessionSnapshot = (sessionId: string): Session | null => {
   return [...global.activeSessions, ...global.archivedSessions].find((session) => session.id === sessionId) ?? null
 }
 
-export const applySessionEventToGlobalSessions = (payload: Event): void => {
+export const applySessionEventToGlobalSessions = (payload: Event, internalSessionGeneration?: number): void => {
+  if (isOpenChamberInternalSessionEvent(payload, internalSessionGeneration)) return
   if (payload.type === "session.idle" || payload.type === "session.error") {
-    const sessionID = (payload as { properties?: { sessionID?: unknown } }).properties?.sessionID
-    if (typeof sessionID === "string") flushPendingGlobalSessionUpdate(sessionID)
+    // SAFETY: session.idle/error share this SDK-owned properties contract.
+    const sessionID = (payload as { properties?: { sessionID?: string } }).properties?.sessionID
+    if (sessionID?.constructor === String) flushPendingGlobalSessionUpdate(sessionID)
     return
   }
 
@@ -99,6 +105,7 @@ export const applySessionEventToGlobalSessions = (payload: Event): void => {
   }
 
   if (payload.type === "session.deleted") {
+    // SAFETY: session.deleted may identify the session directly or carry info.
     const sessionID = (payload as { properties?: { sessionID?: string } }).properties?.sessionID ?? getSessionInfoFromPayload(payload)?.id
     if (sessionID) {
       pendingGlobalSessionUpdates.delete(sessionID)

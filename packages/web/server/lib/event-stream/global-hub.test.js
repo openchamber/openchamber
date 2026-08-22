@@ -137,4 +137,26 @@ describe('createGlobalMessageStreamHub', () => {
       warnSpy.mockRestore();
     }
   });
+
+  it('filters events before ordered fanout and replay without blocking later events', async () => {
+    const received = [];
+    const hub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: (pathname) => `http://127.0.0.1:4096${pathname}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      upstreamReconnectDelayMs: 100,
+      eventFilter: async (event) => event.eventId === 'evt-internal',
+      fetchImpl: async () => createSseResponse({ blocks: [
+        'id: evt-internal\ndata: {"type":"session.created","properties":{}}\n\nid: evt-visible\ndata: {"type":"session.updated","properties":{}}\n\n',
+      ] }),
+    });
+    hub.subscribeEvent((event) => received.push(event.eventId));
+    try {
+      hub.start();
+      await hub.drainEvents();
+      await waitForAssertion(() => expect(received).toEqual(['evt-visible']));
+      expect(hub.replayAfter('evt-internal')).toEqual([]);
+    } finally {
+      hub.stop();
+    }
+  });
 });

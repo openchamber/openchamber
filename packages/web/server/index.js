@@ -72,6 +72,7 @@ import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolut
 import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
+import { classifyOpenChamberInternalSessionEvent, isOpenChamberInternalSession, isOpenChamberInternalSessionEvent, resetOpenChamberInternalSessions } from './lib/opencode/internal-sessions.js';
 import { configureOpenCodeRuntimeProviders, resetOpenCodeRuntimeProviders } from './lib/small-model/runtime-providers.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
@@ -860,6 +861,21 @@ const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
+  eventFilter: async (event) => {
+    const raw = event?.payload;
+    const payload = raw?.payload && typeof raw.payload === 'object' ? raw.payload : raw;
+    if (!payload || typeof payload !== 'object') return false;
+    const directory = typeof event?.directory === 'string' && event.directory !== 'global' ? event.directory : '';
+    return classifyOpenChamberInternalSessionEvent(payload, async (sessionId) => {
+      const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+      const response = await fetch(`${buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '')}${query}`, {
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(300),
+      });
+      if (!response.ok) throw new Error(`session lookup failed with ${response.status}`);
+      return response.json();
+    });
+  },
 });
 
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
@@ -869,6 +885,16 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   readSettingsFromDiskMigrated,
   persistSettings,
   broadcastGlobalUiEvent,
+  isInternalSessionEvent: isOpenChamberInternalSessionEvent,
+  isInternalSession: async (sessionId, directory) => {
+    const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+    const response = await fetch(`${buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '')}${query}`, {
+      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) throw new Error(`session lookup failed with ${response.status}`);
+    return isOpenChamberInternalSession(await response.json());
+  },
 });
 permissionAutoAcceptRuntime.start();
 notificationTriggerRuntime.setGetIsSessionAutoAccepting(
@@ -881,7 +907,15 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   getOpenCodeAuthHeaders,
   parseSseDataPayload: (...args) => parseSseDataPayload(...args),
   globalEventHub: globalMessageStreamHub,
-  onPayload: (payload) => {
+  onPayload: async (payload) => {
+    if (await classifyOpenChamberInternalSessionEvent(payload, async (sessionId) => {
+      const response = await fetch(buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, ''), {
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!response.ok) throw new Error(`session lookup failed with ${response.status}`);
+      return response.json();
+    })) return;
     maybeCacheSessionInfoFromEvent(payload);
     void maybeSendPushForTrigger(payload);
     sessionRuntime.processOpenCodeSsePayload(payload);
@@ -891,13 +925,22 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
 // Session-assist subscribes to the hub directly: it needs the envelope's
 // directory to route its own OpenCode calls to the right instance.
 console.log('[session-assist] listening for session events');
-globalMessageStreamHub.subscribeEvent((event) => {
+globalMessageStreamHub.subscribeEvent(async (event) => {
   const raw = event?.payload;
   const payload = raw?.payload && typeof raw.payload === 'object' ? raw.payload : raw;
   if (!payload || typeof payload !== 'object') return;
   const directory = typeof event?.directory === 'string' && event.directory && event.directory !== 'global'
     ? event.directory
     : '';
+  if (await classifyOpenChamberInternalSessionEvent(payload, async (sessionId) => {
+    const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+    const response = await fetch(`${buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '')}${query}`, {
+      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) throw new Error(`session lookup failed with ${response.status}`);
+    return response.json();
+  })) return;
   sessionAssistRuntime.processPayload(payload, directory);
   sessionGoalRuntime.processPayload(payload, directory);
   contextObligatoryRuntime.processPayload(payload, directory);
@@ -1171,6 +1214,10 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     // A restart reloads plugins: provider ports, credentials and the provider
     // list itself can all differ from what was cached.
     resetOpenCodeRuntimeProviders();
+    resetOpenChamberInternalSessions();
+    void import('./lib/walkthrough/inference.js').then(({ resetWalkthroughInferenceRuntime }) => {
+      resetWalkthroughInferenceRuntime();
+    }).catch(() => {});
     try {
       messageStreamRuntime?.rebindUpstream();
     } catch (error) {
@@ -1919,6 +1966,15 @@ async function main(options = {}) {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     globalEventHub: globalMessageStreamHub,
+    classifyDirectoryEvent: (payload, directory) => classifyOpenChamberInternalSessionEvent(payload, async (sessionId) => {
+      const query = directory && directory !== 'global' ? `?directory=${encodeURIComponent(directory)}` : '';
+      const response = await fetch(`${buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '')}${query}`, {
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(300),
+      });
+      if (!response.ok) throw new Error(`session lookup failed with ${response.status}`);
+      return response.json();
+    }),
     processForwardedEventPayload,
     messageStreamWsClients: uiNotificationWsClients,
     upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,

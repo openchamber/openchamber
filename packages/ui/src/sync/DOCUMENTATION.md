@@ -20,6 +20,13 @@ There are **two distinct session data scopes** in the UI:
      - global archived sessions
      - active sessions indexed by directory
 
+Both scopes reject sessions carrying the canonical OpenChamber internal-session
+metadata marker. Paginated bootstrap/list ingestion filters the marker at the
+data boundary, while the event boundary remembers a bounded set of marked ids
+so later id-only status/message events cannot create user-facing state.
+The bounded id memory is cleared before a runtime endpoint switch because
+session ids can collide across OpenCode runtimes.
+
 These two scopes are intentionally different, but they are no longer equal peers for live UI truth.
 
 ### Why both exist

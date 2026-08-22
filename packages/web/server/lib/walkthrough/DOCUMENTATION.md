@@ -100,6 +100,32 @@ When a change consists only of generated files, generation is refused with
 
 ## Model selection
 
+Generation uses the direct Small Model dispatcher first. That path has an
+explicit output cap and handles providers whose runtime credential and endpoint
+are enough to reproduce their protocol. A runtime-only provider whose adapter
+is not OpenAI-compatible, or whose endpoint rejects the compatible protocol,
+returns `plugin-transport-required`; only then does Walkthrough use the normal
+OpenCode SDK v2 session pipeline so the plugin's custom `fetch` remains active.
+
+The fallback subscribes to the official directory event stream before calling
+`session.promptAsync`. It reads the correlated assistant result from
+`message.updated` and `message.part.updated`. It never polls
+`session.messages`: OpenCode 1.18.18 cannot encode a persisted plain `format`
+object when that endpoint reads a structured-output turn and returns HTTP 400.
+
+Each fallback attempt uses a root temporary session atomically marked as
+`metadata.openchamber.internalSession.kind = walkthrough-inference`.
+That marker is durable authority for hiding the session; a bounded server
+registry covers status and message events that carry only a session id. Tools
+and permissions are denied, cancellation or timeout aborts the turn, and
+deletion is always attempted in `finally`.
+On the next walkthrough use after startup or a cleanup failure, a bounded scan
+of at most 100 sessions deletes up to 20 marked orphans with concurrency two.
+Active walkthrough sessions are excluded. True orphans are aborted before
+deletion, and successful/404 cleanup forgets their classification immediately.
+Failures schedule another bounded scan; a cursor advances across full pages on
+later uses, and no directory or content is logged.
+
 The walkthrough has its own model setting (Settings → Sessions → Changes
 Walkthrough Model), read by `model-settings.js`:
 
@@ -124,19 +150,14 @@ in its cache entry, so reopening a panel resolves the picker as *explicit choice
 → model that generated what is on screen → settings*. Because the model is part
 of the cache key, switching models and back returns the earlier review for free.
 
-The picker hides models the catalog reports as `structured_output: false` —
-offering them would move the same refusal one click later — and, like the small
-model picker, only shows providers with a usable login. The in-panel picker on a
-blocked walkthrough writes this setting too, so recovering from a refusal never
-silently changes the model behind commit messages.
-
-A settings or `opencode.json` `small_model` override can still name a provider
-with no usable login (neither `auth.json` nor `provider.<id>.options.apiKey`).
-`describeSmallModel` reports that as `hasLogin: false`, readiness refuses with
-`reason: 'no-provider-login'` and omits the unusable model so the panel cannot
-present it as selected, and generation maps the same code to HTTP 401. The UI
-disables Generate and keeps the picker on authenticated providers only — it does
-not surface a raw auth error or a special login blocker for this case.
+The picker hides models the catalog reports as `structured_output: false` and
+providers for which the Small Model runtime found neither a usable credential
+nor an endpoint. The latter list includes plugin-registered providers resolved
+from the running OpenCode process. A selected provider still needs a real login;
+the direct call and fallback both map auth failure to HTTP 401 with
+`code: 'no-provider-login'`. The in-panel picker on a blocked walkthrough writes
+this setting too, so recovering from a refusal never silently changes the model
+behind commit messages.
 
 ## Output language
 
@@ -198,10 +219,11 @@ half of all models, and treating unknown as unsupported would hide models that
 work.
 
 Providers that do not declare the capability sometimes reject the schema at
-request time (a plain `400`, or Alibaba/Qwen's "'messages' must contain the word
-'json'"). A rejected request shape is not a dead end, so a `4xx` on a schema
-request triggers exactly one retry with the schema moved into the prompt and the
-tolerant parser handling the result. Only if *that* fails to yield usable JSON is
+request time. An explicit `StructuredOutputError`, or an SDK `APIError` whose
+message identifies JSON schema/response-format rejection, triggers exactly one
+retry with the schema moved into the prompt and the tolerant parser handling the
+result. Generic `4xx` errors such as an invalid model or missing session do not
+poison schema-refusal memory. Only if the fallback fails to yield usable JSON is
 `structured-output-unsupported` reported — at which point it is a real capability
 problem the user can fix by switching model.
 
@@ -216,28 +238,18 @@ also satisfies the providers that scan the request for the word `json` before
 honouring `response_format`. That keeps them on the fast path instead of paying
 for a wasted first call.
 
-## Output budget
+## Output allowance
 
-A walkthrough itself is only a few thousand tokens of JSON. The budget exists
-for what comes before it: reasoning models spend the same allowance thinking and
-return nothing when it runs out, which is a bill for no answer.
+The direct path requests the same output budget that readiness reserves. It is
+bounded to 96k tokens, 25% of context, and the model's catalog output limit,
+with a 24k-token target for small or uncatalogued models. The Small Model input
+calculation keeps at least 1k tokens of input even when a catalog reports output
+at or above context, so a one-line diff is not rejected with a zero budget.
 
-The ask is therefore derived from the resolved model rather than fixed:
-`min(96k, max(24k, a quarter of the context))`, then capped by the catalog's
-`limit.output`. A flat 24k was the same number for a 64k-context model and for
-one that admits to 384k output tokens and a million of context — and on the
-latter it was the only reason generation failed.
-
-The bounds are not arbitrary. The **same number is reserved from the input
-allowance**, so the ceiling and the context share are what stop a generous
-answer budget from eating the diff it is supposed to describe; the 24k floor is
-what this feature always asked for, so no model gets less room than before. A
-model whose own `limit.output` is below the floor gets its limit, because asking
-for more than a provider allows is rejected by some and ignored by others.
-
-`describeSmallModel` decides this once — the walkthrough hands it the rule as a
-function and reads back `outputTokens` — so the reserve and the request cannot
-drift apart.
+`session.promptAsync` has no per-turn maximum-output field. The rare plugin
+fallback therefore cannot enforce the direct path's cap, but it keeps the same
+readiness reserve rather than making all normal inputs unusable for models whose
+catalog output limit equals their context.
 
 When a model exhausts even that, `code: 'output-exhausted'` reports it as what
 it is: this model cannot finish this job, so pick another or review a narrower
