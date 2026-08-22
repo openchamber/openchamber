@@ -22,6 +22,7 @@
 - Attachments: extracted Office and OpenDocument content is now capped and presented more compactly, preventing large documents and their images from overwhelming the message context.
 - Projects: project names now match the folder name exactly, so `.ssh` and `opencode-claude` are no longer shown as `.Ssh` and `Opencode Claude`; names you renamed yourself are kept.
 - Skills Catalog: the source is now named ClawHub instead of "ClawdHub" (thanks to @makeittech).
+- Add Project now adds the chosen folder to the workspace instead of showing a "Failed to add project" toast.
 
 ## [1.18.4] - 2026-08-14
 
