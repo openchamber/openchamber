@@ -778,6 +778,9 @@ const sessionAssistRuntime = createSessionAssistRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   getSmallModelService: async () => import('./lib/small-model/index.js'),
+  // Startup recovery scan: recovers sessions stranded on an interrupted turn
+  // after an OpenCode serve restart (which re-emits no status for them).
+  getStartupDirectories: getWarmupDirectories,
 });
 
 const sessionGoalRuntime = createSessionGoalRuntime({
@@ -1113,6 +1116,28 @@ Object.defineProperties(openCodeLifecycleState, {
   resolvedWslDistro: { get: () => resolvedWslDistro, set: (value) => { resolvedWslDistro = value; } },
 });
 
+// Most-recently-used directories first: OpenCode initializes each directory
+// lazily on first request (seconds on large session stores), so the lifecycle
+// warms these right after readiness — before the UI's first interactive
+// request would otherwise pay that cost. The session-assist startup recovery
+// scans the same list for sessions stranded by a serve restart.
+const getWarmupDirectories = async () => {
+  const settings = await readSettingsFromDiskMigrated().catch(() => null);
+  if (!settings) return [];
+  const directories = [];
+  if (typeof settings.lastDirectory === 'string' && settings.lastDirectory) {
+    directories.push(settings.lastDirectory);
+  }
+  const projects = Array.isArray(settings.projects) ? [...settings.projects] : [];
+  projects.sort((a, b) => (b?.lastOpenedAt ?? 0) - (a?.lastOpenedAt ?? 0));
+  for (const project of projects) {
+    if (typeof project?.path === 'string' && project.path) {
+      directories.push(project.path);
+    }
+  }
+  return [...new Set(directories)];
+};
+
 const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   state: openCodeLifecycleState,
   env: {
@@ -1145,22 +1170,11 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   // lazily on first request (seconds on large session stores), so the
   // lifecycle warms these right after readiness — before the UI's first
   // interactive request would otherwise pay that cost.
-  getWarmupDirectories: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    if (!settings) return [];
-    const directories = [];
-    if (typeof settings.lastDirectory === 'string' && settings.lastDirectory) {
-      directories.push(settings.lastDirectory);
-    }
-    const projects = Array.isArray(settings.projects) ? [...settings.projects] : [];
-    projects.sort((a, b) => (b?.lastOpenedAt ?? 0) - (a?.lastOpenedAt ?? 0));
-    for (const project of projects) {
-      if (typeof project?.path === 'string' && project.path) {
-        directories.push(project.path);
-      }
-    }
-    return [...new Set(directories)];
-  },
+  getWarmupDirectories,
+  // After EVERY serve (re)start — including health-check recovery restarts —
+  // re-run the session-assist startup recovery, which finds sessions stranded
+  // on interrupted turns and retries or recaps them.
+  onOpenCodeReady: () => sessionAssistRuntime.runStartupRecovery(),
   // A managed restart can move OpenCode to a NEW port (the old one may stay
   // occupied by an orphaned process, e.g. killProcessOnPort is a no-op on
   // Windows). Rebind the message-stream upstream readers to the current port
