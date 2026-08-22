@@ -1,6 +1,7 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionStatus, useSessionMessages, useSessionPermissions, useSessionQuestions } from '@/sync/sync-context';
+import { useGlobalSessionDerivedStatus } from '@/sync/global-session-status';
 
 // Mirrors OpenCode SessionStatus: busy|retry|idle.
 type SessionActivityPhase = 'idle' | 'busy' | 'retry';
@@ -23,6 +24,8 @@ const IDLE_RESULT: SessionActivityResult = {
  * Determines if a session is actively working.
  * Checks session_status and, only when status is missing, falls back to the
  * trailing assistant message when its completion update has not landed yet.
+ * A background child busy/retrying keeps the parent logically working even
+ * when the parent's own status is idle (derived from the global status index).
  * Returns idle when permissions or questions are pending (the permission /
  * question indicator takes priority, and the send button must stay available so
  * the user can supersede the prompt with a new message).
@@ -32,6 +35,7 @@ function useSessionActivity(sessionId: string | null | undefined, directory?: st
   const messages = useSessionMessages(sessionId ?? '', directory);
   const permissions = useSessionPermissions(sessionId ?? '', directory);
   const questions = useSessionQuestions(sessionId ?? '', directory);
+  const derivedChildStatus = useGlobalSessionDerivedStatus(sessionId ?? '');
 
   return React.useMemo<SessionActivityResult>(() => {
     if (!sessionId) return IDLE_RESULT;
@@ -40,7 +44,13 @@ function useSessionActivity(sessionId: string | null | undefined, directory?: st
     // priority and the send button must remain a send, not a stop).
     if (permissions.length > 0 || questions.length > 0) return IDLE_RESULT;
 
-    const phase: SessionActivityPhase = (status?.type ?? 'idle') as SessionActivityPhase;
+    // A background child keeps the parent working even while the parent's own
+    // raw status is idle; the derived entry carries the only authoritative
+    // liveness evidence the parent has during that window.
+    const hasDerivedChildActivity = derivedChildStatus !== undefined;
+    const phase: SessionActivityPhase = hasDerivedChildActivity
+      ? (derivedChildStatus.type as SessionActivityPhase)
+      : ((status?.type ?? 'idle') as SessionActivityPhase);
 
     // Only trust the trailing assistant message as a transient fallback while
     // waiting for session.status/message.updated to settle.
@@ -51,7 +61,7 @@ function useSessionActivity(sessionId: string | null | undefined, directory?: st
       && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
     );
 
-    const hasAuthoritativeStatus = status !== undefined;
+    const hasAuthoritativeStatus = status !== undefined || hasDerivedChildActivity;
     const statusWorking = hasAuthoritativeStatus && phase !== 'idle';
     const isWorking = statusWorking || hasPendingAssistant;
 
@@ -65,7 +75,7 @@ function useSessionActivity(sessionId: string | null | undefined, directory?: st
       isBusy: phase === 'busy' || (!statusWorking && hasPendingAssistant),
       isCooldown: false,
     };
-  }, [sessionId, status, messages, permissions, questions]);
+  }, [sessionId, status, messages, permissions, questions, derivedChildStatus]);
 }
 
 export function useCurrentSessionActivity(): SessionActivityResult {

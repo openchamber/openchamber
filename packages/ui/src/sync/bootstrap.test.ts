@@ -108,4 +108,118 @@ describe("bootstrapDirectory", () => {
     expect(result).toBe("stale")
     expect(commits).toBe(0)
   })
+
+  test("does not re-apply a status snapshot when the status fetch failed", async () => {
+    let state = createState()
+    const statusCommits: unknown[] = []
+    const sdk = createSdk()
+    ;(sdk.session as { status: () => Promise<unknown> }).status = async () => {
+      throw new Error("status unavailable")
+    }
+    const result = await bootstrapDirectory({
+      directory: "/repo",
+      sdk,
+      getState: () => state,
+      set: (patch) => {
+        if (patch.session_status) statusCommits.push(patch.session_status)
+        state = { ...state, ...patch }
+      },
+      global: { config: {}, projects: [project] },
+      loadSessions: async () => undefined,
+    })
+
+    expect(result).toBe("complete")
+    // A failed session.status() must never clear existing global activity with
+    // an empty/initialized snapshot.
+    expect(statusCommits).toEqual([])
+  })
+
+  test("re-applies a successful status snapshot after the session list loads", async () => {
+    let state = createState()
+    const statusCommits: unknown[] = []
+    const sdk = createSdk()
+    ;(sdk.session as { status: () => Promise<unknown> }).status = async () => ({ data: { "child-1": { type: "busy" } } })
+    await bootstrapDirectory({
+      directory: "/repo",
+      sdk,
+      getState: () => state,
+      set: (patch) => {
+        if (patch.session_status) statusCommits.push(patch.session_status)
+        state = { ...state, ...patch }
+      },
+      global: { config: {}, projects: [project] },
+      loadSessions: async () => undefined,
+    })
+
+    // Phase 1 commits it once; the post-list re-application commits it again so
+    // the global status index can learn relations from the now-loaded records.
+    expect(statusCommits).toEqual([
+      { "child-1": { type: "busy" } },
+      { "child-1": { type: "busy" } },
+    ])
+  })
+
+  test("re-application preserves live status events that arrived while the session list loaded", async () => {
+    let state = createState()
+    const statusCommits: unknown[] = []
+    const sdk = createSdk()
+    ;(sdk.session as { status: () => Promise<unknown> }).status = async () => ({ data: { "child-1": { type: "busy" } } })
+    await bootstrapDirectory({
+      directory: "/repo",
+      sdk,
+      getState: () => state,
+      set: (patch) => {
+        if (patch.session_status) statusCommits.push(patch.session_status)
+        state = { ...state, ...patch }
+      },
+      global: { config: {}, projects: [project] },
+      loadSessions: async () => {
+        // Live events land while the authoritative session list is loading:
+        // child-1 settles idle and a brand-new session becomes busy.
+        state = {
+          ...state,
+          session_status: {
+            ...state.session_status,
+            "child-1": { type: "idle" },
+            "live-new": { type: "busy" },
+          },
+        }
+      },
+    })
+
+    // The re-application must carry the live view, not revert child-1 to the
+    // phase-1 busy snapshot or drop the newly-busy session.
+    expect(state.session_status).toEqual({
+      "child-1": { type: "idle" },
+      "live-new": { type: "busy" },
+    })
+    expect(statusCommits[statusCommits.length - 1]).toEqual({
+      "child-1": { type: "idle" },
+      "live-new": { type: "busy" },
+    })
+  })
+
+  test("re-application does not resurrect a status entry removed by a live mutation", async () => {
+    let state = createState()
+    const sdk = createSdk()
+    ;(sdk.session as { status: () => Promise<unknown> }).status = async () => ({
+      data: { "moved-1": { type: "busy" }, "kept-1": { type: "busy" } },
+    })
+    await bootstrapDirectory({
+      directory: "/repo",
+      sdk,
+      getState: () => state,
+      set: (patch) => {
+        state = { ...state, ...patch }
+      },
+      global: { config: {}, projects: [project] },
+      loadSessions: async () => {
+        // A live move/delete removes moved-1 from this directory's status view
+        // while the session list loads.
+        state = { ...state, session_status: { "kept-1": { type: "busy" } } }
+      },
+    })
+
+    expect(state.session_status).toEqual({ "kept-1": { type: "busy" } })
+  })
 })

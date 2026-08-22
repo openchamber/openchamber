@@ -97,6 +97,7 @@ describe("mergeBootstrapSessions", () => {
     expect(mergeBootstrapSessions([], [child], [parent])).toEqual({
       sessions: [child, parent],
       rootCount: 1,
+      complete: true,
     })
   })
 
@@ -108,6 +109,7 @@ describe("mergeBootstrapSessions", () => {
     expect(mergeBootstrapSessions([], [parent, child], [stale])).toEqual({
       sessions: [child, parent],
       rootCount: 1,
+      complete: true,
     })
   })
 
@@ -117,17 +119,21 @@ describe("mergeBootstrapSessions", () => {
     expect(mergeBootstrapSessions([], [], [persisted])).toEqual({
       sessions: [],
       rootCount: 0,
+      complete: true,
     })
   })
 
-  test("preserves known children when the child-session request fails", () => {
+  test("preserves known children when the child-session request fails but is not complete", () => {
     const cachedParent = createSession("parent")
     const authoritativeParent = createSession("parent", { title: "Current" })
     const cachedChild = createSession("child", { parentID: "parent" })
 
+    // The fallback data (roots + cached children) commits, but the full
+    // hierarchy was not fetched: the list is NOT authoritative-complete.
     expect(mergeBootstrapSessions([authoritativeParent], null, [cachedChild, cachedParent])).toEqual({
       sessions: [cachedChild, authoritativeParent],
       rootCount: 1,
+      complete: false,
     })
   })
 
@@ -142,6 +148,7 @@ describe("mergeBootstrapSessions", () => {
     })).toEqual({
       sessions: [liveUpdate, liveCreate],
       rootCount: 2,
+      complete: true,
     })
   })
 
@@ -154,6 +161,7 @@ describe("mergeBootstrapSessions", () => {
     })).toEqual({
       sessions: [],
       rootCount: 0,
+      complete: true,
     })
   })
 })

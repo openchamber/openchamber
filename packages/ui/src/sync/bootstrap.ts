@@ -1,4 +1,4 @@
-import type { OpencodeClient, PermissionRequest, Project, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type { OpencodeClient, PermissionRequest, Project, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { retry } from "./retry"
 import type { GlobalState, State } from "./types"
 import { runtimeFetch } from "../lib/runtime-fetch"
@@ -138,6 +138,12 @@ export async function bootstrapDirectory(input: {
   const state = getState()
   const loading = state.status !== "complete"
 
+  // Captured only when the phase-1 status fetch actually succeeds. The
+  // authoritative status snapshot is re-applied after the session list loads
+  // (cold-start relation reconciliation); a failed fetch must never reapply an
+  // empty snapshot that would clear existing global activity.
+  let committedStatuses: Record<string, SessionStatus> | null = null
+
   // Seed from global state while we fetch directory-specific data
   const seededProject = projectID(directory, g.projects)
   if (seededProject) commit({ project: seededProject })
@@ -168,7 +174,12 @@ export async function bootstrapDirectory(input: {
         if (next) commit({ project: next })
       }),
     ),
-    retry(() => sdk.session.status().then((x) => commit({ session_status: unwrap(x, "session.status") }))),
+    retry(() =>
+      sdk.session.status().then((x) => {
+        committedStatuses = unwrap(x, "session.status")
+        commit({ session_status: committedStatuses })
+      }),
+    ),
   ])
 
   if (input.isStale?.()) return "stale"
@@ -299,6 +310,27 @@ export async function bootstrapDirectory(input: {
   if (sessionLoad?.status === "rejected") {
     console.error(`[bootstrap] session load failed for ${directory}`, sessionLoad.reason)
     return "failed"
+  }
+  // Cold-start relation reconciliation: the phase-1 status snapshot was applied
+  // with an empty/partial session list, so parent relations were unknown and a
+  // pre-existing busy child could not derive parent activity. Now that the
+  // authoritative session list is committed, re-apply the successful status
+  // snapshot so derived activity appears immediately without awaiting the next
+  // poll/event. Only a fetch that actually succeeded re-applies — a failed
+  // `session.status()` must never clear existing global activity with an
+  // empty/initialized snapshot.
+  //
+  // Re-apply the store's CURRENT status view, not the phase-1 capture: live
+  // `session.status`/`session.idle`/`session.error` events that arrived while
+  // the session list loaded updated the same store, so committing the older
+  // capture verbatim would clobber that newer live state. The store already
+  // holds the capture overlaid with every live mutation (status events are the
+  // only writers to `session_status`), so committing the current view keeps
+  // those updates; when nothing diverged it is the identical reference, and the
+  // re-apply stays a no-op for store subscribers while still re-running the
+  // global snapshot reconciliation with the now-complete session list.
+  if (committedStatuses) {
+    commit({ session_status: getState().session_status })
   }
   return "complete"
 }

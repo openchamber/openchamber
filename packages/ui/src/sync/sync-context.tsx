@@ -4,6 +4,7 @@ import type { Event, Message, Part } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
 import type { StoreApi } from "zustand"
 import { useStore } from "zustand"
+import { useShallow } from "zustand/react/shallow"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
 import { isVSCodeRuntime } from "@/lib/desktop"
@@ -27,6 +28,7 @@ import {
   areSessionListsEquivalent,
   areStatusMapsEquivalent,
   findLiveSession,
+  mergeDerivedSessionStatuses,
 } from "./live-aggregate"
 import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
@@ -52,7 +54,7 @@ import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
-import { applyGlobalSessionStatusEvent, applyGlobalSessionStatusSnapshot, useGlobalSessionStatusStore } from "./global-session-status"
+import { applyGlobalSessionStatusEvent, applyGlobalSessionStatusSnapshot, isCompleteSessionListForPruning, useGlobalSessionStatusStore } from "./global-session-status"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
@@ -212,7 +214,7 @@ export function useGlobalSessionStatus(sessionId: string): SessionStatus | undef
 
 /** Read all session statuses (for sidebar) */
 export function useAllSessionStatuses(): Record<string, SessionStatus> {
-  return useLiveSyncSelector(
+  const raw = useLiveSyncSelector(
     useCallback((states) => aggregateLiveSessionStatuses(states), []),
     areStatusMapsEquivalent,
     useCallback(
@@ -223,6 +225,22 @@ export function useAllSessionStatuses(): Record<string, SessionStatus> {
       [],
     ),
   )
+  // Derived-only global entries: a parent kept presentation-active by a
+  // busy/retrying background child. Only derived entries are merged — the
+  // global RAW index never shadows a fresher directory store status, and the
+  // merge keeps raw busy/retry precedence. The entry disappears as soon as the
+  // last active child settles (or on runtime reset), so the merged result
+  // clears with it.
+  const derived = useGlobalSessionStatusStore(useShallow(
+    (state) => {
+      const entries: Record<string, SessionStatus> = {}
+      for (const [sessionId, entry] of state.statusById) {
+        if (entry.derived === true) entries[sessionId] = entry.status
+      }
+      return entries
+    },
+  ))
+  return useMemo(() => mergeDerivedSessionStatuses(raw, derived), [raw, derived])
 }
 
 export function useAllLiveSessions(): Session[] {
@@ -657,7 +675,11 @@ async function resyncDirectorySessionStatuses(
   if (nextStatuses === null) return null
   applySessionStatusSnapshot(store, nextStatuses, candidateSessionIds, mode)
   if (mode === "authoritative") {
-    applyGlobalSessionStatusSnapshot(directory, nextStatuses, candidateSessionIds)
+    // Omission pruning requires a proven-complete session list: only an
+    // explicit authoritative fetch/commit proves it ("live" event-updated
+    // lists do not).
+    const listComplete = isCompleteSessionListForPruning(store.getState().sessionListSource)
+    applyGlobalSessionStatusSnapshot(directory, nextStatuses, candidateSessionIds, store.getState().session, listComplete)
     // An authoritative snapshot that settles sessions previously observed
     // busy/retry can leave their trailing assistant message and tool parts
     // unfinished (managed process died mid-turn, #2577): finalize them now.
@@ -2094,7 +2116,12 @@ export function SyncProvider(props: {
               if (!context.isCurrent()) return
               store.setState(patch)
               if (patch.session_status) {
-                applyGlobalSessionStatusSnapshot(directory, patch.session_status, store.getState().session.map((session) => session.id))
+                // Omission pruning runs only when the store's session list is
+                // proven complete (explicit authoritative load) — the phase-1
+                // status commit before loadSessions carries an empty/partial
+                // list, and a "live" event-updated list is not a completeness
+                // proof either, so neither must prune relations.
+                applyGlobalSessionStatusSnapshot(directory, patch.session_status, store.getState().session.map((session) => session.id), store.getState().session, isCompleteSessionListForPruning(store.getState().sessionListSource))
               }
               if (patch.session || patch.message) {
                 ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
@@ -2136,15 +2163,20 @@ export function SyncProvider(props: {
               // roots query catches up. Recover referenced parents from the
               // broader response or cache instead of publishing orphan rows.
               const current = store.getState()
-              const { sessions, rootCount } = mergeBootstrapSessions(rootSessions, allSessions, current.session, {
+              const { sessions, rootCount, complete } = mergeBootstrapSessions(rootSessions, allSessions, current.session, {
                 baselineRevision,
                 eventRevision: current.sessionEventRevision,
                 deletedRevision: current.sessionDeletedRevision,
               })
+              // Mark the list authoritative-complete only when the full
+              // hierarchy (roots AND children) was fetched. A roots-only
+              // fallback after a failed child fetch is NOT complete: calling it
+              // authoritative would let relation omission pruning delete
+              // relations for children that exist but were not fetched.
               store.setState({
                 session: sessions,
                 sessionTotal: rootCount,
-                sessionListSource: "authoritative",
+                sessionListSource: complete ? "authoritative" : "roots-only",
                 limit: Math.max(sessions.length, 50),
               })
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())

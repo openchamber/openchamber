@@ -16,7 +16,7 @@ import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resetStreamingState } from '@/sync/streaming';
-import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { resetGlobalSessionStatus } from '@/sync/global-session-status';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
 import { syncDesktopSettings } from '@/lib/persistence';
@@ -59,7 +59,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // Cross-project session list (mobile sessions sheet & co) belongs to the
   // previous instance — drop it so stale sessions can't linger after a switch.
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
-  useGlobalSessionStatusStore.setState({ statusById: new Map() });
+  resetGlobalSessionStatus();
   resetSessionOrdering();
   // Turn timings belong to the previous instance's sessions, and the reset also
   // restarts the resume window so the switch is treated as a fresh load.
