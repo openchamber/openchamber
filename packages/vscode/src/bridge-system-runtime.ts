@@ -254,7 +254,8 @@ export async function handleSystemBridgeMessage(
           return { id, type, success: true, data: { version: null, error: 'OpenCode manager unavailable' } };
         }
         const base = `${apiUrl.replace(/\/+$/, '')}/`;
-        const response = await fetch(new URL('global/health', base).toString(), {
+        const healthPath = ctx?.manager?.getProtocol() === 'opencode2' ? 'api/health' : 'global/health';
+        const response = await fetch(new URL(healthPath, base).toString(), {
           method: 'GET',
           headers: { Accept: 'application/json', ...ctx?.manager?.getOpenCodeAuthHeaders() },
         });
@@ -520,6 +521,22 @@ export async function handleSystemBridgeMessage(
           normalizedScope,
           { hasStoredAuth: Boolean(getProviderAuth(providerId)) },
         );
+        if (
+          ctx?.manager?.getProtocol() === 'opencode2'
+          && ctx.manager.getDebugInfo().mode === 'managed'
+        ) {
+          return {
+            id,
+            type,
+            success: true,
+            data: {
+              ...buildDeferredRestartResponse(`Provider ${providerId} saved. Restart the global OpenCode service to apply.`),
+              providerId: result.providerId,
+              path: result.path,
+              config: result.config,
+            },
+          };
+        }
         await ctx?.manager?.restart();
         return {
           id,

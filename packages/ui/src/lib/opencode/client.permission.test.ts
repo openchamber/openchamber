@@ -107,10 +107,10 @@ const { opencodeClient } = await import(`./client?cache-test-permission=${Date.n
  * is unambiguous as long as tests do not overlap.
  */
 const resolveNext = (response: TestResponse) => {
-  queueMicrotask(() => {
-    const resolver = pendingResolutions.shift();
-    if (resolver) resolver(response);
-  });
+  void (async () => {
+    while (pendingResolutions.length === 0) await Promise.resolve();
+    pendingResolutions.shift()?.(response);
+  })();
 };
 
 describe('opencodeClient.fetchPermission', () => {

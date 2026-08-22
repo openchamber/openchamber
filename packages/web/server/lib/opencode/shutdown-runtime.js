@@ -19,6 +19,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getMessageStreamRuntime,
     setMessageStreamRuntime,
     shouldSkipOpenCodeStop,
+    getOpenCodeOwnership = () => 'external',
     getOpenCodePort,
     getOpenCodeProcess,
     setOpenCodeProcess,
@@ -40,7 +41,9 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     setIsShuttingDown(true);
     syncToHmrState();
     console.log('Starting graceful shutdown...');
-    const exitProcess = typeof options.exitProcess === 'boolean' ? options.exitProcess : getExitOnShutdown();
+    const exitProcess = options.exitProcess === true
+      ? true
+      : (options.exitProcess === false ? false : getExitOnShutdown());
 
     openCodeWatcherRuntime.stop();
     sessionRuntime.dispose();
@@ -93,7 +96,9 @@ export const createGracefulShutdownRuntime = (dependencies) => {
         console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released during shutdown`);
       }
     } else {
-      console.log('Skipping OpenCode shutdown (external server)');
+      console.log(getOpenCodeOwnership() === 'shared-service'
+        ? 'Skipping OpenCode shutdown (shared service)'
+        : 'Skipping OpenCode shutdown (external server)');
     }
 
     const server = getServer();

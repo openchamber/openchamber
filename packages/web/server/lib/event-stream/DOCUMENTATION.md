@@ -26,7 +26,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `sendMessageStreamWsEvent(socket, payload, options)`: sends an event frame with optional `eventId` and `directory`.
 
 ### Runtime helpers
-- `createGlobalMessageStreamHub(...)`: creates a shared `/global/event` upstream SSE hub with event/status subscribers and bounded event-id replay.
+- `createGlobalMessageStreamHub(...)`: creates a shared upstream SSE hub (`/global/event` for legacy, `/api/event` for opencode2) with event/status subscribers, protocol-aware event normalization, and bounded event-id replay.
 - `createGlobalUiEventBroadcaster({ sseClients, wsClients, writeSseEvent })`: returns a broadcaster that fans out the same synthetic UI event to SSE and WS clients.
 - `createMessageStreamWsRuntime(...)`: mounts the message-stream WS server, upgrade handler, and SSE-to-WS bridge onto the web HTTP server.
 
@@ -39,6 +39,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - Browser clients connect to the WS endpoints above.
 - OpenChamber still fetches OpenCode upstream event streams over SSE.
 - The web server creates one shared global message-stream hub. OpenCode watcher side effects and global WS clients subscribe to that hub, so there is one upstream `/global/event` SSE reader for both server-side processing and browser fan-out.
+- The shared hub preserves legacy event envelopes unchanged and provides shallow opencode2 `{ id, type, data, location }` normalization for server-side consumers. The UI does not use that normalization for opencode2 session text/tool/message events; it consumes adapter SSE so the adapter's stateful event mapper can translate them completely. The opencode2 event `id` remains available for hub replay.
 - The global hub keeps a bounded replay buffer keyed by SSE `eventId` so reconnecting browser clients can receive buffered events after their requested `Last-Event-ID`.
 - Directory WS clients still attach one upstream `/event?directory=...` SSE reader per connection because directory streams are scoped.
 - If an upstream SSE stream stalls after the browser WS is already ready, the reader aborts that upstream fetch and reconnects upstream with `Last-Event-ID`, keeping the browser WS alive when recovery is fast.

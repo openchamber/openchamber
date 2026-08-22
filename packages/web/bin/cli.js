@@ -160,15 +160,15 @@ async function checkOpenCodeCLI(onNotice) {
     }
   }
 
-  const resolvedFromPath = searchPathFor('opencode');
+  const resolvedFromPath = searchPathFor('opencode') || searchPathFor('opencode2');
   if (resolvedFromPath) {
     process.env.OPENCODE_BINARY = resolvedFromPath;
     return resolvedFromPath;
   }
 
   throw new Error(
-    `Unable to locate the opencode CLI on PATH (${process.env.PATH || '<empty>'}). ` +
-    'Ensure the CLI is installed and reachable, or set OPENCODE_BINARY to its full path.'
+    `Unable to locate the opencode or opencode2 CLI on PATH (${process.env.PATH || '<empty>'}). ` +
+    'Ensure a CLI is installed and reachable, or set OPENCODE_BINARY to its full path.'
   );
 }
 

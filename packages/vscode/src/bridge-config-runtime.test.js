@@ -15,12 +15,18 @@ const { handleConfigBridgeMessage } = await import('./bridge-config-runtime.ts')
 const tempRoots = [];
 const originalOpencodeConfig = process.env.OPENCODE_CONFIG;
 
-const createCtx = (workingDirectory, restartImpl = async () => undefined) => {
+const createCtx = (
+  workingDirectory,
+  restartImpl = async () => undefined,
+  { protocol = 'legacy', mode = 'managed' } = {},
+) => {
   const restart = mock(restartImpl);
   return {
     restart,
     manager: {
       getWorkingDirectory: () => workingDirectory,
+      getProtocol: () => protocol,
+      getDebugInfo: () => ({ mode }),
       restart,
     },
   };
@@ -69,6 +75,64 @@ describe('VS Code config bridge plugin parity', () => {
       data: { restarted: true },
     });
     expect(ctx.restart).toHaveBeenCalledTimes(1);
+  });
+
+  test('shared opencode2 config reload requires an operator restart', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-reload-'));
+    tempRoots.push(root);
+    const ctx = createCtx(root, undefined, { protocol: 'opencode2' });
+
+    const reloaded = await handleConfigBridgeMessage({
+      id: 'reload',
+      type: 'api:config/reload',
+    }, ctx, deps);
+
+    expect(reloaded).toEqual({
+      id: 'reload',
+      type: 'api:config/reload',
+      success: true,
+      data: {
+        success: true,
+        requiresReload: false,
+        requiresManualRestart: true,
+        message: 'Configuration is saved on disk. Restart the global OpenCode service to apply the changes.',
+      },
+    });
+    expect(ctx.restart).not.toHaveBeenCalled();
+  });
+
+  test('shared opencode2 skill rename defers apply without restarting the service', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-skill-rename-'));
+    tempRoots.push(root);
+    const skillDirectory = path.join(root, '.opencode', 'skills', 'old-skill');
+    fs.mkdirSync(skillDirectory, { recursive: true });
+    fs.writeFileSync(path.join(skillDirectory, 'SKILL.md'), [
+      '---',
+      'name: old-skill',
+      'description: Old skill',
+      '---',
+      '',
+      'Instructions',
+      '',
+    ].join('\n'));
+    const ctx = createCtx(root, undefined, { protocol: 'opencode2' });
+
+    const renamed = await handleConfigBridgeMessage({
+      id: 'rename',
+      type: 'api:config/skills',
+      payload: { method: 'PATCH', name: 'old-skill', body: { renameTo: 'new-skill' } },
+    }, ctx, deps);
+
+    expect(renamed).toMatchObject({
+      success: true,
+      data: {
+        name: 'new-skill',
+        requiresReload: false,
+        requiresRestart: true,
+        restartDeferred: true,
+      },
+    });
+    expect(ctx.restart).not.toHaveBeenCalled();
   });
 
   test('removes agent fields when update payload sends null', async () => {

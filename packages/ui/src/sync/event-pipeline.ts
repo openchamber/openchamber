@@ -14,6 +14,7 @@
 
 import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { opencodeClient } from "@/lib/opencode/client"
+import { resolveOpenCodeProtocol } from "@/lib/opencode/opencode2-adapter"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
 import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
@@ -783,7 +784,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     })
   }
 
-  const resolveTransport = (): "ws" | "sse" => {
+  const resolveLegacyTransport = (): "ws" | "sse" => {
     if (typeof WebSocket !== "function") {
       return "sse"
     }
@@ -796,14 +797,20 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     return wsFallbackUntil > Date.now() ? "sse" : "ws"
   }
 
+  const resolveTransport = (): "ws" | "sse" | Promise<"ws" | "sse"> => {
+    if (transport === "sse") return "sse"
+    const protocol = resolveOpenCodeProtocol(sdk)
+    if (!(protocol instanceof Promise)) return protocol === "opencode2" ? "sse" : resolveLegacyTransport()
+    return protocol.then((detected) => detected === "opencode2" ? "sse" : resolveLegacyTransport())
+  }
+
   void (async () => {
     while (!abort.signal.aborted) {
       attempt = new AbortController()
       lastEventAt = Date.now()
       attemptAbortReason = null
       let retryDelayMs = reconnectDelayMs
-      const currentTransport = resolveTransport()
-      activeTransport = currentTransport
+      let currentTransport = activeTransport
       const onAbort = () => {
         attemptAbortReason = "pipeline_stopped"
         attempt?.abort()
@@ -811,6 +818,9 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       abort.signal.addEventListener("abort", onAbort)
 
       try {
+        const resolvedTransport = resolveTransport()
+        currentTransport = resolvedTransport instanceof Promise ? await resolvedTransport : resolvedTransport
+        activeTransport = currentTransport
         if (currentTransport === "ws") {
           await runWsAttempt(attempt.signal)
         } else {

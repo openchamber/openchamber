@@ -90,11 +90,13 @@ describe('opencodeClient directory availability', () => {
 describe('opencodeClient getConfig cache', () => {
   test('cleared stale in-flight requests do not repopulate cache or delete newer in-flight requests', async () => {
     const first = opencodeClient.getConfig('/workspace/project');
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(configCalls).toBe(1);
 
     opencodeClient.clearConfigCache();
 
     const second = opencodeClient.getConfig('/workspace/project');
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(configCalls).toBe(2);
 
     configResolvers[0]?.({ data: { model: 'old/model' } });

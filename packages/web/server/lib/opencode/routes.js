@@ -25,6 +25,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     upsertProviderConfig,
     refreshOpenCodeAfterConfigChange,
     buildOpenCodeUrl,
+    getOpenCodeHealthPath = () => '/global/health',
     getOpenCodeAuthHeaders,
     fsPromises = fs.promises,
   } = dependencies;
@@ -89,7 +90,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
 </html>`;
 
   const readOpenCodeCurrentVersion = async () => {
-    const healthResponse = await fetch(buildOpenCodeUrl('/global/health', ''), {
+    const healthResponse = await fetch(buildOpenCodeUrl(getOpenCodeHealthPath(), ''), {
       method: 'GET',
       headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
     });
@@ -295,7 +296,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
       }
 
       const [healthResponse, latestVersion] = await Promise.all([
-        fetch(buildOpenCodeUrl('/global/health', ''), {
+        fetch(buildOpenCodeUrl(getOpenCodeHealthPath(), ''), {
           method: 'GET',
           headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
         }),
@@ -329,7 +330,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
 
   app.get('/api/opencode/health', async (_req, res) => {
     try {
-      const healthResponse = await fetch(buildOpenCodeUrl('/global/health', ''), {
+      const healthResponse = await fetch(buildOpenCodeUrl(getOpenCodeHealthPath(), ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
       });
@@ -351,7 +352,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
 
   app.get('/api/opencode/version', async (_req, res) => {
     try {
-      const healthResponse = await fetch(buildOpenCodeUrl('/global/health', ''), {
+      const healthResponse = await fetch(buildOpenCodeUrl(getOpenCodeHealthPath(), ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
       });

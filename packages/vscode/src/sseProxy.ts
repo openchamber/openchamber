@@ -44,14 +44,35 @@ const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) =
 
 const getAbortReason = (signal: AbortSignal) => signal.reason ?? new DOMException('Aborted', 'AbortError');
 
-const normalizeSsePath = (path: string): { pathname: '/event' | '/global/event'; searchParams: URLSearchParams; directory: string | null } => {
-  const parsed = new URL(path, 'https://openchamber.invalid');
-  const pathname = parsed.pathname === '/global/event' ? '/global/event' : '/event';
-  const directory = parsed.searchParams.get('directory');
+type UpstreamSsePath = '/event' | '/global/event' | '/api/event';
+type NormalizedSsePath = {
+  pathname: UpstreamSsePath;
+  searchParams: URLSearchParams;
+  directory: string | null;
+};
+
+const normalizeSsePath = (path: string): NormalizedSsePath => {
+  const base = new URL('https://openchamber.invalid');
+  const parsed = new URL(path, base);
+  if (parsed.origin !== base.origin) {
+    throw new Error('Invalid OpenCode SSE path');
+  }
+
+  const pathname: UpstreamSsePath = (() => {
+    switch (parsed.pathname) {
+      case '/api/api/event': return '/api/event';
+      case '/api/global/event': return '/global/event';
+      case '/api/event':
+      case '/event': return '/event';
+      case '/global/event': return '/global/event';
+      default: throw new Error(`Unsupported OpenCode SSE path: ${parsed.pathname}`);
+    }
+  })();
+  const directory = parsed.searchParams.get('directory')?.trim() || null;
   return {
     pathname,
     searchParams: new URLSearchParams(parsed.searchParams),
-    directory: typeof directory === 'string' && directory.trim().length > 0 ? directory.trim() : null,
+    directory,
   };
 };
 
@@ -59,13 +80,13 @@ const resolveDefaultDirectory = (manager: OpenCodeManager): string => {
   return manager.getWorkingDirectory() || 'global';
 };
 
-const createSseUrl = (baseUrl: string, pathname: '/event' | '/global/event', searchParams: URLSearchParams, directory: string): URL => {
+const createSseUrl = (baseUrl: string, pathname: UpstreamSsePath, searchParams: URLSearchParams, directory: string): URL => {
   const base = `${baseUrl.replace(/\/+$/, '')}/`;
   const url = new URL(pathname.replace(/^\/+/, ''), base);
   for (const [key, value] of searchParams) {
     url.searchParams.append(key, value);
   }
-  if (pathname === '/event' && !url.searchParams.has('directory')) {
+  if (pathname !== '/global/event' && !url.searchParams.has('directory')) {
     url.searchParams.set('directory', directory);
   }
   return url;
@@ -205,6 +226,24 @@ export const openSseProxy = async ({
   onChunk,
   stallTimeoutMs,
 }: OpenSseProxyOptions): Promise<OpenSseProxyResult> => {
+  normalizeSsePath(path);
+  const streamController = new AbortController();
+  const abortStream = () => streamController.abort(signal.reason);
+  if (signal.aborted) {
+    abortStream();
+  } else {
+    signal.addEventListener('abort', abortStream, { once: true });
+  }
+  const statusSubscription = manager.onStatusChange((status) => {
+    if (status === 'disconnected' || status === 'error') {
+      streamController.abort();
+    }
+  });
+  const streamSignal = streamController.signal;
+  const cleanup = () => {
+    signal.removeEventListener('abort', abortStream);
+    statusSubscription.dispose();
+  };
   // Reconnect logic with exponential backoff
   let reconnectAttempts = 0;
 
@@ -213,16 +252,16 @@ export const openSseProxy = async ({
       const { pathname } = normalizeSsePath(path);
       console.log(`[SSE] Connecting to ${pathname} (attempt ${reconnectAttempts + 1}/${MAX_RECONNECTS + 1})`);
 
-      const result = await fetchSseResponse(manager, path, headers, signal);
+      const result = await fetchSseResponse(manager, path, headers, streamSignal);
       reconnectAttempts = 0;
       return result;
     } catch (error) {
-      if ((error as Error)?.name === 'AbortError' || signal.aborted) {
+      if ((error as Error)?.name === 'AbortError' || streamSignal.aborted) {
         throw error;
       }
 
       // Implement reconnect logic
-      if (!signal.aborted && reconnectAttempts < MAX_RECONNECTS) {
+      if (!streamSignal.aborted && reconnectAttempts < MAX_RECONNECTS) {
         reconnectAttempts++;
         const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1); // Exponential backoff
 
@@ -232,9 +271,9 @@ export const openSseProxy = async ({
           error
         );
 
-        await sleep(delay, signal);
-        if (signal.aborted) {
-          throw getAbortReason(signal);
+        await sleep(delay, streamSignal);
+        if (streamSignal.aborted) {
+          throw getAbortReason(streamSignal);
         }
         return connect(); // Recursive retry
       }
@@ -244,32 +283,38 @@ export const openSseProxy = async ({
     }
   };
 
-  const response = await connect();
+  let response: Response;
+  try {
+    response = await connect();
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 
   const run = (async () => {
     let activeResponse = response;
     try {
-      await pipeSseResponse(activeResponse, signal, onChunk, stallTimeoutMs);
+      await pipeSseResponse(activeResponse, streamSignal, onChunk, stallTimeoutMs);
     } catch (error: unknown) {
       const cause = (error as { cause?: { code?: string } } | null)?.cause;
 
       // Attempt reconnect on socket errors
-      if (!signal.aborted) {
+      if (!streamSignal.aborted) {
         if (cause?.code === 'UND_ERR_SOCKET' || cause?.code === 'ECONNRESET') {
           console.warn('[SSE] Socket error detected, attempting reconnect...');
 
           if (reconnectAttempts < MAX_RECONNECTS) {
             reconnectAttempts++;
             const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1);
-            await sleep(delay, signal);
-            if (signal.aborted) {
+            await sleep(delay, streamSignal);
+            if (streamSignal.aborted) {
               return;
             }
 
             // Attempt to reconnect
             try {
               activeResponse = await connect();
-              await pipeSseResponse(activeResponse, signal, onChunk, stallTimeoutMs);
+              await pipeSseResponse(activeResponse, streamSignal, onChunk, stallTimeoutMs);
               return; // Successfully reconnected
             } catch (reconnectError) {
               console.error('[SSE] Reconnect failed', reconnectError);
@@ -280,6 +325,8 @@ export const openSseProxy = async ({
         // Re-throw if we couldn't recover
         throw error;
       }
+    } finally {
+      cleanup();
     }
   })();
 

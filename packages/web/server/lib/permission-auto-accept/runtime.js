@@ -25,6 +25,7 @@ export function createPermissionAutoAcceptRuntime({
   readSettingsFromDiskMigrated,
   persistSettings,
   broadcastGlobalUiEvent,
+  getOpenCodeProtocol = () => 'legacy',
   fetchImpl = fetch,
   retryDelaysMs = RETRY_DELAYS_MS,
   requestTimeoutMs = REQUEST_TIMEOUT_MS,
@@ -95,9 +96,9 @@ export function createPermissionAutoAcceptRuntime({
     }
   };
 
-  const request = async (path, { directory, method = 'GET', body } = {}) => {
+  const request = async (path, { directory, directoryQuery = 'directory', method = 'GET', body } = {}) => {
     const url = new URL(buildOpenCodeUrl(path, ''));
-    if (directory) url.searchParams.set('directory', directory);
+    if (directory) url.searchParams.set(directoryQuery, directory);
     const response = await fetchImpl(url, {
       method,
       headers: {
@@ -119,7 +120,11 @@ export function createPermissionAutoAcceptRuntime({
   const getSession = async (sessionId, directory) => {
     const cached = sessions.get(sessionId);
     if (cached) return cached;
-    const info = await request(`/session/${encodeURIComponent(sessionId)}`, { directory });
+    const protocol = getOpenCodeProtocol();
+    const path = protocol === 'opencode2'
+      ? `/api/session/${encodeURIComponent(sessionId)}`
+      : `/session/${encodeURIComponent(sessionId)}`;
+    const info = await request(path, { directory: protocol === 'legacy' ? directory : undefined });
     rememberSession(info?.data ?? info, directory);
     return sessions.get(sessionId) ?? null;
   };
@@ -148,8 +153,12 @@ export function createPermissionAutoAcceptRuntime({
     if (!permission?.id || !permission?.sessionID) return false;
     await load();
     if (!(await isSessionAutoAccepting(permission.sessionID, directory))) return false;
-    await request(`/permission/${encodeURIComponent(permission.id)}/reply`, {
-      directory,
+    const protocol = getOpenCodeProtocol();
+    const replyPath = protocol === 'opencode2'
+      ? `/api/session/${encodeURIComponent(permission.sessionID)}/permission/${encodeURIComponent(permission.id)}/reply`
+      : `/permission/${encodeURIComponent(permission.id)}/reply`;
+    await request(replyPath, {
+      directory: protocol === 'legacy' ? directory : undefined,
       method: 'POST',
       body: { reply: 'once' },
     });
@@ -190,7 +199,11 @@ export function createPermissionAutoAcceptRuntime({
       for (const directory of scopes) {
         let payload;
         try {
-          payload = await request('/permission', { directory });
+          const protocol = getOpenCodeProtocol();
+          payload = await request(protocol === 'opencode2' ? '/api/permission/request' : '/permission', {
+            directory,
+            directoryQuery: protocol === 'opencode2' ? 'location[directory]' : 'directory',
+          });
         } catch {
           continue;
         }

@@ -88,7 +88,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return isExecutable(trimmed) ? trimmed : null;
   };
 
-  const searchPathFor = (binaryName, searchPath = process.env.PATH || '') => {
+  const searchPathFor = (binaryName, searchPath = process.env.PATH || '', acceptCandidate = () => true) => {
     const trimmed = typeof binaryName === 'string' ? binaryName.trim() : '';
     if (!trimmed) {
       return null;
@@ -114,7 +114,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     for (const dir of parts) {
       for (const candidateName of candidateNames) {
         const candidate = path.join(dir, candidateName);
-        if (isExecutable(candidate)) {
+        if (isExecutable(candidate) && acceptCandidate(candidate)) {
           return candidate;
         }
       }
@@ -372,7 +372,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
     const bundled = bundledOpenCodeCliFallback();
     if (bundled) return bundled;
 
-    const resolvedFromPath = searchPathFor('opencode');
+    const acceptOpenCodeCli = (candidate) => !isWindowsOpenCodeDesktopAppPath(candidate);
+    const resolvedFromPath = searchPathFor('opencode', process.env.PATH || '', acceptOpenCodeCli)
+      || searchPathFor('opencode2', process.env.PATH || '', acceptOpenCodeCli);
     if (resolvedFromPath) {
       clearWslOpencodeResolution();
       state.resolvedOpencodeBinarySource = 'path';
@@ -390,6 +392,15 @@ export const createOpenCodeEnvRuntime = (deps) => {
       '/home/linuxbrew/.linuxbrew/bin/opencode',
       '/usr/bin/opencode',
       '/bin/opencode',
+      path.join(home, '.opencode', 'bin', 'opencode2'),
+      path.join(home, '.bun', 'bin', 'opencode2'),
+      path.join(home, '.local', 'bin', 'opencode2'),
+      path.join(home, 'bin', 'opencode2'),
+      '/opt/homebrew/bin/opencode2',
+      '/usr/local/bin/opencode2',
+      '/home/linuxbrew/.linuxbrew/bin/opencode2',
+      '/usr/bin/opencode2',
+      '/bin/opencode2',
     ];
 
     const winFallbacks = (() => {
@@ -413,6 +424,16 @@ export const createOpenCodeEnvRuntime = (deps) => {
         path.join(programData, 'chocolatey', 'bin', 'opencode.cmd'),
         path.join(userProfile, '.bun', 'bin', 'opencode.exe'),
         path.join(userProfile, '.bun', 'bin', 'opencode.cmd'),
+        path.join(userProfile, '.opencode', 'bin', 'opencode2.exe'),
+        path.join(userProfile, '.opencode', 'bin', 'opencode2.cmd'),
+        path.join(appData, 'npm', 'opencode2.cmd'),
+        path.join(programFiles, 'nodejs', 'opencode2.cmd'),
+        path.join(userProfile, 'scoop', 'shims', 'opencode2.exe'),
+        path.join(userProfile, 'scoop', 'shims', 'opencode2.cmd'),
+        path.join(programData, 'chocolatey', 'bin', 'opencode2.exe'),
+        path.join(programData, 'chocolatey', 'bin', 'opencode2.cmd'),
+        path.join(userProfile, '.bun', 'bin', 'opencode2.exe'),
+        path.join(userProfile, '.bun', 'bin', 'opencode2.cmd'),
       ].filter(Boolean);
     })();
 
@@ -426,25 +447,27 @@ export const createOpenCodeEnvRuntime = (deps) => {
     }
 
     if (process.platform === 'win32') {
-      try {
-        const result = runSpawnSync('where', ['opencode'], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
-        if (result.status === 0) {
-          const lines = (result.stdout || '')
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .filter(Boolean);
-          const found = lines.find((line) => isExecutable(line) && !isWindowsOpenCodeDesktopAppPath(line));
-          if (found) {
-            clearWslOpencodeResolution();
-            state.resolvedOpencodeBinarySource = 'where';
-            return found;
+      for (const command of ['opencode', 'opencode2']) {
+        try {
+          const result = runSpawnSync('where', [command], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+          });
+          if (result.status === 0) {
+            const lines = (result.stdout || '')
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean);
+            const found = lines.find((line) => isExecutable(line) && !isWindowsOpenCodeDesktopAppPath(line));
+            if (found) {
+              clearWslOpencodeResolution();
+              state.resolvedOpencodeBinarySource = 'where';
+              return found;
+            }
           }
+        } catch {
         }
-      } catch {
       }
       // Do not auto-detect OpenCode from WSL. OpenCode sessions are keyed by
       // server-visible directories, and mixing Windows paths with WSL paths
@@ -452,24 +475,26 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return null;
     }
 
-    const shells = [process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(Boolean);
-    for (const shell of shells) {
-      if (!isExecutable(shell)) continue;
-      try {
-        const result = runSpawnSync(shell, ['-lic', 'command -v opencode'], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
-        if (result.status === 0) {
-          const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
-          if (found && isExecutable(found)) {
-            clearWslOpencodeResolution();
-            state.resolvedOpencodeBinarySource = 'shell';
-            return found;
+    for (const command of ['opencode', 'opencode2']) {
+      const shells = [process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(Boolean);
+      for (const shell of shells) {
+        if (!isExecutable(shell)) continue;
+        try {
+          const result = runSpawnSync(shell, ['-lic', `command -v ${command}`], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+          });
+          if (result.status === 0) {
+            const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
+            if (found && isExecutable(found)) {
+              clearWslOpencodeResolution();
+              state.resolvedOpencodeBinarySource = 'shell';
+              return found;
+            }
           }
+        } catch {
         }
-      } catch {
       }
     }
 
@@ -749,6 +774,22 @@ export const createOpenCodeEnvRuntime = (deps) => {
     }
   };
 
+  const resolveNativeBinaryFromCmdWrapper = (wrapperPath) => {
+    if (!wrapperPath || typeof wrapperPath !== 'string') {
+      return null;
+    }
+    try {
+      const content = fs.readFileSync(wrapperPath, 'utf8');
+      const match = content.match(/["'](%~?dp0%?[\\/][^"']+\.exe)["']/i);
+      if (!match) return null;
+      const relative = match[1].replace(/^%~?dp0%?[\\/]?/i, '');
+      const candidate = path.resolve(path.dirname(wrapperPath), relative.replace(/[\\/]+/g, path.sep));
+      return isExecutable(candidate) ? candidate : null;
+    } catch {
+      return null;
+    }
+  };
+
   const resolveOpencodeNodeModulesDir = (opencodePath) => {
     if (typeof opencodePath !== 'string' || opencodePath.trim().length === 0) {
       return null;
@@ -816,6 +857,17 @@ export const createOpenCodeEnvRuntime = (deps) => {
     }
 
     for (const candidate of candidatePaths) {
+      if (WINDOWS_BATCH_EXTENSIONS.has(path.extname(candidate).toLowerCase())) {
+        const wrappedBinary = resolveNativeBinaryFromCmdWrapper(candidate);
+        if (wrappedBinary) {
+          return {
+            binary: wrappedBinary,
+            args: [],
+            wrapperType: 'native-wrapper',
+          };
+        }
+      }
+
       const nodeModulesDir = resolveOpencodeNodeModulesDir(candidate);
       const nativeBinary = resolveNativeOpencodeBinaryFromNodeModules(nodeModulesDir);
       if (nativeBinary) {

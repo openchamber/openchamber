@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
 const recordStartupPerformanceMock = vi.fn();
+const registerManagedProcessMock = vi.fn();
+const unregisterManagedProcessMock = vi.fn();
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
@@ -11,16 +13,20 @@ vi.mock('node:child_process', () => ({
 vi.mock('./startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
 }));
-
 const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const { createOpenCodeAuthStateRuntime } = await import('./auth-state-runtime.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
+const originalOpencodeServerPassword = process.env.OPENCODE_SERVER_PASSWORD;
+const originalOpencodeServerUsername = process.env.OPENCODE_SERVER_USERNAME;
 const originalPath = process.env.PATH;
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   spawnMock.mockReset();
   recordStartupPerformanceMock.mockReset();
+  registerManagedProcessMock.mockReset();
+  unregisterManagedProcessMock.mockReset();
   globalThis.fetch = originalFetch;
   if (typeof originalOpencodeBinary === 'string') {
     process.env.OPENCODE_BINARY = originalOpencodeBinary;
@@ -32,6 +38,17 @@ afterEach(() => {
     process.env.PATH = originalPath;
   } else {
     delete process.env.PATH;
+  }
+
+  if (typeof originalOpencodeServerPassword === 'string') {
+    process.env.OPENCODE_SERVER_PASSWORD = originalOpencodeServerPassword;
+  } else {
+    delete process.env.OPENCODE_SERVER_PASSWORD;
+  }
+  if (typeof originalOpencodeServerUsername === 'string') {
+    process.env.OPENCODE_SERVER_USERNAME = originalOpencodeServerUsername;
+  } else {
+    delete process.env.OPENCODE_SERVER_USERNAME;
   }
 });
 
@@ -50,6 +67,12 @@ const createMockChild = () => {
   return child;
 };
 
+const createServiceCommandChild = (code = 0) => {
+  const child = new EventEmitter();
+  queueMicrotask(() => child.emit('close', code, null));
+  return child;
+};
+
 const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) => {
   const state = {
     openCodeWorkingDirectory: '/tmp/project',
@@ -61,6 +84,7 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     openCodeApiPrefix: '',
     openCodeApiPrefixDetected: false,
     openCodeApiDetectionTimer: null,
+    openCodeProtocol: 'legacy',
     lastOpenCodeError: null,
     lastOpenCodeHealthFailure: null,
     lastManagedOpenCodeProcess: null,
@@ -68,6 +92,7 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     isOpenCodeReady: false,
     openCodeNotReadySince: 0,
     isExternalOpenCode: false,
+    isSharedOpenCodeService: false,
     isShuttingDown: false,
     healthCheckInterval: null,
     expressApp: null,
@@ -78,7 +103,7 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     ...stateOverrides,
   };
 
-  const runtime = createOpenCodeLifecycleRuntime({
+  const dependencies = {
     state,
     env: {
       ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -93,9 +118,10 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     getOpenCodeAuthHeaders: () => ({}),
     buildOpenCodeUrl: (route) => `http://127.0.0.1:45678${route}`,
     waitForReady: vi.fn(async () => true),
+    getOpenCodeHealthPath: vi.fn(() => '/global/health'),
     normalizeApiPrefix: vi.fn(() => ''),
     applyOpencodeBinaryFromSettings: vi.fn(async () => null),
-    ensureOpencodeCliEnv: vi.fn(),
+    ensureOpencodeCliEnv: vi.fn(() => process.env.OPENCODE_BINARY || 'opencode'),
     ensureLocalOpenCodeServerPassword: vi.fn(async () => 'password'),
     resolveManagedOpenCodeLaunchSpec: vi.fn((binary) => ({ binary, args: [], wrapperType: null })),
     setOpenCodePort: vi.fn((port) => {
@@ -112,9 +138,16 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
       SHELL_ONLY: 'yes',
       OPENCODE_SERVER_PASSWORD: 'shell-password',
     })),
+    discoverOpenCodeService: vi.fn(async () => undefined),
+    spawnOpenCodeServiceCommand: spawnMock,
+    setOpenCodeServiceAuth: vi.fn(),
+    registerManagedOpenCodeProcess: registerManagedProcessMock,
+    unregisterManagedOpenCodeProcess: unregisterManagedProcessMock,
     ...overrides,
-  });
+  };
+  const runtime = createOpenCodeLifecycleRuntime(dependencies);
   runtime.testState = state;
+  runtime.testDependencies = dependencies;
   return runtime;
 };
 
@@ -149,6 +182,202 @@ describe('OpenCode lifecycle', () => {
       phase === 'opencode.bootstrap.ready' || phase === 'opencode.bootstrap.error'
     ));
     expect(terminalEvents).toHaveLength(1);
+    expect(runtime.testDependencies.discoverOpenCodeService).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(runtime.testState.isExternalOpenCode).toBe(true);
+    expect(runtime.testState.isSharedOpenCodeService).toBe(false);
+  });
+
+  it('starts opencode2 through the effective service command and discovers the shared endpoint', async () => {
+    process.env.OPENCODE_SERVER_PASSWORD = 'openchamber-password';
+    process.env.OPENCODE_SERVER_USERNAME = 'openchamber-user';
+    const allocateManagedOpenCodePort = vi.fn(async () => 11111);
+    const ensureLocalOpenCodeServerPassword = vi.fn(async () => 'managed-password');
+    const getManagedOpenCodeEnv = vi.fn(async () => ({ OPENCHAMBER_INJECTED: 'yes' }));
+    const discoverOpenCodeService = vi.fn(async () => ({
+      url: 'http://127.0.0.1:6123',
+      auth: { type: 'basic', username: 'service-user', password: 'service-password' },
+    }));
+    const setOpenCodeServiceAuth = vi.fn();
+    spawnMock.mockImplementationOnce(() => createServiceCommandChild());
+    const runtime = createRuntime({
+      ensureOpencodeCliEnv: vi.fn(() => '/usr/local/bin/opencode2'),
+      resolveManagedOpenCodeLaunchSpec: vi.fn(() => ({
+        binary: '/usr/bin/node',
+        args: ['/opt/opencode2/launcher.js'],
+        wrapperType: 'node-launcher',
+      })),
+      allocateManagedOpenCodePort,
+      ensureLocalOpenCodeServerPassword,
+      getManagedOpenCodeEnv,
+      discoverOpenCodeService,
+      setOpenCodeServiceAuth,
+      getSharedOpenCodeServiceEnv: () => ({
+        INHERITED_ENV: 'yes',
+        OPENCODE_SERVER_PASSWORD: 'openchamber-password',
+        OPENCODE_SERVER_USERNAME: 'openchamber-user',
+      }),
+    }, {}, { ENV_CONFIGURED_OPENCODE_PORT: null });
+
+    const result = await runtime.startOpenCode();
+
+    expect(result).toBeNull();
+    expect(spawnMock).toHaveBeenCalledWith(
+      '/usr/bin/node',
+      ['/opt/opencode2/launcher.js', 'service', 'start'],
+      expect.objectContaining({ stdio: 'ignore' }),
+    );
+    expect(spawnMock.mock.calls[0][2].env).not.toHaveProperty('OPENCODE_SERVER_PASSWORD');
+    expect(spawnMock.mock.calls[0][2].env).not.toHaveProperty('OPENCODE_SERVER_USERNAME');
+    expect(spawnMock.mock.calls[0][2].env).not.toHaveProperty('SHELL_ONLY');
+    expect(spawnMock.mock.calls[0][2].env).toHaveProperty('INHERITED_ENV', 'yes');
+    expect(discoverOpenCodeService).toHaveBeenCalledTimes(1);
+    expect(discoverOpenCodeService).toHaveBeenCalledWith();
+    expect(allocateManagedOpenCodePort).not.toHaveBeenCalled();
+    expect(ensureLocalOpenCodeServerPassword).not.toHaveBeenCalled();
+    expect(getManagedOpenCodeEnv).not.toHaveBeenCalled();
+    expect(runtime.testDependencies.getManagedOpenCodeShellEnvSnapshot).not.toHaveBeenCalled();
+    expect(registerManagedProcessMock).not.toHaveBeenCalled();
+    expect(setOpenCodeServiceAuth).toHaveBeenCalledWith({
+      type: 'basic',
+      username: 'service-user',
+      password: 'service-password',
+    });
+    expect(runtime.testState).toMatchObject({
+      openCodeProcess: null,
+      openCodeBaseUrl: 'http://127.0.0.1:6123',
+      openCodePort: 6123,
+      openCodeProtocol: 'opencode2',
+      isSharedOpenCodeService: true,
+      isExternalOpenCode: false,
+    });
+  });
+
+  it('reconnects a shared service by rerunning service start and discovery', async () => {
+    const endpoints = [
+      { url: 'http://127.0.0.1:6123' },
+      {
+        url: 'http://127.0.0.1:6124',
+        auth: { type: 'basic', username: 'next-user', password: 'next-password' },
+      },
+    ];
+    const discoverOpenCodeService = vi.fn(async () => endpoints.shift());
+    const onOpenCodeRestarted = vi.fn();
+    const setOpenCodeServiceAuth = vi.fn();
+    spawnMock.mockImplementation(() => createServiceCommandChild());
+    const runtime = createRuntime({
+      ensureOpencodeCliEnv: vi.fn(() => '/usr/local/bin/opencode2'),
+      discoverOpenCodeService,
+      onOpenCodeRestarted,
+      setOpenCodeServiceAuth,
+    });
+
+    await runtime.startOpenCode();
+    await runtime.restartOpenCode('test-reconnect');
+
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock.mock.calls.map(([, args]) => args)).toEqual([
+      ['service', 'start'],
+      ['service', 'start'],
+    ]);
+    expect(discoverOpenCodeService).toHaveBeenCalledTimes(2);
+    expect(setOpenCodeServiceAuth).toHaveBeenLastCalledWith({
+      type: 'basic',
+      username: 'next-user',
+      password: 'next-password',
+    });
+    expect(runtime.testState).toMatchObject({
+      openCodeBaseUrl: 'http://127.0.0.1:6124',
+      openCodePort: 6124,
+    });
+    expect(onOpenCodeRestarted).toHaveBeenCalledWith({ sharedService: true });
+    expect(registerManagedProcessMock).not.toHaveBeenCalled();
+  });
+
+  it('health-monitors shared service endpoints and preserves the busy-session restart guard', async () => {
+    let now = 1;
+    let activeSessions = 1;
+    const discoverOpenCodeService = vi.fn(async () => ({ url: 'http://127.0.0.1:6123' }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    spawnMock.mockImplementation(() => createServiceCommandChild());
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      json: async () => null,
+    }));
+    const runtime = createRuntime({
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode2'),
+      discoverOpenCodeService,
+      getActiveSessionCount: () => activeSessions,
+      now: () => now,
+    });
+    await runtime.startOpenCode();
+
+    for (let failure = 0; failure < 20; failure += 1) {
+      now += 15_000;
+      await runtime.triggerHealthCheck();
+    }
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(discoverOpenCodeService).toHaveBeenCalledTimes(1);
+
+    activeSessions = 0;
+    now += 15_000;
+    await runtime.triggerHealthCheck();
+
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(discoverOpenCodeService).toHaveBeenCalledTimes(2);
+    expect(registerManagedProcessMock).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('routes discovered service authentication through the central header accessor', async () => {
+    let authPassword = null;
+    let authSource = null;
+    let authUsername = null;
+    const authRuntime = createOpenCodeAuthStateRuntime({
+      crypto: { randomBytes: vi.fn() },
+      process: { env: {} },
+      getAuthPassword: () => authPassword,
+      setAuthPassword: (value) => { authPassword = value; },
+      getAuthSource: () => authSource,
+      setAuthSource: (value) => { authSource = value; },
+      getAuthUsername: () => authUsername,
+      setAuthUsername: (value) => { authUsername = value; },
+      getUserProvidedPassword: () => null,
+      syncToHmrState: vi.fn(),
+    });
+    spawnMock.mockImplementationOnce(() => createServiceCommandChild());
+    const runtime = createRuntime({
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode2'),
+      discoverOpenCodeService: vi.fn(async () => ({
+        url: 'http://127.0.0.1:6123',
+        auth: { type: 'basic', username: 'service-user', password: 'service-password' },
+      })),
+      setOpenCodeServiceAuth: authRuntime.setOpenCodeServiceAuth,
+      getOpenCodeAuthHeaders: authRuntime.getOpenCodeAuthHeaders,
+    });
+
+    await runtime.startOpenCode();
+
+    expect(authRuntime.getOpenCodeAuthHeaders()).toEqual({
+      Authorization: `Basic ${Buffer.from('service-user:service-password').toString('base64')}`,
+    });
+  });
+
+  it('reports shared service config refresh as requiring a manual global restart', async () => {
+    spawnMock.mockImplementation(() => createServiceCommandChild());
+    const runtime = createRuntime({
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode2'),
+      discoverOpenCodeService: vi.fn(async () => ({ url: 'http://127.0.0.1:6123' })),
+    });
+    await runtime.startOpenCode();
+
+    await expect(runtime.refreshOpenCodeAfterConfigChange('test config')).resolves.toEqual({
+      reloaded: false,
+      external: false,
+      sharedService: true,
+    });
   });
 
   it('warms recently used directories after a successful bootstrap', async () => {
@@ -534,7 +763,7 @@ describe('OpenCode lifecycle', () => {
     const child = createMockChild();
     spawnMock.mockImplementationOnce(() => {
       queueMicrotask(() => {
-        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+        child.stdout.emit('data', 'server listening on http://127.0.0.1:45678\n');
       });
       return child;
     });
@@ -548,6 +777,7 @@ describe('OpenCode lifecycle', () => {
     expect(options.env.PATH).toBe('/home/user/.bun/bin:/usr/local/bin:/usr/bin');
     expect(options.env.SHELL_ONLY).toBe('yes');
     expect(options.env.OPENCODE_SERVER_PASSWORD).toBe('password');
+    expect(registerManagedProcessMock).toHaveBeenCalledTimes(1);
     expect(server.exitCode).toBeNull();
     expect(server.signalCode).toBeNull();
 
