@@ -8,11 +8,21 @@ import { registerWalkthroughRoutes } from './routes.js';
 
 const SOURCE = { kind: 'working-tree', scope: 'all' };
 
+const waitFor = async (predicate, { timeout = 2_000, interval = 5 } = {}) => {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    if (predicate()) return;
+    if (Date.now() > deadline) throw new Error('waitFor timed out');
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
+};
+
 describe('walkthrough routes', () => {
   let server;
   let base;
   let releaseJob;
   let job;
+  let generationRequests;
 
   let lastArgs;
 
@@ -23,6 +33,7 @@ describe('walkthrough routes', () => {
     },
     async generateWalkthrough(args) {
       lastArgs = args;
+      generationRequests += 1;
       if (job) return job;
       job = new Promise((resolve) => {
         releaseJob = () => resolve({ walkthrough: { title: 'DONE' }, hunks: [], hunkCount: 1 });
@@ -43,6 +54,7 @@ describe('walkthrough routes', () => {
 
   beforeEach(async () => {
     job = null;
+    generationRequests = 0;
     releaseJob = undefined;
     lastArgs = undefined;
     const app = express();
@@ -59,7 +71,7 @@ describe('walkthrough routes', () => {
 
   it('answers a generation request that nobody interrupted', async () => {
     const pending = generate();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitFor(() => Boolean(releaseJob));
     releaseJob();
 
     const body = await (await pending).json();
@@ -70,9 +82,8 @@ describe('walkthrough routes', () => {
   it('delivers the result to a client that reconnected after a refresh', async () => {
     const controller = new AbortController();
     generate(controller.signal).catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitFor(() => Boolean(releaseJob));
     controller.abort();
-    await new Promise((resolve) => setTimeout(resolve, 20));
 
     // The reloaded page sees work in progress and re-attaches to it.
     const read = await (await fetch(
@@ -81,7 +92,7 @@ describe('walkthrough routes', () => {
     expect(read.generating).toBe(true);
 
     const reattached = generate();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitFor(() => generationRequests === 2);
     releaseJob();
 
     const body = await (await reattached).json();
@@ -113,7 +124,7 @@ describe('walkthrough routes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ directory: '/repo', source: SOURCE, language: 'ja' }),
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitFor(() => Boolean(releaseJob));
     releaseJob();
     await pending;
 
@@ -130,7 +141,7 @@ describe('walkthrough routes', () => {
 
   it('cancels through its own endpoint rather than a dropped connection', async () => {
     generate().catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await waitFor(() => Boolean(releaseJob));
 
     const response = await fetch(`${base}/api/walkthrough/cancel`, {
       method: 'POST',
