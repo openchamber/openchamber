@@ -857,6 +857,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.noLongerPending': 'To pytanie nie czeka już na odpowiedź.',
   'chat.questionCard.tryAgain': 'Spróbuj ponownie za chwilę.',
   'chat.textSelection.toast.noProject': 'Nie znaleziono projektu dla tej sesji',
+  'chat.textSelection.toast.copyFailed': 'Nie udało się skopiować zaznaczonego tekstu',
   'chat.textSelection.toast.addToNotesFailed': 'Nie udało się dodać do notatek',
   'chat.textSelection.toast.addToNotesSuccess': 'Dodano zaznaczony tekst do notatek',
   'chat.textSelection.toast.addToNotesSummaryFailed': 'Nie można podsumować zaznaczenia, dodano wybrany tekst do notatek',

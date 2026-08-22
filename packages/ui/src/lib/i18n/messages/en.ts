@@ -2159,6 +2159,7 @@ export const dict = {
   'chat.questionCard.noLongerPending': 'This question is no longer waiting for a response.',
   'chat.questionCard.tryAgain': 'Please try again in a moment.',
   'chat.textSelection.toast.noProject': 'No project found for this session',
+  'chat.textSelection.toast.copyFailed': 'Failed to copy selected text',
   'chat.textSelection.toast.addToNotesFailed': 'Failed to add to notes',
   'chat.textSelection.toast.addToNotesSuccess': 'Added selected text to notes',
   'chat.textSelection.toast.addToNotesSummaryFailed': 'Could not summarize selection, added selected text to notes',

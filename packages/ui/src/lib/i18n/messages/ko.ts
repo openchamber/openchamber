@@ -2161,6 +2161,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.questionCard.noLongerPending': '이 질문은 더 이상 응답을 기다리지 않습니다.',
   'chat.questionCard.tryAgain': '잠시 후 다시 시도하세요.',
   'chat.textSelection.toast.noProject': '이 세션의 프로젝트를 찾을 수 없음',
+  'chat.textSelection.toast.copyFailed': '선택한 텍스트를 복사하지 못했습니다',
   'chat.textSelection.toast.addToNotesFailed': '메모 추가 실패',
   'chat.textSelection.toast.addToNotesSuccess': '선택한 텍스트를 메모에 추가함',
   'chat.textSelection.toast.addToNotesSummaryFailed': '선택 영역을 요약할 수 없어 선택한 텍스트를 메모에 추가함',

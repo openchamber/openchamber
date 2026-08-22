@@ -1887,6 +1887,7 @@ export const dict = {
   'chat.questionCard.copiedJson': 'Question copiée sous le nom JSON',
   'chat.questionCard.copyFailed': 'Échec de la copie de la question',
   'chat.textSelection.toast.noProject': 'Aucun projet trouvé pour cette session',
+  'chat.textSelection.toast.copyFailed': 'Échec de la copie du texte sélectionné',
   'chat.textSelection.toast.addToNotesFailed': 'Échec de l\'ajout aux notes',
   'chat.textSelection.toast.addToNotesSuccess': 'Ajout du texte sélectionné aux notes',
   'chat.textSelection.toast.addToNotesSummaryFailed': 'Impossible de résumer la sélection, ajout du texte sélectionné aux notes',

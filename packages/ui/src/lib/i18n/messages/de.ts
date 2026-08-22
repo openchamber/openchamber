@@ -1986,6 +1986,7 @@ export const dict = {
   'chat.questionCard.noLongerPending': 'Diese Frage wartet nicht mehr auf eine Antwort.',
   'chat.questionCard.tryAgain': 'Bitte versuchen Sie es in einem Moment erneut.',
   'chat.textSelection.toast.noProject': 'Kein Projekt für diese Sitzung gefunden',
+  'chat.textSelection.toast.copyFailed': 'Fehler beim Kopieren des ausgewählten Textes',
   'chat.textSelection.toast.addToNotesFailed': 'Fehler beim Hinzufügen zu Notizen',
   'chat.textSelection.toast.addToNotesSuccess': 'Ausgewählter Text zu Notizen hinzugefügt',
   'chat.textSelection.toast.addToNotesSummaryFailed': 'Zusammenfassung der Auswahl nicht möglich, ausgewählter Text wurde zu Notizen hinzugefügt',
