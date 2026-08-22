@@ -36,6 +36,19 @@ export function isUsableAuthEntry(entry) {
   return false;
 }
 
+/**
+ * Whether a provider can actually be called: either an auth.json login entry,
+ * or a custom provider configured with an apiKey in the OpenCode config
+ * (apiKey providers never appear in auth.json — resolveConfigApiKey in call.js
+ * already knows how to call them, this set just lets resolution trust them).
+ */
+export function hasProviderCredentials(auth, configProviders, providerID) {
+  if (isUsableAuthEntry(getAuthEntryForProvider(auth, providerID))) return true;
+  return typeof configProviders === 'object'
+    && configProviders !== null
+    && configProviders[providerID] === true;
+}
+
 export function parseModelRef(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -75,7 +88,7 @@ const pickWithinProvider = (providerID, auth, catalog, family) => {
   return model?.id ? { providerID, modelID: model.id, source: 'family-scan' } : null;
 };
 
-export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSmallModel, preferredProviderID, preferredModelID }) {
+export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSmallModel, preferredProviderID, preferredModelID, configProviders = {} }) {
   // OpenChamber's own setting (Settings → Sessions → Small Model override)
   // outranks everything, including the OpenCode config.
   const fromSettings = parseModelRef(settingsSmallModel);
@@ -95,7 +108,7 @@ export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSma
   const preferred = typeof preferredProviderID === 'string' && preferredProviderID
     ? preferredProviderID
     : null;
-  if (preferred && isUsableAuthEntry(getAuthEntryForProvider(auth, preferred))) {
+  if (preferred && hasProviderCredentials(auth, configProviders, preferred)) {
     for (const family of FAMILY_PRIORITY) {
       const match = pickWithinProvider(preferred, auth, catalog, family);
       if (match) return match;
@@ -105,10 +118,15 @@ export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSma
     }
   }
 
-  // No session context (or its provider has no usable login): scan all
-  // authenticated providers by family priority.
-  const authedProviders = Object.keys(auth || {}).filter((providerID) =>
-    providerID !== preferred && isUsableAuthEntry(auth[providerID]));
+  // No session context (or its provider has no usable credential): scan all
+  // authenticated providers — auth.json logins and config apiKey providers —
+  // by family priority.
+  const candidateProviders = new Set([
+    ...Object.keys(auth || {}),
+    ...Object.keys(configProviders || {}),
+  ]);
+  const authedProviders = [...candidateProviders].filter((providerID) =>
+    providerID !== preferred && hasProviderCredentials(auth, configProviders, providerID));
 
   for (const family of FAMILY_PRIORITY) {
     for (const providerID of authedProviders) {

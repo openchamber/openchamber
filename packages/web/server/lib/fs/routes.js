@@ -196,7 +196,7 @@ const isPathWithinRoot = (resolvedPath, rootPath, path, os) => {
   return true;
 };
 
-const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot, opencodeHomeDir }) => {
   const normalized = normalizeDirectoryPath(targetPath);
   if (!normalized || typeof normalized !== 'string') {
     return { ok: false, error: 'Path is required' };
@@ -211,6 +211,10 @@ const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDi
 
   if (isPathWithinRoot(resolved, openchamberUserConfigRoot, path, os)) {
     return { ok: true, base: path.resolve(openchamberUserConfigRoot), resolved };
+  }
+
+  if (isPathWithinRoot(resolved, opencodeHomeDir, path, os)) {
+    return { ok: true, base: path.resolve(opencodeHomeDir), resolved };
   }
 
   return { ok: false, error: 'Path is outside of active workspace' };
@@ -249,7 +253,7 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
   return { ok: false, error: 'Path is outside of active workspace' };
 };
 
-const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot, opencodeHomeDir }) => {
   const resolvedProject = await resolveProjectDirectory(req);
   if (!resolvedProject.directory) {
     return { ok: false, error: resolvedProject.error || 'Active workspace is required' };
@@ -262,6 +266,7 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
     os,
     normalizeDirectoryPath,
     openchamberUserConfigRoot,
+    opencodeHomeDir,
   });
   if (resolved.ok || resolved.error !== 'Path is outside of active workspace') {
     return resolved;
@@ -318,7 +323,7 @@ const escapeCloneSshKeyPath = (sshKeyPath) => {
   return `'${normalized.replace(/'/g, "'\\''")}'`;
 };
 
-const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, openchamberUserConfigRoot, opencodeHomeDir }) => {
   if (req.query?.allowOutsideWorkspace === 'true') {
     const normalized = normalizeDirectoryPath(targetPath);
     if (!normalized || typeof normalized !== 'string') {
@@ -340,6 +345,7 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
     path,
     os,
     normalizeDirectoryPath,
+    opencodeHomeDir,
     openchamberUserConfigRoot,
   });
 };
@@ -426,6 +432,7 @@ export const registerFsRoutes = (app, dependencies) => {
     buildAugmentedPath,
     resolveGitBinaryForSpawn,
     openchamberUserConfigRoot,
+    opencodeHomeDir,
   } = dependencies;
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
@@ -631,6 +638,7 @@ export const registerFsRoutes = (app, dependencies) => {
           path,
           os,
           normalizeDirectoryPath,
+          opencodeHomeDir,
           openchamberUserConfigRoot,
         });
         if (!resolved.ok) {
@@ -776,6 +784,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         fsPromises,
         normalizeDirectoryPath,
+        opencodeHomeDir,
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
@@ -826,6 +835,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         fsPromises,
         normalizeDirectoryPath,
+        opencodeHomeDir,
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
@@ -890,6 +900,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         fsPromises,
         normalizeDirectoryPath,
+        opencodeHomeDir,
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
@@ -971,6 +982,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
+        opencodeHomeDir,
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
@@ -1023,6 +1035,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
+        opencodeHomeDir,
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
@@ -1200,6 +1213,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
+        opencodeHomeDir,
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
@@ -1238,6 +1252,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
+        opencodeHomeDir,
         openchamberUserConfigRoot,
       });
       if (!resolvedOld.ok) {
@@ -1251,6 +1266,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
+        opencodeHomeDir,
         openchamberUserConfigRoot,
       });
       if (!resolvedNew.ok) {
@@ -1357,6 +1373,7 @@ export const registerFsRoutes = (app, dependencies) => {
         path,
         os,
         normalizeDirectoryPath,
+        opencodeHomeDir,
         openchamberUserConfigRoot,
       });
       if (!resolvedForWorkspace.ok) {

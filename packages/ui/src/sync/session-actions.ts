@@ -4,6 +4,8 @@
  */
 
 import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { PermissionRequest } from "@/types/permission"
+import type { QuestionRequest } from "@/types/question"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -1625,10 +1627,14 @@ export async function dismissPermission(
  * the backend via `permission.reply` with `reply: "reject"`, which fires
  * `permission.replied` for reconciliation.
  *
- * Returns true when at least one permission was dismissed. Rejection failures are
- * swallowed (a stranded permission must never block the send);
- * PermissionNotFoundError also clears the stale entry from the child store via
- * {@link dismissPermission}.
+ * Returns `{ dismissed, failed }` where `dismissed` is true when at least one
+ * permission was dismissed and `failed` is true when at least one dismissal
+ * failed for a reason other than not-found. Failed dismissals restore the
+ * optimistic removal so the prompt stays visible — a silently swallowed
+ * failure strands the session: the server keeps the permission pending (the
+ * turn stays busy forever) while the local card is gone and a queued send
+ * waits for an idle state that never comes. PermissionNotFoundError clears the
+ * stale entry from the child store via {@link dismissPermission}.
  *
  * NOTE: rejecting unblocks the agent's tool but does NOT end its turn. Callers
  * that need to send the next message right away (the chat send path) must also
@@ -1636,12 +1642,14 @@ export async function dismissPermission(
  * prompt arrives while the run is still active and is discarded by the runner's
  * `ensureRunning`.
  */
-export async function dismissOpenPermissionsForSession(sessionId: string): Promise<boolean> {
-  if (!sessionId) return false
+export async function dismissOpenPermissionsForSession(
+  sessionId: string,
+): Promise<{ dismissed: boolean; failed: boolean }> {
+  if (!sessionId) return { dismissed: false, failed: false }
   const stores = _childStores
-  if (!stores) return false
+  if (!stores) return { dismissed: false, failed: false }
 
-  const toDismiss: Array<{ sessionId: string; requestId: string }> = []
+  const toDismiss: Array<{ store: DirectoryStoreApi; sessionId: string; request: PermissionRequest }> = []
   for (const [, store] of stores.children) {
     const state = store.getState()
     const scopedIds = computeSubtreeIds(state.session, sessionId)
@@ -1651,32 +1659,48 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
       const requests = permissionsBySession[scopedId]
       if (!requests) continue
       for (const request of requests) {
-        toDismiss.push({ sessionId: scopedId, requestId: request.id })
+        toDismiss.push({ store, sessionId: scopedId, request })
       }
     }
   }
 
-  if (toDismiss.length === 0) return false
+  if (toDismiss.length === 0) return { dismissed: false, failed: false }
 
   // Optimistically clear the permissions from the local store so the prompt
   // disappears immediately, before the reject round-trip.
-  for (const { sessionId: scopedSessionId, requestId } of toDismiss) {
-    removePermissionRequestFromChildStores(scopedSessionId, requestId)
+  for (const { sessionId: scopedSessionId, request } of toDismiss) {
+    removePermissionRequestFromChildStores(scopedSessionId, request.id)
   }
 
+  let failed = false
   await Promise.all(
-    toDismiss.map(async ({ sessionId: scopedSessionId, requestId }) => {
+    toDismiss.map(async ({ store, sessionId: scopedSessionId, request }) => {
       try {
-        await dismissPermission(scopedSessionId, requestId)
+        await dismissPermission(scopedSessionId, request.id)
       } catch (error) {
         if (isPermissionRequestNotFoundError(error)) return
-        // Swallow: a failed dismissal must not block the send. The next
-        // permission.asked / permission.replied event reconciles the store.
+        // Roll the optimistic removal back so the prompt is visible again: the
+        // server still holds the permission and its turn stays busy, so hiding
+        // the card would strand the session with no recoverable path.
+        failed = true
         console.error("[session-actions] Failed to dismiss open permission on send:", error)
+        restorePermissionRequestToChildStore(store, scopedSessionId, request)
       }
     }),
   )
-  return true
+  return { dismissed: true, failed }
+}
+
+function restorePermissionRequestToChildStore(
+  store: DirectoryStoreApi,
+  sessionId: string,
+  request: PermissionRequest,
+): void {
+  const current = store.getState().permission ?? {}
+  const existing = current[sessionId] ?? []
+  if (existing.some((item) => item.id === request.id)) return
+  const next = [...existing, request].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  store.setState({ permission: { ...current, [sessionId]: next } })
 }
 
 // ---------------------------------------------------------------------------
@@ -1752,10 +1776,14 @@ export async function rejectQuestion(
  * `question.reject` round-trip. Each question is then formally rejected on the
  * backend, which fires `question.rejected` for reconciliation.
  *
- * Returns true when at least one question was dismissed. Rejection failures are
- * swallowed (a stranded question must never block the send);
- * QuestionNotFoundError also clears the stale entry from the child store via
- * {@link rejectQuestion}.
+ * Returns `{ dismissed, failed }` where `dismissed` is true when at least one
+ * question was dismissed and `failed` is true when at least one rejection
+ * failed for a reason other than not-found. Failed rejections restore the
+ * optimistic removal so the prompt stays visible — a silently swallowed
+ * failure strands the session: the server keeps the question pending (the turn
+ * stays busy forever) while the local card is gone and a queued send waits for
+ * an idle state that never comes. QuestionNotFoundError clears the stale entry
+ * from the child store via {@link rejectQuestion}.
  *
  * NOTE: rejecting unblocks the agent's tool but does NOT end its turn. Callers
  * that need to send the next message right away (the chat send path) must also
@@ -1763,12 +1791,14 @@ export async function rejectQuestion(
  * prompt arrives while the run is still active and is discarded by the runner's
  * `ensureRunning`.
  */
-export async function dismissOpenQuestionsForSession(sessionId: string): Promise<boolean> {
-  if (!sessionId) return false
+export async function dismissOpenQuestionsForSession(
+  sessionId: string,
+): Promise<{ dismissed: boolean; failed: boolean }> {
+  if (!sessionId) return { dismissed: false, failed: false }
   const stores = _childStores
-  if (!stores) return false
+  if (!stores) return { dismissed: false, failed: false }
 
-  const toDismiss: Array<{ sessionId: string; requestId: string }> = []
+  const toDismiss: Array<{ store: DirectoryStoreApi; sessionId: string; request: QuestionRequest }> = []
   for (const [, store] of stores.children) {
     const state = store.getState()
     const scopedIds = computeSubtreeIds(state.session, sessionId)
@@ -1778,32 +1808,48 @@ export async function dismissOpenQuestionsForSession(sessionId: string): Promise
       const requests = questionsBySession[scopedId]
       if (!requests) continue
       for (const request of requests) {
-        toDismiss.push({ sessionId: scopedId, requestId: request.id })
+        toDismiss.push({ store, sessionId: scopedId, request })
       }
     }
   }
 
-  if (toDismiss.length === 0) return false
+  if (toDismiss.length === 0) return { dismissed: false, failed: false }
 
   // Optimistically clear the questions from the local store so the prompt
   // disappears immediately, before the reject round-trip.
-  for (const { sessionId: scopedSessionId, requestId } of toDismiss) {
-    removeQuestionRequestFromChildStores(scopedSessionId, requestId)
+  for (const { sessionId: scopedSessionId, request } of toDismiss) {
+    removeQuestionRequestFromChildStores(scopedSessionId, request.id)
   }
 
+  let failed = false
   await Promise.all(
-    toDismiss.map(async ({ sessionId: scopedSessionId, requestId }) => {
+    toDismiss.map(async ({ store, sessionId: scopedSessionId, request }) => {
       try {
-        await rejectQuestion(scopedSessionId, requestId)
+        await rejectQuestion(scopedSessionId, request.id)
       } catch (error) {
         if (isQuestionRequestNotFoundError(error)) return
-        // Swallow: a failed dismissal must not block the send. The next
-        // question.asked / question.rejected event reconciles the store.
+        // Roll the optimistic removal back so the prompt is visible again: the
+        // server still holds the question and its turn stays busy, so hiding
+        // the card would strand the session with no recoverable path.
+        failed = true
         console.error("[session-actions] Failed to dismiss open question on send:", error)
+        restoreQuestionRequestToChildStore(store, scopedSessionId, request)
       }
     }),
   )
-  return true
+  return { dismissed: true, failed }
+}
+
+function restoreQuestionRequestToChildStore(
+  store: DirectoryStoreApi,
+  sessionId: string,
+  request: QuestionRequest,
+): void {
+  const current = store.getState().question ?? {}
+  const existing = current[sessionId] ?? []
+  if (existing.some((item) => item.id === request.id)) return
+  const next = [...existing, request].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  store.setState({ question: { ...current, [sessionId]: next } })
 }
 
 // ---------------------------------------------------------------------------

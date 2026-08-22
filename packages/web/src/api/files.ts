@@ -10,8 +10,26 @@ import {
   type FilesystemErrorReason,
 } from '@openchamber/ui/lib/api/files-errors';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
+import { getDesktopBridge } from '@openchamber/ui/lib/desktop';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
+
+/** Binary reads are bounded; larger files must use downloadFile instead. */
+const MAX_BINARY_READ_BYTES = 4 * 1024 * 1024;
+
+const blobToDataUrl = (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Failed to read binary file'));
+      }
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read binary file'));
+    reader.readAsDataURL(blob);
+  });
 
 interface WebFilesAPIOptions {
   urls?: unknown;
@@ -210,6 +228,26 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     return { content, path: target };
   },
 
+  async readFileBinary(path: string, options): Promise<{ dataUrl: string; path: string }> {
+    const target = normalizePath(path);
+    const response = await runtimeFetch('/api/fs/raw', {
+      query: { path: target },
+      headers: directoryHeaders(getDirectory, options?.directory),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error((error as { error?: string }).error || 'Failed to read file');
+    }
+
+    const blob = await response.blob();
+    if (blob.size > MAX_BINARY_READ_BYTES) {
+      throw new Error('File is too large to read as binary');
+    }
+
+    return { dataUrl: await blobToDataUrl(blob), path: target };
+  },
+
   async writeFile(path: string, content: string): Promise<{ success: boolean; path: string }> {
     const target = normalizePath(path);
     const response = await runtimeFetch('/api/fs/write', {
@@ -310,6 +348,33 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
 
     const result = await response.json().catch(() => ({}));
     return { success: Boolean((result as { success?: boolean }).success) };
+  },
+
+  async openDialog(options) {
+    const bridge = getDesktopBridge();
+    if (!bridge?.openDialog) {
+      throw new Error('File dialogs are not available in this runtime');
+    }
+    const result = await bridge.openDialog(options as Record<string, unknown>);
+    const dialogResult = result as { canceled?: boolean; filePaths?: string[] };
+    return {
+      canceled: Boolean(dialogResult?.canceled),
+      filePaths: Array.isArray(dialogResult?.filePaths) ? dialogResult.filePaths : [],
+    };
+  },
+
+  async copyDirectory(srcPath, destPath) {
+    const bridge = getDesktopBridge();
+    if (!bridge?.invoke) {
+      throw new Error('Directory copy is not available in this runtime');
+    }
+    const src = normalizePath(srcPath);
+    const dest = normalizePath(destPath);
+    const result = await bridge.invoke('desktop_copy_directory', { src, dest });
+    return {
+      success: Boolean((result as { success?: boolean }).success),
+      path: typeof (result as { path?: string }).path === 'string' ? normalizePath((result as { path: string }).path) : dest,
+    };
   },
 
   async downloadFile(path: string): Promise<void> {

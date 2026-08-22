@@ -541,6 +541,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.showToolFileIcons === 'boolean') {
       result.showToolFileIcons = candidate.showToolFileIcons;
     }
+    if (typeof candidate.showPet === 'boolean') {
+      result.showPet = candidate.showPet;
+    }
+    if (typeof candidate.petSize === 'number' && Number.isFinite(candidate.petSize)) {
+      result.petSize = Math.max(0.5, Math.min(1.5, candidate.petSize));
+    }
     if (typeof candidate.showTurnChangedFiles === 'boolean') {
       result.showTurnChangedFiles = candidate.showTurnChangedFiles;
     }

@@ -99,6 +99,28 @@ const readConfiguredSmallModel = (workingDirectory) => {
 };
 
 /**
+ * Custom providers configured with an apiKey in the OpenCode config. These
+ * never appear in auth.json, but call.js can call them (resolveConfigApiKey),
+ * so resolution must trust them as credentialed providers too.
+ */
+const readConfigApiKeyProviders = (workingDirectory) => {
+  try {
+    const { mergedConfig } = readConfigLayers(workingDirectory);
+    const providers = mergedConfig?.provider;
+    if (!providers || typeof providers !== 'object') return {};
+    const result = {};
+    for (const [providerID, cfg] of Object.entries(providers)) {
+      if (cfg && typeof cfg === 'object' && typeof cfg.options?.apiKey === 'string' && cfg.options.apiKey.trim() !== '') {
+        result[providerID] = true;
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+};
+
+/**
  * Generates text with the user's small model, resolved and authenticated
  * entirely server-side from the OpenCode config and auth store.
  */
@@ -118,6 +140,7 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
       catalog,
       settingsSmallModel: readSmallModelSettingsOverride(),
       configSmallModel: readConfiguredSmallModel(directory),
+      configProviders: readConfigApiKeyProviders(directory),
       preferredProviderID,
       preferredModelID,
     });
@@ -281,6 +304,7 @@ export async function describeSmallModel({ directory, preferredProviderID, prefe
       catalog,
       settingsSmallModel: readSmallModelSettingsOverride(),
       configSmallModel: readConfiguredSmallModel(directory),
+      configProviders: readConfigApiKeyProviders(directory),
       preferredProviderID,
       preferredModelID,
     });

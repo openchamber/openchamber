@@ -19,6 +19,7 @@ import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -562,6 +563,8 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     agentWebToolEnabled: defaults.agentWebToolEnabled,
     agentMemoryToolEnabled: defaults.agentMemoryToolEnabled,
     showToolFileIcons: defaults.showToolFileIcons,
+    showPet: isMobileSurfaceRuntime() ? false : true,
+    petSize: 1,
     codeBlockLineWrap: defaults.codeBlockLineWrap,
     showTurnChangedFiles: defaults.showTurnChangedFiles,
     showExpandedBashTools: defaults.showExpandedBashTools,
@@ -758,6 +761,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
     store.setShowToolFileIcons(settings.showToolFileIcons);
+  }
+  if (typeof settings.showPet === 'boolean' && settings.showPet !== store.showPet) {
+    store.setShowPet(settings.showPet);
+  }
+  if (typeof settings.petSize === 'number' && Number.isFinite(settings.petSize) && settings.petSize !== store.petSize) {
+    store.setPetSize(Math.max(0.5, Math.min(1.5, settings.petSize)));
   }
   if (typeof settings.codeBlockLineWrap === 'boolean' && settings.codeBlockLineWrap !== store.codeBlockLineWrap) {
     store.setCodeBlockLineWrap(settings.codeBlockLineWrap);
@@ -1445,6 +1454,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.showToolFileIcons === 'boolean') {
     result.showToolFileIcons = candidate.showToolFileIcons;
+  }
+  if (typeof candidate.showPet === 'boolean') {
+    result.showPet = candidate.showPet;
+  }
+  if (typeof candidate.petSize === 'number' && Number.isFinite(candidate.petSize)) {
+    result.petSize = Math.max(0.5, Math.min(1.5, candidate.petSize));
   }
   if (typeof candidate.codeBlockLineWrap === 'boolean') {
     result.codeBlockLineWrap = candidate.codeBlockLineWrap;

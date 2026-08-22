@@ -8,12 +8,23 @@ import { Button } from '@/components/ui/button';
 import { getClientPlatform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   SettingsSection,
   SettingsTwoColumn,
   SettingsCheckboxRow,
+  SettingsFieldRow,
   SettingsGroupTitle,
   SETTINGS_OPTION_STACK_CLASS,
+  SETTINGS_SELECT_ROW_TRIGGER_CLASS,
+  SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
+import { playSoundById, SOUND_OPTIONS } from '@/utils/sound';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: {
@@ -40,6 +51,158 @@ const TEMPLATE_EVENT_LABEL_KEYS = {
   error: 'settings.notifications.page.template.event.error',
   question: 'settings.notifications.page.template.event.question',
 } as const satisfies Record<NotificationTemplateEvent, string>;
+
+const SOUND_NONE_VALUE = 'none';
+
+type SoundChannelKind = 'agent' | 'permissions' | 'errors' | 'questions';
+
+const SOUND_CHANNEL_TITLE_KEYS = {
+  agent: 'settings.notifications.page.sounds.agent.title',
+  permissions: 'settings.notifications.page.sounds.permissions.title',
+  errors: 'settings.notifications.page.sounds.errors.title',
+  questions: 'settings.notifications.page.sounds.questions.title',
+} as const satisfies Record<SoundChannelKind, string>;
+
+const SOUND_CHANNEL_DESCRIPTION_KEYS = {
+  agent: 'settings.notifications.page.sounds.agent.description',
+  permissions: 'settings.notifications.page.sounds.permissions.description',
+  errors: 'settings.notifications.page.sounds.errors.description',
+  questions: 'settings.notifications.page.sounds.questions.description',
+} as const satisfies Record<SoundChannelKind, string>;
+
+type UIState = ReturnType<typeof useUIStore.getState>;
+
+type SoundChannelFields = {
+  enabled: (state: UIState) => boolean;
+  soundId: (state: UIState) => string;
+  setEnabled: (state: UIState) => (value: boolean) => void;
+  setSoundId: (state: UIState) => (value: string) => void;
+};
+
+const SOUND_CHANNEL_FIELDS: Record<SoundChannelKind, SoundChannelFields> = {
+  agent: {
+    enabled: (state) => state.soundsAgentEnabled,
+    soundId: (state) => state.soundsAgentSoundId,
+    setEnabled: (state) => state.setSoundsAgentEnabled,
+    setSoundId: (state) => state.setSoundsAgentSoundId,
+  },
+  permissions: {
+    enabled: (state) => state.soundsPermissionsEnabled,
+    soundId: (state) => state.soundsPermissionsSoundId,
+    setEnabled: (state) => state.setSoundsPermissionsEnabled,
+    setSoundId: (state) => state.setSoundsPermissionsSoundId,
+  },
+  errors: {
+    enabled: (state) => state.soundsErrorsEnabled,
+    soundId: (state) => state.soundsErrorsSoundId,
+    setEnabled: (state) => state.setSoundsErrorsEnabled,
+    setSoundId: (state) => state.setSoundsErrorsSoundId,
+  },
+  questions: {
+    enabled: (state) => state.soundsQuestionsEnabled,
+    soundId: (state) => state.soundsQuestionsSoundId,
+    setEnabled: (state) => state.setSoundsQuestionsEnabled,
+    setSoundId: (state) => state.setSoundsQuestionsSoundId,
+  },
+};
+
+const SoundChannelRow: React.FC<{ kind: SoundChannelKind }> = ({ kind }) => {
+  const { t } = useI18n();
+  const fields = SOUND_CHANNEL_FIELDS[kind];
+  const enabled = useUIStore(fields.enabled);
+  const soundId = useUIStore(fields.soundId);
+  const setEnabled = useUIStore(fields.setEnabled);
+  const setSoundId = useUIStore(fields.setSoundId);
+
+  const previewTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopCurrentRef = React.useRef<(() => void) | null>(null);
+  const activeIdRef = React.useRef<string | null>(null);
+
+  const stopPreview = React.useCallback(() => {
+    if (previewTimerRef.current !== null) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+    stopCurrentRef.current?.();
+    stopCurrentRef.current = null;
+    activeIdRef.current = null;
+  }, []);
+
+  React.useEffect(() => stopPreview, [stopPreview]);
+
+  const preview = (id: string) => {
+    if (activeIdRef.current === id) return;
+    stopPreview();
+    activeIdRef.current = id;
+    previewTimerRef.current = setTimeout(() => {
+      previewTimerRef.current = null;
+      void playSoundById(id === SOUND_NONE_VALUE ? undefined : id).then((stop) => {
+        stopCurrentRef.current = stop ?? null;
+      });
+    }, 100);
+  };
+
+  const currentValue = enabled ? soundId : SOUND_NONE_VALUE;
+  const displayValue = (value: string | undefined) => {
+    if (!value || value === SOUND_NONE_VALUE) {
+      return t('settings.notifications.page.sounds.option.none');
+    }
+    const option = SOUND_OPTIONS.find((o) => o.id === value);
+    return option ? t(option.label) : value;
+  };
+
+  const handleSelect = (value: string) => {
+    stopPreview();
+    if (value === SOUND_NONE_VALUE) {
+      setEnabled(false);
+      return;
+    }
+    setEnabled(true);
+    setSoundId(value);
+    void playSoundById(value);
+  };
+
+  return (
+    <SettingsFieldRow
+      label={t(SOUND_CHANNEL_TITLE_KEYS[kind])}
+      description={t(SOUND_CHANNEL_DESCRIPTION_KEYS[kind])}
+    >
+      <Select value={currentValue} onValueChange={handleSelect}>
+        <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+          <SelectValue>{displayValue}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={SOUND_NONE_VALUE} onPointerEnter={() => preview(SOUND_NONE_VALUE)}>
+            {t('settings.notifications.page.sounds.option.none')}
+          </SelectItem>
+          {SOUND_OPTIONS.map((option) => (
+            <SelectItem key={option.id} value={option.id} onPointerEnter={() => preview(option.id)}>
+              {t(option.label)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </SettingsFieldRow>
+  );
+};
+
+const SoundsSection: React.FC = () => {
+  const { t } = useI18n();
+  return (
+    <SettingsSection
+      settingsItem="notifications.sounds"
+      title={t('settings.notifications.page.sounds.title')}
+      description={t('settings.notifications.page.sounds.description')}
+    >
+      <div className={SETTINGS_OPTION_STACK_CLASS}>
+        <SoundChannelRow kind="agent" />
+        <SoundChannelRow kind="permissions" />
+        <SoundChannelRow kind="errors" />
+        <SoundChannelRow kind="questions" />
+      </div>
+    </SettingsSection>
+  );
+};
 
 export const NotificationSettings: React.FC = () => {
   const { t } = useI18n();
@@ -517,6 +680,8 @@ export const NotificationSettings: React.FC = () => {
             </div>
           )}
         </SettingsSection>
+
+        <SoundsSection />
 
         {nativeNotificationsEnabled && canShowNotifications && (
           <>

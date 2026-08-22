@@ -95,6 +95,7 @@ const pageOrder: SettingsPageSlug[] = [
   'sessions',
   'shortcuts',
   'voice',
+  'pets',
   'integrations',
   'usage',
   'about',
@@ -333,6 +334,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     notifications: 'notifications',
     voice: 'voice',
     tunnel: 'tunnel',
+    pets: 'pets',
   }), []);
 
   const getPageTitle = React.useCallback((slug: SettingsPageSlug): string => {
@@ -381,6 +383,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.notifications.title');
       case 'voice':
         return t('settings.page.voice.title');
+      case 'pets':
+        return t('settings.page.pets.title');
       case 'tunnel':
         return t('settings.page.tunnel.title');
       case 'about':
@@ -682,6 +686,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'sessions':
       case 'notifications':
       case 'voice':
+      case 'pets':
       case 'tunnel': {
         const section = openChamberSectionBySlug[slug] ?? 'visual';
         return <OpenChamberPage section={section} />;

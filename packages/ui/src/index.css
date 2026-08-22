@@ -1767,3 +1767,35 @@ html.desktop-runtime [class*="cursor-pointer"] {
 html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
   cursor: default;
 }
+
+/* Pet bubble direction flip: when the pet crosses the viewport/display
+   midline the bubble re-mounts on the opposite side (key={align}); it slides
+   in from the side it now hangs from. transform/opacity only. */
+@keyframes pet-bubble-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+
+@keyframes pet-bubble-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
+.animate-pet-bubble-slide-in-left {
+  animation: pet-bubble-slide-in-left 200ms ease-out;
+}
+
+.animate-pet-bubble-slide-in-right {
+  animation: pet-bubble-slide-in-right 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pet-bubble-slide-in-left,
+  .animate-pet-bubble-slide-in-right {
+    animation: none;
+  }
+}

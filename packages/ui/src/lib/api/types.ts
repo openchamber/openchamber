@@ -627,9 +627,23 @@ export interface FilesAPI {
   uploadFile?(path: string, file: Blob, options?: { overwrite?: boolean; directory?: string }): Promise<{ success: boolean; path: string }>;
   delete?(path: string): Promise<{ success: boolean }>;
   rename?(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }>;
+  copyDirectory?(src: string, dest: string): Promise<{ success: boolean; path: string }>;
   revealPath?(path: string): Promise<{ success: boolean }>;
   execCommands?(commands: string[], cwd: string): Promise<{ success: boolean; results: CommandExecResult[] }>;
   downloadFile?(path: string): Promise<void>;
+  openDialog?(options: OpenDialogOptions): Promise<OpenDialogResult>;
+}
+
+export interface OpenDialogOptions {
+  directory?: boolean;
+  title?: string;
+  defaultPath?: string;
+  filters?: Array<{ name: string; extensions: string[] }>;
+}
+
+export interface OpenDialogResult {
+  canceled: boolean;
+  filePaths: string[];
 }
 
 export interface ProjectEntry {
@@ -683,6 +697,8 @@ export interface SettingsPayload {
   showOpenCodeUpdateNotifications?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
+  showPet?: boolean;
+  petSize?: number;
   codeBlockLineWrap?: boolean;
   showTurnChangedFiles?: boolean;
   showExpandedBashTools?: boolean;

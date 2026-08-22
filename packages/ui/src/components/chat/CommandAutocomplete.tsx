@@ -153,6 +153,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             : []
           ),
           { id: 'openchamber:compact', name: 'compact', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.compactDescription'), isBuiltIn: true },
+          { id: 'openchamber:pets', name: 'pets', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.petsDescription'), isBuiltIn: true },
           ...(hasSession
             ? [{ id: 'openchamber:summary', name: 'summary', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.summaryDescription'), isOpenChamber: true }]
             : []
@@ -227,6 +228,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             : []
           ),
           { id: 'openchamber:compact', name: 'compact', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.compactDescription'), isBuiltIn: true },
+          { id: 'openchamber:pets', name: 'pets', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.petsDescription'), isBuiltIn: true },
           ...(hasSession
             ? [{ id: 'openchamber:summary', name: 'summary', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.summaryDescription'), isOpenChamber: true }]
             : []
@@ -346,6 +348,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         return <Icon name="time" className="h-3.5 w-3.5" />;
       case 'compact':
         return <Icon name="scissors" className="h-3.5 w-3.5 text-purple-500" />;
+      case 'pets':
+        return <Icon name="heart" className="h-3.5 w-3.5 text-pink-500" />;
       case 'review':
         return <Icon name="search-eye" className="h-3.5 w-3.5 text-blue-500" />;
       case 'test':

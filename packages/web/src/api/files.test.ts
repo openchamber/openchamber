@@ -141,3 +141,67 @@ describe('createWebFilesAPI', () => {
     expect(share).toHaveBeenCalledWith({ files: [expect.objectContaining({ name: 'hello.txt', type: 'text/plain' })] });
   });
 });
+
+describe('readFileBinary', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const stubFileReader = (dataUrl: string) => {
+    class MockFileReader {
+      result: string | null = null;
+      error: DOMException | null = null;
+      onload: ((this: FileReader, event: ProgressEvent<FileReader>) => unknown) | null = null;
+      onerror: ((this: FileReader, event: ProgressEvent<FileReader>) => unknown) | null = null;
+
+      readAsDataURL() {
+        this.result = dataUrl;
+        this.onload?.call(this as unknown as FileReader, {} as ProgressEvent<FileReader>);
+      }
+    }
+    vi.stubGlobal('FileReader', MockFileReader);
+  };
+
+  const loadApi = async () => {
+    const { createWebFilesAPI } = await import('./files');
+    return createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+  };
+
+  it('reads a binary file as a data URL through /api/fs/raw', async () => {
+    const api = await loadApi();
+    stubFileReader('data:image/webp;base64,Zm9v');
+
+    const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/webp' });
+    runtimeFetchMock.mockResolvedValueOnce(new Response(blob));
+
+    const result = await api.readFileBinary?.('/Users/me/.opencode/pets/pikachu/spritesheet.webp');
+
+    expect(result).toEqual({
+      dataUrl: 'data:image/webp;base64,Zm9v',
+      path: '/Users/me/.opencode/pets/pikachu/spritesheet.webp',
+    });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/raw', {
+      query: { path: '/Users/me/.opencode/pets/pikachu/spritesheet.webp' },
+      headers: { 'x-opencode-directory': '/workspace' },
+    });
+  });
+
+  it('propagates server read failures', async () => {
+    const api = await loadApi();
+    stubFileReader('data:image/webp;base64,Zm9v');
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'File not found' }, { status: 404 }));
+
+    await expect(api.readFileBinary?.('/missing.webp')).rejects.toThrow('File not found');
+  });
+
+  it('rejects binary reads larger than the size cap', async () => {
+    const api = await loadApi();
+    stubFileReader('data:image/webp;base64,Zm9v');
+
+    const oversized = new Blob([new Uint8Array(4 * 1024 * 1024 + 1)]);
+    runtimeFetchMock.mockResolvedValueOnce(new Response(oversized));
+
+    await expect(api.readFileBinary?.('/huge.webp')).rejects.toThrow('too large');
+  });
+});

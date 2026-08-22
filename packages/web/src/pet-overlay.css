@@ -1,0 +1,18 @@
+/**
+ * Desktop pet overlay page hardening.
+ *
+ * The overlay window is transparent (`transparent: true` in main.mjs), but
+ * the shared `@openchamber/ui/index.css` applies `body { background-color:
+ * var(--background) }` (design-system.css), which wins over the inline
+ * transparent rule in pet-overlay.html because the shared stylesheet loads
+ * later in the built document. In light themes that paints a visible
+ * background block around the pet. These rules force the overlay page
+ * transparent no matter the theme.
+ */
+
+html,
+body,
+#root {
+  background: transparent !important;
+  background-color: transparent !important;
+}

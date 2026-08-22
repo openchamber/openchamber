@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>OpenChamber Pet</title>
+
+    <script>
+      // Apply theme mode before first paint so the status bubble uses the
+      // right surface tokens. The window itself is transparent — the pet and
+      // its bubble are the only visible pixels.
+      (function() {
+        try {
+          var themeMode = localStorage.getItem('themeMode');
+          var isDark;
+          if (themeMode === 'dark') {
+            isDark = true;
+          } else if (themeMode === 'light') {
+            isDark = false;
+          } else {
+            isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          }
+          document.documentElement.classList.add(isDark ? 'dark' : 'light');
+          document.documentElement.style.setProperty('color-scheme', isDark ? 'dark' : 'light');
+        } catch (error) {
+          console.warn('Failed to apply theme:', error);
+        }
+      })();
+    </script>
+
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        background: transparent !important;
+        background-color: transparent !important;
+        overflow: hidden;
+      }
+    </style>
+
+    <script type="module" src="/src/pet-overlay-main.tsx"></script>
+  </head>
+  <body class="h-full">
+    <div id="root" class="h-full"></div>
+  </body>
+</html>

@@ -266,6 +266,7 @@ const sanitizeProjects = (...args) => settingsNormalizationRuntime.sanitizeProje
 const OPENCHAMBER_USER_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
 const OPENCHAMBER_USER_THEMES_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'themes');
 const OPENCHAMBER_PROJECTS_CONFIG_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'projects');
+const OPENCODE_HOME_DIR = path.join(os.homedir(), '.opencode');
 
 const MAX_THEME_JSON_BYTES = 512 * 1024;
 
@@ -1865,6 +1866,7 @@ async function main(options = {}) {
     createFsSearchRuntime: createFsSearchRuntimeFactory,
     openchamberDataDir: OPENCHAMBER_DATA_DIR,
     openchamberUserConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
+    opencodeHomeDir: OPENCODE_HOME_DIR,
     normalizeDirectoryPath,
     resolveProjectDirectory,
     resolveOptionalProjectDirectory,
