@@ -38,6 +38,8 @@ export const prepareBoundaryForkMetadata = (
     'reviewSessionID',
     'kind',
     'originalSessionID',
+    'btwSessionID',
+    'btwBoundaryMessageID',
   ] as const;
   for (const key of sourceSessionKeys) {
     if (!Object.hasOwn(nextNamespace, key)) continue;

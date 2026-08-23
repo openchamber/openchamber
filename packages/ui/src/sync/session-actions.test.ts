@@ -499,6 +499,8 @@ describe("session forks", () => {
         reviewSessionID: "review-session",
         kind: "review",
         originalSessionID: "source-session",
+        btwSessionID: "btw-session",
+        btwBoundaryMessageID: "source-assistant",
         context_obligatory_messages: [
           { id: "source-user", createdAt: 1, role: "user" },
           { id: "source-assistant", createdAt: 2, role: "assistant" },
