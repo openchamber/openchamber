@@ -441,9 +441,12 @@ export function applyDirectoryEvent(
           ? next.findIndex((p) => p.type === part.type && !(p as { sessionID?: string }).sessionID)
           : -1
         if (optimisticIndex >= 0) {
-          next.splice(optimisticIndex, 1)
+          // Replace in place: pushing to the end reorders text/file parts of a
+          // just-sent message and remounts its rendered subtree.
+          next[optimisticIndex] = part
+        } else {
+          next.push(part)
         }
-        next.push(part)
       }
       draft.part[messageID] = next
       return missingOwningMessage

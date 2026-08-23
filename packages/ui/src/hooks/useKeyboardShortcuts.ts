@@ -316,7 +316,9 @@ export const useKeyboardShortcuts = () => {
           return;
         }
 
-        openNewSessionDraft();
+        openNewSessionDraft(currentSessionId && currentDirectory
+          ? { directoryOverride: currentDirectory }
+          : undefined);
         return;
       }
 

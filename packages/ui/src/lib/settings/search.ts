@@ -1,4 +1,5 @@
 import type { I18nKey } from '@/lib/i18n/store';
+import { useUIStore } from '@/stores/useUIStore';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 
@@ -490,6 +491,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.agent-memory-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentMemoryTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentMemoryToolInfo',
+    keywords: ['agent', 'tool', 'memory', 'remember', 'recall', 'preferences', 'openchamber'],
+    // Unreleased: searching for a setting that is not rendered would take the
+    // user to an empty spot on the page.
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
+  },
+  {
     id: 'git.github-account',
     page: 'git',
     titleKey: 'settings.github.page.actions.connect',
@@ -538,6 +549,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.projects.page.field.projectName',
     keywords: ['label', 'display name', 'project metadata'],
+  },
+  {
+    id: 'projects.default-model',
+    page: 'projects',
+    titleKey: 'settings.projects.page.field.projectModel',
+    keywords: ['model', 'default', 'new chat', 'project metadata'],
+  },
+  {
+    id: 'projects.default-thinking',
+    page: 'projects',
+    titleKey: 'settings.projects.page.field.projectThinking',
+    keywords: ['thinking', 'variant', 'reasoning', 'effort', 'model', 'project metadata'],
   },
   {
     id: 'projects.accent-color',
@@ -935,26 +958,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
 
   {
-    id: 'integrations.messengers',
-    page: 'integrations',
-    titleKey: 'settings.integrations.messengers.title',
-    keywords: ['messenger', 'discord', 'telegram', 'bot', 'coming soon'],
-  },
-  {
-    id: 'integrations.messengers.discord',
-    page: 'integrations',
-    titleKey: 'settings.integrations.messengers.discord.name',
-    descriptionKey: 'settings.integrations.messengers.discord.description',
-    keywords: ['discord', 'bot', 'messenger', 'coming soon'],
-  },
-  {
-    id: 'integrations.messengers.telegram',
-    page: 'integrations',
-    titleKey: 'settings.integrations.messengers.telegram.name',
-    descriptionKey: 'settings.integrations.messengers.telegram.description',
-    keywords: ['telegram', 'bot', 'messenger', 'coming soon'],
-  },
-  {
     id: 'integrations.third-party',
     page: 'integrations',
     titleKey: 'settings.integrations.thirdParty.title',
@@ -966,13 +969,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.integrations.thirdParty.opencodeClaude.name',
     descriptionKey: 'settings.integrations.thirdParty.opencodeClaude.description',
     keywords: ['claude', 'anthropic', 'claude code', 'pro', 'max', 'agent sdk', '@openchamber/opencode-claude'],
-  },
-  {
-    id: 'integrations.third-party.opencode-commandcode',
-    page: 'integrations',
-    titleKey: 'settings.integrations.thirdParty.opencodeCommandcode.name',
-    descriptionKey: 'settings.integrations.thirdParty.opencodeCommandcode.description',
-    keywords: ['command code', 'commandcode', 'laguna', 'poolside', 'gateway', '@openchamber/opencode-commandcode'],
   },
   {
     id: 'integrations.third-party.opencode-cursor-oauth',

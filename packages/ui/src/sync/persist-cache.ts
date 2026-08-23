@@ -10,11 +10,14 @@ import type { Session, VcsInfo } from "@opencode-ai/sdk/v2/client"
 import type { ProjectMeta } from "./types"
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from "@/lib/runtime-switch"
 import { countSyncPersistenceSerialization, countSyncPersistenceStorageWrite } from "./performance-diagnostics"
+import { isChatDirectoryPath } from "@/lib/chatDirectories"
+import { isVSCodeRuntime } from "@/lib/desktop"
 
 /** Cap persisted session lists so localStorage stays bounded per directory. */
 const PERSISTED_SESSION_LIMIT = 50
 const SESSION_CACHE_FALLBACK_LIMITS = [PERSISTED_SESSION_LIMIT, 25, 10, 5, 1] as const
 const SESSION_PERSIST_DEBOUNCE_MS = 50
+const MANAGED_CHATS_CACHE_SCOPE = "openchamber:managed-chats"
 
 type PendingSessionWrite = {
   runtimeKey: string
@@ -239,6 +242,21 @@ export function persistSessions(directory: string, sessions: Session[] | undefin
     return
   }
   scheduleSessionCacheWrite(directory, sessions)
+}
+
+export function readManagedChatSessions(expectedRuntimeKey = getRuntimeKey()): Session[] {
+  if (isVSCodeRuntime()) return []
+  if (expectedRuntimeKey !== getRuntimeKey()) return []
+  return readDirCache(MANAGED_CHATS_CACHE_SCOPE).sessions?.filter((session) => (
+    isChatDirectoryPath(session.directory)
+  )) ?? []
+}
+
+export function persistManagedChatSessions(sessions: Session[]): void {
+  if (isVSCodeRuntime()) return
+  persistSessions(MANAGED_CHATS_CACHE_SCOPE, sessions.filter((session) => (
+    isChatDirectoryPath(session.directory)
+  )))
 }
 
 /** Write vcs info to cache */

@@ -132,11 +132,6 @@ describe('third-party plugin catalog helpers', () => {
         homepage: 'https://github.com/openchamber/opencode-claude',
       },
       {
-        id: 'opencode-commandcode',
-        packageName: '@openchamber/opencode-commandcode',
-        homepage: 'https://github.com/openchamber/opencode-commandcode',
-      },
-      {
         id: 'opencode-cursor-oauth',
         packageName: '@openchamber/opencode-cursor',
         homepage: 'https://github.com/openchamber/opencode-cursor',

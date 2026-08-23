@@ -212,6 +212,56 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
+  /**
+   * Merge the server-owned `context.json` (notes/todos/plans) across a project
+   * id change.
+   *
+   * `moveDirectoryContents` only renames a file when the destination is free,
+   * so without this step an existing `<newId>/context.json` would silently
+   * discard everything stored under `<oldId>`. Every list is merged by identity
+   * so neither side loses entries.
+   *
+   * A version 1 context stored notes as a single string. It is left untouched
+   * here: `project-context` converts it on read, and converting in two places
+   * would mean two definitions of the same migration.
+   */
+  const mergeProjectContextFiles = async (oldStorageDir, newStorageDir) => {
+    const oldContextPath = path.join(oldStorageDir, 'context.json');
+    const newContextPath = path.join(newStorageDir, 'context.json');
+
+    const [oldContext, newContext] = await Promise.all([
+      readJsonFile(oldContextPath).catch(() => null),
+      readJsonFile(newContextPath).catch(() => null),
+    ]);
+
+    if (!oldContext || !newContext) {
+      // Nothing to reconcile: the plain directory move handles a single side.
+      return;
+    }
+
+    const mergeNotes = () => {
+      // One side may still be a version 1 string; keep whichever is a list, and
+      // prefer the destination when both are strings.
+      const oldIsList = Array.isArray(oldContext.notes);
+      const newIsList = Array.isArray(newContext.notes);
+      if (oldIsList && newIsList) {
+        return mergeByKey(oldContext.notes, newContext.notes, (item) => item.id);
+      }
+      if (newIsList) return newContext.notes;
+      if (oldIsList) return oldContext.notes;
+      return newContext.notes || oldContext.notes || '';
+    };
+
+    await writeJsonFile(newContextPath, {
+      ...oldContext,
+      ...newContext,
+      notes: mergeNotes(),
+      todos: mergeByKey(oldContext.todos, newContext.todos, (item) => item.id),
+      plans: mergeByKey(oldContext.plans, newContext.plans, (item) => item.id || item.file),
+    });
+    await fsPromises.rm(oldContextPath, { force: true });
+  };
+
   const migrateProjectScopedStorage = async ({ oldId, newId, projectPath }) => {
     if (!oldId || !newId || oldId === newId) {
       return;
@@ -232,6 +282,7 @@ export const createSettingsRuntime = (deps) => {
       await writeJsonFile(newConfigPath, merged);
     }
 
+    await mergeProjectContextFiles(oldStorageDir, newStorageDir);
     await moveDirectoryContents(oldStorageDir, newStorageDir);
     await fsPromises.rm(oldConfigPath, { force: true });
   };
@@ -496,25 +547,41 @@ export const createSettingsRuntime = (deps) => {
     // briefly opens the target file. Preserve atomic rename everywhere it works,
     // but fall back to a direct replacement so settings persistence does not
     // get permanently wedged on Windows desktop installs.
-    await fsPromises.copyFile(tmp, target);
-    await fsPromises.rm(tmp, { force: true });
+    try {
+      await fsPromises.copyFile(tmp, target);
+    } finally {
+      await fsPromises.rm(tmp, { force: true }).catch(() => {});
+    }
+  };
+
+  const cleanupOrphanedSettingsTempFiles = async (directory) => {
+    try {
+      const entries = await fsPromises.readdir(directory, { withFileTypes: true });
+      const cleanupTasks = entries
+        .filter((entry) => entry.isFile() && entry.name.startsWith('settings.json.tmp-'))
+        .map((entry) => fsPromises.rm(path.join(directory, entry.name), { force: true }).catch(() => {}));
+      await Promise.all(cleanupTasks);
+    } catch {
+      // Best-effort cleanup: errors reading directory must not fail settings operations
+    }
   };
 
   const writeSettingsToDisk = async (settings) => {
+    const settingsDirectory = path.dirname(SETTINGS_FILE_PATH);
+    await fsPromises.mkdir(settingsDirectory, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await fsPromises.chmod(settingsDirectory, 0o700);
+    // Atomic write: Electron main and ssh-manager read this file via plain
+    // readFile + JSON.parse and silently coerce parse errors to {}. A
+    // partial read during a non-atomic writeFile would make their next
+    // read-modify-write wipe the settings file.
+    const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
-      const settingsDirectory = path.dirname(SETTINGS_FILE_PATH);
-      await fsPromises.mkdir(settingsDirectory, { recursive: true, mode: 0o700 });
-      if (process.platform !== 'win32') await fsPromises.chmod(settingsDirectory, 0o700);
-      // Atomic write: Electron main and ssh-manager read this file via plain
-      // readFile + JSON.parse and silently coerce parse errors to {}. A
-      // partial read during a non-atomic writeFile would make their next
-      // read-modify-write wipe the settings file.
-      const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
       if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
       await replaceFile(tmp, SETTINGS_FILE_PATH);
       if (process.platform !== 'win32') await fsPromises.chmod(SETTINGS_FILE_PATH, 0o600);
     } catch (error) {
+      await fsPromises.rm(tmp, { force: true }).catch(() => {});
       console.warn('Failed to write settings file:', error);
       throw error;
     }
@@ -803,7 +870,13 @@ export const createSettingsRuntime = (deps) => {
     return { settings: next, changed: true };
   };
 
+  let hasCleanedOrphanedTempFiles = false;
+
   const readSettingsFromDiskMigrated = async () => {
+    if (!hasCleanedOrphanedTempFiles) {
+      hasCleanedOrphanedTempFiles = true;
+      await cleanupOrphanedSettingsTempFiles(path.dirname(SETTINGS_FILE_PATH));
+    }
     const current = await readSettingsFromDisk();
     const migration1 = await migrateSettingsFromLegacyLastDirectory(current);
     const migration2 = await migrateSettingsFromLegacyThemePreferences(migration1.settings);

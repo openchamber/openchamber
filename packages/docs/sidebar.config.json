@@ -350,6 +350,21 @@
           }
         },
         {
+          "label": "Integrations",
+          "link": "/integrations/",
+          "translations": {
+            "uk": "Інтеграції",
+            "zh-CN": "集成",
+            "es": "Integraciones",
+            "pt-BR": "Integrações",
+            "ko": "통합 기능",
+            "pl": "Integracje",
+            "fr": "Intégrations",
+            "ja": "統合機能",
+            "de": "Integrationen"
+          }
+        },
+        {
           "label": "MCP Servers",
           "link": "/mcp/",
           "translations": {

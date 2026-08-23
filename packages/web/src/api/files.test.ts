@@ -92,6 +92,39 @@ describe('createWebFilesAPI', () => {
     });
   });
 
+  it('uploads binary file contents to the active workspace', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const file = new Blob([new Uint8Array([0, 1, 255])]);
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ success: true, path: '/workspace/image.bin' }));
+
+    await api.uploadFile?.('/workspace/image.bin', file, { directory: '/workspace' });
+
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/upload', {
+      method: 'POST',
+      query: { path: '/workspace/image.bin', overwrite: undefined },
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'x-opencode-directory': '/workspace',
+      },
+      body: file,
+    });
+  });
+
+  it('preserves upload conflict details for explicit overwrite handling', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(
+      { error: 'File already exists', reason: 'already-exists' },
+      { status: 409 },
+    ));
+
+    await expect(api.uploadFile?.('/workspace/file.txt', new Blob(['new']))).rejects.toMatchObject({
+      reason: 'already-exists',
+      status: 409,
+    });
+  });
+
   it('opens the native share sheet for downloads in the Capacitor app', async () => {
     const { createWebFilesAPI } = await import('./files');
     const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });

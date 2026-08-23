@@ -226,20 +226,23 @@ describe('issue #2903 busy embedded subagent status-line-only', () => {
     expect(chatContainerSource).toContain('void ensureSessionRenderable(currentSessionId);');
   });
 
-  test('empty+busy branch skips empty state so StatusRowContainer can stand alone', () => {
+  test('the empty and idle branch leaves the status row to the busy path', () => {
+    // A busy session with no messages yet must fall through to the viewport so
+    // StatusRowContainer is the only thing on screen. The idle branch returns
+    // before it and must not render one of its own. The empty state itself no
+    // longer lives here: the draft surface owns it since the draft transition
+    // animation landed.
     expect(chatContainerSource).toContain('if (sessionMessages.length === 0 && !sessionIsWorking)');
-    expect(chatContainerSource).toContain('<ChatEmptyState');
     expect(chatContainerSource).toContain('<StatusRowContainer />');
 
-    const emptyBusyGuard = 'if (sessionMessages.length === 0 && !sessionIsWorking)';
-    const emptyStateReturn = chatContainerSource.indexOf(emptyBusyGuard);
-    expect(emptyStateReturn).toBeGreaterThan(-1);
-    const emptyStateBlock = chatContainerSource.slice(
-      emptyStateReturn,
-      emptyStateReturn + 1600,
+    const emptyIdleGuard = 'if (sessionMessages.length === 0 && !sessionIsWorking)';
+    const emptyIdleReturn = chatContainerSource.indexOf(emptyIdleGuard);
+    expect(emptyIdleReturn).toBeGreaterThan(-1);
+    const emptyIdleBlock = chatContainerSource.slice(
+      emptyIdleReturn,
+      emptyIdleReturn + 1600,
     );
-    expect(emptyStateBlock).toContain('<ChatEmptyState');
-    expect(emptyStateBlock).not.toContain('<StatusRowContainer />');
+    expect(emptyIdleBlock).not.toContain('<StatusRowContainer />');
   });
 
   test('visibility handshake remains as defense-in-depth for background work', () => {

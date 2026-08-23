@@ -83,6 +83,7 @@ const MAGIC_PROMPT_DEFINITIONS: readonly MagicPromptDefinition[] = [
     description: 'Hidden instructions for commit message generation.',
     placeholders: [
       { key: 'selected_files', description: 'Bullet list of currently selected file paths.' },
+      { key: 'recent_commits', description: 'Subjects of the most recent commits on the current branch.' },
     ],
     template: `Return exactly one JSON object and nothing else. Do not include prose, markdown, explanations, or code fences.
 
@@ -90,13 +91,16 @@ The JSON object must have exactly this shape:
 {"subject": string, "highlights": string[]}
 
 Rules:
-- subject format: <type>: <summary>
-- allowed types: feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert
-- no scope in subject
+- match the style of the recent commits below: their language, capitalization, use or absence of a type prefix or scope, and typical length
+- if the recent commits are written in a language other than English, write the subject and highlights in that language
+- when the recent commits show no consistent style, use the format <type>: <summary> with one of: feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert, and no scope
 - keep subject concise and user-facing
 - highlights: 0-3 concise user-facing points
 - use double quotes for all JSON strings
 - do not include trailing commas or comments
+
+Recent commits on this branch (newest first):
+{{recent_commits}}
 
 Selected files:
 {{selected_files}}`,
@@ -119,6 +123,7 @@ Selected files:
       { key: 'commits', description: 'Bullet list of commits in base...head.' },
       { key: 'changed_files', description: 'Bullet list of changed files in base...head.' },
       { key: 'additional_context_block', description: 'Optional Additional context block (already formatted).' },
+      { key: 'pr_template_block', description: 'Optional repository pull request template block (already formatted, empty when the repo has none).' },
     ],
     template: `Return exactly one JSON object and nothing else. Do not include prose, markdown outside JSON, explanations, or code fences.
 
@@ -127,7 +132,8 @@ The JSON object must have exactly this shape:
 
 Rules:
 - title: concise, outcome-first, conventional style
-- body: markdown with sections: ## Summary, ## Why, ## Testing
+- body, when a repository pull request template is included below: reuse the template as the body. Keep its headings, their order, its wording and its checklists, drop its HTML comments, and fill every section from the commits and changed files. Leave a section empty rather than inventing content for it
+- body, when no template is included: markdown with sections ## Summary, ## Why, ## Testing
 - keep output concrete and user-facing
 - put all markdown inside the body string
 - use double quotes for all JSON strings and escape newlines as \\n
@@ -140,7 +146,7 @@ Commits in range (base...head):
 {{commits}}
 
 Files changed across these commits:
-{{changed_files}}{{additional_context_block}}`,
+{{changed_files}}{{additional_context_block}}{{pr_template_block}}`,
   },
   {
     id: 'github.pr.review.visible',

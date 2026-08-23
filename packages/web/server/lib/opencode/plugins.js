@@ -4,6 +4,7 @@ import path from 'path';
 import {
   AGENT_SCOPE,
   readConfigFile,
+  readConfigLayer,
   writeConfig,
 } from './shared.js';
 import { isPathSpec } from './plugin-spec.js';
@@ -111,15 +112,23 @@ function readPluginConfigLayers(workingDirectory) {
   const customPath = getActiveCustomConfigPath();
   const userPath = getPrimaryUserConfigPath();
   const projectPath = getProjectConfigPath(workingDirectory);
+  const userLayer = readConfigLayer(userPath);
+  const projectLayer = readConfigLayer(projectPath);
+  const customLayer = readConfigLayer(customPath);
   return {
-    userConfig: readConfigFile(userPath),
-    projectConfig: readConfigFile(projectPath),
-    customConfig: readConfigFile(customPath),
+    userConfig: userLayer.config,
+    projectConfig: projectLayer.config,
+    customConfig: customLayer.config,
     paths: {
       userPath,
       projectPath,
       customPath,
     },
+    layerErrors: [
+      userLayer.error && { path: userPath, code: userLayer.error.code, message: userLayer.error.message },
+      projectLayer.error && projectPath && { path: projectPath, code: projectLayer.error.code, message: projectLayer.error.message },
+      customLayer.error && customPath && { path: customPath, code: customLayer.error.code, message: customLayer.error.message },
+    ].filter(Boolean),
   };
 }
 

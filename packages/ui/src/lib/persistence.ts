@@ -21,6 +21,7 @@ import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -63,6 +64,10 @@ const persistRuntimeSettingsMirror = (settings: DesktopSettings, runtimeKey: str
     homeDirectory: settings.homeDirectory,
     projects: settings.projects,
     activeProjectId: settings.activeProjectId,
+    sidebarProjectDisplayMode: settings.sidebarProjectDisplayMode,
+    sidebarSessionGroupingMode: settings.sidebarSessionGroupingMode,
+    sidebarProjectSortOrder: settings.sidebarProjectSortOrder,
+    sidebarShowRecentSection: settings.sidebarShowRecentSection,
     pinnedDirectories: settings.pinnedDirectories,
     gitmojiEnabled: settings.gitmojiEnabled,
     directoryShowHidden: settings.directoryShowHidden,
@@ -130,7 +135,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
 
   if (Array.isArray(settings.projects) && settings.projects.length > 0) {
     const collapsed = settings.projects
-      .filter((project) => (project as unknown as { sidebarCollapsed?: boolean }).sidebarCollapsed === true)
+      .filter((project) => project.sidebarCollapsed === true)
       .map((project) => project.id)
       .filter((id): id is string => typeof id === 'string' && id.length > 0);
     if (collapsed.length > 0) {
@@ -273,13 +278,14 @@ const sanitizeSkillCatalogs = (value: unknown): DesktopSettings['skillCatalogs']
     if (seen.has(id)) continue;
     seen.add(id);
 
-    result.push({
+    const catalog: NonNullable<DesktopSettings['skillCatalogs']>[number] = {
       id,
       label,
       source,
-      ...(subpath ? { subpath } : {}),
-      ...(gitIdentityId ? { gitIdentityId } : {}),
-    });
+    };
+    if (subpath) catalog.subpath = subpath;
+    if (gitIdentityId) catalog.gitIdentityId = gitIdentityId;
+    result.push(catalog);
   }
 
   return result;
@@ -393,7 +399,7 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
       project.icon = candidate.icon.trim();
     }
     if (candidate.iconImage === null) {
-      (project as unknown as Record<string, unknown>).iconImage = null;
+      project.iconImage = null;
     } else if (candidate.iconImage && typeof candidate.iconImage === 'object') {
       const iconImage = candidate.iconImage as Record<string, unknown>;
       const mime = typeof iconImage.mime === 'string' ? iconImage.mime.trim() : '';
@@ -404,18 +410,18 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
         ? iconImage.source
         : null;
       if (mime && updatedAt > 0 && source) {
-        (project as unknown as Record<string, unknown>).iconImage = { mime, updatedAt, source };
+        project.iconImage = { mime, updatedAt, source };
       }
     }
     if (typeof candidate.color === 'string' && candidate.color.trim().length > 0) {
       project.color = candidate.color.trim();
     }
     if (candidate.iconBackground === null) {
-      (project as unknown as Record<string, unknown>).iconBackground = null;
+      project.iconBackground = null;
     } else {
       const iconBackground = normalizeIconBackground(candidate.iconBackground);
       if (iconBackground) {
-        (project as unknown as Record<string, unknown>).iconBackground = iconBackground;
+        project.iconBackground = iconBackground;
       }
     }
     if (typeof candidate.addedAt === 'number' && Number.isFinite(candidate.addedAt) && candidate.addedAt >= 0) {
@@ -429,7 +435,7 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
       project.lastOpenedAt = candidate.lastOpenedAt;
     }
     if (typeof candidate.sidebarCollapsed === 'boolean') {
-      (project as unknown as Record<string, unknown>).sidebarCollapsed = candidate.sidebarCollapsed;
+      project.sidebarCollapsed = candidate.sidebarCollapsed;
     }
     result.push(project);
   }
@@ -507,7 +513,7 @@ const sanitizeModelRefs = (value: unknown, limit: number): Array<{ providerID: s
 };
 
 const getPersistApi = (): PersistApi | undefined => {
-  const candidate = (useUIStore as unknown as { persist?: PersistApi }).persist;
+  const candidate = useUIStore.persist;
   if (candidate && typeof candidate === 'object') {
     return candidate;
   }
@@ -554,6 +560,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     showOpenCodeUpdateNotifications: defaults.showOpenCodeUpdateNotifications,
     agentControlToolEnabled: defaults.agentControlToolEnabled,
     agentWebToolEnabled: defaults.agentWebToolEnabled,
+    agentMemoryToolEnabled: defaults.agentMemoryToolEnabled,
     showToolFileIcons: defaults.showToolFileIcons,
     codeBlockLineWrap: defaults.codeBlockLineWrap,
     showTurnChangedFiles: defaults.showTurnChangedFiles,
@@ -735,6 +742,19 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     && settings.agentWebToolEnabled !== store.agentWebToolEnabled
   ) {
     store.setAgentWebToolEnabled(settings.agentWebToolEnabled);
+  }
+  if (
+    typeof settings.agentMemoryToolEnabled === 'boolean'
+    && settings.agentMemoryToolEnabled !== store.agentMemoryToolEnabled
+  ) {
+    store.setAgentMemoryToolEnabled(settings.agentMemoryToolEnabled);
+  }
+  // Server-owned: it says whether this build has the feature at all.
+  if (
+    typeof settings.agentMemoryFeatureAvailable === 'boolean'
+    && settings.agentMemoryFeatureAvailable !== store.agentMemoryFeatureAvailable
+  ) {
+    store.setAgentMemoryFeatureAvailable(settings.agentMemoryFeatureAvailable);
   }
   if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
     store.setShowToolFileIcons(settings.showToolFileIcons);
@@ -1014,6 +1034,26 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.filesViewShowGitignored === 'boolean') {
     setFilesViewShowGitignored(settings.filesViewShowGitignored, { persist: false });
   }
+  const sessionDisplayChanges: Partial<ReturnType<typeof useSessionDisplayStore.getState>> = {};
+  if (settings.sidebarProjectDisplayMode === 'all' || settings.sidebarProjectDisplayMode === 'single') {
+    sessionDisplayChanges.projectDisplayMode = settings.sidebarProjectDisplayMode;
+  }
+  if (settings.sidebarSessionGroupingMode === 'by-worktree' || settings.sidebarSessionGroupingMode === 'flat') {
+    sessionDisplayChanges.sessionGroupingMode = settings.sidebarSessionGroupingMode;
+  }
+  if (settings.sidebarProjectSortOrder === 'manual'
+    || settings.sidebarProjectSortOrder === 'a-z'
+    || settings.sidebarProjectSortOrder === 'z-a'
+    || settings.sidebarProjectSortOrder === 'date-added'
+    || settings.sidebarProjectSortOrder === 'recent') {
+    sessionDisplayChanges.projectSortOrder = settings.sidebarProjectSortOrder;
+  }
+  if (typeof settings.sidebarShowRecentSection === 'boolean') {
+    sessionDisplayChanges.showRecentSection = settings.sidebarShowRecentSection;
+  }
+  if (Object.keys(sessionDisplayChanges).length > 0) {
+    useSessionDisplayStore.setState(sessionDisplayChanges);
+  }
 };
 
 const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
@@ -1069,6 +1109,22 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
     result.activeProjectId = candidate.activeProjectId;
+  }
+  if (candidate.sidebarProjectDisplayMode === 'all' || candidate.sidebarProjectDisplayMode === 'single') {
+    result.sidebarProjectDisplayMode = candidate.sidebarProjectDisplayMode;
+  }
+  if (candidate.sidebarSessionGroupingMode === 'by-worktree' || candidate.sidebarSessionGroupingMode === 'flat') {
+    result.sidebarSessionGroupingMode = candidate.sidebarSessionGroupingMode;
+  }
+  if (candidate.sidebarProjectSortOrder === 'manual'
+    || candidate.sidebarProjectSortOrder === 'a-z'
+    || candidate.sidebarProjectSortOrder === 'z-a'
+    || candidate.sidebarProjectSortOrder === 'date-added'
+    || candidate.sidebarProjectSortOrder === 'recent') {
+    result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
+  }
+  if (typeof candidate.sidebarShowRecentSection === 'boolean') {
+    result.sidebarShowRecentSection = candidate.sidebarShowRecentSection;
   }
 
   if (Array.isArray(candidate.securityScopedBookmarks)) {
@@ -1325,11 +1381,7 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     for (const [providerId, config] of Object.entries(candidate.usageModelGroups)) {
       if (config && typeof config === 'object') {
         const typedConfig = config as Record<string, unknown>;
-        const providerConfig: {
-          customGroups?: Array<{id: string; label: string; models: string[]; order: number}>;
-          modelAssignments?: Record<string, string>;
-          renamedGroups?: Record<string, string>;
-        } = {};
+        const providerConfig: NonNullable<DesktopSettings['usageModelGroups']>[string] = {};
 
         // Parse customGroups
         if (Array.isArray(typedConfig.customGroups)) {
@@ -1384,6 +1436,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.agentWebToolEnabled === 'boolean') {
     result.agentWebToolEnabled = candidate.agentWebToolEnabled;
+  }
+  if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
+    result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
   }
   if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
     result.openCodeUpdateToastDismissedVersion = candidate.openCodeUpdateToastDismissedVersion.trim().slice(0, 128);
@@ -1733,12 +1788,12 @@ export const syncDesktopSettings = async (): Promise<void> => {
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
 
-  const persistApi = getPersistApi();
+  const persistApis = [getPersistApi(), useSessionDisplayStore.persist];
 
   // Wait for Zustand persist hydration before applying server settings.
   // Otherwise `set()`-calls race with hydration: we set X, then hydration
   // reads localStorage and overwrites back to the persisted value.
-  const waitForHydration = (): Promise<void> => {
+  const waitForPersistHydration = (persistApi: PersistApi | undefined): Promise<void> => {
     if (!persistApi?.hasHydrated || persistApi.hasHydrated()) {
       return Promise.resolve();
     }
@@ -1761,6 +1816,9 @@ export const syncDesktopSettings = async (): Promise<void> => {
       if (persistApi.hasHydrated?.()) finish();
     });
   };
+  const waitForHydration = (): Promise<void> => Promise.all(
+    persistApis.map(waitForPersistHydration),
+  ).then(() => undefined);
 
   // Each step is wrapped in try/catch so a failure in one side-effect (e.g.
   // a TypeError from writing to a contextBridge-protected global) doesn't
@@ -1775,6 +1833,10 @@ export const syncDesktopSettings = async (): Promise<void> => {
     // `openchamber:files:auto-save-enabled`. Prefer the hydrated store value and
     // seed the backend once so later omitted→default authority is correct.
     const shouldSeedAutoSaveEnabled = typeof settings.autoSaveEnabled !== 'boolean';
+    const shouldSeedSidebarProjectDisplayMode = settings.sidebarProjectDisplayMode === undefined;
+    const shouldSeedSidebarSessionGroupingMode = settings.sidebarSessionGroupingMode === undefined;
+    const shouldSeedSidebarProjectSortOrder = settings.sidebarProjectSortOrder === undefined;
+    const shouldSeedSidebarShowRecentSection = settings.sidebarShowRecentSection === undefined;
     const authoritativeSettings = materializeAuthoritativeUiSettings(settings);
     try {
       persistToLocalStorage(settings);
@@ -1785,6 +1847,19 @@ export const syncDesktopSettings = async (): Promise<void> => {
     if (!isSettingsRuntimeContextCurrent(context)) return;
     if (shouldSeedAutoSaveEnabled) {
       authoritativeSettings.autoSaveEnabled = useUIStore.getState().autoSaveEnabled;
+    }
+    const sessionDisplayState = useSessionDisplayStore.getState();
+    if (shouldSeedSidebarProjectDisplayMode) {
+      authoritativeSettings.sidebarProjectDisplayMode = sessionDisplayState.projectDisplayMode;
+    }
+    if (shouldSeedSidebarSessionGroupingMode) {
+      authoritativeSettings.sidebarSessionGroupingMode = sessionDisplayState.sessionGroupingMode;
+    }
+    if (shouldSeedSidebarProjectSortOrder) {
+      authoritativeSettings.sidebarProjectSortOrder = sessionDisplayState.projectSortOrder;
+    }
+    if (shouldSeedSidebarShowRecentSection) {
+      authoritativeSettings.sidebarShowRecentSection = sessionDisplayState.showRecentSection;
     }
     if (settings.draftStarters === undefined) {
       useUIStore.setState({ globalDraftStarters: null });
@@ -1804,6 +1879,18 @@ export const syncDesktopSettings = async (): Promise<void> => {
     }
     if (shouldSeedAutoSaveEnabled) {
       migrationPatch.autoSaveEnabled = authoritativeSettings.autoSaveEnabled;
+    }
+    if (shouldSeedSidebarProjectDisplayMode) {
+      migrationPatch.sidebarProjectDisplayMode = authoritativeSettings.sidebarProjectDisplayMode;
+    }
+    if (shouldSeedSidebarSessionGroupingMode) {
+      migrationPatch.sidebarSessionGroupingMode = authoritativeSettings.sidebarSessionGroupingMode;
+    }
+    if (shouldSeedSidebarProjectSortOrder) {
+      migrationPatch.sidebarProjectSortOrder = authoritativeSettings.sidebarProjectSortOrder;
+    }
+    if (shouldSeedSidebarShowRecentSection) {
+      migrationPatch.sidebarShowRecentSection = authoritativeSettings.sidebarShowRecentSection;
     }
     if (Object.keys(migrationPatch).length > 0) {
       await updateDesktopSettings(migrationPatch);
@@ -1875,7 +1962,7 @@ async function _flushSettingsUpdate(): Promise<void> {
         return;
       }
 
-      const updated = (await response.json().catch(() => null)) as DesktopSettings | null;
+      const updated = sanitizeWebSettings(await response.json().catch(() => null));
       if (!isSettingsRuntimeContextCurrent(context)) return;
       if (updated) {
         applyDesktopUiPreferences(updated);
