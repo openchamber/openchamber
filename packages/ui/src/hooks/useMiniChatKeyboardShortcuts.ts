@@ -3,16 +3,12 @@ import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { canUseElectronDesktopIPC, invokeDesktop } from '@/lib/desktop';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 export const useMiniChatKeyboardShortcuts = () => {
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const activeProject = useProjectsStore((state) => state.getActiveProject());
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
 
   React.useEffect(() => {
@@ -28,8 +24,8 @@ export const useMiniChatKeyboardShortcuts = () => {
       if (canUseElectronDesktopIPC() && eventMatchesShortcut(event, combo('new_mini_chat'))) {
         event.preventDefault();
         void invokeDesktop('desktop_open_draft_mini_chat_window', {
-          directory: currentDirectory || activeProject?.path || '',
-          projectId: activeProject?.id ?? null,
+          directory: '',
+          projectId: null,
         })?.catch((error) => {
           console.warn('[mini-chat-shortcuts] failed to open draft mini chat window', error);
         });
@@ -38,11 +34,10 @@ export const useMiniChatKeyboardShortcuts = () => {
 
       if (eventMatchesShortcut(event, combo('new_chat'))) {
         event.preventDefault();
-        openNewSessionDraft({
-          selectedProjectId: activeProject?.id ?? null,
-          directoryOverride: currentDirectory || activeProject?.path || null,
-          preserveDirectoryOverride: Boolean(currentDirectory || activeProject?.path),
-        });
+        const sessionState = useSessionUIStore.getState();
+        openNewSessionDraft(sessionState.currentSessionId && sessionState.currentSessionDirectory
+          ? { directoryOverride: sessionState.currentSessionDirectory }
+          : undefined);
         focusChatInput();
         return;
       }
@@ -98,5 +93,5 @@ export const useMiniChatKeyboardShortcuts = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeProject?.id, activeProject?.path, currentDirectory, openNewSessionDraft, shortcutOverrides]);
+  }, [openNewSessionDraft, shortcutOverrides]);
 };

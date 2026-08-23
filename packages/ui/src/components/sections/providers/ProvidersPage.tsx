@@ -4,7 +4,8 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import { SettingsSection, SETTINGS_CUSTOM_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -144,7 +145,10 @@ const parseProvidersPayload = (payload: unknown): ProviderOption[] => {
 
 export const ProvidersPage: React.FC = () => {
   const { t } = useI18n();
-  const providers = useConfigStore((state) => state.providers);
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const settingsDirectory = useSettingsDirectory();
+  const providers = useConfigStore((state) => selectProvidersForDirectory(state, settingsDirectory));
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
   const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
@@ -341,7 +345,8 @@ export const ProvidersPage: React.FC = () => {
       try {
         // OpenChamber-only metadata endpoint: the SDK exposes provider data but
         // not local auth/source-file provenance used by this settings UI.
-        const response = await runtimeFetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source`, {
+        const query = settingsDirectory ? `?directory=${encodeURIComponent(settingsDirectory)}` : '';
+        const response = await runtimeFetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source${query}`, {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -370,7 +375,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedProviderId, t]);
+  }, [selectedProviderId, settingsDirectory, t]);
 
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
@@ -431,7 +436,7 @@ export const ProvidersPage: React.FC = () => {
           ? (editingCustomScope ?? resolveProviderConfigScope(providerSources[editingCustomProviderId]))
           : 'user',
       });
-      const response = await runtimeFetch('/api/provider', {
+      const response = await runtimeFetch(`/api/provider${settingsDirectory ? `?directory=${encodeURIComponent(settingsDirectory)}` : ''}`, {
         method: 'PUT',
         headers: {
           Accept: 'application/json',
@@ -484,10 +489,13 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, {
-        method: 'DELETE',
-        headers: { Accept: 'application/json' },
-      });
+      const response = await runtimeFetch(
+        `/api/provider/${encodeURIComponent(providerId)}/auth?scope=all${settingsDirectory ? `&directory=${encodeURIComponent(settingsDirectory)}` : ''}`,
+        {
+          method: 'DELETE',
+          headers: { Accept: 'application/json' },
+        },
+      );
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {

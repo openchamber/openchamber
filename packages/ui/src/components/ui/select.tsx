@@ -163,6 +163,7 @@ type SelectContentExtra = {
   sideOffset?: number;
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
+  collisionAvoidance?: React.ComponentProps<typeof BaseSelect.Positioner>["collisionAvoidance"];
 };
 
 function SelectContent({
@@ -174,6 +175,7 @@ function SelectContent({
   sideOffset,
   side,
   align,
+  collisionAvoidance,
   ...props
 }: React.ComponentProps<typeof BaseSelect.Popup> & SelectContentExtra) {
   const portalContext = React.useContext(SelectPortalContext);
@@ -187,6 +189,7 @@ function SelectContent({
         sideOffset={sideOffset}
         side={side}
         align={align}
+        collisionAvoidance={collisionAvoidance}
         className="absolute z-[120] pointer-events-auto"
       >
         <BaseSelect.Popup

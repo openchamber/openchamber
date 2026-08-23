@@ -327,6 +327,33 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.equal(windows['MCP Tools']!.windowSeconds, 30 * 24 * 60 * 60);
     assert.equal(windows['MCP Tools']!.resetAt, 1787128459979);
   });
+
+  test('maps CREDIT_LIMIT entries to windows with credit value labels and plan level', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      code: 200,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 12000, currentValue: 65, remaining: 11934, percentage: 1, nextResetTime: 1787257978907 },
+          { type: 'CREDIT_LIMIT', unit: 6, number: 1, usage: 60000, currentValue: 65, remaining: 59934, percentage: 1, nextResetTime: 1787844668997 },
+        ],
+        level: 'pro',
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+    const windows = result.usage!.windows;
+
+    assert.equal(result.ok, true);
+    assert.equal(result.planLabel, 'pro');
+    assert.equal(windows['5h']!.usedPercent, 1);
+    assert.equal(windows['5h']!.windowSeconds, 5 * 60 * 60);
+    assert.equal(windows['5h']!.resetAt, 1787257978907);
+    assert.equal(windows['5h']!.valueLabel, '65 / 12k credits');
+    assert.equal(windows.weekly!.usedPercent, 1);
+    assert.equal(windows.weekly!.windowSeconds, 7 * 24 * 60 * 60);
+    assert.equal(windows.weekly!.resetAt, 1787844668997);
+    assert.equal(windows.weekly!.valueLabel, '65 / 60k credits');
+  });
 });
 
 describe('NeuralWatt quota provider (VS Code parity)', () => {

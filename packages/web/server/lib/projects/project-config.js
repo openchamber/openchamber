@@ -536,8 +536,13 @@ export const createProjectConfigRuntime = (deps) => {
     };
 
     await fsPromises.mkdir(parentDirectory, { recursive: true });
-    await fsPromises.writeFile(temporaryPath, JSON.stringify(merged, null, 2), 'utf8');
-    await fsPromises.rename(temporaryPath, filePath);
+    try {
+      await fsPromises.writeFile(temporaryPath, JSON.stringify(merged, null, 2), 'utf8');
+      await fsPromises.rename(temporaryPath, filePath);
+    } catch (error) {
+      await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
+      throw error;
+    }
   };
 
   const withProjectWriteLock = async (projectID, mutate) => {

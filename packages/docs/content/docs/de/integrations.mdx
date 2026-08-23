@@ -1,16 +1,17 @@
 ---
 title: Integrationen
-description: Nutze dein Claude-, Command-Code- oder Cursor-Abo als Provider.
+description: Nutze dein Claude- oder Cursor-Abo als Provider.
 ---
 
 # Integrationen
 
 Eine Integration ist ein kleines Plugin, das OpenChamber einen Provider hinzufügt — auf Basis eines Abos, das du bereits hast. Verwalten kannst du sie unter **Settings → Integrations**.
 
+> **Experimentelle Funktion.** Wir bemühen uns, die Richtlinien der Anbieter zu respektieren, aber Kontobeschränkungen und Sperrungen liegen bei jedem Anbieter. Nutze Integrationen auf eigenes Risiko.
+
 Verfügbare Integrationen:
 
 - **Claude Code** — dein Claude Pro- oder Max-Plan, ohne API-Keys
-- **Command Code** — dein Command-Code-Plan
 - **Cursor** — die Modell-Limits deines Cursor-Plans
 
 ## Integration installieren
@@ -29,18 +30,9 @@ Claude Code nutzt deinen Claude Pro- oder Max-Plan — ohne API-Keys und ohne se
 1. Installiere die Integration (siehe oben).
 2. Wähle **Set up** und melde dich an. Wenn du die Claude Code CLI noch nicht hast, bietet die Einrichtung an, sie zuerst zu installieren, und meldet dich danach an.
 
-Claude Code ist die einzige Integration hier, die ihre Provider-CLI installiert und angemeldet benötigt. Command Code und Cursor brauchen ihre CLIs nicht.
+Claude Code ist die einzige Integration hier, die ihre Provider-CLI installiert und angemeldet benötigt. Cursor braucht seine CLI nicht.
 
 **Wie dein Claude-Konto geschützt bleibt:** Diese Integration nutzt das offizielle Claude Agent SDK von Anthropic und deine installierte Claude Code CLI. Sie kapert kein OAuth, extrahiert oder wiederholt keine Browser-Tokens, gibt sich nicht als nicht unterstützter Client aus und umgeht nicht Anthropics Authentifizierung. Sie bleibt auf dem von Anthropic unterstützten Zugriffsweg und trägt daher nicht das mit Token-Hijacking oder unautorisierten Authentifizierungsumgehungen verbundene Sperrrisiko.
-
-## Command Code
-
-Command Code nutzt deinen Command-Code-Plan.
-
-1. Installiere die Integration (siehe oben).
-2. Wähle **Set up** — es öffnet sich eine Browserseite. Genehmige den Zugriff und kehre zu OpenChamber zurück.
-
-Auf einem Headless-Server oder in CI setze stattdessen die Umgebungsvariable `COMMAND_CODE_API_KEY`, anstatt dich im Browser anzumelden.
 
 ## Cursor
 

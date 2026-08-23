@@ -13,8 +13,14 @@ import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
 
-export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
-export type PendingDiffScope = 'working' | 'staged' | 'turn';
+/**
+ * The primary view on mobile and the desktop's promoted full-screen view.
+ * Desktop context-panel content is not represented here.
+ */
+export type WorkspaceSurface = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
+/** @deprecated Use WorkspaceSurface. */
+export type MainTab = WorkspaceSurface;
+export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch';
 export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
@@ -77,7 +83,9 @@ type PendingFileNavigation = {
   column: number;
 };
 
-export type MainTabGuard = (nextTab: MainTab) => boolean;
+export type WorkspaceSurfaceGuard = (nextSurface: WorkspaceSurface) => boolean;
+/** @deprecated Use WorkspaceSurfaceGuard. */
+export type MainTabGuard = WorkspaceSurfaceGuard;
 export type EventStreamStatus =
   | 'idle'
   | 'connecting'
@@ -129,7 +137,7 @@ const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
 const LEFT_SIDEBAR_MIN_WIDTH = 280;
-const activeMainTabByRuntime = new Map<string, MainTab>();
+const activeSurfaceByRuntime = new Map<string, WorkspaceSurface>();
 /** Separates browser tabs opened in the same millisecond. */
 let browserTabSequence = 0;
 
@@ -197,7 +205,7 @@ const normalizeContextTabLabel = (value: string | null | undefined): string | nu
 };
 
 const normalizePendingDiffScope = (value: unknown): PendingDiffScope | null => {
-  return value === 'working' || value === 'staged' || value === 'turn' ? value : null;
+  return value === 'working' || value === 'staged' || value === 'turn' || value === 'branch' ? value : null;
 };
 
 const buildDefaultContextPanelTabDedupeKey = (mode: ContextPanelMode, targetPath: string | null): string => {
@@ -648,8 +656,12 @@ interface UIStore {
   workStatusHiddenSections: string[];
   isSessionSwitcherOpen: boolean;
   isSessionDropdownOpen: boolean;
-  activeMainTab: MainTab;
-  mainTabGuard: MainTabGuard | null;
+  activeSurface: WorkspaceSurface;
+  surfaceGuard: WorkspaceSurfaceGuard | null;
+  /** @deprecated Use activeSurface. */
+  activeMainTab: WorkspaceSurface;
+  /** @deprecated Use surfaceGuard. */
+  mainTabGuard: WorkspaceSurfaceGuard | null;
   sidebarOpenBeforeFullscreenTab: boolean | null;
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
@@ -676,6 +688,13 @@ interface UIStore {
   settingsPage: string;
   settingsHasOpenedOnce: boolean;
   settingsProjectsSelectedId: string | null;
+  /**
+   * Project the Settings pages are looking at. `null` follows the app's active
+   * project. Settings browses another project's configuration without moving
+   * the chat, the session list or the file tree, so this is its own state and
+   * not a second writer of the active project.
+   */
+  settingsProjectPath: string | null;
   settingsRemoteInstancesSelectedId: string | null;
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
@@ -834,10 +853,14 @@ interface UIStore {
   setWorkStatusHiddenSections: (sectionIds: string[]) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
-  setActiveMainTab: (tab: MainTab) => void;
+  setActiveSurface: (surface: WorkspaceSurface) => void;
+  /** @deprecated Use setActiveSurface. */
+  setActiveMainTab: (surface: WorkspaceSurface) => void;
   prepareForRuntimeSwitch: (runtimeKey?: string | null) => void;
   restoreForRuntimeSwitch: (runtimeKey?: string | null) => void;
-  setMainTabGuard: (guard: MainTabGuard | null) => void;
+  setSurfaceGuard: (guard: WorkspaceSurfaceGuard | null) => void;
+  /** @deprecated Use setSurfaceGuard. */
+  setMainTabGuard: (guard: WorkspaceSurfaceGuard | null) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean, scope?: PendingDiffScope | null) => void;
   setPendingDiagramFile: (filePath: string | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
@@ -867,6 +890,7 @@ interface UIStore {
   setSidebarSection: (section: SidebarSection) => void;
   setSettingsPage: (slug: string) => void;
   setSettingsProjectsSelectedId: (projectId: string | null) => void;
+  setSettingsProjectPath: (path: string | null) => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
@@ -1011,6 +1035,8 @@ export const useUIStore = create<UIStore>()(
         workStatusHiddenSections: [],
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
+        activeSurface: 'chat',
+        surfaceGuard: null,
         activeMainTab: 'chat',
         mainTabGuard: null,
         sidebarOpenBeforeFullscreenTab: null,
@@ -1037,6 +1063,7 @@ export const useUIStore = create<UIStore>()(
         settingsPage: 'home',
         settingsHasOpenedOnce: false,
         settingsProjectsSelectedId: null,
+        settingsProjectPath: null,
         settingsRemoteInstancesSelectedId: null,
         eventStreamStatus: 'idle',
         eventStreamHint: null,
@@ -1625,29 +1652,33 @@ export const useUIStore = create<UIStore>()(
           set({ isSessionDropdownOpen: open });
         },
 
-        setMainTabGuard: (guard) => {
-          if (get().mainTabGuard === guard) {
+        setSurfaceGuard: (guard) => {
+          if (get().surfaceGuard === guard) {
             return;
           }
-          set({ mainTabGuard: guard });
+          set({ surfaceGuard: guard, mainTabGuard: guard });
         },
 
-        setActiveMainTab: (tab) => {
-          const guard = get().mainTabGuard;
-          if (guard && !guard(tab)) {
+        setMainTabGuard: (guard) => get().setSurfaceGuard(guard),
+
+        setActiveSurface: (surface) => {
+          const guard = get().surfaceGuard;
+          if (guard && !guard(surface)) {
             return;
           }
-          activeMainTabByRuntime.set(runtimeMemoryKey(), tab);
-          set({ activeMainTab: tab });
+          activeSurfaceByRuntime.set(runtimeMemoryKey(), surface);
+          set({ activeSurface: surface, activeMainTab: surface });
         },
+
+        setActiveMainTab: (surface) => get().setActiveSurface(surface),
 
         prepareForRuntimeSwitch: (runtimeKey?: string | null) => {
-          activeMainTabByRuntime.set(runtimeMemoryKey(runtimeKey), get().activeMainTab);
+          activeSurfaceByRuntime.set(runtimeMemoryKey(runtimeKey), get().activeSurface);
         },
 
         restoreForRuntimeSwitch: (runtimeKey?: string | null) => {
-          const restored = activeMainTabByRuntime.get(runtimeMemoryKey(runtimeKey)) ?? 'chat';
-          set({ activeMainTab: restored });
+          const restored = activeSurfaceByRuntime.get(runtimeMemoryKey(runtimeKey)) ?? 'chat';
+          set({ activeSurface: restored, activeMainTab: restored });
         },
 
         setPendingDiffFile: (filePath, staged = false, scope = null) => {
@@ -1671,11 +1702,11 @@ export const useUIStore = create<UIStore>()(
         },
 
         navigateToDiff: (filePath, staged = false, scope = null) => {
-          const guard = get().mainTabGuard;
+          const guard = get().surfaceGuard;
           if (guard && !guard('diff')) {
             return;
           }
-          set({ pendingDiffFile: filePath, pendingDiffStaged: staged, pendingDiffScope: scope, activeMainTab: 'diff' });
+          set({ pendingDiffFile: filePath, pendingDiffStaged: staged, pendingDiffScope: scope, activeSurface: 'diff', activeMainTab: 'diff' });
         },
 
         consumePendingDiffFile: () => {
@@ -1687,11 +1718,11 @@ export const useUIStore = create<UIStore>()(
         },
 
         navigateToDiagram: (filePath) => {
-          const guard = get().mainTabGuard;
+          const guard = get().surfaceGuard;
           if (guard && !guard('diagram')) {
             return;
           }
-          set({ pendingDiagramFile: filePath, activeMainTab: 'diagram' });
+          set({ pendingDiagramFile: filePath, activeSurface: 'diagram', activeMainTab: 'diagram' });
         },
 
         consumePendingDiagramFile: () => {
@@ -1796,6 +1827,11 @@ export const useUIStore = create<UIStore>()(
 
         setSettingsPage: (slug) => {
           set({ settingsPage: slug });
+        },
+
+        setSettingsProjectPath: (path) => {
+          const trimmed = path?.trim();
+          set({ settingsProjectPath: trimmed ? trimmed : null });
         },
 
         setSettingsProjectsSelectedId: (projectId) => {
@@ -2462,12 +2498,19 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 14,
+        version: 15,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v14 -> v15: rename the historic main-tab field. The selected
+          // mobile or promoted desktop view remains unchanged.
+          if (version < 15) {
+            state.activeSurface = state.activeMainTab;
+            state.activeMainTab = state.activeSurface;
+          }
 
           // v13 -> v14: the separate 'preview' surface merged into 'browser'.
           // Stored preview tabs keep their URL and become browser tabs; their
@@ -2674,7 +2717,9 @@ export const useUIStore = create<UIStore>()(
           workStatusPanelEnabled: state.workStatusPanelEnabled,
           workStatusHiddenSections: state.workStatusHiddenSections,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
-          activeMainTab: state.activeMainTab,
+          activeSurface: state.activeSurface,
+          // Keep the deprecated mirror synchronized while consumers migrate.
+          activeMainTab: state.activeSurface,
           sidebarSection: state.sidebarSection,
           settingsPage: state.settingsPage,
           settingsHasOpenedOnce: state.settingsHasOpenedOnce,

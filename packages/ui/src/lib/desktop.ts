@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { ProjectEntry, RuntimeAPIs, TerminalShell } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
@@ -65,6 +66,10 @@ export type DesktopSettings = {
   desktopUiPassword?: string;
   projects?: ProjectEntry[];
   activeProjectId?: string;
+  sidebarProjectDisplayMode?: 'all' | 'single';
+  sidebarSessionGroupingMode?: 'by-worktree' | 'flat';
+  sidebarProjectSortOrder?: 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
+  sidebarShowRecentSection?: boolean;
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
@@ -636,6 +641,12 @@ const isDesktopFileGrantResult = (
   value !== null && typeof value === 'object' && !Array.isArray(value)
 );
 
+const desktopExistingFileGrantSchema = z.object({
+  path: z.string().min(1),
+  outsideFileGrant: z.string().min(1),
+  expiresAt: z.number().finite(),
+});
+
 export const requestFileAccess = async (
   options?: { filters?: Array<{ name: string; extensions: string[] }>; defaultPath?: string }
 ): Promise<{ success: boolean; path?: string; outsideFileGrant?: string; error?: string }> => {
@@ -678,7 +689,10 @@ export const requestFileAccess = async (
 
 export const requestExistingFileAccess = async (
   path: string
-): Promise<{ success: boolean; path?: string; outsideFileGrant?: string; error?: string }> => {
+): Promise<
+  | { success: true; path: string; outsideFileGrant: string; expiresAt: number }
+  | { success: false; error: string }
+> => {
   const targetPath = typeof path === 'string' ? path.trim() : '';
   if (!targetPath) {
     return { success: false, error: 'Path is required' };
@@ -689,15 +703,14 @@ export const requestExistingFileAccess = async (
 
   try {
     const selected = await getDesktopBridge()?.grantFileAccess?.(targetPath);
-    if (!isDesktopFileGrantResult(selected)) {
+    const parsed = desktopExistingFileGrantSchema.safeParse(selected);
+    if (!parsed.success) {
       return { success: false, error: 'File access was not granted' };
     }
-    const grantedPath = typeof selected.path === 'string' ? selected.path : '';
-    const outsideFileGrant = typeof selected.outsideFileGrant === 'string' ? selected.outsideFileGrant : '';
-    if (!grantedPath || !outsideFileGrant) {
-      return { success: false, error: 'File access was not granted' };
-    }
-    return { success: true, path: grantedPath, outsideFileGrant };
+    return {
+      success: true,
+      ...parsed.data,
+    };
   } catch (error) {
     console.warn('Failed to request existing file access', error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };

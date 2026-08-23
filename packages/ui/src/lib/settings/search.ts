@@ -551,6 +551,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['label', 'display name', 'project metadata'],
   },
   {
+    id: 'projects.default-model',
+    page: 'projects',
+    titleKey: 'settings.projects.page.field.projectModel',
+    keywords: ['model', 'default', 'new chat', 'project metadata'],
+  },
+  {
+    id: 'projects.default-thinking',
+    page: 'projects',
+    titleKey: 'settings.projects.page.field.projectThinking',
+    keywords: ['thinking', 'variant', 'reasoning', 'effort', 'model', 'project metadata'],
+  },
+  {
     id: 'projects.accent-color',
     page: 'projects',
     titleKey: 'settings.projects.page.field.accentColor',
@@ -957,13 +969,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.integrations.thirdParty.opencodeClaude.name',
     descriptionKey: 'settings.integrations.thirdParty.opencodeClaude.description',
     keywords: ['claude', 'anthropic', 'claude code', 'pro', 'max', 'agent sdk', '@openchamber/opencode-claude'],
-  },
-  {
-    id: 'integrations.third-party.opencode-commandcode',
-    page: 'integrations',
-    titleKey: 'settings.integrations.thirdParty.opencodeCommandcode.name',
-    descriptionKey: 'settings.integrations.thirdParty.opencodeCommandcode.description',
-    keywords: ['command code', 'commandcode', 'laguna', 'poolside', 'gateway', '@openchamber/opencode-commandcode'],
   },
   {
     id: 'integrations.third-party.opencode-cursor-oauth',

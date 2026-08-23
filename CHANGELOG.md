@@ -6,7 +6,33 @@ All notable changes to this project will be documented in this file.
 
 - **CLI:** options are now validated per command, so passing a flag that belongs to another command (for example `openchamber serve --daily 09:30`) fails with a clear message and the closest matching flag instead of being silently ignored; tunnel and startup validate against the specific subcommand (`openchamber tunnel status --dry-run` is rejected, `openchamber tunnel start --dry-run` still works).
 - CLI: `--help` shows only the options of the command asked about (for example `openchamber session list --help` or `openchamber tunnel start --help`) instead of every command's options, subcommand lists are labeled `COMMANDS` everywhere, and `openchamber control` explains that its listed commands run at the top level and points typos like `openchamber control status` at `openchamber status`.
+- **Desktop/Remote instances:** adding an SSH connection now starts from the hosts in your SSH config instead of a blank command field. Ports, install method and passwords moved behind Advanced settings, and each connection shows Connected, Connecting, or Needs attention with the failure text and a button that resolves it.
+- Desktop/Remote instances: connecting to a remote machine now works when bun, OpenChamber or the opencode CLI live in your home directory rather than on the system path. Installing no longer fails with a permission error, and a missing opencode CLI is now reported before the connection starts instead of as a stack trace.
+- Desktop/Remote instances: a managed remote server can now also be published to the remote machine's own network, so other devices there reach it without the SSH tunnel. It requires a UI password, and stays private to the tunnel otherwise.
+- Desktop/Remote instances: disconnecting from a connection set to not keep the server running now actually stops that remote server.
+- Chat: in a chat without a project, the work status card again steps aside when the context panel is open, instead of sitting next to it.
+- Settings/General: changing the default model, variant or agent no longer repoints an open chat that already carries a model you picked for it. Chats following the default still switch immediately.
+- Settings/Projects: a project can now pin a thinking level next to its model, for models that offer levels. Both sit in one Defaults for new chats group, laid out like the Sessions defaults.
+- **Settings:** the project selector on Providers, Agents, MCP, Commands and Skills now only changes what those pages show. It used to switch the whole app, so opening another project's configuration moved your chat, session list and file tree with it.
+- Settings/Providers: the provider you select no longer jumps to a different one on its own. Changing the chat's model or agent, and background provider refreshes, used to move the settings selection with them.
+- **Chat sessions:** start chats without choosing a project. They live in their own Chats section, rather than inheriting a project's repository and worktree context.
+- **Skills catalog:** browse curated GitHub skill collections in a card-based catalog with cross-source search, skill counts, stars, recent updates, and links back to each skill's repository.
+- **Diff:** the context-panel diff can now show every change on the current branch against its base branch. OpenChamber detects the base when Git knows it, or lets you choose one once when it does not.
+- **Dictation:** speech is now transcribed after you stop recording. The composer shows a live waveform and timer, and long recordings split at pauses instead of cutting words.
+- Chat: file paths in messages now open from the session's project, even if you last browsed files in another project (thanks to @tomzx).
+- Diff: creating an inline comment now opens the chat and focuses the composer for your follow-up.
+- Chat: in the expanded composer, Enter now starts a new line and Cmd/Ctrl+Enter sends, so a long prompt is harder to send by accident.
+- Providers: expanded support for custom providers.
+- Small Model: summaries, goal audits, commit messages, and walkthroughs now support more providers.
+- Git: generated commit messages now match the repository's recent commit style and language.
+- Git: generating a pull request description now picks up the repository's own PR template when it has one, so the draft comes back in your project's sections and checklists instead of the built-in Summary/Why/Testing layout.
+- Sidebar: switch between the full project list and a focused view of one project. Sessions created outside OpenChamber now also appear in the sidebar and Recent list without a page refresh (thanks to @tomzx).
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Chat: newly sent messages and syntax-highlighted code blocks no longer briefly flicker. Bash output can also grow with its content instead of being cut off.
+- Usage: Z.ai credit limits now appear alongside its other quota windows.
+- Git: pull-request checks in Work status stay current as their status changes.
+- UI: the default dialog close button is easier to click or tap (thanks to @rockinrimmer).
+- Desktop/Windows: the close button now aligns correctly with the rest of the window chrome.
 
 ## [1.19.0] - 2026-08-19
 

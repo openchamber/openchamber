@@ -157,6 +157,22 @@ export interface GetGitRangeDiffOptions {
   contextLines?: number;
 }
 
+export interface GetGitRangeFilesOptions {
+  base: string;
+  head: string;
+}
+
+/** One changed file in a `base...head` range, with its change letter (A/M/D/R/C). */
+export interface GitRangeFileEntry {
+  path: string;
+  status: string;
+}
+
+export interface GitBranchBaseResponse {
+  /** Null when git has no authoritative record of where the branch started. */
+  base: string | null;
+}
+
 export interface GitFileDiffResponse {
   original: string;
   modified: string;
@@ -466,6 +482,8 @@ export interface GitAPI {
   getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
   getGitRangeDiff?(directory: string, options: GetGitRangeDiffOptions): Promise<GitDiffResponse>;
+  getGitRangeFiles?(directory: string, options: GetGitRangeFilesOptions): Promise<GitRangeFileEntry[]>;
+  getBranchBase?(directory: string, branch: string): Promise<GitBranchBaseResponse>;
   revertGitFile(directory: string, filePath: string, options?: { scope?: 'all' | 'working' }): Promise<void>;
   stageGitFile(directory: string, filePath: string): Promise<void>;
   stageGitFiles?(directory: string, filePaths: string[]): Promise<void>;
@@ -627,6 +645,8 @@ export interface ProjectEntry {
   iconBackground?: string | null;
   color?: string | null;
   defaultModel?: string;
+  /** Variant of `defaultModel`, when that model exposes any. */
+  defaultVariant?: string;
   addedAt?: number;
   lastOpenedAt?: number;
   sidebarCollapsed?: boolean;
@@ -643,6 +663,10 @@ export interface SettingsPayload {
   opencodeBinary?: string;
   projects?: ProjectEntry[];
   activeProjectId?: string;
+  sidebarProjectDisplayMode?: 'all' | 'single';
+  sidebarSessionGroupingMode?: 'by-worktree' | 'flat';
+  sidebarProjectSortOrder?: 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
+  sidebarShowRecentSection?: boolean;
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
@@ -1247,7 +1271,7 @@ export type RuntimeAPISelector<TValue> = (apis: RuntimeAPIs) => TValue;
 
 type SkillsCatalogSourceId = string;
 
-type SkillsCatalogSourceType = 'github' | 'clawdhub';
+type SkillsCatalogSourceType = 'github';
 
 export interface SkillsCatalogSource {
   id: SkillsCatalogSourceId;
@@ -1256,24 +1280,16 @@ export interface SkillsCatalogSource {
   source: string;
   defaultSubpath?: string;
   sourceType?: SkillsCatalogSourceType;
+  /** GitHub repository star count (null when unavailable) */
+  stars?: number | null;
+  /** GitHub repository last-push timestamp, ISO (null when unavailable) */
+  repoUpdatedAt?: string | null;
 }
 
 interface SkillsCatalogItemInstalledBadge {
   isInstalled: boolean;
   scope?: 'user' | 'project';
   source?: 'opencode' | 'agents' | 'claude';
-}
-
-interface ClawdHubSkillMetadata {
-  slug: string;
-  version: string;
-  displayName?: string;
-  owner?: string;
-  downloads?: number;
-  stars?: number;
-  versionsCount?: number;
-  createdAt?: number;
-  updatedAt?: number;
 }
 
 export interface SkillsCatalogItem {
@@ -1288,22 +1304,18 @@ export interface SkillsCatalogItem {
   installable: boolean;
   warnings?: string[];
   installed?: SkillsCatalogItemInstalledBadge;
-  /** ClawdHub-specific metadata (present only for ClawdHub sources) */
-  clawdhub?: ClawdHubSkillMetadata;
 }
 
 export interface SkillsCatalogResponse {
   ok: boolean;
   sources?: SkillsCatalogSource[];
   itemsBySource?: Record<SkillsCatalogSourceId, SkillsCatalogItem[]>;
-  pageInfoBySource?: Record<SkillsCatalogSourceId, { nextCursor?: string | null }>;
   error?: { kind: string; message: string };
 }
 
 export interface SkillsCatalogSourceResponse {
   ok: boolean;
   items?: SkillsCatalogItem[];
-  nextCursor?: string | null;
   error?: { kind: string; message: string };
 }
 
@@ -1328,11 +1340,6 @@ export interface SkillsRepoScanResponse {
 
 interface SkillsInstallSelection {
   skillDir: string;
-  /** ClawdHub-specific metadata for installation */
-  clawdhub?: {
-    slug: string;
-    version: string;
-  };
 }
 
 export interface SkillsInstallRequest {

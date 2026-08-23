@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { switchRuntimeEndpoint } from "@/lib/runtime-switch"
-import { persistSessions, readDirCache } from "./persist-cache"
+import { persistManagedChatSessions, persistSessions, readDirCache, readManagedChatSessions } from "./persist-cache"
 import { getSyncPerformanceDiagnostics, setSyncPerformanceDiagnosticsEnabled } from "./performance-diagnostics"
 
 class TestStorage implements Storage {
@@ -81,6 +81,17 @@ afterEach(() => {
 })
 
 describe("persisted directory sessions", () => {
+  test("keeps one runtime-scoped startup snapshot for managed chats", async () => {
+    const chat = session(1, 2, "Chat", "/home/user/.config/openchamber/chats/2026-08-21/session-a")
+    persistManagedChatSessions([session(2, 3), chat])
+    await waitForPersistence()
+
+    expect(readManagedChatSessions().map((item) => item.id)).toEqual([chat.id])
+
+    switchRuntimeEndpoint({ apiBaseUrl: "https://runtime-other.test", runtimeKey: "runtime-other" })
+    expect(readManagedChatSessions()).toEqual([])
+  })
+
   test("keeps the 50 most recently updated sessions across restart reads", async () => {
     const sessions = Array.from({ length: 60 }, (_, updated) => session(59 - updated, updated))
 

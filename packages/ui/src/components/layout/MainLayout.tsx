@@ -45,7 +45,7 @@ const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/Se
 
 export const MainLayout: React.FC = () => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
-    const activeMainTab = useUIStore((state) => state.activeMainTab);
+    const activeSurface = useUIStore((state) => state.activeSurface);
     const setIsMobile = useUIStore((state) => state.setIsMobile);
     const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
     const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
@@ -83,7 +83,7 @@ export const MainLayout: React.FC = () => {
             if (sessionSelected || draftOpened) closeSurfacePages();
         });
         const unsubscribeTab = useUIStore.subscribe((state, prev) => {
-            if (state.activeMainTab !== prev.activeMainTab) closeSurfacePages();
+            if (state.activeSurface !== prev.activeSurface) closeSurfacePages();
         });
         return () => {
             unsubscribeSession();
@@ -195,7 +195,7 @@ export const MainLayout: React.FC = () => {
     }, [isMobile, setMobileSessionPanelOpen]);
 
     useEffect(() => {
-        if (!isMobile || activeMainTab !== 'chat' || mobileLeftDrawerOpen || mobileRightSidebarOpen || isSettingsDialogOpen) {
+        if (!isMobile || activeSurface !== 'chat' || mobileLeftDrawerOpen || mobileRightSidebarOpen || isSettingsDialogOpen) {
             return;
         }
 
@@ -231,7 +231,7 @@ export const MainLayout: React.FC = () => {
                 window.clearTimeout(timeoutId);
             }
         };
-    }, [activeMainTab, isMobile, isSettingsDialogOpen, mobileLeftDrawerOpen, mobileRightSidebarOpen]);
+    }, [activeSurface, isMobile, isSettingsDialogOpen, mobileLeftDrawerOpen, mobileRightSidebarOpen]);
 
     // Ensure mobile drawers are closed when opening full-screen settings
     useEffect(() => {
@@ -263,10 +263,10 @@ export const MainLayout: React.FC = () => {
         // Desktop surfaces live in the context panel; the only full-view
         // overlays left there are the terminal (promoted by project actions)
         // and the diagram viewer. Mobile keeps the full tab set.
-        if (!isMobile && activeMainTab !== 'terminal' && activeMainTab !== 'diagram') {
+        if (!isMobile && activeSurface !== 'terminal' && activeSurface !== 'diagram') {
             return null;
         }
-        switch (activeMainTab) {
+        switch (activeSurface) {
             case 'plan':
                 return <React.Suspense fallback={null}><PlanView /></React.Suspense>;
             case 'git':
@@ -284,9 +284,9 @@ export const MainLayout: React.FC = () => {
             default:
                 return null;
         }
-    }, [activeMainTab, isMobile, mobileRightSidebarOpen]);
+    }, [activeSurface, isMobile, mobileRightSidebarOpen]);
 
-    const isChatActive = activeMainTab === 'chat';
+    const isChatActive = activeSurface === 'chat';
 
     return (
         <DiffWorkerProvider>

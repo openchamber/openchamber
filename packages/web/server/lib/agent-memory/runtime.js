@@ -236,8 +236,13 @@ export const createAgentMemoryRuntime = (deps) => {
   const writeJsonAtomic = async (filePath, value) => {
     const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
-    await fsPromises.writeFile(temporaryPath, JSON.stringify(value, null, 2), 'utf8');
-    await fsPromises.rename(temporaryPath, filePath);
+    try {
+      await fsPromises.writeFile(temporaryPath, JSON.stringify(value, null, 2), 'utf8');
+      await fsPromises.rename(temporaryPath, filePath);
+    } catch (error) {
+      await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
+      throw error;
+    }
   };
 
   const withWriteLock = async (key, mutate) => {

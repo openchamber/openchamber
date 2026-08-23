@@ -1548,7 +1548,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 output,
                 {
                     className: part.tool === 'bash' ? 'p-1 rounded-none' : 'p-1',
-                    maxHeightClass: isStreamingBash ? 'h-[46vh]' : part.tool === 'bash' ? 'max-h-[46vh]' : undefined,
+                    maxHeightClass: part.tool === 'bash' ? 'max-h-[46vh]' : undefined,
                     followKey: isStreamingBash ? outputString : undefined,
                 }
             );

@@ -38,7 +38,7 @@ Examples:
 - `useFeatureFlagsStore.ts`
 - `useUpdateStore.ts`
 
-These stores coordinate visible app state, navigation, selected tabs, dialogs, and lightweight feature flags.
+These stores coordinate visible app state, navigation, selected context-panel tabs, dialogs, and lightweight feature flags. `useUIStore.activeSurface` selects the primary mobile view and the few desktop views that are promoted out of the context panel. It is not a desktop tab selection.
 
 Context-panel session chats mount only the active chat iframe. After installing
 its message listener, the iframe requests its authoritative visibility from the
@@ -64,7 +64,7 @@ These stores coordinate persistent project/session metadata across multiple view
 
 `useProjectContextStore.ts` caches server-owned project notes, todos, and plan links, keyed by the path-derived project id. It replaced a pair of `window` CustomEvents that made every mounted notes panel re-read the whole project config. Writes are optimistic and roll back on failure; they are serialized per project, because the server's own store does a read-modify-write and two concurrent saves would otherwise race it. A load that resolves while a write is in flight keeps the local value for that field group only, so a slow snapshot cannot undo newer typing while still delivering the plan list it fetched. A failed load sets `error` and preserves the cached snapshot — an unreachable server must never render as "this project has no notes". Note and plan creation are deliberately not optimistic, since ids and timestamps are assigned by the server. Notes, todos, and plans are written through separate routes and tracked by separate in-flight flags, so a todo toggle cannot clobber a note edit in the same window. Pinned notes and plans are assembled into a synthetic context part by `lib/projectContextPinning.ts` at send time; that module tracks per-session what it already sent so an unchanged pinned set is not re-sent every turn.
 
-`messageQueueStore.ts` keeps a queued message until its own send resolves, so between dispatch and resolution the entry is still visible to every reader. Dispatchers must therefore mark the send (`markSending`/`clearSending`) and read `getSendableQueue()` — or filter `sendingIds` themselves — instead of dispatching straight from `queuedMessages`; otherwise a composer submit merges a message the auto-send hook is already delivering and it is sent twice (the window is seconds over a relay). `clearQueue()` retains in-flight entries for the same reason. `sendingIds` is deliberately not persisted: a restart has no in-flight sends, and a stale flag would strand a queued message.
+`messageQueueStore.ts` keeps a queued message until its own send resolves, so between dispatch and resolution the entry is still visible to every reader. Dispatchers must therefore mark the send (`markSending`/`clearSending`) and read `getSendableQueue()` — or filter `sendingIds` themselves — instead of dispatching straight from `queuedMessages`; otherwise a composer submit merges a message the auto-send hook is already delivering and it is sent twice (the window is seconds over a relay). `clearQueue()` retains in-flight entries for the same reason. `sendingIds` is deliberately not persisted: a restart has no in-flight sends, and a stale flag would strand a queued message. Desktop queues use the configured host id as runtime identity, not the current API URL, because an SSH reconnect allocates a new local forwarding port while the remote host remains the same.
 
 `useGlobalSessionsStore.ts` owns cold/global active and archived session coverage, including `sessionsByDirectory`. It is complementary to directory child stores: it is not the source of live busy/retry status or session messages.
 
@@ -87,6 +87,8 @@ Shared safe storage treats durable failures per key. A quota or access failure c
 Project and UI settings use successful settings synchronization as authority. Omitted fields in a complete snapshot reset to canonical client defaults, including an omitted project list becoming empty; transport or settings-load failure dispatches no synchronization event and preserves current state. Settings save responses are partial patches and must not clear unrelated in-memory preferences or local mirrors.
 
 Project ordering defaults to manual. Session display persistence v3 migrates the previously shipped `recent` project order to `manual` while preserving every other explicit sort mode.
+
+Session display persistence keeps a hydrated local cache for the independent all-projects/single-project mode, session grouping, project sort, and Recent preference; successful server settings snapshots are authoritative and the UI seeds missing server fields once from that cache for upgrades. The last confirmed or manually selected project and sticky-header preference stay local to the device. Draft target changes do not write the picker selection; materialized session navigation updates it from the resolved project directory.
 
 Session folders persist in runtime-specific v2 browser keys without silently evicting older runtime namespaces. Runtime switch, page hide, app freeze, and unload synchronously flush the pending browser snapshot before lifecycle suspension or namespace replacement. A runtime switch then cancels stale old-runtime disk work and starts generation-owned disk hydration. Missing or malformed server files are not authoritative empty snapshots; disk data may replace browser state only when it carries a real revision and no newer local folder mutation occurred. Server writes are serialized and reject non-newer revisions so delayed or duplicate requests cannot overwrite the current state. File-search cache and in-flight keys include runtime plus directory and are cleared on endpoint reset.
 
@@ -195,6 +197,38 @@ These rules are important. Breaking them tends to reintroduce idle CPU churn, st
 8. File tree Git status should update only when the file tree is visible.
 9. Global session refresh must remain bounded and failure-isolated per directory.
 10. Global session cache must not drive live activity indicators or message-loading state.
+
+### Configuration stores and the Settings directory
+
+`useAgentsStore`, `useCommandsStore`, `useSkillsStore`, `useMcpConfigStore` and
+the provider half of `useConfigStore` describe **one project's configuration**.
+Two surfaces read them at once: the app (chat, autocompletes, pickers), which
+wants the active project, and Settings, whose own project selector may point
+somewhere else.
+
+Each of them therefore keeps two things:
+
+- a per-directory map (`agentsByDirectory`, `commandsByDirectory`,
+  `skillsByDirectory`, `serversByDirectory`, `directoryScoped`);
+- a flat mirror (`agents`, `commands`, `skills`, `mcpServers`, `providers`) that
+  tracks the **active** project only.
+
+Every loader and mutation takes an explicit directory; omitting it means the
+active project, which is what non-Settings callers pass. A load for another
+directory writes the map and leaves the mirror alone, so browsing another
+project in Settings cannot change what chat sees. Components select through
+`selectAgentsForDirectory` / `selectCommandsForDirectory` /
+`selectSkillsForDirectory` / `selectMcpServersForDirectory` /
+`selectProvidersForDirectory`, which return stored arrays.
+
+Settings resolves its directory through `useSettingsDirectory`, backed by
+`useUIStore.settingsProjectPath`. That selection is Settings-local and not
+persisted: it follows the active project until the user picks another one. The
+Settings project selector must never call `setActiveProject` — that relocates
+the chat, the session list and the file tree.
+
+Failure is still not empty: a failed load restores that directory's previous
+list rather than clearing it.
 
 ## Selector Rules
 

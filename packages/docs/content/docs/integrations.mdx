@@ -1,16 +1,17 @@
 ---
 title: Integrations
-description: Use your Claude, Command Code, or Cursor subscription as a provider.
+description: Use your Claude or Cursor subscription as a provider.
 ---
 
 # Integrations
 
 An integration is a small plugin that adds a provider to OpenChamber using a subscription you already have. You manage them at **Settings → Integrations**.
 
+> **Experimental feature.** We aim to respect provider policies, but account restrictions and suspensions remain each provider's decision. Use integrations at your own risk.
+
 Available integrations:
 
 - **Claude Code** — your Claude Pro or Max plan, no API keys
-- **Command Code** — your Command Code plan
 - **Cursor** — the model limits of your Cursor plan
 
 ## Install an integration
@@ -29,18 +30,9 @@ Claude Code uses your Claude Pro or Max plan — no API keys and no separate Cla
 1. Install the integration (above).
 2. Choose **Set up** and sign in. If you don't have the Claude Code CLI yet, setup offers to install it first and then sign you in.
 
-Claude Code is the only integration here that requires its provider CLI to be installed and signed in. Command Code and Cursor do not require their CLIs.
+Claude Code is the only integration here that requires its provider CLI to be installed and signed in. Cursor does not require its CLI.
 
 **How your Claude account stays safe:** this integration uses Anthropic's official Claude Agent SDK and your installed Claude Code CLI. It does not hijack OAuth, extract or replay browser tokens, impersonate an unsupported client, or bypass Anthropic's authentication flow. It stays on Anthropic's supported access path, so it does not carry the account-ban risk of token hijacking or unauthorized authentication workarounds.
-
-## Command Code
-
-Command Code uses your Command Code plan.
-
-1. Install the integration (above).
-2. Choose **Set up** — a browser page opens. Approve access, then return to OpenChamber.
-
-On a headless machine or in CI, set the `COMMAND_CODE_API_KEY` environment variable instead of signing in in the browser.
 
 ## Cursor
 

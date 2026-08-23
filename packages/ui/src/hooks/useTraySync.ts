@@ -3,7 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive } from '@/lib/desktop';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
-import { getSyncChildStores, getAllSyncSessions } from '@/sync/sync-refs';
+import { getSyncChildStores } from '@/sync/sync-refs';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useGlobalSessionStatusStore, applyGlobalSessionStatusSnapshot } from '@/sync/global-session-status';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
@@ -12,8 +12,6 @@ import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { respondToPermission } from '@/sync/session-actions';
 import {
   useGlobalSessionsStore,
-  ensureGlobalSessionsLoaded,
-  refreshGlobalSessions,
   resolveGlobalSessionDirectory,
 } from '@/stores/useGlobalSessionsStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
@@ -40,10 +38,6 @@ const TRAY_ACTION_EVENT = 'openchamber:tray-action';
 // Event-driven updates do the real work; this is just a slow safety net.
 const POLL_INTERVAL_MS = 5000;
 const FLUSH_DEBOUNCE_MS = 500;
-// Pull the full cross-project session list periodically. SSE keeps the active
-// directory instant; this catches sessions created in directories this client
-// never opened (other worktrees, other projects, the TUI, …).
-const GLOBAL_REFRESH_MS = 45000;
 const MAX_SESSIONS = 20;
 
 type TraySessionStatus = 'idle' | 'busy' | 'retry';
@@ -535,12 +529,6 @@ export const useTraySync = (): void => {
     const unsubscribeSessionOrder = useSessionOrderingStore.subscribe(() => scheduleFlush());
     const unsubscribePinnedSessions = useSessionPinnedStore.subscribe(() => scheduleFlush());
 
-    // Make the tray self-sufficient: load the full cross-project list now
-    // (independent of the sidebar) and refresh it periodically so sessions from
-    // directories this client never opened still show up and stay current.
-    void ensureGlobalSessionsLoaded(getAllSyncSessions());
-    const refreshInterval = window.setInterval(() => { void refreshGlobalSessions(); }, GLOBAL_REFRESH_MS);
-
     // Global busy/retry status: fetch now and poll, so unsynced sessions don't
     // sit looking idle. Synced directories stay instant via their SSE stores.
     void refreshGlobalStatus();
@@ -567,7 +555,6 @@ export const useTraySync = (): void => {
       disposed = true;
       if (flushTimer !== null) window.clearTimeout(flushTimer);
       window.clearInterval(interval);
-      window.clearInterval(refreshInterval);
       window.clearInterval(globalStatusInterval);
       unsubscribeNotif();
       unsubscribeGlobal();

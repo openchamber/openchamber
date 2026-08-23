@@ -207,7 +207,8 @@ Managed health failures are classified as `timeout`, `connection_refused`, `conn
   - `readSettingsFromDiskMigrated()`
   - `writeSettingsToDisk(settings)`
   - `persistSettings(changes)`
-  - Persistent permission auto-accept policy is stored under `permissionAutoAccept`; execution ownership lives in `lib/permission-auto-accept/`.
+- Persistent permission auto-accept policy is stored under `permissionAutoAccept`; execution ownership lives in `lib/permission-auto-accept/`.
+- Shared sidebar preferences are stored as validated top-level fields: `sidebarProjectDisplayMode`, `sidebarSessionGroupingMode`, `sidebarProjectSortOrder`, and `sidebarShowRecentSection`. Device-local picker selection and sticky-header state do not enter `settings.json`.
 
 ## Public exports (settings-helpers.js)
 - `createSettingsHelpers(dependencies)`: creates settings helper runtime for settings request/response shaping.

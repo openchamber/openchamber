@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
+import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
@@ -560,10 +561,15 @@ const writeJsonFile = async (filePath, data) => {
   // Atomic: write to a temp file then rename. Readers never see a partial
   // JSON file that could parse-error and get coerced to {}.
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
-  if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
-  await fsp.rename(tmp, filePath);
-  if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
+  try {
+    await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+    if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
+    await replaceFileWithRetry(tmp, filePath);
+    if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
+  } catch (error) {
+    await fsp.rm(tmp, { force: true }).catch(() => {});
+    throw error;
+  }
 };
 
 const readSettingsRoot = () => {
@@ -2465,6 +2471,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
   browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__ocTitleBarOverlayEnabled = titleBarOverlayEnabled;
+  browserWindow.on('app-command', (event, command) => {
+    if (command === 'browser-backward') event.preventDefault();
+  });
 
   if (useSaved && saved.maximized) {
     browserWindow.maximize();

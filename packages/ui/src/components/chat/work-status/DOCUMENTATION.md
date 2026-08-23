@@ -45,7 +45,11 @@ exactly as it already does when the context panel opens.
 
 - the user switched it off;
 - the runtime is mobile or VS Code;
-- the context panel is open for the active directory;
+- the context panel is open for the directory the app is effectively on —
+  looked up through `useEffectiveDirectory` and `normalizeContextPanelDirectoryKey`,
+  the same key the rail and the panel use. It is deliberately **not** the
+  directory this panel reports about: a managed Chat reports about none, and
+  that empty key answered "closed" for a context panel that was plainly open;
 - the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` of transcript alongside
   `WORK_STATUS_PANEL_WIDTH` of panel.
 
@@ -53,6 +57,11 @@ exactly as it already does when the context panel opens.
 mode. It remains available on a new-session draft: when the draft targets a
 project or pending worktree, the panel uses that directory for project, MCP,
 and usage readouts before a session exists.
+
+Managed Chats never render or warm the Project repository section. A Chat draft
+also passes no fallback directory to the panel, so an active project's branch
+cannot leak into the draft while directory-independent sections remain
+available.
 
 `rowRef` is a **callback ref, not an object ref**. An object ref gives no signal
 when the node attaches, so the measuring effect read `.current`, found nothing
@@ -89,7 +98,7 @@ which requests only providers enabled for this panel.
 | Context + cost | `contextUsage.ts` over `useSessionMessages`, `Session.cost` | see below — the store getters cannot serve this |
 | Branch, ahead/behind, attention | `useGitStore` directory state | warmed via `runBackgroundNetworkTask(ensureStatus)` and refreshed from Git mutation hints |
 | Changed files | `useGitStore` status `files` + `diffStats` | working tree, not session-authored edits |
-| PR + checks | `usePrVisualSummary` | **read-only** |
+| PR + checks | `useFreshestPrVisualSummaryForBranch` | **read-only**; follows the freshest remote-keyed entry for the branch |
 | Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses` | |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
@@ -145,6 +154,10 @@ The panel never calls `startWatching`. PR watching is owned by the background
 tracker, and its concurrency gate exists because per-consumer PR fetches once
 saturated the browser's connection pool and stalled startup for ~20s. A panel
 that started a watch per open session would reintroduce exactly that fan-out.
+The PR surface can watch a concrete remote while passive readers initially know
+only the automatic remote key, so the panel reads the freshest entry for the
+directory and branch across remote keys. This keeps its PR and checks rows in
+sync with the live PR surface without adding another request owner.
 
 ### Changed files come from git status, not the session
 

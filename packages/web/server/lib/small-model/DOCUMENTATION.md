@@ -15,6 +15,15 @@ other runtime API.
 ## Files
 
 - `index.js` — orchestration: `generateSmallModelText()` / `describeSmallModel()`.
+- `runtime-providers.js` — provider state that exists only inside the running
+  OpenCode process. A plugin registers its provider from the `config` hook and
+  supplies the credential from its `auth` loader, so neither reaches
+  `opencode.json` nor `auth.json`; `GET /provider` is the only place they
+  become visible. The module caches one snapshot (30s TTL, shared in-flight
+  request) and answers `null` — never an empty provider list — when OpenCode is
+  unreachable, so a momentary outage cannot retract providers. It is wired once
+  from `server/index.js` and reset on OpenCode restart, which reloads plugins
+  and can move their ports and keys.
 - `resolve.js` — model selection, mirroring OpenCode's `getSmallModel` chain:
   0. OpenChamber's own settings override (Settings → Sessions → Small Model):
      when `smallModelUseDefault` is `false`, `smallModelOverride`
@@ -100,9 +109,17 @@ other runtime API.
   - Everything else: OpenAI-compatible `/chat/completions` against the
     provider's base URL, resolved from (1) `provider.<id>.options.baseURL`
     in the OpenCode config, (2) the hardcoded `https://api.openai.com/v1`
-     endpoint, or (3) the provider's `api` field from the models.dev catalog.
-    Configured API keys honor OpenCode's `{env:NAME}` and `{file:path}`
-    substitutions; file contents and resolved credentials remain server-side.
+     endpoint, (3) the endpoint OpenCode resolved at runtime, or (4) the
+    provider's `api` field from the models.dev catalog. The credential follows
+    the same shape: config `options.apiKey`, then the runtime credential, then
+    the auth.json entry. Configured API keys honor OpenCode's `{env:NAME}` and
+    `{file:path}` substitutions; file contents and resolved credentials remain
+    server-side.
+  - The runtime credential is refused for providers listed in
+    `OWN_CREDENTIAL_HANDLING`. Their branches need the stored entry rather than
+    a bearer token: the clearest case is the ChatGPT-plan `openai` login, whose
+    runtime `options.apiKey` is an OAuth access token that `api.openai.com`
+    answers with 401.
   - `[small-model:diagnostic]` logs record provider/model, input character
     counts, output budget, thinking toggle, HTTP/finish status, and
     content/reasoning lengths without logging prompts, response text, or
@@ -110,10 +127,58 @@ other runtime API.
     `[session-goal:diagnostic]` structural verdict metadata.
 - `catalog.js` — models.dev catalog via the shared in-process cache
   (`../opencode/models-metadata.js`, also serving
-  `/api/openchamber/models-metadata`).
+   `/api/openchamber/models-metadata`).
 - `routes.js` — `GET /api/small-model` (resolution preview) and
   `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
   model?, directory? }` → `{ text, providerID, modelID, source }`).
+
+## Which providers the pickers may offer
+
+`listAuthenticatedProviders()` answers one question for the Small Model and
+Changes Walkthrough pickers alike: which providers can this module actually
+call. One rule decides it, applied the same way to every provider — **a
+credential we are allowed to use, and an endpoint to send it to.** The
+auth.json scan as before, plus the credential and endpoint OpenCode resolved
+for a plugin provider.
+
+**opencode zen is excluded without a real login.** When the user has no zen
+credential, OpenCode substitutes the sentinel `options.apiKey = "public"` and
+trims its catalog to the free models. Those run on OpenCode's own subsidised
+infrastructure and are meant to be reached through OpenCode, so the sentinel is
+never accepted as a credential — see `ZEN_ANONYMOUS_API_KEY`.
+
+### Why there is no capability probe
+
+A plugin may implement its whole integration inside `options.fetch` —
+rewriting the path, signing the request, translating the payload — and OpenCode
+cannot serialise a function. Such a provider advertises an ordinary base URL
+that answers nothing we know how to ask, and no reported field distinguishes it
+from a plain one.
+
+Asking the endpoint (`GET /models`) does identify that case correctly. It was
+measured against all 166 providers carrying an `api` URL in the models.dev
+catalog, and it also denies six of them — `cloudflare-workers-ai`,
+`infomaniak`, `iflowcn`, `inference`, `kuae-cloud-coding-plan`,
+`thinkingmachines` — which work fine and simply have no `/models` route. At a
+3.6% false-negative rate on providers known to work, the probe removes more
+working models from the picker than broken ones, and a provider that silently
+vanishes explains nothing while one that fails on use says why.
+
+So availability stops at credential and endpoint, and the protocol verdict is
+left to the call. A provider whose protocol lives in a plugin's `fetch` stays
+selectable and fails when used — which is what it did before this resolution
+existed.
+
+Claude Code is refused unconditionally. A plugin can publish an
+OpenAI-compatible endpoint for it, but that endpoint is a façade over the
+Claude Agent SDK, which spawns the Claude Code CLI per request and spends the
+user's Claude subscription rate limit. Paying that for a session title or a
+summary is the wrong trade, so an available endpoint does not lift the
+refusal — the cost is the reason, not the transport.
+
+The result is served as `authenticatedProviders` on `GET /api/small-model`.
+The field name predates the runtime resolution; it now means "callable", which
+is a superset of "has an auth.json entry".
 
 ## Registration
 
@@ -125,9 +190,12 @@ module is imported on first request, not at server startup.
 - OpenCode's free models (`opencode/big-pickle`, `*-free`) work without a
   token only through OpenCode's own server — direct calls are rejected, and
   piggybacking on their subsidized infra is out of bounds by design. Every
-  resolution step therefore requires a usable auth entry for the provider:
+  resolution step therefore requires a credential we are allowed to use:
   a session on an unauthenticated `opencode` provider falls through to the
-  global scan (or a clean 404 on a vanilla setup with no logins).
+  global scan (or a clean 404 on a vanilla setup with no logins). The runtime
+  snapshot does not weaken this — OpenCode reports the sentinel
+  `apiKey: "public"` for that state, and this module refuses to read it as a
+  credential.
 
 - Anthropic OAuth (Claude Pro/Max) entries are not supported — OpenCode itself
   keeps those outside `auth.json` in this generation; only `type: api` keys

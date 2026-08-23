@@ -81,7 +81,7 @@ const fetchQuotaUncoalesced = async () => {
 
   if (Date.now() < cooldownUntil) {
     return cachedResultFor(fingerprint, credential.planLabel)
-      ?? failure('Rate limited by Anthropic. Retrying shortly.');
+      ?? failure('Rate limited. Retrying soon.');
   }
 
   let response;
@@ -100,7 +100,7 @@ const fetchQuotaUncoalesced = async () => {
   if (response.status === 429) {
     cooldownUntil = Date.now() + cooldownFromHeader(response);
     return cachedResultFor(fingerprint, credential.planLabel)
-      ?? failure('Rate limited by Anthropic. Retrying shortly.');
+      ?? failure('Rate limited. Retrying soon.');
   }
 
   if (response.status === 401 || response.status === 403) {

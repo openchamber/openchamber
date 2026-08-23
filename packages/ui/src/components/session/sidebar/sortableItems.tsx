@@ -30,6 +30,10 @@ type ProjectIdentityProps = {
   projectIconBackground?: string;
 };
 
+type ProjectPickerOption = ProjectIdentityProps & {
+  projectDescription: string;
+};
+
 type ProjectHeaderIdentityProps = ProjectIdentityProps & {
   isCollapsed?: boolean;
   alwaysShowActions?: boolean;
@@ -121,6 +125,8 @@ export interface SortableProjectItemProps extends ProjectIdentityProps {
   setOpenSidebarMenuKey: (key: string | null) => void;
   /** Aggregated activity/attention indicator shown while the project is collapsed. */
   statusIndicator?: React.ReactNode;
+  projectPickerOptions?: ProjectPickerOption[];
+  onProjectSelect?: (projectId: string) => void;
 }
 
 export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
@@ -150,6 +156,8 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   openSidebarMenuKey,
   setOpenSidebarMenuKey,
   statusIndicator = null,
+  projectPickerOptions,
+  onProjectSelect,
 }) => {
   const { t } = useI18n();
   const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
@@ -227,6 +235,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     }
     onToggle();
   }, [onToggle]);
+  const isProjectPicker = Boolean(projectPickerOptions && onProjectSelect);
 
   return (
     <div
@@ -273,39 +282,92 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
               className="relative flex items-center gap-1 py-1 pl-4 pr-3.5"
               {...attributes}
             >
-              <Tooltip>
-                <TooltipTrigger asChild>
+              {isProjectPicker ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      onMouseDown={handleToggleMouseDown}
-                      onClick={handleToggleClick}
-                      {...listeners}
+                      title={projectDescription}
                       className={cn(
-                        'flex-1 min-w-0 flex items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-md cursor-grab active:cursor-grabbing transition-[padding]',
+                        'flex-1 min-w-0 flex items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-md transition-[padding]',
                         isRepo && !hideDirectoryControls
                           ? (alwaysShowActions ? 'pr-20' : 'pr-7 group-hover/project:pr-20 group-focus-within/project:pr-20')
                           : (alwaysShowActions ? 'pr-14' : 'pr-7 group-hover/project:pr-14 group-focus-within/project:pr-14'),
                       )}
+                      aria-label={t('sessions.sidebar.project.selectAria', { project: projectLabel })}
                     >
-                    <ProjectHeaderIdentity
-                      id={id}
-                      projectLabel={projectLabel}
-                      projectIcon={projectIcon}
-                      projectColor={projectColor}
-                      projectIconImage={projectIconImage}
-                      projectIconBackground={projectIconBackground}
-                      isCollapsed={isCollapsed}
-                      alwaysShowActions={alwaysShowActions}
-                    />
-                    {statusIndicator ? (
-                      <span className="ml-1 inline-flex flex-shrink-0 items-center">{statusIndicator}</span>
-                    ) : null}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="right" sideOffset={8}>
-                  {projectDescription}
-                </TooltipContent>
-              </Tooltip>
+                      <ProjectHeaderIdentity
+                        id={id}
+                        projectLabel={projectLabel}
+                        projectIcon={projectIcon}
+                        projectColor={projectColor}
+                        projectIconImage={projectIconImage}
+                        projectIconBackground={projectIconBackground}
+                      />
+                      <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="start"
+                    className="min-w-[220px] max-w-[calc(100vw-2rem)] max-h-[min(var(--available-height),70vh)] overflow-y-auto overscroll-contain"
+                  >
+                    {projectPickerOptions?.map((option) => (
+                      <DropdownMenuItem
+                        key={option.id}
+                        onClick={() => onProjectSelect?.(option.id)}
+                        className="flex items-center justify-between gap-3"
+                        title={option.projectDescription}
+                      >
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <ProjectHeaderIdentity
+                            id={option.id}
+                            projectLabel={option.projectLabel}
+                            projectIcon={option.projectIcon}
+                            projectColor={option.projectColor}
+                            projectIconImage={option.projectIconImage}
+                            projectIconBackground={option.projectIconBackground}
+                          />
+                        </span>
+                        {option.id === id ? <Icon name="check" className="h-4 w-4 flex-shrink-0 text-primary" /> : null}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onMouseDown={handleToggleMouseDown}
+                        onClick={handleToggleClick}
+                        {...listeners}
+                        className={cn(
+                          'flex-1 min-w-0 flex items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-md cursor-grab active:cursor-grabbing transition-[padding]',
+                          isRepo && !hideDirectoryControls
+                            ? (alwaysShowActions ? 'pr-20' : 'pr-7 group-hover/project:pr-20 group-focus-within/project:pr-20')
+                            : (alwaysShowActions ? 'pr-14' : 'pr-7 group-hover/project:pr-14 group-focus-within/project:pr-14'),
+                        )}
+                      >
+                      <ProjectHeaderIdentity
+                        id={id}
+                        projectLabel={projectLabel}
+                        projectIcon={projectIcon}
+                        projectColor={projectColor}
+                        projectIconImage={projectIconImage}
+                        projectIconBackground={projectIconBackground}
+                        isCollapsed={isCollapsed}
+                        alwaysShowActions={alwaysShowActions}
+                      />
+                      {statusIndicator ? (
+                        <span className="ml-1 inline-flex flex-shrink-0 items-center">{statusIndicator}</span>
+                      ) : null}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {projectDescription}
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
               <div className={cn(
                 'absolute top-1/2 z-10 flex -translate-y-1/2 items-center gap-1',

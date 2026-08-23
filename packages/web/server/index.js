@@ -72,6 +72,7 @@ import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolut
 import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
+import { configureOpenCodeRuntimeProviders, resetOpenCodeRuntimeProviders } from './lib/small-model/runtime-providers.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
@@ -664,6 +665,11 @@ const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(..
 const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
 const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
 
+// Plugin-registered providers exist only inside the running OpenCode process.
+// Small-model callers resolve them through this connection; without it they
+// stay on the file-based resolution and plugin models remain unreachable.
+configureOpenCodeRuntimeProviders({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
+
 const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
   process.env.OPENCODE_API_PREFIX || process.env.OPENCHAMBER_API_PREFIX || ''
 );
@@ -1162,6 +1168,9 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   // process (#2638). The runtime is created later by the startup pipeline;
   // by the time any restart runs, it is assigned.
   onOpenCodeRestarted: () => {
+    // A restart reloads plugins: provider ports, credentials and the provider
+    // list itself can all differ from what was cached.
+    resetOpenCodeRuntimeProviders();
     try {
       messageStreamRuntime?.rebindUpstream();
     } catch (error) {
@@ -1282,6 +1291,7 @@ const resolveMemoryProjectId = createMemoryProjectResolver({
     return sanitizeProjects(settings?.projects || []).map((project) => project.path);
   },
   resolvePrimaryWorktreeRoot,
+  managedProjectRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats')],
 });
 
 /**

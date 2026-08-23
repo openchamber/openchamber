@@ -7,6 +7,16 @@ everything between typing and sending.
 own state and wires these modules together; it should not grow logic that
 belongs to one of them.
 
+`ChatContainer.tsx` keeps one `ChatInput` mounted while a new-session draft
+becomes its first session. Draft-only UI first fades for 120ms while the editor
+stays in place. The parent then moves the editor to its final session position
+with a 180ms transform-only FLIP animation. Reduced-motion mode skips these
+transitions. `session-ui-store.ts` marks sessions materialized from a submitted
+draft, so selecting an existing session while a draft is open switches without
+animation. Do not restore separate draft and session composer branches:
+remounting the editor loses focus and interrupts the transition. Keep the
+existing mobile fixed-position rules unchanged.
+
 ## Layers
 
 | Directory | Owns |

@@ -405,6 +405,60 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariant).toBe('fast');
   });
 
+  test('the settings provider selection survives a refresh that no longer lists it', async () => {
+    // Plugin-registered providers vanish from the list while OpenCode restarts.
+    // A refresh in that window used to move the user to another provider while
+    // they were reading or editing the one they picked.
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      currentProviderId: 'live',
+      currentModelId: 'live-model',
+      selectedProviderId: 'plugin-provider',
+      directoryScoped: {},
+    });
+
+    liveProviderId = 'live';
+    await useConfigStore.getState().loadProviders({ source: 'test:missing-selection' });
+
+    const state = useConfigStore.getState();
+    expect(state.providers.map((entry) => entry.id)).toEqual(['live']);
+    expect(state.selectedProviderId).toBe('plugin-provider');
+    expect(state.directoryScoped[DIRECTORY]?.selectedProviderId).toBe('plugin-provider');
+  });
+
+  test('an empty settings provider selection is filled from the refreshed list', async () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      currentProviderId: '',
+      currentModelId: '',
+      selectedProviderId: '',
+      directoryScoped: {},
+    });
+
+    liveProviderId = 'live';
+    await useConfigStore.getState().loadProviders({ source: 'test:empty-selection' });
+
+    expect(useConfigStore.getState().selectedProviderId).toBe('live');
+  });
+
+  test('changing the chat provider leaves the settings provider selection alone', async () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('anthropic'), provider('openai')],
+      currentProviderId: 'anthropic',
+      currentModelId: 'anthropic-model',
+      selectedProviderId: 'openai',
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setProvider('anthropic');
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('anthropic');
+    expect(state.selectedProviderId).toBe('openai');
+    expect(state.directoryScoped[DIRECTORY]?.selectedProviderId).toBe('openai');
+  });
+
   test('provider reload preserves the add-provider sentinel selection', async () => {
     // The user has opened the "Add provider" form, which sets selectedProviderId
     // to the sentinel. A background provider refresh must not navigate them away
@@ -615,6 +669,57 @@ describe('useConfigStore provider persistence', () => {
 
     expect(listAgentsCalls).toBe(1);
     expect(getConfigCalls).toBe(0);
+  });
+
+  test('a project default carries its own thinking level', async () => {
+    // The project pins a model plus the level to run it at. Before, the level
+    // was dropped and only the global settings variant was ever considered —
+    // and that one belongs to the global model, not this project's.
+    const projectProvider = provider('anthropic', 'claude-opus-5', { high: {}, low: {} });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [projectProvider],
+      agents: [testAgent('build')],
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      settingsDefaultModel: undefined,
+      settingsDefaultVariant: 'low',
+      selectionSource: 'auto',
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection({
+      projectDefaultModel: 'anthropic/claude-opus-5',
+      projectDefaultVariant: 'high',
+    });
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('anthropic');
+    expect(state.currentModelId).toBe('claude-opus-5');
+    expect(state.currentVariant).toBe('high');
+  });
+
+  test('a thinking level the project model does not offer is ignored', async () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('anthropic', 'claude-opus-5')],
+      agents: [testAgent('build')],
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      settingsDefaultModel: undefined,
+      settingsDefaultVariant: undefined,
+      selectionSource: 'auto',
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection({
+      projectDefaultModel: 'anthropic/claude-opus-5',
+      projectDefaultVariant: 'high',
+    });
+
+    expect(useConfigStore.getState().currentVariant).toBe(undefined);
   });
 
   test('manual selection survives an in-flight loadAgents refresh', async () => {

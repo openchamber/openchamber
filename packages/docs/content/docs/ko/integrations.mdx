@@ -1,16 +1,17 @@
 ---
 title: 통합 기능
-description: Claude, Command Code 또는 Cursor 구독을 공급자로 사용하세요.
+description: Claude 또는 Cursor 구독을 공급자로 사용하세요.
 ---
 
 # 통합 기능
 
 통합 기능(인테그레이션)은 이미 가지고 있는 구독을 사용해 OpenChamber에 공급자를 추가하는 작은 플러그인입니다. **Settings → Integrations**에서 관리합니다.
 
+> **실험 단계 기능.** 프로바이더 정책을 존중하려 노력하지만, 계정 제한과 정지는 각 프로바이더의 결정입니다. 본인의 책임 아래 통합 기능을 사용하세요.
+
 사용 가능한 통합 기능:
 
 - **Claude Code** — Claude Pro 또는 Max 플랜, API 키 불필요
-- **Command Code** — Command Code 플랜
 - **Cursor** — Cursor 플랜의 모델 한도
 
 ## 통합 기능 설치
@@ -29,18 +30,9 @@ Claude Code는 Claude Pro 또는 Max 플랜을 사용합니다 — API 키도 �
 1. 통합 기능을 설치합니다(위 참고).
 2. **Set up**를 선택하고 로그인합니다. Claude Code CLI가 아직 없으면 설정에서 먼저 설치를 제안한 뒤 로그인을 진행합니다.
 
-Claude Code는 여기에서 유일하게 공급자 CLI 설치와 로그인을 필요로 하는 통합 기능입니다. Command Code와 Cursor는 CLI가 필요 없습니다.
+Claude Code는 여기에서 유일하게 공급자 CLI 설치와 로그인을 필요로 하는 통합 기능입니다. Cursor는 CLI가 필요 없습니다.
 
 **Claude 계정이 안전하게 유지되는 방식:** 이 통합 기능은 Anthropic의 공식 Claude Agent SDK와 설치된 Claude Code CLI를 사용합니다. OAuth 탈취, 브라우저 토큰 추출·재사용, 지원되지 않는 클라이언트로의 위장, Anthropic 인증 우회를 하지 않습니다. Anthropic이 지원하는 정상 경로를 사용하므로 토큰 탈취나 비인가 인증 우회에 따른 계정 정지 위험이 없습니다.
-
-## Command Code
-
-Command Code는 Command Code 플랜을 사용합니다.
-
-1. 통합 기능을 설치합니다(위 참고).
-2. **Set up**를 선택하면 브라우저에서 페이지가 열립니다. 접근을 승인한 뒤 OpenChamber로 돌아옵니다.
-
-화면이 없는 서버나 CI 환경에서는 브라우저 로그인 대신 `COMMAND_CODE_API_KEY` 환경 변수를 설정하세요.
 
 ## Cursor
 

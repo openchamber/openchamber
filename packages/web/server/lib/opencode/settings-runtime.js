@@ -547,25 +547,41 @@ export const createSettingsRuntime = (deps) => {
     // briefly opens the target file. Preserve atomic rename everywhere it works,
     // but fall back to a direct replacement so settings persistence does not
     // get permanently wedged on Windows desktop installs.
-    await fsPromises.copyFile(tmp, target);
-    await fsPromises.rm(tmp, { force: true });
+    try {
+      await fsPromises.copyFile(tmp, target);
+    } finally {
+      await fsPromises.rm(tmp, { force: true }).catch(() => {});
+    }
+  };
+
+  const cleanupOrphanedSettingsTempFiles = async (directory) => {
+    try {
+      const entries = await fsPromises.readdir(directory, { withFileTypes: true });
+      const cleanupTasks = entries
+        .filter((entry) => entry.isFile() && entry.name.startsWith('settings.json.tmp-'))
+        .map((entry) => fsPromises.rm(path.join(directory, entry.name), { force: true }).catch(() => {}));
+      await Promise.all(cleanupTasks);
+    } catch {
+      // Best-effort cleanup: errors reading directory must not fail settings operations
+    }
   };
 
   const writeSettingsToDisk = async (settings) => {
+    const settingsDirectory = path.dirname(SETTINGS_FILE_PATH);
+    await fsPromises.mkdir(settingsDirectory, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await fsPromises.chmod(settingsDirectory, 0o700);
+    // Atomic write: Electron main and ssh-manager read this file via plain
+    // readFile + JSON.parse and silently coerce parse errors to {}. A
+    // partial read during a non-atomic writeFile would make their next
+    // read-modify-write wipe the settings file.
+    const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
-      const settingsDirectory = path.dirname(SETTINGS_FILE_PATH);
-      await fsPromises.mkdir(settingsDirectory, { recursive: true, mode: 0o700 });
-      if (process.platform !== 'win32') await fsPromises.chmod(settingsDirectory, 0o700);
-      // Atomic write: Electron main and ssh-manager read this file via plain
-      // readFile + JSON.parse and silently coerce parse errors to {}. A
-      // partial read during a non-atomic writeFile would make their next
-      // read-modify-write wipe the settings file.
-      const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
       if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
       await replaceFile(tmp, SETTINGS_FILE_PATH);
       if (process.platform !== 'win32') await fsPromises.chmod(SETTINGS_FILE_PATH, 0o600);
     } catch (error) {
+      await fsPromises.rm(tmp, { force: true }).catch(() => {});
       console.warn('Failed to write settings file:', error);
       throw error;
     }
@@ -854,7 +870,13 @@ export const createSettingsRuntime = (deps) => {
     return { settings: next, changed: true };
   };
 
+  let hasCleanedOrphanedTempFiles = false;
+
   const readSettingsFromDiskMigrated = async () => {
+    if (!hasCleanedOrphanedTempFiles) {
+      hasCleanedOrphanedTempFiles = true;
+      await cleanupOrphanedSettingsTempFiles(path.dirname(SETTINGS_FILE_PATH));
+    }
     const current = await readSettingsFromDisk();
     const migration1 = await migrateSettingsFromLegacyLastDirectory(current);
     const migration2 = await migrateSettingsFromLegacyThemePreferences(migration1.settings);
