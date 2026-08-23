@@ -24,6 +24,28 @@ Pick the scope when you add a server:
 
 Server names use lowercase letters, numbers, hyphens, and underscores.
 
+## Example: Build Remote Agent
+
+Pair a phone running [Build Remote Agent](https://grokbuildremote.com/) as a **spectator** for this OpenChamber / OpenCode session. Protocol `gbr/1`. Independent product; not affiliated with xAI or SpaceX.
+
+This does **not** replace OpenChamber’s own [device pairing](/connect-devices/) or [Private Relay](/private-relay/). Use it when you want a second phone on the free MIT `gbr-agent` Bot API.
+
+1. Install and pair:
+
+```bash
+curl -fsSL https://grokbuildremote.com/install.sh | bash
+gbr-agent version    # need v0.6.0+
+gbr-agent pair && gbr-agent run
+```
+
+2. In **Settings → MCP**, add a **local** server named `gbr`. Command (after cloning [GrokBuildRemote-Agents](https://github.com/LinespottingOrg/GrokBuildRemote-Agents) and `npm install` in `mcp/gbr-mcp`):
+
+```text
+node /path/to/GrokBuildRemote-Agents/mcp/gbr-mcp/bin/gbr-mcp.js
+```
+
+Bot API is `http://127.0.0.1:8788` after `gbr-agent run`. Phone is spectator + veto, not orchestrator. Never put mailbox keys in OpenChamber settings notes or git.
+
 ## Related
 
 - [Providers, Models & Agents](/providers/) — connect a model first
