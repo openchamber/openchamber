@@ -20,6 +20,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { contextTokensFromBreakdown } from '@/stores/utils/tokenUtils';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
 type MiniChatMode = 'session' | 'draft';
 
@@ -51,6 +52,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const draftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
+  const draftTarget = useSessionUIStore((state) => state.newSessionDraft.target);
   const draftProjectId = useSessionUIStore((state) => state.newSessionDraft?.selectedProjectId ?? null);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const projects = useProjectsStore((state) => state.projects);
@@ -99,6 +101,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const worktreeDirectory = normalizePath(worktreePath || sessionWorktreeMetadata?.path || worktreeAttachment?.cwd || worktreeAttachment?.worktreeRoot || '');
   const currentDirectoryNormalized = normalizePath(currentDirectory);
   const openDirectory = worktreeDirectory || sessionDirectory || draftDirectory || currentDirectoryNormalized;
+  const isChatContext = draftOpen ? draftTarget === 'chat' : isChatDirectoryPath(sessionDirectory);
   const directoryLabel = compactPath(openDirectory);
   const catalogWorktreeBranch = useSessionUIStore((state) => {
     const candidateDirectory = normalizePath(worktreeDirectory || sessionDirectory || '');
@@ -111,9 +114,9 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
     return null;
   });
   React.useEffect(() => {
-    if (!openDirectory) return;
+    if (!openDirectory || isChatContext) return;
     void ensureGitStatus(openDirectory, runtimeApis.git).catch(() => {});
-  }, [ensureGitStatus, openDirectory, runtimeApis.git]);
+  }, [ensureGitStatus, isChatContext, openDirectory, runtimeApis.git]);
 
   const pathMatchedProject = React.useMemo(() => {
     const projectDirectory = normalizePath(sessionWorktreeMetadata?.projectDirectory ?? worktreeAttachment?.worktreeRoot ?? null);
@@ -125,13 +128,14 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       .sort((left, right) => right.path.length - left.path.length)[0] ?? null;
   }, [openDirectory, projects, sessionWorktreeMetadata?.projectDirectory, worktreeAttachment?.worktreeRoot]);
   const projectLabel = React.useMemo(() => {
+    if (isChatContext) return null;
     const project = pathMatchedProject ?? activeProject;
     if (!project) return directoryLabel || 'OpenChamber';
     const label = project.label?.trim();
     if (label) return label;
     const segments = project.path.split(/[\\/]/).filter(Boolean);
     return segments.at(-1) ?? project.path;
-  }, [activeProject, directoryLabel, pathMatchedProject]);
+  }, [activeProject, directoryLabel, isChatContext, pathMatchedProject]);
   const gitBranchForDirectory = useGitBranchLabel(openDirectory || null);
   const rawBranchLabel = gitBranchForDirectory || worktreeMetadataBranch || sessionWorktreeMetadata?.branch?.trim() || worktreeAttachment?.branch?.trim() || catalogWorktreeBranch;
   const branchLabel = rawBranchLabel && rawBranchLabel !== 'HEAD' ? rawBranchLabel : null;
@@ -241,7 +245,11 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const handleOpenMainApp = React.useCallback(() => {
     const payload = currentSessionId
       ? { sessionId: currentSessionId, directory: (session as { directory?: string | null } | null)?.directory ?? currentDirectory ?? '' }
-      : { mode: 'draft', directory: openDirectory || currentDirectory || '', projectId: draftProjectId };
+      : {
+          mode: 'draft',
+          directory: isChatContext ? '' : openDirectory || currentDirectory || '',
+          projectId: isChatContext ? null : draftProjectId,
+        };
     void invokeDesktop<{ focused?: boolean }>('desktop_focus_main_window', payload)
       .then((result) => {
         if (result?.focused === true) {
@@ -249,12 +257,13 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
         }
         return null;
       });
-  }, [currentDirectory, currentSessionId, draftProjectId, openDirectory, session]);
+  }, [currentDirectory, currentSessionId, draftProjectId, isChatContext, openDirectory, session]);
 
   return (
     <header
       className={cn(
-        'flex items-center gap-3 bg-background pr-3',
+        'flex items-center gap-3 bg-background',
+        usesFramelessChrome && windowControlsSide === 'right' ? 'pr-0' : 'pr-3',
         hasMacTrafficLights ? 'pl-[5.5rem]' : 'pl-3',
         usesFramelessChrome ? 'h-12' : macosHeaderSizeClass || 'min-h-14',
       )}
@@ -273,7 +282,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
           <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
             {title}
           </span>
-          <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+          {!isChatContext ? <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
             <span className="truncate">{projectLabel}</span>
             {branchLabel ? (
               <span className="inline-flex min-w-0 items-center gap-0.5">
@@ -281,7 +290,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
                 <span className="truncate">{branchLabel}</span>
               </span>
             ) : null}
-          </span>
+          </span> : null}
         </button>
       </SessionSwitcherDropdown>
       <div className="min-w-0 flex-1" />

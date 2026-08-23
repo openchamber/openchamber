@@ -72,13 +72,31 @@ type ZaiLimit = {
   type?: string;
   number?: number;
   unit?: number;
+  usage?: number;
+  currentValue?: number;
+  remaining?: number;
   nextResetTime?: number;
   percentage?: number;
+};
+
+// CREDIT_LIMIT entries carry `usage` (total credits) and `currentValue` (consumed);
+// TOKENS_LIMIT entries only carry a percentage.
+const formatZaiCreditAmount = (value: number): string => {
+  if (value < 1000) return value.toLocaleString('en-US');
+  return `${Math.round(value / 100) / 10}k`;
+};
+
+const formatZaiCreditValueLabel = (limit: ZaiLimit): string | null => {
+  const used = toNumber(limit.currentValue);
+  const total = toNumber(limit.usage);
+  if (used === null || total === null) return null;
+  return `${formatZaiCreditAmount(used)} / ${formatZaiCreditAmount(total)} credits`;
 };
 
 type ZaiPayload = {
   data?: {
     limits?: ZaiLimit[];
+    level?: string;
   };
 };
 
@@ -411,15 +429,20 @@ const buildResult = (data: {
   configured: boolean;
   usage?: ProviderUsage | null;
   error?: string;
-}): ProviderResult => ({
-  providerId: data.providerId,
-  providerName: data.providerName,
-  ok: data.ok,
-  configured: data.configured,
-  usage: data.usage ?? null,
-  ...(data.error ? { error: data.error } : {}),
-  fetchedAt: Date.now(),
-});
+  planLabel?: string | null;
+}): ProviderResult => {
+  const result: ProviderResult = {
+    providerId: data.providerId,
+    providerName: data.providerName,
+    ok: data.ok,
+    configured: data.configured,
+    usage: data.usage ?? null,
+    ...(data.error ? { error: data.error } : {}),
+    fetchedAt: Date.now(),
+  };
+  if (data.planLabel) result.planLabel = data.planLabel;
+  return result;
+};
 
 const resolveXaiAuth = (): XaiAuthEntry | null => {
   const entry = getProviderAuth('xai');
@@ -1291,7 +1314,7 @@ const buildClaudeRateLimitResult = (): ProviderResult => (
         providerName: 'Claude',
         ok: false,
         configured: true,
-        error: 'Rate limited by Anthropic. Retrying shortly.',
+        error: 'Rate limited. Retrying soon.',
       })
 );
 
@@ -2059,16 +2082,19 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
     const payload = await response.json() as ZaiPayload;
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
     const windows: Record<string, UsageWindow> = {};
-    for (const tokensLimit of limits.filter((limit) => limit?.type === 'TOKENS_LIMIT')) {
-      const windowSeconds = resolveWindowSeconds(tokensLimit as Record<string, unknown>);
+    // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the same,
+    // so both limit types map to the same windows.
+    for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
+      const windowSeconds = resolveWindowSeconds(limit as Record<string, unknown>);
       const windowLabel = resolveWindowLabel(windowSeconds);
-      const resetAt = tokensLimit.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
-      const usedPercent = typeof tokensLimit.percentage === 'number' ? tokensLimit.percentage : null;
+      const resetAt = limit.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
+      const usedPercent = typeof limit.percentage === 'number' ? limit.percentage : null;
 
       windows[windowLabel] = toUsageWindow({
         usedPercent,
         windowSeconds,
         resetAt,
+        valueLabel: formatZaiCreditValueLabel(limit),
       });
     }
 
@@ -2087,6 +2113,7 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
       ok: true,
       configured: true,
       usage: { windows },
+      planLabel: payload?.data?.level || null,
     });
   } catch (error) {
     return buildResult({

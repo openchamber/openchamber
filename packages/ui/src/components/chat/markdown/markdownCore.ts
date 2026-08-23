@@ -3,6 +3,7 @@ import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
+import { isAppLinkUrl } from '@/lib/url';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { contentFingerprint, HighlightResultCache, utf16Bytes } from './highlightResultCache';
 import { highlightCodeInWorker } from './markdown-worker';
@@ -472,7 +473,10 @@ const ensureSanitizeHook = (): void => {
   sanitizeHookInstalled = true;
   DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
     if (!(node instanceof HTMLAnchorElement) || data.attrName !== 'href') return;
-    if (isLocalFileUrl(data.attrValue)) data.forceKeepAttr = true;
+    // DOMPurify's default URI policy strips custom application schemes
+    // (obsidian://, vscode://, ...). Keep them for anchors; dangerous schemes
+    // stay excluded via isAppLinkUrl and clicks go through confirmation.
+    if (isLocalFileUrl(data.attrValue) || isAppLinkUrl(data.attrValue)) data.forceKeepAttr = true;
   });
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     if (!(node instanceof HTMLAnchorElement)) return;
@@ -544,7 +548,10 @@ export const __markdownBlockCacheSizesForTests = (): { full: number; live: numbe
   live: liveBlockCache.size,
 });
 
-const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): Promise<string> => {
+const parseBlock = async (
+  block: MarkdownBlock,
+  imageMode: MarkdownImageMode,
+): Promise<string> => {
   const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
   const parsed = await Promise.resolve(parser.parse(block.src));
   const withMath = renderMathExpressions(parsed);
@@ -561,7 +568,10 @@ const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): P
  * is synchronous (marked is not configured `async`), so this never blocks on a
  * worker round-trip.
  */
-export const renderMarkdownSync = (text: string, imageMode: MarkdownImageMode = 'inline'): string => {
+export const renderMarkdownSync = (
+  text: string,
+  imageMode: MarkdownImageMode = 'inline',
+): string => {
   if (!text) return '';
   const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
   const parsed = parser.parse(text) as string;

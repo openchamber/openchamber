@@ -24,6 +24,8 @@ attached to that session. Pins never come from project-wide note or plan state.
 A new-session draft passes its pins into this metadata when its first message
 creates the session.
 
+Directories beneath the managed `~/.config/openchamber/chats` root resolve to that root before project context and project memory are read. Every ordinary chat therefore shares one Chats knowledge owner instead of creating an unreachable context store for each dated session directory.
+
 `session.metadata.openchamber.knowledge_context_delivered` holds the signature
 of what the session is carrying. It lives with the session, so it survives the
 tab closing and is visible to every sender, including the ones with no tab.

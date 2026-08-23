@@ -21,6 +21,7 @@ import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -63,6 +64,10 @@ const persistRuntimeSettingsMirror = (settings: DesktopSettings, runtimeKey: str
     homeDirectory: settings.homeDirectory,
     projects: settings.projects,
     activeProjectId: settings.activeProjectId,
+    sidebarProjectDisplayMode: settings.sidebarProjectDisplayMode,
+    sidebarSessionGroupingMode: settings.sidebarSessionGroupingMode,
+    sidebarProjectSortOrder: settings.sidebarProjectSortOrder,
+    sidebarShowRecentSection: settings.sidebarShowRecentSection,
     pinnedDirectories: settings.pinnedDirectories,
     gitmojiEnabled: settings.gitmojiEnabled,
     directoryShowHidden: settings.directoryShowHidden,
@@ -1029,6 +1034,26 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.filesViewShowGitignored === 'boolean') {
     setFilesViewShowGitignored(settings.filesViewShowGitignored, { persist: false });
   }
+  const sessionDisplayChanges: Partial<ReturnType<typeof useSessionDisplayStore.getState>> = {};
+  if (settings.sidebarProjectDisplayMode === 'all' || settings.sidebarProjectDisplayMode === 'single') {
+    sessionDisplayChanges.projectDisplayMode = settings.sidebarProjectDisplayMode;
+  }
+  if (settings.sidebarSessionGroupingMode === 'by-worktree' || settings.sidebarSessionGroupingMode === 'flat') {
+    sessionDisplayChanges.sessionGroupingMode = settings.sidebarSessionGroupingMode;
+  }
+  if (settings.sidebarProjectSortOrder === 'manual'
+    || settings.sidebarProjectSortOrder === 'a-z'
+    || settings.sidebarProjectSortOrder === 'z-a'
+    || settings.sidebarProjectSortOrder === 'date-added'
+    || settings.sidebarProjectSortOrder === 'recent') {
+    sessionDisplayChanges.projectSortOrder = settings.sidebarProjectSortOrder;
+  }
+  if (typeof settings.sidebarShowRecentSection === 'boolean') {
+    sessionDisplayChanges.showRecentSection = settings.sidebarShowRecentSection;
+  }
+  if (Object.keys(sessionDisplayChanges).length > 0) {
+    useSessionDisplayStore.setState(sessionDisplayChanges);
+  }
 };
 
 const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
@@ -1084,6 +1109,22 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
     result.activeProjectId = candidate.activeProjectId;
+  }
+  if (candidate.sidebarProjectDisplayMode === 'all' || candidate.sidebarProjectDisplayMode === 'single') {
+    result.sidebarProjectDisplayMode = candidate.sidebarProjectDisplayMode;
+  }
+  if (candidate.sidebarSessionGroupingMode === 'by-worktree' || candidate.sidebarSessionGroupingMode === 'flat') {
+    result.sidebarSessionGroupingMode = candidate.sidebarSessionGroupingMode;
+  }
+  if (candidate.sidebarProjectSortOrder === 'manual'
+    || candidate.sidebarProjectSortOrder === 'a-z'
+    || candidate.sidebarProjectSortOrder === 'z-a'
+    || candidate.sidebarProjectSortOrder === 'date-added'
+    || candidate.sidebarProjectSortOrder === 'recent') {
+    result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
+  }
+  if (typeof candidate.sidebarShowRecentSection === 'boolean') {
+    result.sidebarShowRecentSection = candidate.sidebarShowRecentSection;
   }
 
   if (Array.isArray(candidate.securityScopedBookmarks)) {
@@ -1747,12 +1788,12 @@ export const syncDesktopSettings = async (): Promise<void> => {
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
 
-  const persistApi = getPersistApi();
+  const persistApis = [getPersistApi(), useSessionDisplayStore.persist];
 
   // Wait for Zustand persist hydration before applying server settings.
   // Otherwise `set()`-calls race with hydration: we set X, then hydration
   // reads localStorage and overwrites back to the persisted value.
-  const waitForHydration = (): Promise<void> => {
+  const waitForPersistHydration = (persistApi: PersistApi | undefined): Promise<void> => {
     if (!persistApi?.hasHydrated || persistApi.hasHydrated()) {
       return Promise.resolve();
     }
@@ -1775,6 +1816,9 @@ export const syncDesktopSettings = async (): Promise<void> => {
       if (persistApi.hasHydrated?.()) finish();
     });
   };
+  const waitForHydration = (): Promise<void> => Promise.all(
+    persistApis.map(waitForPersistHydration),
+  ).then(() => undefined);
 
   // Each step is wrapped in try/catch so a failure in one side-effect (e.g.
   // a TypeError from writing to a contextBridge-protected global) doesn't
@@ -1789,6 +1833,10 @@ export const syncDesktopSettings = async (): Promise<void> => {
     // `openchamber:files:auto-save-enabled`. Prefer the hydrated store value and
     // seed the backend once so later omitted→default authority is correct.
     const shouldSeedAutoSaveEnabled = typeof settings.autoSaveEnabled !== 'boolean';
+    const shouldSeedSidebarProjectDisplayMode = settings.sidebarProjectDisplayMode === undefined;
+    const shouldSeedSidebarSessionGroupingMode = settings.sidebarSessionGroupingMode === undefined;
+    const shouldSeedSidebarProjectSortOrder = settings.sidebarProjectSortOrder === undefined;
+    const shouldSeedSidebarShowRecentSection = settings.sidebarShowRecentSection === undefined;
     const authoritativeSettings = materializeAuthoritativeUiSettings(settings);
     try {
       persistToLocalStorage(settings);
@@ -1799,6 +1847,19 @@ export const syncDesktopSettings = async (): Promise<void> => {
     if (!isSettingsRuntimeContextCurrent(context)) return;
     if (shouldSeedAutoSaveEnabled) {
       authoritativeSettings.autoSaveEnabled = useUIStore.getState().autoSaveEnabled;
+    }
+    const sessionDisplayState = useSessionDisplayStore.getState();
+    if (shouldSeedSidebarProjectDisplayMode) {
+      authoritativeSettings.sidebarProjectDisplayMode = sessionDisplayState.projectDisplayMode;
+    }
+    if (shouldSeedSidebarSessionGroupingMode) {
+      authoritativeSettings.sidebarSessionGroupingMode = sessionDisplayState.sessionGroupingMode;
+    }
+    if (shouldSeedSidebarProjectSortOrder) {
+      authoritativeSettings.sidebarProjectSortOrder = sessionDisplayState.projectSortOrder;
+    }
+    if (shouldSeedSidebarShowRecentSection) {
+      authoritativeSettings.sidebarShowRecentSection = sessionDisplayState.showRecentSection;
     }
     if (settings.draftStarters === undefined) {
       useUIStore.setState({ globalDraftStarters: null });
@@ -1818,6 +1879,18 @@ export const syncDesktopSettings = async (): Promise<void> => {
     }
     if (shouldSeedAutoSaveEnabled) {
       migrationPatch.autoSaveEnabled = authoritativeSettings.autoSaveEnabled;
+    }
+    if (shouldSeedSidebarProjectDisplayMode) {
+      migrationPatch.sidebarProjectDisplayMode = authoritativeSettings.sidebarProjectDisplayMode;
+    }
+    if (shouldSeedSidebarSessionGroupingMode) {
+      migrationPatch.sidebarSessionGroupingMode = authoritativeSettings.sidebarSessionGroupingMode;
+    }
+    if (shouldSeedSidebarProjectSortOrder) {
+      migrationPatch.sidebarProjectSortOrder = authoritativeSettings.sidebarProjectSortOrder;
+    }
+    if (shouldSeedSidebarShowRecentSection) {
+      migrationPatch.sidebarShowRecentSection = authoritativeSettings.sidebarShowRecentSection;
     }
     if (Object.keys(migrationPatch).length > 0) {
       await updateDesktopSettings(migrationPatch);

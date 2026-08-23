@@ -143,6 +143,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 ## Native Features Owned Here
 
 - Floating Mini Chat windows.
+- New Mini Chat windows default to the managed Chats target. Explicit project/worktree drafts retain their target, existing managed chat sessions reopen in their own directory, and the compact header omits project/branch metadata for Chats. Opening a managed draft back in the main window preserves that target.
 - Multiple native windows.
 - Native notifications.
 - User-confirmed local folder selection. The shared UI supplies the requested directory as the picker `defaultPath`; confirmation is required before filesystem access is retried.

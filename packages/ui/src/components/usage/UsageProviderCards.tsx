@@ -35,6 +35,11 @@ export const UsageProviderCards: React.FC<{
           <span className="min-w-0 flex-1 truncate typography-ui-label font-medium text-foreground">
             {group.providerName}
           </span>
+          {group.planLabel ? (
+            <span className="shrink-0 typography-micro capitalize text-muted-foreground">
+              {group.planLabel}
+            </span>
+          ) : null}
           {group.status && group.rows.length === 0 ? (
             <span className="shrink-0 truncate typography-micro text-muted-foreground">{group.status}</span>
           ) : null}
@@ -54,12 +59,12 @@ export const UsageProviderCards: React.FC<{
               );
               return (
                 <div key={row.key} className="flex min-w-0 items-baseline justify-between gap-3">
-                  <span className="inline-flex min-w-0 flex-1 items-baseline gap-1.5">
-                    <span className="truncate typography-ui-label text-muted-foreground">
+                  <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                    <span className="shrink-0 truncate typography-ui-label text-muted-foreground">
                       {row.subtitle ? `${row.subtitle} · ${row.label}` : row.label}
                     </span>
                     {resetLabel ? (
-                      <span className="shrink-0 truncate typography-micro text-muted-foreground/70">
+                      <span className="min-w-0 truncate typography-micro text-muted-foreground/70">
                         {resetLabel}
                       </span>
                     ) : null}

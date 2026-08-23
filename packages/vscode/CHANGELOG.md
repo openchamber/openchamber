@@ -1,6 +1,22 @@
-## [Unreleased]
+## [1.20.0] - 2026-08-23
 
+- **/btw side questions:** type `/btw` followed by your question to ask something off-topic in a temporary session forked from the current conversation. The answer streams into a panel above the composer; collapse it, keep it as a full session, or discard it without touching the chat (thanks to @jaygupta17).
+- **Skills catalog:** browse curated GitHub skill collections in a card-based catalog with cross-source search and direct links to each skill's repository.
+- Settings: the workspace selector on Providers, Agents, MCP, Commands and Skills now only changes what those pages show instead of moving the chat, session list and file tree to another workspace.
+- Settings/Projects: a project can now pin a thinking level next to its model, for models that offer levels.
+- Settings/General: changing the default model, variant or agent no longer repoints an open chat that already carries a model you picked for it. Chats following the default still switch immediately.
+- Settings/Providers: the provider you select no longer jumps to a different one when the chat selection or provider data changes.
+- Settings/Integrations: the experimental page now only lists integrations that can be installed; unavailable and Coming soon entries were removed.
+- Providers: expanded support for custom providers.
+- Sessions created outside OpenChamber now appear in the sidebar and Recent list without a page refresh (thanks to @tomzx).
 - If OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Usage: Z.ai credit limits now appear alongside its other quota windows.
+- Chat: file paths in messages now open from the session's workspace, even if you last browsed files in another workspace (thanks to @tomzx).
+- Chat: app links such as `spotify://` now ask for confirmation before opening another app. You can trust an app link type on one device and manage trusted links in Settings.
+- While a reply streams, the model status line under the last message now turns into the finished message's info row in place, instead of jumping when the reply completes.
+- Chat: newly sent messages and syntax-highlighted code blocks no longer briefly flicker. Bash output can also grow with its content instead of being cut off.
+- Chat: long user messages can be expanded even when their final layout finishes after they first appear.
+- UI: the default dialog close button is easier to click or tap (thanks to @rockinrimmer).
 
 ## [1.19.0] - 2026-08-19
 

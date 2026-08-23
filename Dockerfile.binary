@@ -1,0 +1,26 @@
+FROM node:20-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash curl git ca-certificates openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN usermod -l openchamber -d /home/openchamber -m node \
+    && groupmod -n openchamber node \
+    && mkdir -p /home/openchamber && chown -R openchamber:openchamber /home/openchamber
+
+USER openchamber
+ENV PATH=/home/openchamber/.local/bin:/home/openchamber/.npm-global/bin:$PATH
+ENV NPM_CONFIG_PREFIX=/home/openchamber/.npm-global
+RUN mkdir -p /home/openchamber/.npm-global /home/openchamber/.local/bin
+
+RUN npm install -g opencode-ai @openchamber/web
+
+RUN mkdir -p /home/openchamber/.config/openchamber \
+    /home/openchamber/.local/share/opencode \
+    /home/openchamber/.local/state/opencode \
+    /home/openchamber/.config/opencode \
+    /home/openchamber/.ssh
+
+EXPOSE 3000
+
+CMD ["openchamber", "serve", "--lan", "--foreground"]

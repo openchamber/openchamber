@@ -71,6 +71,33 @@ describe('custom provider config persistence', () => {
     }).ok).toBe(true);
   });
 
+  test('accepts the OpenCode Responses and Anthropic adapter packages', () => {
+    for (const npm of ['@ai-sdk/openai', '@ai-sdk/anthropic']) {
+      const result = validateCustomProviderConfig('ok', {
+        name: 'X',
+        npm,
+        env: ['MY_KEY'],
+        options: { baseURL: 'https://api.example.com/v1' },
+        models: { m: { name: 'M' } },
+      });
+      expect(result.ok).toBe(true);
+      expect(result.value.config.npm).toBe(npm);
+    }
+  });
+
+  test('rejects unsupported adapter packages', () => {
+    const result = validateCustomProviderConfig('ok', {
+      name: 'X',
+      npm: '@example/unsupported',
+      env: ['MY_KEY'],
+      options: { baseURL: 'https://api.example.com/v1' },
+      models: { m: { name: 'M' } },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('@ai-sdk/openai');
+  });
+
   test('upsertProviderConfig writes and round-trips project config', () => {
     const result = upsertProviderConfig('campus-llm', {
       name: 'Campus LLM',

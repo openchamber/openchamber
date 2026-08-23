@@ -5,6 +5,10 @@
  * area uses the same paddings/typography as the textarea and the action row
  * reuses the footer icon-button styling — so toggling dictation causes no
  * vertical shift.
+ *
+ * No text appears while recording. The server transcribes the audio once the
+ * user stops, so the overlay shows the recording state and then Transcribing.
+ * The only transcript rendered here is the salvage text of a failed dictation.
  */
 
 import React from 'react';
@@ -15,6 +19,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDictation } from '@/hooks/useDictation';
+import { DictationWaveform } from '@/components/dictation/DictationWaveform';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -48,25 +53,6 @@ const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${String(secs).padStart(2, '0')}`;
-};
-
-const VolumeMeter: React.FC<{ volume: number }> = ({ volume }) => {
-    const { currentTheme } = useThemeSystem();
-    return (
-        <div
-            className="h-1.5 w-16 flex-shrink-0 overflow-hidden rounded-full"
-            style={{ backgroundColor: currentTheme.colors.interactive.border }}
-            aria-hidden="true"
-        >
-            <div
-                className="h-full rounded-full transition-[width] duration-75"
-                style={{
-                    width: `${Math.round(Math.min(1, volume) * 100)}%`,
-                    backgroundColor: currentTheme.colors.primary.base,
-                }}
-            />
-        </div>
-    );
 };
 
 /**
@@ -162,7 +148,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     const {
         status,
         partialTranscript,
-        volume,
+        subscribeLevel,
         duration,
         error,
         errorReason,
@@ -399,7 +385,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                         {/* Measured for the composer-growth report — keep all
                             transcript/placeholder/error content inside. */}
                         <div ref={transcriptContentRef}>
-                            {partialTranscript ? (
+                            {status === 'failed' && partialTranscript ? (
                                 <p className="typography-markdown md:typography-ui-label whitespace-pre-wrap" style={{ color: currentTheme.colors.surface.foreground }}>
                                     {partialTranscript}
                                 </p>
@@ -436,8 +422,8 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                                         style={{ backgroundColor: currentTheme.colors.status.error }}
                                     />
                                 </span>
-                                <VolumeMeter volume={volume} />
-                                <span className="typography-meta tabular-nums" style={{ color: currentTheme.colors.surface.mutedForeground }}>
+                                <DictationWaveform subscribeLevel={subscribeLevel} className="block h-4 min-w-0 flex-1" />
+                                <span className="typography-meta flex-shrink-0 tabular-nums" style={{ color: currentTheme.colors.surface.mutedForeground }}>
                                     {formatDuration(duration)}
                                 </span>
                             </>
@@ -446,7 +432,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                         ) : null}
                         {/* Same inter-control gap as the composer's right cluster:
                             gap-x-1 on mobile, md:gap-x-3 on desktop. */}
-                        <div className={cn('ml-auto flex items-center', isMobile ? 'gap-x-1' : 'gap-x-1.5 md:gap-x-3')}>
+                        <div className={cn('ml-auto flex flex-shrink-0 items-center', isMobile ? 'gap-x-1' : 'gap-x-1.5 md:gap-x-3')}>
                             {status === 'recording' ? (
                                 <>
                                     <button

@@ -14,6 +14,7 @@ import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
+import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
 
 type FileInfo = ProjectFileSearchHit;
 type AgentInfo = {
@@ -80,7 +81,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   const measureRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const isMobile = useUIStore((state) => state.isMobile);
-  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, isMobile);
+  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, true);
   const normalizedSearchQuery = (searchQuery ?? '').trim();
   const recentFiles = React.useMemo(() => {
     if (!projectRoot || !projectTabs) {
@@ -458,6 +459,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
             {visibleAgents.map((agent, index) => {
               const isSelected = selectedIndex === index;
               return (
+                <AutocompleteRowTooltip description={agent.description} active={!isMobile && isSelected}>
                 <div
                   key={`agent-${agent.name}`}
                   ref={(el) => { itemRefs.current[index] = el; }}
@@ -470,11 +472,9 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                 >
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold truncate">@{agent.name}</div>
-                    {agent.description && !isMobile ? (
-                      <div className="typography-meta text-muted-foreground truncate">{agent.description}</div>
-                    ) : null}
                   </div>
                 </div>
+                </AutocompleteRowTooltip>
               );
             })}
             {visibleAgents.length === 2 && normalizedSearchQuery.length === 0 && agents.length > 2 && (

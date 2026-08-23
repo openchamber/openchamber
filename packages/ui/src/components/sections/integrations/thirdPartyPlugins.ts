@@ -26,16 +26,6 @@ export const THIRD_PARTY_PLUGINS: readonly ThirdPartyPluginDefinition[] = [
     homepage: 'https://github.com/openchamber/opencode-claude',
   },
   {
-    id: 'opencode-commandcode',
-    packageName: '@openchamber/opencode-commandcode',
-    providerId: 'command-code',
-    icon: 'command-code',
-    brandClassName: 'text-foreground',
-    nameKey: 'settings.integrations.thirdParty.opencodeCommandcode.name',
-    descriptionKey: 'settings.integrations.thirdParty.opencodeCommandcode.description',
-    homepage: 'https://github.com/openchamber/opencode-commandcode',
-  },
-  {
     id: 'opencode-cursor-oauth',
     packageName: '@openchamber/opencode-cursor',
     providerId: 'cursor',

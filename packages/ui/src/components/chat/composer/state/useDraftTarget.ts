@@ -23,6 +23,8 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { normalizePath } from '../attachments/filePaths';
+import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
+import { useI18n } from '@/lib/i18n';
 
 /** How long a cached branch list is served before it is refreshed. */
 const BRANCHES_SWR_TTL_MS = 30_000;
@@ -35,6 +37,7 @@ export interface DraftTargetProject {
     color?: string | null;
     iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' } | null;
     iconBackground?: string | null;
+    kind?: 'chat' | 'project';
 }
 
 /** A project's display name, falling back to its directory name. */
@@ -43,7 +46,15 @@ export function getProjectDisplayLabel(project: { label?: string; path: string }
 }
 
 export function useDraftTarget(enabled: boolean) {
-    const projects = useProjectsStore((state) => state.projects) as DraftTargetProject[];
+    const configuredProjects: readonly DraftTargetProject[] = useProjectsStore((state) => state.projects);
+    const { t } = useI18n();
+    const chatProject = React.useMemo<DraftTargetProject>(() => ({
+        id: CHAT_DRAFT_PROJECT_ID,
+        path: '',
+        label: t('layout.mainTab.chat'),
+        kind: 'chat',
+    }), [t]);
+    const projects = React.useMemo(() => [chatProject, ...configuredProjects], [chatProject, configuredProjects]);
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
     const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
@@ -53,6 +64,7 @@ export function useDraftTarget(enabled: boolean) {
     const { git: runtimeGit } = useRuntimeAPIs();
 
     const selectedDraftProject = React.useMemo(() => {
+        if (newSessionDraft?.target === 'chat') return chatProject;
         const explicit = newSessionDraft?.selectedProjectId
             ? projects.find((project) => project.id === newSessionDraft.selectedProjectId) ?? null
             : null;
@@ -67,14 +79,16 @@ export function useDraftTarget(enabled: boolean) {
             return active;
         }
 
-        return projects[0] ?? null;
-    }, [activeProjectId, newSessionDraft?.selectedProjectId, projects]);
+        return configuredProjects[0] ?? chatProject;
+    }, [activeProjectId, chatProject, configuredProjects, newSessionDraft?.selectedProjectId, newSessionDraft?.target, projects]);
 
     const selectedDraftProjectPath = React.useMemo(
-        () => normalizePath(selectedDraftProject?.path ?? null),
-        [selectedDraftProject?.path],
+        () => selectedDraftProject?.kind === 'chat' ? null : normalizePath(selectedDraftProject?.path ?? null),
+        [selectedDraftProject?.kind, selectedDraftProject?.path],
     );
-    const draftProjectLabel = selectedDraftProject ? getProjectDisplayLabel(selectedDraftProject) : null;
+    const draftProjectLabel = selectedDraftProject && selectedDraftProject.kind !== 'chat'
+        ? getProjectDisplayLabel(selectedDraftProject)
+        : null;
 
     const selectedDraftProjectBranches = useGitBranches(selectedDraftProjectPath);
     const selectedDraftProjectBranchesFetchedAt = useGitStore(
@@ -256,6 +270,10 @@ export function useDraftTarget(enabled: boolean) {
         }
         const project = projects.find((entry) => entry.id === projectId);
         if (!project) {
+            return;
+        }
+        if (project.kind === 'chat') {
+            setNewSessionDraftTarget({ projectId: CHAT_DRAFT_PROJECT_ID, directoryOverride: null }, { force: true });
             return;
         }
         if (activeProjectId !== projectId) {

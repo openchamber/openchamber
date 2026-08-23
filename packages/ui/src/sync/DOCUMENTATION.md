@@ -46,7 +46,7 @@ So:
 | `global-session-status.ts` | Incremental non-idle session status index reconciled from events and authoritative directory snapshots | All known directories in the active runtime |
 | `session-ordering.ts` | Ephemeral lifecycle rank used by every user-visible session list | All known sessions in the active runtime |
 | `session-activity-timing.ts` | Elapsed time of the running turn and of the turn that just finished, plus the persisted starts that survive a reload | All known sessions in the active runtime |
-| `session-ui-store.ts` | Session selection, draft lifecycle, abort prompts, worktree metadata, SDK-facing action entrypoints | App UI state |
+| `session-ui-store.ts` | Session selection, draft lifecycle, one-shot draft-materialization transition identity, abort prompts, worktree metadata, SDK-facing action entrypoints | App UI state |
 | `useGlobalSessionsStore.ts` | Global active sessions, global archived sessions, `sessionsByDirectory` | All opened project/worktree session lists |
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |
 | `attachment-files.ts` | Attachment picker allowlists, MIME/content validation, structured-text sanitization, and HEIC conversion | Local chat attachments across shared UI runtimes |
@@ -112,6 +112,16 @@ Session materialization recency is keyed by runtime and directory. Foreground lo
 ### Global session list
 
 Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**.
+
+Each full app root owns one global polling lifecycle through
+`useGlobalSessionsPolling`. The web/desktop root and VS Code chat root load once
+when mounted and refresh every 45 seconds so sessions created by another
+OpenCode process are discovered without relying on the sidebar or native tray
+being visible. Embedded chats and the VS Code agent-manager panel do not poll.
+The sidebar and tray consume the same store and must not start their own
+full-list timers. Surface-specific refreshes, such as opening the mobile session
+sheet or returning from suspension, may still request freshness at their
+explicit lifecycle edge; the store coalesces an overlapping in-flight load.
 
 Current consumers:
 
@@ -323,6 +333,16 @@ server stays deleted there; its persisted state is left as harmless stale
 metadata and the next authoritative load reconciles it.
 
 ## The golden rule
+
+### Managed chat directories
+
+Ordinary user-created drafts default to the OpenChamber-managed Chat target. The first submit creates one isolated directory under `~/.config/openchamber/chats/YYYY-MM-DD/session-<id>` before creating the OpenCode session. The shared `~/.config/openchamber/chats` root acts as a system project owner for sidebar membership and Notes, Todo, Plans, pinned knowledge, and project memory, but it is never persisted or rendered as a user project and exposes no Git/worktree controls. Project and worktree actions remain explicit targets. Archiving retains a chat directory so restore remains lossless. Confirmed deletion removes that managed directory and never removes project directories.
+
+Typing the first character in a managed Chat draft starts one deduplicated directory preparation for that draft. Materialization consumes the prepared directory before `createSession`, removing filesystem creation from the usual submit path. Closing the draft, changing it to a project target, or completing preparation after the runtime/draft changed deletes the unclaimed directory. A create failure also deletes the consumed directory.
+
+The global sessions store persists and hydrates one bounded, runtime-scoped startup snapshot containing only active managed chat sessions. Every global session surface, including the main sidebar and Electron Mini Chat switcher, sees that stale snapshot while the global list is unresolved or failed; the first authoritative global snapshot replaces it. Runtime reset to idle must hydrate rather than erase the destination runtime's snapshot; authoritative empty, archive, and delete updates do persist the resulting empty or reduced list.
+
+VS Code intentionally has no managed Chats mode. It neither reads nor writes the managed Chats startup cache, regular drafts continue to target the open workspace, and the global session store rejects managed chat sessions from both snapshots and live upserts before any VS Code surface can consume them. Sidebar and switcher filters repeat that exclusion defensively.
 
 When creating a draft in `handleDirectoryEvent`, **only clone the state fields the event will mutate**. Never spread all fields eagerly.
 

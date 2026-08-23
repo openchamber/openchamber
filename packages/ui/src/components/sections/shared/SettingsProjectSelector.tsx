@@ -8,6 +8,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Icon } from "@/components/icon/Icon";
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -17,8 +19,11 @@ const formatProjectLabel = (label: string): string => label.trim();
 export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ className }) => {
   const { t } = useI18n();
   const projects = useProjectsStore((state) => state.projects);
-  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  const setActiveProject = useProjectsStore((state) => state.setActiveProject);
+  // Settings-only selection. Picking a project here used to call
+  // `setActiveProject`, which relocates the chat, the session list and the file
+  // tree; reading another project's configuration must not move the app.
+  const settingsDirectory = useSettingsDirectory();
+  const setSettingsProjectPath = useUIStore((state) => state.setSettingsProjectPath);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
 
@@ -30,8 +35,8 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
     if (sortedProjects.length === 0) {
       return null;
     }
-    return sortedProjects.find((p) => p.id === activeProjectId) ?? sortedProjects[0];
-  }, [activeProjectId, sortedProjects]);
+    return sortedProjects.find((p) => p.path === settingsDirectory) ?? sortedProjects[0];
+  }, [settingsDirectory, sortedProjects]);
 
   if (isVSCode || sortedProjects.length === 0) {
     return null;
@@ -67,7 +72,9 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
             value={activeProject?.id ?? ''}
             onValueChange={(value) => {
               if (!value) return;
-              setActiveProject(value);
+              const project = sortedProjects.find((entry) => entry.id === value);
+              if (!project) return;
+              setSettingsProjectPath(project.path);
             }}
           >
             {sortedProjects.map((project) => {

@@ -24,12 +24,21 @@ const normalize = (value) => {
 };
 
 export const createMemoryProjectResolver = (dependencies) => {
-  const { listProjectPaths, resolvePrimaryWorktreeRoot } = dependencies;
+  const { listProjectPaths, resolvePrimaryWorktreeRoot, managedProjectRoots = [] } = dependencies;
+  const managedRoots = managedProjectRoots.map(normalize).filter(Boolean);
 
   return async (directory) => {
     const resolved = normalize(directory);
     if (!resolved) {
       return '';
+    }
+
+    const managedRoot = managedRoots.find((root) => {
+      const relative = path.relative(root, resolved);
+      return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    });
+    if (managedRoot) {
+      return createProjectIdFromPath(managedRoot);
     }
 
     let configured = [];

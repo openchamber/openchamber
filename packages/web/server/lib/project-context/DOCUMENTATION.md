@@ -3,6 +3,8 @@
 Server-owned storage for the Project Notes surface: free-form notes, todos, and
 plan markdown files.
 
+The managed Chats root (`~/.config/openchamber/chats`) is also one context owner. Every dated per-session directory beneath it resolves to that root, so Notes, Todo, Plans, pinned knowledge, and project memory are shared across ordinary chats without registering Chats as a user project.
+
 ## Ownership
 
 | Path | Owner | Contents |

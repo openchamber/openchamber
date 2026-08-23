@@ -114,6 +114,22 @@ describe("applyDirectoryEvent", () => {
     expect(draft.part.msg_1).toEqual([legacyPart, currentPart])
   })
 
+  test("replaces an optimistic user part in place instead of appending it", () => {
+    const optimisticText = { id: "prt_optimistic_text", messageID: "msg_1", type: "text", text: "hi" } as Part
+    const optimisticFile = { id: "prt_optimistic_file", messageID: "msg_1", type: "file", filename: "a.png" } as Part
+    const serverText = { id: "prt_server_text", messageID: "msg_1", sessionID: "ses_1", type: "text", text: "hi" } as Part
+    const draft = state({
+      message: { ses_1: [{ id: "msg_1", sessionID: "ses_1", role: "user", time: { created: 1 } } as Message] },
+      part: { msg_1: [optimisticText, optimisticFile] },
+    })
+
+    expect(applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: { part: serverText },
+    } as Event)).toBe(true)
+    expect(draft.part.msg_1).toEqual([serverText, optimisticFile])
+  })
+
   test("returns typed materialization when delta arrives before parts", () => {
     const result = applyDirectoryEvent(state(), deltaEvent())
 

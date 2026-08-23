@@ -66,9 +66,36 @@ describe('useCommandsStore', () => {
     useCommandsStore.setState({
       selectedCommandName: null,
       commands: [],
+      commandsByDirectory: {},
       isLoading: false,
       commandDraft: null,
     });
+  });
+
+  test('loading another project leaves the active project\'s commands alone', async () => {
+    // Settings can browse a project the app is not on. Chat reads `commands`,
+    // so that list must keep describing the active project.
+    const activeCommands = [{
+      name: 'active-only',
+      description: 'Active project command',
+      template: 'run it',
+      scope: 'project' as const,
+    }];
+    useCommandsStore.setState({
+      commands: activeCommands,
+      commandsByDirectory: { [activeProjectPath]: activeCommands },
+    });
+    listCommandsWithDetailsImpl = async () => [
+      { name: 'other-only', description: 'Other project command', template: 'run there' },
+    ];
+
+    const result = await useCommandsStore.getState().loadCommands('/workspace/other');
+
+    expect(result).toBe(true);
+    const state = useCommandsStore.getState();
+    expect(state.commands).toEqual(activeCommands);
+    expect(state.commandsByDirectory['/workspace/other']?.map((command) => command.name)).toEqual(['other-only']);
+    expect(state.commandsByDirectory[activeProjectPath]).toEqual(activeCommands);
   });
 
   test('loadCommands preserves previous commands when the command list fails', async () => {
