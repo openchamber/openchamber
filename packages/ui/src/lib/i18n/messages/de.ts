@@ -2039,6 +2039,7 @@ export const dict = {
   'chat.messageBody.actions.forkSession': 'Sitzung abzweigen',
   'sessions.fork.toast.success': 'Sitzung abgezweigt',
   'sessions.fork.toast.error': 'Sitzung konnte nicht abgezweigt werden',
+  'sessions.fork.toast.unsupportedBoundary': 'OpenCode kann diese Sitzung an dieser Nachricht nicht abzweigen. Ein erneuter Versuch hilft nicht.',
   'chat.messageBody.actions.startNewMultiRun': 'Neuer Multi-Run von dieser Antwort starten',
   'chat.messageBody.startFromAnswerDialog.instructions.label': 'Anweisungen',
   'chat.messageBody.startFromAnswerDialog.instructions.placeholder': 'Fügen Sie Anweisungen für die neue Sitzung hinzu…',

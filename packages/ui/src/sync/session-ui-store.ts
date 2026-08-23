@@ -71,6 +71,7 @@ import {
   revertToMessage as revertToMessageAction,
   unrevertSession as unrevertSessionAction,
   forkFromMessage as forkFromMessageAction,
+  UnsupportedForkBoundaryError,
   fetchMessagesForSession,
   type ArchiveSessionsOptions,
   type DeleteSessionOptions,
@@ -1875,11 +1876,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       toast.success(formatMessage(dictionary, "sessions.fork.toast.success"))
     } catch (error) {
       if (error instanceof Error && error.message === "runtime changed") return
-      console.error("Failed to fork session:", error)
+      const unsupportedBoundary = error instanceof UnsupportedForkBoundaryError
+      if (!unsupportedBoundary) console.error("Failed to fork session:", error)
       const { toast } = await import("sonner")
       const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
       const { dictionary } = useI18nStore.getState()
-      toast.error(formatMessage(dictionary, "sessions.fork.toast.error"))
+      toast.error(formatMessage(
+        dictionary,
+        unsupportedBoundary ? "sessions.fork.toast.unsupportedBoundary" : "sessions.fork.toast.error",
+      ))
     }
   },
 

@@ -2198,6 +2198,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.forkSession': '分支工作階段',
   'sessions.fork.toast.success': '工作階段已分支',
   'sessions.fork.toast.error': '無法分支工作階段',
+  'sessions.fork.toast.unsupportedBoundary': 'OpenCode 無法從此訊息處分支此工作階段。重試也無法解決。',
   'chat.messageBody.actions.startNewMultiRun': '基於此回答開始新的 Multi-run',
   'chat.messageBody.startFromAnswerDialog.instructions.label': '說明',
   'chat.messageBody.startFromAnswerDialog.instructions.placeholder': '為新工作階段新增說明…',

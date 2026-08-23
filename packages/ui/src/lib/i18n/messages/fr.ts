@@ -1955,6 +1955,7 @@ export const dict = {
   'chat.messageBody.actions.forkSession': 'Dupliquer la session',
   'sessions.fork.toast.success': 'Session dupliquée',
   'sessions.fork.toast.error': 'Échec de la duplication de la session',
+  'sessions.fork.toast.unsupportedBoundary': 'OpenCode ne peut pas dupliquer cette session à partir de ce message. Réessayer ne servira à rien.',
   'chat.messageBody.actions.startNewMultiRun': 'Démarrer une nouvelle exécution multiple à partir de cette réponse',
   'chat.generatedResult.actions.copy': 'Copie',
   'chat.generatedResult.actions.copied': 'Copié',

@@ -279,6 +279,10 @@ The fork API uses `messageID` as a stop sign. It does not copy that message or a
 - For an assistant-message fork, the action sends the next message as the stop sign. The new session includes the selected answer.
 - For the last assistant message, no next message exists. The action omits `messageID`, so OpenCode copies the full transcript.
 
+OpenCode compares the stop ID as text while it walks messages by time.
+If an earlier ID sorts at or after the stop ID, the requested fork boundary cannot work.
+OpenChamber rejects that request before OpenCode creates a fork.
+
 The action fetches the source transcript first because it must find the next message.
 
 Fork reconciliation maps pinned message IDs to the cloned message IDs. It removes pins for messages beyond the copied boundary.

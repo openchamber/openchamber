@@ -920,6 +920,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.forkSession': 'Rozgałęź sesję',
   'sessions.fork.toast.success': 'Sesja została rozgałęziona',
   'sessions.fork.toast.error': 'Nie udało się rozgałęzić sesji',
+  'sessions.fork.toast.unsupportedBoundary': 'OpenCode nie może rozgałęzić tej sesji od tej wiadomości. Ponowna próba nie pomoże.',
   'chat.messageBody.actions.startNewMultiRun': 'Rozpocznij nowe wielokrotne uruchomienie z tej odpowiedzi',
   'chat.messageBody.startFromAnswerDialog.instructions.label': 'Instrukcje',
   'chat.messageBody.startFromAnswerDialog.instructions.placeholder': 'Dodaj instrukcje dla nowej sesji…',

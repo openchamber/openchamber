@@ -2224,6 +2224,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.forkSession': 'セッションをフォーク',
   'sessions.fork.toast.success': 'セッションをフォークしました',
   'sessions.fork.toast.error': 'セッションをフォークできませんでした',
+  'sessions.fork.toast.unsupportedBoundary': 'OpenCode はこのメッセージからこのセッションをフォークできません。再試行しても成功しません。',
   'chat.messageBody.actions.startNewMultiRun': 'この回答から新しいマルチランを開始',
   'chat.messageBody.startFromAnswerDialog.instructions.label': '指示',
   'chat.messageBody.startFromAnswerDialog.instructions.placeholder': '新しいセッションの指示を追加…',

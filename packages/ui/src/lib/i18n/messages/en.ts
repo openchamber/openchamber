@@ -2228,6 +2228,7 @@ export const dict = {
   'chat.messageBody.actions.forkSession': 'Fork session',
   'sessions.fork.toast.success': 'Session forked',
   'sessions.fork.toast.error': 'Failed to fork session',
+  'sessions.fork.toast.unsupportedBoundary': 'OpenCode cannot fork this session at this message. Retrying will not help.',
   'chat.messageBody.actions.startNewMultiRun': 'Start new multi-run from this answer',
   'chat.messageBody.startFromAnswerDialog.instructions.label': 'Instructions',
   'chat.messageBody.startFromAnswerDialog.instructions.placeholder': 'Add instructions for the new session…',

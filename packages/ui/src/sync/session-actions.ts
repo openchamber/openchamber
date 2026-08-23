@@ -121,6 +121,14 @@ type SessionMessageRecord = {
   parts: Part[]
 }
 
+/** The fork action throws this before OpenCode creates a fork with the wrong message boundary. */
+export class UnsupportedForkBoundaryError extends Error {
+  constructor() {
+    super("OpenCode cannot copy the requested message prefix")
+    this.name = "UnsupportedForkBoundaryError"
+  }
+}
+
 function formatSdkError(error: unknown): string {
   if (error instanceof Error) return error.message
   if (typeof error === "string") return error
@@ -2194,6 +2202,22 @@ async function forkAndReconcileSession(
   return reconcileForkedSession(reconciledMetadataSession, store, directory, expectedRuntimeKey)
 }
 
+function canServerCopyThroughBoundary(
+  sourceRecords: SessionMessageRecord[],
+  copiedThroughIndex: number,
+  exclusiveBoundaryId: string | undefined,
+): boolean {
+  if (!exclusiveBoundaryId) return true
+
+  // OpenCode walks messages by time but compares IDs to find the stop point.
+  // An earlier larger ID makes the server stop before the requested message.
+  for (let index = 0; index <= copiedThroughIndex; index += 1) {
+    const record = sourceRecords[index]
+    if (record && record.info.id >= exclusiveBoundaryId) return false
+  }
+  return true
+}
+
 /**
  * Copy a session from a user or assistant message.
  *
@@ -2218,6 +2242,9 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     : selectedIndex
   const exclusiveBoundaryId = sourceRecords[copiedThroughIndex + 1]?.info.id
   const copiedThroughCreatedAt = sourceRecords[copiedThroughIndex]?.info.time.created ?? null
+  if (!canServerCopyThroughBoundary(sourceRecords, copiedThroughIndex, exclusiveBoundaryId)) {
+    throw new UnsupportedForkBoundaryError()
+  }
 
   // Only user-message forks restore the selected message in the composer.
   // Synthetic text and files come from the server, not from the user's input.

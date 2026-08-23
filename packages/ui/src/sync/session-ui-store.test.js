@@ -11,6 +11,9 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useI18nStore } from '@/lib/i18n/store';
+import { dict as enDict } from '@/lib/i18n/messages/en';
+import { toast } from 'sonner';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -269,6 +272,66 @@ describe('routeMessage directory scoping', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].sessionId).toBe('session-a');
     expect(calls[0].directory).toBe('/session/project');
+  });
+});
+
+describe('forkFromMessage errors', () => {
+  test('shows the unsupported-boundary toast for a rollover fork', async () => {
+    const sourceRecords = [
+      { info: { id: 'msg_ff5b3480000100000000000000', role: 'user', time: { created: 1 } }, parts: [] },
+      {
+        info: {
+          id: 'msg_ff5b3480000200000000000000',
+          role: 'assistant',
+          parentID: 'msg_ff5b3480000100000000000000',
+          time: { created: 2 },
+        },
+        parts: [],
+      },
+      { info: { id: 'msg_00a4cb80000100000000000000', role: 'user', time: { created: 3 } }, parts: [] },
+    ];
+    const sdk = {
+      session: {
+        messages: async () => ({ data: sourceRecords }),
+      },
+    };
+    const childStore = {
+      getState: () => ({
+        session: [{ id: 'session-rollover', directory: '/rollover/project' }],
+        message: {},
+        session_status: {},
+        permission: {},
+        question: {},
+      }),
+    };
+    const childStores = {
+      children: new Map([['/rollover/project', childStore]]),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    const toastErrors = [];
+    const originalToastError = toast.error;
+    const previousI18nState = useI18nStore.getState();
+    toast.error = (message) => {
+      toastErrors.push(message);
+      return 'unsupported-boundary-toast';
+    };
+    useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+    setActionRefs(sdk, childStores, () => '/rollover/project');
+
+    try {
+      await useSessionUIStore.getState().forkFromMessage(
+        'session-rollover',
+        'msg_00a4cb80000100000000000000',
+      );
+    } finally {
+      toast.error = originalToastError;
+      useI18nStore.setState(previousI18nState);
+    }
+
+    expect(toastErrors).toEqual([
+      'OpenCode cannot fork this session at this message. Retrying will not help.',
+    ]);
   });
 });
 

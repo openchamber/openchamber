@@ -2194,6 +2194,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.forkSession': '分叉会话',
   'sessions.fork.toast.success': '会话已分叉',
   'sessions.fork.toast.error': '无法分叉会话',
+  'sessions.fork.toast.unsupportedBoundary': 'OpenCode 无法从此消息处分叉此会话。重试也无法解决。',
   'chat.messageBody.actions.startNewMultiRun': '基于此回答开始新的多运行',
   'chat.messageBody.startFromAnswerDialog.instructions.label': '说明',
   'chat.messageBody.startFromAnswerDialog.instructions.placeholder': '为新会话添加说明…',

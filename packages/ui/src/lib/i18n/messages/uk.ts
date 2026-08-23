@@ -2206,6 +2206,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.actions.forkSession": "Розгалузити сесію",
   "sessions.fork.toast.success": "Сесію розгалужено",
   "sessions.fork.toast.error": "Не вдалося розгалузити сесію",
+  "sessions.fork.toast.unsupportedBoundary": "OpenCode не може розгалузити цю сесію від цього повідомлення. Повторна спроба не допоможе.",
   "chat.messageBody.actions.startNewMultiRun": "Почніть новий Multi-run із цієї відповіді",
   "chat.messageBody.startFromAnswerDialog.instructions.label": "Інструкції",
   "chat.messageBody.startFromAnswerDialog.instructions.placeholder": "Додайте інструкції для нової сесії…",

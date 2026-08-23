@@ -2228,6 +2228,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.forkSession': '세션 포크',
   'sessions.fork.toast.success': '세션을 포크했습니다',
   'sessions.fork.toast.error': '세션을 포크하지 못했습니다',
+  'sessions.fork.toast.unsupportedBoundary': 'OpenCode는 이 메시지에서 이 세션을 포크할 수 없습니다. 다시 시도해도 해결되지 않습니다.',
   'chat.messageBody.actions.startNewMultiRun': '이 응답에서 새 멀티런 시작',
   'chat.messageBody.startFromAnswerDialog.instructions.label': '지침',
   'chat.messageBody.startFromAnswerDialog.instructions.placeholder': '새 세션에 대한 지침을 입력하세요…',

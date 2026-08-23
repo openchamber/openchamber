@@ -455,22 +455,22 @@ describe("session forks", () => {
 
   test("excludes a user message, restores its input, and applies the shared metadata policy", async () => {
     const sourceMessages = [
-      userMessageFixture("source-user", 1),
-      assistantMessageFixture("source-assistant", 2, "source-user"),
-      userMessageFixture("source-selected", 3),
+      userMessageFixture("source-1-user", 1),
+      assistantMessageFixture("source-2-assistant", 2, "source-1-user"),
+      userMessageFixture("source-3-selected", 3),
     ]
     const selectedParts: Part[] = [
       {
         id: "part-text",
         sessionID: "session-a",
-        messageID: "source-selected",
+        messageID: "source-3-selected",
         type: "text",
         text: "Try this next",
       },
       {
         id: "part-synthetic",
         sessionID: "session-a",
-        messageID: "source-selected",
+        messageID: "source-3-selected",
         type: "text",
         text: "server context",
         synthetic: true,
@@ -478,7 +478,7 @@ describe("session forks", () => {
       {
         id: "part-file",
         sessionID: "session-a",
-        messageID: "source-selected",
+        messageID: "source-3-selected",
         type: "file",
         mime: "image/png",
         filename: "example.png",
@@ -493,18 +493,18 @@ describe("session forks", () => {
       customPluginState: { keep: true },
       openchamber: {
         future_field: { keep: true },
-        context_obligatory_last_compaction_message_id: "source-selected",
-        assist: { forMessageID: "source-selected" },
+        context_obligatory_last_compaction_message_id: "source-3-selected",
+        assist: { forMessageID: "source-3-selected" },
         goal: { id: "goal-1" },
         reviewSessionID: "review-session",
         kind: "review",
         originalSessionID: "source-session",
         btwSessionID: "btw-session",
-        btwBoundaryMessageID: "source-assistant",
+        btwBoundaryMessageID: "source-2-assistant",
         context_obligatory_messages: [
-          { id: "source-user", createdAt: 1, role: "user" },
-          { id: "source-assistant", createdAt: 2, role: "assistant" },
-          { id: "source-selected", createdAt: 3, role: "user" },
+          { id: "source-1-user", createdAt: 1, role: "user" },
+          { id: "source-2-assistant", createdAt: 2, role: "assistant" },
+          { id: "source-3-selected", createdAt: 3, role: "user" },
         ],
         linked_issues: [linkedIssueFixture(1, 1), linkedIssueFixture(2, 3)],
       },
@@ -527,7 +527,7 @@ describe("session forks", () => {
     const updatedFork = { ...sessionForkResult, metadata: expectedMetadata }
     sessionUpdateResult = { data: updatedFork }
     sessionMessagesBySessionID.set("session-a", {
-      data: messageRecords(sourceMessages, { "source-selected": selectedParts }),
+      data: messageRecords(sourceMessages, { "source-3-selected": selectedParts }),
     })
     sessionMessagesBySessionID.set("session-fork", { data: messageRecords(forkMessages) })
     const source = createStore({}, {
@@ -540,11 +540,11 @@ describe("session forks", () => {
     switchRuntimeEndpoint({ apiBaseUrl: "http://fork-user.test", runtimeKey: "fork-user" })
     setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
 
-    await forkFromMessage("session-a", "source-selected")
+    await forkFromMessage("session-a", "source-3-selected")
 
     expect(replyCalls.filter((call) => call.method === "session.fork")[0]?.params).toEqual({
       sessionID: "session-a",
-      messageID: "source-selected",
+      messageID: "source-3-selected",
       directory: "/test/project",
     })
     expect(replyCalls.filter((call) => call.method === "session.update")).toEqual([{
@@ -602,9 +602,9 @@ describe("session forks", () => {
 
   test("includes an assistant answer without restoring composer input", async () => {
     const sourceMessages = [
-      userMessageFixture("source-user", 1),
-      assistantMessageFixture("source-selected", 2, "source-user"),
-      userMessageFixture("source-next", 3),
+      userMessageFixture("source-1-user", 1),
+      assistantMessageFixture("source-2-selected", 2, "source-1-user"),
+      userMessageFixture("source-3-next", 3),
     ]
     sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
     const source = createStore({}, {
@@ -617,15 +617,63 @@ describe("session forks", () => {
     switchRuntimeEndpoint({ apiBaseUrl: "http://fork-assistant.test", runtimeKey: "fork-assistant" })
     setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
 
-    await forkFromMessage("session-a", "source-selected")
+    await forkFromMessage("session-a", "source-2-selected")
 
     expect(replyCalls.filter((call) => call.method === "session.fork")[0]?.params).toEqual({
       sessionID: "session-a",
-      messageID: "source-next",
+      messageID: "source-3-next",
       directory: "/test/project",
     })
     expect(inputState.pendingInputText).toBe("")
     expect(inputState.pendingInputMode).toBe("normal")
+  })
+
+  test("rejects a user-message fork when chronological IDs cross the rollover", async () => {
+    const sourceMessages = [
+      userMessageFixture("msg_ff5b3480000100000000000000", 1),
+      assistantMessageFixture("msg_ff5b3480000200000000000000", 2, "msg_ff5b3480000100000000000000"),
+      userMessageFixture("msg_00a4cb80000100000000000000", 3),
+      assistantMessageFixture("msg_00a4cb80000200000000000000", 4, "msg_00a4cb80000100000000000000"),
+      userMessageFixture("msg_00a4cb80000300000000000000", 5),
+    ]
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs, UnsupportedForkBoundaryError } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-rollover-user.test", runtimeKey: "fork-rollover-user" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    await expect(forkFromMessage("session-a", "msg_00a4cb80000100000000000000"))
+      .rejects.toThrow(UnsupportedForkBoundaryError)
+    expect(replyCalls.filter((call) => call.method === "session.fork")).toHaveLength(0)
+  })
+
+  test("rejects an assistant-message fork when chronological IDs cross the rollover", async () => {
+    const sourceMessages = [
+      userMessageFixture("msg_ff5b3480000100000000000000", 1),
+      assistantMessageFixture("msg_ff5b3480000200000000000000", 2, "msg_ff5b3480000100000000000000"),
+      userMessageFixture("msg_00a4cb80000100000000000000", 3),
+      assistantMessageFixture("msg_00a4cb80000200000000000000", 4, "msg_00a4cb80000100000000000000"),
+      userMessageFixture("msg_00a4cb80000300000000000000", 5),
+    ]
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs, UnsupportedForkBoundaryError } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-rollover-assistant.test", runtimeKey: "fork-rollover-assistant" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    await expect(forkFromMessage("session-a", "msg_00a4cb80000200000000000000"))
+      .rejects.toThrow(UnsupportedForkBoundaryError)
+    expect(replyCalls.filter((call) => call.method === "session.fork")).toHaveLength(0)
   })
 
   test("omits the boundary for the last assistant but still applies metadata cleanup", async () => {

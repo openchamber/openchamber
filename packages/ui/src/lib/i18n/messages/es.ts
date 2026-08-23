@@ -2206,6 +2206,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.actions.forkSession": "Bifurcar sesión",
   "sessions.fork.toast.success": "Sesión bifurcada",
   "sessions.fork.toast.error": "No se pudo bifurcar la sesión",
+  "sessions.fork.toast.unsupportedBoundary": "OpenCode no puede bifurcar esta sesión en este mensaje. Volver a intentarlo no servirá.",
   "chat.messageBody.actions.startNewMultiRun": "Iniciar nuevo multi-run desde esta respuesta",
   "chat.messageBody.startFromAnswerDialog.instructions.label": "Instrucciones",
   "chat.messageBody.startFromAnswerDialog.instructions.placeholder": "Añade instrucciones para la nueva sesión…",
