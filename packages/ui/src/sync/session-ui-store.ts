@@ -71,6 +71,7 @@ import {
   revertToMessage as revertToMessageAction,
   unrevertSession as unrevertSessionAction,
   forkFromMessage as forkFromMessageAction,
+  ForkLeftoverError,
   UnsupportedForkBoundaryError,
   fetchMessagesForSession,
   type ArchiveSessionsOptions,
@@ -1869,21 +1870,32 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   forkFromMessage: async (sessionId, messageId) => {
     try {
-      await forkFromMessageAction(sessionId, messageId)
+      const result = await forkFromMessageAction(sessionId, messageId)
       const { toast } = await import("sonner")
       const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
       const { dictionary } = useI18nStore.getState()
-      toast.success(formatMessage(dictionary, "sessions.fork.toast.success"))
+      if (result.status === "pins-dropped") {
+        toast.warning(formatMessage(dictionary, "sessions.fork.toast.pinsDropped"))
+      } else {
+        toast.success(formatMessage(dictionary, "sessions.fork.toast.success"))
+      }
     } catch (error) {
-      if (error instanceof Error && error.message === "runtime changed") return
+      const leftover = error instanceof ForkLeftoverError
+      if (!leftover && error instanceof Error && error.message === "runtime changed") return
       const unsupportedBoundary = error instanceof UnsupportedForkBoundaryError
-      if (!unsupportedBoundary) console.error("Failed to fork session:", error)
+      if (!unsupportedBoundary) {
+        console.error("Failed to fork session:", leftover ? error.originalError : error)
+      }
       const { toast } = await import("sonner")
       const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
       const { dictionary } = useI18nStore.getState()
       toast.error(formatMessage(
         dictionary,
-        unsupportedBoundary ? "sessions.fork.toast.unsupportedBoundary" : "sessions.fork.toast.error",
+        leftover
+          ? "sessions.fork.toast.leftover"
+          : unsupportedBoundary
+            ? "sessions.fork.toast.unsupportedBoundary"
+            : "sessions.fork.toast.error",
       ))
     }
   },

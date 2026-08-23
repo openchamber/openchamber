@@ -129,6 +129,23 @@ export class UnsupportedForkBoundaryError extends Error {
   }
 }
 
+export type ForkFromMessageResult =
+  | { status: "success" }
+  | { status: "pins-dropped" }
+
+/** The server created the fork, but setup failed and rollback did not remove it. */
+export class ForkLeftoverError extends Error {
+  readonly forkedSessionId: string
+  readonly originalError: Error
+
+  constructor(forkedSessionId: string, originalError: Error) {
+    super(originalError.message)
+    this.name = "ForkLeftoverError"
+    this.forkedSessionId = forkedSessionId
+    this.originalError = originalError
+  }
+}
+
 function formatSdkError(error: unknown): string {
   if (error instanceof Error) return error.message
   if (typeof error === "string") return error
@@ -2038,6 +2055,7 @@ function reconcileForkedSession(
   fallbackStore: DirectoryStoreApi,
   fallbackDirectory: string | undefined,
   expectedRuntimeKey: string,
+  selectSession: boolean,
 ): Session {
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
 
@@ -2052,7 +2070,13 @@ function reconcileForkedSession(
   const sessions = [...current.session]
   const searchResult = Binary.search(sessions, session.id, (entry) => entry.id)
 
-  if (!searchResult.found) {
+  if (searchResult.found) {
+    sessions[searchResult.index] = session
+    targetStore.setState({
+      session: sessions,
+      ...sessionMutationPatch(current, session.id, false),
+    })
+  } else {
     sessions.splice(searchResult.index, 0, session)
     targetStore.setState({
       session: sessions,
@@ -2062,7 +2086,7 @@ function reconcileForkedSession(
   }
 
   useGlobalSessionsStore.getState().upsertSession(session)
-  useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
+  if (selectSession) useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
   return session
 }
 
@@ -2103,63 +2127,132 @@ function getKnownSessionsForForkTitle(
   })
 }
 
-async function reconcileForkedMetadata(
+interface PreparedForkMetadata {
+  metadata: SessionMetadataRecord
+  pinnedMessages: ContextObligatoryMessage[]
+}
+
+function prepareCleanForkMetadata(
+  forkedSession: Session,
+  copiedThroughCreatedAt: number | null,
+): PreparedForkMetadata {
+  const pinnedMessages = getContextObligatoryMessages(forkedSession)
+  const currentMetadata = getSessionMetadata(forkedSession)
+  const metadataWithoutPins = pinnedMessages.length > 0
+    ? withContextObligatoryMessages(currentMetadata, [])
+    : currentMetadata
+
+  return {
+    metadata: prepareBoundaryForkMetadata(metadataWithoutPins, copiedThroughCreatedAt),
+    pinnedMessages,
+  }
+}
+
+async function remapForkedPins(
   sourceRecords: SessionMessageRecord[],
   forkedSession: Session,
+  pinnedMessages: readonly ContextObligatoryMessage[],
   forkDirectory: string | null,
   expectedRuntimeKey: string,
-  copiedThroughCreatedAt: number | null,
 ): Promise<Session> {
-  const pinnedMessages = getContextObligatoryMessages(forkedSession)
   const remappedMessages: ContextObligatoryMessage[] = []
 
-  if (pinnedMessages.length > 0) {
-    const forkResult = await sdk().session.messages({
-      sessionID: forkedSession.id,
-      directory: forkDirectory ?? undefined,
-    })
-    if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+  const forkResult = await sdk().session.messages({
+    sessionID: forkedSession.id,
+    directory: forkDirectory ?? undefined,
+  })
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
 
-    const forkRecords = assertSdkData(forkResult, "fork session.messages")
-    if (forkRecords.length > sourceRecords.length) {
-      throw new Error("Cannot remap pinned messages because the fork transcript is longer than its source")
-    }
-
-    const forkMessageIdBySourceId = new Map<string, string>()
-    for (let index = 0; index < forkRecords.length; index += 1) {
-      const sourceMessage = sourceRecords[index]?.info
-      const forkMessage = forkRecords[index]?.info
-      if (
-        !sourceMessage
-        || !forkMessage
-        || sourceMessage.role !== forkMessage.role
-        || sourceMessage.time.created !== forkMessage.time.created
-      ) {
-        throw new Error("Cannot remap pinned messages because the fork transcript does not match its source")
-      }
-      forkMessageIdBySourceId.set(sourceMessage.id, forkMessage.id)
-    }
-
-    for (const pinnedMessage of pinnedMessages) {
-      const forkMessageId = forkMessageIdBySourceId.get(pinnedMessage.id)
-      if (forkMessageId) remappedMessages.push({ ...pinnedMessage, id: forkMessageId })
-    }
+  const forkRecords = assertSdkData(forkResult, "fork session.messages")
+  if (forkRecords.length > sourceRecords.length) {
+    throw new Error("Cannot remap pinned messages because the fork transcript is longer than its source")
   }
 
-  const currentMetadata = getSessionMetadata(forkedSession)
-  let metadata = pinnedMessages.length > 0
-    ? withContextObligatoryMessages(currentMetadata, remappedMessages)
-    : currentMetadata
-  metadata = prepareBoundaryForkMetadata(metadata, copiedThroughCreatedAt)
-  if (metadata === currentMetadata) return forkedSession
+  const forkMessageIdBySourceId = new Map<string, string>()
+  for (let index = 0; index < forkRecords.length; index += 1) {
+    const sourceMessage = sourceRecords[index]?.info
+    const forkMessage = forkRecords[index]?.info
+    if (
+      !sourceMessage
+      || !forkMessage
+      || sourceMessage.role !== forkMessage.role
+      || sourceMessage.time.created !== forkMessage.time.created
+    ) {
+      throw new Error("Cannot remap pinned messages because the fork transcript does not match its source")
+    }
+    forkMessageIdBySourceId.set(sourceMessage.id, forkMessage.id)
+  }
+
+  for (const pinnedMessage of pinnedMessages) {
+    const forkMessageId = forkMessageIdBySourceId.get(pinnedMessage.id)
+    if (forkMessageId) remappedMessages.push({ ...pinnedMessage, id: forkMessageId })
+  }
+
+  if (remappedMessages.length === 0) return forkedSession
 
   const updatedSession = await opencodeClient.updateSession(
     forkedSession.id,
-    { metadata },
+    { metadata: withContextObligatoryMessages(getSessionMetadata(forkedSession), remappedMessages) },
     forkDirectory,
   )
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   return updatedSession
+}
+
+async function updateCleanFork(
+  forkedSession: Session,
+  nextTitle: string,
+  metadata: SessionMetadataRecord,
+  forkDirectory: string | null,
+  expectedRuntimeKey: string,
+): Promise<Session> {
+  try {
+    const updatedSession = await opencodeClient.updateSession(
+      forkedSession.id,
+      { title: nextTitle, metadata },
+      forkDirectory,
+    )
+    if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+    return updatedSession
+  } catch (error) {
+    if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+    if (nextTitle === forkedSession.title) throw error
+
+    try {
+      const updatedSession = await opencodeClient.updateSession(
+        forkedSession.id,
+        { metadata },
+        forkDirectory,
+      )
+      if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+      console.error("[session-actions] Failed to increase the fork title. The server title remains.", error)
+      return updatedSession
+    } catch (metadataError) {
+      if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+      console.error("[session-actions] Failed to clean fork metadata after the title update failed.", metadataError)
+      throw error
+    }
+  }
+}
+
+async function compensateFailedFork(
+  forkedSession: Session,
+  forkDirectory: string | null,
+  expectedRuntimeKey: string,
+): Promise<boolean> {
+  // After a runtime switch, opencodeClient points at another server. The same
+  // ID can belong to an unrelated session there, so deletion must stop.
+  if (isStaleRuntime(expectedRuntimeKey)) return false
+
+  try {
+    const deleted = await opencodeClient.deleteSession(forkedSession.id, forkDirectory)
+    if (isStaleRuntime(expectedRuntimeKey) || deleted !== true) return false
+    finalizeConfirmedSessionDeletion(forkedSession.id, forkDirectory ?? undefined, expectedRuntimeKey)
+    return true
+  } catch (compensationError) {
+    console.error("[session-actions] Failed to remove a fork after setup failed.", compensationError)
+    return false
+  }
 }
 
 async function forkAndReconcileSession(
@@ -2170,36 +2263,65 @@ async function forkAndReconcileSession(
   store: DirectoryStoreApi,
   directory: string | undefined,
   expectedRuntimeKey: string,
-): Promise<Session> {
+): Promise<ForkFromMessageResult> {
   const forkedSession = await opencodeClient.forkSession(sessionId, messageBoundaryId, directory)
-  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
-
   const forkDirectory = forkedSession.directory ?? directory ?? null
-  const nextTitle = getNextForkTitle(
-    forkedSession.title,
-    getKnownSessionsForForkTitle(store, forkDirectory, forkedSession.id),
-  )
-  let titledSession = forkedSession
-  if (nextTitle !== forkedSession.title) {
-    try {
-      titledSession = await opencodeClient.updateSession(
-        forkedSession.id,
-        { title: nextTitle },
-        forkDirectory,
-      )
-    } catch (error) {
-      if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
-      console.error("[session-actions] Failed to increase the fork title. The server title remains.", error)
-    }
+  let reconciledSession: Session
+  let pinnedMessages: ContextObligatoryMessage[]
+
+  try {
+    if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+    const preparedMetadata = prepareCleanForkMetadata(forkedSession, copiedThroughCreatedAt)
+    pinnedMessages = preparedMetadata.pinnedMessages
+    const nextTitle = getNextForkTitle(
+      forkedSession.title,
+      getKnownSessionsForForkTitle(store, forkDirectory, forkedSession.id),
+    )
+    const cleanSession = await updateCleanFork(
+      forkedSession,
+      nextTitle,
+      preparedMetadata.metadata,
+      forkDirectory,
+      expectedRuntimeKey,
+    )
+    reconciledSession = reconcileForkedSession(
+      cleanSession,
+      store,
+      directory,
+      expectedRuntimeKey,
+      true,
+    )
+  } catch (error) {
+    const originalError = error instanceof Error ? error : new Error("Fork setup failed")
+    const deleted = await compensateFailedFork(forkedSession, forkDirectory, expectedRuntimeKey)
+    if (deleted) throw originalError
+    throw new ForkLeftoverError(forkedSession.id, originalError)
   }
-  const reconciledMetadataSession = await reconcileForkedMetadata(
-    sourceRecords,
-    titledSession,
-    forkDirectory,
-    expectedRuntimeKey,
-    copiedThroughCreatedAt,
-  )
-  return reconcileForkedSession(reconciledMetadataSession, store, directory, expectedRuntimeKey)
+
+  if (pinnedMessages.length === 0) return { status: "success" }
+
+  try {
+    const sessionWithRemappedPins = await remapForkedPins(
+      sourceRecords,
+      reconciledSession,
+      pinnedMessages,
+      forkDirectory,
+      expectedRuntimeKey,
+    )
+    if (sessionWithRemappedPins !== reconciledSession) {
+      reconcileForkedSession(
+        sessionWithRemappedPins,
+        store,
+        directory,
+        expectedRuntimeKey,
+        false,
+      )
+    }
+    return { status: "success" }
+  } catch (error) {
+    console.error("[session-actions] Failed to remap pinned messages. The clean fork remains usable.", error)
+    return { status: "pins-dropped" }
+  }
 }
 
 function canServerCopyThroughBoundary(
@@ -2225,7 +2347,7 @@ function canServerCopyThroughBoundary(
  * stays in the copied transcript. OpenCode treats messageID as an exclusive
  * cutoff, so both cases send the first message that must not be copied.
  */
-export async function forkFromMessage(sessionId: string, messageId: string): Promise<void> {
+export async function forkFromMessage(sessionId: string, messageId: string): Promise<ForkFromMessageResult> {
   const expectedRuntimeKey = getRuntimeKey()
   const { store, directory } = dirStoreForSession(sessionId)
 
@@ -2260,7 +2382,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     part.type === "file" && !isSyntheticPart(part)
   ))
 
-  await forkAndReconcileSession(
+  const result = await forkAndReconcileSession(
     sessionId,
     exclusiveBoundaryId,
     sourceRecords,
@@ -2270,7 +2392,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     expectedRuntimeKey,
   )
 
-  if (selectedRecord.info.role !== "user") return
+  if (selectedRecord.info.role !== "user") return result
 
   if (messageText) {
     useInputStore.setState({
@@ -2279,6 +2401,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     })
   }
   restoreFilePartsToInput(fileParts)
+  return result
 }
 
 export async function fetchMessagesForSession(sessionID: string, directory?: string | null): Promise<void> {

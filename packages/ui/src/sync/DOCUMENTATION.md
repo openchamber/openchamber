@@ -285,7 +285,17 @@ OpenChamber rejects that request before OpenCode creates a fork.
 
 The action fetches the source transcript first because it must find the next message.
 
-Fork reconciliation maps pinned message IDs to the cloned message IDs. It removes pins for messages beyond the copied boundary.
+The fork response is authoritative for metadata. Before selection, the action reads that metadata and removes pins and source-only state.
+It sends the title and clean metadata in one update.
+If that update fails after a title change, the action retries the required metadata update without the title.
+
+If setup fails after fork creation, the action removes the fork through the bare client delete while the runtime remains current.
+It does not call the high-level session delete action because that action also removes linked sessions.
+A runtime switch stops compensation because the client points to another server. The same ID can identify an unrelated session there.
+If compensation fails or stops, the error tells the user that the fork remains.
+
+After selection, the action maps pinned message IDs to cloned message IDs only when source pins exist.
+If pin mapping fails, the clean selected fork remains usable. The UI warns that pinned messages were not copied.
 
 Every message fork uses the last copied message time as the linked-issue cutoff. An empty transcript removes all linked issues.
 

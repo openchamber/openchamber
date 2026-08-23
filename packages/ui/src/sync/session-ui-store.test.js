@@ -276,6 +276,174 @@ describe('routeMessage directory scoping', () => {
 });
 
 describe('forkFromMessage errors', () => {
+  const createChildStore = (sessions) => {
+    let state = {
+      session: sessions,
+      sessionTotal: sessions.length,
+      sessionRevision: 0,
+      sessionEventRevision: {},
+      sessionDeletedRevision: {},
+      message: {},
+      part: {},
+      session_status: {},
+      permission: {},
+      question: {},
+    };
+    return {
+      getState: () => state,
+      setState: (patch) => {
+        state = { ...state, ...patch };
+      },
+    };
+  };
+
+  test('warns when the clean fork remains usable but pinned messages were not copied', async () => {
+    const directory = '/fork-pin-warning/project';
+    const sourceSession = {
+      id: 'session-pin-warning',
+      title: 'Source',
+      directory,
+      time: { created: 1, updated: 1 },
+    };
+    const forkedSession = {
+      id: 'session-pin-warning-fork',
+      title: 'Source (fork #1)',
+      directory,
+      time: { created: 2, updated: 2 },
+      metadata: {
+        openchamber: {
+          context_obligatory_messages: [
+            { id: 'source-user', createdAt: 1, role: 'user' },
+          ],
+        },
+      },
+    };
+    const sourceRecords = [
+      { info: { id: 'source-user', role: 'user', time: { created: 1 } }, parts: [] },
+      {
+        info: {
+          id: 'source-assistant',
+          role: 'assistant',
+          parentID: 'source-user',
+          time: { created: 2 },
+        },
+        parts: [],
+      },
+    ];
+    const sdk = {
+      session: {
+        messages: async ({ sessionID }) => sessionID === sourceSession.id
+          ? { data: sourceRecords }
+          : { error: new Error('fork transcript unavailable'), response: { status: 503 } },
+      },
+    };
+    const childStore = createChildStore([sourceSession]);
+    const childStores = {
+      children: new Map([[directory, childStore]]),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    const warnings = [];
+    const successes = [];
+    const originalForkSession = opencodeClient.forkSession;
+    const originalUpdateSession = opencodeClient.updateSession;
+    const originalToastWarning = toast.warning;
+    const originalToastSuccess = toast.success;
+    const previousI18nState = useI18nStore.getState();
+    opencodeClient.forkSession = async () => forkedSession;
+    opencodeClient.updateSession = async (_sessionId, patch) => ({ ...forkedSession, ...patch });
+    toast.warning = (message) => {
+      warnings.push(message);
+      return 'pin-warning-toast';
+    };
+    toast.success = (message) => {
+      successes.push(message);
+      return 'fork-success-toast';
+    };
+    useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+    setActionRefs(sdk, childStores, () => directory);
+
+    try {
+      await useSessionUIStore.getState().forkFromMessage(sourceSession.id, 'source-assistant');
+    } finally {
+      opencodeClient.forkSession = originalForkSession;
+      opencodeClient.updateSession = originalUpdateSession;
+      toast.warning = originalToastWarning;
+      toast.success = originalToastSuccess;
+      useI18nStore.setState(previousI18nState);
+    }
+
+    expect(warnings).toEqual(['Session forked, but pinned messages were not copied']);
+    expect(successes).toEqual([]);
+    expect(useSessionUIStore.getState().currentSessionId).toBe(forkedSession.id);
+  });
+
+  test('reports a leftover session when setup and compensation both fail', async () => {
+    const directory = '/fork-leftover/project';
+    const sourceSession = {
+      id: 'session-leftover',
+      title: 'Source',
+      directory,
+      time: { created: 1, updated: 1 },
+    };
+    const forkedSession = {
+      id: 'session-leftover-fork',
+      title: 'Source (fork #1)',
+      directory,
+      time: { created: 2, updated: 2 },
+    };
+    const sourceRecords = [
+      { info: { id: 'source-user', role: 'user', time: { created: 1 } }, parts: [] },
+      {
+        info: {
+          id: 'source-assistant',
+          role: 'assistant',
+          parentID: 'source-user',
+          time: { created: 2 },
+        },
+        parts: [],
+      },
+    ];
+    const sdk = { session: { messages: async () => ({ data: sourceRecords }) } };
+    const childStore = createChildStore([sourceSession]);
+    const childStores = {
+      children: new Map([[directory, childStore]]),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    const errors = [];
+    const originalForkSession = opencodeClient.forkSession;
+    const originalUpdateSession = opencodeClient.updateSession;
+    const originalDeleteSession = opencodeClient.deleteSession;
+    const originalToastError = toast.error;
+    const previousI18nState = useI18nStore.getState();
+    opencodeClient.forkSession = async () => forkedSession;
+    opencodeClient.updateSession = async () => {
+      throw new Error('metadata cleanup failed');
+    };
+    opencodeClient.deleteSession = async () => {
+      throw new Error('delete failed');
+    };
+    toast.error = (message) => {
+      errors.push(message);
+      return 'fork-leftover-toast';
+    };
+    useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+    setActionRefs(sdk, childStores, () => directory);
+
+    try {
+      await useSessionUIStore.getState().forkFromMessage(sourceSession.id, 'source-assistant');
+    } finally {
+      opencodeClient.forkSession = originalForkSession;
+      opencodeClient.updateSession = originalUpdateSession;
+      opencodeClient.deleteSession = originalDeleteSession;
+      toast.error = originalToastError;
+      useI18nStore.setState(previousI18nState);
+    }
+
+    expect(errors).toEqual(['Fork setup failed, but the new session still exists']);
+  });
+
   test('shows the unsupported-boundary toast for a rollover fork', async () => {
     const sourceRecords = [
       { info: { id: 'msg_ff5b3480000100000000000000', role: 'user', time: { created: 1 } }, parts: [] },
