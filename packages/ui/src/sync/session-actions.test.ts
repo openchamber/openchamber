@@ -2,6 +2,11 @@ import { describe, expect, test, beforeEach, mock } from "bun:test"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
 
+Object.defineProperty(globalThis, "window", {
+  configurable: true,
+  value: Object.assign(new EventTarget(), { __OPENCHAMBER_SURFACE__: "desktop" }),
+})
+
 // Mock SDK client that records permission.reply / question.reply calls
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 const scopedClientDirectories: string[] = []
@@ -23,7 +28,23 @@ const movedSessionDirectories: Array<{ sessionID: string; directory: string }> =
 let autoCloseEmptyProjects = false
 let autoCloseProjects: Array<{ id: string; path: string }> = []
 let globalSessionRefreshCalls = 0
-let beforeGlobalSessionRefresh: (() => void) | null = null
+let beforeGlobalSessionRefresh: ((runtimeKey: string) => void) | null = null
+let globalSessionRefreshGate: Promise<void> | null = null
+const globalSessionRefreshRuntimeKeys: string[] = []
+let onAutoCloseProjectRemoved: ((projectId: string) => void) | null = null
+
+type Deferred<T> = {
+  promise: Promise<T>
+  resolve: (value: T) => void
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
 
 const mockScopedClient = {
   permission: {
@@ -184,6 +205,7 @@ mock.module("@/stores/useProjectsStore", () => ({
       projects: autoCloseProjects,
       removeProject: (id: string) => {
         autoCloseProjects = autoCloseProjects.filter((project) => project.id !== id)
+        onAutoCloseProjectRemoved?.(id)
       },
     }),
   },
@@ -239,7 +261,11 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
   resolveGlobalSessionDirectory: (session: SessionWithDirectory) => session.directory ?? session.project?.worktree ?? null,
   refreshGlobalSessionsAfterPending: async () => {
     globalSessionRefreshCalls += 1
-    beforeGlobalSessionRefresh?.()
+    const { getRuntimeKey } = await import("../lib/runtime-switch")
+    const runtimeKey = getRuntimeKey()
+    globalSessionRefreshRuntimeKeys.push(runtimeKey)
+    beforeGlobalSessionRefresh?.(runtimeKey)
+    if (globalSessionRefreshGate) await globalSessionRefreshGate
     return { activeSessions: [], archivedSessions: [] }
   },
   mergeSessionDirectoryMetadata: (incoming: Session, existing?: SessionWithDirectory | null): SessionWithDirectory => {
@@ -656,6 +682,9 @@ describe("empty-project auto-close", () => {
     autoCloseProjects = [{ id: "project-a", path: "/test/project" }]
     globalSessionRefreshCalls = 0
     beforeGlobalSessionRefresh = null
+    globalSessionRefreshGate = null
+    globalSessionRefreshRuntimeKeys.length = 0
+    onAutoCloseProjectRemoved = null
   })
 
   test("coalesces concurrent evaluations for the same directory", async () => {
@@ -673,16 +702,70 @@ describe("empty-project auto-close", () => {
   test("does not remove a project after the runtime changes during refresh", async () => {
     const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
     switchRuntimeEndpoint({ apiBaseUrl: "http://auto-close-a.test", runtimeKey: "auto-close-a" })
+    const projectRemoved = createDeferred<void>()
     beforeGlobalSessionRefresh = () => {
+      beforeGlobalSessionRefresh = null
       switchRuntimeEndpoint({ apiBaseUrl: "http://auto-close-b.test", runtimeKey: "auto-close-b" })
     }
+    onAutoCloseProjectRemoved = () => projectRemoved.resolve()
     const { closeProjectsWithoutActiveSessionsForDirectories } = await import("./session-actions")
 
     await closeProjectsWithoutActiveSessionsForDirectories(["/test/project"])
 
     expect(autoCloseProjects).toEqual([{ id: "project-a", path: "/test/project" }])
+    switchRuntimeEndpoint({ apiBaseUrl: "http://auto-close-a.test", runtimeKey: "auto-close-a" })
+    await projectRemoved.promise
+    expect(autoCloseProjects).toEqual([])
+    autoCloseEmptyProjects = false
+    onAutoCloseProjectRemoved = null
+  })
+
+  test("requeues an A-to-B-to-A evaluation and drains B only when B becomes active", async () => {
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    const { closeProjectsWithoutActiveSessionsForDirectories } = await import("./session-actions")
+    const firstRefresh = createDeferred<void>()
+    const releaseFirstRefresh = createDeferred<void>()
+    const projectARemoved = createDeferred<void>()
+    const projectBRemoved = createDeferred<void>()
+    autoCloseProjects = [
+      { id: "project-a", path: "/runtime-a/project" },
+      { id: "project-b", path: "/runtime-b/project" },
+    ]
+    beforeGlobalSessionRefresh = (runtimeKey) => {
+      if (globalSessionRefreshCalls === 1) firstRefresh.resolve()
+      if (runtimeKey !== "auto-close-a" || globalSessionRefreshCalls !== 1) {
+        globalSessionRefreshGate = null
+      }
+    }
+    globalSessionRefreshGate = releaseFirstRefresh.promise
+    onAutoCloseProjectRemoved = (projectId) => {
+      if (projectId === "project-a") projectARemoved.resolve()
+      if (projectId === "project-b") projectBRemoved.resolve()
+    }
+
+    switchRuntimeEndpoint({ apiBaseUrl: "http://auto-close-a.test", runtimeKey: "auto-close-a" })
+    const runtimeAPromise = closeProjectsWithoutActiveSessionsForDirectories(["/runtime-a/project"])
+    await firstRefresh.promise
+
+    switchRuntimeEndpoint({ apiBaseUrl: "http://auto-close-b.test", runtimeKey: "auto-close-b" })
+    const runtimeBPromise = closeProjectsWithoutActiveSessionsForDirectories(["/runtime-b/project"])
+    expect(runtimeBPromise).toBe(runtimeAPromise)
+    switchRuntimeEndpoint({ apiBaseUrl: "http://auto-close-a.test", runtimeKey: "auto-close-a" })
+    releaseFirstRefresh.resolve()
+
+    await runtimeAPromise
+    await projectARemoved.promise
+    expect(autoCloseProjects).toEqual([{ id: "project-b", path: "/runtime-b/project" }])
+    expect(globalSessionRefreshRuntimeKeys).toEqual(["auto-close-a", "auto-close-a"])
+
+    switchRuntimeEndpoint({ apiBaseUrl: "http://auto-close-b.test", runtimeKey: "auto-close-b" })
+    await projectBRemoved.promise
+    expect(autoCloseProjects).toEqual([])
+    expect(globalSessionRefreshRuntimeKeys).toEqual(["auto-close-a", "auto-close-a", "auto-close-b"])
+
     autoCloseEmptyProjects = false
     beforeGlobalSessionRefresh = null
+    onAutoCloseProjectRemoved = null
   })
 })
 

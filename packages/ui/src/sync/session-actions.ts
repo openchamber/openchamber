@@ -38,7 +38,7 @@ import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessi
 import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
-import { getRuntimeKey } from "@/lib/runtime-switch"
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from "@/lib/runtime-switch"
 import { isAmbiguousTransportFailure } from "@/lib/relay/transport-error"
 import { getStaleRunningToolMessageID } from "./materialization"
 import { normalizePath } from "@/lib/pathNormalization"
@@ -80,6 +80,7 @@ let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 let _optimisticConfirm: ((input: OptimisticConfirmInput) => void) | null = null
 const pendingProjectAutoCloseDirectories = new Map<string, Set<string>>()
 let pendingProjectAutoCloseEvaluation: Promise<void> | null = null
+let projectAutoCloseRuntimeGeneration = 0
 
 function sessionMutationPatch(
   state: ReturnType<DirectoryStoreApi["getState"]>,
@@ -1017,20 +1018,36 @@ export async function deleteSession(sessionId: string, options?: DeleteSessionOp
   }
 }
 
-async function evaluateProjectsWithoutActiveSessions(directories: string[], runtimeKey: string): Promise<void> {
-  if (getRuntimeKey() !== runtimeKey) return
+function isProjectAutoCloseEvaluationStale(runtimeKey: string, runtimeGeneration: number): boolean {
+  return getRuntimeKey() !== runtimeKey || projectAutoCloseRuntimeGeneration !== runtimeGeneration
+}
+
+function enqueueProjectAutoCloseDirectories(runtimeKey: string, directories: Iterable<string>): void {
+  const pendingDirectories = pendingProjectAutoCloseDirectories.get(runtimeKey) ?? new Set<string>()
+  for (const directory of directories) {
+    pendingDirectories.add(directory)
+  }
+  pendingProjectAutoCloseDirectories.set(runtimeKey, pendingDirectories)
+}
+
+async function evaluateProjectsWithoutActiveSessions(
+  directories: string[],
+  runtimeKey: string,
+  runtimeGeneration: number,
+): Promise<"evaluated" | "stale"> {
+  if (isProjectAutoCloseEvaluationStale(runtimeKey, runtimeGeneration)) return "stale"
   const projectsState = useProjectsStore.getState()
   const availableWorktrees = useSessionUIStore.getState().availableWorktreesByProject
   if (!directories.some((directory) => resolveProjectForSessionDirectory(
     projectsState.projects,
     availableWorktrees,
     directory,
-  ))) return
+  ))) return "evaluated"
 
   await refreshGlobalSessionsAfterPending(getAllSyncSessions())
-  if (getRuntimeKey() !== runtimeKey) return
+  if (isProjectAutoCloseEvaluationStale(runtimeKey, runtimeGeneration)) return "stale"
   const globalSessions = useGlobalSessionsStore.getState()
-  if (!globalSessions.hasLoaded || globalSessions.status !== "ready") return
+  if (!globalSessions.hasLoaded || globalSessions.status !== "ready") return "evaluated"
 
   const emptyProjects = resolveProjectsWithNoActiveSessions(
     projectsState.projects,
@@ -1041,6 +1058,47 @@ async function evaluateProjectsWithoutActiveSessions(directories: string[], runt
   for (const project of emptyProjects) {
     projectsState.removeProject(project.id)
   }
+  return "evaluated"
+}
+
+function startPendingProjectAutoCloseEvaluation(): Promise<void> {
+  if (pendingProjectAutoCloseEvaluation) return pendingProjectAutoCloseEvaluation
+
+  pendingProjectAutoCloseEvaluation = (async () => {
+    // Let action and event-router callers from the same mutation join before
+    // the authoritative refresh begins.
+    await Promise.resolve()
+    const evaluatedDirectoriesByRuntime = new Map<string, Set<string>>()
+    while (true) {
+      const queuedRuntimeKey = getRuntimeKey()
+      const queuedDirectories = pendingProjectAutoCloseDirectories.get(queuedRuntimeKey)
+      if (!queuedDirectories) break
+      pendingProjectAutoCloseDirectories.delete(queuedRuntimeKey)
+      const alreadyEvaluated = evaluatedDirectoriesByRuntime.get(queuedRuntimeKey) ?? new Set<string>()
+      const directoriesToEvaluate = [...queuedDirectories]
+        .filter((directory) => !alreadyEvaluated.has(directory))
+      if (directoriesToEvaluate.length === 0) continue
+      for (const directory of directoriesToEvaluate) alreadyEvaluated.add(directory)
+      evaluatedDirectoriesByRuntime.set(queuedRuntimeKey, alreadyEvaluated)
+      const runtimeGeneration = projectAutoCloseRuntimeGeneration
+      const result = await evaluateProjectsWithoutActiveSessions(
+        directoriesToEvaluate,
+        queuedRuntimeKey,
+        runtimeGeneration,
+      )
+      if (result === "stale") {
+        enqueueProjectAutoCloseDirectories(queuedRuntimeKey, directoriesToEvaluate)
+        break
+      }
+    }
+  })().finally(() => {
+    pendingProjectAutoCloseEvaluation = null
+    if (pendingProjectAutoCloseDirectories.has(getRuntimeKey())) {
+      void startPendingProjectAutoCloseEvaluation()
+    }
+  })
+
+  return pendingProjectAutoCloseEvaluation
 }
 
 export function closeProjectsWithoutActiveSessionsForDirectories(
@@ -1051,42 +1109,19 @@ export function closeProjectsWithoutActiveSessionsForDirectories(
   if (changedDirectories.length === 0) return Promise.resolve()
 
   const runtimeKey = getRuntimeKey()
-  const pendingDirectories = pendingProjectAutoCloseDirectories.get(runtimeKey) ?? new Set<string>()
-  for (const directory of changedDirectories) {
-    pendingDirectories.add(directory)
-  }
-  pendingProjectAutoCloseDirectories.set(runtimeKey, pendingDirectories)
+  enqueueProjectAutoCloseDirectories(runtimeKey, changedDirectories)
 
-  if (pendingProjectAutoCloseEvaluation) return pendingProjectAutoCloseEvaluation
-
-  pendingProjectAutoCloseEvaluation = (async () => {
-    // Let action and event-router callers from the same mutation join before
-    // the authoritative refresh begins.
-    await Promise.resolve()
-    const evaluatedDirectories = new Map<string, Set<string>>()
-    while (pendingProjectAutoCloseDirectories.size > 0) {
-      let next: [string, Set<string>] | undefined
-      for (const entry of pendingProjectAutoCloseDirectories) {
-        next = entry
-        break
-      }
-      if (!next) break
-      const [queuedRuntimeKey, queuedDirectories] = next
-      pendingProjectAutoCloseDirectories.delete(queuedRuntimeKey)
-      const alreadyEvaluated = evaluatedDirectories.get(queuedRuntimeKey) ?? new Set<string>()
-      const directoriesToEvaluate = [...queuedDirectories]
-        .filter((directory) => !alreadyEvaluated.has(directory))
-      if (directoriesToEvaluate.length === 0) continue
-      for (const directory of directoriesToEvaluate) alreadyEvaluated.add(directory)
-      evaluatedDirectories.set(queuedRuntimeKey, alreadyEvaluated)
-      await evaluateProjectsWithoutActiveSessions(directoriesToEvaluate, queuedRuntimeKey)
-    }
-  })().finally(() => {
-    pendingProjectAutoCloseEvaluation = null
-  })
-
-  return pendingProjectAutoCloseEvaluation
+  return startPendingProjectAutoCloseEvaluation()
 }
+
+subscribeRuntimeEndpointChanged(() => {
+  projectAutoCloseRuntimeGeneration += 1
+  queueMicrotask(() => {
+    if (pendingProjectAutoCloseDirectories.has(getRuntimeKey())) {
+      void startPendingProjectAutoCloseEvaluation()
+    }
+  })
+})
 
 /** Delete a session specifying which directory it lives in. Used by agent groups for cross-directory deletes. */
 export async function deleteSessionInDirectory(
