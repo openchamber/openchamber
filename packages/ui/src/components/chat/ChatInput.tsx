@@ -34,6 +34,9 @@ import {
     type ChatDraftSnapshot,
 } from '@/lib/chatDraftPersistence';
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
+import { BtwPanel } from './btw/BtwPanel';
+import { useBtwPanelState } from './btw/useBtwPanelState';
+import { destroyBtwSession, startBtwSession, type BtwSessionRef } from '@/lib/btw';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { ToolPopupContent } from './message/types';
@@ -51,7 +54,7 @@ import { PendingChangesBar } from './PendingChangesBar';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
-import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
+import { useCurrentSessionActivity, useSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
 // useMessageStore removed — messages now come from sync system
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -315,6 +318,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const currentSessionDirectoryForSync = useSessionUIStore(
         React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
     );
+    // btw mode: the CURRENT session's metadata links an active btw fork and
+    // the panel is expanded, so this composer's sends route to the fork
+    // instead of the main session. Collapsed keeps the fork alive (chip stays
+    // visible) while the composer talks to the main session again.
+    const btwPanel = useBtwPanelState(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
+    const btwSessionId = btwPanel.btwSessionId;
+    const btwDirectory = btwPanel.btwDirectory;
+    const btwSessionRef = React.useMemo<BtwSessionRef | null>(
+        () => (currentSessionId && btwSessionId && btwDirectory
+            ? { parentSessionId: currentSessionId, btwSessionId, directory: btwDirectory }
+            : null),
+        [btwDirectory, btwSessionId, currentSessionId],
+    );
+    const isBtwActive = Boolean(btwSessionRef) && !btwPanel.collapsed;
     const activeRuntimeKey = getRuntimeKey();
     const chatDraftIdentity = React.useMemo(
         () => createChatDraftIdentity(
@@ -563,7 +580,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const availableSkills = useSkillsStore((s) => s.skills);
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([
-            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
+            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'btw', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
         ]);
         if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
@@ -833,8 +850,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         prevNewSessionDraftOpenRef.current = newSessionDraftOpen;
     }, [newSessionDraftOpen, isMobile]);
 
-    // Session activity for queue availability and controls
-    const { phase: sessionPhase } = useCurrentSessionActivity();
+    // Session activity for queue availability and controls. In btw mode the
+    // composer controls the temporary fork, so the stop button and send-button
+    // state follow the FORK's activity; the queue affordance stays tied to the
+    // main session (queued messages always belong to the main chat).
+    const { phase: currentSessionPhase } = useCurrentSessionActivity();
+    const { phase: btwSessionPhase } = useSessionActivity(btwSessionId, btwDirectory ?? undefined);
+    const sessionPhase = isBtwActive ? btwSessionPhase : currentSessionPhase;
     const autoReviewRunning = useAutoReviewStore(React.useCallback((state) => {
         if (!currentSessionId) return false;
         const run = state.runsByOriginalSessionID[currentSessionId];
@@ -1032,12 +1054,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // queued-message auto-send hook delivers it as the next turn once the
         // rejected turn winds down and the session returns to idle. This avoids
         // aborting the turn (which would surface an "aborted" notice).
-        if (currentSessionId && !queuedOnly && autoReviewRunning) {
+        if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive) {
             handleQueueMessage();
             return;
         }
 
-        if (currentSessionId && !queuedOnly) {
+        // btw mode: the child fork's blocking prompts are answered inside the
+        // panel; the composer send goes straight to the fork (routeMessage
+        // queues if the fork's own turn is busy).
+        if (currentSessionId && !queuedOnly && !isBtwActive) {
             // Sending is authoritative for blocking prompts: deny pending
             // permissions and dismiss open questions for the session subtree,
             // then queue the message once if either was open. The deny/clear
@@ -1057,17 +1082,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
         }
 
-        const sendMessageOptions: {
+        let sendMessageOptions: {
             target?: NonNullable<typeof capturedTarget>;
+            sessionId?: string;
+            directory?: string;
             draftSnapshot?: NonNullable<typeof capturedDraftSnapshot>;
             delivery?: 'steer';
-        } | undefined = (capturedTarget || capturedDraftSnapshot || delivery)
-            ? {
-                ...(capturedTarget ? { target: capturedTarget } : {}),
-                ...(capturedDraftSnapshot ? { draftSnapshot: capturedDraftSnapshot } : {}),
-                ...(delivery ? { delivery } : {}),
-            }
-            : undefined;
+        } | undefined;
+        if (isBtwActive && btwSessionId && btwDirectory) {
+            sendMessageOptions = {
+                sessionId: btwSessionId,
+                directory: btwDirectory,
+            };
+        } else if (capturedTarget || capturedDraftSnapshot || delivery) {
+            sendMessageOptions = {};
+            if (capturedTarget) sendMessageOptions.target = capturedTarget;
+            if (capturedDraftSnapshot) sendMessageOptions.draftSnapshot = capturedDraftSnapshot;
+        }
+        if (delivery && sendMessageOptions) sendMessageOptions.delivery = delivery;
 
         const preparedDocumentMentions = new Map<string, AttachedFile[]>();
         const reservedFilenames = new Set([
@@ -1208,6 +1240,40 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 }
                 return;
             }
+            if (commandName === 'btw' && currentSessionId) {
+                const question = argument.trim();
+                if (!question) {
+                    toast.error(t('chat.btw.toast.emptyArgument'));
+                    return;
+                }
+                const targetDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId)
+                    || currentDirectory
+                    || null;
+                if (!targetDirectory) {
+                    toast.error(t('chat.btw.toast.createFailed'));
+                    return;
+                }
+                try {
+                    // A new btw replaces this session's current one: destroy
+                    // the previous fork first so forks never accumulate.
+                    if (btwSessionRef) {
+                        await destroyBtwSession(btwSessionRef);
+                    }
+                    await startBtwSession({
+                        parentSessionId: currentSessionId,
+                        question,
+                        directory: targetDirectory,
+                        providerID: providerIdToSend,
+                        modelID: modelIdToSend,
+                        agent: agentNameToSend,
+                        variant: variantToSend,
+                    });
+                    scrollToBottom?.();
+                } catch (error) {
+                    toast.error(getSubmitErrorMessage(error, t('chat.btw.toast.createFailed')));
+                }
+                return;
+            }
 
             // The rest render a visible prompt plus synthetic instructions and
             // send them as one message.
@@ -1243,7 +1309,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
 
         const currentSessionDirectory = capturedTarget?.directory ?? currentDirectory;
-        const shouldAddResponseStyle = newSessionDraftOpen || (currentSessionId ? !hasUserMessages(currentSessionId, currentSessionDirectory) : false);
+        // btw mode: the fork already carries the question plus full history,
+        // so the response-style instruction never applies there.
+        const shouldAddResponseStyle = !isBtwActive && (newSessionDraftOpen || (currentSessionId ? !hasUserMessages(currentSessionId, currentSessionDirectory) : false));
         if (shouldAddResponseStyle) {
             const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
             if (responseStyleInstruction) {
@@ -1413,7 +1481,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // Primary action for send/queue button — respects selected follow-up behavior
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
-        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
+        const canQueue = !isBtwActive && inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
         if (followUpBehavior === 'queue' && canQueue) {
             handleQueueMessage();
         } else if (followUpBehavior === 'steer' && canQueue) {
@@ -1421,7 +1489,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         } else {
             void handleSubmitRef.current();
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, currentSessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage, isBtwActive]);
 
     // Draft welcome presets: submit immediately.
     const submitPresetPrompt = React.useCallback((text: string, type: 'command' | 'skill') => {
@@ -1637,7 +1705,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             // Queueing / steering only works when there's an existing busy
             // session (or an active auto-review run).
-            const canQueue = inputMode === 'normal' && hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
+            const canQueue = !isBtwActive && inputMode === 'normal' && hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
 
             if (followUpBehavior === 'queue') {
                 if (isCtrlEnter || !canQueue) {
@@ -1687,8 +1755,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         clearAbortPrompt();
         startAbortIndicator();
 
-        void abortCurrentOperation(currentSessionId || undefined);
-    }, [abortCurrentOperation, clearAbortPrompt, currentSessionId, startAbortIndicator]);
+        // btw mode: the stop button stops the fork's turn, not the main
+        // session's.
+        const abortTarget = isBtwActive && btwSessionId ? btwSessionId : currentSessionId;
+        void abortCurrentOperation(abortTarget || undefined);
+    }, [abortCurrentOperation, btwSessionId, clearAbortPrompt, currentSessionId, isBtwActive, startAbortIndicator]);
 
     const handleCycleAgent = React.useCallback((direction: 1 | -1 = 1) => {
         const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName, direction);
@@ -2826,11 +2897,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                 }}
                                 onFocus={mobileShell.onEditorFocus}
                                 onBlur={mobileShell.onEditorBlur}
-                                placeholder={currentSessionId || newSessionDraftOpen
-                                    ? inputMode === 'shell'
-                                        ? t('chat.chatInput.placeholder.shell')
-                                        : t(useCompactChatPlaceholder ? 'chat.chatInput.placeholder.chatCompact' : 'chat.chatInput.placeholder.chat')
-                                    : t('chat.chatInput.placeholder.selectSession')}
+                                placeholder={isBtwActive
+                                    ? t('chat.btw.mainComposerPlaceholder')
+                                    : currentSessionId || newSessionDraftOpen
+                                        ? inputMode === 'shell'
+                                            ? t('chat.chatInput.placeholder.shell')
+                                            : t(useCompactChatPlaceholder ? 'chat.chatInput.placeholder.chatCompact' : 'chat.chatInput.placeholder.chat')
+                                        : t('chat.chatInput.placeholder.selectSession')}
                                 editable={Boolean(currentSessionId || newSessionDraftOpen)}
                                 autoCorrect={isMobile}
                                 autoCapitalize={isMobile ? 'sentences' : 'none'}
@@ -2929,6 +3002,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     className={cn('chat-input-column mt-4', draftPresentationClassName)}
                 />
             ) : null}
+            {currentSessionId ? <BtwPanel parentSessionId={currentSessionId} panel={btwPanel} /> : null}
         </form>
 
         {/* Issue Picker Dialog */}

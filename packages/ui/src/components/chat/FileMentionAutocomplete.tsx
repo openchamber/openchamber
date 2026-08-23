@@ -459,7 +459,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
             {visibleAgents.map((agent, index) => {
               const isSelected = selectedIndex === index;
               return (
-                <AutocompleteRowTooltip description={agent.description} active={isSelected}>
+                <AutocompleteRowTooltip description={agent.description} active={!isMobile && isSelected}>
                 <div
                   key={`agent-${agent.name}`}
                   ref={(el) => { itemRefs.current[index] = el; }}

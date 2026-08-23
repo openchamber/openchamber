@@ -4,10 +4,12 @@ import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { isExternalHttpUrl, openExternalUrl } from '@/lib/url';
+import { openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { Theme } from '@/types/theme';
+import { openAppLinkWithConfirmation } from './appLinkConfirmation';
+import { attachAppLinkInteractions } from './appLinkInteractions';
 import type { ToolPopupContent } from './message/types';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import { useUIStore } from '@/stores/useUIStore';
@@ -55,7 +57,7 @@ const useCurrentMermaidTheme = () => {
       : fallbackLight);
 };
 
-const useExternalLinkInteractions = ({
+const useLinkInteractions = ({
   containerRef,
   enabled,
 }: {
@@ -63,48 +65,16 @@ const useExternalLinkInteractions = ({
   enabled?: boolean;
 }) => {
   React.useEffect(() => {
-    if (enabled === false) {
-      return;
-    }
-
     const container = containerRef.current;
     if (!container) {
       return;
     }
 
-    const handleClick = (event: MouseEvent) => {
-      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
-        return;
-      }
-
-      const target = event.target;
-      if (!(target instanceof Element)) {
-        return;
-      }
-
-      const anchor = target.closest('a[href]');
-      if (!(anchor instanceof HTMLAnchorElement)) {
-        return;
-      }
-
-      if (anchor.getAttribute('data-openchamber-file-link') === 'true') {
-        return;
-      }
-
-      const href = anchor.getAttribute('href') ?? '';
-      if (!isExternalHttpUrl(href)) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      void openExternalUrl(href);
-    };
-
-    container.addEventListener('click', handleClick);
-    return () => {
-      container.removeEventListener('click', handleClick);
-    };
+    return attachAppLinkInteractions(container, {
+      allowExternalHttp: enabled !== false,
+      openAppLink: (href) => void openAppLinkWithConfirmation(href),
+      openExternalHttp: (href) => void openExternalUrl(href),
+    });
   }, [containerRef, enabled]);
 };
 
@@ -969,7 +939,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     preferRuntimeEditor: runtime.isVSCode,
     enabled: enableFileReferences && !isStreaming,
   });
-  useExternalLinkInteractions({ containerRef });
+  useLinkInteractions({ containerRef });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
   const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
@@ -1020,6 +990,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   content: string;
   className?: string;
   variant?: MarkdownVariant;
+  // App links remain confirmed even where ordinary HTTP link handling is off.
   disableLinkSafety?: boolean;
   stripFrontmatter?: boolean;
   onShowPopup?: (content: ToolPopupContent) => void;
@@ -1061,7 +1032,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     preferRuntimeEditor: runtime.isVSCode,
     enabled: enableFileReferences,
   });
-  useExternalLinkInteractions({ containerRef, enabled: !disableLinkSafety });
+  useLinkInteractions({ containerRef, enabled: !disableLinkSafety });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
   const ctx = useDecorateContext(currentTheme, false, undefined, mermaidControls);

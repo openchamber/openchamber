@@ -229,15 +229,19 @@ export function WorkingPlaceholder({
 
   return (
     <div
+      // Styled to mirror the turn footer's model row (text-sm,
+      // muted-foreground/60, no left inset): when the turn completes this row
+      // disappears and the footer appears in the same visual spot, so the two
+      // must read as the same line swapping its text.
       className={
-        'flex h-full items-center text-muted-foreground pl-0.5'
+        'flex h-full items-center text-muted-foreground/60'
       }
       role="status"
       aria-live={displayedPermission ? 'assertive' : 'polite'}
       aria-label={label}
       data-waiting={displayedPermission ? 'true' : undefined}
     >
-      <span className="typography-ui-header">
+      <span className="text-sm">
         {hasProviderLogo && providerLogoSrc ? (
           <img
             src={providerLogoSrc}

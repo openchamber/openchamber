@@ -1,5 +1,6 @@
 import React from 'react';
 import { getChatsRootForHome, getChatsRootFromDirectory, isChatDirectoryForHome, isChatDirectoryPath } from '@/lib/chatDirectories';
+import { isBtwSession } from '@/lib/sessionBtwMetadata';
 import { mergeSidebarSessionSources } from './sidebar/sidebarSessionSources';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
@@ -512,11 +513,15 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     const merged = mergeSidebarSessionSources(globalActiveSessions, liveFallbackSessions);
 
     return merged.filter((session) => (
-      (!isVSCode && isChatDirectoryPath(session.directory))
-      || isKnownActiveSessionDirectory(session, knownSessionDirectories, {
-        allowUnknownDirectory: !isVSCode,
-        allowEmptyDirectorySet: !isVSCode,
-      })
+      // btw forks stay hidden until promoted to a full session
+      !isBtwSession(session)
+      && (
+        (!isVSCode && isChatDirectoryPath(session.directory))
+        || isKnownActiveSessionDirectory(session, knownSessionDirectories, {
+          allowUnknownDirectory: !isVSCode,
+          allowEmptyDirectorySet: !isVSCode,
+        })
+      )
     ));
   }, [globalActiveSessions, isVSCode, knownSessionDirectories, liveFallbackSessions]);
 

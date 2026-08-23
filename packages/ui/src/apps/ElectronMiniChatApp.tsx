@@ -5,6 +5,7 @@ import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
+import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -325,6 +326,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
           <TooltipProvider delayDuration={300} skipDelayDuration={150}>
             <div className="h-full text-foreground bg-background">
               <ElectronMiniChatContent config={config} />
+              <AppLinkConfirmDialog />
               <Toaster />
             </div>
           </TooltipProvider>
