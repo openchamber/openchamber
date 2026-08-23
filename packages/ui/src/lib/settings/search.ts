@@ -329,13 +329,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['follow up', 'queue', 'steer', 'send immediately'],
   },
   {
-    id: 'chat.assistant-answer-action',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.section.assistantAnswerAction',
-    descriptionKey: 'settings.openchamber.visual.field.assistantAnswerActionDescription',
-    keywords: ['answer action', 'start session', 'fork session', 'assistant response'],
-  },
-  {
     id: 'chat.persist-drafts',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.persistDraftMessages',

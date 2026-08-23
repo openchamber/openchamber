@@ -268,20 +268,34 @@ Rules:
 Examples of global-store updates performed in `session-actions.ts`:
 
 - `createSession()` -> `upsertSession(session)`
-- `forkSession()` copies the whole session when it receives no message. When it receives a clicked message, it copies through that message.
-- `forkFromMessage()` excludes the selected user message and restores that message in the composer.
-- Both fork actions register the directory, update both session stores, and select the returned session.
+- `forkFromMessage()` handles user and assistant messages.
+- A user-message fork excludes the selected prompt and restores it in the composer.
+- An assistant-message fork includes the selected answer. The source session keeps its draft, and the new session opens with an empty composer.
+- The fork action registers the directory, updates both session stores, and selects the returned session.
 
-The OpenCode fork endpoint excludes its `messageID` boundary. `forkSession()` uses the next transcript message so the clicked message remains in the new session.
+The fork API uses `messageID` as a stop sign. It does not copy that message or anything after it.
+
+- For a user-message fork, the action sends the selected user message as the stop sign. The new session excludes it.
+- For an assistant-message fork, the action sends the next message as the stop sign. The new session includes the selected answer.
+- For the last assistant message, no next message exists. The action omits `messageID`, so OpenCode copies the full transcript.
+
+The action fetches the source transcript first because it must find the next message.
 
 Fork reconciliation maps pinned message IDs to the cloned message IDs. It removes pins for messages beyond the copied boundary.
 
-Boundary forks filter linked issues by the clicked message time. They preserve unknown metadata and remove goal, assist, compaction, and review state.
+Every message fork uses the last copied message time as the linked-issue cutoff. An empty transcript removes all linked issues.
 
-Review sessions fail before the fork request. Whole-session forks retain other source metadata.
+Message forks preserve unknown metadata. They remove goal, assist, compaction, and review state.
+Those fields have no message time. The action cannot tell whether each field existed before or after the fork point, so it removes them.
 
-OpenCode increments a fork suffix only when the source title already contains one. The shared action also checks known sessions in the fork directory.
-It uses the next available number for repeated forks from the original session. Active and archived sessions both reserve their fork numbers.
+A message fork from a review session becomes a normal independent session. Metadata cleanup removes the review links from the fork.
+The original session and its review session keep their existing relationship.
+Both user and assistant message controls can create this fork.
+
+OpenCode adds the next fork number only when the source title already has a suffix. OpenChamber adds `(fork #1)` to the first fork.
+The shared action checks known sessions in the fork directory. It uses the next available number for later forks.
+Active and archived sessions both reserve their fork numbers.
+The action does not count the new fork if its creation event reaches the stores first.
 
 Forks remain independent root sessions. They do not receive the source session as `parentID`. That field remains reserved for child sessions such as subagents.
 - `updateSessionTitle()` -> `upsertSession(result.data)`

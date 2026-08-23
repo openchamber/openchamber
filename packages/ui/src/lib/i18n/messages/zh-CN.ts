@@ -2192,7 +2192,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.saveAsPlan': '保存为计划',
   'chat.messageBody.actions.startNewSession': '基于此回答开始新会话',
   'chat.messageBody.actions.forkSession': '分叉会话',
-  'sessions.sidebar.session.menu.fork': '分叉会话',
   'sessions.fork.toast.success': '会话已分叉',
   'sessions.fork.toast.error': '无法分叉会话',
   'chat.messageBody.actions.startNewMultiRun': '基于此回答开始新的多运行',

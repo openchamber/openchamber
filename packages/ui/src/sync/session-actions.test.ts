@@ -28,7 +28,7 @@ const sessionFixture = (id: string, title: string, directory: string): Session =
   version: "test",
   time: { created: 1, updated: 1 },
 })
-let sessionForkResult = sessionFixture("session-fork", "Forked", "/test/project")
+let sessionForkResult = sessionFixture("session-fork", "Forked (fork #1)", "/test/project")
 const globalUpsertedSessions: unknown[] = []
 const globalRemovedSessionIds: string[] = []
 const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
@@ -278,6 +278,7 @@ import { create, type StoreApi } from "zustand"
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, OpencodeClient, Part, Session } from "@opencode-ai/sdk/v2/client"
+import type { LinkedIssue } from "@/lib/linkedIssues"
 
 type OptimisticAddCall = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
 type OptimisticRemoveCall = { sessionID: string; directory?: string | null; messageID: string }
@@ -392,6 +393,49 @@ describe("moveSessionToDirectory", () => {
   })
 })
 
+const userMessageFixture = (id: string, created: number, sessionID = "session-a"): Message => ({
+  id,
+  sessionID,
+  role: "user",
+  time: { created },
+  agent: "build",
+  model: { providerID: "test", modelID: "test" },
+})
+
+const assistantMessageFixture = (
+  id: string,
+  created: number,
+  parentID: string,
+  sessionID = "session-a",
+): Message => ({
+  id,
+  sessionID,
+  role: "assistant",
+  time: { created },
+  parentID,
+  modelID: "test",
+  providerID: "test",
+  mode: "build",
+  agent: "build",
+  path: { cwd: "/test/project", root: "/test/project" },
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+})
+
+const messageRecords = (
+  messages: Message[],
+  partsByMessageID: Record<string, Part[]> = {},
+) => messages.map((info) => ({ info, parts: partsByMessageID[info.id] ?? [] }))
+
+const linkedIssueFixture = (number: number, linkedAt: number): LinkedIssue => ({
+  id: `owner/repo#${number}`,
+  number,
+  title: `Issue ${number}`,
+  url: `https://github.com/owner/repo/issues/${number}`,
+  kind: "issue",
+  linkedAt,
+})
+
 describe("session forks", () => {
   beforeEach(() => {
     replyCalls.length = 0
@@ -400,187 +444,69 @@ describe("session forks", () => {
     selectedSessions.length = 0
     beforeSessionForkResolve = null
     beforeSessionUpdateResolve = null
-    sessionForkResult = sessionFixture("session-fork", "Forked", "/test/project")
+    sessionForkResult = sessionFixture("session-fork", "Forked (fork #1)", "/test/project")
     sessionUpdateResult = {}
+    sessionMessagesResult = { data: [] }
     sessionMessagesBySessionID.clear()
     inputState.pendingInputText = ""
     inputState.pendingInputMode = "normal"
     inputState.attachedFiles = []
   })
 
-  test("forks the full session and reconciles every session index", async () => {
-    const source = createStore({}, {
-      session: [sessionFixture("session-a", "Source", "/test/project")],
-      sessionTotal: 1,
-    })
-    const { forkSession, setActionRefs } = await import("./session-actions")
-    const { opencodeClient } = await import("@/lib/opencode/client")
-    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
-    switchRuntimeEndpoint({ apiBaseUrl: "http://fork.test", runtimeKey: "fork" })
-    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
-
-    await forkSession("session-a")
-
-    expect(replyCalls.filter((call) => call.method === "session.fork")).toEqual([{
-      method: "session.fork",
-      params: { sessionID: "session-a", messageID: undefined, directory: "/test/project" },
-    }])
-    expect(source.getState().session.map((session) => session.id)).toEqual(["session-a", "session-fork"])
-    expect(source.getState().sessionTotal).toBe(2)
-    expect(registeredSessionDirectories).toEqual([{ sessionID: "session-fork", directory: "/test/project" }])
-    expect(globalUpsertedSessions).toEqual([sessionForkResult])
-    expect(selectedSessions).toEqual([{ sessionID: "session-fork", directory: "/test/project" }])
-    expect(inputState.pendingInputText).toBe("")
-    expect(inputState.attachedFiles).toEqual([])
-  })
-
-  test("forks through the clicked message with the next message as the exclusive boundary", async () => {
-    const messages: Message[] = [
+  test("excludes a user message, restores its input, and applies the shared metadata policy", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-user", 1),
+      assistantMessageFixture("source-assistant", 2, "source-user"),
+      userMessageFixture("source-selected", 3),
+    ]
+    const selectedParts: Part[] = [
       {
-        id: "message-user-start",
+        id: "part-text",
         sessionID: "session-a",
-        role: "user",
-        time: { created: 1 },
-        agent: "build",
-        model: { providerID: "test", modelID: "test" },
+        messageID: "source-selected",
+        type: "text",
+        text: "Try this next",
       },
       {
-        id: "message-assistant-clicked",
+        id: "part-synthetic",
         sessionID: "session-a",
-        role: "assistant",
-        time: { created: 2 },
-        parentID: "message-user-start",
-        modelID: "test",
-        providerID: "test",
-        mode: "build",
-        agent: "build",
-        path: { cwd: "/test/project", root: "/test/project" },
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        messageID: "source-selected",
+        type: "text",
+        text: "server context",
+        synthetic: true,
       },
       {
-        id: "message-user-next",
+        id: "part-file",
         sessionID: "session-a",
-        role: "user",
-        time: { created: 3 },
-        agent: "build",
-        model: { providerID: "test", modelID: "test" },
+        messageID: "source-selected",
+        type: "file",
+        mime: "image/png",
+        filename: "example.png",
+        url: "data:image/png;base64,AA==",
       },
     ]
-    const source = createStore({}, {
-      session: [sessionFixture("session-a", "Source", "/test/project")],
-      sessionTotal: 1,
-      message: { "session-a": messages },
-    })
-    const { forkSession, setActionRefs } = await import("./session-actions")
-    const { opencodeClient } = await import("@/lib/opencode/client")
-    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
-    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-through-message.test", runtimeKey: "fork-through-message" })
-    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
-
-    await forkSession("session-a", "message-assistant-clicked")
-
-    expect(replyCalls.filter((call) => call.method === "session.fork")).toEqual([{
-      method: "session.fork",
-      params: { sessionID: "session-a", messageID: "message-user-next", directory: "/test/project" },
-    }])
-    expect(source.getState().sessionTotal).toBe(2)
-    expect(globalUpsertedSessions).toEqual([sessionForkResult])
-    expect(selectedSessions).toEqual([{ sessionID: "session-fork", directory: "/test/project" }])
-    expect(inputState.pendingInputText).toBe("")
-    expect(inputState.attachedFiles).toEqual([])
-  })
-
-  test("keeps and remaps only pinned messages through the clicked message", async () => {
-    const sourceMessages: Message[] = [
-      {
-        id: "source-user",
-        sessionID: "session-a",
-        role: "user",
-        time: { created: 1 },
-        agent: "build",
-        model: { providerID: "test", modelID: "test" },
-      },
-      {
-        id: "source-assistant",
-        sessionID: "session-a",
-        role: "assistant",
-        time: { created: 2 },
-        parentID: "source-user",
-        modelID: "test",
-        providerID: "test",
-        mode: "build",
-        agent: "build",
-        path: { cwd: "/test/project", root: "/test/project" },
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-      },
-      {
-        id: "source-later",
-        sessionID: "session-a",
-        role: "user",
-        time: { created: 3 },
-        agent: "build",
-        model: { providerID: "test", modelID: "test" },
-      },
+    const forkMessages = [
+      userMessageFixture("fork-user", 1, "session-fork"),
+      assistantMessageFixture("fork-assistant", 2, "fork-user", "session-fork"),
     ]
     const copiedMetadata = {
       customPluginState: { keep: true },
       openchamber: {
         future_field: { keep: true },
-        goal: { id: "goal-1", status: "complete", lastAccountedMessageID: "source-later" },
-        assist: { recap: "Later recap", suggestion: "Later suggestion", forMessageID: "source-later", generatedAt: 3 },
-        context_obligatory_last_compaction_message_id: "source-later",
+        context_obligatory_last_compaction_message_id: "source-selected",
+        assist: { forMessageID: "source-selected" },
+        goal: { id: "goal-1" },
         reviewSessionID: "review-session",
+        kind: "review",
+        originalSessionID: "source-session",
         context_obligatory_messages: [
           { id: "source-user", createdAt: 1, role: "user" },
           { id: "source-assistant", createdAt: 2, role: "assistant" },
-          { id: "source-later", createdAt: 3, role: "user" },
+          { id: "source-selected", createdAt: 3, role: "user" },
         ],
-        linked_issues: [
-          {
-            id: "owner/repo#1",
-            number: 1,
-            title: "Before boundary",
-            url: "https://github.com/owner/repo/issues/1",
-            kind: "issue",
-            linkedAt: 1,
-          },
-          {
-            id: "owner/repo#2",
-            number: 2,
-            title: "After boundary",
-            url: "https://github.com/owner/repo/issues/2",
-            kind: "issue",
-            linkedAt: 3,
-          },
-        ],
+        linked_issues: [linkedIssueFixture(1, 1), linkedIssueFixture(2, 3)],
       },
     }
-    const forkMessages: Message[] = [
-      {
-        id: "fork-user",
-        sessionID: "session-fork",
-        role: "user",
-        time: { created: 1 },
-        agent: "build",
-        model: { providerID: "test", modelID: "test" },
-      },
-      {
-        id: "fork-assistant",
-        sessionID: "session-fork",
-        role: "assistant",
-        time: { created: 2 },
-        parentID: "fork-user",
-        modelID: "test",
-        providerID: "test",
-        mode: "build",
-        agent: "build",
-        path: { cwd: "/test/project", root: "/test/project" },
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-      },
-    ]
     const expectedMetadata = {
       customPluginState: { keep: true },
       openchamber: {
@@ -589,193 +515,334 @@ describe("session forks", () => {
           { id: "fork-user", createdAt: 1, role: "user" },
           { id: "fork-assistant", createdAt: 2, role: "assistant" },
         ],
-        linked_issues: [
-          {
-            id: "owner/repo#1",
-            number: 1,
-            title: "Before boundary",
-            url: "https://github.com/owner/repo/issues/1",
-            kind: "issue",
-            linkedAt: 1,
-          },
-        ],
+        linked_issues: [linkedIssueFixture(1, 1)],
       },
     }
-    const sourceSession: Session = {
-      ...sessionFixture("session-a", "Source", "/test/project"),
-      metadata: copiedMetadata,
-    }
     sessionForkResult = {
-      ...sessionFixture("session-fork", "Forked", "/test/project"),
+      ...sessionFixture("session-fork", "Forked (fork #1)", "/test/project"),
       metadata: copiedMetadata,
     }
-    const updatedFork: Session = { ...sessionForkResult, metadata: expectedMetadata }
+    const updatedFork = { ...sessionForkResult, metadata: expectedMetadata }
     sessionUpdateResult = { data: updatedFork }
     sessionMessagesBySessionID.set("session-a", {
-      data: sourceMessages.map((info) => ({ info, parts: [] })),
+      data: messageRecords(sourceMessages, { "source-selected": selectedParts }),
     })
-    sessionMessagesBySessionID.set("session-fork", {
-      data: forkMessages.map((info) => ({ info, parts: [] })),
-    })
+    sessionMessagesBySessionID.set("session-fork", { data: messageRecords(forkMessages) })
     const source = createStore({}, {
-      session: [sourceSession],
+      session: [sessionFixture("session-a", "Source", "/test/project")],
       sessionTotal: 1,
-      message: { "session-a": sourceMessages },
     })
-    const { forkSession, setActionRefs } = await import("./session-actions")
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
     const { opencodeClient } = await import("@/lib/opencode/client")
     const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
-    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-pins.test", runtimeKey: "fork-pins" })
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-user.test", runtimeKey: "fork-user" })
     setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
 
-    const result = await forkSession("session-a", "source-assistant")
+    await forkFromMessage("session-a", "source-selected")
 
-    expect(replyCalls.filter((call) => call.method === "session.messages")).toEqual([
-      { method: "session.messages", params: { sessionID: "session-a", directory: "/test/project" } },
-      { method: "session.messages", params: { sessionID: "session-fork", directory: "/test/project" } },
-    ])
+    expect(replyCalls.filter((call) => call.method === "session.fork")[0]?.params).toEqual({
+      sessionID: "session-a",
+      messageID: "source-selected",
+      directory: "/test/project",
+    })
     expect(replyCalls.filter((call) => call.method === "session.update")).toEqual([{
       method: "session.update",
       params: { sessionID: "session-fork", metadata: expectedMetadata, directory: "/test/project" },
     }])
-    expect(result).toEqual(updatedFork)
     expect(source.getState().session.find((session) => session.id === "session-fork")).toEqual(updatedFork)
+    expect(inputState.pendingInputText).toBe("Try this next")
+    expect(inputState.pendingInputMode).toBe("replace")
+    expect(inputState.attachedFiles).toEqual([{
+      url: "data:image/png;base64,AA==",
+      mimeType: "image/png",
+      filename: "example.png",
+    }])
+  })
+
+  test("removes all linked issues when the first user message leaves an empty transcript", async () => {
+    const sourceMessages = [userMessageFixture("source-first", 1)]
+    const copiedMetadata = {
+      customPluginState: { keep: true },
+      openchamber: {
+        future_field: { keep: true },
+        goal: { id: "goal-1" },
+        linked_issues: [linkedIssueFixture(1, 1)],
+      },
+    }
+    const expectedMetadata = {
+      customPluginState: { keep: true },
+      openchamber: {
+        future_field: { keep: true },
+        linked_issues: [],
+      },
+    }
+    sessionForkResult = {
+      ...sessionFixture("session-fork", "Forked (fork #1)", "/test/project"),
+      metadata: copiedMetadata,
+    }
+    sessionUpdateResult = { data: { ...sessionForkResult, metadata: expectedMetadata } }
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-first-user.test", runtimeKey: "fork-first-user" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    await forkFromMessage("session-a", "source-first")
+
+    expect(replyCalls.filter((call) => call.method === "session.fork")[0]?.params.messageID).toBe("source-first")
+    expect(replyCalls.filter((call) => call.method === "session.update")[0]?.params.metadata).toEqual(expectedMetadata)
+  })
+
+  test("includes an assistant answer without restoring composer input", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-user", 1),
+      assistantMessageFixture("source-selected", 2, "source-user"),
+      userMessageFixture("source-next", 3),
+    ]
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-assistant.test", runtimeKey: "fork-assistant" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    await forkFromMessage("session-a", "source-selected")
+
+    expect(replyCalls.filter((call) => call.method === "session.fork")[0]?.params).toEqual({
+      sessionID: "session-a",
+      messageID: "source-next",
+      directory: "/test/project",
+    })
+    expect(inputState.pendingInputText).toBe("")
+    expect(inputState.pendingInputMode).toBe("normal")
+  })
+
+  test("omits the boundary for the last assistant but still applies metadata cleanup", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-user", 1),
+      assistantMessageFixture("source-selected", 2, "source-user"),
+    ]
+    const forkMessages = [
+      userMessageFixture("fork-user", 1, "session-fork"),
+      assistantMessageFixture("fork-assistant", 2, "fork-user", "session-fork"),
+    ]
+    const copiedMetadata = {
+      customPluginState: { keep: true },
+      openchamber: {
+        future_field: { keep: true },
+        assist: { forMessageID: "source-selected" },
+        context_obligatory_messages: [
+          { id: "source-user", createdAt: 1, role: "user" },
+          { id: "source-selected", createdAt: 2, role: "assistant" },
+        ],
+        linked_issues: [linkedIssueFixture(1, 1), linkedIssueFixture(2, 3)],
+      },
+    }
+    const expectedMetadata = {
+      customPluginState: { keep: true },
+      openchamber: {
+        future_field: { keep: true },
+        context_obligatory_messages: [
+          { id: "fork-user", createdAt: 1, role: "user" },
+          { id: "fork-assistant", createdAt: 2, role: "assistant" },
+        ],
+        linked_issues: [linkedIssueFixture(1, 1)],
+      },
+    }
+    sessionForkResult = {
+      ...sessionFixture("session-fork", "Forked (fork #1)", "/test/project"),
+      metadata: copiedMetadata,
+    }
+    const updatedFork = { ...sessionForkResult, metadata: expectedMetadata }
+    sessionUpdateResult = { data: updatedFork }
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    sessionMessagesBySessionID.set("session-fork", { data: messageRecords(forkMessages) })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-last-assistant.test", runtimeKey: "fork-last-assistant" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    await forkFromMessage("session-a", "source-selected")
+
+    expect(replyCalls.filter((call) => call.method === "session.fork")[0]?.params.messageID).toBe(undefined)
+    expect(replyCalls.filter((call) => call.method === "session.update")[0]?.params.metadata).toEqual(expectedMetadata)
     expect(globalUpsertedSessions).toEqual([updatedFork])
   })
 
-  test("rejects a review-session fork before the server mutation", async () => {
+  test("forks a review session as an independent regular session", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-user", 1),
+      assistantMessageFixture("source-assistant", 2, "source-user"),
+    ]
     const reviewSession: Session = {
       ...sessionFixture("session-a", "Review", "/test/project"),
-      metadata: {
-        openchamber: {
-          kind: "review",
-          originalSessionID: "session-original",
-        },
+      metadata: { openchamber: { kind: "review", originalSessionID: "session-original" } },
+    }
+    const copiedMetadata = {
+      customPluginState: { keep: true },
+      openchamber: {
+        kind: "review",
+        originalSessionID: "session-original",
       },
     }
-    const source = createStore({}, {
-      session: [reviewSession],
-      sessionTotal: 1,
-    })
-    const { forkSession, setActionRefs } = await import("./session-actions")
+    const expectedMetadata = {
+      customPluginState: { keep: true },
+      openchamber: {},
+    }
+    sessionForkResult = {
+      ...sessionFixture("session-fork", "Forked (fork #1)", "/test/project"),
+      metadata: copiedMetadata,
+    }
+    const updatedFork = { ...sessionForkResult, metadata: expectedMetadata }
+    sessionUpdateResult = { data: updatedFork }
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    const source = createStore({}, { session: [reviewSession], sessionTotal: 1 })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
     const { opencodeClient } = await import("@/lib/opencode/client")
     const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
     switchRuntimeEndpoint({ apiBaseUrl: "http://fork-review.test", runtimeKey: "fork-review" })
     setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
 
-    await expect(forkSession("session-a")).rejects.toThrow("Review sessions cannot be forked")
+    await forkFromMessage("session-a", "source-assistant")
 
-    expect(replyCalls.filter((call) => call.method === "session.fork")).toEqual([])
-    expect(source.getState().session).toEqual([reviewSession])
-    expect(globalUpsertedSessions).toEqual([])
-    expect(selectedSessions).toEqual([])
+    expect(replyCalls.filter((call) => call.method === "session.fork")[0]?.params.messageID).toBe(undefined)
+    expect(replyCalls.filter((call) => call.method === "session.update")[0]?.params.metadata).toEqual(expectedMetadata)
+    expect(source.getState().session.find((session) => session.id === reviewSession.id)).toEqual(reviewSession)
+    expect(globalUpsertedSessions).toEqual([updatedFork])
   })
 
-  test("does not add OpenChamber metadata when a boundary fork has none", async () => {
-    const messages: Message[] = [{
-      id: "source-user",
-      sessionID: "session-a",
-      role: "user",
-      time: { created: 1 },
-      agent: "build",
-      model: { providerID: "test", modelID: "test" },
-    }]
-    const sourceSession: Session = {
+  test("does not add OpenChamber metadata when the fork has none", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-user", 1),
+      assistantMessageFixture("source-assistant", 2, "source-user"),
+    ]
+    const sourceSession = {
       ...sessionFixture("session-a", "Source", "/test/project"),
       metadata: { customPluginState: { keep: true } },
     }
     sessionForkResult = {
-      ...sessionFixture("session-fork", "Forked", "/test/project"),
+      ...sessionFixture("session-fork", "Forked (fork #1)", "/test/project"),
       metadata: { customPluginState: { keep: true } },
     }
-    const source = createStore({}, {
-      session: [sourceSession],
-      sessionTotal: 1,
-      message: { "session-a": messages },
-    })
-    const { forkSession, setActionRefs } = await import("./session-actions")
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    const source = createStore({}, { session: [sourceSession], sessionTotal: 1 })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
     const { opencodeClient } = await import("@/lib/opencode/client")
     const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
     switchRuntimeEndpoint({ apiBaseUrl: "http://fork-no-metadata.test", runtimeKey: "fork-no-metadata" })
     setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
 
-    const result = await forkSession("session-a", "source-user")
+    await forkFromMessage("session-a", "source-assistant")
 
     expect(replyCalls.filter((call) => call.method === "session.update")).toEqual([])
-    expect(result).toEqual(sessionForkResult)
     expect(globalUpsertedSessions).toEqual([sessionForkResult])
   })
 
+  test("adds fork number one when OpenCode returns the source title unchanged", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-user", 1),
+      assistantMessageFixture("source-assistant", 2, "source-user"),
+    ]
+    const titledFork = sessionFixture("session-fork", "Source (fork #1)", "/test/project")
+    sessionForkResult = sessionFixture("session-fork", "Source", "/test/project")
+    sessionUpdateResult = { data: titledFork }
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-first-title.test", runtimeKey: "fork-first-title" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    await forkFromMessage("session-a", "source-assistant")
+
+    expect(replyCalls.filter((call) => call.method === "session.update")).toEqual([{
+      method: "session.update",
+      params: { sessionID: "session-fork", title: "Source (fork #1)", directory: "/test/project" },
+    }])
+    expect(globalUpsertedSessions).toEqual([titledFork])
+  })
+
+  test("keeps fork number one when the creation event already added the new fork", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-user", 1),
+      assistantMessageFixture("source-assistant", 2, "source-user"),
+    ]
+    const original = sessionFixture("session-a", "Source", "/test/project")
+    const firstFork = sessionFixture("session-fork", "Source (fork #1)", "/test/project")
+    sessionForkResult = firstFork
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    const source = createStore({}, { session: [original, firstFork], sessionTotal: 2 })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-created-event.test", runtimeKey: "fork-created-event" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    await forkFromMessage("session-a", "source-assistant")
+
+    expect(replyCalls.filter((call) => call.method === "session.update")).toEqual([])
+    expect(globalUpsertedSessions).toEqual([firstFork])
+  })
+
   test("uses the next fork number for another fork from the original session", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-user", 1),
+      assistantMessageFixture("source-assistant", 2, "source-user"),
+    ]
     const original = sessionFixture("session-a", "Source", "/test/project")
     const firstFork = sessionFixture("session-fork-1", "Source (fork #1)", "/test/project")
     const secondFork = sessionFixture("session-fork-2", "Source (fork #2)", "/test/project")
-    const source = createStore({}, {
-      session: [original, firstFork],
-      sessionTotal: 2,
-    })
+    const source = createStore({}, { session: [original, firstFork], sessionTotal: 2 })
     sessionForkResult = { ...secondFork, title: "Source (fork #1)" }
     sessionUpdateResult = { data: secondFork }
-    const { forkSession, setActionRefs } = await import("./session-actions")
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
     const { opencodeClient } = await import("@/lib/opencode/client")
     const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
     switchRuntimeEndpoint({ apiBaseUrl: "http://fork-title.test", runtimeKey: "fork-title" })
     setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
 
-    const result = await forkSession("session-a")
+    await forkFromMessage("session-a", "source-assistant")
 
     expect(replyCalls.filter((call) => call.method === "session.update")).toEqual([{
       method: "session.update",
       params: { sessionID: "session-fork-2", title: "Source (fork #2)", directory: "/test/project" },
     }])
-    expect(result.title).toBe("Source (fork #2)")
-    expect(result.parentID).toBe(undefined)
     expect(source.getState().session.map((session) => session.title)).toContain("Source (fork #2)")
     expect(globalUpsertedSessions).toEqual([secondFork])
   })
 
-  test("reuses fork reconciliation for a message boundary", async () => {
-    const source = createStore({}, {
-      session: [sessionFixture("session-a", "Source", "/test/project")],
-      sessionTotal: 1,
-      part: {
-        "message-user": [{
-          id: "part-user",
-          sessionID: "session-a",
-          messageID: "message-user",
-          type: "text",
-          text: "Try this next",
-        }],
-      },
-    })
-    const { forkFromMessage, setActionRefs } = await import("./session-actions")
-    const { opencodeClient } = await import("@/lib/opencode/client")
-    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
-    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-message.test", runtimeKey: "fork-message" })
-    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
-
-    await forkFromMessage("session-a", "message-user")
-
-    expect(replyCalls.filter((call) => call.method === "session.fork")[0]?.params).toEqual({
-      sessionID: "session-a",
-      messageID: "message-user",
-      directory: "/test/project",
-    })
-    expect(source.getState().sessionTotal).toBe(2)
-    expect(globalUpsertedSessions).toEqual([sessionForkResult])
-    expect(selectedSessions).toEqual([{ sessionID: "session-fork", directory: "/test/project" }])
-    expect(inputState.pendingInputText).toBe("Try this next")
-    expect(inputState.pendingInputMode).toBe("replace")
-  })
-
   test("uses the directory returned by the fork response", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-user", 1),
+      assistantMessageFixture("source-assistant", 2, "source-user"),
+    ]
     const source = createStore({}, {
       session: [sessionFixture("session-a", "Source", "/test/project")],
       sessionTotal: 1,
     })
     const destination = createStore({})
-    sessionForkResult = sessionFixture("session-fork", "Forked", "/other/project")
-    const { forkSession, setActionRefs } = await import("./session-actions")
+    sessionForkResult = sessionFixture("session-fork", "Forked (fork #1)", "/other/project")
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
     const { opencodeClient } = await import("@/lib/opencode/client")
     const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
     switchRuntimeEndpoint({ apiBaseUrl: "http://fork-directory.test", runtimeKey: "fork-directory" })
@@ -784,7 +851,7 @@ describe("session forks", () => {
       ["/other/project", destination],
     ]), () => "/test/project")
 
-    await forkSession("session-a")
+    await forkFromMessage("session-a", "source-assistant")
 
     expect(source.getState().session.map((session) => session.id)).toEqual(["session-a"])
     expect(destination.getState().session.map((session) => session.id)).toEqual(["session-fork"])
@@ -793,11 +860,16 @@ describe("session forks", () => {
   })
 
   test("rejects a fork response from the previous runtime", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-user", 1),
+      assistantMessageFixture("source-assistant", 2, "source-user"),
+    ]
     const source = createStore({}, {
       session: [sessionFixture("session-a", "Source", "/test/project")],
       sessionTotal: 1,
     })
-    const { forkSession, setActionRefs } = await import("./session-actions")
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
     const { opencodeClient } = await import("@/lib/opencode/client")
     const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
     switchRuntimeEndpoint({ apiBaseUrl: "http://fork-runtime-a.test", runtimeKey: "fork-runtime-a" })
@@ -806,13 +878,30 @@ describe("session forks", () => {
     }
     setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
 
-    await expect(forkSession("session-a")).rejects.toThrow("runtime changed")
+    await expect(forkFromMessage("session-a", "source-assistant")).rejects.toThrow("runtime changed")
 
     expect(source.getState().session.map((session) => session.id)).toEqual(["session-a"])
     expect(source.getState().sessionTotal).toBe(1)
     expect(registeredSessionDirectories).toEqual([])
     expect(globalUpsertedSessions).toEqual([])
     expect(selectedSessions).toEqual([])
+  })
+
+  test("does not create a fork when the source transcript fetch fails", async () => {
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    sessionMessagesResult = { error: new Error("offline"), response: { status: 503 } }
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-fetch-failure.test", runtimeKey: "fork-fetch-failure" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    await expect(forkFromMessage("session-a", "source-user")).rejects.toThrow("source session.messages failed (503): offline")
+
+    expect(replyCalls.filter((call) => call.method === "session.fork")).toEqual([])
   })
 })
 

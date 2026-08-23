@@ -17,17 +17,6 @@ const runtimeCtx = {
 };
 
 describe('settings search', () => {
-  test('finds the assistant answer action', () => {
-    const results = buildSettingsSearchResults({
-      query: 'fork session',
-      runtimeCtx,
-      t,
-      getPageTitle: (page) => page,
-    });
-
-    expect(results.some((result) => result.id === 'chat.assistant-answer-action')).toBe(true);
-  });
-
   test('finds the Claude Code third-party integration', () => {
     const results = buildSettingsSearchResults({
       query: 'claude',

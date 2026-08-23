@@ -2204,7 +2204,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.actions.saveAsPlan": "Guardar como plan",
   "chat.messageBody.actions.startNewSession": "Iniciar nueva sesión desde esta respuesta",
   "chat.messageBody.actions.forkSession": "Bifurcar sesión",
-  "sessions.sidebar.session.menu.fork": "Bifurcar sesión",
   "sessions.fork.toast.success": "Sesión bifurcada",
   "sessions.fork.toast.error": "No se pudo bifurcar la sesión",
   "chat.messageBody.actions.startNewMultiRun": "Iniciar nuevo multi-run desde esta respuesta",

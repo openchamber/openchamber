@@ -62,7 +62,6 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { TerminalShellOption } from '@/lib/api/types';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import type { AssistantAnswerAction } from '@/lib/assistantAnswerAction';
 
 interface Option<T extends string> {
     id: T;
@@ -263,22 +262,11 @@ const FOLLOW_UP_BEHAVIOR_OPTIONS: Option<FollowUpBehavior>[] = [
     },
 ];
 
-const ASSISTANT_ANSWER_ACTION_OPTIONS: Option<AssistantAnswerAction>[] = [
-    {
-        id: 'start-from-answer',
-        labelKey: 'settings.openchamber.visual.option.assistantAnswerAction.startFromAnswer.label',
-    },
-    {
-        id: 'fork-session',
-        labelKey: 'settings.openchamber.visual.option.assistantAnswerAction.forkSession.label',
-    },
-];
-
 const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'assistantAnswerAction' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -385,8 +373,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
     const showSplitAssistantMessageActions = useUIStore(state => state.showSplitAssistantMessageActions);
     const setShowSplitAssistantMessageActions = useUIStore(state => state.setShowSplitAssistantMessageActions);
-    const assistantAnswerAction = useUIStore(state => state.assistantAnswerAction);
-    const setAssistantAnswerAction = useUIStore(state => state.setAssistantAnswerAction);
     const allowPromptingSubagentSessions = useUIStore(state => state.allowPromptingSubagentSessions);
     const setAllowPromptingSubagentSessions = useUIStore(state => state.setAllowPromptingSubagentSessions);
     const draftStartersVisible = useUIStore(state => state.draftStartersVisible);
@@ -527,11 +513,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ showSplitAssistantMessageActions: enabled });
     }, [setShowSplitAssistantMessageActions]);
 
-    const handleAssistantAnswerActionChange = React.useCallback((value: AssistantAnswerAction) => {
-        setAssistantAnswerAction(value);
-        void updateDesktopSettings({ assistantAnswerAction: value });
-    }, [setAssistantAnswerAction]);
-
     const handleInputSpellcheckChange = React.useCallback((enabled: boolean) => {
         setInputSpellcheckEnabled(enabled);
         void updateDesktopSettings({ inputSpellcheckEnabled: enabled });
@@ -648,7 +629,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('wideChatLayout')
         || shouldShow('codeBlockLineWrap')
         || shouldShow('splitAssistantMessageActions')
-        || shouldShow('assistantAnswerAction')
         || shouldShow('subagentReadOnlyBanner')
         || shouldShow('diffLayout')
         || shouldShow('dotfiles')
@@ -665,8 +645,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const showBehaviorMessageOptions = shouldShow('userMessageRendering')
         || shouldShow('mermaidRendering')
         || (shouldShow('diffLayout') && !isVSCode)
-        || shouldShow('followUpBehavior')
-        || shouldShow('assistantAnswerAction');
+        || shouldShow('followUpBehavior');
     const showBehaviorFeatureCheckboxes = shouldShow('sessionAssist')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('subagentReadOnlyBanner')
@@ -1733,25 +1712,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </SettingsControlGroup>
                                     )}
 
-                                    {shouldShow('assistantAnswerAction') && (
-                                        <SettingsControlGroup
-                                            title={t('settings.openchamber.visual.section.assistantAnswerAction')}
-                                            description={t('settings.openchamber.visual.field.assistantAnswerActionDescription')}
-                                            settingsItem="chat.assistant-answer-action"
-                                        >
-                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.assistantAnswerActionAria')}>
-                                                {ASSISTANT_ANSWER_ACTION_OPTIONS.map((option) => (
-                                                    <SettingsRadioOption
-                                                        key={option.id}
-                                                        selected={assistantAnswerAction === option.id}
-                                                        onSelect={() => handleAssistantAnswerActionChange(option.id)}
-                                                        label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.openchamber.visual.field.assistantAnswerActionAria', { option: tUnsafe(option.labelKey) })}
-                                                    />
-                                                ))}
-                                            </SettingsRadioGroup>
-                                        </SettingsControlGroup>
-                                    )}
                                 </SettingsTwoColumn>
                             </SettingsSection>
                         )}

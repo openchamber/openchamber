@@ -2193,11 +2193,5 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'エージェントが応答している間にフォローアップメッセージで Enter を押したときの動作を選択します。',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'ステア',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'キュー',
-  'settings.openchamber.visual.section.assistantAnswerAction': 'アシスタント回答のアクション',
-  'settings.openchamber.visual.section.assistantAnswerActionAria': 'アシスタント回答のアクション',
-  'settings.openchamber.visual.field.assistantAnswerActionAria': 'アシスタント回答のアクション: {option}',
-  'settings.openchamber.visual.field.assistantAnswerActionDescription': 'アシスタントの回答の下にあるアクションの動作を選択します。',
-  'settings.openchamber.visual.option.assistantAnswerAction.startFromAnswer.label': '回答から新しいセッションを開始',
-  'settings.openchamber.visual.option.assistantAnswerAction.forkSession.label': 'セッションをフォーク',
   ...thirdPartyIntegrationI18n.ja,
 } as const;

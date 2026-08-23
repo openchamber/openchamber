@@ -22,7 +22,6 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpoin
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { DEFAULT_ASSISTANT_ANSWER_ACTION, normalizeAssistantAnswerAction } from '@/lib/assistantAnswerAction';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -581,7 +580,6 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     promptNavigatorEnabled: defaults.promptNavigatorEnabled,
     wideChatLayoutEnabled: defaults.wideChatLayoutEnabled,
     showSplitAssistantMessageActions: defaults.showSplitAssistantMessageActions,
-    assistantAnswerAction: DEFAULT_ASSISTANT_ANSWER_ACTION,
     draftStartersVisible: defaults.draftStartersVisible,
     reportUsage: defaults.reportUsage,
     fontSize: defaults.fontSize,
@@ -851,12 +849,6 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     && settings.showSplitAssistantMessageActions !== store.showSplitAssistantMessageActions
   ) {
     store.setShowSplitAssistantMessageActions(settings.showSplitAssistantMessageActions);
-  }
-  if (settings.assistantAnswerAction !== undefined) {
-    const assistantAnswerAction = normalizeAssistantAnswerAction(settings.assistantAnswerAction);
-    if (assistantAnswerAction !== store.assistantAnswerAction) {
-      store.setAssistantAnswerAction(assistantAnswerAction);
-    }
   }
   if (typeof settings.reportUsage === 'boolean' && settings.reportUsage !== store.reportUsage) {
     store.setReportUsage(settings.reportUsage);
@@ -1520,9 +1512,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
     result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
-  }
-  if (candidate.assistantAnswerAction !== undefined) {
-    result.assistantAnswerAction = normalizeAssistantAnswerAction(String(candidate.assistantAnswerAction));
   }
   if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
     result.fontSize = candidate.fontSize;

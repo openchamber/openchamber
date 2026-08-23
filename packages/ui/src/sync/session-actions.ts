@@ -3,7 +3,7 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { FilePart, OpencodeClient, Session, Message, Part, TextPart } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -114,6 +114,11 @@ type SdkResult<T> = {
   data?: T
   error?: unknown
   response?: { status?: number }
+}
+
+type SessionMessageRecord = {
+  info: Message
+  parts: Part[]
 }
 
 function formatSdkError(error: unknown): string {
@@ -487,14 +492,15 @@ function getSessionReplyClient(sessionId?: string): OpencodeClient {
   return sdk()
 }
 
-function restoreFilePartsToInput(fileParts: Array<Record<string, unknown>>): void {
+function restoreFilePartsToInput(fileParts: FilePart[]): void {
   useInputStore.getState().clearAttachedFiles()
   for (const filePart of fileParts) {
-    const url = typeof filePart.url === "string" ? filePart.url : ""
-    const mime = typeof filePart.mime === "string" ? filePart.mime : "application/octet-stream"
-    const filename = typeof filePart.filename === "string" ? filePart.filename : "attachment"
-    if (url) {
-      useInputStore.getState().addRestoredAttachment({ url, mimeType: mime, filename })
+    if (filePart.url) {
+      useInputStore.getState().addRestoredAttachment({
+        url: filePart.url,
+        mimeType: filePart.mime,
+        filename: filePart.filename ?? "attachment",
+      })
     }
   }
 }
@@ -1863,7 +1869,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const messages = state.message[sessionId] ?? []
   const targetMsg = messages.find((m) => m.id === messageId)
   let messageText = ""
-  let submittedFileParts: Array<Record<string, unknown>> = []
+  let submittedFileParts: FilePart[] = []
   if (targetMsg && targetMsg.role === "user") {
     const parts = state.part[messageId] ?? []
     const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
@@ -1874,7 +1880,9 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     // Snapshot file parts for later restoration to the input.
     // Exclude synthetic file parts (server-generated file content that should
     // not be restored to the composer).
-    submittedFileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
+    submittedFileParts = parts.filter((part): part is FilePart => (
+      part.type === "file" && !isSyntheticPart(part)
+    ))
   }
 
   // Optimistically set only the revert marker. Keep messages and parts in the
@@ -2054,10 +2062,8 @@ const FORK_TITLE_PATTERN = /^(.*) \(fork #(\d+)\)$/
 
 function getNextForkTitle(proposedTitle: string, sessions: readonly Session[]): string {
   const proposedMatch = proposedTitle.match(FORK_TITLE_PATTERN)
-  if (!proposedMatch) return proposedTitle
-
-  const baseTitle = proposedMatch[1]
-  const proposedNumber = Number.parseInt(proposedMatch[2], 10)
+  const baseTitle = proposedMatch?.[1] ?? proposedTitle
+  const proposedNumber = proposedMatch ? Number.parseInt(proposedMatch[2], 10) : 1
   let nextNumber = proposedNumber
   for (const session of sessions) {
     const match = session.title.match(FORK_TITLE_PATTERN)
@@ -2068,7 +2074,11 @@ function getNextForkTitle(proposedTitle: string, sessions: readonly Session[]): 
   return `${baseTitle} (fork #${nextNumber})`
 }
 
-function getKnownSessionsForForkTitle(store: DirectoryStoreApi, directory: string | null): Session[] {
+function getKnownSessionsForForkTitle(
+  store: DirectoryStoreApi,
+  directory: string | null,
+  forkedSessionId: string,
+): Session[] {
   const globalState = useGlobalSessionsStore.getState()
   const normalizedDirectory = normalizePath(directory)
   return [
@@ -2076,6 +2086,9 @@ function getKnownSessionsForForkTitle(store: DirectoryStoreApi, directory: strin
     ...globalState.activeSessions,
     ...globalState.archivedSessions,
   ].filter((session) => {
+    // The creation event can add the new fork before this action resumes.
+    // Do not count that fork when the action chooses its own number.
+    if (session.id === forkedSessionId) return false
     if (!normalizedDirectory) return true
     const sessionDirectory = resolveGlobalSessionDirectory(session)
     return !sessionDirectory || normalizePath(sessionDirectory) === normalizedDirectory
@@ -2083,24 +2096,22 @@ function getKnownSessionsForForkTitle(store: DirectoryStoreApi, directory: strin
 }
 
 async function reconcileForkedMetadata(
-  sourceSessionId: string,
+  sourceRecords: SessionMessageRecord[],
   forkedSession: Session,
-  sourceDirectory: string | undefined,
   forkDirectory: string | null,
   expectedRuntimeKey: string,
-  boundaryCreatedAt?: number,
+  copiedThroughCreatedAt: number | null,
 ): Promise<Session> {
   const pinnedMessages = getContextObligatoryMessages(forkedSession)
   const remappedMessages: ContextObligatoryMessage[] = []
 
   if (pinnedMessages.length > 0) {
-    const [sourceResult, forkResult] = await Promise.all([
-      sdk().session.messages({ sessionID: sourceSessionId, directory: sourceDirectory }),
-      sdk().session.messages({ sessionID: forkedSession.id, directory: forkDirectory ?? undefined }),
-    ])
+    const forkResult = await sdk().session.messages({
+      sessionID: forkedSession.id,
+      directory: forkDirectory ?? undefined,
+    })
     if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
 
-    const sourceRecords = assertSdkData(sourceResult, "source session.messages")
     const forkRecords = assertSdkData(forkResult, "fork session.messages")
     if (forkRecords.length > sourceRecords.length) {
       throw new Error("Cannot remap pinned messages because the fork transcript is longer than its source")
@@ -2131,9 +2142,7 @@ async function reconcileForkedMetadata(
   let metadata = pinnedMessages.length > 0
     ? withContextObligatoryMessages(currentMetadata, remappedMessages)
     : currentMetadata
-  if (boundaryCreatedAt !== undefined) {
-    metadata = prepareBoundaryForkMetadata(metadata, boundaryCreatedAt)
-  }
+  metadata = prepareBoundaryForkMetadata(metadata, copiedThroughCreatedAt)
   if (metadata === currentMetadata) return forkedSession
 
   const updatedSession = await opencodeClient.updateSession(
@@ -2148,21 +2157,19 @@ async function reconcileForkedMetadata(
 async function forkAndReconcileSession(
   sessionId: string,
   messageBoundaryId: string | undefined,
+  sourceRecords: SessionMessageRecord[],
+  copiedThroughCreatedAt: number | null,
   store: DirectoryStoreApi,
   directory: string | undefined,
   expectedRuntimeKey: string,
-  boundaryCreatedAt?: number,
 ): Promise<Session> {
-  const sourceSession = store.getState().session.find((session) => session.id === sessionId)
-  if (isReviewSession(sourceSession)) throw new Error("Review sessions cannot be forked")
-
   const forkedSession = await opencodeClient.forkSession(sessionId, messageBoundaryId, directory)
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
 
   const forkDirectory = forkedSession.directory ?? directory ?? null
   const nextTitle = getNextForkTitle(
     forkedSession.title,
-    getKnownSessionsForForkTitle(store, forkDirectory),
+    getKnownSessionsForForkTitle(store, forkDirectory, forkedSession.id),
   )
   let titledSession = forkedSession
   if (nextTitle !== forkedSession.title) {
@@ -2178,78 +2185,72 @@ async function forkAndReconcileSession(
     }
   }
   const reconciledMetadataSession = await reconcileForkedMetadata(
-    sessionId,
+    sourceRecords,
     titledSession,
-    directory,
     forkDirectory,
     expectedRuntimeKey,
-    boundaryCreatedAt,
+    copiedThroughCreatedAt,
   )
   return reconcileForkedSession(reconciledMetadataSession, store, directory, expectedRuntimeKey)
 }
 
 /**
- * Copy a session through an optional message and select the returned session.
- * OpenCode treats its message ID as an exclusive boundary, so use the next
- * transcript message when the clicked message must remain in the fork.
- */
-export async function forkSession(sessionId: string, throughMessageId?: string): Promise<Session> {
-  const expectedRuntimeKey = getRuntimeKey()
-  const { store, directory } = dirStoreForSession(sessionId)
-  const messages = store.getState().message[sessionId] ?? []
-  const throughMessageIndex = throughMessageId
-    ? messages.findIndex((message) => message.id === throughMessageId)
-    : -1
-  if (throughMessageId && throughMessageIndex < 0) {
-    throw new Error("Cannot fork through a message that is not loaded")
-  }
-  const exclusiveBoundaryId = throughMessageIndex >= 0
-    ? messages[throughMessageIndex + 1]?.id
-    : undefined
-  const boundaryCreatedAt = throughMessageIndex >= 0
-    ? messages[throughMessageIndex]?.time.created
-    : undefined
-  return forkAndReconcileSession(
-    sessionId,
-    exclusiveBoundaryId,
-    store,
-    directory,
-    expectedRuntimeKey,
-    boundaryCreatedAt,
-  )
-}
-
-/**
- * Copy a session at a user message, then restore that message in the composer.
+ * Copy a session from a user or assistant message.
+ *
+ * A user message stays in the composer and is not copied. An assistant message
+ * stays in the copied transcript. OpenCode treats messageID as an exclusive
+ * cutoff, so both cases send the first message that must not be copied.
  */
 export async function forkFromMessage(sessionId: string, messageId: string): Promise<void> {
   const expectedRuntimeKey = getRuntimeKey()
   const { store, directory } = dirStoreForSession(sessionId)
-  const state = store.getState()
 
-  // Extract message text and file attachments for input restoration.
-  // Only non-synthetic text parts — the server adds file content as synthetic
-  // text parts that should not be restored. File parts (images, pasted
-  // screenshots) are user-originated and must be restored.
-  const parts = state.part[messageId] ?? []
-  let messageText = ""
-  const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
-  messageText = textParts
-    .map((p: Part) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
+  const sourceResult = await sdk().session.messages({ sessionID: sessionId, directory })
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+
+  const sourceRecords = assertSdkData(sourceResult, "source session.messages")
+  const selectedIndex = sourceRecords.findIndex((record) => record.info.id === messageId)
+  if (selectedIndex < 0) throw new Error("Cannot fork from a message that does not exist")
+
+  const selectedRecord = sourceRecords[selectedIndex]
+  const copiedThroughIndex = selectedRecord.info.role === "user"
+    ? selectedIndex - 1
+    : selectedIndex
+  const exclusiveBoundaryId = sourceRecords[copiedThroughIndex + 1]?.info.id
+  const copiedThroughCreatedAt = sourceRecords[copiedThroughIndex]?.info.time.created ?? null
+
+  // Only user-message forks restore the selected message in the composer.
+  // Synthetic text and files come from the server, not from the user's input.
+  const parts = selectedRecord.info.role === "user" ? selectedRecord.parts : []
+  const textParts = parts.filter((part): part is TextPart => (
+    part.type === "text" && !isSyntheticPart(part)
+  ))
+  const messageText = textParts
+    .map((part) => part.text)
     .join("\n")
     .trim()
-  const fileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
+  const fileParts = parts.filter((part): part is FilePart => (
+    part.type === "file" && !isSyntheticPart(part)
+  ))
 
-  await forkAndReconcileSession(sessionId, messageId, store, directory, expectedRuntimeKey)
+  await forkAndReconcileSession(
+    sessionId,
+    exclusiveBoundaryId,
+    sourceRecords,
+    copiedThroughCreatedAt,
+    store,
+    directory,
+    expectedRuntimeKey,
+  )
 
-  // Restore forked message text and file attachments to input
+  if (selectedRecord.info.role !== "user") return
+
   if (messageText) {
     useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
     })
   }
-  // Clear existing attachments and restore file parts from the forked message.
   restoreFilePartsToInput(fileParts)
 }
 

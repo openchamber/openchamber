@@ -958,14 +958,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         <Icon name="download" className="mr-1 h-4 w-4" />
         {t('sessions.sidebar.session.menu.exportMarkdown')}
       </Item>
-      <Item
-        disabled={!sessionDirectory}
-        onClick={() => { if (sessionDirectory) void useSessionUIStore.getState().forkSession(session.id); }}
-        className="[&>svg]:mr-1"
-      >
-        <Icon name="git-branch" className="mr-1 h-4 w-4" />
-        {t('sessions.sidebar.session.menu.fork')}
-      </Item>
       {!isSubtaskSession && !archivedBucket && !isVSCode && !isChatDirectoryPath(sessionDirectory) ? (
         <Tooltip>
           <TooltipTrigger asChild>

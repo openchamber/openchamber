@@ -11,7 +11,7 @@ const metadataNamespaceSchema = z.record(z.string(), z.unknown());
  */
 export const prepareBoundaryForkMetadata = (
   metadata: SessionMetadataRecord,
-  boundaryCreatedAt: number,
+  copiedThroughCreatedAt: number | null,
 ): SessionMetadataRecord => {
   const parsedNamespace = metadataNamespaceSchema.safeParse(metadata.openchamber);
   if (!parsedNamespace.success) return metadata;
@@ -21,8 +21,10 @@ export const prepareBoundaryForkMetadata = (
   let changed = false;
 
   if (Array.isArray(currentNamespace.linked_issues)) {
-    const linkedIssues = getLinkedIssuesFromMetadata(metadata)
-      .filter((issue) => issue.linkedAt <= boundaryCreatedAt);
+    const linkedIssues = copiedThroughCreatedAt === null
+      ? []
+      : getLinkedIssuesFromMetadata(metadata)
+        .filter((issue) => issue.linkedAt <= copiedThroughCreatedAt);
     if (linkedIssues.length !== currentNamespace.linked_issues.length) {
       nextNamespace.linked_issues = linkedIssues;
       changed = true;

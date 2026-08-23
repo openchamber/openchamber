@@ -3,7 +3,6 @@ import type { ProjectEntry, RuntimeAPIs, TerminalShell } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import type { AssistantAnswerAction } from '@/lib/assistantAnswerAction';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
@@ -182,7 +181,6 @@ export type DesktopSettings = {
   promptNavigatorEnabled?: boolean;
   wideChatLayoutEnabled?: boolean;
   showSplitAssistantMessageActions?: boolean;
-  assistantAnswerAction?: AssistantAnswerAction;
   fontSize?: number;
   terminalFontSize?: number;
   terminalShell?: TerminalShell;

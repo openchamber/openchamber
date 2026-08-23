@@ -2196,7 +2196,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.saveAsPlan': '儲存為計畫',
   'chat.messageBody.actions.startNewSession': '基於此回答開始新會話',
   'chat.messageBody.actions.forkSession': '分支工作階段',
-  'sessions.sidebar.session.menu.fork': '分支工作階段',
   'sessions.fork.toast.success': '工作階段已分支',
   'sessions.fork.toast.error': '無法分支工作階段',
   'chat.messageBody.actions.startNewMultiRun': '基於此回答開始新的 Multi-run',

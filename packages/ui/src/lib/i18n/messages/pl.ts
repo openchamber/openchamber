@@ -918,7 +918,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.saveAsPlan': 'Zapisz jako plan',
   'chat.messageBody.actions.startNewSession': 'Rozpocznij nową sesję z tej odpowiedzi',
   'chat.messageBody.actions.forkSession': 'Rozgałęź sesję',
-  'sessions.sidebar.session.menu.fork': 'Rozgałęź sesję',
   'sessions.fork.toast.success': 'Sesja została rozgałęziona',
   'sessions.fork.toast.error': 'Nie udało się rozgałęzić sesji',
   'chat.messageBody.actions.startNewMultiRun': 'Rozpocznij nowe wielokrotne uruchomienie z tej odpowiedzi',

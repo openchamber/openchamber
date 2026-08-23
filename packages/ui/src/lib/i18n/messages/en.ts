@@ -2226,7 +2226,6 @@ export const dict = {
   'chat.messageBody.actions.saveAsPlan': 'Save as plan',
   'chat.messageBody.actions.startNewSession': 'Start new session from this answer',
   'chat.messageBody.actions.forkSession': 'Fork session',
-  'sessions.sidebar.session.menu.fork': 'Fork session',
   'sessions.fork.toast.success': 'Session forked',
   'sessions.fork.toast.error': 'Failed to fork session',
   'chat.messageBody.actions.startNewMultiRun': 'Start new multi-run from this answer',

@@ -70,7 +70,6 @@ import {
   refetchSessionMessages,
   revertToMessage as revertToMessageAction,
   unrevertSession as unrevertSessionAction,
-  forkSession as forkSessionAction,
   forkFromMessage as forkFromMessageAction,
   fetchMessagesForSession,
   type ArchiveSessionsOptions,
@@ -381,7 +380,6 @@ export type SessionUIState = {
   shareSession: (sessionId: string) => Promise<Session | null>
   unshareSession: (sessionId: string) => Promise<Session | null>
   revertToMessage: (sessionId: string, messageId: string, options?: { skipRedoPush?: boolean }) => Promise<void>
-  forkSession: (sessionId: string, throughMessageId?: string) => Promise<void>
   forkFromMessage: (sessionId: string, messageId: string) => Promise<void>
   handleSlashUndo: (sessionId: string) => Promise<void>
   handleSlashRedo: (sessionId: string, options?: { fullUnrevert?: boolean }) => Promise<void>
@@ -1868,23 +1866,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // Session forks delegate state reconciliation to session-actions.
   // ---------------------------------------------------------------------------
-  forkSession: async (sessionId, throughMessageId) => {
-    try {
-      await forkSessionAction(sessionId, throughMessageId)
-      const { toast } = await import("sonner")
-      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
-      const { dictionary } = useI18nStore.getState()
-      toast.success(formatMessage(dictionary, "sessions.fork.toast.success"))
-    } catch (error) {
-      if (error instanceof Error && error.message === "runtime changed") return
-      console.error("Failed to fork session:", error)
-      const { toast } = await import("sonner")
-      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
-      const { dictionary } = useI18nStore.getState()
-      toast.error(formatMessage(dictionary, "sessions.fork.toast.error"))
-    }
-  },
-
   forkFromMessage: async (sessionId, messageId) => {
     try {
       await forkFromMessageAction(sessionId, messageId)

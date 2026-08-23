@@ -2226,7 +2226,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.saveAsPlan': '플랜으로 저장',
   'chat.messageBody.actions.startNewSession': '이 응답에서 새 세션 시작',
   'chat.messageBody.actions.forkSession': '세션 포크',
-  'sessions.sidebar.session.menu.fork': '세션 포크',
   'sessions.fork.toast.success': '세션을 포크했습니다',
   'sessions.fork.toast.error': '세션을 포크하지 못했습니다',
   'chat.messageBody.actions.startNewMultiRun': '이 응답에서 새 멀티런 시작',

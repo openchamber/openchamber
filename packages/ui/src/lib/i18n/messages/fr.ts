@@ -1953,7 +1953,6 @@ export const dict = {
   'chat.messageBody.actions.saveAsPlan': 'Enregistrer comme forfait',
   'chat.messageBody.actions.startNewSession': 'Démarrer une nouvelle session à partir de cette réponse',
   'chat.messageBody.actions.forkSession': 'Dupliquer la session',
-  'sessions.sidebar.session.menu.fork': 'Dupliquer la session',
   'sessions.fork.toast.success': 'Session dupliquée',
   'sessions.fork.toast.error': 'Échec de la duplication de la session',
   'chat.messageBody.actions.startNewMultiRun': 'Démarrer une nouvelle exécution multiple à partir de cette réponse',

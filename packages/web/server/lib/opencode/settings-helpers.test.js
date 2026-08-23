@@ -96,23 +96,6 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: 'true' })).toEqual({});
   });
 
-  it('normalizes the assistant answer action', () => {
-    const helpers = createTestHelpers();
-
-    expect(helpers.sanitizeSettingsUpdate({ assistantAnswerAction: 'start-from-answer' })).toEqual({
-      assistantAnswerAction: 'start-from-answer',
-    });
-    expect(helpers.sanitizeSettingsUpdate({ assistantAnswerAction: 'fork-session' })).toEqual({
-      assistantAnswerAction: 'fork-session',
-    });
-    expect(helpers.sanitizeSettingsUpdate({ assistantAnswerAction: 'invalid' })).toEqual({
-      assistantAnswerAction: 'start-from-answer',
-    });
-    expect(helpers.formatSettingsResponse({})).toMatchObject({
-      assistantAnswerAction: 'start-from-answer',
-    });
-  });
-
   it('accepts only booleans for collapsible user messages', () => {
     const helpers = createTestHelpers();
 

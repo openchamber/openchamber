@@ -2096,12 +2096,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.followUpBehaviorDescription': 'Wählen Sie aus, was passiert, wenn Sie Enter auf einer Follow-up-Nachricht drücken, während der Agent noch antwortet.',
   'settings.openchamber.visual.option.followUpBehavior.steer.label': 'Steuerung',
   'settings.openchamber.visual.option.followUpBehavior.queue.label': 'Warteschlange',
-  'settings.openchamber.visual.section.assistantAnswerAction': 'Aktion für Assistentenantworten',
-  'settings.openchamber.visual.section.assistantAnswerActionAria': 'Aktion für Assistentenantworten',
-  'settings.openchamber.visual.field.assistantAnswerActionAria': 'Aktion für Assistentenantworten: {option}',
-  'settings.openchamber.visual.field.assistantAnswerActionDescription': 'Wählen Sie aus, was die Aktion unter einer Assistentenantwort ausführt.',
-  'settings.openchamber.visual.option.assistantAnswerAction.startFromAnswer.label': 'Neue Sitzung aus Antwort',
-  'settings.openchamber.visual.option.assistantAnswerAction.forkSession.label': 'Sitzung abzweigen',
 
   'settings.providers.page.quotaCredentials.accessToken': 'Zugriffstoken',
   'settings.providers.page.quotaCredentials.refreshToken': 'Aktualisierungstoken',

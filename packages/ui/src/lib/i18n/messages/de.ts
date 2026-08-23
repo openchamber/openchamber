@@ -2037,7 +2037,6 @@ export const dict = {
   'chat.messageBody.actions.saveAsPlan': 'Als Plan speichern',
   'chat.messageBody.actions.startNewSession': 'Neue Sitzung von dieser Antwort starten',
   'chat.messageBody.actions.forkSession': 'Sitzung abzweigen',
-  'sessions.sidebar.session.menu.fork': 'Sitzung abzweigen',
   'sessions.fork.toast.success': 'Sitzung abgezweigt',
   'sessions.fork.toast.error': 'Sitzung konnte nicht abgezweigt werden',
   'chat.messageBody.actions.startNewMultiRun': 'Neuer Multi-Run von dieser Antwort starten',

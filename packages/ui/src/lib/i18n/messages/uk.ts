@@ -2204,7 +2204,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.actions.saveAsPlan": "Зберегти як план",
   "chat.messageBody.actions.startNewSession": "Почати нову сесію із цієї відповіді",
   "chat.messageBody.actions.forkSession": "Розгалузити сесію",
-  "sessions.sidebar.session.menu.fork": "Розгалузити сесію",
   "sessions.fork.toast.success": "Сесію розгалужено",
   "sessions.fork.toast.error": "Не вдалося розгалузити сесію",
   "chat.messageBody.actions.startNewMultiRun": "Почніть новий Multi-run із цієї відповіді",

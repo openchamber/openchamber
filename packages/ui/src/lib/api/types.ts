@@ -1,6 +1,5 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DraftStarterRef } from '@/lib/draftStarters';
-import type { AssistantAnswerAction } from '@/lib/assistantAnswerAction';
 
 type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
@@ -706,7 +705,6 @@ export interface SettingsPayload {
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';
   showSplitAssistantMessageActions?: boolean;
-  assistantAnswerAction?: AssistantAnswerAction;
   fontSize?: number;
   terminalFontSize?: number;
   terminalShell?: TerminalShell;
