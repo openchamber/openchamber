@@ -232,16 +232,16 @@ describe('issue #2903 busy embedded subagent status-line-only', () => {
     // before it and must not render one of its own. The empty state itself no
     // longer lives here: the draft surface owns it since the draft transition
     // animation landed.
-    expect(chatContainerSource).toContain('if (sessionMessages.length === 0 && !sessionIsWorking)');
+    const emptyIdleGuard = 'if (sessionMessages.length === 0 && !sessionIsWorking)';
+    expect(chatContainerSource).toContain(emptyIdleGuard);
     expect(chatContainerSource).toContain('<StatusRowContainer />');
 
-    const emptyIdleGuard = 'if (sessionMessages.length === 0 && !sessionIsWorking)';
     const emptyIdleReturn = chatContainerSource.indexOf(emptyIdleGuard);
     expect(emptyIdleReturn).toBeGreaterThan(-1);
-    const emptyIdleBlock = chatContainerSource.slice(
-      emptyIdleReturn,
-      emptyIdleReturn + 1600,
-    );
+    const chatViewportReturn = chatContainerSource.indexOf('<ChatViewport', emptyIdleReturn);
+    expect(chatViewportReturn).toBeGreaterThan(emptyIdleReturn);
+    const emptyIdleBlock = chatContainerSource.slice(emptyIdleReturn, chatViewportReturn);
+    expect(emptyIdleBlock).not.toContain('<ChatEmptyState');
     expect(emptyIdleBlock).not.toContain('<StatusRowContainer />');
   });
 
