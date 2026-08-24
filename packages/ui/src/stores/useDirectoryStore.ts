@@ -8,6 +8,12 @@ import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { getDeferredSafeStorage } from './utils/safeStorage';
 
+declare global {
+  interface Window {
+    __zustand_directory_store__?: typeof useDirectoryStore;
+  }
+}
+
 interface DirectoryStore {
 
   currentDirectory: string;
@@ -436,6 +442,11 @@ export const useDirectoryStore = create<DirectoryStore>()(
 );
 
 if (typeof window !== 'undefined') {
+  // Registered on window so store modules inside the circular import cluster
+  // (useConfigStore, useAgentsStore, ...) can reach this store lazily without
+  // a static import that would resolve in TDZ at module-evaluation time.
+  window.__zustand_directory_store__ = useDirectoryStore;
+
   initializeHomeDirectory().then((home) => {
     useDirectoryStore.getState().synchronizeHomeDirectory(home);
   });

@@ -487,6 +487,46 @@ describe('settings helpers', () => {
       expect(sanitized.favoriteModels).toEqual(payload.favoriteModels);
       expect(sanitized.recentModels).toEqual(payload.recentModels);
     });
+
+    it('round-trips a valid gitProviders payload through sanitizeSettingsUpdate', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      const payload = {
+        gitProviders: {
+          github: { apiBaseUrl: 'https://github.example.com/api/v3', detectUrls: ['github.example.com'] },
+          gitlab: { apiBaseUrl: 'gitlab.example.com', detectUrls: [] },
+          gitea: { apiBaseUrl: '', detectUrls: ['gitea.example.com'] },
+        },
+      };
+
+      expect(helpers.sanitizeSettingsUpdate(payload)).toEqual({
+        gitProviders: {
+          github: { apiBaseUrl: 'https://github.example.com/api/v3', detectUrls: ['github.example.com'] },
+          gitlab: { apiBaseUrl: 'https://gitlab.example.com' },
+          gitea: { detectUrls: ['gitea.example.com'] },
+        },
+      });
+    });
+
+    it('drops malformed gitProviders payloads entirely', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ gitProviders: 'not-an-object' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ gitProviders: [] })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ gitProviders: null })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ gitProviders: { unknown: { apiBaseUrl: 'https://x.example.com' } } })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ gitProviders: { github: { apiBaseUrl: '  ' } } })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ gitProviders: { github: { detectUrls: 'github.example.com' } } })).toEqual({});
+    });
+
+    it('normalizes gitProviders apiBaseUrl scheme and strips trailing slashes', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({
+        gitProviders: { github: { apiBaseUrl: 'github.example.com/api/v3/' } },
+      })).toEqual({
+        gitProviders: { github: { apiBaseUrl: 'https://github.example.com/api/v3' } },
+      });
+    });
   });
 
   describe('session retention settings persistence', () => {

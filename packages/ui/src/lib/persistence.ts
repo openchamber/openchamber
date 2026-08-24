@@ -4,6 +4,15 @@ import { createProjectIdFromPath } from '@/lib/projectId';
 import { useUIStore } from '@/stores/useUIStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
 import {
+  useGitProviderDomainsStore,
+  normalizeApiBaseUrl,
+  normalizeDomainList,
+} from '@/stores/useGitProviderDomainsStore';
+import { getProjectGitProviders, resolveProjectIdForDirectory } from '@/lib/projectGitProviders';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import {
   DEFAULT_FOLLOW_UP_BEHAVIOR,
   isFollowUpBehavior,
   normalizeFollowUpBehavior,
@@ -327,6 +336,39 @@ const areStringArraysEqual = (left: string[], right: string[]): boolean => (
 const sanitizeStringArray = (value: unknown): string[] | undefined => {
   if (!Array.isArray(value)) return undefined;
   return Array.from(new Set(value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)));
+};
+
+const GIT_PROVIDER_NAMES = ['github', 'gitlab', 'gitea'] as const;
+
+const sanitizeGitProviders = (value: unknown): DesktopSettings['gitProviders'] | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const source = value as Record<string, unknown>;
+  const result: NonNullable<DesktopSettings['gitProviders']> = {};
+  let hasAny = false;
+  for (const provider of GIT_PROVIDER_NAMES) {
+    const entry = source[provider];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const providerConfig: { apiBaseUrl?: string; detectUrls?: string[] } = {};
+    const apiBaseUrl = normalizeApiBaseUrl(record.apiBaseUrl);
+    if (apiBaseUrl) {
+      providerConfig.apiBaseUrl = apiBaseUrl;
+    }
+    // detectUrls are bare hosts (scheme/port/path stripped) via parseGitHost.
+    const detectUrls = normalizeDomainList(record.detectUrls);
+    if (detectUrls.length > 0) {
+      providerConfig.detectUrls = detectUrls;
+    }
+    if (Object.keys(providerConfig).length > 0) {
+      result[provider] = providerConfig;
+      hasAny = true;
+    }
+  }
+  return hasAny ? result : undefined;
 };
 
 const sanitizeRecentEfforts = (value: unknown): Record<string, string[]> | undefined => {
@@ -1672,6 +1714,11 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     result.sttLanguage = candidate.sttLanguage.trim();
   }
 
+  const gitProviders = sanitizeGitProviders(candidate.gitProviders);
+  if (gitProviders) {
+    result.gitProviders = gitProviders;
+  }
+
   return result;
 };
 
@@ -1868,6 +1915,40 @@ export const syncDesktopSettings = async (): Promise<void> => {
       applyDesktopUiPreferences(authoritativeSettings);
     } catch (error) {
       console.warn('applyDesktopUiPreferences failed:', error);
+    }
+    try {
+      // Server `gitProviders` settings are authoritative for provider api base
+      // urls and detect hosts; hydrate the domains store (localStorage stays a
+      // cache for the one-time migration of pre-feature custom domains).
+      if (settings.gitProviders !== undefined) {
+        useGitProviderDomainsStore.getState().hydrateFromServer(settings.gitProviders);
+      }
+    } catch (error) {
+      console.warn('applyGitProviderSettings failed:', error);
+    }
+    try {
+      // Per-project git provider api base url overrides are also
+      // server-authoritative. Resolve the active project with the same
+      // directory resolution used by git provider detection (so hydration and
+      // detection key by the same project id) and fetch its override
+      // best-effort; failures are ignored and prior state is preserved.
+      const projectsState = useProjectsStore.getState();
+      const activeProjectId = projectsState.getActiveProject()?.id ?? null;
+      const projectId = activeProjectId
+        ?? resolveProjectIdForDirectory(
+          useDirectoryStore.getState().currentDirectory,
+          projectsState.projects,
+          useSessionUIStore.getState().availableWorktreesByProject,
+        );
+      if (projectId) {
+        void getProjectGitProviders(projectId)
+          .then(({ gitProviders }) => {
+            useGitProviderDomainsStore.getState().hydrateProjectFromServer(projectId, gitProviders);
+          })
+          .catch(() => undefined);
+      }
+    } catch (error) {
+      console.warn('applyProjectGitProviderSettings failed:', error);
     }
     const migrationPatch: Partial<DesktopSettings> = {};
     if (shouldPersistCraftGoalMigration) {

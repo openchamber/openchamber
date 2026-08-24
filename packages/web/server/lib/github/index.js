@@ -28,3 +28,8 @@ export {
   parseGitHubRemoteUrl,
   resolveGitHubRepoFromDirectory,
 } from './repo/index.js';
+
+export {
+  getProviderApiBaseUrl,
+  githubWebOriginFromApiBase,
+} from '../git-providers/config.js';

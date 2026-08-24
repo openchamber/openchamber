@@ -214,7 +214,7 @@ Managed health failures are classified as `timeout`, `connection_refused`, `conn
 - `createSettingsHelpers(dependencies)`: creates settings helper runtime for settings request/response shaping.
 - Returned API:
   - `normalizePwaAppName(value, fallback?)`
-  - `sanitizeSettingsUpdate(payload)`
+  - `sanitizeSettingsUpdate(payload)` — whitelist of persisted keys; includes `gitProviders` (validated via `packages/web/server/lib/git-providers/config.js` `sanitizeGitProviders`), which therefore round-trips through GET/PUT `/api/config/settings`.
   - `mergePersistedSettings(current, changes)`
   - `formatSettingsResponse(settings)`
 

@@ -1,9 +1,24 @@
 import type { Part } from "@opencode-ai/sdk/v2";
-
 import { readContextPart } from "./contextParts";
 
-const GITHUB_ISSUE_CONTEXT_PREFIX = 'GitHub issue context (JSON)';
-const GITHUB_PR_CONTEXT_PREFIX = 'GitHub pull request context (JSON)';
+export const GITHUB_ISSUE_CONTEXT_PREFIX = 'GitHub issue context (JSON)';
+export const GITHUB_PR_CONTEXT_PREFIX = 'GitHub pull request context (JSON)';
+export const GITLAB_ISSUE_CONTEXT_PREFIX = 'GitLab issue context (JSON)';
+export const GITLAB_MR_CONTEXT_PREFIX = 'GitLab merge request context (JSON)';
+export const GITEA_ISSUE_CONTEXT_PREFIX = 'Gitea issue context (JSON)';
+export const GITEA_PR_CONTEXT_PREFIX = 'Gitea pull request context (JSON)';
+
+export const FORGE_CONTEXT_PREFIXES = [
+    GITHUB_ISSUE_CONTEXT_PREFIX,
+    GITHUB_PR_CONTEXT_PREFIX,
+    GITLAB_ISSUE_CONTEXT_PREFIX,
+    GITLAB_MR_CONTEXT_PREFIX,
+    GITEA_ISSUE_CONTEXT_PREFIX,
+    GITEA_PR_CONTEXT_PREFIX,
+];
+
+export const startsWithForgeContextPrefix = (text: string): boolean =>
+    FORGE_CONTEXT_PREFIXES.some((prefix) => text.startsWith(prefix));
 
 export const isSyntheticPart = (part: Part | undefined): boolean => {
     if (!part || typeof part !== "object") {
@@ -54,7 +69,7 @@ export const filterSyntheticParts = (parts: Part[] | undefined): Part[] => {
         }
 
         const trimmed = text.trimStart();
-        return trimmed.startsWith(GITHUB_ISSUE_CONTEXT_PREFIX) || trimmed.startsWith(GITHUB_PR_CONTEXT_PREFIX);
+        return startsWithForgeContextPrefix(trimmed);
     };
 
     // If there are non-synthetic parts, filter out synthetic ones
