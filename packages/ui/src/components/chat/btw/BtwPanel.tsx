@@ -233,7 +233,7 @@ const BtwFrame: React.FC<{
         role="dialog"
         aria-label="btw"
     >
-        <div className="oc-glass-popover oc-glass-floating w-full overflow-hidden rounded-xl">
+        <div className="oc-glass-popover w-full overflow-hidden rounded-xl border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
             <div className="flex items-center gap-2 px-3 py-1.5">
                 {onTitleClick ? (
                     <button

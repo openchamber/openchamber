@@ -135,6 +135,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const globalMemory = useAgentMemoryStore((state) => state.global);
   const projectMemory = useAgentMemoryStore((state) => state.project);
 
+  const isMobile = useUIStore((state) => state.isMobile);
   const storedTab = useUIStore((state) => state.projectContextTab);
   const setStoredTab = useUIStore((state) => state.setProjectContextTab);
   const requestedTab = TAB_ORDER.includes(storedTab as ProjectContextTab)
@@ -413,6 +414,42 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
       </div>
 
+      {/* Mobile: a half-width panel has no room for a side column, so the
+          sections become the same pill strip the mobile drawer's surface
+          tabs use — the active pill carries the label, the rest collapse to
+          icon and count. */}
+      {isMobile ? (
+        <nav
+          className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto px-3 pb-2"
+          aria-label={t('rightSidebar.contextNotesTodo.sections.label')}
+        >
+          {sections.map((section) => {
+            const isActive = activeTab === section.id;
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => setStoredTab(section.id)}
+                aria-current={isActive ? 'page' : undefined}
+                className={cn(
+                  'flex flex-shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                  isActive
+                    ? 'border-transparent bg-interactive-active text-foreground'
+                    : 'border-[var(--interactive-border)] text-muted-foreground',
+                )}
+              >
+                <Icon name={section.icon} className="h-4 w-4 flex-shrink-0" />
+                {isActive ? (
+                  <span className="whitespace-nowrap typography-meta">{section.label}</span>
+                ) : null}
+                <span className="typography-micro text-muted-foreground">{section.count}</span>
+              </button>
+            );
+          })}
+        </nav>
+      ) : null}
+
       {/* Content first, sidebar on the right — the same order and the same
           drag-to-resize edge the files surface uses, so the two panels do not
           disagree about where navigation lives. */}
@@ -472,6 +509,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         ) : null}
         </div>
 
+        {isMobile ? null : (
         <nav
           className="relative flex flex-shrink-0 flex-col gap-0.5 overflow-y-auto border-l border-[var(--interactive-border)] p-2"
           style={{ width: `${sidebarWidth}px` }}
@@ -514,6 +552,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             );
           })}
         </nav>
+        )}
       </div>
 
       <TodoSendDialog

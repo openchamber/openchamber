@@ -705,30 +705,25 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         }
         if (errorName === 'SessionRetry') {
             return {
-                text: `Opencode failed to send a message. Retry attempt info: \n\`${detail}\``,
-                variant: 'info' as const,
+                text: `Opencode failed to send a message. Retry attempt info: ${detail}`,
             };
         }
         if (isLikelyProviderAuthFailure(detail)) {
             return {
                 text: PROVIDER_AUTH_FAILURE_MESSAGE,
-                variant: 'error' as const,
             };
         }
         if (detail.trim().toLowerCase() === 'aborted') {
             return {
                 text: 'The running turn was stopped before OpenCode could send the next message.',
-                variant: 'info' as const,
             };
         }
         return {
-            text: `Opencode failed to send message with error:\n\`${detail}\``,
-            variant: 'error' as const,
+            text: `Opencode failed to send message with error: ${detail}`,
         };
     }, [isUser, message.info]);
 
     const assistantErrorText = assistantError?.text;
-    const assistantErrorVariant = assistantError?.variant;
 
     const messageTextContent = React.useMemo(() => {
         if (isUser) {
@@ -1089,7 +1084,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 contextPinPending={pinPending}
                                                 onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
-                                                errorVariant={assistantErrorVariant}
                                                 userActionsMode={useExternalUserActionsRow ? 'external-content' : 'inline'}
                                                 stickyUserHeaderEnabled={stickyUserHeader}
                                             />
@@ -1126,7 +1120,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 contextPinPending={pinPending}
                                                 onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
-                                                errorVariant={assistantErrorVariant}
                                                 userActionsMode="external-actions"
                                                 stickyUserHeaderEnabled={stickyUserHeader}
                                             />
@@ -1169,7 +1162,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 agentMention={agentMention}
                                 turnGroupingContext={turnGroupingContext}
                                 errorMessage={assistantErrorText}
-                                errorVariant={assistantErrorVariant}
                                 reviewTransferDirection={reviewTransferDirection}
                                 footerProviderID={headerProviderID}
                                 footerModelName={headerModelName}

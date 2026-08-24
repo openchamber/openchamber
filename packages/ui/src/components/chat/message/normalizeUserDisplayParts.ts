@@ -1,4 +1,5 @@
 import type { Part } from '@opencode-ai/sdk/v2';
+import { readContextPart } from '@/lib/messages/contextParts';
 
 const GITHUB_ISSUE_CONTEXT_PREFIX = 'GitHub issue context (JSON)';
 const GITHUB_PR_CONTEXT_PREFIX = 'GitHub pull request context (JSON)';
@@ -96,6 +97,7 @@ export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEna
             const synthetic = (part as { synthetic?: boolean }).synthetic === true;
             if (!synthetic) return true;
             if (part.type !== 'text') return false;
+            if (readContextPart(part)) return true;
             const text = (part as { text?: unknown }).text;
             if (typeof text !== 'string') {
                 return false;
@@ -116,6 +118,27 @@ export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEna
                 const synthetic = rawPart.synthetic === true;
 
                 if (synthetic) {
+                    const contextPayload = readContextPart(part);
+                    if (contextPayload?.kind === 'github-issue' || contextPayload?.kind === 'github-pr') {
+                        // SAFETY: same display-only file-part shape the legacy
+                        // buildGitHubAttachmentPart produces; consumed by
+                        // FileAttachment, which matches on the mime type.
+                        return {
+                            type: 'file',
+                            mime: contextPayload.kind === 'github-issue'
+                                ? 'application/vnd.github.issue-link'
+                                : 'application/vnd.github.pull-request-link',
+                            filename: contextPayload.kind === 'github-issue'
+                                ? `Issue #${contextPayload.number}: ${contextPayload.title}`
+                                : `PR #${contextPayload.number}: ${contextPayload.title}`,
+                            url: contextPayload.url,
+                        } as Part;
+                    }
+                    if (contextPayload) {
+                        // Other context kinds render through UserContextPart.
+                        return part;
+                    }
+                    // Legacy messages: sniff the pre-metadata text format.
                     const attachmentPart = buildGitHubAttachmentPart(text);
                     if (attachmentPart) {
                         return attachmentPart;

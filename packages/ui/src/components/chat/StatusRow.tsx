@@ -313,7 +313,10 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       // carries ~12px more structure BELOW its footer than this row has — so
       // the swap used to lift the line up. mb-6 (24px) reserves that space
       // under this row instead (verified: row top 636 == footer top 636).
-      className={cn("mb-6", !hasLeftAccessory && "chat-column")}
+      // The reservation belongs to the assistant-status swap only: a row that
+      // renders just an accessory (the pending-changes bar) takes the normal
+      // 8px, or it floats a stray gap above the composer.
+      className={cn(showAssistantStatus ? "mb-6" : "mb-2", !hasLeftAccessory && "chat-column")}
       style={STATUS_ROW_CONTAINER_STYLE}
     >
       {/* h-8 matches the turn footer's real row height: its h-8 action

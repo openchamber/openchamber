@@ -76,13 +76,27 @@ button,
 }
 
 :root.light .message-content-text::selection,
-:root.light .message-content-text ::selection {
+:root.light .message-content-text ::selection,
+:root.light .oc-file-preview::selection,
+:root.light .oc-file-preview ::selection {
   background: color-mix(in srgb, var(--interactive-border-focus) 18%, transparent);
   color: var(--surface-foreground);
 }
 
 .oc-cm-selected-line {
   background: color-mix(in srgb, var(--primary-base) 22%, transparent);
+}
+
+/* Quoted chat fragment kept visibly highlighted while its comment input is
+   open (the native selection collapses once the input takes focus). The
+   rectangles come from the selection's own client rects, so shape and shade
+   both match the native selection that was just showing. */
+.oc-chat-comment-rect {
+  background-color: var(--interactive-selection);
+}
+
+:root.light .oc-chat-comment-rect {
+  background-color: color-mix(in srgb, var(--interactive-border-focus) 18%, transparent);
 }
 
 .pierre-diff-wrapper {

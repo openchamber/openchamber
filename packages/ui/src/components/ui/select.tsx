@@ -17,7 +17,9 @@ type AsChildRenderProps = {
 
 type SelectPortalContextValue = {
   portalContainer: HTMLElement | null;
+  collisionBoundary: Element | null;
   setPortalContainer: (container: HTMLElement | null) => void;
+  setCollisionBoundary: (boundary: Element | null) => void;
 };
 
 const SelectPortalContext = React.createContext<SelectPortalContextValue | null>(null);
@@ -44,10 +46,13 @@ function Select<Value extends string = string>({
   ...props
 }: SelectRootProps<Value>) {
   const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
+  const [collisionBoundary, setCollisionBoundary] = React.useState<Element | null>(null);
   const portalContextValue = React.useMemo<SelectPortalContextValue>(() => ({
     portalContainer,
+    collisionBoundary,
     setPortalContainer,
-  }), [portalContainer]);
+    setCollisionBoundary,
+  }), [collisionBoundary, portalContainer]);
 
   const handleValueChange = React.useCallback(
     (value: unknown, eventDetails: SelectRootChangeEventDetails) => {
@@ -119,6 +124,7 @@ function SelectTrigger({
     }
     const element = target instanceof HTMLElement ? target : null;
     portalContext.setPortalContainer(resolveDialogContainer(element));
+    portalContext.setCollisionBoundary(element?.closest('main') ?? null);
   }, [portalContext]);
 
   const asChildRender: AsChildRenderProps | null = asChild && React.isValidElement(children)
@@ -164,6 +170,7 @@ type SelectContentExtra = {
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
   collisionAvoidance?: React.ComponentProps<typeof BaseSelect.Positioner>["collisionAvoidance"];
+  constrainToMain?: boolean;
 };
 
 function SelectContent({
@@ -176,6 +183,7 @@ function SelectContent({
   side,
   align,
   collisionAvoidance,
+  constrainToMain = false,
   ...props
 }: React.ComponentProps<typeof BaseSelect.Popup> & SelectContentExtra) {
   const portalContext = React.useContext(SelectPortalContext);
@@ -190,6 +198,7 @@ function SelectContent({
         side={side}
         align={align}
         collisionAvoidance={collisionAvoidance}
+        collisionBoundary={constrainToMain ? portalContext?.collisionBoundary ?? undefined : undefined}
         className="absolute z-[120] pointer-events-auto"
       >
         <BaseSelect.Popup

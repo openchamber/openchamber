@@ -70,6 +70,11 @@ export const createRelayService = ({
   // evict each other at the relay worker ("Control replaced") and devices land
   // on a random instance. Optional: without it, behavior is pre-lock.
   hostLock = null,
+  // When false, this instance never starts the relay host on its own (boot,
+  // demand reconcile, or claim-watch takeover) — only an explicit user action
+  // (enable, pairing) force-claims. Dev/debug instances set this so they do not
+  // capture paired devices from the production instance sharing the data dir.
+  allowPassiveHost = true,
   logger = console,
 }) => {
   const identityRuntime = createRelayIdentityRuntime({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict });
@@ -80,6 +85,13 @@ export const createRelayService = ({
   // claimant dies; a running host stands down when another process claims.
   let claimWatchTimer = null;
   const CLAIM_WATCH_INTERVAL_MS = 30_000;
+  // A standby instance does not grab a freed claim immediately: a clean restart
+  // of the previous host (app update, relaunch) releases the claim for a short
+  // while, and taking it during that window strands the devices on this —
+  // possibly older — instance. The restarting host reclaims at boot without any
+  // wait, so it always wins the window.
+  const CLAIM_TAKEOVER_GRACE_MS = 120_000;
+  let claimFreeSinceMs = null;
 
   const readConfig = async () => {
     const settings = await readSettingsFromDiskMigrated();
@@ -133,8 +145,19 @@ export const createRelayService = ({
             }
             return;
           }
-          if (status.state === 'standby' && hostLock.tryClaim()) {
-            logger.warn('[Relay] host claim is free — taking over the relay host');
+          if (status.state !== 'standby' || !allowPassiveHost) return;
+          if (hostLock.liveClaimantPid() !== null) {
+            claimFreeSinceMs = null;
+            return;
+          }
+          if (claimFreeSinceMs === null) {
+            claimFreeSinceMs = Date.now();
+            return;
+          }
+          if (Date.now() - claimFreeSinceMs < CLAIM_TAKEOVER_GRACE_MS) return;
+          if (hostLock.tryClaim()) {
+            claimFreeSinceMs = null;
+            logger.warn('[Relay] host claim stayed free — taking over the relay host');
             await start(relayUrl);
           }
         } catch (error) {
@@ -149,10 +172,19 @@ export const createRelayService = ({
     if (!claimWatchTimer) return;
     clearInterval(claimWatchTimer);
     claimWatchTimer = null;
+    claimFreeSinceMs = null;
   };
 
   const start = async (relayUrl, { claim = 'try' } = {}) => {
     if (hostClient) return;
+    if (claim !== 'force' && !allowPassiveHost) {
+      status = {
+        state: 'standby',
+        lastError: 'passive relay hosting is disabled on this instance — enable the relay or create a pairing link to host here',
+        connectedClients: 0,
+      };
+      return;
+    }
     if (hostLock) {
       const claimed = claim === 'force' ? hostLock.forceClaim() : hostLock.tryClaim();
       if (!claimed) {

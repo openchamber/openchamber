@@ -478,9 +478,11 @@ const ReadOnlyPromptBanner: React.FC = () => {
     const { t } = useI18n();
 
     return (
-        <div className="p-3">
-            <div className="rounded-2xl border border-border/70 bg-[var(--surface-background)] px-4 py-3 typography-ui-label text-muted-foreground">
-                {t('chat.container.readOnlySubagentPromptBanner')}
+        <div className="w-full py-3">
+            <div className="chat-input-column">
+                <div className="rounded-2xl border border-border/70 bg-[var(--surface-background)] px-4 py-3 text-center typography-ui-label text-muted-foreground">
+                    {t('chat.container.readOnlySubagentPromptBanner')}
+                </div>
             </div>
         </div>
     );

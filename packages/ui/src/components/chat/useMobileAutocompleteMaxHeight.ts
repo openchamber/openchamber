@@ -35,7 +35,11 @@ export const useMobileAutocompleteMaxHeight = (
             // The popup's bottom edge is its anchor (composer top) and does not
             // depend on its current height.
             const available = Math.max(0, Math.floor(el.getBoundingClientRect().bottom - boundaryTop - 8));
-            const next = available < normalMaxHeight ? available : undefined;
+            // Floor: browser keyboard panning can put the anchor above the
+            // measured boundary for a frame (or for the whole pan), which
+            // would collapse the popup to zero height. A short popup that
+            // slightly overlaps the header beats an invisible one.
+            const next = available < normalMaxHeight ? Math.max(120, available) : undefined;
             setMaxHeight((prev) => (prev === next ? prev : next));
         };
         measure();

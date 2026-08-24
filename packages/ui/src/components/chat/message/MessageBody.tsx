@@ -432,7 +432,6 @@ interface MessageBodyProps {
     onRevert?: () => void;
     onFork?: () => void;
     errorMessage?: string;
-    errorVariant?: 'error' | 'info';
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
     reviewTransferDirection?: ReviewTransferDirection | null;
@@ -489,6 +488,20 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
     const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
     const copyHintTimeoutRef = React.useRef<number | null>(null);
+
+    // One expanded state for the whole message: text parts and context cards
+    // collapse and expand together, with a single collapse control up here
+    // instead of one per part.
+    const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
+    const [messageExpanded, setMessageExpanded] = React.useState(false);
+    const expandMessage = React.useCallback(() => setMessageExpanded(true), []);
+    const collapseMessage = React.useCallback((event: React.MouseEvent) => {
+        event.stopPropagation();
+        setMessageExpanded(false);
+    }, []);
+    React.useEffect(() => {
+        if (!collapsibleUserMessages) setMessageExpanded(false);
+    }, [collapsibleUserMessages]);
 
     const userContentParts = React.useMemo(() => {
         return parts.filter((part) => {
@@ -717,6 +730,16 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
             style={CONTAIN_LAYOUT_STYLE}
             onTouchStart={isTouchContext && canCopyMessage && hasCopyableText ? revealCopyHint : undefined}
         >
+            {collapsibleUserMessages && messageExpanded && (
+                <button
+                    type="button"
+                    onClick={collapseMessage}
+                    className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-[var(--surface-elevated)] p-0.5 text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]"
+                    aria-label={t('chat.message.userText.collapseAria')}
+                >
+                    <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
+                </button>
+            )}
             <div
                 className={cn(
                     'leading-relaxed text-foreground/90 text-base overflow-x-hidden',
@@ -761,6 +784,8 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                                 messageId={messageId}
                                 isMobile={isMobile}
                                 agentMention={mentionForPart}
+                                messageExpanded={messageExpanded}
+                                onExpandMessage={expandMessage}
                             />
                         </React.Fragment>
                     );
@@ -1094,7 +1119,6 @@ const AssistantMessageBody = React.memo(({
     showReasoningTraces = false,
     turnGroupingContext,
     errorMessage,
-    errorVariant = 'error',
     reviewTransferDirection = null,
     contextPinned,
     contextPinPending,
@@ -1704,7 +1728,6 @@ const AssistantMessageBody = React.memo(({
 
     const shouldDeferSortedInlineText = isSortedRenderMode && !hasStopFinish;
     const showErrorMessage = Boolean(errorMessage);
-    const errorIconName = errorVariant === 'info' ? 'information' : 'error-warning';
     const isPeekSurface = chatSurfaceMode === 'peek';
     const shouldShowMessageActions = hasCopyableText && !isPeekSurface;
     const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage)) && !isPeekSurface;
@@ -2217,17 +2240,9 @@ const AssistantMessageBody = React.memo(({
                     {renderedParts}
                     {showErrorMessage && (
                         <FadeInOnReveal key="assistant-error">
-                            <div className={cn(
-                                'group/assistant-text relative mt-3 p-3 rounded-lg border break-words max-w-full',
-                                errorVariant === 'info'
-                                    ? 'bg-[var(--status-info-background)] border-[var(--status-info-border)]'
-                                    : 'bg-[var(--status-error-background)] border-[var(--status-error-border)]',
-                            )}>
-                                <div className="flex items-center gap-2">
-                                    <Icon name={errorIconName} className={cn(
-                                        'h-4 w-4 shrink-0',
-                                        errorVariant === 'info' ? 'text-[var(--status-info)]' : 'text-[var(--status-error)]',
-                                    )} />
+                            <div className="group/assistant-text relative mt-3 max-w-full break-words rounded-2xl border border-[var(--status-info-border)] bg-[var(--status-info-background)] px-4 py-3 text-base leading-relaxed">
+                                <div className="flex items-center gap-3">
+                                    <Icon name="information" className="size-4 shrink-0 text-[var(--status-info)]" />
                                     <div className="min-w-0 flex-1 break-words">
                                         <SimpleMarkdownRenderer
                                             content={errorMessage ?? ''}
