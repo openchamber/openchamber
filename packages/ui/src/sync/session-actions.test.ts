@@ -236,7 +236,7 @@ mock.module("./session-ui-store", () => ({
 const inputState = {
   pendingInputText: "",
   pendingInputMode: "normal" as const,
-  attachedFiles: [],
+  attachedFiles: Array<{ filename: string }>(),
   clearAttachedFiles: () => {
     inputState.attachedFiles = []
   },
@@ -651,6 +651,7 @@ describe("session forks", () => {
       assistantMessageFixture("source-2-selected", 2, "source-1-user"),
       userMessageFixture("source-3-next", 3),
     ]
+    inputState.attachedFiles = [{ filename: "first.png" }, { filename: "second.png" }]
     sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
     const source = createStore({}, {
       session: [sessionFixture("session-a", "Source", "/test/project")],
@@ -671,6 +672,7 @@ describe("session forks", () => {
     })
     expect(inputState.pendingInputText).toBe("")
     expect(inputState.pendingInputMode).toBe("normal")
+    expect(inputState.attachedFiles).toEqual([])
   })
 
   test("rejects a user-message fork when chronological IDs cross the rollover", async () => {

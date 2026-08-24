@@ -2404,6 +2404,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     expectedRuntimeKey,
   )
 
+  restoreFilePartsToInput(fileParts)
   if (selectedRecord.info.role !== "user") return result
 
   if (messageText) {
@@ -2412,7 +2413,6 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
       pendingInputMode: "replace" as const,
     })
   }
-  restoreFilePartsToInput(fileParts)
   return result
 }
 

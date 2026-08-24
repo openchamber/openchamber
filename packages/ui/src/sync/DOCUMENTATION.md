@@ -270,7 +270,7 @@ Examples of global-store updates performed in `session-actions.ts`:
 - `createSession()` -> `upsertSession(session)`
 - `forkFromMessage()` handles user and assistant messages.
 - A user-message fork excludes the selected prompt and restores it in the composer.
-- An assistant-message fork includes the selected answer. The source session keeps its draft, and the new session opens with an empty composer.
+- An assistant-message fork includes the selected answer. The source session keeps its text draft, and the new session opens with an empty composer.
 - The fork action registers the directory, updates both session stores, and selects the returned session.
 
 The fork API uses `messageID` as a stop sign. It does not copy that message or anything after it.
