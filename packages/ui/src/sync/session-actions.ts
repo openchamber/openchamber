@@ -33,7 +33,7 @@ import {
 } from "@/lib/contextObligatoryMessages"
 import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
 import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
-import { prepareBoundaryForkMetadata } from "@/lib/sessionForkMetadata"
+import { prepareMessageForkMetadata } from "@/lib/sessionForkMetadata"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { getRuntimeKey } from "@/lib/runtime-switch"
@@ -2137,10 +2137,7 @@ interface RemappedForkPins {
   pinsDropped: boolean
 }
 
-function prepareCleanForkMetadata(
-  forkedSession: Session,
-  copiedThroughCreatedAt: number | null,
-): PreparedForkMetadata {
+function prepareCleanForkMetadata(forkedSession: Session): PreparedForkMetadata {
   const pinnedMessages = getContextObligatoryMessages(forkedSession)
   const currentMetadata = getSessionMetadata(forkedSession)
   const metadataWithoutPins = pinnedMessages.length > 0
@@ -2148,7 +2145,7 @@ function prepareCleanForkMetadata(
     : currentMetadata
 
   return {
-    metadata: prepareBoundaryForkMetadata(metadataWithoutPins, copiedThroughCreatedAt),
+    metadata: prepareMessageForkMetadata(metadataWithoutPins),
     pinnedMessages,
   }
 }
@@ -2270,7 +2267,6 @@ async function forkAndReconcileSession(
   sessionId: string,
   messageBoundaryId: string | undefined,
   copiedSourceRecords: SessionMessageRecord[],
-  copiedThroughCreatedAt: number | null,
   store: DirectoryStoreApi,
   directory: string | undefined,
   expectedRuntimeKey: string,
@@ -2282,7 +2278,7 @@ async function forkAndReconcileSession(
 
   try {
     if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
-    const preparedMetadata = prepareCleanForkMetadata(forkedSession, copiedThroughCreatedAt)
+    const preparedMetadata = prepareCleanForkMetadata(forkedSession)
     pinnedMessages = preparedMetadata.pinnedMessages
     const nextTitle = getNextForkTitle(
       forkedSession.title,
@@ -2375,7 +2371,6 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     : selectedIndex
   const copiedSourceRecords = sourceRecords.slice(0, copiedThroughIndex + 1)
   const exclusiveBoundaryId = sourceRecords[copiedThroughIndex + 1]?.info.id
-  const copiedThroughCreatedAt = sourceRecords[copiedThroughIndex]?.info.time.created ?? null
   if (!canServerCopyThroughBoundary(sourceRecords, copiedThroughIndex, exclusiveBoundaryId)) {
     throw new UnsupportedForkBoundaryError()
   }
@@ -2398,7 +2393,6 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     sessionId,
     exclusiveBoundaryId,
     copiedSourceRecords,
-    copiedThroughCreatedAt,
     store,
     directory,
     expectedRuntimeKey,

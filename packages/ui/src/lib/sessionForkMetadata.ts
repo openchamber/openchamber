@@ -1,17 +1,15 @@
 import { z } from 'zod';
 
-import { getLinkedIssuesFromMetadata } from './linkedIssues';
 import type { SessionMetadataRecord } from './sessionReviewMetadata';
 
 const metadataNamespaceSchema = z.record(z.string(), z.unknown());
 
 /**
- * Remove source-session state that cannot describe a fork at a message
- * boundary. Unknown metadata stays intact because another feature can own it.
+ * Remove source-session state that cannot describe an independent message
+ * fork. Unknown metadata stays intact because another feature can own it.
  */
-export const prepareBoundaryForkMetadata = (
+export const prepareMessageForkMetadata = (
   metadata: SessionMetadataRecord,
-  copiedThroughCreatedAt: number | null,
 ): SessionMetadataRecord => {
   const parsedNamespace = metadataNamespaceSchema.safeParse(metadata.openchamber);
   if (!parsedNamespace.success) return metadata;
@@ -19,17 +17,6 @@ export const prepareBoundaryForkMetadata = (
   const currentNamespace = parsedNamespace.data;
   const nextNamespace = { ...currentNamespace };
   let changed = false;
-
-  if (Array.isArray(currentNamespace.linked_issues)) {
-    const linkedIssues = copiedThroughCreatedAt === null
-      ? []
-      : getLinkedIssuesFromMetadata(metadata)
-        .filter((issue) => issue.linkedAt <= copiedThroughCreatedAt);
-    if (linkedIssues.length !== currentNamespace.linked_issues.length) {
-      nextNamespace.linked_issues = linkedIssues;
-      changed = true;
-    }
-  }
 
   const sourceSessionKeys = [
     'context_obligatory_last_compaction_message_id',

@@ -540,7 +540,7 @@ describe("session forks", () => {
           { id: "fork-user", createdAt: 1, role: "user" },
           { id: "fork-assistant", createdAt: 2, role: "assistant" },
         ],
-        linked_issues: [linkedIssueFixture(1, 1)],
+        linked_issues: [linkedIssueFixture(1, 1), linkedIssueFixture(2, 3)],
       },
     }
     const cleanedMetadata = {
@@ -548,7 +548,7 @@ describe("session forks", () => {
       openchamber: {
         future_field: { keep: true },
         context_obligatory_messages: [],
-        linked_issues: [linkedIssueFixture(1, 1)],
+        linked_issues: [linkedIssueFixture(1, 1), linkedIssueFixture(2, 3)],
       },
     }
     sessionForkResult = {
@@ -602,7 +602,7 @@ describe("session forks", () => {
     }])
   })
 
-  test("removes all linked issues when the first user message leaves an empty transcript", async () => {
+  test("keeps linked issues when the first user message leaves an empty transcript", async () => {
     const sourceMessages = [userMessageFixture("source-first", 1)]
     const copiedMetadata = {
       customPluginState: { keep: true },
@@ -616,7 +616,7 @@ describe("session forks", () => {
       customPluginState: { keep: true },
       openchamber: {
         future_field: { keep: true },
-        linked_issues: [],
+        linked_issues: [linkedIssueFixture(1, 1)],
       },
     }
     sessionForkResult = {
@@ -752,7 +752,7 @@ describe("session forks", () => {
           { id: "fork-user", createdAt: 1, role: "user" },
           { id: "fork-assistant", createdAt: 2, role: "assistant" },
         ],
-        linked_issues: [linkedIssueFixture(1, 1)],
+        linked_issues: [linkedIssueFixture(1, 1), linkedIssueFixture(2, 3)],
       },
     }
     const cleanedMetadata = {
@@ -760,7 +760,7 @@ describe("session forks", () => {
       openchamber: {
         future_field: { keep: true },
         context_obligatory_messages: [],
-        linked_issues: [linkedIssueFixture(1, 1)],
+        linked_issues: [linkedIssueFixture(1, 1), linkedIssueFixture(2, 3)],
       },
     }
     sessionForkResult = {

@@ -297,7 +297,7 @@ If compensation fails or stops, the error tells the user that the fork remains.
 After selection, the action maps pinned message IDs to cloned message IDs only when source pins exist.
 If pin mapping fails, the clean selected fork remains usable. The UI warns that pinned messages were not copied.
 
-Every message fork uses the last copied message time as the linked-issue cutoff. An empty transcript removes all linked issues.
+Linked issues are session-scoped and carry across a message fork unchanged.
 
 Message forks preserve unknown metadata. They remove goal, assist, compaction, and review state.
 Those fields have no message time. The action cannot tell whether each field existed before or after the fork point, so it removes them.

@@ -79,7 +79,7 @@ export const buildLinkedIssue = (input: {
   };
 };
 
-export const getLinkedIssuesFromMetadata = (metadata: SessionMetadataRecord): LinkedIssue[] => {
+const getLinkedIssuesFromMetadata = (metadata: SessionMetadataRecord): LinkedIssue[] => {
   const openchamber = metadata.openchamber;
   if (!isRecord(openchamber) || !Array.isArray(openchamber.linked_issues)) return [];
   return openchamber.linked_issues.filter(isLinkedIssue);
