@@ -978,12 +978,24 @@ describe("session forks", () => {
       ["/test/project", source],
       ["/other/project", destination],
     ]), () => "/test/project")
+    let registrationsAtCleanupUpdate: typeof registeredSessionDirectories = []
+    beforeSessionUpdateResolve = () => {
+      // Copy the entries now. A direct reference also sees the later reconciliation
+      // entry and can hide a late registration.
+      registrationsAtCleanupUpdate = [...registeredSessionDirectories]
+    }
 
     await forkFromMessage("session-a", "source-assistant")
 
     expect(source.getState().session.map((session) => session.id)).toEqual(["session-a"])
     expect(destination.getState().session.map((session) => session.id)).toEqual(["session-fork"])
-    expect(registeredSessionDirectories).toEqual([{ sessionID: "session-fork", directory: "/other/project" }])
+    expect(registrationsAtCleanupUpdate).toEqual([
+      { sessionID: "session-fork", directory: "/other/project" },
+    ])
+    expect(registeredSessionDirectories).toEqual([
+      { sessionID: "session-fork", directory: "/other/project" },
+      { sessionID: "session-fork", directory: "/other/project" },
+    ])
     expect(selectedSessions).toEqual([{ sessionID: "session-fork", directory: "/other/project" }])
   })
 

@@ -2278,6 +2278,9 @@ async function forkAndReconcileSession(
 
   try {
     if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+    // Register before the cleanup request so directory-less SSE events reach the fork store.
+    // Keep the later reconciliation registration because cleanup can return a different directory.
+    if (forkDirectory) registerSessionDirectory(forkedSession.id, forkDirectory)
     const preparedMetadata = prepareCleanForkMetadata(forkedSession)
     pinnedMessages = preparedMetadata.pinnedMessages
     const nextTitle = getNextForkTitle(
