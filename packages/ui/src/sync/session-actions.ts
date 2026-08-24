@@ -2150,7 +2150,45 @@ function prepareCleanForkMetadata(forkedSession: Session): PreparedForkMetadata 
   }
 }
 
+/**
+ * Read the new fork's transcript and prove it stays within the copied prefix.
+ *
+ * The source session can change between the snapshot this action fetched and
+ * the moment the server copies. A last-assistant fork sends no stop message, so
+ * the server copies whatever exists when it reads. This check runs before
+ * selection so a fork that copied too much never opens.
+ *
+ * The action accepts a shorter matching transcript.
+ */
+async function fetchVerifiedForkPrefix(
+  forkedSession: Session,
+  copiedSourceRecords: SessionMessageRecord[],
+  forkDirectory: string | null,
+  expectedRuntimeKey: string,
+): Promise<SessionMessageRecord[]> {
+  const forkResult = await sdk().session.messages({
+    sessionID: forkedSession.id,
+    directory: forkDirectory ?? undefined,
+  })
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+
+  const forkRecords = assertSdkData(forkResult, "fork session.messages")
+  // A longer fork copied messages the user excluded. That is the race.
+  if (forkRecords.length > copiedSourceRecords.length) {
+    throw new Error("The fork transcript is longer than the copied prefix")
+  }
+  for (let index = 0; index < forkRecords.length; index += 1) {
+    const sourceMessage = copiedSourceRecords[index].info
+    const forkMessage = forkRecords[index].info
+    if (sourceMessage.role !== forkMessage.role || sourceMessage.time.created !== forkMessage.time.created) {
+      throw new Error("The fork transcript does not match the copied prefix")
+    }
+  }
+  return forkRecords
+}
+
 async function remapForkedPins(
+  forkRecords: SessionMessageRecord[],
   copiedSourceRecords: SessionMessageRecord[],
   forkedSession: Session,
   pinnedMessages: readonly ContextObligatoryMessage[],
@@ -2159,30 +2197,10 @@ async function remapForkedPins(
 ): Promise<RemappedForkPins> {
   const remappedMessages: ContextObligatoryMessage[] = []
 
-  const forkResult = await sdk().session.messages({
-    sessionID: forkedSession.id,
-    directory: forkDirectory ?? undefined,
-  })
-  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
-
-  const forkRecords = assertSdkData(forkResult, "fork session.messages")
-  if (forkRecords.length > copiedSourceRecords.length) {
-    throw new Error("Cannot remap pinned messages because the fork transcript is longer than the copied prefix")
-  }
-
+  // Setup already verified these records match the start of the copied prefix.
   const forkMessageIdBySourceId = new Map<string, string>()
   for (let index = 0; index < forkRecords.length; index += 1) {
-    const sourceMessage = copiedSourceRecords[index]?.info
-    const forkMessage = forkRecords[index]?.info
-    if (
-      !sourceMessage
-      || !forkMessage
-      || sourceMessage.role !== forkMessage.role
-      || sourceMessage.time.created !== forkMessage.time.created
-    ) {
-      throw new Error("Cannot remap pinned messages because the fork transcript does not match its source")
-    }
-    forkMessageIdBySourceId.set(sourceMessage.id, forkMessage.id)
+    forkMessageIdBySourceId.set(copiedSourceRecords[index].info.id, forkRecords[index].info.id)
   }
 
   const copiedSourceIds = new Set(copiedSourceRecords.map((record) => record.info.id))
@@ -2275,12 +2293,21 @@ async function forkAndReconcileSession(
   const forkDirectory = forkedSession.directory ?? directory ?? null
   let reconciledSession: Session
   let pinnedMessages: ContextObligatoryMessage[]
+  let forkRecords: SessionMessageRecord[]
 
   try {
     if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
     // Register before the cleanup request so directory-less SSE events reach the fork store.
     // Keep the later reconciliation registration because cleanup can return a different directory.
     if (forkDirectory) registerSessionDirectory(forkedSession.id, forkDirectory)
+    // Verify before the cleanup write and before selection. A fork that copied
+    // past the selected message must never open, so this failure deletes it.
+    forkRecords = await fetchVerifiedForkPrefix(
+      forkedSession,
+      copiedSourceRecords,
+      forkDirectory,
+      expectedRuntimeKey,
+    )
     const preparedMetadata = prepareCleanForkMetadata(forkedSession)
     pinnedMessages = preparedMetadata.pinnedMessages
     const nextTitle = getNextForkTitle(
@@ -2312,6 +2339,7 @@ async function forkAndReconcileSession(
 
   try {
     const { session: sessionWithRemappedPins, pinsDropped } = await remapForkedPins(
+      forkRecords,
       copiedSourceRecords,
       reconciledSession,
       pinnedMessages,

@@ -322,10 +322,12 @@ describe('forkFromMessage errors', () => {
     let forkCalls = 0;
     const sdk = {
       session: {
-        messages: async () => {
+        // The fork boundary is the first user message, so the copied prefix is
+        // empty. Setup verification reads the fork transcript and accepts that.
+        messages: async ({ sessionID }) => {
           messageCalls += 1;
           await messagesReady;
-          return { data: sourceRecords };
+          return { data: sessionID === forkedSession.id ? [] : sourceRecords };
         },
       },
     };
@@ -366,7 +368,9 @@ describe('forkFromMessage errors', () => {
 
       await useSessionUIStore.getState().forkFromMessage(sourceSession.id, 'source-user');
 
-      expect(messageCalls).toBe(2);
+      // Each completed fork reads the source transcript once and the new fork
+      // transcript once, so two operations make four requests.
+      expect(messageCalls).toBe(4);
       expect(forkCalls).toBe(2);
       expect(successes).toHaveLength(2);
     } finally {
@@ -412,9 +416,12 @@ describe('forkFromMessage errors', () => {
     ];
     const sdk = {
       session: {
+        // Setup verifies the fork transcript before selection. An empty fork
+        // transcript is a valid short prefix, so setup passes and the pinned
+        // source message has nothing to map to.
         messages: async ({ sessionID }) => sessionID === sourceSession.id
           ? { data: sourceRecords }
-          : { error: new Error('fork transcript unavailable'), response: { status: 503 } },
+          : { data: [] },
       },
     };
     const childStore = createChildStore([sourceSession]);

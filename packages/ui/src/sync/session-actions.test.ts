@@ -1105,7 +1105,7 @@ describe("session forks", () => {
     expect(globalRemovedSessionIds).toEqual([])
   })
 
-  test("returns partial success when pin remap fails after clean selection", async () => {
+  test("returns partial success when the pin metadata update fails after clean selection", async () => {
     const sourceMessages = [
       userMessageFixture("source-user", 1),
       assistantMessageFixture("source-assistant", 2, "source-user"),
@@ -1123,8 +1123,10 @@ describe("session forks", () => {
     }
     sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
     sessionMessagesBySessionID.set("session-fork", {
-      error: new Error("fork transcript unavailable"),
-      response: { status: 503 },
+      data: messageRecords([
+        userMessageFixture("fork-1-user", 1, "session-fork"),
+        assistantMessageFixture("fork-2-assistant", 2, "fork-1-user", "session-fork"),
+      ]),
     })
     const source = createStore({}, {
       session: [sessionFixture("session-a", "Source", "/test/project")],
@@ -1134,6 +1136,14 @@ describe("session forks", () => {
     const { opencodeClient } = await import("@/lib/opencode/client")
     const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
     switchRuntimeEndpoint({ apiBaseUrl: "http://fork-pin-failure.test", runtimeKey: "fork-pin-failure" })
+    // The first update is the setup cleanup write. The second writes the pins.
+    // Failing only the second keeps the fork clean and selected before the loss.
+    let forkUpdateCount = 0
+    beforeSessionUpdateResolve = (sessionId) => {
+      if (sessionId !== "session-fork") return
+      forkUpdateCount += 1
+      if (forkUpdateCount === 2) throw new Error("pin metadata rejected")
+    }
     setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
 
     const result = await forkFromMessage("session-a", "source-assistant")
@@ -1301,6 +1311,145 @@ describe("session forks", () => {
     expect(result).toEqual({ status: "success" })
   })
 
+  // Setup reads the new fork's transcript before selection. These tests cover a
+  // source session that changes between the snapshot and the server copy.
+  const forkVerificationSource = () => [
+    userMessageFixture("source-user", 1),
+    assistantMessageFixture("source-assistant", 2, "source-user"),
+  ]
+  const matchingForkTranscript = () => messageRecords([
+    userMessageFixture("fork-1-user", 1, "session-fork"),
+    assistantMessageFixture("fork-2-assistant", 2, "fork-1-user", "session-fork"),
+  ])
+  const forkTranscriptRequests = () => replyCalls.filter((call) => (
+    call.method === "session.messages" && call.params.sessionID === "session-fork"
+  ))
+  const prepareForkVerificationTest = async (runtimeKey: string) => {
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(forkVerificationSource()) })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: `http://${runtimeKey}.test`, runtimeKey })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+    return { forkFromMessage, switchRuntimeEndpoint }
+  }
+
+  test("deletes the fork when the server copied past the selected message", async () => {
+    // A message arrived in the source session after this action took its
+    // snapshot, so the server copied one record more than the user chose.
+    sessionMessagesBySessionID.set("session-fork", {
+      data: messageRecords([
+        userMessageFixture("fork-1-user", 1, "session-fork"),
+        assistantMessageFixture("fork-2-assistant", 2, "fork-1-user", "session-fork"),
+        userMessageFixture("fork-3-extra", 3, "session-fork"),
+      ]),
+    })
+    const { forkFromMessage } = await prepareForkVerificationTest("fork-over-copy")
+
+    await expect(forkFromMessage("session-a", "source-assistant"))
+      .rejects.toThrow("The fork transcript is longer than the copied prefix")
+
+    expect(replyCalls.filter((call) => call.method === "session.delete")).toEqual([
+      { method: "session.delete", params: { sessionID: "session-fork", directory: "/test/project" } },
+    ])
+    expect(selectedSessions).toEqual([])
+  })
+
+  test("deletes the fork when a copied record does not match its source", async () => {
+    // Same record count, but the second record carries a different created time.
+    sessionMessagesBySessionID.set("session-fork", {
+      data: messageRecords([
+        userMessageFixture("fork-1-user", 1, "session-fork"),
+        assistantMessageFixture("fork-2-assistant", 99, "fork-1-user", "session-fork"),
+      ]),
+    })
+    const { forkFromMessage } = await prepareForkVerificationTest("fork-mismatch")
+
+    await expect(forkFromMessage("session-a", "source-assistant"))
+      .rejects.toThrow("The fork transcript does not match the copied prefix")
+
+    expect(replyCalls.filter((call) => call.method === "session.delete")).toHaveLength(1)
+    expect(selectedSessions).toEqual([])
+  })
+
+  test("deletes the fork when the verification transcript request fails", async () => {
+    sessionMessagesBySessionID.set("session-fork", {
+      error: new Error("fork transcript unavailable"),
+      response: { status: 503 },
+    })
+    const { forkFromMessage } = await prepareForkVerificationTest("fork-verify-fetch")
+
+    await expect(forkFromMessage("session-a", "source-assistant")).rejects.toThrow("fork session.messages")
+
+    expect(replyCalls.filter((call) => call.method === "session.delete")).toHaveLength(1)
+    expect(selectedSessions).toEqual([])
+  })
+
+  test("reports a leftover fork when the runtime changes during verification", async () => {
+    sessionMessagesBySessionID.set("session-fork", { data: matchingForkTranscript() })
+    const { forkFromMessage, switchRuntimeEndpoint } = await prepareForkVerificationTest("fork-verify-runtime-a")
+    beforeSessionMessagesResolve = (sessionID) => {
+      if (sessionID !== "session-fork") return
+      switchRuntimeEndpoint({ apiBaseUrl: "http://fork-verify-runtime-b.test", runtimeKey: "fork-verify-runtime-b" })
+    }
+
+    const { ForkLeftoverError } = await import("./session-actions")
+    let caught: Error | null = null
+    try {
+      await forkFromMessage("session-a", "source-assistant")
+    } catch (error) {
+      if (error instanceof Error) caught = error
+    }
+
+    expect(caught).toBeInstanceOf(ForkLeftoverError)
+    // Compensation stops on a stale runtime, so the fork stays on the old server.
+    expect(replyCalls.filter((call) => call.method === "session.delete")).toEqual([])
+    expect(selectedSessions).toEqual([])
+  })
+
+  test("uses one fork transcript request for a success without pins", async () => {
+    sessionMessagesBySessionID.set("session-fork", { data: matchingForkTranscript() })
+    const { forkFromMessage } = await prepareForkVerificationTest("fork-verify-unpinned")
+
+    const result = await forkFromMessage("session-a", "source-assistant")
+
+    expect(result).toEqual({ status: "success" })
+    expect(forkTranscriptRequests()).toHaveLength(1)
+    expect(selectedSessions).toEqual([{ sessionID: "session-fork", directory: "/test/project" }])
+  })
+
+  test("uses one fork transcript request for a success with pins", async () => {
+    // The pin remap reuses the records that setup already fetched.
+    sessionForkResult = {
+      ...sessionFixture("session-fork", "Forked (fork #1)", "/test/project"),
+      metadata: {
+        openchamber: {
+          context_obligatory_messages: [
+            { id: "source-user", createdAt: 1, role: "user" },
+          ],
+        },
+      },
+    }
+    sessionMessagesBySessionID.set("session-fork", { data: matchingForkTranscript() })
+    const { forkFromMessage } = await prepareForkVerificationTest("fork-verify-pinned")
+
+    const result = await forkFromMessage("session-a", "source-assistant")
+
+    expect(result).toEqual({ status: "success" })
+    expect(forkTranscriptRequests()).toHaveLength(1)
+    expect(replyCalls.filter((call) => call.method === "session.update")[1]?.params.metadata).toEqual({
+      openchamber: {
+        context_obligatory_messages: [
+          { id: "fork-1-user", createdAt: 1, role: "user" },
+        ],
+      },
+    })
+  })
+
   test("reports a leftover fork and skips delete after a runtime switch", async () => {
     const sourceMessages = [
       userMessageFixture("source-user", 1),
@@ -1380,7 +1529,14 @@ describe("session forks", () => {
     sessionMessagesBySessionID.set("session-a", {
       data: messageRecords(sourceMessages, { "source-3-selected": selectedParts }),
     })
-    sessionMessagesBySessionID.set("session-fork", { data: [] })
+    // Setup verification needs a fork transcript that matches the copied prefix,
+    // which is the two records before the selected user message.
+    sessionMessagesBySessionID.set("session-fork", {
+      data: messageRecords([
+        userMessageFixture("fork-1-user", 1, "session-fork"),
+        assistantMessageFixture("fork-2-assistant", 2, "fork-1-user", "session-fork"),
+      ]),
+    })
     const source = createStore({}, {
       session: [sessionFixture("session-a", "Source", "/test/project")],
       sessionTotal: 1,
@@ -1389,10 +1545,13 @@ describe("session forks", () => {
     const { opencodeClient } = await import("@/lib/opencode/client")
     const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
     switchRuntimeEndpoint({ apiBaseUrl: "http://fork-pin-runtime-a.test", runtimeKey: "fork-pin-runtime-a" })
-    // This hook also runs for the source fetch. The fork id check switches the
-    // runtime while remapForkedPins awaits, not before the fork starts.
-    beforeSessionMessagesResolve = (sessionID) => {
-      if (sessionID !== "session-fork") return
+    // The fork sends two updates. The first is the cleanup write during setup.
+    // The second writes the remapped pins, which is the await this test covers.
+    let forkUpdateCount = 0
+    beforeSessionUpdateResolve = (sessionId) => {
+      if (sessionId !== "session-fork") return
+      forkUpdateCount += 1
+      if (forkUpdateCount < 2) return
       switchRuntimeEndpoint({ apiBaseUrl: "http://fork-pin-runtime-b.test", runtimeKey: "fork-pin-runtime-b" })
     }
     setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")

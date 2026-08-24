@@ -286,6 +286,16 @@ OpenChamber rejects that request before OpenCode creates a fork.
 
 The action fetches the source transcript first because it must find the next message.
 
+The source session can change between that fetch and the moment the server copies.
+A fork from the last assistant message sends no stop message, so the server copies every record that exists when it reads.
+Setup therefore reads the new fork's transcript and compares it with the copied prefix.
+The check runs after directory registration and before metadata cleanup and selection.
+A transcript longer than the copied prefix fails setup, because the fork holds messages the user excluded.
+A role or created-time mismatch inside the returned records also fails setup.
+A shorter matching transcript passes setup, and the fork remains usable. The pin remap then reports any missing copied pins.
+Every setup failure here removes the fork, so an over-copied fork never opens.
+This costs one transcript request for a fork without pins. A fork with pins reuses these records, so its request count does not change.
+
 The fork response is authoritative for metadata. Before selection, the action reads that metadata and removes pins and source-only state.
 It sends the title and clean metadata in one update.
 If that update fails after a title change, the action retries the required metadata update without the title.
@@ -296,6 +306,7 @@ A runtime switch stops compensation because the client points to another server.
 If compensation fails or stops, the error tells the user that the fork remains.
 
 After selection, the action maps pinned message IDs to cloned message IDs only when source pins exist.
+It reuses the transcript that setup verified, so it sends no second transcript request.
 If pin mapping fails on the same runtime, the clean fork remains usable.
 The UI shows the pins warning.
 If the runtime changes during the pin request, the action rejects the stale result.
