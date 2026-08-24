@@ -90,7 +90,7 @@ describe('opencodeClient session fork', () => {
   test('omits messageID for a whole-session fork', async () => {
     await opencodeClient.forkSession('session-a', undefined, '/workspace/project');
 
-    expect(forkCalls).toEqual([{
+    expect(forkCalls).toStrictEqual([{
       sessionID: 'session-a',
       directory: '/workspace/project',
     }]);
@@ -100,7 +100,7 @@ describe('opencodeClient session fork', () => {
   test('includes messageID for a boundary fork', async () => {
     await opencodeClient.forkSession('session-a', 'message-a', '/workspace/project');
 
-    expect(forkCalls).toEqual([{
+    expect(forkCalls).toStrictEqual([{
       sessionID: 'session-a',
       directory: '/workspace/project',
       messageID: 'message-a',
