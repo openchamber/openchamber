@@ -2361,6 +2361,8 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   const expectedRuntimeKey = getRuntimeKey()
   const { store, directory } = dirStoreForSession(sessionId)
 
+  // A limit returns only the newest messages. A fork can start from any message,
+  // so this action needs all records for old boundaries and their copied prefixes.
   const sourceResult = await sdk().session.messages({ sessionID: sessionId, directory })
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
 
