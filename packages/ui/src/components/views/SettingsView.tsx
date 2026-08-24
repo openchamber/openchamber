@@ -467,6 +467,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       useConfigStore.getState().setSelectedProvider(ADD_PROVIDER_SETTINGS_ID);
     }
 
+    if (result.page === 'remote-instances') {
+      // The page swaps its whole layout for the selected instance's detail
+      // view; the client-auth / relay-url / direct-hosts targets only render
+      // on the list branch, so drop a persisted selection before navigating
+      // (same store-priming pattern as the drafts above).
+      useUIStore.getState().setSettingsRemoteInstancesSelectedId(null);
+    }
+
     if (result.id === 'plugins.create') {
       return 'plugins.spec';
     }
