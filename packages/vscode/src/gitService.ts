@@ -34,6 +34,8 @@ const WORKTREE_PHASE_SETUP_READY = 'setup-ready' as const;
 const WORKTREE_INDEX_LOCK_RETRY_DELAY_MS = 250;
 const WORKTREE_INDEX_LOCK_STALE_DELAY_MS = 750;
 const GIT_NULL_REF = '0'.repeat(40);
+// Leave room for Git's fixed arguments and Windows command-line quoting.
+const GIT_PATH_BATCH_MAX_BYTES = 8 * 1024;
 
 const toBootstrapStateKey = (directory: string): string => {
   const normalized = normalizeDirectoryPath(directory);
@@ -342,6 +344,69 @@ async function execGit(args: string[], cwd: string): Promise<{ stdout: string; s
     });
   });
 }
+
+class GitPathBatchError extends Error {
+  readonly completedPaths: string[];
+
+  constructor(action: string, completedPaths: string[], totalPaths: number, detail: string) {
+    super(
+      `${action} stopped after completing ${completedPaths.length} of ${totalPaths} paths. ` +
+      `Git may have applied part of the failing batch: ${detail}`
+    );
+    this.name = 'GitPathBatchError';
+    this.completedPaths = [...completedPaths];
+  }
+}
+
+const splitGitPathBatches = (filePaths: string[]): string[][] => {
+  const batches: string[][] = [];
+  let currentBatch: string[] = [];
+  let currentBatchBytes = 0;
+
+  for (const filePath of filePaths) {
+    const pathBytes = Buffer.byteLength(filePath, 'utf8') + 1;
+    if (currentBatch.length > 0 && currentBatchBytes + pathBytes > GIT_PATH_BATCH_MAX_BYTES) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentBatchBytes = 0;
+    }
+    currentBatch.push(filePath);
+    currentBatchBytes += pathBytes;
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+  return batches;
+};
+
+const hasMultipleGitPathBatches = (filePaths: string[]): boolean => splitGitPathBatches(filePaths).length > 1;
+
+const runGitPathBatches = async (
+  filePaths: string[],
+  action: string,
+  runBatch: (batch: string[]) => Promise<void>,
+): Promise<void> => {
+  const batches = splitGitPathBatches(filePaths);
+  if (batches.length === 0) {
+    return;
+  }
+  if (batches.length === 1) {
+    await runBatch(batches[0]);
+    return;
+  }
+
+  const completedPaths: string[] = [];
+  for (const batch of batches) {
+    try {
+      await runBatch(batch);
+      completedPaths.push(...batch);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error || 'Git command failed');
+      throw new GitPathBatchError(action, completedPaths, filePaths.length, detail);
+    }
+  }
+};
 
 function isValidCommitHash(hash: string): boolean {
   return /^[0-9a-fA-F]{7,40}$/.test(hash);
@@ -2349,33 +2414,35 @@ export async function stageGitFiles(directory: string, filePaths: string[]): Pro
   if (paths.length === 0) {
     throw new Error('path is required');
   }
-  const result = await execGit(['add', '--', ...paths], directory);
-  if (result.exitCode === 0) {
-    return;
-  }
-
-  const isPathspecError =
-    /pathspec/.test(result.stderr) && /did not match any files/.test(result.stderr);
-  if (!isPathspecError) {
-    throw new Error(result.stderr || 'Failed to stage git file');
-  }
-
-  // During rapid stage/unstage toggling the optimistic UI can request staging a
-  // path that a prior queued mutation already staged (most visibly a deletion,
-  // whose file is gone from the working tree). `git add` aborts the whole batch on
-  // a single unmatched pathspec, so retry per-path and skip the ones already in
-  // their target state rather than failing the entire "stage all".
-  for (const path of paths) {
-    const perPath = await execGit(['add', '--', path], directory);
-    if (perPath.exitCode === 0) {
-      continue;
+  await runGitPathBatches(paths, 'Staging selected files', async (batch) => {
+    const result = await execGit(['add', '--', ...batch], directory);
+    if (result.exitCode === 0) {
+      return;
     }
-    const perPathIsPathspecError =
-      /pathspec/.test(perPath.stderr) && /did not match any files/.test(perPath.stderr);
-    if (!perPathIsPathspecError) {
-      throw new Error(perPath.stderr || 'Failed to stage git file');
+
+    const isPathspecError =
+      /pathspec/.test(result.stderr) && /did not match any files/.test(result.stderr);
+    if (!isPathspecError) {
+      throw new Error(result.stderr || 'Failed to stage git file');
     }
-  }
+
+    // During rapid stage/unstage toggling the optimistic UI can request staging a
+    // path that a prior queued mutation already staged (most visibly a deletion,
+    // whose file is gone from the working tree). `git add` aborts the whole batch on
+    // a single unmatched pathspec, so retry per-path and skip the ones already in
+    // their target state rather than failing the entire "stage all".
+    for (const path of batch) {
+      const perPath = await execGit(['add', '--', path], directory);
+      if (perPath.exitCode === 0) {
+        continue;
+      }
+      const perPathIsPathspecError =
+        /pathspec/.test(perPath.stderr) && /did not match any files/.test(perPath.stderr);
+      if (!perPathIsPathspecError) {
+        throw new Error(perPath.stderr || 'Failed to stage git file');
+      }
+    }
+  });
 }
 
 export async function unstageGitFiles(directory: string, filePaths: string[]): Promise<void> {
@@ -2384,14 +2451,16 @@ export async function unstageGitFiles(directory: string, filePaths: string[]): P
   if (paths.length === 0) {
     throw new Error('path is required');
   }
-  const result = await execGit(['restore', '--staged', '--', ...paths], directory);
-  if (result.exitCode === 0) {
-    return;
-  }
-  const fallback = await execGit(['reset', 'HEAD', '--', ...paths], directory);
-  if (fallback.exitCode !== 0) {
-    throw new Error(fallback.stderr || result.stderr || 'Failed to unstage git file');
-  }
+  await runGitPathBatches(paths, 'Unstaging selected files', async (batch) => {
+    const result = await execGit(['restore', '--staged', '--', ...batch], directory);
+    if (result.exitCode === 0) {
+      return;
+    }
+    const fallback = await execGit(['reset', 'HEAD', '--', ...batch], directory);
+    if (fallback.exitCode !== 0) {
+      throw new Error(fallback.stderr || result.stderr || 'Failed to unstage git file');
+    }
+  });
 }
 
 const HUNK_ACTION_ARGS: Record<'stage' | 'unstage' | 'discard', string[]> = {
@@ -2537,45 +2606,92 @@ export async function createGitCommit(
   message: string,
   options?: { addAll?: boolean; files?: string[]; stageFiles?: string[] }
 ): Promise<GitCommitResult> {
-  if (options?.files?.length && options.stageFiles) {
-    const selectedFiles = new Set(options.files);
+  const selectedFiles = Array.isArray(options?.files) ? options.files : [];
+  const explicitStageFiles = Array.isArray(options?.stageFiles) ? options.stageFiles : null;
+  const shouldCommitSelectedFilesFromIndex = selectedFiles.length > 0 && (
+    explicitStageFiles !== null || hasMultipleGitPathBatches(selectedFiles)
+  );
+
+  if (shouldCommitSelectedFilesFromIndex) {
+    const selectedFileSet = new Set(selectedFiles);
     const stagedResult = await execGit(['diff', '--cached', '--name-only'], directory);
+    if (stagedResult.exitCode !== 0) {
+      throw new Error(stagedResult.stderr || 'Failed to list staged git files');
+    }
     const temporarilyUnstagedFiles = stagedResult.stdout
       .split('\n')
       .map((line) => line.trim())
-      .filter((filePath) => filePath && !selectedFiles.has(filePath));
+      .filter((filePath) => filePath && !selectedFileSet.has(filePath));
+    let temporarilyUnstagedPathsToRestore: string[] = [];
+    let commitResult: GitCommitResult | null = null;
 
     try {
       if (temporarilyUnstagedFiles.length > 0) {
-        await execGit(['restore', '--staged', '--', ...temporarilyUnstagedFiles], directory);
+        try {
+          await unstageGitFiles(directory, temporarilyUnstagedFiles);
+          temporarilyUnstagedPathsToRestore = temporarilyUnstagedFiles;
+        } catch (error) {
+          if (error instanceof GitPathBatchError) {
+            temporarilyUnstagedPathsToRestore = error.completedPaths;
+          }
+          throw error;
+        }
       }
-      if (options.stageFiles.length > 0) {
-        await execGit(['add', '--', ...options.stageFiles], directory);
+      const filesToStage = explicitStageFiles ?? selectedFiles;
+      if (filesToStage.length > 0) {
+        await stageGitFiles(directory, filesToStage);
       }
 
       const result = await execGit(['commit', '-m', message], directory);
       if (result.exitCode !== 0) {
-        return {
+        commitResult = {
           success: false,
           commit: '',
           branch: '',
           summary: { changes: 0, insertions: 0, deletions: 0 },
         };
+      } else {
+        const hashResult = await execGit(['rev-parse', 'HEAD'], directory);
+        const branchResult = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], directory);
+        commitResult = {
+          success: true,
+          commit: hashResult.stdout.trim(),
+          branch: branchResult.stdout.trim(),
+          summary: { changes: 0, insertions: 0, deletions: 0 },
+        };
       }
+    } catch (error) {
+      if (temporarilyUnstagedPathsToRestore.length > 0) {
+        try {
+          await stageGitFiles(directory, temporarilyUnstagedPathsToRestore);
+          temporarilyUnstagedPathsToRestore = [];
+        } catch (restoreError) {
+          const commitError = error instanceof Error ? error.message : String(error || 'Git command failed');
+          const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError || 'Git command failed');
+          throw new Error(
+            `Commit failed: ${commitError}. Restoring unrelated staged files also failed: ${restoreMessage}`
+          );
+        }
+      }
+      throw error;
+    }
 
-      const hashResult = await execGit(['rev-parse', 'HEAD'], directory);
-      const branchResult = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], directory);
-      return {
-        success: true,
-        commit: hashResult.stdout.trim(),
-        branch: branchResult.stdout.trim(),
-        summary: { changes: 0, insertions: 0, deletions: 0 },
-      };
-    } finally {
-      if (temporarilyUnstagedFiles.length > 0) {
-        await execGit(['add', '--', ...temporarilyUnstagedFiles], directory);
+    if (!commitResult) {
+      throw new Error('Failed to create git commit');
+    }
+
+    if (temporarilyUnstagedPathsToRestore.length > 0) {
+      try {
+        await stageGitFiles(directory, temporarilyUnstagedPathsToRestore);
+      } catch (restoreError) {
+        const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError || 'Git command failed');
+        throw new Error(
+          `Commit ${commitResult.commit} was created, but restoring unrelated staged files failed: ${restoreMessage}`
+        );
       }
     }
+
+    return commitResult;
   }
 
   const repo = await getRepository(directory);
@@ -2587,7 +2703,11 @@ export async function createGitCommit(
       } else if (options?.files?.length) {
         const filesToStage = options.stageFiles ?? options.files;
         if (filesToStage.length > 0) {
-          await repo.add(filesToStage);
+          if (hasMultipleGitPathBatches(filesToStage)) {
+            await stageGitFiles(directory, filesToStage);
+          } else {
+            await repo.add(filesToStage);
+          }
         }
       }
       
@@ -2611,7 +2731,7 @@ export async function createGitCommit(
   } else if (options?.files?.length) {
     const filesToStage = options.stageFiles ?? options.files;
     if (filesToStage.length > 0) {
-      await execGit(['add', ...filesToStage], directory);
+      await stageGitFiles(directory, filesToStage);
     }
   }
 

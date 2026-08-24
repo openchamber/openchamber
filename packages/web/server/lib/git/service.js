@@ -18,6 +18,8 @@ const SIMPLE_GIT_SAFE_BINARY_PATTERN = /^([a-z]:)?([a-z0-9/.\\_~-]+)$/i;
 const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom binary, restricted characters must be removed';
 const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
 const gitIndexMutationQueues = new Map();
+// Leave room for Git's fixed arguments and Windows command-line quoting.
+const GIT_PATH_BATCH_MAX_BYTES = 8 * 1024;
 
 const WORKTREE_BOOTSTRAP_PENDING = 'pending';
 const WORKTREE_BOOTSTRAP_READY = 'ready';
@@ -456,6 +458,63 @@ const normalizeFilePathList = (paths) => Array.from(new Set(
     .map((value) => String(value || '').trim())
     .filter(Boolean)
 ));
+
+class GitPathBatchError extends Error {
+  constructor(action, completedPaths, totalPaths, error) {
+    const detail = error instanceof Error ? error.message : String(error || 'Git command failed');
+    super(
+      `${action} stopped after completing ${completedPaths.length} of ${totalPaths} paths. ` +
+      `Git may have applied part of the failing batch: ${detail}`
+    );
+    this.name = 'GitPathBatchError';
+    this.completedPaths = [...completedPaths];
+  }
+}
+
+const splitGitPathBatches = (filePaths) => {
+  const batches = [];
+  let currentBatch = [];
+  let currentBatchBytes = 0;
+
+  for (const filePath of filePaths) {
+    const pathBytes = Buffer.byteLength(filePath, 'utf8') + 1;
+    if (currentBatch.length > 0 && currentBatchBytes + pathBytes > GIT_PATH_BATCH_MAX_BYTES) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentBatchBytes = 0;
+    }
+    currentBatch.push(filePath);
+    currentBatchBytes += pathBytes;
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+  return batches;
+};
+
+const hasMultipleGitPathBatches = (filePaths) => splitGitPathBatches(filePaths).length > 1;
+
+const runGitPathBatches = async (filePaths, action, runBatch) => {
+  const batches = splitGitPathBatches(filePaths);
+  if (batches.length === 0) {
+    return;
+  }
+  if (batches.length === 1) {
+    await runBatch(batches[0]);
+    return;
+  }
+
+  const completedPaths = [];
+  for (const batch of batches) {
+    try {
+      await runBatch(batch);
+      completedPaths.push(...batch);
+    } catch (error) {
+      throw new GitPathBatchError(action, completedPaths, filePaths.length, error);
+    }
+  }
+};
 
 const validateRepositoryFilePaths = (directoryPath, filePaths) => {
   const repoRoot = path.resolve(directoryPath);
@@ -3444,6 +3503,44 @@ export async function stageFile(directory, filePath) {
   await stageFiles(directory, [filePath]);
 }
 
+const stageGitPathBatch = async (git, repoPaths) => {
+  await git.raw(['add', '--', ...repoPaths]).catch(async (error) => {
+    const gitErrorText = parseGitErrorText(error);
+    const isPathspecError = gitErrorText.includes('pathspec') && gitErrorText.includes('did not match any files');
+    if (!isPathspecError) {
+      throw error;
+    }
+
+    // During rapid stage/unstage toggling the optimistic UI can request staging a
+    // path that a prior queued mutation already staged (most visibly a deletion,
+    // whose file is gone from the working tree). `git add` aborts the whole batch
+    // on a single unmatched pathspec, so retry per-path and skip the ones already
+    // in their target state rather than failing the entire "stage all".
+    for (const repoPath of repoPaths) {
+      await git.raw(['add', '--', repoPath]).catch((perPathError) => {
+        const perPathText = parseGitErrorText(perPathError);
+        const perPathIsPathspecError =
+          perPathText.includes('pathspec') && perPathText.includes('did not match any files');
+        if (!perPathIsPathspecError) {
+          throw perPathError;
+        }
+      });
+    }
+  });
+};
+
+const stageGitPaths = (git, repoPaths, action = 'Staging selected files') =>
+  runGitPathBatches(repoPaths, action, (batch) => stageGitPathBatch(git, batch));
+
+const unstageGitPathBatch = async (git, repoPaths) => {
+  await git.raw(['restore', '--staged', '--', ...repoPaths]).catch(async () => {
+    await git.raw(['reset', 'HEAD', '--', ...repoPaths]);
+  });
+};
+
+const unstageGitPaths = (git, repoPaths, action = 'Unstaging selected files') =>
+  runGitPathBatches(repoPaths, action, (batch) => unstageGitPathBatch(git, batch));
+
 export async function stageFiles(directory, paths) {
   if (!directory) {
     throw new Error('directory and path are required for stageFile');
@@ -3462,29 +3559,7 @@ export async function stageFiles(directory, paths) {
       return fileContext.repoPath;
     }))));
     validateRepositoryFilePaths(repoRoot, repoPaths);
-    await git.raw(['add', '--', ...repoPaths]).catch(async (error) => {
-      const gitErrorText = parseGitErrorText(error);
-      const isPathspecError = gitErrorText.includes('pathspec') && gitErrorText.includes('did not match any files');
-      if (!isPathspecError) {
-        throw error;
-      }
-
-      // During rapid stage/unstage toggling the optimistic UI can request staging a
-      // path that a prior queued mutation already staged (most visibly a deletion,
-      // whose file is gone from the working tree). `git add` aborts the whole batch
-      // on a single unmatched pathspec, so retry per-path and skip the ones already
-      // in their target state rather than failing the entire "stage all".
-      for (const repoPath of repoPaths) {
-        await git.raw(['add', '--', repoPath]).catch((perPathError) => {
-          const perPathText = parseGitErrorText(perPathError);
-          const perPathIsPathspecError =
-            perPathText.includes('pathspec') && perPathText.includes('did not match any files');
-          if (!perPathIsPathspecError) {
-            throw perPathError;
-          }
-        });
-      }
-    });
+    await stageGitPaths(git, repoPaths);
   });
 }
 
@@ -3510,16 +3585,15 @@ export async function unstageFiles(directory, paths) {
       return fileContext.repoPath;
     }))));
     validateRepositoryFilePaths(repoRoot, repoPaths);
-    await git.raw(['restore', '--staged', '--', ...repoPaths]).catch(async () => {
-      await git.raw(['reset', 'HEAD', '--', ...repoPaths]);
-    });
+    await unstageGitPaths(git, repoPaths);
   });
 }
 
 export async function commit(directory, message, options = {}) {
   return withGitIndexMutationQueue(directory, async () => {
     const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
-    let temporarilyUnstagedFiles = [];
+    let temporarilyUnstagedPathsToRestore = [];
+    let result;
 
     try {
       const requestedFiles = Array.isArray(options.files)
@@ -3552,16 +3626,16 @@ export async function commit(directory, message, options = {}) {
 
         const status = await git.status();
         const fileStatusByPath = new Map(status.files.map((file) => [file.path, file]));
-      filesToCommit = filesToCommit.filter((filePath) => fileStatusByPath.has(filePath));
+        filesToCommit = filesToCommit.filter((filePath) => fileStatusByPath.has(filePath));
 
         if (filesToCommit.length === 0) {
           throw new Error('No selected files are available to commit. Refresh git status and try again.');
         }
 
-        if (requestedStageFiles) {
+        if (requestedStageFiles || hasMultipleGitPathBatches(filesToCommit)) {
           commitFromIndexOnly = true;
           const selectedFileSet = new Set(filesToCommit);
-          temporarilyUnstagedFiles = status.files
+          const temporarilyUnstagedFiles = status.files
             .filter((file) => {
               const indexStatus = (file.index || '').trim();
               return indexStatus && indexStatus !== '?' && !selectedFileSet.has(file.path);
@@ -3569,7 +3643,15 @@ export async function commit(directory, message, options = {}) {
             .map((file) => file.path);
 
           if (temporarilyUnstagedFiles.length > 0) {
-            await git.raw(['restore', '--staged', '--', ...temporarilyUnstagedFiles]);
+            try {
+              await unstageGitPaths(git, temporarilyUnstagedFiles, 'Preparing the selected commit');
+              temporarilyUnstagedPathsToRestore = temporarilyUnstagedFiles;
+            } catch (error) {
+              if (error instanceof GitPathBatchError) {
+                temporarilyUnstagedPathsToRestore = error.completedPaths;
+              }
+              throw error;
+            }
           }
         }
 
@@ -3586,7 +3668,7 @@ export async function commit(directory, message, options = {}) {
           });
 
         if (filesNeedingAdd.length > 0) {
-          await git.raw(['add', '--', ...filesNeedingAdd]);
+          await stageGitPaths(git, filesNeedingAdd, 'Preparing the selected commit');
         }
       }
 
@@ -3595,7 +3677,6 @@ export async function commit(directory, message, options = {}) {
           ? filesToCommit
           : undefined;
 
-      let result;
       try {
         result = await git.commit(message, commitArgs);
       } catch (error) {
@@ -3608,28 +3689,45 @@ export async function commit(directory, message, options = {}) {
         // Fallback for deleted/stale selections: commit currently staged changes.
         result = await git.commit(message);
       }
-
-      if (temporarilyUnstagedFiles.length > 0) {
-        await git.raw(['add', '--', ...temporarilyUnstagedFiles]).catch((restoreError) => {
-          console.error('Failed to restore temporarily unstaged files:', restoreError);
-        });
-      }
-
-      return {
-        success: true,
-        commit: result.commit,
-        branch: result.branch,
-        summary: result.summary
-      };
     } catch (error) {
-      if (temporarilyUnstagedFiles.length > 0) {
-        await git.raw(['add', '--', ...temporarilyUnstagedFiles]).catch((restoreError) => {
-          console.error('Failed to restore temporarily unstaged files after commit failure:', restoreError);
-        });
+      if (temporarilyUnstagedPathsToRestore.length > 0) {
+        try {
+          await stageGitPaths(git, temporarilyUnstagedPathsToRestore, 'Restoring unrelated staged files');
+          temporarilyUnstagedPathsToRestore = [];
+        } catch (restoreError) {
+          const commitError = error instanceof Error ? error.message : String(error || 'Git command failed');
+          const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError || 'Git command failed');
+          const failure = new Error(
+            `Commit failed: ${commitError}. Restoring unrelated staged files also failed: ${restoreMessage}`
+          );
+          console.error('Failed to commit:', failure);
+          throw failure;
+        }
       }
       console.error('Failed to commit:', error);
       throw error;
     }
+
+    if (temporarilyUnstagedPathsToRestore.length > 0) {
+      try {
+        await stageGitPaths(git, temporarilyUnstagedPathsToRestore, 'Restoring unrelated staged files');
+        temporarilyUnstagedPathsToRestore = [];
+      } catch (restoreError) {
+        const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError || 'Git command failed');
+        const failure = new Error(
+          `Commit ${result.commit} was created, but restoring unrelated staged files failed: ${restoreMessage}`
+        );
+        console.error('Failed to commit:', failure);
+        throw failure;
+      }
+    }
+
+    return {
+      success: true,
+      commit: result.commit,
+      branch: result.branch,
+      summary: result.summary
+    };
   });
 }
 
