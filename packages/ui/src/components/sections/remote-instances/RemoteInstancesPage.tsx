@@ -1776,14 +1776,14 @@ export const RemoteInstancesPage: React.FC = () => {
                 settingsItem="remote-instances.relay-url"
               >
                 {relayEndpointLoadFailed ? (
-                    <p className="typography-meta text-[var(--status-error)]">
-                      {t('settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed')}
-                    </p>
-                  ) : !relayEndpoint ? (
-                    <p className="typography-meta text-muted-foreground">
-                      {t('settings.remoteInstances.clientAuth.relayEndpoint.state.loading')}
-                    </p>
-                  ) : relayEndpoint.relayUrlLocked ? (
+                  <p className="typography-meta text-[var(--status-error)]">
+                    {t('settings.remoteInstances.clientAuth.relayEndpoint.error.loadFailed')}
+                  </p>
+                ) : !relayEndpoint ? (
+                  <p className="typography-meta text-muted-foreground">
+                    {t('settings.remoteInstances.clientAuth.relayEndpoint.state.loading')}
+                  </p>
+                ) : relayEndpoint.relayUrlLocked ? (
                     <p className="typography-meta text-muted-foreground">
                       {t('settings.remoteInstances.clientAuth.relayEndpoint.locked')}
                       <span className="ml-1 font-mono text-xs break-all">{relayEndpoint.relayUrl}</span>
