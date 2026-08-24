@@ -307,8 +307,8 @@ The original session and its review session keep their existing relationship.
 Both user and assistant message controls can create this fork.
 
 OpenCode adds the next fork number only when the source title already has a suffix. OpenChamber adds `(fork #1)` to the first fork.
-The shared action checks known sessions in the fork directory. It uses the next available number for later forks.
-Active and archived sessions both reserve their fork numbers.
+The shared action scans materialized session records in the fork directory and selects the next available number.
+Until the global store contains a complete active and archived snapshot, the selected fork number is best-effort.
 The action does not count the new fork if its creation event reaches the stores first.
 
 Forks remain independent root sessions. They do not receive the source session as `parentID`. That field remains reserved for child sessions such as subagents.
