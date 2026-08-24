@@ -21,6 +21,7 @@ let sessionDeleteError: unknown | null = null
 let beforeSessionUpdateResolve: ((sessionId: string) => void) | null = null
 let beforeSessionDeleteResolve: ((sessionId: string) => void) | null = null
 let beforeSessionForkResolve: ((sessionId: string) => void) | null = null
+let beforeSessionMessagesResolve: ((sessionId: string) => void) | null = null
 const sessionFixture = (id: string, title: string, directory: string): Session => ({
   id,
   slug: id,
@@ -79,6 +80,7 @@ const mockSdk = {
     messages: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.messages", params })
       const sessionID = typeof params.sessionID === "string" ? params.sessionID : ""
+      beforeSessionMessagesResolve?.(sessionID)
       return Promise.resolve(sessionMessagesBySessionID.get(sessionID) ?? sessionMessagesResult)
     }),
     revert: mock((params: Record<string, unknown>) => {
@@ -464,6 +466,7 @@ describe("session forks", () => {
     beforeSessionForkResolve = null
     beforeSessionUpdateResolve = null
     beforeSessionDeleteResolve = null
+    beforeSessionMessagesResolve = null
     sessionForkResult = sessionFixture("session-fork", "Forked (fork #1)", "/test/project")
     sessionUpdateResult = {}
     sessionUpdateErrors.length = 0
@@ -1334,6 +1337,78 @@ describe("session forks", () => {
     expect(registeredSessionDirectories).toEqual([])
     expect(globalUpsertedSessions).toEqual([])
     expect(selectedSessions).toEqual([])
+  })
+
+  test("rejects a runtime switch during pin remapping instead of restoring the composer", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-1-user", 1),
+      assistantMessageFixture("source-2-assistant", 2, "source-1-user"),
+      userMessageFixture("source-3-selected", 3),
+    ]
+    // Runtime A content. If the action reaches the shared composer restore,
+    // this text and this file land in runtime B.
+    const selectedParts: Part[] = [
+      {
+        id: "part-text",
+        sessionID: "session-a",
+        messageID: "source-3-selected",
+        type: "text",
+        text: "runtime A prompt",
+      },
+      {
+        id: "part-file",
+        sessionID: "session-a",
+        messageID: "source-3-selected",
+        type: "file",
+        mime: "image/png",
+        filename: "runtime-a.png",
+        url: "data:image/png;base64,AA==",
+      },
+    ]
+    // Pins are required. With no pins the action returns before the remap that
+    // this test covers.
+    sessionForkResult = {
+      ...sessionFixture("session-fork", "Forked (fork #1)", "/test/project"),
+      metadata: {
+        openchamber: {
+          context_obligatory_messages: [
+            { id: "source-1-user", createdAt: 1, role: "user" },
+          ],
+        },
+      },
+    }
+    sessionMessagesBySessionID.set("session-a", {
+      data: messageRecords(sourceMessages, { "source-3-selected": selectedParts }),
+    })
+    sessionMessagesBySessionID.set("session-fork", { data: [] })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-pin-runtime-a.test", runtimeKey: "fork-pin-runtime-a" })
+    // This hook also runs for the source fetch. The fork id check switches the
+    // runtime while remapForkedPins awaits, not before the fork starts.
+    beforeSessionMessagesResolve = (sessionID) => {
+      if (sessionID !== "session-fork") return
+      switchRuntimeEndpoint({ apiBaseUrl: "http://fork-pin-runtime-b.test", runtimeKey: "fork-pin-runtime-b" })
+    }
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+    inputState.pendingInputText = "new runtime draft"
+    inputState.attachedFiles = [{ filename: "runtime-b-sentinel.png" }]
+
+    let caught: Error | null = null
+    try {
+      await forkFromMessage("session-a", "source-3-selected")
+    } catch (error) {
+      if (error instanceof Error) caught = error
+    }
+
+    expect(caught?.message).toBe("runtime changed")
+    expect(inputState.pendingInputText).toBe("new runtime draft")
+    expect(inputState.attachedFiles).toEqual([{ filename: "runtime-b-sentinel.png" }])
   })
 
   test("does not create a fork when the source transcript fetch fails", async () => {

@@ -296,7 +296,10 @@ A runtime switch stops compensation because the client points to another server.
 If compensation fails or stops, the error tells the user that the fork remains.
 
 After selection, the action maps pinned message IDs to cloned message IDs only when source pins exist.
-If pin mapping fails, the clean selected fork remains usable. The UI warns that pinned messages were not copied.
+If pin mapping fails on the same runtime, the clean fork remains usable.
+The UI shows the pins warning.
+If the runtime changes during the pin request, the action rejects the stale result.
+The stale result does not change the composer in the new runtime.
 
 Linked issues are session-scoped and carry across a message fork unchanged.
 

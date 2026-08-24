@@ -2329,6 +2329,7 @@ async function forkAndReconcileSession(
     }
     return { status: pinsDropped ? "pins-dropped" : "success" }
   } catch (error) {
+    if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
     console.error("[session-actions] Failed to remap pinned messages. The clean fork remains usable.", error)
     return { status: "pins-dropped" }
   }
