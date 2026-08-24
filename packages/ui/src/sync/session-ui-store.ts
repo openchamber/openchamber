@@ -99,6 +99,13 @@ export type { AttachedFile }
 
 type GoalCommand = { name: string; template?: string }
 
+// Reuse one request for every runtime, source session, and message.
+// This guard covers every control that starts a message fork.
+const messageForkInflightByKey = new Map<string, Promise<void>>()
+
+const keyForMessageFork = (runtimeKey: string, sessionId: string, messageId: string): string =>
+  `${runtimeKey}\n${sessionId}\n${messageId}`
+
 export function expandSlashCommandGoalObjective(content: string, commands: GoalCommand[]): string {
   if (!content.startsWith("/")) return content
   const [head, ...tail] = content.split(" ")
@@ -1868,36 +1875,51 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // Session forks delegate state reconciliation to session-actions.
   // ---------------------------------------------------------------------------
-  forkFromMessage: async (sessionId, messageId) => {
-    try {
-      const result = await forkFromMessageAction(sessionId, messageId)
-      const { toast } = await import("sonner")
-      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
-      const { dictionary } = useI18nStore.getState()
-      if (result.status === "pins-dropped") {
-        toast.warning(formatMessage(dictionary, "sessions.fork.toast.pinsDropped"))
-      } else {
-        toast.success(formatMessage(dictionary, "sessions.fork.toast.success"))
+  forkFromMessage: (sessionId, messageId) => {
+    const key = keyForMessageFork(getRuntimeKey(), sessionId, messageId)
+    const existing = messageForkInflightByKey.get(key)
+    if (existing) return existing
+
+    const promise = (async () => {
+      try {
+        const result = await forkFromMessageAction(sessionId, messageId)
+        const { toast } = await import("sonner")
+        const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+        const { dictionary } = useI18nStore.getState()
+        if (result.status === "pins-dropped") {
+          toast.warning(formatMessage(dictionary, "sessions.fork.toast.pinsDropped"))
+        } else {
+          toast.success(formatMessage(dictionary, "sessions.fork.toast.success"))
+        }
+      } catch (error) {
+        const leftover = error instanceof ForkLeftoverError
+        if (!leftover && error instanceof Error && error.message === "runtime changed") return
+        const unsupportedBoundary = error instanceof UnsupportedForkBoundaryError
+        if (!unsupportedBoundary) {
+          console.error("Failed to fork session:", leftover ? error.originalError : error)
+        }
+        const { toast } = await import("sonner")
+        const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+        const { dictionary } = useI18nStore.getState()
+        toast.error(formatMessage(
+          dictionary,
+          leftover
+            ? "sessions.fork.toast.leftover"
+            : unsupportedBoundary
+              ? "sessions.fork.toast.unsupportedBoundary"
+              : "sessions.fork.toast.error",
+        ))
       }
-    } catch (error) {
-      const leftover = error instanceof ForkLeftoverError
-      if (!leftover && error instanceof Error && error.message === "runtime changed") return
-      const unsupportedBoundary = error instanceof UnsupportedForkBoundaryError
-      if (!unsupportedBoundary) {
-        console.error("Failed to fork session:", leftover ? error.originalError : error)
+    })()
+
+    messageForkInflightByKey.set(key, promise)
+    const clearInflightRequest = () => {
+      if (messageForkInflightByKey.get(key) === promise) {
+        messageForkInflightByKey.delete(key)
       }
-      const { toast } = await import("sonner")
-      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
-      const { dictionary } = useI18nStore.getState()
-      toast.error(formatMessage(
-        dictionary,
-        leftover
-          ? "sessions.fork.toast.leftover"
-          : unsupportedBoundary
-            ? "sessions.fork.toast.unsupportedBoundary"
-            : "sessions.fork.toast.error",
-      ))
     }
+    void promise.then(clearInflightRequest, clearInflightRequest)
+    return promise
   },
 
   // ---------------------------------------------------------------------------

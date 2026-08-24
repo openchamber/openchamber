@@ -297,6 +297,86 @@ describe('forkFromMessage errors', () => {
     };
   };
 
+  test('reuses one in-flight fork for repeated requests from the same message', async () => {
+    const directory = '/fork-inflight/project';
+    const sourceSession = {
+      id: 'session-inflight',
+      title: 'Source',
+      directory,
+      time: { created: 1, updated: 1 },
+    };
+    const forkedSession = {
+      id: 'session-inflight-fork',
+      title: 'Source (fork #1)',
+      directory,
+      time: { created: 2, updated: 2 },
+    };
+    const sourceRecords = [
+      { info: { id: 'source-user', role: 'user', time: { created: 1 } }, parts: [] },
+    ];
+    let releaseMessages = () => {};
+    const messagesReady = new Promise((resolve) => {
+      releaseMessages = resolve;
+    });
+    let messageCalls = 0;
+    let forkCalls = 0;
+    const sdk = {
+      session: {
+        messages: async () => {
+          messageCalls += 1;
+          await messagesReady;
+          return { data: sourceRecords };
+        },
+      },
+    };
+    const childStore = createChildStore([sourceSession]);
+    const childStores = {
+      children: new Map([[directory, childStore]]),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    const successes = [];
+    const originalForkSession = opencodeClient.forkSession;
+    const originalUpdateSession = opencodeClient.updateSession;
+    const originalToastSuccess = toast.success;
+    const previousI18nState = useI18nStore.getState();
+    opencodeClient.forkSession = async () => {
+      forkCalls += 1;
+      return forkedSession;
+    };
+    opencodeClient.updateSession = async (_sessionId, patch) => ({ ...forkedSession, ...patch });
+    toast.success = (message) => {
+      successes.push(message);
+      return 'fork-success-toast';
+    };
+    useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+    setActionRefs(sdk, childStores, () => directory);
+
+    try {
+      const first = useSessionUIStore.getState().forkFromMessage(sourceSession.id, 'source-user');
+      const second = useSessionUIStore.getState().forkFromMessage(sourceSession.id, 'source-user');
+      const messageCallsWhilePending = messageCalls;
+
+      releaseMessages();
+      await Promise.all([first, second]);
+
+      expect(messageCallsWhilePending).toBe(1);
+      expect(forkCalls).toBe(1);
+      expect(successes).toHaveLength(1);
+
+      await useSessionUIStore.getState().forkFromMessage(sourceSession.id, 'source-user');
+
+      expect(messageCalls).toBe(2);
+      expect(forkCalls).toBe(2);
+      expect(successes).toHaveLength(2);
+    } finally {
+      opencodeClient.forkSession = originalForkSession;
+      opencodeClient.updateSession = originalUpdateSession;
+      toast.success = originalToastSuccess;
+      useI18nStore.setState(previousI18nState);
+    }
+  });
+
   test('warns when the clean fork remains usable but not all pinned messages were copied', async () => {
     const directory = '/fork-pin-warning/project';
     const sourceSession = {
