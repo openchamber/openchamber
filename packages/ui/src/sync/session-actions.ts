@@ -2132,6 +2132,11 @@ interface PreparedForkMetadata {
   pinnedMessages: ContextObligatoryMessage[]
 }
 
+interface RemappedForkPins {
+  session: Session
+  pinsDropped: boolean
+}
+
 function prepareCleanForkMetadata(
   forkedSession: Session,
   copiedThroughCreatedAt: number | null,
@@ -2149,12 +2154,12 @@ function prepareCleanForkMetadata(
 }
 
 async function remapForkedPins(
-  sourceRecords: SessionMessageRecord[],
+  copiedSourceRecords: SessionMessageRecord[],
   forkedSession: Session,
   pinnedMessages: readonly ContextObligatoryMessage[],
   forkDirectory: string | null,
   expectedRuntimeKey: string,
-): Promise<Session> {
+): Promise<RemappedForkPins> {
   const remappedMessages: ContextObligatoryMessage[] = []
 
   const forkResult = await sdk().session.messages({
@@ -2164,13 +2169,13 @@ async function remapForkedPins(
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
 
   const forkRecords = assertSdkData(forkResult, "fork session.messages")
-  if (forkRecords.length > sourceRecords.length) {
-    throw new Error("Cannot remap pinned messages because the fork transcript is longer than its source")
+  if (forkRecords.length > copiedSourceRecords.length) {
+    throw new Error("Cannot remap pinned messages because the fork transcript is longer than the copied prefix")
   }
 
   const forkMessageIdBySourceId = new Map<string, string>()
   for (let index = 0; index < forkRecords.length; index += 1) {
-    const sourceMessage = sourceRecords[index]?.info
+    const sourceMessage = copiedSourceRecords[index]?.info
     const forkMessage = forkRecords[index]?.info
     if (
       !sourceMessage
@@ -2183,12 +2188,18 @@ async function remapForkedPins(
     forkMessageIdBySourceId.set(sourceMessage.id, forkMessage.id)
   }
 
+  const copiedSourceIds = new Set(copiedSourceRecords.map((record) => record.info.id))
+  let pinsDropped = false
   for (const pinnedMessage of pinnedMessages) {
     const forkMessageId = forkMessageIdBySourceId.get(pinnedMessage.id)
-    if (forkMessageId) remappedMessages.push({ ...pinnedMessage, id: forkMessageId })
+    if (forkMessageId) {
+      remappedMessages.push({ ...pinnedMessage, id: forkMessageId })
+    } else if (copiedSourceIds.has(pinnedMessage.id)) {
+      pinsDropped = true
+    }
   }
 
-  if (remappedMessages.length === 0) return forkedSession
+  if (remappedMessages.length === 0) return { session: forkedSession, pinsDropped }
 
   const updatedSession = await opencodeClient.updateSession(
     forkedSession.id,
@@ -2196,7 +2207,7 @@ async function remapForkedPins(
     forkDirectory,
   )
   if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
-  return updatedSession
+  return { session: updatedSession, pinsDropped }
 }
 
 async function updateCleanFork(
@@ -2258,7 +2269,7 @@ async function compensateFailedFork(
 async function forkAndReconcileSession(
   sessionId: string,
   messageBoundaryId: string | undefined,
-  sourceRecords: SessionMessageRecord[],
+  copiedSourceRecords: SessionMessageRecord[],
   copiedThroughCreatedAt: number | null,
   store: DirectoryStoreApi,
   directory: string | undefined,
@@ -2301,8 +2312,8 @@ async function forkAndReconcileSession(
   if (pinnedMessages.length === 0) return { status: "success" }
 
   try {
-    const sessionWithRemappedPins = await remapForkedPins(
-      sourceRecords,
+    const { session: sessionWithRemappedPins, pinsDropped } = await remapForkedPins(
+      copiedSourceRecords,
       reconciledSession,
       pinnedMessages,
       forkDirectory,
@@ -2317,7 +2328,7 @@ async function forkAndReconcileSession(
         false,
       )
     }
-    return { status: "success" }
+    return { status: pinsDropped ? "pins-dropped" : "success" }
   } catch (error) {
     console.error("[session-actions] Failed to remap pinned messages. The clean fork remains usable.", error)
     return { status: "pins-dropped" }
@@ -2362,6 +2373,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   const copiedThroughIndex = selectedRecord.info.role === "user"
     ? selectedIndex - 1
     : selectedIndex
+  const copiedSourceRecords = sourceRecords.slice(0, copiedThroughIndex + 1)
   const exclusiveBoundaryId = sourceRecords[copiedThroughIndex + 1]?.info.id
   const copiedThroughCreatedAt = sourceRecords[copiedThroughIndex]?.info.time.created ?? null
   if (!canServerCopyThroughBoundary(sourceRecords, copiedThroughIndex, exclusiveBoundaryId)) {
@@ -2385,7 +2397,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   const result = await forkAndReconcileSession(
     sessionId,
     exclusiveBoundaryId,
-    sourceRecords,
+    copiedSourceRecords,
     copiedThroughCreatedAt,
     store,
     directory,

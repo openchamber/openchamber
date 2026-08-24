@@ -2038,7 +2038,7 @@ export const dict = {
   'chat.messageBody.actions.startNewSession': 'Neue Sitzung von dieser Antwort starten',
   'chat.messageBody.actions.forkSession': 'Sitzung abzweigen',
   'sessions.fork.toast.success': 'Sitzung abgezweigt',
-  'sessions.fork.toast.pinsDropped': 'Sitzung abgezweigt, aber angeheftete Nachrichten wurden nicht kopiert',
+  'sessions.fork.toast.pinsDropped': 'Sitzung abgezweigt, aber nicht alle angehefteten Nachrichten wurden kopiert',
   'sessions.fork.toast.error': 'Sitzung konnte nicht abgezweigt werden',
   'sessions.fork.toast.leftover': 'Einrichten der Abzweigung fehlgeschlagen, aber die neue Sitzung ist noch vorhanden',
   'sessions.fork.toast.unsupportedBoundary': 'OpenCode kann diese Sitzung an dieser Nachricht nicht abzweigen. Ein erneuter Versuch hilft nicht.',

@@ -2197,7 +2197,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.startNewSession': '基於此回答開始新會話',
   'chat.messageBody.actions.forkSession': '分支工作階段',
   'sessions.fork.toast.success': '工作階段已分支',
-  'sessions.fork.toast.pinsDropped': '工作階段已分支，但未複製釘選訊息',
+  'sessions.fork.toast.pinsDropped': '工作階段已分支，但未複製所有釘選訊息',
   'sessions.fork.toast.error': '無法分支工作階段',
   'sessions.fork.toast.leftover': '分支設定失敗，但新的工作階段仍然存在',
   'sessions.fork.toast.unsupportedBoundary': 'OpenCode 無法從此訊息處分支此工作階段。重試也無法解決。',

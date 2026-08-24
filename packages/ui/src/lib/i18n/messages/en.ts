@@ -2227,7 +2227,7 @@ export const dict = {
   'chat.messageBody.actions.startNewSession': 'Start new session from this answer',
   'chat.messageBody.actions.forkSession': 'Fork session',
   'sessions.fork.toast.success': 'Session forked',
-  'sessions.fork.toast.pinsDropped': 'Session forked, but pinned messages were not copied',
+  'sessions.fork.toast.pinsDropped': 'Session forked, but not all pinned messages were copied',
   'sessions.fork.toast.error': 'Failed to fork session',
   'sessions.fork.toast.leftover': 'Fork setup failed, but the new session still exists',
   'sessions.fork.toast.unsupportedBoundary': 'OpenCode cannot fork this session at this message. Retrying will not help.',

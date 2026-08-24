@@ -297,7 +297,7 @@ describe('forkFromMessage errors', () => {
     };
   };
 
-  test('warns when the clean fork remains usable but pinned messages were not copied', async () => {
+  test('warns when the clean fork remains usable but not all pinned messages were copied', async () => {
     const directory = '/fork-pin-warning/project';
     const sourceSession = {
       id: 'session-pin-warning',
@@ -373,7 +373,7 @@ describe('forkFromMessage errors', () => {
       useI18nStore.setState(previousI18nState);
     }
 
-    expect(warnings).toEqual(['Session forked, but pinned messages were not copied']);
+    expect(warnings).toEqual(['Session forked, but not all pinned messages were copied']);
     expect(successes).toEqual([]);
     expect(useSessionUIStore.getState().currentSessionId).toBe(forkedSession.id);
   });

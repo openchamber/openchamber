@@ -919,7 +919,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.startNewSession': 'Rozpocznij nową sesję z tej odpowiedzi',
   'chat.messageBody.actions.forkSession': 'Rozgałęź sesję',
   'sessions.fork.toast.success': 'Sesja została rozgałęziona',
-  'sessions.fork.toast.pinsDropped': 'Sesja została rozgałęziona, ale przypięte wiadomości nie zostały skopiowane',
+  'sessions.fork.toast.pinsDropped': 'Sesja została rozgałęziona, ale nie wszystkie przypięte wiadomości zostały skopiowane',
   'sessions.fork.toast.error': 'Nie udało się rozgałęzić sesji',
   'sessions.fork.toast.leftover': 'Konfiguracja rozgałęzienia nie powiodła się, ale nowa sesja nadal istnieje',
   'sessions.fork.toast.unsupportedBoundary': 'OpenCode nie może rozgałęzić tej sesji od tej wiadomości. Ponowna próba nie pomoże.',

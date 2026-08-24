@@ -2223,7 +2223,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.startNewSession': 'この回答から新しいセッションを開始',
   'chat.messageBody.actions.forkSession': 'セッションをフォーク',
   'sessions.fork.toast.success': 'セッションをフォークしました',
-  'sessions.fork.toast.pinsDropped': 'セッションをフォークしましたが、ピン留めしたメッセージはコピーされませんでした',
+  'sessions.fork.toast.pinsDropped': 'セッションをフォークしましたが、ピン留めしたメッセージをすべてはコピーできませんでした',
   'sessions.fork.toast.error': 'セッションをフォークできませんでした',
   'sessions.fork.toast.leftover': 'フォークの設定に失敗しましたが、新しいセッションは残っています',
   'sessions.fork.toast.unsupportedBoundary': 'OpenCode はこのメッセージからこのセッションをフォークできません。再試行しても成功しません。',

@@ -2193,7 +2193,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.startNewSession': '基于此回答开始新会话',
   'chat.messageBody.actions.forkSession': '分叉会话',
   'sessions.fork.toast.success': '会话已分叉',
-  'sessions.fork.toast.pinsDropped': '会话已分叉，但置顶消息未复制',
+  'sessions.fork.toast.pinsDropped': '会话已分叉，但未复制所有置顶消息',
   'sessions.fork.toast.error': '无法分叉会话',
   'sessions.fork.toast.leftover': '分叉设置失败，但新会话仍然存在',
   'sessions.fork.toast.unsupportedBoundary': 'OpenCode 无法从此消息处分叉此会话。重试也无法解决。',

@@ -2227,7 +2227,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.startNewSession': '이 응답에서 새 세션 시작',
   'chat.messageBody.actions.forkSession': '세션 포크',
   'sessions.fork.toast.success': '세션을 포크했습니다',
-  'sessions.fork.toast.pinsDropped': '세션을 포크했지만 고정한 메시지는 복사하지 못했습니다',
+  'sessions.fork.toast.pinsDropped': '세션을 포크했지만 고정한 메시지를 모두 복사하지는 못했습니다',
   'sessions.fork.toast.error': '세션을 포크하지 못했습니다',
   'sessions.fork.toast.leftover': '포크 설정에 실패했지만 새 세션은 아직 남아 있습니다',
   'sessions.fork.toast.unsupportedBoundary': 'OpenCode는 이 메시지에서 이 세션을 포크할 수 없습니다. 다시 시도해도 해결되지 않습니다.',

@@ -1954,7 +1954,7 @@ export const dict = {
   'chat.messageBody.actions.startNewSession': 'Démarrer une nouvelle session à partir de cette réponse',
   'chat.messageBody.actions.forkSession': 'Dupliquer la session',
   'sessions.fork.toast.success': 'Session dupliquée',
-  'sessions.fork.toast.pinsDropped': "La session a été dupliquée, mais les messages épinglés n'ont pas été copiés",
+  'sessions.fork.toast.pinsDropped': "La session a été dupliquée, mais les messages épinglés n'ont pas tous été copiés",
   'sessions.fork.toast.error': 'Échec de la duplication de la session',
   'sessions.fork.toast.leftover': 'La configuration de la duplication a échoué, mais la nouvelle session existe toujours',
   'sessions.fork.toast.unsupportedBoundary': 'OpenCode ne peut pas dupliquer cette session à partir de ce message. Réessayer ne servira à rien.',

@@ -1130,6 +1130,160 @@ describe("session forks", () => {
     expect(selectedSessions).toEqual([{ sessionID: "session-fork", directory: "/test/project" }])
   })
 
+  test("reports pin loss when the fork transcript omits the pinned copied tail", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-1-user", 1),
+      assistantMessageFixture("source-2-assistant", 2, "source-1-user"),
+      userMessageFixture("source-3-user", 3),
+      assistantMessageFixture("source-4-selected", 4, "source-3-user"),
+      userMessageFixture("source-5-next", 5),
+    ]
+    const forkMessages = [
+      userMessageFixture("fork-1-user", 1, "session-fork"),
+      assistantMessageFixture("fork-2-assistant", 2, "fork-1-user", "session-fork"),
+      userMessageFixture("fork-3-user", 3, "session-fork"),
+    ]
+    sessionForkResult = {
+      ...sessionFixture("session-fork", "Forked (fork #1)", "/test/project"),
+      metadata: {
+        openchamber: {
+          context_obligatory_messages: [
+            { id: "source-4-selected", createdAt: 4, role: "assistant" },
+          ],
+        },
+      },
+    }
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    sessionMessagesBySessionID.set("session-fork", { data: messageRecords(forkMessages) })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-pin-tail-loss.test", runtimeKey: "fork-pin-tail-loss" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const result = await forkFromMessage("session-a", "source-4-selected")
+
+    expect(result).toEqual({ status: "pins-dropped" })
+  })
+
+  test("does not report a pin beyond the copied boundary as lost", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-1-user", 1),
+      assistantMessageFixture("source-2-assistant", 2, "source-1-user"),
+      userMessageFixture("source-3-selected", 3),
+    ]
+    const forkMessages = [
+      userMessageFixture("fork-1-user", 1, "session-fork"),
+      assistantMessageFixture("fork-2-assistant", 2, "fork-1-user", "session-fork"),
+    ]
+    sessionForkResult = {
+      ...sessionFixture("session-fork", "Forked (fork #1)", "/test/project"),
+      metadata: {
+        openchamber: {
+          context_obligatory_messages: [
+            { id: "source-3-selected", createdAt: 3, role: "user" },
+          ],
+        },
+      },
+    }
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    sessionMessagesBySessionID.set("session-fork", { data: messageRecords(forkMessages) })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-pin-beyond-boundary.test", runtimeKey: "fork-pin-beyond-boundary" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const result = await forkFromMessage("session-a", "source-3-selected")
+
+    expect(result).toEqual({ status: "success" })
+  })
+
+  test("keeps mapped pins when another copied pin is lost", async () => {
+    const sourceMessages = [
+      userMessageFixture("source-1-user", 1),
+      assistantMessageFixture("source-2-assistant", 2, "source-1-user"),
+      userMessageFixture("source-3-user", 3),
+      assistantMessageFixture("source-4-selected", 4, "source-3-user"),
+      userMessageFixture("source-5-next", 5),
+    ]
+    const forkMessages = [
+      userMessageFixture("fork-1-user", 1, "session-fork"),
+      assistantMessageFixture("fork-2-assistant", 2, "fork-1-user", "session-fork"),
+      userMessageFixture("fork-3-user", 3, "session-fork"),
+    ]
+    sessionForkResult = {
+      ...sessionFixture("session-fork", "Forked (fork #1)", "/test/project"),
+      metadata: {
+        openchamber: {
+          context_obligatory_messages: [
+            { id: "source-1-user", createdAt: 1, role: "user" },
+            { id: "source-4-selected", createdAt: 4, role: "assistant" },
+          ],
+        },
+      },
+    }
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    sessionMessagesBySessionID.set("session-fork", { data: messageRecords(forkMessages) })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-pin-partial-loss.test", runtimeKey: "fork-pin-partial-loss" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const result = await forkFromMessage("session-a", "source-4-selected")
+
+    expect(result).toEqual({ status: "pins-dropped" })
+    expect(replyCalls.filter((call) => call.method === "session.update")[1]?.params.metadata).toEqual({
+      openchamber: {
+        context_obligatory_messages: [
+          { id: "fork-1-user", createdAt: 1, role: "user" },
+        ],
+      },
+    })
+  })
+
+  test("does not report the first user message pin as lost", async () => {
+    const sourceMessages = [userMessageFixture("source-first", 1)]
+    sessionForkResult = {
+      ...sessionFixture("session-fork", "Forked (fork #1)", "/test/project"),
+      metadata: {
+        openchamber: {
+          context_obligatory_messages: [
+            { id: "source-first", createdAt: 1, role: "user" },
+          ],
+        },
+      },
+    }
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    sessionMessagesBySessionID.set("session-fork", { data: [] })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-first-user-pin.test", runtimeKey: "fork-first-user-pin" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const result = await forkFromMessage("session-a", "source-first")
+
+    expect(result).toEqual({ status: "success" })
+  })
+
   test("reports a leftover fork and skips delete after a runtime switch", async () => {
     const sourceMessages = [
       userMessageFixture("source-user", 1),
