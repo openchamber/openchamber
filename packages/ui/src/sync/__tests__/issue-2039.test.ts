@@ -287,6 +287,8 @@ mock.module("../session-actions", () => ({
   revertToMessage: mock(async () => undefined),
   unrevertSession: mock(async () => undefined),
   forkFromMessage: mock(async () => undefined),
+  ForkLeftoverError: class ForkLeftoverError extends Error {},
+  UnsupportedForkBoundaryError: class UnsupportedForkBoundaryError extends Error {},
   fetchMessagesForSession: mock(async () => undefined),
   getSessionLastAssistantModel: () => null,
   patchSessionMetadata: mock(async () => undefined),
