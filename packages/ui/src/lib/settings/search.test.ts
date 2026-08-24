@@ -10,6 +10,7 @@ const runtimeCtx = {
   isDesktop: false,
   isMobile: false,
   isDesktopLocalOrigin: false,
+  hasClientAuth: true,
   isMac: false,
   isWindows: false,
   isLinux: false,
@@ -37,5 +38,17 @@ describe('settings search', () => {
     });
 
     expect(results.some((result) => result.id === 'integrations.third-party.opencode-cursor-oauth')).toBe(true);
+  });
+
+  test('hides client-auth targets when the runtime has no clientAuth API', () => {
+    const results = buildSettingsSearchResults({
+      query: 'relay',
+      runtimeCtx: { ...runtimeCtx, hasClientAuth: false },
+      t,
+      getPageTitle: (page) => page,
+    });
+
+    expect(results.some((result) => result.id === 'remote-instances.client-auth')).toBe(false);
+    expect(results.some((result) => result.id === 'remote-instances.relay-url')).toBe(false);
   });
 });

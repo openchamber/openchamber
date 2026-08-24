@@ -44,6 +44,7 @@ import {
   SETTINGS_SECTION_TITLE_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { useDeviceInfo } from '@/lib/device';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { isWindowsArm64 as isWindowsArm64Platform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
@@ -181,6 +182,7 @@ function getCurrentHistoryState(): Record<string, unknown> {
 export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile, isWindowed, visiblePageSlugs, initialMobileStage = 'nav' }) => {
   const { t } = useI18n();
   const deviceInfo = useDeviceInfo();
+  const { clientAuth } = useRuntimeAPIs();
   const isMobile = forceMobile ?? deviceInfo.isMobile;
   const pendingRestartCount = usePendingOpenCodeRestartStore(selectPendingOpenCodeRestartCount);
 
@@ -398,12 +400,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const settingsSearchResults = React.useMemo(() => {
     return buildSettingsSearchResults({
       query: settingsSearchQuery,
-      runtimeCtx: { ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, isLinux, isWindowsArm64 },
+      runtimeCtx: { ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, isLinux, isWindowsArm64, hasClientAuth: Boolean(clientAuth) },
       visiblePageSlugs,
       t,
       getPageTitle,
     });
-  }, [getPageTitle, isWindowsArm64, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
+  }, [getPageTitle, isWindowsArm64, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs, clientAuth]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
     if (result.id.startsWith('agents.')) {

@@ -21,6 +21,10 @@ export interface SettingsSearchResult extends SettingsSearchItem {
 interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
+  // Whether the runtime registers the clientAuth API surface. Guards entries
+  // whose targets render behind the clientAuth section, so search never
+  // exposes a result the page cannot mount.
+  hasClientAuth: boolean;
   // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
   isMac: boolean;
   // Windows desktop shell — for controls that only render on win32.
@@ -598,7 +602,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.remoteInstances.clientAuth.title',
     descriptionKey: 'settings.remoteInstances.clientAuth.description',
     keywords: ['pairing link', 'client token', 'connect desktop', 'remote access', 'relay', 'devices', 'connect from anywhere'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.hasClientAuth,
   },
   {
     id: 'remote-instances.relay-url',
@@ -606,7 +610,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.remoteInstances.clientAuth.relayEndpoint.title',
     descriptionKey: 'settings.remoteInstances.clientAuth.relayEndpoint.info',
     keywords: ['relay', 'relay server', 'custom relay', 'self-hosted relay', 'relay url', 'relay endpoint', 'private relay'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.hasClientAuth,
   },
   {
     id: 'remote-instances.direct-hosts',
