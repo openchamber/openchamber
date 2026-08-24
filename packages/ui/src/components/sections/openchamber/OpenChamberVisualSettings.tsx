@@ -1711,7 +1711,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             </SettingsRadioGroup>
                                         </SettingsControlGroup>
                                     )}
-
                                 </SettingsTwoColumn>
                             </SettingsSection>
                         )}
