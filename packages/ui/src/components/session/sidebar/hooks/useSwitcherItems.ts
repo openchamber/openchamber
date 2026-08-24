@@ -2,6 +2,7 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { isBtwSession } from '@/lib/sessionBtwMetadata';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGitAllBranches } from '@/stores/useGitStore';
@@ -117,6 +118,8 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
 
     const parents = activeSessions
       .filter((session) => !session.time?.archived)
+      // btw forks stay hidden until promoted to a full session
+      .filter((session) => !isBtwSession(session))
       .filter((session) => !isVSCode || !isChatDirectoryPath(resolveGlobalSessionDirectory(session)))
       .filter((session) => !(session as Session & { parentID?: string | null }).parentID)
       .filter((session) => {

@@ -1815,6 +1815,14 @@ async function main(options = {}) {
       fs,
       process,
     }),
+    // Dev/debug instances share the data dir (and thus the relay identity) with
+    // the production instance, so they must not host the relay on their own —
+    // paired devices would land on them. OPENCHAMBER_RELAY_HOST=off disables
+    // passive hosting explicitly (dev scripts set it); the Electron dev shell is
+    // covered via OPENCHAMBER_ELECTRON_DEV. OPENCHAMBER_RELAY_HOST=on overrides
+    // both. Explicit enable/pairing on the instance still hosts regardless.
+    allowPassiveHost: process.env.OPENCHAMBER_RELAY_HOST === 'on'
+      || (process.env.OPENCHAMBER_RELAY_HOST !== 'off' && process.env.OPENCHAMBER_ELECTRON_DEV !== '1'),
     // Relay demand = any paired device or pending pairing session that uses the
     // relay transport. Drives the auto on/off lifecycle.
     hasRelayDemand: async () => {

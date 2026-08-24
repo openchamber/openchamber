@@ -334,7 +334,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
-                <Tooltip>
+                <Tooltip delayDuration={800}>
                   <TooltipTrigger asChild>
                       <button
                         type="button"

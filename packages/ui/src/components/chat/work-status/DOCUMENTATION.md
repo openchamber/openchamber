@@ -45,7 +45,11 @@ exactly as it already does when the context panel opens.
 
 - the user switched it off;
 - the runtime is mobile or VS Code;
-- the context panel is open for the active directory;
+- the context panel is open for the directory the app is effectively on —
+  looked up through `useEffectiveDirectory` and `normalizeContextPanelDirectoryKey`,
+  the same key the rail and the panel use. It is deliberately **not** the
+  directory this panel reports about: a managed Chat reports about none, and
+  that empty key answered "closed" for a context panel that was plainly open;
 - the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` of transcript alongside
   `WORK_STATUS_PANEL_WIDTH` of panel.
 

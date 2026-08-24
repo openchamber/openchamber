@@ -54,7 +54,8 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 - Assistant markdown treats raw HTML as inert visible text. The final generated
   HTML is sanitized as defense in depth, with script and style elements
   forbidden, so message content cannot inject active DOM or application-wide
-  CSS into any runtime surface.
+  CSS into any runtime surface. Safe custom application links go through the
+  app-link confirmation flow in every supported renderer, including VS Code.
 - Final assistant Markdown rendering is independent from image gallery
   extraction: gallery presence never changes the chat body. Assistant image
   syntax consistently renders as a shared image icon followed by its filename,
@@ -120,6 +121,14 @@ Why: only navigation tools use the compact static path; all other tools need obs
 ## Quick map of files in this folder
 
 - Text: `AssistantTextPart.tsx`, `UserTextPart.tsx`
+- User-attached context (inline code comments, terminal selections, browser
+  annotations, PR comments/checks): `UserContextPart.tsx`. `UserTextPart`
+  routes to it when the part's metadata carries an `openchamberContext`
+  payload (see `lib/messages/contextParts.ts`, which owns both the send-time
+  builder and the read-back parser). Linked GitHub issues/PRs are instead
+  converted to link file-parts in `normalizeUserDisplayParts.ts`. Legacy
+  pre-metadata messages still render via text sniffing (`<terminal_context>`
+  blocks, `GitHub issue context (JSON)` prefixes).
 - Tools: `ToolPart.tsx`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `ToolRevealOnMount.tsx`
 - Reasoning/justification: `ReasoningPart.tsx`, `JustificationBlock.tsx`
 - Status/placeholders: `WorkingPlaceholder.tsx`, `SessionActiveSpinner.tsx`, `MigratingPart.tsx`, `BusyDots.tsx`

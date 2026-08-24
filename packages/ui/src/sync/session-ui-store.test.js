@@ -200,6 +200,47 @@ describe('session-worktree-store worktree routing', () => {
   });
 });
 
+describe('draft materialization transition identity', () => {
+  beforeEach(() => {
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      materializedDraftSessionId: null,
+      newSessionDraft: { open: true, target: 'project', directoryOverride: '/projects/alpha' },
+    });
+  });
+
+  test('marks and consumes only the submitted draft session', () => {
+    useSessionUIStore.getState().setCurrentSession(
+      'session-created',
+      '/projects/alpha',
+      'submitted-draft',
+    );
+
+    expect(useSessionUIStore.getState().materializedDraftSessionId).toBe('session-created');
+
+    useSessionUIStore.getState().clearMaterializedDraftSession('another-session');
+    expect(useSessionUIStore.getState().materializedDraftSessionId).toBe('session-created');
+
+    useSessionUIStore.getState().clearMaterializedDraftSession('session-created');
+    expect(useSessionUIStore.getState().materializedDraftSessionId).toBeNull();
+  });
+
+  test('clears the marker when navigating from a draft to an existing session', () => {
+    useSessionUIStore.getState().setCurrentSession(
+      'session-created',
+      '/projects/alpha',
+      'submitted-draft',
+    );
+    useSessionUIStore.setState({
+      newSessionDraft: { open: true, target: 'project', directoryOverride: '/projects/alpha' },
+    });
+    useSessionUIStore.getState().setCurrentSession('session-existing', '/projects/alpha');
+
+    expect(useSessionUIStore.getState().materializedDraftSessionId).toBeNull();
+  });
+});
+
 describe('routeMessage directory scoping', () => {
   test('runs sends in the provided session directory', async () => {
     // The session directory travels as an explicit request param (not via

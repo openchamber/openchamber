@@ -306,13 +306,22 @@ export const StatusRow: React.FC<StatusRowProps> = ({
 
   return (
     <div
-      // Mobile: breathing room between the last message and the agent status
-      // line — without it the "<model> is running…" row sits flush against
-      // the message above.
-      className={cn("mb-1", isMobile && "mt-2", !hasLeftAccessory && "chat-column")}
+      // This row must land exactly where the assistant turn footer (mt-2
+      // inside the message) appears when the turn completes. Measured against
+      // the live DOM: the gap ABOVE already matches (message pb-2 = footer
+      // mt-2 = 8px), but the chat is bottom-anchored and the finished message
+      // carries ~12px more structure BELOW its footer than this row has — so
+      // the swap used to lift the line up. mb-6 (24px) reserves that space
+      // under this row instead (verified: row top 636 == footer top 636).
+      // The reservation belongs to the assistant-status swap only: a row that
+      // renders just an accessory (the pending-changes bar) takes the normal
+      // 8px, or it floats a stray gap above the composer.
+      className={cn(showAssistantStatus ? "mb-6" : "mb-2", !hasLeftAccessory && "chat-column")}
       style={STATUS_ROW_CONTAINER_STYLE}
     >
-      <div className={cn("flex items-center justify-between py-0.5 gap-2 h-[1.2rem]", hasLeftAccessory && "px-0.5")}>
+      {/* h-8 matches the turn footer's real row height: its h-8 action
+          buttons define the footer line, with the meta text centered in it. */}
+      <div className={cn("flex items-center justify-between gap-2 h-8", hasLeftAccessory && "px-0.5")}>
         {/* Left: Abort status | Working placeholder | leftAccessory */}
         <div className={cn("flex-1 flex items-center min-w-0 gap-2", hasLeftAccessory ? "pl-1.5" : "overflow-x-hidden")}>
           {showAssistantStatus && showAbortStatus ? (

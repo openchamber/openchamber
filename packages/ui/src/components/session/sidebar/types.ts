@@ -30,6 +30,7 @@ export type SessionGroup = {
    */
   folderScopes?: SessionGroupFolderScope[];
   draftTarget?: 'chat' | 'project';
+  emptyMessage?: string;
   sessions: SessionNode[];
 };
 

@@ -46,7 +46,7 @@ So:
 | `global-session-status.ts` | Incremental non-idle session status index reconciled from events and authoritative directory snapshots | All known directories in the active runtime |
 | `session-ordering.ts` | Ephemeral lifecycle rank used by every user-visible session list | All known sessions in the active runtime |
 | `session-activity-timing.ts` | Elapsed time of the running turn and of the turn that just finished, plus the persisted starts that survive a reload | All known sessions in the active runtime |
-| `session-ui-store.ts` | Session selection, draft lifecycle, abort prompts, worktree metadata, SDK-facing action entrypoints | App UI state |
+| `session-ui-store.ts` | Session selection, draft lifecycle, one-shot draft-materialization transition identity, abort prompts, worktree metadata, SDK-facing action entrypoints | App UI state |
 | `useGlobalSessionsStore.ts` | Global active sessions, global archived sessions, `sessionsByDirectory` | All opened project/worktree session lists |
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |
 | `attachment-files.ts` | Attachment picker allowlists, MIME/content validation, structured-text sanitization, and HEIC conversion | Local chat attachments across shared UI runtimes |
@@ -112,6 +112,16 @@ Session materialization recency is keyed by runtime and directory. Foreground lo
 ### Global session list
 
 Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**.
+
+Each full app root owns one global polling lifecycle through
+`useGlobalSessionsPolling`. The web/desktop root and VS Code chat root load once
+when mounted and refresh every 45 seconds so sessions created by another
+OpenCode process are discovered without relying on the sidebar or native tray
+being visible. Embedded chats and the VS Code agent-manager panel do not poll.
+The sidebar and tray consume the same store and must not start their own
+full-list timers. Surface-specific refreshes, such as opening the mobile session
+sheet or returning from suspension, may still request freshness at their
+explicit lifecycle edge; the store coalesces an overlapping in-flight load.
 
 Current consumers:
 

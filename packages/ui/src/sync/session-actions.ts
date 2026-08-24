@@ -26,6 +26,7 @@ import {
   type SessionMetadataRecord,
 } from "@/lib/sessionReviewMetadata"
 import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
+import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
 import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
@@ -727,6 +728,7 @@ export async function createSession(
   directoryOverride?: string | null,
   parentID?: string | null,
   metadata?: Record<string, unknown>,
+  selectionTransition?: "submitted-draft",
 ): Promise<Session | null> {
   try {
     // Capture the effective directory used for session creation so we can fall
@@ -747,7 +749,7 @@ export async function createSession(
     if (sessionDirectory) {
       registerSessionDirectory(session.id, sessionDirectory)
     }
-    useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
+    useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory, selectionTransition)
     useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
     useGlobalSessionsStore.getState().upsertSession(session)
     return session
@@ -793,6 +795,7 @@ export async function patchSessionMetadata(
   useGlobalSessionsStore.getState().upsertSession(updated)
   const sessionDirectory = (updated as { directory?: string | null }).directory ?? targetDirectory
   if (sessionDirectory) registerSessionDirectory(updated.id, sessionDirectory)
+  mirrorSessionIntoLiveStores(updated, sessionDirectory ?? undefined)
   return updated
 }
 
@@ -802,11 +805,8 @@ export async function setLinkedIssue(
   issue: LinkedIssue,
   linked: boolean,
 ): Promise<Session> {
-  const updated = await patchSessionMetadata(sessionId, directory, (metadata) =>
+  return patchSessionMetadata(sessionId, directory, (metadata) =>
     withLinkedIssue(metadata, issue, linked))
-  const sessionDirectory = (updated as Session & { directory?: string | null }).directory ?? directory ?? undefined
-  mirrorSessionIntoLiveStores(updated, sessionDirectory ?? undefined)
-  return updated
 }
 
 export async function setContextObligatoryMessage(
@@ -815,11 +815,8 @@ export async function setContextObligatoryMessage(
   message: ContextObligatoryMessage,
   pinned: boolean,
 ): Promise<Session> {
-  const updated = await patchSessionMetadata(sessionId, directory, (metadata) =>
+  return patchSessionMetadata(sessionId, directory, (metadata) =>
     withContextObligatoryMessage(metadata, message, pinned))
-  const sessionDirectory = (updated as Session & { directory?: string | null }).directory ?? directory ?? undefined
-  mirrorSessionIntoLiveStores(updated, sessionDirectory ?? undefined)
-  return updated
 }
 
 async function cleanupReviewMetadataBeforeDelete(
@@ -835,18 +832,41 @@ async function cleanupReviewMetadataBeforeDelete(
     return
   }
   if (isStaleRuntime(expectedRuntimeKey)) return
-  if (!isReviewSession(session)) return
-  const originalSessionID = getOriginalSessionID(session)
-  if (!originalSessionID) return
-  try {
-    await patchSessionMetadata(originalSessionID, directory ?? getSessionDirectory(originalSessionID), (metadata) =>
-      withoutReviewSessionLink(metadata, sessionId),
-      expectedRuntimeKey,
-    )
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (/not found/i.test(message)) return
-    console.warn("[session-actions] review metadata cleanup failed before delete", error)
+
+  const unlinkParent = async (originalSessionID: string, unlink: (metadata: SessionMetadataRecord) => SessionMetadataRecord) => {
+    try {
+      await patchSessionMetadata(originalSessionID, directory ?? getSessionDirectory(originalSessionID), unlink, expectedRuntimeKey)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (/not found/i.test(message)) return
+      console.warn("[session-actions] linked-session metadata cleanup failed before delete", error)
+    }
+  }
+
+  if (isReviewSession(session)) {
+    const originalSessionID = getOriginalSessionID(session)
+    if (originalSessionID) await unlinkParent(originalSessionID, (metadata) => withoutReviewSessionLink(metadata, sessionId))
+    return
+  }
+
+  if (isBtwSession(session)) {
+    const originalSessionID = getBtwOriginalSessionID(session)
+    if (originalSessionID) await unlinkParent(originalSessionID, (metadata) => withoutBtwSessionLink(metadata, sessionId))
+    return
+  }
+
+  // Deleting or archiving a session that has an active btw fork also removes
+  // the fork: it is a temporary session that only exists for its parent's
+  // panel. Best-effort — a failed fork delete must not block the parent's
+  // operation; the orphaned fork stays visible in the sidebar.
+  const btwSessionID = getBtwSessionID(session)
+  if (btwSessionID) {
+    try {
+      if (isStaleRuntime(expectedRuntimeKey)) return
+      await deleteSession(btwSessionID, { expectedRuntimeKey })
+    } catch (error) {
+      console.warn("[session-actions] failed to delete btw fork before parent delete", error)
+    }
   }
 }
 

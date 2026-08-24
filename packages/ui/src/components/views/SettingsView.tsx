@@ -1,6 +1,7 @@
 import React from "react";
 import { cn, getModifierLabel } from "@/lib/utils";
 import { useUIStore } from "@/stores/useUIStore";
+import { useSettingsDirectory } from "@/hooks/useSettingsDirectory";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { useAgentsStore } from "@/stores/useAgentsStore";
 import { useCommandsStore } from "@/stores/useCommandsStore";
@@ -35,6 +36,7 @@ import { MagicPromptsPage } from "@/components/sections/magic-prompts/MagicPromp
 import { SnippetsSidebar } from "@/components/sections/snippets/SnippetsSidebar";
 import { SnippetsPage } from "@/components/sections/snippets/SnippetsPage";
 import { GitPage } from "@/components/sections/git-identities/GitPage";
+import { IntegrationsPage } from "@/components/sections/integrations/IntegrationsPage";
 import type { OpenChamberSection } from "@/components/sections/openchamber/types";
 import { OpenChamberPage } from "@/components/sections/openchamber/OpenChamberPage";
 import { AboutSettings } from "@/components/sections/openchamber/AboutSettings";
@@ -101,6 +103,7 @@ const pageOrder: SettingsPageSlug[] = [
   "sessions",
   "shortcuts",
   "voice",
+  "integrations",
   "usage",
   "analytics",
   "about",
@@ -304,23 +307,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   }, [visiblePages]);
 
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const settingsDirectory = useSettingsDirectory();
 
-  // Load stores when project changes or when a page becomes active.
+  // Load stores when the settings project changes or a page becomes active.
   React.useEffect(() => {
     if (!isSettingsDialogOpen && !runtimeCtx.isVSCode && !isWindowed) {
       return;
     }
 
     if (settingsSlug === "agents") {
-      void useAgentsStore.getState().loadAgents();
+      void useAgentsStore.getState().loadAgents(settingsDirectory);
       return;
     }
     if (settingsSlug === "commands") {
-      void useCommandsStore.getState().loadCommands();
+      void useCommandsStore.getState().loadCommands(settingsDirectory);
       return;
     }
     if (settingsSlug === "mcp") {
-      void useMcpConfigStore.getState().loadMcpConfigs();
+      void useMcpConfigStore.getState().loadMcpConfigs({
+        directory: settingsDirectory,
+      });
       return;
     }
     if (settingsSlug === "plugins") {
@@ -331,17 +337,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       settingsSlug === "skills.installed" ||
       settingsSlug === "skills.catalog"
     ) {
-      void useSkillsStore.getState().loadSkills();
+      void useSkillsStore.getState().loadSkills(settingsDirectory);
       void useSkillsCatalogStore.getState().loadCatalog();
     }
     if (settingsSlug === "snippets") {
       void useSnippetsStore.getState().loadSnippets();
     }
+    // `activeProjectId` still matters: the settings directory follows the active
+    // project until the user picks another one in the Settings selector.
   }, [
     activeProjectId,
     isSettingsDialogOpen,
     isWindowed,
     runtimeCtx.isVSCode,
+    settingsDirectory,
     settingsSlug,
   ]);
 
@@ -360,6 +369,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setMobileStage(def.kind === "split" ? "page-sidebar" : "page-content");
     },
     [isMobile, setSettingsPage],
+  );
+
+  const openThirdPartyProviderSetup = React.useCallback(
+    async (providerId: string): Promise<boolean> => {
+      const configStore = useConfigStore.getState();
+      await configStore.loadProviders({
+        source: "settings:third-party-provider-setup",
+      });
+      const providerAvailable = useConfigStore
+        .getState()
+        .providers.some((provider) => provider.id === providerId);
+      if (!providerAvailable) {
+        return false;
+      }
+
+      configStore.setSelectedProvider(providerId);
+      openPage("providers");
+      if (isMobile) {
+        setMobileStage("page-content");
+      }
+      return true;
+    },
+    [isMobile, openPage],
   );
 
   const activePageMeta = React.useMemo(() => {
@@ -415,6 +447,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           return t("settings.page.skillsCatalog.title");
         case "git":
           return t("settings.page.git.title");
+        case "integrations":
+          return t("settings.page.integrations.title");
         case "appearance":
           return t("settings.page.appearance.title");
         case "chat":
@@ -811,6 +845,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           return <SnippetsPage />;
         case "git":
           return <GitPage />;
+        case "integrations":
+          return (
+            <IntegrationsPage
+              onOpenProviderSetup={openThirdPartyProviderSetup}
+              onOpenPluginManager={() => openPage("plugins")}
+            />
+          );
         case "general":
         case "appearance":
         case "chat":
@@ -827,7 +868,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           return null;
       }
     },
-    [openChamberSectionBySlug, renderUnavailable, runtimeCtx, t],
+    [openChamberSectionBySlug, openPage, openThirdPartyProviderSetup, renderUnavailable, runtimeCtx, t],
   );
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.

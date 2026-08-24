@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "1.19.0",
+  "version": "1.20.0",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
@@ -13,8 +13,8 @@
   },
   "scripts": {
     "dev": "bun run build:watch",
-    "dev:server": "bun server/index.js --port ${OPENCHAMBER_PORT:-3001}",
-    "dev:server:watch": "nodemon --watch server --ext js --exec \"bun server/index.js --port ${OPENCHAMBER_PORT:-3001}\"",
+    "dev:server": "OPENCHAMBER_RELAY_HOST=${OPENCHAMBER_RELAY_HOST:-off} bun server/index.js --port ${OPENCHAMBER_PORT:-3001}",
+    "dev:server:watch": "OPENCHAMBER_RELAY_HOST=${OPENCHAMBER_RELAY_HOST:-off} nodemon --watch server --ext js --exec \"bun server/index.js --port ${OPENCHAMBER_PORT:-3001}\"",
     "build": "vite build",
     "build:watch": "vite build --watch",
     "type-check": "tsc --noEmit",
@@ -25,7 +25,7 @@
   "dependencies": {
     "@clack/prompts": "^1.1.0",
     "@octokit/rest": "^22.0.1",
-    "@opencode-ai/sdk": "1.18.18",
+    "@opencode-ai/sdk": "1.18.21",
     "@simplewebauthn/server": "13.3.1",
     "bun-pty": "^0.4.5",
     "compression": "^1.8.1",

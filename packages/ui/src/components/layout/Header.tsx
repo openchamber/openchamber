@@ -511,7 +511,8 @@ export const Header: React.FC<HeaderProps> = ({
   const currentGlobalSession = useGlobalSessionsStore(useShallow(React.useCallback(
     (state): HeaderSessionSnapshot | null => {
       if (!currentSessionId) return null;
-      const session = state.activeSessions.find((candidate) => candidate.id === currentSessionId);
+       const session = [...state.activeSessions, ...state.archivedSessions]
+         .find((candidate) => candidate.id === currentSessionId);
       if (!session) return null;
       const record = session as typeof session & { directory?: string | null; slug?: string | null };
       return {

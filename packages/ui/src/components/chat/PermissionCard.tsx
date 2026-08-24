@@ -66,6 +66,14 @@ const getToolIcon = (toolName: string) => {
     return <Icon name="global" className={iconClass} />;
   }
 
+  if (tool === 'linear' || tool.startsWith('linear_')) {
+    return <Icon name="linear" className={iconClass} />;
+  }
+
+  if (tool === 'cloudflare' || tool.startsWith('cloudflare_') || tool === 'claudflare' || tool.startsWith('claudflare_')) {
+    return <Icon name="cloudflare" className={iconClass} />;
+  }
+
   return <Icon name="tools" className={iconClass} />;
 };
 

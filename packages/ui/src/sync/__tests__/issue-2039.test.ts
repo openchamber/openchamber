@@ -4,6 +4,9 @@ import { togglePermissionAutoAccept } from "../../components/chat/permissionAuto
 const storage = new Map<string, string>()
 const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown }> = []
 const permissionAutoAcceptCalls: Array<[string, boolean]> = []
+// Sync's session→directory index. `createSession` writes it, and directory
+// resolution reads it as the authoritative source, so the mock has to keep one.
+const sessionDirectoryRegistry = new Map<string, string>()
 let createdSessionDirectory: string | undefined
 
 const getMockCalls = (fn: unknown): unknown[][] => ((fn as { mock?: { calls: unknown[][] } }).mock?.calls ?? [])
@@ -241,13 +244,34 @@ mock.module("../sync-refs", () => ({
   getSyncMessages: () => [],
   getSyncParts: () => [],
   getAllSyncSessions: () => [],
-  getSyncSessionDirectory: () => null,
+  getSyncSessionDirectory: (sessionId: string) => sessionDirectoryRegistry.get(sessionId) ?? null,
+  registerSessionDirectory: (sessionId: string, directory: string) => {
+    sessionDirectoryRegistry.set(sessionId, directory)
+  },
 }))
 
 mock.module("../session-actions", () => ({
-  createSession: mock(async (title: string | undefined, directory: string | null, parentID: string | null, metadata?: unknown) => {
+  // Mirrors the real action's authoritative steps: the created session becomes
+  // current under the directory the server confirmed, and that directory enters
+  // the routing index. Everything these tests assert about routing depends on
+  // those two, so a mock without them tests nothing.
+  createSession: mock(async (
+    title: string | undefined,
+    directory: string | null,
+    parentID: string | null,
+    metadata?: unknown,
+    selectionTransition?: "submitted-draft",
+  ) => {
     createSessionCalls.push({ title, directory, parentID, metadata })
-    return { id: "ses_issue_2039", directory: createdSessionDirectory ?? directory }
+    const session = { id: "ses_issue_2039", directory: createdSessionDirectory ?? directory }
+    const sessionDirectory = session.directory ?? null
+    if (sessionDirectory) {
+      sessionDirectoryRegistry.set(session.id, sessionDirectory)
+    }
+    const { useSessionUIStore: store } = await import("../session-ui-store")
+    store.getState().setCurrentSession(session.id, sessionDirectory, selectionTransition)
+    store.getState().markSessionAsOpenChamberCreated(session.id)
+    return session
   }),
   deleteSession: mock(async () => true),
   deleteSessions: mock(async () => ({ deletedIds: [], failedIds: [] })),
@@ -322,6 +346,7 @@ describe("issue 2039 draft auto-accept", () => {
   beforeEach(() => {
     storage.clear()
     createSessionCalls.length = 0
+    sessionDirectoryRegistry.clear()
     permissionAutoAcceptCalls.length = 0
     createdSessionDirectory = undefined
 

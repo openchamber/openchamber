@@ -1,10 +1,43 @@
 import { describe, expect, mock, test } from 'bun:test';
 
+type SanitizeAttribute = {
+  attrName: string;
+  attrValue: string;
+  forceKeepAttr?: boolean;
+};
+
+class TestAnchorElement {
+  target = '';
+
+  setAttribute(name: string, value: string): void {
+    if (name === 'target') this.target = value;
+  }
+}
+
+const sanitizeHooks: {
+  uponSanitizeAttribute?: (node: unknown, data: SanitizeAttribute) => void;
+  afterSanitizeAttributes?: (node: unknown) => void;
+} = {};
+
+Object.assign(globalThis, {
+  window: {},
+  HTMLAnchorElement: TestAnchorElement,
+});
+
 mock.module('dompurify', () => ({
   default: {
     isSupported: true,
-    addHook: () => undefined,
-    sanitize: (html: string) => html,
+    addHook: (name: keyof typeof sanitizeHooks, hook: never) => {
+      sanitizeHooks[name] = hook;
+    },
+    sanitize: (html: string) => html.replace(/ href="([^"]*)"/g, (attribute, href: string) => {
+      const anchor = new TestAnchorElement();
+      const data: SanitizeAttribute = { attrName: 'href', attrValue: href };
+      sanitizeHooks.uponSanitizeAttribute?.(anchor, data);
+      sanitizeHooks.afterSanitizeAttributes?.(anchor);
+
+      return data.forceKeepAttr || /^(?:https?|mailto|tel):/i.test(href) ? attribute : '';
+    }),
   },
 }));
 mock.module('./markdown-worker', () => ({
@@ -40,6 +73,21 @@ describe('markdown sanitization', () => {
     expect(isLocalFileUrl('file://remote-host/share/report.html')).toBe(false);
     expect(isLocalFileUrl('javascript:alert(1)')).toBe(false);
   });
+
+  test('keeps app and local file links while stripping blocked schemes', () => {
+    const html = renderMarkdownSync([
+      '[app](obsidian://open?vault=Notebook)',
+      '[file](file:///workspace/notes.md)',
+      '[script](javascript:alert(1))',
+      '[diagnostic](ms-msdt:/id%20PCWDiagnostic)',
+    ].join('\n\n'), 'inline');
+
+    expect(html).toContain('href="obsidian://open?vault=Notebook"');
+    expect(html).toContain('href="file:///workspace/notes.md"');
+    expect(html).not.toContain('href="javascript:alert(1)"');
+    expect(html).not.toContain('href="ms-msdt:/id%20PCWDiagnostic"');
+  });
+
 });
 
 describe('Markdown images', () => {

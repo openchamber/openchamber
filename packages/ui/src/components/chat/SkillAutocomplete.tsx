@@ -127,7 +127,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
     const isProject = skill.scope === 'project';
     const source = skill.source || 'opencode';
     return (
-      <AutocompleteRowTooltip description={skill.description} active={index === selectedIndex}>
+      <AutocompleteRowTooltip description={skill.description} active={!isMobile && index === selectedIndex}>
       <div
         key={`${skill.name}-${skill.scope}`}
         ref={(el) => {

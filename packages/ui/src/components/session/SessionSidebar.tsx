@@ -1,5 +1,6 @@
 import React from 'react';
 import { getChatsRootForHome, getChatsRootFromDirectory, isChatDirectoryForHome, isChatDirectoryPath } from '@/lib/chatDirectories';
+import { isBtwSession } from '@/lib/sessionBtwMetadata';
 import { mergeSidebarSessionSources } from './sidebar/sidebarSessionSources';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
@@ -512,11 +513,15 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     const merged = mergeSidebarSessionSources(globalActiveSessions, liveFallbackSessions);
 
     return merged.filter((session) => (
-      (!isVSCode && isChatDirectoryPath(session.directory))
-      || isKnownActiveSessionDirectory(session, knownSessionDirectories, {
-        allowUnknownDirectory: !isVSCode,
-        allowEmptyDirectorySet: !isVSCode,
-      })
+      // btw forks stay hidden until promoted to a full session
+      !isBtwSession(session)
+      && (
+        (!isVSCode && isChatDirectoryPath(session.directory))
+        || isKnownActiveSessionDirectory(session, knownSessionDirectories, {
+          allowUnknownDirectory: !isVSCode,
+          allowEmptyDirectorySet: !isVSCode,
+        })
+      )
     ));
   }, [globalActiveSessions, isVSCode, knownSessionDirectories, liveFallbackSessions]);
 
@@ -542,22 +547,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const [worktreeDiscoveryRevision, requestWorktreeDiscovery] = React.useReducer((revision) => revision + 1, 0);
   const isWorktreeTopologyLoading = !isVSCode && resolvedWorktreeTopologyKey !== projectWorktreeDiscoveryKey;
   const [unresolvedWorktreeProjectPaths, setUnresolvedWorktreeProjectPaths] = React.useState<ReadonlySet<string>>(new Set());
-
-  const initialGlobalSessionsRefreshStartedRef = React.useRef(false);
-  React.useEffect(() => {
-    if (initialGlobalSessionsRefreshStartedRef.current) {
-      return;
-    }
-    initialGlobalSessionsRefreshStartedRef.current = true;
-    void refreshGlobalSessions(syncSessionsSnapshotRef.current);
-  }, []);
-
-  React.useEffect(() => {
-    const interval = window.setInterval(() => {
-      void refreshGlobalSessions();
-    }, 45_000);
-    return () => window.clearInterval(interval);
-  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1806,10 +1795,11 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       folderScopeKey: chatsRoot,
       folderScopes,
       draftTarget: 'chat',
+      emptyMessage: t('sessions.sidebar.activity.chatsEmpty'),
       sessions: items.map((item) => item.node),
     };
     return renderGroupSessions(group, 'managed-chats', null, true);
-  }, [homeDirectory, renderGroupSessions, renderSessionNode]);
+  }, [homeDirectory, renderGroupSessions, renderSessionNode, t]);
 
   const topContent = React.useMemo(
     () => (!isVSCode && !hasSessionSearchQuery && hasActivitySectionItems) ? (

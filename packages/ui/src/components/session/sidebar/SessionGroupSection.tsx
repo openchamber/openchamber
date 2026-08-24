@@ -1056,7 +1056,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
               )
               : bootstrapFailureNotice
                 ? bootstrapFailureNotice
-            : t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
+            : group.emptyMessage ?? t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
         </div>
       ) : null}
       {totalSessions > 0 && bootstrapFailureNotice ? (

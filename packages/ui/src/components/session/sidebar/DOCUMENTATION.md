@@ -16,6 +16,7 @@
 - Root session menus can quickly create a worktree from the session directory's current branch and move the full session subtree there while idle.
 - Managed Chats never offer the worktree-move action in either the sidebar row menu or the active-session header menu because their directories are not project repositories.
 - Managed Chats use the shared Chats root as their folder scope. Their activity section renders the normal folder tree, and sessions created from a Chats folder are assigned back to that root-scoped folder after their date/session directory materializes. Per-session folder scopes created by older builds remain visible for compatibility.
+- An empty Chats section says that there are no chats yet; it never reuses the project/workspace empty message.
 - The New session keyboard command inherits the active materialized session directory. Explicit sidebar entry points, including the top New session row and the Chats `+`, open a fresh managed Chat draft instead.
 - The new-worktree keyboard command is a silent no-op while a managed Chat draft is open. It must not retarget that draft to the active project or show a Git/worktree error because Chats never participate in worktrees.
 - Directory loading is demand-driven: the sidebar publishes one complete priority plan for all known project/worktree directories, while the sync layer owns bounded execution.

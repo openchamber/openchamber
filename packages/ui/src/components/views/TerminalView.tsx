@@ -642,7 +642,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
             startLine: selection.startLine,
             endLine: selection.endLine,
             code: selection.text,
-            language: activeTab.terminalSessionId ?? activeTab.id,
+            language: '',
+            terminalId: activeTab.terminalSessionId ?? activeTab.id,
             text: '',
         });
     }, [activeTab, addContextDraft, currentSessionId, effectiveDirectory, newSessionDraft?.open]);

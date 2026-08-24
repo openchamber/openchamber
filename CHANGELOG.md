@@ -4,19 +4,54 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Chat context attachments:** everything you attach to a message — diff/file/plan comments, terminal selections, browser annotations, PR comments and failed checks, linked issues and PRs — now shows up in the conversation as a compact context card: a header naming the source, the captured content behind an expander, and your comment below it. Previously most of these arrived as a wall of raw text inside your message.
+- **Chat: comment on a reply.** Select text in a chat message and choose Comment to attach that quote with your note to the next message. The selection stays highlighted while you type, and the selection menu itself was restyled — Add to chat is now Add to input.
+- **Diff: comment like a review.** Hovering a line shows a + button in the gutter; clicking it, clicking a line, or dragging across lines opens the comment editor for that line or range. The comment editor and saved-comment cards now match the chat's comment style.
+- Files: in a rendered markdown preview, select text and choose Comment to attach exactly that fragment (with a source line range when it can be located) plus your note to the next message.
+- Composer: hovering or tapping a context chip above the input opens a stacked preview of everything attached, where a comment can be edited in place or an item removed before sending.
+- Mobile: the chat comment input overlays the composer exactly and rides the keyboard; Enter makes a new line there, with attach on the button.
+- Desktop: a freshly installed or updated build no longer keeps loading the previous version's interface from cache.
+- Chat: OpenCode notices now share one style.
+- UI: draft target menus stay inside the chat area instead of overlapping the header.
+- UI: Linear and Cloudflare tools now show their own icons.
+- UI: sidebar item tooltips no longer appear instantly on passing hover.
+- Sessions: headers now find archived sessions too, so an archived session's title no longer goes missing.
+- UI: the timeline dialog now fits small screens instead of squeezing the message list to a couple of rows (thanks to @gaojunran).
+- UI: the btw panel's shadow is lighter, matching the composer.
+- Devices: re-pairing a phone (or logging in again) keeps the device's existing name in Connected Devices instead of resetting it to "OpenChamber Mobile".
+- Relay: paired devices no longer get logged out when the app restarts (for example during an update) while another local OpenChamber process is running — the restarted app keeps serving them instead of a bystander process taking over.
+
+## [1.20.0] - 2026-08-23
+
+- **Session: /btw side questions.** Type `/btw` followed by your question to ask something off-topic in a temporary session forked from the current conversation, so it inherits the full context but leaves the chat itself untouched. The answer streams into a panel above the composer, which talks to that session while the panel is open; you can collapse it to a slim header bar, keep it as a full session, or discard it. The temporary session stays out of the sidebar and session lists until you keep it (thanks to @jaygupta17).
 - **Chat sessions:** start chats without choosing a project. They live in their own Chats section, rather than inheriting a project's repository and worktree context.
-- **Skills catalog:** browse curated GitHub skill collections in a card-based catalog with cross-source search, skill counts, stars, recent updates, and links back to each skill's repository.
-- **Diff:** the context-panel diff can now show every change on the current branch against its base branch. OpenChamber detects the base when Git knows it, or lets you choose one once when it does not.
-- **Dictation:** speech is now transcribed after you stop recording. The composer shows a live waveform and timer, and long recordings split at pauses instead of cutting words.
+- **Desktop/Remote instances:** adding an SSH connection now starts from the hosts in your SSH config instead of a blank command field. Ports, install method and passwords moved behind Advanced settings, and each connection shows Connected, Connecting, or Needs attention with the failure text and a button that resolves it.
+- Desktop/Remote instances: connecting to a remote machine now works when bun, OpenChamber or the opencode CLI live in your home directory rather than on the system path. Installing no longer fails with a permission error, and a missing opencode CLI is now reported before the connection starts instead of as a stack trace.
+- Desktop/Remote instances: a managed remote server can now also be published to the remote machine's own network, so other devices there reach it without the SSH tunnel. It requires a UI password, and stays private to the tunnel otherwise.
+- Desktop/Remote instances: disconnecting from a connection set to not keep the server running now actually stops that remote server.
+- Skills catalog: browse curated GitHub skill collections in a card-based catalog with cross-source search, skill counts, stars, recent updates, and links back to each skill's repository.
+- Diff: the context-panel diff can now show every change on the current branch against its base branch. OpenChamber detects the base when Git knows it, or lets you choose one once when it does not.
+- Dictation: speech is now transcribed after you stop recording. The composer shows a live waveform and timer, and long recordings split at pauses instead of cutting words.
+- Settings: the project selector on Providers, Agents, MCP, Commands and Skills now only changes what those pages show. It used to switch the whole app, so opening another project's configuration moved your chat, session list and file tree with it.
+- Settings/Projects: a project can now pin a thinking level next to its model, for models that offer levels. Both sit in one Defaults for new chats group, laid out like the Sessions defaults.
+- Settings/General: changing the default model, variant or agent no longer repoints an open chat that already carries a model you picked for it. Chats following the default still switch immediately.
+- Settings/Providers: the provider you select no longer jumps to a different one on its own. Changing the chat's model or agent, and background provider refreshes, used to move the settings selection with them.
+- Settings/Integrations: the experimental page now only lists integrations that can be installed; unavailable and Coming soon entries were removed.
 - Chat: file paths in messages now open from the session's project, even if you last browsed files in another project (thanks to @tomzx).
+- Chat: app links such as `spotify://` now ask for confirmation before opening another app. You can trust an app link type on one device and manage trusted links in Settings.
+- Files/Desktop: files opened from outside the workspace remain readable after their temporary access expires instead of failing until you reopen them (thanks to @pascalandr).
 - Diff: creating an inline comment now opens the chat and focuses the composer for your follow-up.
+- Chat: in the expanded composer, Enter now starts a new line and Cmd/Ctrl+Enter sends, so a long prompt is harder to send by accident.
 - Providers: expanded support for custom providers.
 - Small Model: summaries, goal audits, commit messages, and walkthroughs now support more providers.
 - Git: generated commit messages now match the repository's recent commit style and language.
 - Git: generating a pull request description now picks up the repository's own PR template when it has one, so the draft comes back in your project's sections and checklists instead of the built-in Summary/Why/Testing layout.
 - Sidebar: switch between the full project list and a focused view of one project. Sessions created outside OpenChamber now also appear in the sidebar and Recent list without a page refresh (thanks to @tomzx).
 - Chat: if OpenCode restarts while a response is still running, the chat now stops with an interrupted state and a notification to continue instead of hanging silently (thanks to @sum117).
+- Chat: while a reply streams, the model status line under the last message now turns into the finished message's info row in place, instead of jumping when the reply completes.
 - Chat: newly sent messages and syntax-highlighted code blocks no longer briefly flicker. Bash output can also grow with its content instead of being cut off.
+- Chat: long user messages can be expanded even when their final layout finishes after they first appear.
+- Chat: in a chat without a project, the work status card again steps aside when the context panel is open, instead of sitting next to it.
 - Usage: Z.ai credit limits now appear alongside its other quota windows.
 - Git: pull-request checks in Work status stay current as their status changes.
 - UI: the default dialog close button is easier to click or tap (thanks to @rockinrimmer).
