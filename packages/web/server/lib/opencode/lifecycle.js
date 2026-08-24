@@ -641,6 +641,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   const START_OPEN_CODE_MAX_ATTEMPTS = 2;
+  const SKIP_START_UNAVAILABLE_ERROR = 'OpenCode is unavailable: skip-start mode requires OPENCODE_HOST or OPENCODE_PORT';
 
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -695,6 +696,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           ...managedOpenCodeEnv,
           PATH: envPath,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
+          OPENCODE_EXPERIMENTAL_WORKSPACES: 'true',
         })),
       });
 
@@ -751,6 +753,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   const startOpenCode = async () => {
+    if (env.ENV_SKIP_OPENCODE_START) {
+      throw new Error('Managed OpenCode startup is disabled in skip-start mode');
+    }
+
     let lastError = null;
     for (let attempt = 1; attempt <= START_OPEN_CODE_MAX_ATTEMPTS; attempt += 1) {
       try {
@@ -1035,18 +1041,43 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
 
       syncFromHmrState();
-      if (await isOpenCodeProcessHealthy()) {
-        console.log(`[HMR] Reusing existing OpenCode process on port ${state.openCodePort}`);
-      } else if (env.ENV_SKIP_OPENCODE_START && env.ENV_EFFECTIVE_PORT) {
+      if (env.ENV_SKIP_OPENCODE_START) {
+        const managedProcess = state.openCodeProcess;
+        state.openCodeProcess = null;
+        state.openCodePort = null;
+        state.openCodeBaseUrl = null;
+        state.isOpenCodeReady = false;
+        state.isExternalOpenCode = false;
+        state.lastOpenCodeLaunchDiagnostics = null;
+        state.openCodeNotReadySince = Date.now();
+        syncToHmrState();
+
+        if (managedProcess) {
+          console.log('[HMR] Stopping managed OpenCode process because skip-start mode is enabled');
+          try {
+            await managedProcess.close();
+          } catch (error) {
+            console.warn('Error closing managed OpenCode process:', error);
+          }
+        }
+
+        if (!env.ENV_EFFECTIVE_PORT) {
+          state.lastOpenCodeError = SKIP_START_UNAVAILABLE_ERROR;
+          syncToHmrState();
+          console.error(SKIP_START_UNAVAILABLE_ERROR);
+          console.log('Continuing without OpenCode integration...');
+          return;
+        }
+
         const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
         console.log(`Using external OpenCode server at ${label} (skip-start mode)`);
         state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
         setOpenCodePort(env.ENV_EFFECTIVE_PORT);
-        state.isOpenCodeReady = true;
         state.isExternalOpenCode = true;
         state.lastOpenCodeError = null;
-        state.openCodeNotReadySince = 0;
         syncToHmrState();
+      } else if (await isOpenCodeProcessHealthy()) {
+        console.log(`[HMR] Reusing existing OpenCode process on port ${state.openCodePort}`);
       } else if (env.ENV_EFFECTIVE_PORT && await probeExternalOpenCode(env.ENV_EFFECTIVE_PORT, env.ENV_CONFIGURED_OPENCODE_HOST?.origin)) {
         const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
         console.log(`Auto-detected existing OpenCode server at ${label}`);
@@ -1081,6 +1112,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       await waitForOpenCodePort();
       try {
         await waitForOpenCodeReady();
+        state.openCodeNotReadySince = 0;
+        syncToHmrState();
       } catch (error) {
         bootstrapError = error;
         console.error(`OpenCode readiness check failed: ${error.message}`);

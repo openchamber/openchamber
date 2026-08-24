@@ -543,10 +543,6 @@ export const createSettingsRuntime = (deps) => {
       throw lastError;
     }
 
-    // Windows can transiently reject atomic replacement when another process
-    // briefly opens the target file. Preserve atomic rename everywhere it works,
-    // but fall back to a direct replacement so settings persistence does not
-    // get permanently wedged on Windows desktop installs.
     try {
       await fsPromises.copyFile(tmp, target);
     } finally {
@@ -580,6 +576,12 @@ export const createSettingsRuntime = (deps) => {
       if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
       await replaceFile(tmp, SETTINGS_FILE_PATH);
       if (process.platform !== 'win32') await fsPromises.chmod(SETTINGS_FILE_PATH, 0o600);
+      try {
+        const directoryHandle = await fsPromises.open(path.dirname(SETTINGS_FILE_PATH), 'r');
+        try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+      } catch {
+        // Directory fsync is not supported by every platform/filesystem.
+      }
     } catch (error) {
       await fsPromises.rm(tmp, { force: true }).catch(() => {});
       console.warn('Failed to write settings file:', error);
@@ -969,11 +971,28 @@ export const createSettingsRuntime = (deps) => {
     return persistSettingsLock;
   };
 
+  const restoreSettingsFields = async (settings, keyPrefix) => {
+    persistSettingsLock = persistSettingsLock.then(async () => {
+      const current = await readSettingsFromDiskStrict();
+      const restored = { ...current };
+      for (const key of Object.keys(restored)) {
+        if (key.startsWith(keyPrefix)) delete restored[key];
+      }
+      for (const [key, value] of Object.entries(settings)) {
+        if (key.startsWith(keyPrefix)) restored[key] = value;
+      }
+      await writeSettingsToDisk(restored);
+      return formatSettingsResponse(restored);
+    });
+    return persistSettingsLock;
+  };
+
   return {
     readSettingsFromDisk,
     readSettingsFromDiskStrict,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     persistSettings,
+    restoreSettingsFields,
   };
 };

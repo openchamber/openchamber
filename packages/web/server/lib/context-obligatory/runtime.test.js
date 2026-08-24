@@ -17,7 +17,7 @@ describe('context obligatory runtime', () => {
     let sessionReads = 0;
     vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
       const url = new URL(typeof input === 'string' ? input : input.url);
-      requests.push({ path: url.pathname, method: init.method ?? 'GET', body: init.body });
+      requests.push({ path: url.pathname, workspace: url.searchParams.get('workspace'), method: init.method ?? 'GET', body: init.body });
       if (url.pathname === '/session/ses_1' && init.method === 'PATCH') return json({});
       if (url.pathname === '/session/ses_1') {
         sessionReads += 1;
@@ -43,7 +43,7 @@ describe('context obligatory runtime', () => {
       getOpenCodeAuthHeaders: () => ({}),
     });
 
-    await runtime.processPayload({ type: 'session.compacted', properties: { sessionID: 'ses_1' } });
+    await runtime.processPayload({ type: 'session.compacted', properties: { sessionID: 'ses_1' } }, '/workspace', 'wrk_1');
 
     const prompt = requests.find((request) => request.path.endsWith('/prompt_async'));
     const payload = JSON.parse(prompt.body);
@@ -59,6 +59,7 @@ describe('context obligatory runtime', () => {
     expect(payload.parts[0].text).toContain('no more than one short paragraph');
     const patch = requests.find((request) => request.method === 'PATCH');
     expect(JSON.parse(patch.body).metadata.openchamber.context_obligatory_last_compaction_message_id).toBe('msg_summary');
+    expect(requests.every((request) => request.workspace === 'wrk_1')).toBe(true);
     expect(sessionReads).toBe(2);
     runtime.stop();
   });

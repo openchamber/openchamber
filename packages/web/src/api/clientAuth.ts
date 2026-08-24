@@ -5,15 +5,23 @@ import type {
   RemoteClientCreateResult,
   RemoteClientPurgeRevokedResult,
   RemoteClientRecord,
+  RemoteClientCapability,
   RemoteClientRevokeResult,
 } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
+import { requestReauthProof } from './reauth';
 
 const jsonOrNull = async <T>(response: Response): Promise<T | null> => {
   return (await response.json().catch(() => null)) as T | null;
 };
 
 export const createWebClientAuthAPI = (): ClientAuthAPI => ({
+  reauthenticate: requestReauthProof,
+
+  async canManageCapabilities(): Promise<boolean> {
+    const response = await runtimeFetch('/api/host-admin/status', { method: 'GET', headers: { Accept: 'application/json' } });
+    return response.ok;
+  },
   async listClients(): Promise<RemoteClientRecord[]> {
     const response = await runtimeFetch('/api/client-auth/clients', {
       method: 'GET',
@@ -104,6 +112,24 @@ export const createWebClientAuthAPI = (): ClientAuthAPI => ({
       throw new Error(payload?.error || response.statusText || 'Failed to revoke remote client');
     }
     return payload;
+  },
+
+  async updateClientCapabilities(id: string, input: { grant?: RemoteClientCapability[]; revoke?: RemoteClientCapability[]; reauthProof?: string; reauthNonce?: string }) {
+    const response = await runtimeFetch(`/api/host-admin/clients/${encodeURIComponent(id)}/capabilities`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...(input.reauthProof && input.reauthNonce ? {
+          'X-OpenChamber-Reauth-Proof': input.reauthProof,
+          'X-OpenChamber-Reauth-Nonce': input.reauthNonce,
+        } : {}),
+      },
+      body: JSON.stringify({ grant: input.grant ?? [], revoke: input.revoke ?? [] }),
+    });
+    const payload = await jsonOrNull<{ updated?: boolean; client?: RemoteClientRecord; error?: string }>(response);
+    if (!response.ok || !payload) throw new Error(payload?.error || response.statusText || 'Failed to update client capabilities');
+    return { updated: payload.updated === true, client: payload.client };
   },
 
   async purgeRevokedClients(): Promise<RemoteClientPurgeRevokedResult> {

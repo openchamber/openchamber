@@ -12,6 +12,8 @@ import { compareSessionsByLifecycleOrder, getSessionLifecycleOrderValue } from '
 import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { getSessionHostDirectory } from '@/sync/session-host-directory';
+import { getSyncSessionDirectory } from '@/sync/sync-refs';
 import { getWorktreeFirstSeenAt } from '../worktreeFirstSeen';
 
 type Args = {
@@ -132,7 +134,14 @@ export const useSessionGrouping = (args: Args) => {
         // below would otherwise dump these sessions into the archived bucket.
         if (args.isVSCode) return normalizedProjectRoot ?? '__project_root__';
         const metadataPath = normalizePath(args.worktreeMetadata.get(session.id)?.path ?? null);
-        const normalizedDir = metadataPath ?? resolveGlobalSessionDirectory(session);
+        // The same fallback chain ownership uses: a workspace-routed session's record
+        // resolves to no directory at all, and without the recorded route it fell into
+        // the archived bucket here — bucketed into the project, then hidden inside a
+        // collapsed group it does not belong to.
+        const normalizedDir = metadataPath
+          ?? resolveGlobalSessionDirectory(session)
+          ?? getSessionHostDirectory(session.id)
+          ?? normalizePath(getSyncSessionDirectory(session.id));
         if (!normalizedDir) return archivedKey;
         if (normalizedDir !== normalizedProjectRoot && worktreeByPath.has(normalizedDir)) return normalizedDir;
         if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';

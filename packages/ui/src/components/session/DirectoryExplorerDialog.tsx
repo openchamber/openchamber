@@ -13,6 +13,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
+import { browseTargetForRow, canConfirmPathOnEnter, displayPathToAbsolutePath, ensureBrowseDirectoryPath } from './directoryExplorerPaths';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { cn } from '@/lib/utils';
@@ -58,12 +59,6 @@ const trimTrailingSeparators = (value: string): string => {
 
 const hasTrailingPathSeparator = (value: string): boolean => value.endsWith('/');
 
-const ensureBrowseDirectoryPath = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed || hasTrailingPathSeparator(trimmed)) return trimmed;
-  return `${trimmed}/`;
-};
-
 const getLastPathSeparatorIndex = (value: string): number => value.lastIndexOf('/');
 
 const getBrowseDirectoryPath = (value: string): string => {
@@ -90,22 +85,11 @@ const getBrowseParentPath = (value: string): string | null => {
 
 const canNavigateUp = (value: string): boolean => hasTrailingPathSeparator(value) && getBrowseParentPath(value) !== null;
 
-const appendBrowsePathSegment = (currentPath: string, segment: string): string => (
-  `${getBrowseDirectoryPath(currentPath)}${segment}/`
-);
-
 const normalizeDirectoryPath = (path: string | null | undefined): string | null => {
   if (!path) return null;
   const normalized = trimTrailingSeparators(normalizeSeparators(path.trim()));
   if (!normalized) return null;
   return normalized.toLowerCase();
-};
-
-const displayPathToAbsolutePath = (value: string, homeDirectory: string): string => {
-  const trimmed = value.trim();
-  if (trimmed === '~') return homeDirectory;
-  if (trimmed.startsWith('~/')) return `${homeDirectory}${trimmed.slice(1)}`;
-  return trimmed;
 };
 
 const isPrimaryModifierPressed = (event: React.KeyboardEvent<HTMLInputElement>): boolean => {
@@ -170,6 +154,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const [browseErrorReason, setBrowseErrorReason] = React.useState<FilesystemErrorReason | null>(null);
   const [browseReloadKey, setBrowseReloadKey] = React.useState(0);
   const [highlightedIndex, setHighlightedIndex] = React.useState(0);
+  // Whether the highlight is where someone put it, rather than where it defaulted to.
+  const [rowChosen, setRowChosen] = React.useState(false);
   const [isConfirming, setIsConfirming] = React.useState(false);
   const [isOpeningFinder, setIsOpeningFinder] = React.useState(false);
   const [addButtonWidth, setAddButtonWidth] = React.useState(0);
@@ -191,6 +177,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     setQuery('~/');
     setEntries([]);
     setHighlightedIndex(0);
+    setRowChosen(false);
     setIsConfirming(false);
     setIsOpeningFinder(false);
     setIsCloneMode(false);
@@ -328,6 +315,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
 
   React.useEffect(() => {
     setHighlightedIndex(0);
+    setRowChosen(false);
   }, [query, rows.length]);
 
   const targetPath = React.useMemo(() => {
@@ -358,6 +346,13 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     && Boolean(targetPath);
   const canSubmitClone = canAddProject && cloneRemoteUrl.trim().length > 0;
   const highlightedRow = rows[highlightedIndex] ?? null;
+  const canConfirmOnEnter = canConfirmPathOnEnter({
+    rowChosen,
+    targetPath,
+    wouldCreate: shouldCreateTarget,
+    isAlreadyAdded,
+    isBusy: isConfirming || isOpeningFinder,
+  });
   const hasHighlightedBrowseItem = Boolean(
     highlightedRow && (highlightedRow.type === 'up' || (highlightedRow.type === 'directory' && !highlightedRow.disabled))
   );
@@ -476,10 +471,6 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     setQuery(ensureBrowseDirectoryPath(displayPath));
   }, []);
 
-  const browseToEntry = React.useCallback((entry: BrowseEntry) => {
-    setQuery(appendBrowsePathSegment(query, entry.name));
-  }, [query]);
-
   const executeRow = React.useCallback((row: BrowseRow | null) => {
     if (!row) return;
     if (row.type === 'up') {
@@ -487,8 +478,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       return;
     }
     if (row.disabled) return;
-    browseToEntry(row);
-  }, [browseToDisplayPath, browseToEntry]);
+    const target = browseTargetForRow(row);
+    if (target) setQuery(target);
+  }, [browseToDisplayPath]);
 
   const handleOpenInFinder = React.useCallback(async () => {
     if (!canRequestAccess || isOpeningFinder) return;
@@ -525,17 +517,27 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const handleKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
+      setRowChosen(true);
       setHighlightedIndex((index) => Math.min(rows.length - 1, index + 1));
       return;
     }
     if (event.key === 'ArrowUp') {
       event.preventDefault();
+      setRowChosen(true);
       setHighlightedIndex((index) => Math.max(0, index - 1));
       return;
     }
     if (event.key === 'Enter') {
       event.preventDefault();
       if (isPrimaryModifierPressed(event)) {
+        void finalizeSelection(targetPath);
+        return;
+      }
+      // Someone who typed or pasted a path and pressed Enter meant that path. Only a row
+      // they actually reached for — with the arrow keys or the pointer — makes Enter a
+      // navigation key. Without this the default highlight decides, and the default is
+      // the parent link, so Enter answered a complete path by going up a level.
+      if (canConfirmOnEnter) {
         void finalizeSelection(targetPath);
         return;
       }
@@ -548,7 +550,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       event.preventDefault();
       handleClose();
     }
-  }, [executeRow, finalizeSelection, handleClose, hasHighlightedBrowseItem, highlightedRow, query, rows.length, targetPath]);
+  }, [canConfirmOnEnter, executeRow, finalizeSelection, handleClose, hasHighlightedBrowseItem, highlightedRow, query, rows.length, targetPath]);
 
   const showHiddenToggle = (
     <button
@@ -666,7 +668,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                   }}
                   type="button"
                   disabled={row.type === 'directory' && row.disabled}
-                  onMouseEnter={() => setHighlightedIndex(index)}
+                  onMouseEnter={() => { setRowChosen(true); setHighlightedIndex(index); }}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => executeRow(row)}
                   className={cn(

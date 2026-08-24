@@ -5,6 +5,7 @@ import {
   isGlobalSessionRecencyOnlyUpdate,
   resolveGlobalSessionDirectory,
   mergeLiveSessionWithGlobalSession,
+  rememberConfirmedSessionWorkspaceRoute,
   useGlobalSessionsStore,
 } from './useGlobalSessionsStore';
 
@@ -23,6 +24,7 @@ const buildSession = (shareUrl: string, extra: SessionExtra = {}): Session => ({
 
 describe('useGlobalSessionsStore', () => {
   beforeEach(() => {
+    useGlobalSessionsStore.getState().resetForRuntimeSwitch();
     useGlobalSessionsStore.setState({
       activeSessions: [],
       archivedSessions: [],
@@ -63,6 +65,39 @@ describe('useGlobalSessionsStore', () => {
     const session = useGlobalSessionsStore.getState().activeSessions[0];
     expect(resolveGlobalSessionDirectory(session)).toBe('/repo/app');
     expect(useGlobalSessionsStore.getState().sessionsByDirectory.get('/repo/app')?.[0]?.id).toBe('ses_1');
+  });
+
+  test('preserves workspace routing when a remote session event omits it', () => {
+    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/a', {
+      directory: '/workspace',
+      workspaceID: 'wrk_1',
+    }));
+    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/b', {
+      directory: '/workspace',
+      time: { created: 1, updated: 3 },
+    }));
+
+    expect(useGlobalSessionsStore.getState().activeSessions[0]?.workspaceID).toBe('wrk_1');
+  });
+
+  test('restores confirmed workspace routing after an authoritative replacement omits it', () => {
+    rememberConfirmedSessionWorkspaceRoute('ses_1', 'wrk_1');
+    useGlobalSessionsStore.getState().applySnapshot([
+      buildSession('https://share.example/a', { directory: '/workspace' }),
+    ], []);
+
+    expect(useGlobalSessionsStore.getState().activeSessions[0]?.workspaceID).toBe('wrk_1');
+  });
+
+  test('inherits a confirmed parent workspace route when a child event omits it', () => {
+    rememberConfirmedSessionWorkspaceRoute('ses_parent', 'wrk_1');
+    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/child', {
+      id: 'ses_child',
+      parentID: 'ses_parent',
+      directory: '/workspace',
+    }));
+
+    expect(useGlobalSessionsStore.getState().activeSessions[0]?.workspaceID).toBe('wrk_1');
   });
 
   test('preserves raw directory metadata when a live update only has project worktree', () => {

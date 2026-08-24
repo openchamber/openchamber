@@ -152,5 +152,3 @@ export async function getRuntimeProvider(providerID) {
   const current = await getRuntimeProviderSnapshot();
   return current?.providers.get(providerID) ?? null;
 }
-
-

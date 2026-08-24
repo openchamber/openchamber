@@ -97,7 +97,7 @@
     },
     "packages/electron": {
       "name": "@openchamber/electron",
-      "version": "1.19.0",
+      "version": "1.20.0",
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
@@ -106,6 +106,7 @@
       },
       "devDependencies": {
         "@electron/rebuild": "^4.2.0",
+        "@openchamber/opencode-container-workspace": "github:openchamber/opencode-container-workspace#b1c4682d5c1509c86fa5ce7f4e7170fa4ba13466",
         "electron": "^43.3.0",
         "electron-builder": "^26.0.0",
         "node-abi": "^4.33.0",
@@ -134,7 +135,7 @@
     },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "1.19.0",
+      "version": "1.20.0",
       "dependencies": {
         "@aparajita/capacitor-secure-storage": "^8.0.0",
         "@base-ui/react": "^1.4.0",
@@ -238,7 +239,7 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "1.19.0",
+      "version": "1.20.0",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
         "@opencode-ai/sdk": "1.18.21",
@@ -261,13 +262,14 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "1.19.0",
+      "version": "1.20.0",
       "bin": {
         "openchamber": "./bin/cli.js",
       },
       "dependencies": {
         "@clack/prompts": "^1.1.0",
         "@octokit/rest": "^22.0.1",
+        "@openchamber/opencode-container-workspace": "github:openchamber/opencode-container-workspace#b1c4682d5c1509c86fa5ce7f4e7170fa4ba13466",
         "@opencode-ai/sdk": "1.18.21",
         "@simplewebauthn/server": "13.3.1",
         "bun-pty": "^0.4.5",
@@ -998,6 +1000,8 @@
     "@openchamber/electron": ["@openchamber/electron@workspace:packages/electron"],
 
     "@openchamber/mobile": ["@openchamber/mobile@workspace:packages/mobile"],
+
+    "@openchamber/opencode-container-workspace": ["@openchamber/opencode-container-workspace@github:openchamber/opencode-container-workspace#b1c4682", {}, "openchamber-opencode-container-workspace-b1c4682", "sha512-W7FcdcNkBpmwFQxcAdwsdQP08HD6iQkTq5aBQK5nEA031I6l8CqYPtlOajAGZOkNjG7Jopn6y33BnwFSMB8MRA=="],
 
     "@openchamber/ui": ["@openchamber/ui@workspace:packages/ui"],
 

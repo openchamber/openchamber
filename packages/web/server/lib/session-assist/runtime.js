@@ -163,9 +163,13 @@ export const createSessionAssistRuntime = ({
     }
   };
 
-  const openCodeFetch = async (path, { directory, method = 'GET', body } = {}) => {
+  const openCodeFetch = async (path, { directory, workspace, method = 'GET', body } = {}) => {
     const base = buildOpenCodeUrl(path, '');
-    const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
+    const params = new URLSearchParams();
+    if (directory) params.set('directory', directory);
+    if (workspace) params.set('workspace', workspace);
+    const search = params.toString();
+    const url = search ? `${base}?${search}` : base;
     const response = await fetch(url, {
       method,
       headers: {
@@ -182,10 +186,11 @@ export const createSessionAssistRuntime = ({
     return response.json().catch(() => null);
   };
 
-  const fetchRecentMessages = async (sessionId, directory) => {
+  const fetchRecentMessages = async (sessionId, directory, workspace) => {
     const base = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/message`, '');
     const params = new URLSearchParams({ limit: String(TRANSCRIPT_MESSAGE_LIMIT) });
     if (directory) params.set('directory', directory);
+    if (workspace) params.set('workspace', workspace);
     const response = await fetch(`${base}?${params.toString()}`, {
       method: 'GET',
       headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
@@ -196,10 +201,10 @@ export const createSessionAssistRuntime = ({
     return Array.isArray(messages) ? messages : null;
   };
 
-  const generateAssist = async (sessionId, directory) => {
+  const generateAssist = async (sessionId, directory, workspace) => {
     const targets = getSessionAssistTargets();
     if (!targets.recap && !targets.suggestion) return;
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
+    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory, workspace })
       .catch((error) => {
         console.warn(`[session-assist] session fetch failed: ${error?.message || error}`);
         return null;
@@ -208,7 +213,7 @@ export const createSessionAssistRuntime = ({
     // Sub-agent/task sessions never surface in chat — skip them.
     if (typeof session.parentID === 'string' && session.parentID) return;
 
-    const messages = await fetchRecentMessages(sessionId, directory);
+    const messages = await fetchRecentMessages(sessionId, directory, workspace);
     if (!messages || messages.length === 0) {
       console.warn('[session-assist] no messages fetched');
       return;
@@ -293,7 +298,7 @@ export const createSessionAssistRuntime = ({
 
     // The session may have moved on while we generated — a stale patch would
     // flash outdated content, so re-check the tail before writing.
-    const latest = await fetchRecentMessages(sessionId, directory);
+    const latest = await fetchRecentMessages(sessionId, directory, workspace);
     const latestAssistantId = (() => {
       if (!latest) return null;
       for (let i = latest.length - 1; i >= 0; i -= 1) {
@@ -311,7 +316,7 @@ export const createSessionAssistRuntime = ({
     // Merge from a FRESH read: generation takes tens of seconds, and merging
     // from the session snapshot fetched before it would clobber any metadata
     // written meanwhile (suggestion dismissals, review links, …).
-    const freshSession = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
+    const freshSession = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory, workspace })
       .catch(() => null);
     const currentMetadata = freshSession?.metadata && typeof freshSession.metadata === 'object'
       ? freshSession.metadata
@@ -323,6 +328,7 @@ export const createSessionAssistRuntime = ({
     console.log(`[session-assist] generated for ${sessionId} via ${generated.providerID}/${generated.modelID}`);
     await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, {
       directory,
+      workspace,
       method: 'PATCH',
       body: {
         metadata: {
@@ -341,13 +347,13 @@ export const createSessionAssistRuntime = ({
     });
   };
 
-  const armTimer = (sessionId, directory) => {
+  const armTimer = (sessionId, directory, workspace) => {
     clearTimer(sessionId);
     const timer = setTimeout(() => {
       timers.delete(sessionId);
       if (stopped || inflight.has(sessionId)) return;
       inflight.add(sessionId);
-      generateAssist(sessionId, directory)
+      generateAssist(sessionId, directory, workspace)
         .catch((error) => {
           console.warn('[session-assist] failed:', error?.message || error);
         })
@@ -359,12 +365,12 @@ export const createSessionAssistRuntime = ({
     timers.set(sessionId, { timer, armedAt: Date.now() });
   };
 
-  const processPayload = (payload, directoryHint = '') => {
+  const processPayload = (payload, directoryHint = '', workspaceHint = '') => {
     if (stopped) return;
     const status = extractSessionStatus(payload);
     if (status) {
       if (status.type === 'idle') {
-        armTimer(status.sessionId, status.directory || directoryHint);
+        armTimer(status.sessionId, status.directory || directoryHint, workspaceHint);
       } else {
         clearTimer(status.sessionId);
       }

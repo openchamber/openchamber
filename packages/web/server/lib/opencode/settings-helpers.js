@@ -1,4 +1,5 @@
 import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
+import { sanitizeWorkspaceSettingsUpdate } from '../workspaces/policy.js';
 
 export const createSettingsHelpers = (dependencies) => {
   const {
@@ -246,6 +247,7 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
       result.activeProjectId = candidate.activeProjectId;
     }
+    Object.assign(result, sanitizeWorkspaceSettingsUpdate(candidate));
     if (SIDEBAR_PROJECT_DISPLAY_MODE_VALUES.has(candidate.sidebarProjectDisplayMode)) {
       result.sidebarProjectDisplayMode = candidate.sidebarProjectDisplayMode;
     }
@@ -917,7 +919,8 @@ export const createSettingsHelpers = (dependencies) => {
   };
 
   const formatSettingsResponse = (settings) => {
-    const sanitized = sanitizeSettingsUpdate(settings);
+    const sanitized = sanitizeSettingsUpdate({ ...settings, secureWorkspacesRequirePinnedImage: true });
+    sanitized.secureWorkspacesRequirePinnedImage = true;
     delete sanitized.managedRemoteTunnelToken;
     const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
     const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;

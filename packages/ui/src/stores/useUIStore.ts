@@ -19,7 +19,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
  */
 export type WorkspaceSurface = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 /** @deprecated Use WorkspaceSurface. */
-export type MainTab = WorkspaceSurface;
+export type MainTab = WorkspaceSurface | 'workspaces';
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch';
 export type ContextPanelMode = 'diff' | 'walkthrough' | 'file' | 'context' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal';
 export type MermaidRenderingMode = 'svg' | 'ascii';
@@ -659,7 +659,7 @@ interface UIStore {
   activeSurface: WorkspaceSurface;
   surfaceGuard: WorkspaceSurfaceGuard | null;
   /** @deprecated Use activeSurface. */
-  activeMainTab: WorkspaceSurface;
+  activeMainTab: MainTab;
   /** @deprecated Use surfaceGuard. */
   mainTabGuard: WorkspaceSurfaceGuard | null;
   sidebarOpenBeforeFullscreenTab: boolean | null;
@@ -855,7 +855,7 @@ interface UIStore {
   setSessionDropdownOpen: (open: boolean) => void;
   setActiveSurface: (surface: WorkspaceSurface) => void;
   /** @deprecated Use setActiveSurface. */
-  setActiveMainTab: (surface: WorkspaceSurface) => void;
+  setActiveMainTab: (surface: MainTab) => void;
   prepareForRuntimeSwitch: (runtimeKey?: string | null) => void;
   restoreForRuntimeSwitch: (runtimeKey?: string | null) => void;
   setSurfaceGuard: (guard: WorkspaceSurfaceGuard | null) => void;
@@ -1670,7 +1670,13 @@ export const useUIStore = create<UIStore>()(
           set({ activeSurface: surface, activeMainTab: surface });
         },
 
-        setActiveMainTab: (surface) => get().setActiveSurface(surface),
+        setActiveMainTab: (surface) => {
+          if (surface === 'workspaces') {
+            set({ activeMainTab: surface });
+            return;
+          }
+          get().setActiveSurface(surface);
+        },
 
         prepareForRuntimeSwitch: (runtimeKey?: string | null) => {
           activeSurfaceByRuntime.set(runtimeMemoryKey(runtimeKey), get().activeSurface);

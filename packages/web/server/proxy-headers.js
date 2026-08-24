@@ -48,7 +48,8 @@ export const shouldForwardProxyResponseHeader = (key) => {
     return false;
   }
 
-  return !filteredResponseHeaders.has(key.toLowerCase());
+  const normalizedKey = key.toLowerCase();
+  return !normalizedKey.startsWith('access-control-') && !filteredResponseHeaders.has(normalizedKey);
 };
 
 export const applyForwardProxyResponseHeaders = (responseHeaders, response) => {

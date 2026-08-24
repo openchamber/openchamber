@@ -10,6 +10,21 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const TRUSTED_DEVICE_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const URL_AUTH_TOKEN_TTL_MS = 60 * 1000;
 const URL_AUTH_TOKEN_PREFIX = 'oc_url_';
+const REAUTH_PROOF_TTL_MS = 2 * 60 * 1000;
+const STEP_UP_WINDOW_TTL_MS = 10 * 60 * 1000;
+const REAUTH_PROOF_PREFIX = 'oc_reauth_';
+const REAUTH_PROOF_OPERATIONS = new Set([
+  'workspace.configure',
+  'workspace.validate',
+  'workspace.setup',
+  'workspace.create',
+  'workspace.session.start',
+  'workspace.cleanup',
+  'workspace.reconcile',
+  'workspace.export',
+  'host.apply',
+  'host.capabilities',
+]);
 
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS) || 10;
@@ -23,16 +38,10 @@ let rateLimitCleanupTimer = null;
 const rateLimitLocks = new Map();
 
 const getClientIp = (req) => {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    const ip = forwarded.split(',')[0].trim();
-    if (ip.startsWith('::ffff:')) {
-      return ip.substring(7);
-    }
-    return ip;
-  }
-
-  const ip = req.ip || req.connection?.remoteAddress;
+  // Express trusts proxy headers for routing, but authentication endpoints can also be
+  // reached directly. A caller-controlled X-Forwarded-For value must not create a fresh
+  // password-attempt bucket; use the actual peer for the security limit.
+  const ip = req.socket?.remoteAddress || req.connection?.remoteAddress;
   if (ip) {
     if (ip.startsWith('::ffff:')) {
       return ip.substring(7);
@@ -411,9 +420,16 @@ export const createUiAuth = ({
   readSettingsFromDiskMigrated,
   clientAuthController = null,
   requireClientAuth = false,
+  reauthProofTtlMs = REAUTH_PROOF_TTL_MS,
+  stepUpWindowTtlMs = STEP_UP_WINDOW_TTL_MS,
 } = {}) => {
   const normalizedPassword = normalizePassword(password);
   const urlAuthTokens = new Map();
+  const reauthProofs = new Map();
+  // A successful password/passkey ceremony opens a short principal-bound window during
+  // which further proofs are minted without repeating the ceremony. Proofs themselves
+  // stay single-use and bound to operation, project, body hash, nonce, and principal.
+  const stepUpWindows = new Map();
 
   const sweepUrlAuthTokens = () => {
     const now = Date.now();
@@ -483,6 +499,82 @@ export const createUiAuth = ({
     client: clientAuth?.client || null,
   });
 
+  const authContextPrincipal = (context) => {
+    if (context?.type === 'client' && context.clientId) return `client:${context.clientId}`;
+    if (context?.type === 'session' && context.token) {
+      return `session:${crypto.createHash('sha256').update(context.token).digest('hex')}`;
+    }
+    return null;
+  };
+
+  const normalizeReauthBinding = (body) => {
+    const operation = typeof body?.operation === 'string' ? body.operation.trim() : '';
+    const project = typeof body?.project === 'string' ? body.project.trim() : '';
+    const bodyHash = typeof body?.bodyHash === 'string' ? body.bodyHash.trim().toLowerCase() : '';
+    const nonce = typeof body?.nonce === 'string' ? body.nonce.trim() : '';
+    if (!REAUTH_PROOF_OPERATIONS.has(operation) || !project || project.length > 4096 || !/^[a-f0-9]{64}$/.test(bodyHash) || nonce.length < 16 || nonce.length > 256) {
+      return null;
+    }
+    return { operation, project, bodyHash, nonce };
+  };
+
+  const issueReauthProof = (context, body) => {
+    const principal = authContextPrincipal(context);
+    const binding = normalizeReauthBinding(body);
+    if (!principal || !binding) return null;
+    const token = `${REAUTH_PROOF_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const expiresAt = Date.now() + reauthProofTtlMs;
+    reauthProofs.set(tokenHash, { ...binding, principal, expiresAt });
+    return { proof: token, nonce: binding.nonce, expiresAt };
+  };
+
+  const grantStepUpWindow = (context) => {
+    const principal = authContextPrincipal(context);
+    if (!principal) return null;
+    const expiresAt = Date.now() + stepUpWindowTtlMs;
+    stepUpWindows.set(principal, expiresAt);
+    return expiresAt;
+  };
+
+  const activeStepUpWindow = (context) => {
+    const principal = authContextPrincipal(context);
+    if (!principal) return null;
+    const expiresAt = stepUpWindows.get(principal);
+    if (!expiresAt || expiresAt <= Date.now()) {
+      stepUpWindows.delete(principal);
+      return null;
+    }
+    return expiresAt;
+  };
+
+  const normalizeHttpClientKind = (value) => value === 'mobile' || value === 'desktop' ? value : null;
+
+  const consumeBoundReauthProof = (req, context, expected) => {
+    const header = req?.headers?.['x-openchamber-reauth-proof'];
+    const token = Array.isArray(header) ? header[0] : header;
+    if (typeof token !== 'string' || !token.startsWith(REAUTH_PROOF_PREFIX)) return false;
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const nonceHeader = req?.headers?.['x-openchamber-reauth-nonce'];
+    const nonce = Array.isArray(nonceHeader) ? nonceHeader[0] : nonceHeader;
+    const entry = reauthProofs.get(tokenHash);
+    if (!entry || entry.expiresAt <= Date.now()) {
+      reauthProofs.delete(tokenHash);
+      return false;
+    }
+    const principal = authContextPrincipal(context);
+    if (!principal
+      || principal !== entry.principal
+      || nonce !== entry.nonce
+      || expected?.operation !== entry.operation
+      || expected?.project !== entry.project
+      || expected?.bodyHash !== entry.bodyHash) {
+      return false;
+    }
+    reauthProofs.delete(tokenHash);
+    return true;
+  };
+
   if (!normalizedPassword) {
     const setSessionCookie = (req, res, token, ttlMs = sessionTtlMs) => {
       const secure = isSecureRequest(req);
@@ -551,6 +643,26 @@ export const createUiAuth = ({
       requireAuth,
       requireSessionAuth,
       resolveAuthContext,
+      handleReauthProof: async (req, res) => {
+        const context = await resolveAuthContext(req, res, { allowClientAuth: true, allowUrlToken: false });
+        if (!context) return res.status(401).json({ error: 'Authentication required' });
+        return res.status(428).json({
+          error: 'Privileged reauthentication requires a configured independent step-up factor',
+          setupRequired: true,
+        });
+      },
+      handlePasskeyReauthOptions: (_req, res) => res.status(428).json({
+        error: 'Privileged reauthentication requires a configured independent step-up factor',
+        setupRequired: true,
+      }),
+      handlePasskeyReauthVerify: (_req, res) => res.status(428).json({
+        error: 'Privileged reauthentication requires a configured independent step-up factor',
+        setupRequired: true,
+      }),
+      consumeReauthProof: async (req, expected) => {
+        const context = await resolveAuthContext(req, null, { allowClientAuth: true, allowUrlToken: false });
+        return context ? consumeBoundReauthProof(req, context, expected) : false;
+      },
       handleSessionStatus: async (req, res) => {
         if (requireClientAuth) {
           const clientAuth = await authenticateClientRequest(req);
@@ -607,7 +719,8 @@ export const createUiAuth = ({
         return ensureSessionToken(req, res);
       },
       dispose: () => {
-
+        reauthProofs.clear();
+    stepUpWindows.clear();
       },
     };
   }
@@ -635,6 +748,8 @@ export const createUiAuth = ({
     const nextSecret = crypto.randomBytes(32).toString('hex');
     jwtSecret = persistJwtSecret(nextSecret);
     urlAuthTokens.clear();
+    reauthProofs.clear();
+    stepUpWindows.clear();
     rebuildPasskeyController();
   };
 
@@ -841,7 +956,7 @@ export const createUiAuth = ({
       clientTokenResult = await clientAuthController.createClient({
         label: req.body?.clientLabel,
         expiresAt: new Date(Date.now() + ttlMs).toISOString(),
-        clientKind: req.body?.clientKind,
+        clientKind: normalizeHttpClientKind(req.body?.clientKind),
         dedupeKey: req.body?.dedupeKey,
         authMethod: 'password',
         deviceName: req.body?.deviceName,
@@ -855,6 +970,73 @@ export const createUiAuth = ({
       authenticated: true,
       ...(clientTokenResult?.token ? { clientToken: clientTokenResult.token, client: clientTokenResult.client } : {}),
     });
+  };
+
+  const handleReauthProof = async (req, res) => {
+    const context = await resolveAuthContext(req, res, { allowClientAuth: true, allowUrlToken: false });
+    if (!context) return respondUnauthorized(req, res);
+    if (req.body?.password === undefined) {
+      // Silent probe: mint from a still-valid step-up window. Not a credential guess,
+      // so it neither consumes the rate limit nor records a failed attempt.
+      const windowExpiresAt = activeStepUpWindow(context);
+      if (!windowExpiresAt) return res.status(401).json({ error: 'Step-up authorization required', stepUpRequired: true });
+      const result = issueReauthProof(context, req.body);
+      if (!result) return res.status(400).json({ error: 'Invalid reauthentication binding' });
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ ...result, windowExpiresAt });
+    }
+    const rateLimitResult = await checkRateLimit(req);
+    res.setHeader('X-RateLimit-Limit', rateLimitResult.limit);
+    res.setHeader('X-RateLimit-Remaining', rateLimitResult.remaining);
+    res.setHeader('X-RateLimit-Reset', rateLimitResult.reset);
+    if (!rateLimitResult.allowed) {
+      res.setHeader('Retry-After', rateLimitResult.retryAfter);
+      return res.status(429).json({ error: 'Too many reauthentication attempts, please try again later' });
+    }
+    if (!verifyPassword(req.body?.password)) {
+      await recordFailedAttempt(req);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    const result = issueReauthProof(context, req.body);
+    if (!result) return res.status(400).json({ error: 'Invalid reauthentication binding' });
+    await clearRateLimit(req);
+    const windowExpiresAt = grantStepUpWindow(context);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ ...result, windowExpiresAt });
+  };
+
+  const handlePasskeyReauthOptions = async (req, res) => {
+    try {
+      const context = await resolveAuthContext(req, res, { allowClientAuth: true, allowUrlToken: false });
+      if (!context) return respondUnauthorized(req, res);
+      const binding = normalizeReauthBinding(req.body);
+      const principal = authContextPrincipal(context);
+      if (!binding || !principal) return res.status(400).json({ error: 'Invalid reauthentication binding' });
+      const options = await passkeyController.beginAuthentication(req, { binding: { ...binding, principal } });
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json(options);
+    } catch (error) {
+      return respondPasskeyError(res, error);
+    }
+  };
+
+  const handlePasskeyReauthVerify = async (req, res) => {
+    try {
+      const context = await resolveAuthContext(req, res, { allowClientAuth: true, allowUrlToken: false });
+      if (!context) return respondUnauthorized(req, res);
+      const result = await passkeyController.finishAuthentication(req.body);
+      const principal = authContextPrincipal(context);
+      if (!result?.binding || result.binding.principal !== principal) {
+        return res.status(403).json({ error: 'Reauthentication principal mismatch' });
+      }
+      const proof = issueReauthProof(context, result.binding);
+      if (!proof) return res.status(400).json({ error: 'Invalid reauthentication binding' });
+      const windowExpiresAt = grantStepUpWindow(context);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ ...proof, windowExpiresAt });
+    } catch (error) {
+      return respondPasskeyError(res, error);
+    }
   };
 
   const respondPasskeyError = (res, error) => {
@@ -909,7 +1091,7 @@ export const createUiAuth = ({
         clientTokenResult = await clientAuthController.createClient({
           label: req.body?.clientLabel,
           expiresAt: new Date(Date.now() + ttlMs).toISOString(),
-          clientKind: req.body?.clientKind,
+          clientKind: normalizeHttpClientKind(req.body?.clientKind),
           dedupeKey: req.body?.dedupeKey,
           authMethod: 'passkey',
           deviceName: req.body?.deviceName,
@@ -966,6 +1148,8 @@ export const createUiAuth = ({
       rateLimitCleanupTimer = null;
     }
     passkeyController.dispose();
+    reauthProofs.clear();
+    stepUpWindows.clear();
   };
 
   return {
@@ -973,6 +1157,13 @@ export const createUiAuth = ({
     requireAuth,
     requireSessionAuth,
     resolveAuthContext,
+    handleReauthProof,
+    handlePasskeyReauthOptions,
+    handlePasskeyReauthVerify,
+    consumeReauthProof: async (req, expected) => {
+      const context = await resolveAuthContext(req, null, { allowClientAuth: true, allowUrlToken: false });
+      return context ? consumeBoundReauthProof(req, context, expected) : false;
+    },
     handleSessionStatus,
     handleSessionCreate,
     handleUrlAuthToken,

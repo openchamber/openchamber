@@ -1,5 +1,5 @@
 import type { SidebarSection } from '@/constants/sidebar';
-import type { WorkspaceSurface } from '@/stores/useUIStore';
+import type { MainTab } from '@/stores/useUIStore';
 
 /**
  * Represents the current route state derived from URL parameters.
@@ -9,7 +9,7 @@ export interface RouteState {
   /** Session ID to navigate to */
   sessionId: string | null;
   /** View selected through the legacy `tab` URL parameter. */
-  tab: WorkspaceSurface | null;
+  tab: MainTab | null;
   /** Settings section - when non-null, settings dialog should be open */
   settingsPath: string | null;
   /** File path for diff view */
@@ -19,7 +19,11 @@ export interface RouteState {
 /**
  * Valid values for the legacy `tab` URL parameter.
  */
-export const VALID_TABS: readonly WorkspaceSurface[] = ['chat', 'git', 'diff', 'terminal', 'files', 'diagram'] as const;
+export const VALID_TABS: readonly MainTab[] = ['chat', 'git', 'diff', 'terminal', 'files', 'diagram', 'workspaces'] as const;
+
+export function isMainTabAvailable(tab: MainTab, runtime: { isVSCode: boolean }): boolean {
+  return tab !== 'workspaces' || !runtime.isVSCode;
+}
 
 /**
  * Valid settings section values for URL routing.

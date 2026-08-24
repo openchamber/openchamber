@@ -9,6 +9,7 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { rememberConfirmedSessionWorkspaceRoute, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
@@ -794,14 +795,10 @@ describe('routeMessage skill invocation', () => {
     sendMessageCalls.length = 0;
 
     // Minimal optimistic + connection machinery so routeMessage can dispatch.
+    let childState = { session: [], message: {}, part: {}, session_status: {} };
     const childStore = {
-      getState: () => ({
-        session: [],
-        message: {},
-        part: {},
-        session_status: {},
-      }),
-      setState: () => {},
+      getState: () => childState,
+      setState: (patch) => { childState = { ...childState, ...patch }; },
     };
     const childStores = {
       children: new Map(),
@@ -816,6 +813,8 @@ describe('routeMessage skill invocation', () => {
     // so they start empty here — the skill is only known to the skills store.
     useCommandsStore.setState({ commands: [] });
     useSkillsStore.setState({ skills: [] });
+    useGlobalSessionsStore.getState().resetForRuntimeSwitch();
+    useGlobalSessionsStore.setState({ activeSessions: [], archivedSessions: [] });
 
     originalSendCommand = opencodeClient.sendCommand;
     originalSendMessage = opencodeClient.sendMessage;
@@ -882,6 +881,45 @@ describe('routeMessage skill invocation', () => {
 
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendCommandCalls).toHaveLength(0);
+  });
+
+  test('routes a newly created workspace session explicitly before control-plane materialization', async () => {
+    useGlobalSessionsStore.setState({
+      activeSessions: [{ id: 'session-workspace', directory: '/workspace', workspaceID: 'wrk_workspace', time: { created: 1 } }],
+      archivedSessions: [],
+    });
+
+    await routeMessage({
+      sessionId: 'session-workspace',
+      directory: '/workspace',
+      content: 'hello',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    });
+
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].workspace).toBe('wrk_workspace');
+  });
+
+  test('keeps routing subsequent messages after a session snapshot omits workspace metadata', async () => {
+    rememberConfirmedSessionWorkspaceRoute('session-workspace', 'wrk_workspace');
+    useGlobalSessionsStore.setState({
+      activeSessions: [{ id: 'session-workspace', directory: '/workspace', time: { created: 1 } }],
+      archivedSessions: [],
+    });
+
+    for (const content of ['first', 'second']) {
+      await routeMessage({
+        sessionId: 'session-workspace',
+        directory: '/workspace',
+        content,
+        providerID: 'provider-a',
+        modelID: 'model-a',
+      });
+    }
+
+    expect(sendMessageCalls).toHaveLength(2);
+    expect(sendMessageCalls.every((call) => call.workspace === 'wrk_workspace')).toBe(true);
   });
 });
 

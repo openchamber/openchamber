@@ -16,16 +16,17 @@ describe('event stream protocol helpers', () => {
     expect(MESSAGE_STREAM_DIRECTORY_WS_PATH).toBe('/api/event/ws');
   });
 
-  it('parses wrapped SSE payloads with event id and directory', () => {
+  it('parses wrapped SSE payloads with event id and routing metadata', () => {
     const envelope = parseSseEventEnvelope(
       'id: evt-1\n' +
       'event: message\n' +
-      'data: {"directory":"/tmp/project","payload":{"type":"session.updated"}}\n'
+      'data: {"directory":"/tmp/project","workspace":"wrk_1","payload":{"type":"session.updated"}}\n'
     );
 
     expect(envelope).toEqual({
       eventId: 'evt-1',
       directory: '/tmp/project',
+      workspace: 'wrk_1',
       payload: { type: 'session.updated' },
     });
   });

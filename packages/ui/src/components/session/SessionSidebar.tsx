@@ -11,7 +11,8 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useChildStoreManager } from '@/sync/sync-context';
-import { getAllSyncSessionMap } from '@/sync/sync-refs';
+import { getAllSyncSessionMap, getSyncSessionDirectory } from '@/sync/sync-refs';
+import { getSessionHostDirectoriesVersion, getSessionHostDirectory, hydrateSessionHostDirectories, subscribeSessionHostDirectories } from '@/sync/session-host-directory';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSync } from '@/sync/use-sync';
 import { SessionPrefetchEffect } from './sidebar/hooks/useSessionPrefetch';
@@ -1079,7 +1080,24 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     void refreshGlobalSessionsForDirectories(addedDirectories, syncSessionsSnapshotRef.current);
   }, [isVSCode, projectSessionDirectories]);
 
-  const { github } = useRuntimeAPIs();
+  const { github, workspaces: workspacesAPI } = useRuntimeAPIs();
+
+  // Server-recorded session↔workspace routes are the only durable way to attribute a
+  // workspace-routed session to its project: the session record itself names only the
+  // container path. Hydrate once per mount; creation-time writes cover the live run.
+  // The version subscription re-buckets ownership whenever routes land, from either
+  // source, no matter which component learned them first.
+  const sessionRoutesVersion = React.useSyncExternalStore(
+    subscribeSessionHostDirectories,
+    getSessionHostDirectoriesVersion,
+    getSessionHostDirectoriesVersion,
+  );
+  React.useEffect(() => {
+    if (!workspacesAPI?.sessionRoutes) return;
+    workspacesAPI.sessionRoutes()
+      .then((result) => { hydrateSessionHostDirectories(result.routes); })
+      .catch(() => { /* grouping degrades to the remaining fallbacks */ });
+  }, [workspacesAPI]);
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const gitRepoStatus = useGitRepoStatusMap(isVisible ? normalizedProjectPaths : EMPTY_STRING_ARRAY);
@@ -1097,8 +1115,21 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
   const isSessionsLoading = useSessionUIStore((state) => state.isLoading);
   const sessionOwnership = React.useMemo(
-    () => createSessionOwnershipIndex(sessions, normalizedProjects, availableWorktreesByProject, isVSCode, archivedSessions),
-    [archivedSessions, availableWorktreesByProject, isVSCode, normalizedProjects, sessions],
+    // Workspace-routed session records name only the container path and no project, so
+    // ownership falls back to what the client learned at creation or from the
+    // server-recorded routes, then to child-store membership; without these fallbacks
+    // such sessions vanish from every project group.
+    () => createSessionOwnershipIndex(
+      sessions,
+      normalizedProjects,
+      availableWorktreesByProject,
+      isVSCode,
+      archivedSessions,
+      (sessionId) => getSessionHostDirectory(sessionId) ?? getSyncSessionDirectory(sessionId),
+    ),
+    // sessionRoutesVersion re-buckets after server routes hydrate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [archivedSessions, availableWorktreesByProject, isVSCode, normalizedProjects, sessions, sessionRoutesVersion],
   );
   useAuthoritativeSessionCleanup({
     enabled: isVisible,

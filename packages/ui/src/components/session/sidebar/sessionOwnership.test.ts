@@ -45,6 +45,45 @@ describe('createSessionOwnershipIndex', () => {
     ]));
   });
 
+  test('keeps a workspace-routed session in the project whose list it arrived in', () => {
+    // A session routed into a secure workspace reports `/workspace` and carries no
+    // project. The raw path owns nothing here, so these sessions vanished from every
+    // sidebar group. The resolver converts the container path, and store membership is
+    // the fallback when the record alone cannot say which project it belongs to.
+    const sessions = [
+      { id: 'routed-with-project', directory: '/workspace', project: { worktree: '/projects/app' } },
+      { id: 'routed-bare', directory: '/workspace' },
+    ] as unknown as Session[];
+    const projects = [{ id: 'app', normalizedPath: '/projects/app' }];
+
+    const ownership = createSessionOwnershipIndex(
+      sessions,
+      projects,
+      new Map(),
+      false,
+      [],
+      (sessionId) => sessionId === 'routed-bare' ? '/projects/app' : null,
+    );
+
+    expect(ownership.bySessionId.get('routed-with-project')?.projectId).toBe('app');
+    expect(ownership.bySessionId.get('routed-bare')?.projectId).toBe('app');
+    expect(ownership.sessionsByProject.get('app')?.map((session) => session.id)).toEqual([
+      'routed-with-project',
+      'routed-bare',
+    ]);
+  });
+
+  test('still drops a workspace-routed session no store claims', () => {
+    const ownership = createSessionOwnershipIndex(
+      [{ id: 'routed-orphan', directory: '/workspace' } as Session],
+      [{ id: 'app', normalizedPath: '/projects/app' }],
+      new Map(),
+      false,
+    );
+
+    expect(ownership.bySessionId.has('routed-orphan')).toBe(false);
+  });
+
   test('gives an exact project precedence over a colliding worktree', () => {
     const ownership = createSessionOwnershipIndex(
       [{ id: 'nested', directory: '/projects/app/packages/admin/src' } as Session],

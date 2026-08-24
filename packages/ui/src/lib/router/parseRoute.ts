@@ -1,4 +1,4 @@
-import type { WorkspaceSurface } from '@/stores/useUIStore';
+import type { MainTab } from '@/stores/useUIStore';
 import {
   type RouteState,
   VALID_TABS,
@@ -52,13 +52,13 @@ function parseSessionId(params: URLSearchParams): string | null {
  * Parse main tab from URL parameters.
  * Returns null if missing or invalid.
  */
-function parseTab(params: URLSearchParams): WorkspaceSurface | null {
+function parseTab(params: URLSearchParams): MainTab | null {
   const value = params.get(ROUTE_PARAMS.TAB);
   if (!value) {
     return null;
   }
 
-  const normalized = value.toLowerCase().trim() as WorkspaceSurface;
+  const normalized = value.toLowerCase().trim() as MainTab;
   if (VALID_TABS.includes(normalized)) {
     return normalized;
   }

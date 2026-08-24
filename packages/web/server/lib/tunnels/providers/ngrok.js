@@ -50,7 +50,7 @@ export function createNgrokTunnelProvider() {
       };
     },
     diagnose: async () => {
-      const dependency = await checkNgrokAvailable();
+      const dependency = await checkNgrokAvailable({ force: true });
       const authtoken = await checkNgrokAuthtokenConfigured(dependency.path);
       const network = await checkNgrokApiReachability();
       const installInfo = getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_NGROK);

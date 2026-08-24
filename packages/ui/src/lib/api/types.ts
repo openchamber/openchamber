@@ -1,5 +1,6 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DraftStarterRef } from '@/lib/draftStarters';
+import type { Session } from '@opencode-ai/sdk/v2/client';
 
 type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
@@ -779,6 +780,287 @@ export interface ToolsAPI {
   getAvailableTools(): Promise<string[]>;
 }
 
+export type WorkspaceProviderKind = 'docker' | 'kubernetes' | 'apple-container';
+
+export interface WorkspaceProviderValidationInput {
+  provider: WorkspaceProviderKind;
+  context?: string;
+  namespace?: string;
+  egressHttpProxy?: string;
+  egressProxyCIDR?: string;
+  egressDnsCIDRs?: string;
+  egressNoProxy?: string;
+}
+
+export interface WorkspaceProviderValidationResult {
+  available: boolean;
+  version?: string | null;
+  context?: string | null;
+  namespace?: string | null;
+  error?: string;
+  /** Structured reason (e.g. WORKSPACE_PROVIDER_CLI_MISSING) used for localized remediation guidance. */
+  code?: string;
+  diagnostics?: string[];
+}
+
+interface WorkspaceArtifactTextHunk {
+  id: string;
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  removed: string[];
+  added: string[];
+}
+
+export interface WorkspaceArtifactFileReview {
+  id: string;
+  kind: 'add' | 'modify' | 'delete' | 'rename' | 'mode';
+  oldPath: string | null;
+  newPath: string | null;
+  binary: boolean;
+  entryType: 'file' | 'symlink' | 'directory';
+  oldMode: number | null;
+  newMode: number | null;
+  /**
+   * How this change relates to the host right now: `pending` can be applied cleanly,
+   * `applied` is already on the host from an earlier apply, `conflict` means the host
+   * entry matches neither the baseline nor the result. Absent when unknown.
+   */
+  hostState?: 'pending' | 'applied' | 'conflict';
+  beforeText?: string;
+  afterText?: string;
+  textHunks: WorkspaceArtifactTextHunk[];
+}
+
+export interface WorkspaceArtifactReview {
+  files: WorkspaceArtifactFileReview[];
+  totalFiles: number;
+}
+
+export interface WorkspaceExportResult {
+  provider: WorkspaceProviderKind | string;
+  exportID: string;
+  expiresAt: string;
+  review: WorkspaceArtifactReview;
+}
+
+export interface WorkspaceConfigureResult {
+  configured: boolean;
+  enabled: boolean;
+  spec?: string;
+  activated?: boolean;
+  active?: boolean;
+  external?: boolean;
+  manualRestartRequired?: boolean;
+  compatibility?: WorkspaceCompatibilityResult;
+  settings?: SettingsPayload;
+}
+
+export interface WorkspaceCompatibilityResult {
+  configured: boolean;
+  active: boolean;
+  supported: boolean;
+  adapterKinds: string[];
+  spec?: string;
+  status: 'active' | 'pending-activation' | 'not-configured';
+  error?: string | null;
+  diagnostics?: string[];
+  handoffSupported?: boolean;
+  /** Server host platform (Node process.platform), e.g. win32, darwin, linux. */
+  platform?: string;
+  /** Providers meaningful on the server host platform; others are hidden from provider pickers. */
+  platformProviders?: WorkspaceProviderKind[];
+}
+
+/** One requirement on the ordered path to a working provider. */
+export interface WorkspaceSetupStep {
+  id: 'platform' | 'cli' | 'daemon' | 'cluster' | 'namespace' | 'permissions' | 'isolation';
+  status: 'satisfied' | 'blocked' | 'pending' | 'unknown';
+  /** Present when the app can complete this step itself. */
+  action?: 'create-namespace' | 'check-isolation';
+  /** Present on a blocking step, naming the specific cause. */
+  code?: string;
+}
+
+/** Clusters the host already knows about, read from its own configuration. */
+export interface WorkspaceProviderEnvironment {
+  provider: WorkspaceProviderKind;
+  contexts: Array<{ name: string; namespace: string | null; current: boolean }>;
+  currentContext: string | null;
+}
+
+export interface WorkspaceSetupResult {
+  provider: WorkspaceProviderKind;
+  action: 'create-namespace' | 'check-isolation';
+  namespace?: string;
+  created?: boolean;
+  verdict?: 'enforced' | 'not-enforced' | 'inconclusive';
+  /** The check could not run because the cluster could not pull the configured image. */
+  imageUnavailable?: boolean;
+  diagnostics?: string[];
+}
+
+export interface WorkspaceProviderReadiness {
+  provider: WorkspaceProviderKind;
+  available: boolean;
+  /** Structured reason when unavailable; never carries provider output or credentials. */
+  code?: string;
+  /** The ordered path to a working provider, so a surface can show the whole route. */
+  steps?: WorkspaceSetupStep[];
+  diagnostics?: string[];
+}
+
+/** Environment readiness, answerable without any step-up authentication. */
+export interface WorkspaceReadinessResult extends WorkspaceCompatibilityResult {
+  enabled: boolean;
+  defaultProvider: WorkspaceProviderKind;
+  providers: WorkspaceProviderReadiness[];
+  policyError?: string;
+}
+
+export interface WorkspaceHandoffBinding {
+  projectID: string;
+  directory: string;
+  sourceSessionID: string;
+  sourceWorkspaceID: string | null;
+  targetWorkspaceID: string | null;
+}
+
+export interface WorkspaceHandoffDraft {
+  id: string;
+  revision: number;
+  hash: string;
+  text: string;
+  boundary: { through: string | null; hash: string; count: number };
+  omissions: Array<{ code: 'goal' | 'message' | 'text' | 'reasoning' | 'tool' | 'file' | 'subtask' | 'agent' | 'snapshot' | 'patch' | 'step-start' | 'step-finish' | 'retry' | 'compaction' | 'unknown' | 'truncated'; count: number }>;
+  warningCodes: Array<'not-exact-history' | 'excluded-content' | 'file-changes-excluded'>;
+}
+
+export interface WorkspaceHandoffOperation {
+  operationID: string;
+  state: 'drafted' | 'confirmed' | 'target-created' | 'context-inserted' | 'verified' | 'completed' | 'cleanup-required';
+  binding: WorkspaceHandoffBinding;
+  draft?: WorkspaceHandoffDraft;
+  targetSessionID: string | null;
+  cleanupRequired: boolean;
+}
+
+export interface WorkspaceApplyResult {
+  applied: boolean;
+  checkOnly: boolean;
+  files?: string[];
+  error?: string;
+}
+
+export interface WorkspaceLifecycleResult {
+  reconciled?: boolean;
+  cleaned?: boolean;
+  retryable?: boolean;
+  status?: string;
+  diagnostics: string[];
+  remainingResources?: string[];
+  retainedResources?: string[];
+  error?: string;
+  /** Structured failure reason (e.g. WORKSPACE_POLICY_MISMATCH) used for localized guidance. */
+  code?: string;
+}
+
+export type WorkspaceSessionStartErrorCode =
+  | 'WORKSPACE_SESSION_INVALID_REQUEST'
+  | 'WORKSPACE_SESSION_REAUTH_REQUIRED'
+  | 'WORKSPACE_SESSION_UNAUTHORIZED'
+  | 'WORKSPACE_SESSION_UNSUPPORTED_RUNTIME'
+  | 'WORKSPACE_SESSION_CONNECTION_TIMEOUT'
+  | 'WORKSPACE_SESSION_PARTIAL'
+  | 'WORKSPACE_SESSION_WORKSPACE_UNAVAILABLE'
+  | 'WORKSPACE_SESSION_IDEMPOTENCY_CONFLICT'
+  | 'WORKSPACE_SESSION_START_FAILED';
+
+export interface WorkspaceSessionStartResult {
+  status: 'completed' | 'partial' | 'connecting';
+  operationID: string;
+  session?: Session;
+  workspaceID?: string;
+  sessionID?: string;
+}
+
+export interface WorkspaceSessionStartError {
+  status?: number;
+  code: WorkspaceSessionStartErrorCode;
+  message: string;
+  retryable: boolean;
+  operationID: string;
+  workspaceID?: string;
+  sessionID?: string;
+}
+
+export interface WorkspaceArtifactDownload {
+  blob: Blob;
+  fileName: string;
+}
+
+export interface WorkspaceApplySelection {
+  fileID: string;
+  hunkIDs?: string[];
+}
+
+export type WorkspacePrivilegedOperation =
+  | 'workspace.session.start'
+  | 'workspace.configure'
+  | 'workspace.validate'
+  | 'workspace.setup'
+  | 'workspace.create'
+  | 'workspace.cleanup'
+  | 'workspace.reconcile'
+  | 'workspace.export'
+  | 'host.apply'
+  | 'host.capabilities';
+
+export interface WorkspaceReauthProofRequest {
+  operation: WorkspacePrivilegedOperation;
+  project: string;
+  payload: Record<string, unknown>;
+  password?: string;
+}
+
+export interface WorkspaceReauthProofResult {
+  proof: string;
+  nonce: string;
+  expiresAt: number;
+  /** End of the step-up window during which adjacent privileged actions skip the password prompt. */
+  windowExpiresAt?: number;
+}
+
+export interface WorkspaceSecurityAPI {
+  reauthenticate(input: WorkspaceReauthProofRequest): Promise<WorkspaceReauthProofResult>;
+  validateProvider(input: WorkspaceProviderValidationInput & { reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceProviderValidationResult>;
+  compatibility(input?: { directory?: string | null }): Promise<WorkspaceCompatibilityResult>;
+  readiness(input?: { directory?: string | null }): Promise<WorkspaceReadinessResult>;
+  setupProvider(input: { provider: WorkspaceProviderKind; action: 'create-namespace' | 'check-isolation'; reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceSetupResult>;
+  providerEnvironment(input: { provider: WorkspaceProviderKind }): Promise<WorkspaceProviderEnvironment>;
+  policyState(input?: { directory?: string | null }): Promise<{ mismatched: string[] }>;
+  /**
+   * Server-recorded session↔workspace↔project routes. OpenCode exposes no such
+   * association on any session read, so the record written at creation is the only
+   * durable way a client can group a workspace-routed session under its project.
+   */
+  sessionRoutes(): Promise<{ routes: Array<{ sessionID: string; workspaceID: string; projectDirectory: string }> }>;
+  updateSettings(input: { changes: Partial<SettingsPayload>; activate?: boolean; reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceConfigureResult>;
+  create(input: { type: WorkspaceProviderKind; directory?: string | null; extra?: Record<string, unknown> | null; reauthProof?: string; reauthNonce?: string }): Promise<{ id: string; type: string; name: string; directory?: string | null; status: 'connected' | 'connecting'; provisional: boolean; retryable: boolean; diagnostics: string[] }>;
+  cleanup(input: { id: string; directory?: string | null; reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceLifecycleResult>;
+  reconcileWorkspace(input: { id: string; directory?: string | null; reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceLifecycleResult>;
+  exportWorkspace(input: { id: string; directory?: string | null; reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceExportResult>;
+  downloadArtifact(input: { exportID: string; workspaceID: string }): Promise<WorkspaceArtifactDownload>;
+  discardArtifact(input: { exportID: string; workspaceID: string }): Promise<{ discarded: boolean }>;
+  applyExport(input: { directory: string; checkOnly?: boolean; exportID: string; selections: WorkspaceApplySelection[]; workspaceID: string; reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceApplyResult>;
+  startSession(input: { operationID: string; directory: string; title?: string; reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceSessionStartResult>;
+  createHandoffDraft(input: WorkspaceHandoffBinding): Promise<WorkspaceHandoffOperation>;
+  commitHandoff(input: WorkspaceHandoffBinding & { operationID: string; draftID: string; draftRevision: number; draftHash: string; text: string }): Promise<WorkspaceHandoffOperation>;
+  inspectHandoff(operationID: string): Promise<WorkspaceHandoffOperation>;
+  cleanupHandoffTarget(operationID: string): Promise<WorkspaceHandoffOperation>;
+}
+
 export interface EditorAPI {
   openFile(path: string, line?: number, column?: number): Promise<void>;
   openDiff(
@@ -1169,6 +1451,7 @@ export interface RemoteClientRecord {
   revokedAt: string | null;
   expiresAt?: string | null;
   clientKind?: string | null;
+  capabilities: RemoteClientCapability[];
   authMethod?: string | null;
   /** Pairing session this client was created from, when authMethod is 'pairing'. */
   pairingId?: string | null;
@@ -1178,6 +1461,8 @@ export interface RemoteClientRecord {
   /** Transport that carried the device's most recent authenticated request. */
   lastTransport?: 'relay' | 'direct' | null;
 }
+
+export type RemoteClientCapability = 'workspace.read' | 'workspace.use' | 'workspace.admin' | 'host.apply';
 
 // A pairing link that has been created but not yet redeemed by a device.
 export interface PendingPairingRecord {
@@ -1239,6 +1524,9 @@ export interface ClientAuthAPI {
   }): Promise<PairingSessionCreateResult>;
   purgeRevokedClients(): Promise<RemoteClientPurgeRevokedResult>;
   revokeClient(id: string): Promise<RemoteClientRevokeResult>;
+  canManageCapabilities(): Promise<boolean>;
+  reauthenticate(input: WorkspaceReauthProofRequest): Promise<WorkspaceReauthProofResult>;
+  updateClientCapabilities(id: string, input: { grant?: RemoteClientCapability[]; revoke?: RemoteClientCapability[]; reauthProof?: string; reauthNonce?: string }): Promise<{ updated: boolean; client?: RemoteClientRecord }>;
   // Pairing links created but not yet redeemed (the "pending devices" list).
   listPendingPairings(): Promise<PendingPairingRecord[]>;
   cancelPairing(id: string): Promise<{ cancelled: boolean }>;
@@ -1260,6 +1548,7 @@ export interface RuntimeAPIs {
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;
   tools: ToolsAPI;
+  workspaces?: WorkspaceSecurityAPI;
   editor?: EditorAPI;
   vscode?: VSCodeAPI;
   worktrees?: WorktreeMetadata[];

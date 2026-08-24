@@ -10,9 +10,12 @@ import {
 } from '../../proxy-headers.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
+import { WorkspaceSessionRouteStore } from '../workspaces/session-routes.js';
 import { recordStartupPerformance } from './startup-performance.js';
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
+const WORKSPACE_FILE_PATHS = new Set(['/file', '/file/content']);
+const WORKSPACE_FILE_ROUTE = Symbol('workspaceFileRoute');
 
 const OPENCODE_AGENT_KEEP_ALIVE_MS = 30_000;
 // Node's own default. A lower cap evicts pooled sockets under concurrency,
@@ -283,9 +286,15 @@ export const registerOpenCodeProxy = (app, deps) => {
     getOpenCodeAuthHeaders,
     buildOpenCodeUrl,
     ensureOpenCodeApiPrefix,
+    uiAuthController,
+    tunnelAuthController,
+    getUiAuthController = () => uiAuthController,
+    getTunnelAuthController = () => tunnelAuthController,
     SSE_HEARTBEAT_INTERVAL_MS = DEFAULT_SSE_HEARTBEAT_INTERVAL_MS,
     SSE_UPSTREAM_STALL_TIMEOUT_MS = DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
     getSseUpstreamStallTimeoutMs = () => SSE_UPSTREAM_STALL_TIMEOUT_MS,
+    openchamberDataDir,
+    workspaceSessionRouteStore,
   } = deps;
 
   if (app.get('opencodeProxyConfigured')) {
@@ -305,6 +314,9 @@ export const registerOpenCodeProxy = (app, deps) => {
   const canonicalizeDirectoryQuery = createDirectoryQueryCanonicalizer({
     realpath: fs?.promises?.realpath?.bind(fs.promises),
   });
+  const sessionRouteStore = workspaceSessionRouteStore ?? (openchamberDataDir
+    ? new WorkspaceSessionRouteStore({ rootDirectory: path.join(openchamberDataDir, 'workspace-session-routes') })
+    : null);
 
   const hasParsedBodyValue = (body) => {
     if (body === undefined || body === null) return false;
@@ -654,6 +666,167 @@ export const registerOpenCodeProxy = (app, deps) => {
     return canonicalizeDirectoryQuery(upstreamPathRaw);
   };
 
+  const requestUrl = (req) => new URL(req.originalUrl || req.url || '/', 'http://localhost');
+
+  const explicitWorkspaceId = (req) => {
+    const url = requestUrl(req);
+    const values = [
+      url.searchParams.get('workspace'),
+      url.searchParams.get('workspaceID'),
+      url.searchParams.get('location[workspace]'),
+      req.headers?.['x-opencode-workspace'],
+      req.body?.workspace,
+      req.body?.workspaceID,
+    ];
+    return values.find((value) => typeof value === 'string' && value.trim())?.trim() || null;
+  };
+
+  const explicitWorkspaceFileIds = (req) => {
+    const url = requestUrl(req);
+    const values = [
+      url.searchParams.get('workspace'),
+      url.searchParams.get('workspaceID'),
+      url.searchParams.get('location[workspace]'),
+      req.get?.('x-opencode-workspace'),
+    ];
+    return [...new Set(values
+      .map((value) => value?.trim())
+      .filter(Boolean))];
+  };
+
+  const isWorkspaceFileRequest = (req) => WORKSPACE_FILE_PATHS.has(requestUrl(req).pathname.replace(/^\/api/, ''));
+
+  const hasWorkspaceFileRoutingIntent = (req) => {
+    if (!isWorkspaceFileRequest(req)) return false;
+    const url = requestUrl(req);
+    return Boolean(explicitWorkspaceId(req) || url.searchParams.get('sessionID') || url.searchParams.get('sessionId'));
+  };
+
+  const authoritativeWorkspace = async (workspaceID, directory) => {
+    const response = await fetch(buildOpenCodeUrl(`/experimental/workspace?directory=${encodeURIComponent(directory)}`, ''), {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !Array.isArray(payload)) {
+      throw Object.assign(new Error('Authoritative workspace lookup failed'), { statusCode: 502 });
+    }
+    return payload.find((workspace) => workspace?.id === workspaceID) ?? null;
+  };
+
+  const resolveWorkspaceFileRoute = async (req) => {
+    if (!hasWorkspaceFileRoutingIntent(req)) return null;
+    const url = requestUrl(req);
+    const sessionID = url.searchParams.get('sessionID') || url.searchParams.get('sessionId');
+    const requestedWorkspaceIDs = explicitWorkspaceFileIds(req);
+    if (requestedWorkspaceIDs.length > 1) {
+      throw Object.assign(new Error('Workspace file routing selectors conflict'), { statusCode: 409 });
+    }
+    const requestedWorkspaceID = requestedWorkspaceIDs[0] ?? null;
+    const route = sessionID ? await sessionRouteStore?.route(sessionID) : null;
+    if (sessionID && !route) {
+      throw Object.assign(new Error('Workspace session route is unavailable'), { statusCode: 409 });
+    }
+    if (route && requestedWorkspaceID && route.workspaceID !== requestedWorkspaceID) {
+      throw Object.assign(new Error('Workspace session route conflicts with the requested workspace'), { statusCode: 409 });
+    }
+
+    const workspaceID = route?.workspaceID ?? requestedWorkspaceID;
+    const requestedDirectory = url.searchParams.get('directory');
+    const directory = route?.projectDirectory ?? requestedDirectory;
+    if (!workspaceID || !directory) {
+      throw Object.assign(new Error('Workspace file routing authority is incomplete'), { statusCode: 409 });
+    }
+    if (route && requestedDirectory && path.normalize(requestedDirectory) !== path.normalize(route.projectDirectory)) {
+      throw Object.assign(new Error('Workspace session route conflicts with the requested project'), { statusCode: 409 });
+    }
+    if (!await authoritativeWorkspace(workspaceID, directory)) {
+      throw Object.assign(new Error('Workspace session route is stale'), { statusCode: 409 });
+    }
+    return { workspaceID, directory };
+  };
+
+  const rewriteWorkspaceFileRoute = (req, _res, next) => {
+    const route = req[WORKSPACE_FILE_ROUTE];
+    if (!route) return next();
+    const url = new URL(req.url, 'http://localhost');
+    url.searchParams.set('workspace', route.workspaceID);
+    url.searchParams.set('directory', route.directory);
+    url.searchParams.delete('workspaceID');
+    url.searchParams.delete('location[workspace]');
+    url.searchParams.delete('sessionID');
+    url.searchParams.delete('sessionId');
+    req.url = `${url.pathname}${url.search}`;
+    delete req.headers['x-opencode-workspace'];
+    return next();
+  };
+
+  const sessionIdForRequest = (req) => {
+    const pathname = requestUrl(req).pathname.replace(/^\/api/, '');
+    const pathMatch = pathname.match(/^\/(?:experimental\/)?session\/([^/]+)/);
+    if (pathMatch) return decodeURIComponent(pathMatch[1]);
+    const url = requestUrl(req);
+    const values = [url.searchParams.get('sessionID'), url.searchParams.get('sessionId'), req.body?.sessionID, req.body?.sessionId];
+    return values.find((value) => typeof value === 'string' && value.trim())?.trim() || null;
+  };
+
+  const loadSessionWorkspaceId = async (sessionId, req) => {
+    const directory = requestUrl(req).searchParams.get('directory');
+    const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+    const upstream = await fetch(buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}${query}`, ''), {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+    });
+    const payload = await upstream.json().catch(() => null);
+    if (!upstream.ok) {
+      const error = new Error(payload?.error || upstream.statusText || 'Failed to resolve session workspace');
+      error.statusCode = upstream.status;
+      throw error;
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw Object.assign(new Error('OpenCode returned an invalid session'), { statusCode: 502 });
+    }
+    return typeof payload.workspaceID === 'string' && payload.workspaceID.trim() ? payload.workspaceID.trim() : null;
+  };
+
+  const authorizeWorkspaceUse = async (req, res, next) => {
+    const pathname = requestUrl(req).pathname.replace(/^\/api/, '');
+    if ((req.method === 'POST' && pathname === '/experimental/workspace')
+      || (req.method === 'DELETE' && /^\/experimental\/workspace\/[^/]+$/.test(pathname))) {
+      return res.status(403).json({ error: 'Workspace lifecycle must use OpenChamber orchestration' });
+    }
+    const currentUiAuthController = getUiAuthController();
+    const currentTunnelAuthController = getTunnelAuthController();
+    if (!currentUiAuthController?.resolveAuthContext) return next();
+    try {
+      const context = await currentUiAuthController.resolveAuthContext(req, res, { allowClientAuth: true, allowUrlToken: false });
+      if (!context) return res.status(401).json({ error: 'Authentication required' });
+      const workspaceFileIntent = hasWorkspaceFileRoutingIntent(req);
+      const capabilities = Array.isArray(context.client?.capabilities) ? context.client.capabilities : [];
+      const localSession = context.type === 'session'
+        && !['tunnel', 'unknown-public'].includes(currentTunnelAuthController?.classifyRequestScope?.(req));
+      if (workspaceFileIntent && !localSession && (context.type !== 'client' || !capabilities.includes('workspace.use'))) {
+        return res.status(403).json({ error: 'Client capability required: workspace.use', requiredCapability: 'workspace.use' });
+      }
+      const workspaceFileRoute = workspaceFileIntent ? await resolveWorkspaceFileRoute(req) : null;
+      if (workspaceFileRoute) req[WORKSPACE_FILE_ROUTE] = workspaceFileRoute;
+      if (context.type === 'session') {
+        const scope = currentTunnelAuthController?.classifyRequestScope?.(req);
+        if (scope !== 'tunnel' && scope !== 'unknown-public') return next();
+      }
+      const workspaceId = workspaceFileRoute?.workspaceID
+        || explicitWorkspaceId(req)
+        || (sessionIdForRequest(req) ? await loadSessionWorkspaceId(sessionIdForRequest(req), req) : null);
+      if (!workspaceId) return next();
+      if (context.type !== 'client' || !capabilities.includes('workspace.use')) {
+        return res.status(403).json({ error: 'Client capability required: workspace.use', requiredCapability: 'workspace.use' });
+      }
+      return next();
+    } catch (error) {
+      return res.status(error?.statusCode || 502).json({ error: error?.message || 'Failed to authorize workspace access' });
+    }
+  };
+
   const forwardSanitizedSessionListRequest = async (req, res, next, logLabel) => {
     try {
       const upstreamPath = await getRequestUpstreamPath(req);
@@ -774,6 +947,9 @@ export const registerOpenCodeProxy = (app, deps) => {
       });
     }
   });
+
+  app.use('/api', authorizeWorkspaceUse);
+  app.use('/api', rewriteWorkspaceFileRoute);
 
   // Windows: session merge for cross-directory session listing
   if (process.platform === 'win32') {

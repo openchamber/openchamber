@@ -2,11 +2,12 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
+const spawnSyncMock = vi.fn();
 const recordStartupPerformanceMock = vi.fn();
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
-  spawnSync: vi.fn(),
+  spawnSync: spawnSyncMock,
 }));
 vi.mock('./startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
@@ -16,11 +17,14 @@ const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
+const originalManagedProcessRegistry = process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   spawnMock.mockReset();
+  spawnSyncMock.mockReset();
   recordStartupPerformanceMock.mockReset();
+  vi.unstubAllGlobals();
   globalThis.fetch = originalFetch;
   if (typeof originalOpencodeBinary === 'string') {
     process.env.OPENCODE_BINARY = originalOpencodeBinary;
@@ -32,6 +36,12 @@ afterEach(() => {
     process.env.PATH = originalPath;
   } else {
     delete process.env.PATH;
+  }
+
+  if (typeof originalManagedProcessRegistry === 'string') {
+    process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = originalManagedProcessRegistry;
+  } else {
+    delete process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
   }
 });
 
@@ -50,31 +60,37 @@ const createMockChild = () => {
   return child;
 };
 
+const createLifecycleState = () => ({
+  openCodeWorkingDirectory: '/tmp/project',
+  openCodeProcess: null,
+  openCodePort: null,
+  openCodeBaseUrl: null,
+  currentRestartPromise: null,
+  isRestartingOpenCode: false,
+  openCodeApiPrefix: '',
+  openCodeApiPrefixDetected: false,
+  openCodeApiDetectionTimer: null,
+  lastOpenCodeError: null,
+  lastOpenCodeLaunchDiagnostics: null,
+  isOpenCodeReady: false,
+  openCodeNotReadySince: 0,
+  isExternalOpenCode: false,
+  isShuttingDown: false,
+  healthCheckInterval: null,
+  expressApp: null,
+  useWslForOpencode: false,
+  resolvedWslBinary: null,
+  resolvedWslOpencodePath: null,
+  resolvedWslDistro: null,
+});
+
+
+// main's signature, which adds env overrides, over this branch's extracted state.
 const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) => {
-  const state = {
-    openCodeWorkingDirectory: '/tmp/project',
-    openCodeProcess: null,
-    openCodePort: null,
-    openCodeBaseUrl: null,
-    currentRestartPromise: null,
-    isRestartingOpenCode: false,
-    openCodeApiPrefix: '',
-    openCodeApiPrefixDetected: false,
-    openCodeApiDetectionTimer: null,
-    lastOpenCodeError: null,
-    lastOpenCodeHealthFailure: null,
-    lastManagedOpenCodeProcess: null,
-    lastOpenCodeRestartDiagnostics: null,
-    isOpenCodeReady: false,
-    openCodeNotReadySince: 0,
-    isExternalOpenCode: false,
-    isShuttingDown: false,
-    healthCheckInterval: null,
-    expressApp: null,
-    useWslForOpencode: false,
-    resolvedWslBinary: null,
-    resolvedWslOpencodePath: null,
-    resolvedWslDistro: null,
+  // Passed by reference when a caller supplies one: those tests assert that the runtime
+  // mutated their object, which a copy would silently defeat.
+  const state = overrides.state ?? {
+    ...createLifecycleState(),
     ...stateOverrides,
   };
 
@@ -119,6 +135,49 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
 };
 
 describe('OpenCode lifecycle', () => {
+  it('uses only the configured external target in skip-start mode, ahead of HMR reuse', async () => {
+    process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = `/tmp/openchamber-lifecycle-test-${process.pid}-configured`;
+    const managedProcess = { close: vi.fn(async () => {}) };
+    const state = createLifecycleState();
+    state.openCodeProcess = managedProcess;
+    state.openCodePort = 4096;
+    state.isOpenCodeReady = true;
+    state.lastOpenCodeLaunchDiagnostics = { binary: 'opencode' };
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ healthy: true }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const runtime = createRuntime({
+      state,
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 4999,
+        ENV_CONFIGURED_OPENCODE_HOST: { origin: 'https://external.example:7443', port: 7443 },
+        ENV_EFFECTIVE_PORT: 7443,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      buildOpenCodeUrl: (route) => `${state.openCodeBaseUrl}${route}`,
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+
+    expect(managedProcess.close).toHaveBeenCalledOnce();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe('https://external.example:7443/global/health');
+    expect(state.openCodeProcess).toBeNull();
+    expect(state.openCodePort).toBe(7443);
+    expect(state.openCodeBaseUrl).toBe('https://external.example:7443');
+    expect(state.isExternalOpenCode).toBe(true);
+    expect(state.isOpenCodeReady).toBe(true);
+    expect(state.openCodeNotReadySince).toBe(0);
+    expect(state.lastOpenCodeError).toBeNull();
+    expect(state.lastOpenCodeLaunchDiagnostics).toBeNull();
+  });
+
   it('records an authoritative ready terminal event for external startup', async () => {
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
@@ -179,6 +238,44 @@ describe('OpenCode lifecycle', () => {
       'http://127.0.0.1:45678/session/status?directory=%2Ftmp%2Fworktree-a',
       'http://127.0.0.1:45678/session/status?directory=%2Ftmp%2Fproject-b',
     ]);
+  });
+
+  it('keeps OpenCode unavailable without waiting or spawning when skip-start has no target', async () => {
+    process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = `/tmp/openchamber-lifecycle-test-${process.pid}-unconfigured`;
+    const managedProcess = { close: vi.fn(async () => {}) };
+    const state = createLifecycleState();
+    state.openCodeProcess = managedProcess;
+    state.openCodePort = 4096;
+    state.isOpenCodeReady = true;
+    state.lastOpenCodeLaunchDiagnostics = { binary: 'opencode' };
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const runtime = createRuntime({
+      state,
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+
+    expect(managedProcess.close).toHaveBeenCalledOnce();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(state.openCodeProcess).toBeNull();
+    expect(state.openCodePort).toBeNull();
+    expect(state.openCodeBaseUrl).toBeNull();
+    expect(state.isExternalOpenCode).toBe(false);
+    expect(state.isOpenCodeReady).toBe(false);
+    expect(state.openCodeNotReadySince).toBeGreaterThan(0);
+    expect(state.lastOpenCodeError).toBe('OpenCode is unavailable: skip-start mode requires OPENCODE_HOST or OPENCODE_PORT');
+    expect(state.lastOpenCodeLaunchDiagnostics).toBeNull();
   });
 
   it('records an authoritative error terminal event when bootstrap fails', async () => {
@@ -548,6 +645,7 @@ describe('OpenCode lifecycle', () => {
     expect(options.env.PATH).toBe('/home/user/.bun/bin:/usr/local/bin:/usr/bin');
     expect(options.env.SHELL_ONLY).toBe('yes');
     expect(options.env.OPENCODE_SERVER_PASSWORD).toBe('password');
+    expect(options.env.OPENCODE_EXPERIMENTAL_WORKSPACES).toBe('true');
     expect(server.exitCode).toBeNull();
     expect(server.signalCode).toBeNull();
 
@@ -634,6 +732,28 @@ describe('OpenCode lifecycle', () => {
     expect(options.env.OPENCHAMBER_AGENT_TOOL_TOKEN).toBe('ephemeral');
     expect(options.env.PATH).toBe('/home/user/.bun/bin:/usr/local/bin:/usr/bin');
     expect(options.env.OPENCODE_SERVER_PASSWORD).toBe('password');
+
+    await server.close();
+  });
+
+  it('passes an isolated OpenCode data root to the managed process', async () => {
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+    const runtime = createRuntime({
+      getManagedOpenCodeEnv: vi.fn(async () => ({
+        XDG_DATA_HOME: '/tmp/openchamber-profile/opencode-data',
+      })),
+    });
+
+    const server = await runtime.startOpenCode();
+    const [, , options] = spawnMock.mock.calls[0];
+
+    expect(options.env.XDG_DATA_HOME).toBe('/tmp/openchamber-profile/opencode-data');
 
     await server.close();
   });
