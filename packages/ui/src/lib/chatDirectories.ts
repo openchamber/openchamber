@@ -6,10 +6,8 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 export const CHAT_DRAFT_PROJECT_ID = 'openchamber:chats';
 const MANAGED_CHATS_PATH_SEGMENT = '/.config/openchamber/chats/';
 const chatsRootByRuntime = new Map<string, Promise<string>>();
-// Synchronous mirror of the resolved root, populated whenever the async root
-// resolves. Sync helpers (sidebar filtering, session grouping) must classify
-// relocated chat directories — those live at a server-configured root that
-// does not contain the well-known path segment.
+// Sync mirror of the resolved root: the sync helpers below must classify
+// relocated chat directories, whose paths lack the well-known segment.
 const chatsRootCacheByRuntime = new Map<string, string>();
 
 const joinPath = (base: string, ...parts: string[]): string => {
@@ -64,8 +62,6 @@ export function getChatsRootForHome(home: string | null | undefined): string | n
 }
 
 async function resolveChatsRoot(): Promise<string> {
-  // The server owns the root (OPENCHAMBER_CHATS_DIR override or default);
-  // older servers answer without chatsRoot and fall back to the home join.
   const chatsRoot = await opencodeClient.getFilesystemChatsRoot();
   if (chatsRoot) return chatsRoot;
   const home = await opencodeClient.getFilesystemHome();

@@ -69,10 +69,7 @@ export async function bootstrapGlobal(
   sdk: OpencodeClient,
   set: (patch: Partial<GlobalState>) => void,
 ) {
-  // Resolve the managed chats root before session lists load: sync chat
-  // classification (sidebar grouping, global session filters) needs the
-  // server-configured root — relocated chat directories do not contain the
-  // well-known path segment.
+  // Sync chat classification needs the root before session lists load.
   warmChatsRootDirectory()
   const results = await Promise.allSettled([
     retry(() => sdk.path.get().then((x) => set({ path: unwrap(x, "path.get") }))),

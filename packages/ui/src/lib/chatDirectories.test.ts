@@ -4,10 +4,8 @@ const createdDirectories: string[] = [];
 const createDirectoryOptions: Array<{ allowOutsideWorkspace?: boolean } | undefined> = [];
 const deletedDirectories: string[] = [];
 
-// Server-provided chats root (OPENCHAMBER_CHATS_DIR override); null models
-// an older server whose /api/fs/home answers without chatsRoot.
+// Null models an older server whose /api/fs/home answers without chatsRoot.
 let serverChatsRoot: string | null = null;
-// Unique per test so the module's per-runtime root caches stay isolated.
 let testRuntimeKey = 'runtime-0';
 
 mock.module('@/lib/opencode/client', () => ({
@@ -84,8 +82,6 @@ describe('chat directories with relocated chats root', () => {
 
   test('classifies relocated directories synchronously once the root is warm', async () => {
     await warmChatsRootDirectory();
-    // The next microtask resolves the warm promise; the sync helpers must
-    // see the cached root afterwards.
     await new Promise<void>((resolve) => { queueMicrotask(() => resolve()); });
 
     expect(isChatDirectoryPath('/srv/openchamber-chats/2026-08-21/session-a')).toBe(true);

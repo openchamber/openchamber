@@ -266,9 +266,8 @@ const getDesktopFilesApi = (): FilesAPI | null => {
   return null;
 };
 
-// Parsing boundary for the OpenChamber-owned /api/fs/home response.
-// Older servers answer without chatsRoot — .partial() maps that to
-// undefined → null, so callers fall back to the home join.
+// /api/fs/home parsing boundary. Older servers answer without chatsRoot;
+// .partial() maps that to undefined so callers fall back to the home join.
 const fsHomeResponseSchema = z.object({ chatsRoot: z.string().min(1) }).partial();
 
 class OpencodeService {
@@ -1977,9 +1976,6 @@ class OpencodeService {
   }
 
   async getFilesystemChatsRoot(): Promise<string | null> {
-    // The server owns the managed chats root (OPENCHAMBER_CHATS_DIR override
-    // or the default under the config root). Missing field/older server →
-    // null, callers fall back to joining home + the well-known segment.
     try {
       const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
         method: 'GET',
