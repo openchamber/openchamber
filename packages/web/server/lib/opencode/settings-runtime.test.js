@@ -69,6 +69,25 @@ describe('settings runtime', () => {
     }
   });
 
+  it.skipIf(process.platform === 'win32')('preserves pre-existing settings directory permissions across writes', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      // Admins may deliberately open an existing settings directory to a
+      // group (e.g. POSIX ACLs granting the agent user access). A write
+      // must not re-assert 0700 and clobber that (chmod replaces the ACL
+      // mask).
+      await fsPromises.chmod(tempRoot, 0o770);
+
+      await runtime.writeSettingsToDisk({ theme: 'dark' });
+      expect((await fsPromises.stat(tempRoot)).mode & 0o777).toBe(0o770);
+
+      await runtime.writeSettingsToDisk({ theme: 'light' });
+      expect((await fsPromises.stat(tempRoot)).mode & 0o777).toBe(0o770);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('only remaps project plan paths within the migrated storage directory', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     try {
