@@ -366,7 +366,7 @@ export const PullRequestSection: React.FC<{
     }
     return normalizeBranchRef(baseBranch);
   });
-  const [mergeMethod, setMergeMethod] = React.useState<MergeMethod>('squash');
+  const [mergeMethod, setMergeMethod] = React.useState<MergeMethod | undefined>(undefined);
 
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [isCreating, setIsCreating] = React.useState(false);
@@ -1314,6 +1314,11 @@ export const PullRequestSection: React.FC<{
   }, [body, branch, detectedUpstream, directory, draft, github, prStatusKey, refresh, scheduleActionRefresh, selectedRemote, targetBaseBranch, title, trackingBranch, updatePrStatus, useDetectedUpstream, t]);
 
   const mergePr = React.useCallback(async (pr: GitHubPullRequest) => {
+    if (!mergeMethod) {
+      // A merge requires an explicit method choice. Without one, an
+      // accidental click must do nothing rather than merge with a default.
+      return;
+    }
     if (!github?.prMerge) {
       toast.error(t('gitView.pr.toast.githubApiUnavailable'));
       return;
