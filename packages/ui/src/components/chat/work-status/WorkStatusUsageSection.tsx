@@ -124,8 +124,7 @@ export const WorkStatusUsageSection: React.FC = () => {
         <React.Fragment key={group.providerId}>
           <WorkStatusRow
             leading={<ProviderLogo providerId={group.providerId} className="size-4 shrink-0" />}
-            label={group.providerName}
-            muted
+            label={<span className="font-semibold text-foreground">{group.providerName}</span>}
             value={group.status && group.rows.length === 0 ? (
               <WorkStatusValue tone="muted">{group.status}</WorkStatusValue>
             ) : undefined}

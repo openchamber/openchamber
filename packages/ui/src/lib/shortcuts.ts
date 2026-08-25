@@ -240,6 +240,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'close_session_tab',
+    defaultCombo: 'alt+w',
+    label: 'Close session tab',
+    description: 'Close the active session tab in the header (the session itself stays)',
+    customizable: true,
+  },
+  {
     id: 'new_mini_chat',
     defaultCombo: 'mod+alt+n',
     label: 'New Mini Chat window',

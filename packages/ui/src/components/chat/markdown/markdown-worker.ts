@@ -1,4 +1,5 @@
 import MarkdownShikiWorkerUrl from './markdown-shiki.worker.ts?worker&url';
+import { isVSCodeRuntime } from '@/stores/utils/vscodeRuntime';
 import {
   contentFingerprint,
   estimateTokenRunsBytes,
@@ -46,6 +47,8 @@ const resultCache = new HighlightResultCache<CachedHighlight>({
 const inflight = new Map<string, Promise<CachedHighlight | null>>();
 
 let worker: Worker | undefined;
+let workerCreation: Promise<Worker | undefined> | undefined;
+let workerObjectUrl: string | undefined;
 let nextId = 0;
 const pending = new Map<number, PendingResolver>();
 // Theme names whose full definition we've already shipped to the live worker, so
@@ -71,31 +74,56 @@ const failAll = (): void => {
   inflight.clear();
   worker?.terminate();
   worker = undefined;
+  workerCreation = undefined;
+  if (workerObjectUrl) {
+    URL.revokeObjectURL(workerObjectUrl);
+    workerObjectUrl = undefined;
+  }
 };
 
-const getWorker = (): Worker | undefined => {
-  if (worker) return worker;
+const createWorker = async (): Promise<Worker | undefined> => {
   if (typeof window === 'undefined' || typeof Worker === 'undefined') return undefined;
   try {
-    worker = new Worker(MarkdownShikiWorkerUrl, { type: 'module' });
+    let workerUrl = MarkdownShikiWorkerUrl;
+    if (isVSCodeRuntime(null)) {
+      const response = await fetch(workerUrl);
+      if (!response.ok) throw new Error(`Shiki worker request failed with ${response.status}`);
+      workerObjectUrl = URL.createObjectURL(await response.blob());
+      workerUrl = workerObjectUrl;
+    }
+
+    const instance = new Worker(workerUrl, { type: 'module' });
+    worker = instance;
+    instance.onmessage = (event: MessageEvent<MarkdownWorkerResponse>) => {
+      const resolve = pending.get(event.data.id);
+      if (!resolve) return;
+      pending.delete(event.data.id);
+      resolve(event.data);
+    };
+    instance.onerror = failAll;
+    instance.onmessageerror = failAll;
+    instance.postMessage({ type: 'init' } satisfies MarkdownWorkerRequest);
+    return instance;
   } catch (err) {
+    if (workerObjectUrl) {
+      URL.revokeObjectURL(workerObjectUrl);
+      workerObjectUrl = undefined;
+    }
     console.error('Failed to create Shiki worker:', err);
     return undefined;
   }
-  worker.onmessage = (event: MessageEvent<MarkdownWorkerResponse>) => {
-    const resolve = pending.get(event.data.id);
-    if (!resolve) return;
-    pending.delete(event.data.id);
-    resolve(event.data);
-  };
-  worker.onerror = failAll;
-  worker.onmessageerror = failAll;
-  worker.postMessage({ type: 'init' } satisfies MarkdownWorkerRequest);
-  return worker;
 };
 
-const request = (payload: (id: number) => MarkdownWorkerRequest): Promise<MarkdownWorkerResponse | null> => {
-  const instance = getWorker();
+const getWorker = async (): Promise<Worker | undefined> => {
+  if (worker) return worker;
+  workerCreation ??= createWorker().finally(() => {
+    workerCreation = undefined;
+  });
+  return workerCreation;
+};
+
+const request = async (payload: (id: number) => MarkdownWorkerRequest): Promise<MarkdownWorkerResponse | null> => {
+  const instance = await getWorker();
   if (!instance) return Promise.resolve(null);
   const id = ++nextId;
   return new Promise<MarkdownWorkerResponse | null>((resolve) => {
@@ -165,6 +193,12 @@ export const highlightLinesInWorker = async (code: string, lang: string): Promis
     return entry;
   });
   return result?.type === 'highlightLines' ? result.lines : null;
+};
+
+/** Return an already-tokenized line result without scheduling a worker request. */
+export const getCachedHighlightedLines = (code: string, lang: string): string[] | null => {
+  const cached = resultCache.get(cacheKeyFor('highlightLines', lang, code));
+  return cached?.type === 'highlightLines' ? cached.lines : null;
 };
 
 /**

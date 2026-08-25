@@ -1,3 +1,4 @@
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 
 import { toast } from '@/components/ui';
@@ -23,12 +24,13 @@ const NOTE_SAVE_DEBOUNCE_MS = 400;
  */
 const NoteRow: React.FC<{
   note: ProjectNote;
+  pinned: boolean;
   expanded: boolean;
   onToggleExpanded: () => void;
   onSaveBody: (body: string) => void;
   onTogglePinned: () => void;
   onDelete: () => void;
-}> = ({ note, expanded, onToggleExpanded, onSaveBody, onTogglePinned, onDelete }) => {
+}> = ({ note, pinned, expanded, onToggleExpanded, onSaveBody, onTogglePinned, onDelete }) => {
   const { t } = useI18n();
   const [draft, setDraft] = React.useState(note.body);
   const lastSavedRef = React.useRef(note.body);
@@ -107,19 +109,19 @@ const NoteRow: React.FC<{
             onClick={onTogglePinned}
             className={cn(
               'inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-              note.pinned ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+              pinned ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
             )}
-            aria-pressed={note.pinned}
-            aria-label={note.pinned
+            aria-pressed={pinned}
+            aria-label={pinned
               ? t('rightSidebar.contextNotesTodo.notes.actions.unpin')
               : t('rightSidebar.contextNotesTodo.notes.actions.pin')}
-            title={note.pinned
+            title={pinned
               ? t('rightSidebar.contextNotesTodo.notes.actions.unpin')
               : t('rightSidebar.contextNotesTodo.notes.actions.pin')}
           >
             {/* Filled means pinned, outline means "pin this" — the same
                 language the work status panel uses. */}
-            <Icon name={note.pinned ? 'pushpin-2-fill' : 'pushpin'} className="h-3.5 w-3.5" />
+            <Icon name={pinned ? 'pushpin-2-fill' : 'pushpin'} className="h-3.5 w-3.5" />
           </button>
           <button
             type="button"
@@ -163,7 +165,9 @@ export const NotesSection: React.FC<{
   notes: ProjectNote[];
   disabled: boolean;
   query: string;
-}> = ({ projectRef, notes, disabled, query }) => {
+  pinnedNoteIds: ReadonlySet<string>;
+  onTogglePinned: (noteId: string, pinned: boolean) => Promise<boolean>;
+}> = ({ projectRef, notes, disabled, query, pinnedNoteIds, onTogglePinned }) => {
   const { t } = useI18n();
   const [composerText, setComposerText] = React.useState('');
   // One at a time on purpose: notes can run to 3000 characters each, and
@@ -173,14 +177,12 @@ export const NotesSection: React.FC<{
   const setNotesPanelHeight = useUIStore((state) => state.setNotesPanelHeight);
   const createNote = useProjectContextStore((state) => state.createNote);
   const saveNoteBody = useProjectContextStore((state) => state.saveNoteBody);
-  const setNotePinned = useProjectContextStore((state) => state.setNotePinned);
   const deleteNote = useProjectContextStore((state) => state.deleteNote);
 
-  const visibleNotes = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return notes;
-    return notes.filter((note) => note.body.toLowerCase().includes(needle));
-  }, [notes, query]);
+  const visibleNotes = React.useMemo(
+    () => notes.filter((note) => matchesRankQuery([note.body], query)),
+    [notes, query],
+  );
 
   // The store keeps the failure reason; without passing it through, every
   // failure looks identical to the user and tells them nothing about the cause.
@@ -214,12 +216,12 @@ export const NotesSection: React.FC<{
 
   const handleTogglePinned = React.useCallback(
     async (noteId: string, pinned: boolean) => {
-      const ok = await setNotePinned(projectRef, noteId, pinned);
+      const ok = await onTogglePinned(noteId, pinned);
       if (!ok) {
         reportFailure(t('rightSidebar.contextNotesTodo.toast.saveNotesFailed'));
       }
     },
-    [projectRef, reportFailure, setNotePinned, t]
+    [onTogglePinned, reportFailure, t]
   );
 
   const handleSaveBody = React.useCallback(
@@ -281,10 +283,11 @@ export const NotesSection: React.FC<{
               <NoteRow
                 key={note.id}
                 note={note}
+                pinned={pinnedNoteIds.has(note.id)}
                 expanded={expandedNoteId === note.id}
                 onToggleExpanded={() => setExpandedNoteId((current) => (current === note.id ? null : note.id))}
                 onSaveBody={(body) => handleSaveBody(note.id, body)}
-                onTogglePinned={() => void handleTogglePinned(note.id, !note.pinned)}
+                onTogglePinned={() => void handleTogglePinned(note.id, !pinnedNoteIds.has(note.id))}
                 onDelete={() => void handleDelete(note.id)}
               />
             ))}

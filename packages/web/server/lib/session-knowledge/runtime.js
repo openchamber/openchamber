@@ -16,6 +16,7 @@
  */
 
 const KNOWLEDGE_METADATA_KEY = 'knowledge_context_delivered';
+const PINS_METADATA_KEY = 'project_context_pins';
 
 /** Total budget for the assembled block; anything past it is cut, loudly. */
 const KNOWLEDGE_MAX_LENGTH = 8000;
@@ -119,7 +120,17 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
    * source never blanks the rest: a memory store that will not load must not
    * take the user's pinned notes down with it.
    */
-  const collect = async (directory) => {
+  const readPins = (session) => {
+    const metadata = isRecord(session?.metadata) ? session.metadata : {};
+    const openchamber = isRecord(metadata.openchamber) ? metadata.openchamber : {};
+    const pins = isRecord(openchamber[PINS_METADATA_KEY]) ? openchamber[PINS_METADATA_KEY] : {};
+    const strings = (value) => Array.isArray(value)
+      ? [...new Set(value.filter((entry) => typeof entry === 'string' && entry.trim()).map((entry) => entry.trim()))]
+      : [];
+    return { notes: strings(pins.notes), plans: strings(pins.plans) };
+  };
+
+  const collect = async (directory, pins = { notes: [], plans: [] }) => {
     const projectId = directory ? await resolveProjectId(directory) : '';
 
     let notes = [];
@@ -127,8 +138,10 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     if (projectId) {
       try {
         const context = await projectContextRuntime.readContext(projectId);
-        notes = (context.notes || []).filter((note) => note.pinned);
-        const pinnedPlans = (context.plans || []).filter((plan) => plan.pinned);
+        const noteIds = new Set(pins.notes);
+        const planIds = new Set(pins.plans);
+        notes = (context.notes || []).filter((note) => noteIds.has(note.id));
+        const pinnedPlans = (context.plans || []).filter((plan) => planIds.has(plan.id));
         plans = await Promise.all(pinnedPlans.map(async (plan) => {
           try {
             const content = await projectContextRuntime.readPlan(projectId, plan.id);
@@ -175,7 +188,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
    * off disk to show a number would make opening a panel cost what sending a
    * message costs.
    */
-  const collectSummary = async (directory) => {
+  const collectSummary = async (directory, pins = { notes: [], plans: [] }) => {
     const projectId = directory ? await resolveProjectId(directory) : '';
     const empty = { notes: [], plans: [], memory: { global: 0, project: 0 } };
     if (!projectId) return empty;
@@ -184,9 +197,11 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     let plans = [];
     try {
       const context = await projectContextRuntime.readContext(projectId);
-      notes = (context.notes || []).filter((note) => note.pinned)
+      const noteIds = new Set(pins.notes);
+      const planIds = new Set(pins.plans);
+      notes = (context.notes || []).filter((note) => noteIds.has(note.id))
         .map((note) => ({ id: note.id, body: note.body }));
-      plans = (context.plans || []).filter((plan) => plan.pinned)
+      plans = (context.plans || []).filter((plan) => planIds.has(plan.id))
         .map((plan) => ({ id: plan.id, title: plan.title }));
     } catch {
       notes = [];
@@ -223,8 +238,8 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
    * The text this session still owes, or an empty string when it is already
    * carrying it. `deliveredSignature` comes from the session's metadata.
    */
-  const resolvePending = async (directory, deliveredSignature) => {
-    const collected = await collect(directory);
+  const resolvePending = async (directory, deliveredSignature, pins = { notes: [], plans: [] }) => {
+    const collected = await collect(directory, pins);
     const signature = buildKnowledgeSignature(collected);
     if (!signature || signature === deliveredSignature) {
       return { text: '', signature };
@@ -241,7 +256,38 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
    */
   const resolvePendingForSession = async (sessionId, directory) => {
     const session = await readSession(sessionId, directory).catch(() => null);
-    return resolvePending(directory, readDeliveredSignature(session));
+    return resolvePending(directory, readDeliveredSignature(session), readPins(session));
+  };
+
+  const collectSummaryForSession = async (sessionId, directory) => {
+    const session = await readSession(sessionId, directory).catch(() => null);
+    return collectSummary(directory, readPins(session));
+  };
+
+  const setPin = async (sessionId, directory, kind, id, pinned) => {
+    const fresh = await readSession(sessionId, directory);
+    const metadata = isRecord(fresh?.metadata) ? fresh.metadata : {};
+    const openchamber = isRecord(metadata.openchamber) ? metadata.openchamber : {};
+    const pins = readPins(fresh);
+    const key = kind === 'note' ? 'notes' : 'plans';
+    const next = new Set(pins[key]);
+    if (pinned) next.add(id);
+    else next.delete(id);
+    await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, {
+      directory,
+      method: 'PATCH',
+      body: {
+        metadata: {
+          ...metadata,
+          openchamber: {
+            ...openchamber,
+            [PINS_METADATA_KEY]: { ...pins, [key]: [...next] },
+            [KNOWLEDGE_METADATA_KEY]: '',
+          },
+        },
+      },
+    });
+    return { ...pins, [key]: [...next] };
   };
 
   /**
@@ -272,10 +318,14 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
   return {
     collect,
     collectSummary,
+    collectSummaryForSession,
     resolvePending,
     resolvePendingForSession,
     recordDelivered,
     readDeliveredSignature,
+    readPins,
+    setPin,
     metadataKey: KNOWLEDGE_METADATA_KEY,
+    pinsMetadataKey: PINS_METADATA_KEY,
   };
 };

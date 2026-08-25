@@ -58,6 +58,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const setActiveTab = useTerminalStore((s) => s.setActiveTab);
     const closeTab = useTerminalStore((s) => s.closeTab);
     const setTabSessionId = useTerminalStore((s) => s.setTabSessionId);
+    const adoptServerSessions = useTerminalStore((s) => s.adoptServerSessions);
     const setTabLifecycle = useTerminalStore((s) => s.setTabLifecycle);
     const setConnecting = useTerminalStore((s) => s.setConnecting);
     const appendToBuffer = useTerminalStore((s) => s.appendToBuffer);
@@ -147,9 +148,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         terminalControllerRef.current?.focus();
     }, [useTouchTerminalInput]);
 
-    const activeMainTab = useUIStore((state) => state.activeMainTab);
-    const isTerminalActive = activeMainTab === 'terminal';
-    const isTerminalVisible = visible ?? isTerminalActive;
+    const isTerminalVisible = visible ?? false;
     const [hasOpenedTerminalViewport, setHasOpenedTerminalViewport] = React.useState(isTerminalVisible);
 
     React.useEffect(() => {
@@ -175,6 +174,50 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     React.useEffect(() => {
         directoryRef.current = effectiveDirectory;
     }, [effectiveDirectory]);
+
+    // The tab list is a per-client projection, so ask the server what actually
+    // exists for this directory and adopt sessions no local tab references
+    // (another device, a fresh browser tab, or a reload with cleared storage).
+    // A failed listing changes nothing: adoption is additive only.
+    React.useEffect(() => {
+        if (!terminalHydrated || !effectiveDirectory || !terminal.listSessions) {
+            return;
+        }
+        let cancelled = false;
+        const directory = effectiveDirectory;
+        void terminal.listSessions(directory)
+            .then((serverSessions) => {
+                if (cancelled || directoryRef.current !== directory) return;
+                adoptServerSessions(directory, serverSessions);
+            })
+            .catch(() => { /* keep local tabs; the next mount or directory switch retries */ });
+        return () => {
+            cancelled = true;
+        };
+    }, [terminalHydrated, effectiveDirectory, terminal, adoptServerSessions]);
+
+    // The server reaps terminals with no attached socket after an idle timeout,
+    // but only the active tab holds an attachment. While this client is open,
+    // periodically mark every session its tabs reference as active so
+    // background tabs (and other directories' terminals) are not reaped.
+    React.useEffect(() => {
+        if (!terminal.touchSessions) {
+            return;
+        }
+        const touch = () => {
+            if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+            const ids: string[] = [];
+            for (const dirState of useTerminalStore.getState().sessions.values()) {
+                for (const tab of dirState.tabs) {
+                    if (tab.terminalSessionId) ids.push(tab.terminalSessionId);
+                }
+            }
+            if (ids.length > 0) void terminal.touchSessions?.(ids).catch(() => {});
+        };
+        touch();
+        const interval = setInterval(touch, 10 * 60 * 1000);
+        return () => clearInterval(interval);
+    }, [terminal]);
 
     React.useEffect(() => {
         if (!showQuickKeys && activeModifier !== null) {
@@ -642,7 +685,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
             startLine: selection.startLine,
             endLine: selection.endLine,
             code: selection.text,
-            language: activeTab.terminalSessionId ?? activeTab.id,
+            language: '',
+            terminalId: activeTab.terminalSessionId ?? activeTab.id,
             text: '',
         });
     }, [activeTab, addContextDraft, currentSessionId, effectiveDirectory, newSessionDraft?.open]);

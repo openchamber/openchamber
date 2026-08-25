@@ -13,9 +13,11 @@ import { Icon } from "@/components/icon/Icon";
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useI18n } from '@/lib/i18n';
+import { updateDesktopSettings } from '@/lib/persistence';
 
 type Props = {
   hideDirectoryControls: boolean;
+  showProjectDisplayControls: boolean;
   showRecentControls: boolean;
   handleOpenDirectoryDialog: () => void;
   onOpenScheduled: () => void;
@@ -41,6 +43,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
   const {
     hideDirectoryControls,
+    showProjectDisplayControls,
     showRecentControls,
     handleOpenDirectoryDialog,
     onOpenScheduled,
@@ -70,6 +73,9 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const setSessionGroupingMode = useSessionDisplayStore((state) => state.setSessionGroupingMode);
   const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
   const toggleStickyZoneHeaders = useSessionDisplayStore((state) => state.toggleStickyZoneHeaders);
+  const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
+  const setProjectDisplayMode = useSessionDisplayStore((state) => state.setProjectDisplayMode);
+  const isSingleProjectMode = showProjectDisplayControls && projectDisplayMode === 'single';
 
   if (hideDirectoryControls) {
     return null;
@@ -84,7 +90,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               icon inset inside the 24px buttons so the first glyph lines up
               with the New-session icon above (16px from the sidebar edge). */}
           <div className="ml-[3px] flex items-center gap-1.5">
-            <Tooltip>
+            <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -98,7 +104,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.addProject')}</p></TooltipContent>
             </Tooltip>
 
-            <Tooltip>
+            <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -112,7 +118,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.scheduledTasks')}</p></TooltipContent>
             </Tooltip>
 
-            <Tooltip>
+            <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -127,7 +133,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newMultiRun')}</p></TooltipContent>
             </Tooltip>
 
-            <Tooltip>
+            <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -143,7 +149,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
           </div>
 
           <div className="flex items-center gap-1.5">
-            <Tooltip>
+            <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -158,7 +164,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.searchSessions')}</p></TooltipContent>
             </Tooltip>
 
-            <Tooltip>
+            <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -180,7 +186,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
             </Tooltip>
 
             <DropdownMenu>
-              <Tooltip>
+              <Tooltip delayDuration={500}>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
                     <button
@@ -205,7 +211,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 ] as const).map(([order, labelKey]) => (
                   <DropdownMenuItem
                     key={order}
-                    onClick={() => setProjectSortOrder(order)}
+                    onClick={() => {
+                      setProjectSortOrder(order);
+                      void updateDesktopSettings({ sidebarProjectSortOrder: order });
+                    }}
                     className="flex items-center justify-between"
                   >
                     <span>{t(labelKey)}</span>
@@ -213,6 +222,28 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />
+                {showProjectDisplayControls ? (
+                  <>
+                    <DropdownMenuLabel>{t('sessions.sidebar.header.projectDisplay.label')}</DropdownMenuLabel>
+                    {([
+                      ['all', 'sessions.sidebar.header.projectDisplay.all'],
+                      ['single', 'sessions.sidebar.header.projectDisplay.single'],
+                    ] as const).map(([mode, labelKey]) => (
+                      <DropdownMenuItem
+                        key={mode}
+                        onClick={() => {
+                          setProjectDisplayMode(mode);
+                          void updateDesktopSettings({ sidebarProjectDisplayMode: mode });
+                        }}
+                        className="flex items-center justify-between"
+                      >
+                        <span>{t(labelKey)}</span>
+                        {projectDisplayMode === mode ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                  </>
+                ) : null}
                 <DropdownMenuLabel>{t('sessions.sidebar.header.grouping.label')}</DropdownMenuLabel>
                 {([
                   ['by-worktree', 'sessions.sidebar.header.grouping.byWorktree'],
@@ -220,7 +251,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 ] as const).map(([mode, labelKey]) => (
                   <DropdownMenuItem
                     key={mode}
-                    onClick={() => setSessionGroupingMode(mode)}
+                    onClick={() => {
+                      setSessionGroupingMode(mode);
+                      void updateDesktopSettings({ sidebarSessionGroupingMode: mode });
+                    }}
                     className="flex items-center justify-between"
                   >
                     <span>{t(labelKey)}</span>
@@ -228,9 +262,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />
-                {showRecentControls ? (
+                {showRecentControls && !isSingleProjectMode ? (
                   <DropdownMenuItem
-                    onClick={toggleRecentSection}
+                    onClick={() => {
+                      toggleRecentSection();
+                      void updateDesktopSettings({ sidebarShowRecentSection: !showRecentSection });
+                    }}
                     className="flex items-center justify-between"
                   >
                     <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
@@ -244,15 +281,19 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   <span>{t('sessions.sidebar.header.displayMode.stickyHeaders')}</span>
                   {stickyZoneHeaders ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
-                  <Icon name="contract-up-down" className="h-4 w-4" />
-                  <span>{t('sessions.sidebar.header.displayMode.collapseAll')}</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={expandAllProjects} className="flex items-center gap-2">
-                  <Icon name="expand-up-down" className="h-4 w-4" />
-                  <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
-                </DropdownMenuItem>
+                {!isSingleProjectMode ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
+                      <Icon name="contract-up-down" className="h-4 w-4" />
+                      <span>{t('sessions.sidebar.header.displayMode.collapseAll')}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={expandAllProjects} className="flex items-center gap-2">
+                      <Icon name="expand-up-down" className="h-4 w-4" />
+                      <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

@@ -51,4 +51,37 @@ describe('Z.ai quota provider', () => {
       resetAt: 1787128459979,
     });
   });
+
+  it('maps CREDIT_LIMIT entries to windows with credit value labels and plan level', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      code: 200,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 12000, currentValue: 65, remaining: 11934, percentage: 1, nextResetTime: 1787257978907 },
+          { type: 'CREDIT_LIMIT', unit: 6, number: 1, usage: 60000, currentValue: 65, remaining: 59934, percentage: 1, nextResetTime: 1787844668997 },
+        ],
+        level: 'pro',
+      },
+    })));
+
+    const result = await fetchQuota();
+    const windows = result.usage.windows;
+
+    expect(result.ok).toBe(true);
+    expect(result.planLabel).toBe('pro');
+    expect(windows['5h']).toMatchObject({
+      usedPercent: 1,
+      remainingPercent: 99,
+      windowSeconds: 5 * 60 * 60,
+      resetAt: 1787257978907,
+      valueLabel: '65 / 12k credits',
+    });
+    expect(windows.weekly).toMatchObject({
+      usedPercent: 1,
+      remainingPercent: 99,
+      windowSeconds: 7 * 24 * 60 * 60,
+      resetAt: 1787844668997,
+      valueLabel: '65 / 60k credits',
+    });
+  });
 });

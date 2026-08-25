@@ -66,29 +66,22 @@ export const truncatePathMiddle = (
     return source;
   }
 
-  const prefixBudget = Math.max(0, maxLength - (fileName.length + 2));
-  if (prefixBudget <= 0) {
-    return `…/${fileName}`;
-  }
-
-  let prefix = '';
-  for (const segment of segments) {
+  // Keep the segments closest to the file name: in trees full of index.md the
+  // parent directory is the distinguishing part, so drop leading segments.
+  let suffix = fileName;
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const segment = segments[i];
     if (!segment) {
       continue;
     }
-    const candidate = prefix ? `${prefix}/${segment}` : segment;
-    if (candidate.length > prefixBudget) {
+    const candidate = `${segment}/${suffix}`;
+    if (candidate.length + 2 > maxLength) {
       break;
     }
-    prefix = candidate;
+    suffix = candidate;
   }
 
-  if (!prefix) {
-    const first = segments[0] ?? '';
-    prefix = first ? first.slice(0, prefixBudget) : '';
-  }
-
-  return prefix ? `${prefix}…/${fileName}` : `…/${fileName}`;
+  return `…/${suffix}`;
 };
 
 const normalizePath = (value: string) => {

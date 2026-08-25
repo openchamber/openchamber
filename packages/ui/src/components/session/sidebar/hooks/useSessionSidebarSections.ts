@@ -1,3 +1,4 @@
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionGroup, SessionNode, GroupSearchData } from '../types';
@@ -161,10 +162,10 @@ export const useSessionSidebarSections = (args: Args) => {
       section.groups.forEach((group) => {
         const filteredNodes = filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
         const matchedSessionCount = countNodes(filteredNodes);
-        const groupMatches = buildGroupSearchText(group).includes(normalizedSessionSearchQuery);
+        const groupMatches = matchesRankQuery([buildGroupSearchText(group)], normalizedSessionSearchQuery);
         const scopeKey = normalizePath(group.directory ?? null);
         const scopeFolders = scopeKey ? (foldersMap[scopeKey] ?? []) : [];
-        const folderNameMatchCount = scopeFolders.filter((folder) => folder.name.toLowerCase().includes(normalizedSessionSearchQuery)).length;
+        const folderNameMatchCount = scopeFolders.filter((folder) => matchesRankQuery([folder.name], normalizedSessionSearchQuery)).length;
 
         result.set(group, {
           filteredNodes,

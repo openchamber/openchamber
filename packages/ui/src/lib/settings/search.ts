@@ -50,7 +50,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.weekStartsOn',
     keywords: ['calendar', 'monday', 'sunday'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'appearance.light-theme',
@@ -172,6 +171,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['editor', 'vim', 'keymap'],
   },
   {
+    id: 'appearance.session-tabs',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.sessionTabsGroup',
+    descriptionKey: 'settings.openchamber.visual.field.sessionTabsInfo',
+    keywords: ['session', 'tabs', 'header', 'working set'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
+  },
+  {
     id: 'appearance.terminal-quick-keys',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.terminalQuickKeys',
@@ -185,6 +192,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.sendAnonymousUsageReports',
     descriptionKey: 'settings.openchamber.visual.field.sendAnonymousUsageReportsHint',
     keywords: ['telemetry', 'analytics'],
+  },
+  {
+    id: 'general.app-links',
+    page: 'general',
+    titleKey: 'settings.openchamber.appLinks.title',
+    descriptionKey: 'settings.openchamber.appLinks.info',
+    keywords: ['security', 'app link', 'deep link', 'scheme', 'protocol', 'obsidian', 'notion'],
   },
   {
     id: 'chat.render-mode',
@@ -558,6 +572,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.projects.page.field.projectName',
     keywords: ['label', 'display name', 'project metadata'],
+  },
+  {
+    id: 'projects.default-model',
+    page: 'projects',
+    titleKey: 'settings.projects.page.field.projectModel',
+    keywords: ['model', 'default', 'new chat', 'project metadata'],
+  },
+  {
+    id: 'projects.default-thinking',
+    page: 'projects',
+    titleKey: 'settings.projects.page.field.projectThinking',
+    keywords: ['thinking', 'variant', 'reasoning', 'effort', 'model', 'project metadata'],
   },
   {
     id: 'projects.accent-color',
@@ -955,26 +981,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
 
   {
-    id: 'integrations.messengers',
-    page: 'integrations',
-    titleKey: 'settings.integrations.messengers.title',
-    keywords: ['messenger', 'discord', 'telegram', 'bot', 'coming soon'],
-  },
-  {
-    id: 'integrations.messengers.discord',
-    page: 'integrations',
-    titleKey: 'settings.integrations.messengers.discord.name',
-    descriptionKey: 'settings.integrations.messengers.discord.description',
-    keywords: ['discord', 'bot', 'messenger', 'coming soon'],
-  },
-  {
-    id: 'integrations.messengers.telegram',
-    page: 'integrations',
-    titleKey: 'settings.integrations.messengers.telegram.name',
-    descriptionKey: 'settings.integrations.messengers.telegram.description',
-    keywords: ['telegram', 'bot', 'messenger', 'coming soon'],
-  },
-  {
     id: 'integrations.third-party',
     page: 'integrations',
     titleKey: 'settings.integrations.thirdParty.title',
@@ -986,13 +992,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.integrations.thirdParty.opencodeClaude.name',
     descriptionKey: 'settings.integrations.thirdParty.opencodeClaude.description',
     keywords: ['claude', 'anthropic', 'claude code', 'pro', 'max', 'agent sdk', '@openchamber/opencode-claude'],
-  },
-  {
-    id: 'integrations.third-party.opencode-commandcode',
-    page: 'integrations',
-    titleKey: 'settings.integrations.thirdParty.opencodeCommandcode.name',
-    descriptionKey: 'settings.integrations.thirdParty.opencodeCommandcode.description',
-    keywords: ['command code', 'commandcode', 'laguna', 'poolside', 'gateway', '@openchamber/opencode-commandcode'],
   },
   {
     id: 'integrations.third-party.opencode-cursor-oauth',

@@ -107,7 +107,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     defaultWidthFraction: 3 / 5,
     defaultHeightFraction: 0.4,
     mode: 'file',
-    icon: 'braces',
+    icon: 'file-edit',
     labelKey: 'contextPanel.mode.files',
     availability: 'always',
   },

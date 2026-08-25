@@ -15,6 +15,7 @@ export type UsageLimitRow = {
 export type UsageProviderGroup = {
   providerId: QuotaProviderId;
   providerName: string;
+  planLabel?: string | null;
   rows: UsageLimitRow[];
   /** Provider-level message: a fetch error, or "nothing reported". */
   status: string | null;
@@ -76,6 +77,7 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
         return {
           providerId: providerMeta.id,
           providerName: providerMeta.name,
+          planLabel: result.planLabel,
           rows,
           status,
         };

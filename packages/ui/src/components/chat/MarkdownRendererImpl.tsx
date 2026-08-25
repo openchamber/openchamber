@@ -4,11 +4,12 @@ import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { isExternalHttpUrl, openExternalUrl } from '@/lib/url';
+import { openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { Theme } from '@/types/theme';
+import { openAppLinkWithConfirmation } from './appLinkConfirmation';
+import { attachAppLinkInteractions } from './appLinkInteractions';
 import type { ToolPopupContent } from './message/types';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import { useUIStore } from '@/stores/useUIStore';
@@ -42,6 +43,7 @@ import {
   parseFileReference,
   type ParsedFileReference,
 } from './fileReferenceParser';
+import { fileReferenceExists } from './fileReferenceStat';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 
 const useCurrentMermaidTheme = () => {
@@ -55,7 +57,7 @@ const useCurrentMermaidTheme = () => {
       : fallbackLight);
 };
 
-const useExternalLinkInteractions = ({
+const useLinkInteractions = ({
   containerRef,
   enabled,
 }: {
@@ -63,48 +65,16 @@ const useExternalLinkInteractions = ({
   enabled?: boolean;
 }) => {
   React.useEffect(() => {
-    if (enabled === false) {
-      return;
-    }
-
     const container = containerRef.current;
     if (!container) {
       return;
     }
 
-    const handleClick = (event: MouseEvent) => {
-      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
-        return;
-      }
-
-      const target = event.target;
-      if (!(target instanceof Element)) {
-        return;
-      }
-
-      const anchor = target.closest('a[href]');
-      if (!(anchor instanceof HTMLAnchorElement)) {
-        return;
-      }
-
-      if (anchor.getAttribute('data-openchamber-file-link') === 'true') {
-        return;
-      }
-
-      const href = anchor.getAttribute('href') ?? '';
-      if (!isExternalHttpUrl(href)) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      void openExternalUrl(href);
-    };
-
-    container.addEventListener('click', handleClick);
-    return () => {
-      container.removeEventListener('click', handleClick);
-    };
+    return attachAppLinkInteractions(container, {
+      allowExternalHttp: enabled !== false,
+      openAppLink: (href) => void openAppLinkWithConfirmation(href),
+      openExternalHttp: (href) => void openExternalUrl(href),
+    });
   }, [containerRef, enabled]);
 };
 
@@ -151,19 +121,9 @@ const CODE_BLOCK_PATH_SCANNED_ATTR = 'data-openchamber-block-paths-scanned';
 // output. The regex is defined in `./fileReferenceParser`; the inline-code
 // pipeline reads full text content rather than using this regex.
 const MAX_BLOCK_CODE_SCAN_LENGTH = 200_000;
-const FILE_REFERENCE_STAT_CONCURRENCY = 4;
-const FILE_REFERENCE_STAT_CACHE_MAX = 1000;
-const VSCODE_FILE_REFERENCE_STAT_CACHE_MAX = 200;
 const FILE_REFERENCE_LINK_LIMIT = 80;
 const VSCODE_FILE_REFERENCE_LINK_LIMIT = 40;
 const FILE_REFERENCE_ANNOTATION_DELAY_MS = 160;
-const FILE_REFERENCE_STAT_CACHE = new Map<string, Promise<boolean>>();
-let activeFileReferenceStatCount = 0;
-const pendingFileReferenceStats: Array<() => void> = [];
-
-const getFileReferenceStatCacheMax = (): number => (
-  isVSCodeRuntime() ? VSCODE_FILE_REFERENCE_STAT_CACHE_MAX : FILE_REFERENCE_STAT_CACHE_MAX
-);
 
 const getFileReferenceLinkLimit = (): number => (
   isVSCodeRuntime() ? VSCODE_FILE_REFERENCE_LINK_LIMIT : FILE_REFERENCE_LINK_LIMIT
@@ -361,61 +321,6 @@ const getResolvedReference = (rawValue: string, effectiveDirectory: string): (Pa
   };
 };
 
-const fileReferenceExists = (resolvedPath: string): Promise<boolean> => {
-  const normalizedPath = normalizePath(resolvedPath);
-  if (!normalizedPath) {
-    return Promise.resolve(false);
-  }
-
-  const cached = FILE_REFERENCE_STAT_CACHE.get(normalizedPath);
-  if (cached) {
-    FILE_REFERENCE_STAT_CACHE.delete(normalizedPath);
-    FILE_REFERENCE_STAT_CACHE.set(normalizedPath, cached);
-    return cached;
-  }
-
-  const request = new Promise<boolean>((resolve) => {
-    const run = () => {
-      activeFileReferenceStatCount += 1;
-      void runtimeFetch(`/api/fs/stat?path=${encodeURIComponent(normalizedPath)}&optional=true`, {
-        method: 'GET',
-        cache: 'no-store',
-      })
-        .then(async (response) => {
-          if (!response.ok) {
-            resolve(false);
-            return;
-          }
-          const payload = await response.json().catch(() => null) as { exists?: unknown } | null;
-          resolve(payload?.exists !== false);
-        })
-        .catch(() => resolve(false))
-        .finally(() => {
-          activeFileReferenceStatCount = Math.max(0, activeFileReferenceStatCount - 1);
-          pendingFileReferenceStats.shift()?.();
-        });
-    };
-
-    if (activeFileReferenceStatCount < FILE_REFERENCE_STAT_CONCURRENCY) {
-      run();
-      return;
-    }
-
-    pendingFileReferenceStats.push(run);
-  });
-
-  const maxCacheEntries = getFileReferenceStatCacheMax();
-  while (FILE_REFERENCE_STAT_CACHE.size >= maxCacheEntries) {
-    const oldest = FILE_REFERENCE_STAT_CACHE.keys().next().value;
-    if (typeof oldest !== 'string') {
-      break;
-    }
-    FILE_REFERENCE_STAT_CACHE.delete(oldest);
-  }
-  FILE_REFERENCE_STAT_CACHE.set(normalizedPath, request);
-  return request;
-};
-
 const getContextDirectory = (effectiveDirectory: string, resolvedPath: string): string => {
   return effectiveDirectory || getDirectoryForFilePath(effectiveDirectory, resolvedPath);
 };
@@ -521,7 +426,7 @@ const useFileReferenceInteractions = ({
           && !isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory);
         const existsPromise = canGrantOutsideFile
           ? Promise.resolve(true)
-          : fileReferenceExists(resolved.resolvedPath);
+          : fileReferenceExists(resolved.resolvedPath, effectiveDirectory);
 
         void existsPromise.then((exists) => {
           if (cancelled || !exists || !container.contains(candidate)) {
@@ -1034,7 +939,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     preferRuntimeEditor: runtime.isVSCode,
     enabled: enableFileReferences && !isStreaming,
   });
-  useExternalLinkInteractions({ containerRef });
+  useLinkInteractions({ containerRef });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
   const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
@@ -1085,6 +990,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   content: string;
   className?: string;
   variant?: MarkdownVariant;
+  // App links remain confirmed even where ordinary HTTP link handling is off.
   disableLinkSafety?: boolean;
   stripFrontmatter?: boolean;
   onShowPopup?: (content: ToolPopupContent) => void;
@@ -1126,7 +1032,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     preferRuntimeEditor: runtime.isVSCode,
     enabled: enableFileReferences,
   });
-  useExternalLinkInteractions({ containerRef, enabled: !disableLinkSafety });
+  useLinkInteractions({ containerRef, enabled: !disableLinkSafety });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
   const ctx = useDecorateContext(currentTheme, false, undefined, mermaidControls);

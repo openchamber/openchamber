@@ -25,7 +25,8 @@ import { useDeviceInfo } from '@/lib/device';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
 import { getEditModeColors } from '@/lib/permissions/editModeColors';
-import { cn, fuzzyMatch } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -56,6 +57,28 @@ type MobileVariantTarget = { providerId: string; modelId: string };
 
 const buildModelRefKey = (providerID: string, modelID: string) => `${providerID}:${modelID}`;
 const MAX_INLINE_MOBILE_VARIANT_OPTIONS = 6;
+
+const AgentDescriptionTooltip: React.FC<{
+    description?: string;
+    children: React.ReactElement;
+}> = ({ description, children }) => {
+    if (!description) {
+        return children;
+    }
+
+    return (
+        <Tooltip delayDuration={450}>
+            <TooltipTrigger asChild>{children}</TooltipTrigger>
+            <TooltipContent
+                side="right"
+                sideOffset={8}
+                className="max-w-xs text-left transition-none data-[starting-style]:opacity-100 data-[starting-style]:scale-100 data-[ending-style]:opacity-100 data-[ending-style]:scale-100"
+            >
+                <span className="typography-meta text-muted-foreground">{description}</span>
+            </TooltipContent>
+        </Tooltip>
+    );
+};
 
 const asPermissionRuleset = (value: unknown): PermissionRule[] | null => {
     if (!Array.isArray(value)) {
@@ -506,13 +529,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const sortedAndFilteredAgents = React.useMemo(() => {
         const sorted = [...selectableDesktopAgents].sort((a, b) => a.name.localeCompare(b.name));
-        if (!agentSearchQuery.trim()) {
-            return sorted;
-        }
-        return sorted.filter((agent) =>
-            fuzzyMatch(agent.name, agentSearchQuery) ||
-            (agent.description && fuzzyMatch(agent.description, agentSearchQuery))
-        );
+        return rankByQuery(sorted, agentSearchQuery, (agent) => [agent.name, agent.description]);
     }, [selectableDesktopAgents, agentSearchQuery]);
 
     const defaultAgentName = React.useMemo(() => {
@@ -558,38 +575,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return result;
     }, [providers, hiddenModels]);
 
-    const normalizeModelSearchValue = React.useCallback((value: string) => {
-        const lower = value.toLowerCase().trim();
-        const compact = lower.replace(/[^a-z0-9]/g, '');
-        const tokens = lower.split(/[^a-z0-9]+/).filter(Boolean);
-        return { lower, compact, tokens };
-    }, []);
-
-    const matchesModelSearch = React.useCallback((candidate: string, query: string) => {
-        const normalizedQuery = normalizeModelSearchValue(query);
-        if (!normalizedQuery.lower) {
-            return true;
-        }
-
-        const normalizedCandidate = normalizeModelSearchValue(candidate);
-        if (normalizedCandidate.lower.includes(normalizedQuery.lower)) {
-            return true;
-        }
-
-        if (normalizedQuery.compact.length >= 2 && normalizedCandidate.compact.includes(normalizedQuery.compact)) {
-            return true;
-        }
-
-        if (normalizedQuery.tokens.length === 0) {
-            return false;
-        }
-
-        return normalizedQuery.tokens.every((queryToken) =>
-            normalizedCandidate.tokens.some((candidateToken) =>
-                candidateToken.startsWith(queryToken) || candidateToken.includes(queryToken)
-            )
-        );
-    }, [normalizeModelSearchValue]);
+    const matchesModelSearch = React.useCallback(
+        (candidate: string, query: string) => matchesRankQuery([candidate], query),
+        [],
+    );
 
     const currentModelForMetadata = currentModelId
         ? models.find((model: ProviderModel) => model.id === currentModelId)
@@ -893,25 +882,29 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 ? useSelectionStore.getState().getSessionAgentSelection(currentSessionId)
                 : null;
             if (savedAgentName) {
-                if (currentAgentName !== savedAgentName) {
-                    setAgent(savedAgentName);
-                }
-
                 const savedModel = getAgentModelForSession(currentSessionId, savedAgentName);
                 if (savedModel) {
                     const result = tryApplyModelSelection(savedModel.providerId, savedModel.modelId, savedAgentName);
                     if (result === 'applied') {
+                        if (currentAgentName !== savedAgentName) {
+                            setAgent(savedAgentName);
+                        }
                         return 'resolved';
                     }
                     if (result === 'provider-missing') {
                         return 'waiting';
                     }
+                } else if (currentAgentName !== savedAgentName) {
+                    setAgent(savedAgentName);
                 }
             }
 
             if (savedSessionModel) {
                 const result = tryApplyModelSelection(savedSessionModel.providerId, savedSessionModel.modelId, savedAgentName || currentAgentName || undefined);
                 if (result === 'applied') {
+                    if (savedAgentName && currentAgentName !== savedAgentName) {
+                        setAgent(savedAgentName);
+                    }
                     return 'resolved';
                 }
                 if (result === 'provider-missing') {
@@ -925,16 +918,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     continue;
                 }
 
-                if (currentAgentName !== agent.name) {
-                    setAgent(agent.name);
-                }
-
-                const existingSelection = useSelectionStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current;
-                if (!existingSelection) {
-                    saveSessionAgentSelection(currentSessionId, agent.name);
-                }
                 const result = tryApplyModelSelection(selection.providerId, selection.modelId, agent.name);
                 if (result === 'applied') {
+                    if (currentAgentName !== agent.name) {
+                        setAgent(agent.name);
+                    }
+                    const existingSelection = useSelectionStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current;
+                    if (!existingSelection) {
+                        saveSessionAgentSelection(currentSessionId, agent.name);
+                    }
                     return 'resolved';
                 }
                 if (result === 'provider-missing') {
@@ -2316,9 +2308,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             </DropdownMenuTrigger>
                         </TooltipTrigger>
                         <DropdownMenuContent
-                            className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col"
+                            side="top"
+                            className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col overflow-hidden"
                             align="end"
                             alignOffset={-40}
+                            constrainToMain
+                            collisionAvoidance={{ side: 'none', align: 'shift' }}
                             onKeyDownCapture={handleModelShortcutKeyDownCapture}
                         >
                             <div className="p-1 border-b border-border/40">
@@ -2375,6 +2370,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         </div>
                                     );
                                 }}
+                                maxHeightClassName="max-h-[min(400px,calc(var(--available-height)-4rem))] flex-1"
                                 tooltipsEnabled={agentMenuOpen}
                                 onEscape={() => setAgentMenuOpen(false)}
                             />
@@ -2618,7 +2614,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             </div>
                         </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <DropdownMenuContent align="end" alignOffset={-40} className="w-[min(180px,calc(100vw-2rem))]">
+                    <DropdownMenuContent side="top" align="end" alignOffset={-40} className="w-[min(180px,calc(100vw-2rem))]">
                         <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">{t('chat.modelControls.thinking')}</DropdownMenuLabel>
                         <DropdownMenuItem className="typography-meta" onSelect={() => handleVariantSelect(undefined)}>
                             <div className="flex items-center justify-between gap-2 w-full min-w-0">
@@ -2708,7 +2704,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     </div>
                                 </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <DropdownMenuContent align="end" alignOffset={-40} className="w-[min(280px,calc(100vw-2rem))] p-0 flex flex-col">
+                            <DropdownMenuContent side="top" align="end" alignOffset={-40} constrainToMain collisionAvoidance={{ side: 'none', align: 'shift' }} className="w-[min(280px,calc(100vw-2rem))] p-0 flex flex-col overflow-hidden">
                                 <div className="p-2 border-b border-border/40">
                                     <div className="relative">
                                         <Icon name="search" className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
@@ -2724,7 +2720,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         />
                                     </div>
                                 </div>
-                                <ScrollableOverlay outerClassName="max-h-[min(400px,calc(100dvh-12rem))] flex-1">
+                                <ScrollableOverlay outerClassName="max-h-[min(400px,calc(var(--available-height)-4rem))] flex-1">
                                     <div className="p-1">
                                         {!agentSearchQuery.trim() && defaultAgentName && (
                                             <>
@@ -2746,12 +2742,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                             </div>
                                         ) : (
                                             sortedAndFilteredAgents.map((agent) => (
-                                                <DropdownMenuItem
-                                                    key={agent.name}
-                                                    className="typography-meta"
-                                                    onSelect={() => handleAgentChange(agent.name)}
-                                                >
-                                                    <div className="flex flex-col gap-0.5">
+                                                <AgentDescriptionTooltip key={agent.name} description={agent.description}>
+                                                    <DropdownMenuItem
+                                                        className="typography-meta"
+                                                        onSelect={() => handleAgentChange(agent.name)}
+                                                    >
                                                         <div className="flex items-center gap-1.5">
                                                             <div className={cn(
                                                                 'h-1 w-1 rounded-full agent-dot',
@@ -2759,13 +2754,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                             )} />
                                                             <span className="font-medium">{capitalizeAgentName(agent.name)}</span>
                                                         </div>
-                                                        {agent.description && (
-                                                            <span className="typography-meta text-muted-foreground max-w-[200px] ml-2.5 break-words">
-                                                                {agent.description}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </DropdownMenuItem>
+                                                    </DropdownMenuItem>
+                                                </AgentDescriptionTooltip>
                                             ))
                                         )}
                                     </div>

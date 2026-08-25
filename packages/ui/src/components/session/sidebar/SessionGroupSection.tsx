@@ -1,3 +1,4 @@
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Session } from '@opencode-ai/sdk/v2';
@@ -13,7 +14,6 @@ import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { sessionEvents } from '@/lib/sessionEvents';
-import type { MainTab } from '@/stores/useUIStore';
 import { SessionFolderItem } from '../SessionFolderItem';
 import type { SortableDragHandleProps } from './sortableItems';
 import { DroppableFolderWrapper, SessionFolderDndScope } from './sessionFolderDnd';
@@ -58,6 +58,7 @@ type Props = {
   normalizedSessionSearchQuery: string;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
   visibleSessionCount?: number;
+  sessionBatchSize?: number;
   collapsedGroups: Set<string>;
   hideDirectoryControls: boolean;
   collapsedFolderIds: Set<string>;
@@ -76,15 +77,14 @@ type Props = {
     renderContext?: 'project' | 'recent',
     renderExtras?: SessionNodeRenderExtras,
   ) => React.ReactNode;
-  showMoreGroupSessions: (groupKey: string, currentVisibleCount: number) => void;
+  showMoreGroupSessions: (groupKey: string, currentVisibleCount: number, increment?: number) => void;
   resetGroupSessionLimit: (groupKey: string) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   activeProjectId: string | null;
   setActiveProjectIdOnly: (id: string) => void;
-  setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; targetFolderId?: string }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; targetFolderId?: string; target?: 'chat' | 'project' }) => void;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   renamingFolderId: string | null;
@@ -190,6 +190,7 @@ const areGroupPropsEqual = (prev: Props, next: Props): boolean => {
   if (prev.compactBodyPadding !== next.compactBodyPadding) return false;
   if (prev.groupSearchDataByGroup !== next.groupSearchDataByGroup) return false;
   if (prev.visibleSessionCount !== next.visibleSessionCount) return false;
+  if (prev.sessionBatchSize !== next.sessionBatchSize) return false;
 
   if (prev.collapsedGroups !== next.collapsedGroups
     && prev.collapsedGroups.has(prev.groupKey) !== next.collapsedGroups.has(next.groupKey)) {
@@ -262,7 +263,6 @@ const areGroupPropsEqual = (prev: Props, next: Props): boolean => {
     && prev.alwaysShowActions === next.alwaysShowActions
     && prev.activeProjectId === next.activeProjectId
     && prev.setActiveProjectIdOnly === next.setActiveProjectIdOnly
-    && prev.setActiveMainTab === next.setActiveMainTab
     && prev.setSessionSwitcherOpen === next.setSessionSwitcherOpen
     && prev.openNewSessionDraft === next.openNewSessionDraft
     && prev.addSessionToFolder === next.addSessionToFolder
@@ -288,6 +288,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     normalizedSessionSearchQuery,
     groupSearchDataByGroup,
     visibleSessionCount,
+    sessionBatchSize,
     collapsedGroups,
     hideDirectoryControls,
     collapsedFolderIds,
@@ -303,7 +304,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     alwaysShowActions,
     activeProjectId,
     setActiveProjectIdOnly,
-    setActiveMainTab,
     setSessionSwitcherOpen,
     openNewSessionDraft,
     addSessionToFolder,
@@ -401,7 +401,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
       setIsRequestingBootstrapAccess(false);
     }
   }, [canGrantBootstrapAccess, failedBootstrapDirectory, isRequestingBootstrapAccess, retryFailedBootstrap]);
-  const maxVisible = hideDirectoryControls ? 10 : 5;
+  const maxVisible = sessionBatchSize ?? (hideDirectoryControls ? 10 : 5);
   const nonArchivedVisibleCount = Math.max(maxVisible, visibleSessionCount ?? maxVisible);
   const groupMatchesSearch = hasSessionSearchQuery ? searchData?.groupMatches === true : false;
   const shouldFilterGroupContents = hasSessionSearchQuery;
@@ -480,7 +480,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         return true;
       }
 
-      const folderMatches = entry.folder.name.toLowerCase().includes(normalizedSessionSearchQuery);
+      const folderMatches = matchesRankQuery([entry.folder.name], normalizedSessionSearchQuery);
       if (folderMatches || entry.nodes.length > 0) {
         keepByFolderId.set(folderId, true);
         return true;
@@ -876,9 +876,13 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
             depth={0}
             onNewSession={() => {
               if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
-              setActiveMainTab('chat');
               if (mobileVariant) setSessionSwitcherOpen(false);
-              openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: scopeDirectory ?? group.directory, targetFolderId: folder.id });
+               openNewSessionDraft({
+                 selectedProjectId: projectId,
+                 directoryOverride: scopeDirectory ?? group.directory,
+                 targetFolderId: folder.id,
+                 target: group.draftTarget,
+               });
             }}
             hideActions={false}
             archivedBucket={group.isArchivedBucket === true}
@@ -1048,7 +1052,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
               )
               : bootstrapFailureNotice
                 ? bootstrapFailureNotice
-            : t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
+            : group.emptyMessage ?? t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
         </div>
       ) : null}
       {totalSessions > 0 && bootstrapFailureNotice ? (
@@ -1059,7 +1063,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
       {remainingCount > 0 ? (
         <button
           type="button"
-          onClick={() => showMoreGroupSessions(groupKey, visibleSessions.length)}
+          onClick={() => showMoreGroupSessions(groupKey, visibleSessions.length, sessionBatchSize ?? 7)}
           className="mt-0.5 flex items-center justify-start rounded-md pl-[26px] pr-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
         >
           {t('sessions.sidebar.group.showMore')}
@@ -1185,7 +1189,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         </div>
         {group.isArchivedBucket && allGroupSessions.length > 0 ? (
           <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
-            <Tooltip>
+            <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1208,7 +1212,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         ) : null}
         {group.directory && !group.isMain && group.worktree ? (
           <div className={cn('absolute right-7 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
-            <Tooltip>
+            <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1232,15 +1236,14 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         ) : null}
         {group.directory ? (
           <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
-            <Tooltip>
+            <Tooltip delayDuration={500}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
                     if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
-                    setActiveMainTab('chat');
-                    if (mobileVariant) setSessionSwitcherOpen(false);
+                          if (mobileVariant) setSessionSwitcherOpen(false);
                     openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"

@@ -3,7 +3,6 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
-import type { MainTab } from '@/stores/useUIStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -30,7 +29,6 @@ type Args = {
   sessionSearchQuery: string;
   setSessionSearchQuery: (value: string) => void;
   setIsSessionSearchOpen: (open: boolean) => void;
-  setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => void;
   updateSessionTitle: (id: string, title: string) => Promise<void>;
@@ -79,7 +77,6 @@ export const useSessionActions = (args: Args) => {
       };
 
       if (args.mobileVariant) {
-        args.setActiveMainTab('chat');
         args.setSessionSwitcherOpen(false);
       }
 

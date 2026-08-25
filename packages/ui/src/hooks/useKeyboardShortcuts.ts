@@ -1,6 +1,7 @@
 import React from 'react';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
@@ -59,7 +60,6 @@ export const useKeyboardShortcuts = () => {
   }, [currentShortcutDirectory]);
   const isMobile = useUIStore((s) => s.isMobile);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
-  const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setModelSelectorOpen = useUIStore((s) => s.setModelSelectorOpen);
   const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
@@ -154,7 +154,6 @@ export const useKeyboardShortcuts = () => {
         isAboutDialogOpen,
         isMultiRunLauncherOpen,
         isImagePreviewOpen,
-        activeMainTab,
         isPromptNavigatorPanelOpen,
       } = useUIStore.getState();
 
@@ -183,7 +182,7 @@ export const useKeyboardShortcuts = () => {
       }
 
       const hasOverlay = isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen || isMultiRunLauncherOpen || isImagePreviewOpen;
-      const isChatActive = activeMainTab === 'chat';
+      const isChatActive = true;
 
       if (hasOverlay || !isChatActive) {
         resetAbortPriming();
@@ -245,7 +244,6 @@ export const useKeyboardShortcuts = () => {
 
       if (eventMatchesShortcut(e, combo('toggle_prompt_navigator'))) {
         const {
-          activeMainTab,
           promptNavigatorEnabled,
           isSettingsDialogOpen,
           isCommandPaletteOpen,
@@ -257,7 +255,7 @@ export const useKeyboardShortcuts = () => {
           isImagePreviewOpen,
         } = useUIStore.getState();
 
-        if (!promptNavigatorEnabled || isMobile || isVSCodeRuntime() || activeMainTab !== 'chat') {
+        if (!promptNavigatorEnabled || isMobile || isVSCodeRuntime()) {
           return;
         }
 
@@ -302,13 +300,20 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      if (!isVSCodeRuntime() && useUIStore.getState().sessionTabsEnabled && eventMatchesShortcut(e, combo('close_session_tab'))) {
+        e.preventDefault();
+        if (currentSessionId) {
+          closeSessionTabAndActivateNeighbour(currentSessionId);
+        }
+        return;
+      }
+
       const matchedNewSessionShortcut = eventMatchesShortcut(e, combo('new_chat'));
       const matchedWorktreeShortcut = eventMatchesShortcut(e, combo('new_chat_worktree'));
 
       if (matchedNewSessionShortcut || matchedWorktreeShortcut) {
         e.preventDefault();
 
-        setActiveMainTab('chat');
         setSessionSwitcherOpen(false);
 
         if (!isVSCodeRuntime() && matchedWorktreeShortcut) {
@@ -316,7 +321,9 @@ export const useKeyboardShortcuts = () => {
           return;
         }
 
-        openNewSessionDraft();
+        openNewSessionDraft(currentSessionId && currentDirectory
+          ? { directoryOverride: currentDirectory }
+          : undefined);
         return;
       }
 
@@ -392,11 +399,10 @@ export const useKeyboardShortcuts = () => {
           isHelpDialogOpen,
           isSessionSwitcherOpen,
           isAboutDialogOpen,
-          activeMainTab,
         } = useUIStore.getState();
 
         const hasOverlay = isSettingsDialogOpen || isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen;
-        if (hasOverlay || activeMainTab !== 'chat' || !isChatInputTarget(e.target)) {
+        if (hasOverlay || !isChatInputTarget(e.target)) {
           return;
         }
 
@@ -523,7 +529,6 @@ export const useKeyboardShortcuts = () => {
           isHelpDialogOpen,
           isSessionSwitcherOpen,
           isAboutDialogOpen,
-          activeMainTab,
           isModelSelectorOpen,
         } = useUIStore.getState();
 
@@ -534,7 +539,7 @@ export const useKeyboardShortcuts = () => {
 
         // Skip if any overlay open or not on chat tab
         const hasOverlay = isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen;
-        const isChatActive = activeMainTab === 'chat';
+        const isChatActive = true;
 
         if (hasOverlay || !isChatActive) {
           return;
@@ -553,7 +558,6 @@ export const useKeyboardShortcuts = () => {
           isHelpDialogOpen,
           isSessionSwitcherOpen,
           isAboutDialogOpen,
-          activeMainTab,
         } = useUIStore.getState();
 
         if (isSettingsDialogOpen) {
@@ -561,7 +565,7 @@ export const useKeyboardShortcuts = () => {
         }
 
         const hasOverlay = isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen;
-        const isChatActive = activeMainTab === 'chat';
+        const isChatActive = true;
 
         if (hasOverlay || !isChatActive) {
           return;
@@ -600,7 +604,6 @@ export const useKeyboardShortcuts = () => {
           isHelpDialogOpen,
           isSessionSwitcherOpen,
           isAboutDialogOpen,
-          activeMainTab,
           favoriteModels,
           addRecentModel,
         } = useUIStore.getState();
@@ -610,7 +613,7 @@ export const useKeyboardShortcuts = () => {
         }
 
         const hasOverlay = isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen;
-        const isChatActive = activeMainTab === 'chat';
+        const isChatActive = true;
 
         if (hasOverlay || !isChatActive || favoriteModels.length === 0) {
           return;
@@ -642,8 +645,8 @@ export const useKeyboardShortcuts = () => {
       }
 
       if (eventMatchesShortcut(e, combo('toggle_dictation'))) {
-        const { activeMainTab, isCommandPaletteOpen, isHelpDialogOpen, isSessionSwitcherOpen, isSettingsDialogOpen } = useUIStore.getState();
-        if (activeMainTab !== 'chat' || isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isSettingsDialogOpen) {
+        const { isCommandPaletteOpen, isHelpDialogOpen, isSessionSwitcherOpen, isSettingsDialogOpen } = useUIStore.getState();
+        if (isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isSettingsDialogOpen) {
           return;
         }
         e.preventDefault();
@@ -693,7 +696,6 @@ export const useKeyboardShortcuts = () => {
     toggleTerminalSurfaceExpanded,
     isMobile,
     setSessionSwitcherOpen,
-    setActiveMainTab,
     setSettingsDialogOpen,
     setModelSelectorOpen,
     setTimelineDialogOpen,

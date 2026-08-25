@@ -3,7 +3,7 @@ import { asObject, buildResult, getAuthEntry, normalizeAuthEntry, toNumber, toUs
 
 export const providerId = 'command-code';
 export const providerName = 'Command Code';
-export const aliases = ['command-code'];
+export const aliases = ['command-code', 'commandcode', 'command_code', 'command code'];
 
 const API_BASE_URL = 'https://api.commandcode.ai';
 

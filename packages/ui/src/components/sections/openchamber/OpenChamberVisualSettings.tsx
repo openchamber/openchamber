@@ -33,7 +33,6 @@ import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS,
 import { useI18n, type Locale } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import { getStoredMobileLayoutPreference, setStoredMobileLayoutPreference, type MobileLayoutPreference } from '@/lib/mobileLayoutPreference';
 import {
     setDirectoryShowHidden,
     useDirectoryShowHidden,
@@ -149,17 +148,6 @@ const MOBILE_KEYBOARD_MODE_OPTIONS: Option<MobileKeyboardMode>[] = [
         id: 'resize-content',
         labelKey: 'settings.openchamber.visual.option.mobileKeyboardMode.resizeContent.label',
         descriptionKey: 'settings.openchamber.visual.option.mobileKeyboardMode.resizeContent.description',
-    },
-];
-
-const MOBILE_LAYOUT_OPTIONS: Array<{ value: MobileLayoutPreference; labelKey: string }> = [
-    {
-        value: 'default',
-        labelKey: 'settings.openchamber.visual.option.mobileLayout.default',
-    },
-    {
-        value: 'new',
-        labelKey: 'settings.openchamber.visual.option.mobileLayout.new',
     },
 ];
 
@@ -279,7 +267,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar' | 'contextPanelDock' | 'autoSaveEnabled';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar' | 'contextPanelDock' | 'autoSaveEnabled' | 'sessionTabs';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -365,6 +353,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const diffLayoutPreference = useUIStore(state => state.diffLayoutPreference);
     const setDiffLayoutPreference = useUIStore(state => state.setDiffLayoutPreference);
     const showTerminalQuickKeysOnDesktop = useUIStore(state => state.showTerminalQuickKeysOnDesktop);
+    const sessionTabsEnabled = useUIStore(state => state.sessionTabsEnabled);
+    const setSessionTabsEnabled = useUIStore(state => state.setSessionTabsEnabled);
     const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
     const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
     const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
@@ -637,13 +627,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasThemeSettings = shouldShow('theme') && !isVSCode;
     const showWindowControlsPositionSetting = shouldShow('windowControlsPosition') && showWindowControlsPosition;
     const hasLocalizationSettings = shouldShow('theme') || shouldShow('timeFormat') || shouldShow('weekStart');
-    const showMobileLayoutSetting = isMobile && isWebRuntime() && !isDesktopShell() && !isVSCode;
     const hasAppearanceSettings = isVSCode
         ? hasLocalizationSettings
-        : (shouldShow('theme') || showWindowControlsPositionSetting || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
+        : (shouldShow('theme') || showWindowControlsPositionSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
     const showContextPanelDockSetting = shouldShow('contextPanelDock') && !isVSCode && !isMobile;
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('expandedEditorToolbar') && !isVSCode) || showContextPanelDockSetting;
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('expandedEditorToolbar') && !isVSCode) || showContextPanelDockSetting || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('userMessageRendering')
@@ -732,7 +721,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
             ? [...terminalLoginShells.filter((shell) => shell !== terminalShell), terminalShell]
             : terminalLoginShells.filter((shell) => shell !== terminalShell));
     };
-    const [mobileLayoutPreference, setMobileLayoutPreference] = React.useState<MobileLayoutPreference>(() => getStoredMobileLayoutPreference());
     const [pwaInstallName, setPwaInstallName] = React.useState('');
     const [pwaOrientation, setPwaOrientation] = React.useState<'system' | 'portrait' | 'landscape'>('system');
     const selectedTimeFormatLabel = React.useMemo(() => {
@@ -751,16 +739,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         const option = MOBILE_KEYBOARD_MODE_OPTIONS.find((item) => item.id === mobileKeyboardMode);
         return option ? tUnsafe(option.labelKey) : undefined;
     }, [mobileKeyboardMode, tUnsafe]);
-
-    const handleMobileLayoutPreferenceChange = React.useCallback((value: MobileLayoutPreference) => {
-        if (value === mobileLayoutPreference) {
-            return;
-        }
-
-        setMobileLayoutPreference(value);
-        setStoredMobileLayoutPreference(value);
-        window.location.reload();
-    }, [mobileLayoutPreference]);
 
     const applyPwaInstallName = React.useCallback(async (value: string) => {
         if (typeof window === 'undefined') {
@@ -886,21 +864,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             ))}
                                         </SettingsRadioGroup>
 
-                                        {showMobileLayoutSetting && (
-                                            <SettingsInset>
-                                                <SettingsStackedField label={t('settings.openchamber.visual.section.mobileLayout')}>
-                                                    <SettingsChipGroup
-                                                        value={mobileLayoutPreference}
-                                                        options={MOBILE_LAYOUT_OPTIONS.map((option) => ({
-                                                            value: option.value,
-                                                            label: tUnsafe(option.labelKey),
-                                                        }))}
-                                                        onChange={handleMobileLayoutPreferenceChange}
-                                                        aria-label={t('settings.openchamber.visual.section.mobileLayout')}
-                                                    />
-                                                </SettingsStackedField>
-                                            </SettingsInset>
-                                        )}
                                     </div>
 
                                     <div className={SETTINGS_FIELDS_STACK_CLASS}>
@@ -1521,16 +1484,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     />
                                 </SettingsFieldRow>
                             )}
-                            {shouldShow('terminalQuickKeys') && !isMobile && (
-                                <SettingsCheckboxRow
-                                    checked={showTerminalQuickKeysOnDesktop}
-                                    onChange={setShowTerminalQuickKeysOnDesktop}
-                                    label={t('settings.openchamber.visual.field.terminalQuickKeys')}
-                                    ariaLabel={t('settings.openchamber.visual.field.terminalQuickKeysAria')}
-                                    settingsItem="appearance.terminal-quick-keys"
-                                    info={t('settings.openchamber.visual.field.terminalQuickKeysTooltip')}
-                                />
-                            )}
                             {showTerminalShellSetting && (
                                 <SettingsStackedField
                                     label={t('settings.openchamber.visual.field.terminalShell')}
@@ -1560,7 +1513,31 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     settingsItem="appearance.terminal-login-shell"
                                 />
                             )}
+                            {shouldShow('terminalQuickKeys') && !isMobile && (
+                                <SettingsCheckboxRow
+                                    checked={showTerminalQuickKeysOnDesktop}
+                                    onChange={setShowTerminalQuickKeysOnDesktop}
+                                    label={t('settings.openchamber.visual.field.terminalQuickKeys')}
+                                    ariaLabel={t('settings.openchamber.visual.field.terminalQuickKeysAria')}
+                                    settingsItem="appearance.terminal-quick-keys"
+                                    info={t('settings.openchamber.visual.field.terminalQuickKeysTooltip')}
+                                />
+                            )}
                         </div>
+                        {shouldShow('sessionTabs') && !isVSCode && !isMobile && (
+                            <SettingsControlGroup
+                                title={t('settings.openchamber.visual.field.sessionTabsGroup')}
+                                settingsItem="appearance.session-tabs"
+                            >
+                                <SettingsCheckboxRow
+                                    checked={sessionTabsEnabled}
+                                    onChange={setSessionTabsEnabled}
+                                    label={t('settings.openchamber.visual.field.sessionTabs')}
+                                    ariaLabel={t('settings.openchamber.visual.field.sessionTabsAria')}
+                                    info={t('settings.openchamber.visual.field.sessionTabsInfo')}
+                                />
+                            </SettingsControlGroup>
+                        )}
                     </SettingsSection>
                 )}
 

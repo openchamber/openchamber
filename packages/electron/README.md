@@ -143,6 +143,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 ## Native Features Owned Here
 
 - Floating Mini Chat windows.
+- New Mini Chat windows default to the managed Chats target. Explicit project/worktree drafts retain their target, existing managed chat sessions reopen in their own directory, and the compact header omits project/branch metadata for Chats. Opening a managed draft back in the main window preserves that target.
 - Multiple native windows.
 - Native notifications.
 - User-confirmed local folder selection. The shared UI supplies the requested directory as the picker `defaultPath`; confirmation is required before filesystem access is retried.
@@ -159,7 +160,9 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
   grants permission requests by default when no handler is set, and the panel
   loads whatever address the user types. Tab favicons are fetched in this
   session too, so icons behind the page's own login resolve and the app's origin
-  never requests anything from a third-party host.
+  never requests anything from a third-party host. Self-signed loopback HTTPS
+  pages may use an untrusted certificate authority; certificate failures for
+  external hosts and all other certificate errors remain blocked.
 
 ## IPC Pattern
 

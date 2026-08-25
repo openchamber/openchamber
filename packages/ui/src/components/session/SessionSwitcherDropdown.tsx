@@ -71,14 +71,12 @@ type SwitcherContentProps = {
 function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentProps): React.ReactElement {
   const items = useSwitcherItems(true, { scopeProjectId });
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
-  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const { t } = useI18n();
 
   const handleNewSession = React.useCallback(() => {
-    setActiveMainTab('chat');
     onSelect();
     openNewSessionDraft();
-  }, [onSelect, openNewSessionDraft, setActiveMainTab]);
+  }, [onSelect, openNewSessionDraft]);
 
   const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set());
   const toggleParent = React.useCallback((sessionId: string) => {

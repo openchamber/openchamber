@@ -1,10 +1,12 @@
+import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection, SETTINGS_CUSTOM_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,7 +25,7 @@ import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { opencodeClient } from '@/lib/opencode/client';
-import { shouldLoadAvailableProviders } from './providerAvailability';
+import { requiresProviderAuth, shouldLoadAvailableProviders } from './providerAvailability';
 import {
   getOAuthAuthMethods,
   parseAuthPayload,
@@ -144,7 +146,10 @@ const parseProvidersPayload = (payload: unknown): ProviderOption[] => {
 
 export const ProvidersPage: React.FC = () => {
   const { t } = useI18n();
-  const providers = useConfigStore((state) => state.providers);
+  // Settings browses whichever project its own selector points at; the app
+  // stays where it is.
+  const settingsDirectory = useSettingsDirectory();
+  const providers = useConfigStore((state) => selectProvidersForDirectory(state, settingsDirectory));
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
   const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
@@ -324,7 +329,8 @@ export const ProvidersPage: React.FC = () => {
       ? provider.env.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
       : [];
     const hasCreds = Boolean(sources.auth.exists) || envEntries.length > 0;
-    if (!hasCreds) {
+    const isCustomProvider = Boolean(provider && isConfigDefinedCustomProvider(provider, sources));
+    if (requiresProviderAuth(true, hasCreds, isCustomProvider)) {
       setShowAuthPanel(true);
     }
   }, [selectedProviderId, providerSources, providers]);
@@ -340,7 +346,8 @@ export const ProvidersPage: React.FC = () => {
       try {
         // OpenChamber-only metadata endpoint: the SDK exposes provider data but
         // not local auth/source-file provenance used by this settings UI.
-        const response = await runtimeFetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source`, {
+        const query = settingsDirectory ? `?directory=${encodeURIComponent(settingsDirectory)}` : '';
+        const response = await runtimeFetch(`/api/provider/${encodeURIComponent(selectedProviderId)}/source${query}`, {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -369,7 +376,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedProviderId, t]);
+  }, [selectedProviderId, settingsDirectory, t]);
 
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
@@ -430,7 +437,7 @@ export const ProvidersPage: React.FC = () => {
           ? (editingCustomScope ?? resolveProviderConfigScope(providerSources[editingCustomProviderId]))
           : 'user',
       });
-      const response = await runtimeFetch('/api/provider', {
+      const response = await runtimeFetch(`/api/provider${settingsDirectory ? `?directory=${encodeURIComponent(settingsDirectory)}` : ''}`, {
         method: 'PUT',
         headers: {
           Accept: 'application/json',
@@ -483,10 +490,13 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, {
-        method: 'DELETE',
-        headers: { Accept: 'application/json' },
-      });
+      const response = await runtimeFetch(
+        `/api/provider/${encodeURIComponent(providerId)}/auth?scope=all${settingsDirectory ? `&directory=${encodeURIComponent(settingsDirectory)}` : ''}`,
+        {
+          method: 'DELETE',
+          headers: { Accept: 'application/json' },
+        },
+      );
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -594,15 +604,9 @@ export const ProvidersPage: React.FC = () => {
                         </div>
                         <ScrollableOverlay outerClassName="max-h-[240px]" className="p-1">
                           {(() => {
-                            const query = providerSearchQuery.toLowerCase();
                             const customLabel = t('settings.providers.page.custom.optionLabel');
-                            const customMatches = !query
-                              || customLabel.toLowerCase().includes(query)
-                              || 'other'.includes(query)
-                              || 'custom'.includes(query);
-                            const filtered = unconnectedProviders.filter(p => {
-                              return (p.name || p.id).toLowerCase().includes(query) || p.id.toLowerCase().includes(query);
-                            });
+                            const customMatches = matchesRankQuery([customLabel, 'other', 'custom'], providerSearchQuery);
+                            const filtered = rankByQuery(unconnectedProviders, providerSearchQuery, (p) => [p.name || p.id, p.id]);
                             if (filtered.length === 0 && !customMatches) {
                               return <p className="py-4 text-center typography-meta text-muted-foreground">{t('settings.providers.page.connect.noProvidersFound')}</p>;
                             }
@@ -773,19 +777,20 @@ export const ProvidersPage: React.FC = () => {
   const hasStoredAuth = Boolean(selectedSources?.auth.exists);
   const hasEnvCredentials = providerEnv.length > 0;
   const hasCredentials = hasStoredAuth || hasEnvCredentials;
-  const authStatusIncomplete = sourcesLoaded && !hasCredentials;
-  const showModelsSection = providerModels.length > 0 && (!sourcesLoaded || hasCredentials);
+  const authStatusIncomplete = requiresProviderAuth(
+    sourcesLoaded,
+    hasCredentials,
+    isEditableCustomProvider,
+  );
+  const showModelsSection = providerModels.length > 0 && !authStatusIncomplete;
   const incompleteAuthHint = !showApiKeyAuth && oauthAuthMethods.length > 0
     ? t('settings.providers.page.auth.useReconnectHint')
     : t('settings.providers.page.auth.incompleteHint');
 
-  const filteredModels = providerModels.filter((model) => {
-    const name = typeof model?.name === 'string' ? model.name : '';
-    const id = typeof model?.id === 'string' ? model.id : '';
-    const query = modelQuery.trim().toLowerCase();
-    if (!query) return true;
-    return name.toLowerCase().includes(query) || id.toLowerCase().includes(query);
-  });
+  const filteredModels = rankByQuery(providerModels, modelQuery, (model) => [
+    typeof model?.name === 'string' ? model.name : '',
+    typeof model?.id === 'string' ? model.id : '',
+  ]);
 
   if (isCustomEditMode && isEditableCustomProvider && editingCustomFormInitial) {
     return (

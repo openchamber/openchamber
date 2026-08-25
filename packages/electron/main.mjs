@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
+import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
@@ -31,6 +32,7 @@ import {
   setLinuxAutostartEnabled,
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
+import { shouldAllowBrowserPanelCertificateError } from './browser-panel-security.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
@@ -559,10 +561,15 @@ const writeJsonFile = async (filePath, data) => {
   // Atomic: write to a temp file then rename. Readers never see a partial
   // JSON file that could parse-error and get coerced to {}.
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
-  if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
-  await fsp.rename(tmp, filePath);
-  if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
+  try {
+    await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+    if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
+    await replaceFileWithRetry(tmp, filePath);
+    if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
+  } catch (error) {
+    await fsp.rm(tmp, { force: true }).catch(() => {});
+    throw error;
+  }
 };
 
 const readSettingsRoot = () => {
@@ -1186,6 +1193,15 @@ const resolveBrowserPanelContents = (rawId) => {
 const hardenBrowserPanelSession = () => {
   const panelSession = session.fromPartition(BROWSER_PANEL_PARTITION);
 
+  app.on('certificate-error', (event, contents, url, error, _certificate, callback) => {
+    if (contents.session === panelSession && shouldAllowBrowserPanelCertificateError({ url, error })) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+
   panelSession.setPermissionRequestHandler((_contents, permission, callback, details) => {
     log.info('[electron] browser panel denied a permission request', {
       permission,
@@ -1224,7 +1240,15 @@ const registerPackagedUiProtocol = () => {
         if (filePath.endsWith('.html')) {
           const html = await fsp.readFile(filePath, 'utf8');
           const body = injectRuntimeConfigIntoHtml(html);
-          return new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+          // index.html must never be cached: it names the hashed asset
+          // bundles, and a cached copy keeps a freshly installed build
+          // loading the previous version's UI from the renderer disk cache.
+          return new Response(body, {
+            headers: {
+              'Content-Type': 'text/html; charset=utf-8',
+              'Cache-Control': 'no-store',
+            },
+          });
         }
         return electronNet.fetch(pathToFileURL(filePath).toString());
       }
@@ -2455,6 +2479,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
   browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__ocTitleBarOverlayEnabled = titleBarOverlayEnabled;
+  browserWindow.on('app-command', (event, command) => {
+    if (command === 'browser-backward') event.preventDefault();
+  });
 
   if (useSaved && saved.maximized) {
     browserWindow.maximize();

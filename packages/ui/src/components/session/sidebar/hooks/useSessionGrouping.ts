@@ -1,3 +1,4 @@
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -44,7 +45,7 @@ export const useSessionGrouping = (args: Args) => {
       }
 
       return nodes.flatMap((node) => {
-        const nodeMatches = buildSessionSearchText(node.session).includes(query);
+        const nodeMatches = matchesRankQuery([buildSessionSearchText(node.session)], query);
         if (nodeMatches) {
           return [node];
         }

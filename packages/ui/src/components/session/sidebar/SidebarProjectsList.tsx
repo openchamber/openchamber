@@ -16,7 +16,6 @@ import type { SortableDragHandleProps } from './sortableItems';
 import { ProjectHeaderIdentity, SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
-import type { MainTab } from '@/stores/useUIStore';
 import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { Icon } from '@/components/icon/Icon';
@@ -37,6 +36,13 @@ type ProjectSection = {
 const TOP_FADE_MAX_SIZE = 48;
 const TOP_FADE_MIN_SIZE = 32;
 const TOP_FADE_CLEAR_MAX_SIZE = 24;
+type ActivitySectionKey = 'chats' | 'active-now';
+
+const readActivitySectionKey = (element: Element): ActivitySectionKey | null => {
+  const key = element.getAttribute('data-sidebar-activity-sentinel');
+  if (key === 'chats' || key === 'active-now') return key;
+  return null;
+};
 
 const getProjectLabel = (project: ProjectSection['project'], homeDirectory: string | null): string => (
   formatProjectLabel(
@@ -52,7 +58,11 @@ type Props = {
   hasSharedSessions?: boolean;
   sectionsForRender: ProjectSection[];
   projectSections: ProjectSection[];
+  projectPickerSections: ProjectSection[];
   activeProjectId: string | null;
+  singleProjectMode: boolean;
+  singleProjectId: string | null;
+  setSingleProjectId: (id: string) => void;
   showOnlyMainWorkspace: boolean;
   hasSessionSearchQuery: boolean;
   emptyState: React.ReactNode;
@@ -80,7 +90,6 @@ type Props = {
   alwaysShowActions: boolean;
   toggleProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
-  setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
   openNewWorktreeDialog: () => void;
@@ -98,7 +107,7 @@ type Props = {
 function SidebarProjectsListComponent(props: Props): React.ReactNode {
   streamPerfCount('ui.sidebar_projects_list.render');
   const { t } = useI18n();
-  const enableStickyFade = props.isDesktopShellRuntime && props.stickyZoneHeaders;
+  const enableStickyFade = props.isDesktopShellRuntime && props.stickyZoneHeaders && !props.singleProjectMode;
   const projectSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -106,6 +115,21 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
   const groupSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
+  const selectedSingleProjectSection = props.singleProjectMode
+    ? props.sectionsForRender.find((section) => section.project.id === props.singleProjectId)
+    : null;
+  const renderedProjectSections = props.singleProjectMode
+    ? (selectedSingleProjectSection ? [selectedSingleProjectSection] : [])
+    : props.sectionsForRender;
+  const projectPickerOptions = React.useMemo(() => props.projectPickerSections.map((section) => ({
+    id: section.project.id,
+    projectLabel: getProjectLabel(section.project, props.homeDirectory),
+    projectDescription: formatPathForDisplay(section.project.normalizedPath, props.homeDirectory),
+    projectIcon: section.project.icon,
+    projectColor: section.project.color,
+    projectIconImage: section.project.iconImage,
+    projectIconBackground: section.project.iconBackground,
+  })), [props.homeDirectory, props.projectPickerSections]);
 
   // Memoize getOrderedGroups per project so downstream consumers see a stable
   // array reference while inputs are unchanged (avoids O(P) fresh arrays per
@@ -135,6 +159,7 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
   // can resolve the scrolling ancestor synchronously (no getComputedStyle
   // walk) and skip the cost of a style recalc on every render.
   const scrollContainerRef = React.useRef<HTMLElement | null>(null);
+  const [leadingActivitySection, setLeadingActivitySection] = React.useState<ActivitySectionKey>('chats');
   // Keep per-scroll measurements out of React state so the interaction guard
   // can read the current fade boundary without rerendering the sidebar.
   const topFadeSizeRef = React.useRef(0);
@@ -161,12 +186,44 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
     event.preventDefault();
     event.stopPropagation();
   }, []);
-  const hasProjectScroller = props.projectSections.length > 0 && props.sectionsForRender.length > 0;
+  const hasProjectScroller = props.projectSections.length > 0 && renderedProjectSections.length > 0;
   React.useLayoutEffect(() => {
     if (enableStickyFade && hasProjectScroller && scrollContainerRef.current) {
       syncTopFade(scrollContainerRef.current);
     }
   }, [enableStickyFade, hasProjectScroller, syncTopFade]);
+  React.useEffect(() => {
+    const root = scrollContainerRef.current;
+    if (!enableStickyFade || !root || !props.hasSharedSessions) return;
+
+    const sentinels = Array.from(root.querySelectorAll<HTMLElement>('[data-sidebar-activity-sentinel]'));
+    if (sentinels.length === 0) return;
+    const stuckSections = new Set<ActivitySectionKey>();
+    const syncLeadingSection = (): void => {
+      let nextSection = sentinels[0] ? readActivitySectionKey(sentinels[0]) : null;
+      for (const sentinel of sentinels) {
+        const key = readActivitySectionKey(sentinel);
+        if (key && stuckSections.has(key)) nextSection = key;
+      }
+      if (nextSection) setLeadingActivitySection((current) => current === nextSection ? current : nextSection);
+    };
+    const observer = new IntersectionObserver((entries) => {
+      const rootTop = root.getBoundingClientRect().top;
+      for (const entry of entries) {
+        const key = readActivitySectionKey(entry.target);
+        if (!key) continue;
+        if (!entry.isIntersecting && entry.boundingClientRect.top < (entry.rootBounds?.top ?? rootTop)) {
+          stuckSections.add(key);
+        } else {
+          stuckSections.delete(key);
+        }
+      }
+      syncLeadingSection();
+    }, { root, threshold: 0 });
+    sentinels.forEach((sentinel) => observer.observe(sentinel));
+    syncLeadingSection();
+    return () => observer.disconnect();
+  }, [enableStickyFade, props.hasSharedSessions, props.topContent]);
   let stuckProject: ProjectSection['project'] | null = null;
   for (const section of props.projectSections) {
     if (props.stuckProjectHeaders.has(section.project.id)) {
@@ -180,7 +237,7 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
   // ready in the same frame; the observer then corrects it. When shared sessions
   // lead the list, the Recent fallback below owns the top instead of a project.
   const leadingProject =
-    stuckProject ?? (props.hasSharedSessions ? null : props.sectionsForRender[0]?.project ?? null);
+    stuckProject ?? (props.hasSharedSessions ? null : renderedProjectSections[0]?.project ?? null);
   const leadingProjectLabel = leadingProject ? getProjectLabel(leadingProject, props.homeDirectory) : null;
 
   if (props.sharedSessionsOnly) {
@@ -271,20 +328,20 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
             props.reorderProjects(oldIndex, newIndex);
           }}
         >
-          <SortableContext items={props.sectionsForRender.map((section) => section.project.id)} strategy={verticalListSortingStrategy}>
-            {props.sectionsForRender.map((section) => {
+          <SortableContext items={renderedProjectSections.map((section) => section.project.id)} strategy={verticalListSortingStrategy}>
+            {renderedProjectSections.map((section) => {
               const project = section.project;
               const projectKey = project.id;
               const projectLabel = getProjectLabel(project, props.homeDirectory);
               const projectDescription = formatPathForDisplay(project.normalizedPath, props.homeDirectory);
-              const isCollapsed = props.collapsedProjects.has(projectKey);
+              const isCollapsed = props.singleProjectMode ? false : props.collapsedProjects.has(projectKey);
               const isRepo = props.projectRepoStatus.get(projectKey);
 
               return (
                 <SortableProjectItem
                   key={projectKey}
                   id={projectKey}
-                  disabled={props.projectSortOrder !== 'manual'}
+                  disabled={props.singleProjectMode || props.projectSortOrder !== 'manual'}
                   projectLabel={projectLabel}
                   projectDescription={projectDescription}
                   projectIcon={project.icon}
@@ -298,10 +355,11 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
                   mobileVariant={props.mobileVariant}
                   alwaysShowActions={props.alwaysShowActions}
                   statusIndicator={isCollapsed ? props.renderProjectStatusIndicator?.(projectKey, section.groups) : null}
-                  onToggle={() => props.toggleProject(projectKey)}
+                  onToggle={() => {
+                    if (!props.singleProjectMode) props.toggleProject(projectKey);
+                  }}
                   onNewSession={() => {
                     if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
-                    props.setActiveMainTab('chat');
                     if (props.mobileVariant) props.setSessionSwitcherOpen(false);
                     props.openNewSessionDraft({
                       selectedProjectId: projectKey,
@@ -310,7 +368,6 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
                   }}
                   onNewWorktreeSession={() => {
                     if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
-                    props.setActiveMainTab('chat');
                     props.openNewWorktreeDialog();
                   }}
                   onManageWorktrees={() => props.openWorktreesPage(projectKey)}
@@ -320,6 +377,8 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
                   showCreateButtons
                   openSidebarMenuKey={props.openSidebarMenuKey}
                   setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
+                  projectPickerOptions={props.singleProjectMode ? projectPickerOptions : undefined}
+                  onProjectSelect={props.singleProjectMode ? props.setSingleProjectId : undefined}
                 >
                   {!isCollapsed ? (
                     <div className="space-y-0 pt-0.5 pb-0.5">
@@ -393,9 +452,11 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
             />
           ) : (
             <>
-              <Icon name="history" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/80" />
+              <Icon name={leadingActivitySection === 'chats' ? 'chat-4' : 'history'} className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/80" />
               <span className="truncate text-[14px] font-semibold lowercase text-foreground">
-                {t('sessions.sidebar.activity.recentTitle')}
+                {t(leadingActivitySection === 'chats'
+                  ? 'sessions.sidebar.activity.chatsTitle'
+                  : 'sessions.sidebar.activity.recentTitle')}
               </span>
             </>
           )}

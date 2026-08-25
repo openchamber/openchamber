@@ -26,6 +26,8 @@ type Props = {
   /** Null on a new-session draft: repository readouts still apply. */
   sessionId: string | null;
   directory: string | null;
+  /** Managed Chats have no project repository, even if another project remains active. */
+  repositoryEnabled?: boolean;
   /** Whether the panel should currently occupy space. */
   visible: boolean;
   /**
@@ -63,7 +65,7 @@ const PANEL_TRANSITION_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
  * eat a visible slice of every row's trailing value, and the shadows already
  * say there is more to see.
  */
-export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, overlay = false }) => {
+export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, repositoryEnabled = true, overlay = false }) => {
   const { t } = useI18n();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
   const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
@@ -248,7 +250,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           sessionId={sessionId}
           directory={directory}
           showSession={sectionVisible('session')}
-          showRepository={sectionVisible('repository')}
+          showRepository={repositoryEnabled && sectionVisible('repository')}
           goalRow={<WorkStatusGoalRow sessionId={sessionId} directory={directory} />}
         />
         {sectionVisible('usage') ? <WorkStatusUsageSection /> : null}

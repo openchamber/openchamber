@@ -29,6 +29,9 @@ export const createSettingsHelpers = (dependencies) => {
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
   const TERMINAL_SHELL_VALUES = new Set(['auto', 'bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu']);
+  const SIDEBAR_PROJECT_DISPLAY_MODE_VALUES = new Set(['all', 'single']);
+  const SIDEBAR_SESSION_GROUPING_MODE_VALUES = new Set(['by-worktree', 'flat']);
+  const SIDEBAR_PROJECT_SORT_ORDER_VALUES = new Set(['manual', 'a-z', 'z-a', 'date-added', 'recent']);
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
@@ -242,6 +245,18 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
       result.activeProjectId = candidate.activeProjectId;
+    }
+    if (SIDEBAR_PROJECT_DISPLAY_MODE_VALUES.has(candidate.sidebarProjectDisplayMode)) {
+      result.sidebarProjectDisplayMode = candidate.sidebarProjectDisplayMode;
+    }
+    if (SIDEBAR_SESSION_GROUPING_MODE_VALUES.has(candidate.sidebarSessionGroupingMode)) {
+      result.sidebarSessionGroupingMode = candidate.sidebarSessionGroupingMode;
+    }
+    if (SIDEBAR_PROJECT_SORT_ORDER_VALUES.has(candidate.sidebarProjectSortOrder)) {
+      result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
+    }
+    if (typeof candidate.sidebarShowRecentSection === 'boolean') {
+      result.sidebarShowRecentSection = candidate.sidebarShowRecentSection;
     }
 
     if (Array.isArray(candidate.securityScopedBookmarks)) {

@@ -11,6 +11,7 @@ import { computeCacheHitRate } from '@/stores/utils/tokenUtils';
 import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { formatMoney } from '@/lib/money';
 import {
   derivePartsLabel,
   deriveUserSnippet,
@@ -235,16 +236,6 @@ const computeContextBreakdown = (
 };
 
 const formatNumber = (value: number): string => value.toLocaleString(getCurrentIntlLocale());
-
-const formatMoney = (value: number): string => {
-  if (!Number.isFinite(value) || value <= 0) return new Intl.NumberFormat(getCurrentIntlLocale(), { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(0);
-  return new Intl.NumberFormat(getCurrentIntlLocale(), {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: value < 0.01 ? 4 : 2,
-    maximumFractionDigits: value < 0.01 ? 4 : 2,
-  }).format(value);
-};
 
 const formatDateTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference): string => {
   if (!timestamp || !Number.isFinite(timestamp)) return '-';

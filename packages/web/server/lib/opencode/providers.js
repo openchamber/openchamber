@@ -9,6 +9,11 @@ import {
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 const BASE_URL_PATTERN = /^https?:\/\//;
 const OPENAI_COMPATIBLE_NPM = '@ai-sdk/openai-compatible';
+const CUSTOM_PROVIDER_NPM_PACKAGES = new Set([
+  OPENAI_COMPATIBLE_NPM,
+  '@ai-sdk/openai',
+  '@ai-sdk/anthropic',
+]);
 
 function getProviderSources(providerId, workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
@@ -42,7 +47,7 @@ function getProviderSources(providerId, workingDirectory) {
 }
 
 /**
- * Validate a custom OpenAI-compatible provider config payload before persistence.
+ * Validate a custom provider config payload before persistence.
  * Returns { ok: true, value } or { ok: false, error }.
  *
  * Credentials: either config.env contains a variable name, or hasStoredAuth is true
@@ -63,8 +68,8 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
   }
 
   const npm = typeof config.npm === 'string' ? config.npm.trim() : OPENAI_COMPATIBLE_NPM;
-  if (npm !== OPENAI_COMPATIBLE_NPM) {
-    return { ok: false, error: `Custom providers must use npm package ${OPENAI_COMPATIBLE_NPM}` };
+  if (!CUSTOM_PROVIDER_NPM_PACKAGES.has(npm)) {
+    return { ok: false, error: 'Custom providers must use @ai-sdk/openai-compatible, @ai-sdk/openai, or @ai-sdk/anthropic' };
   }
 
   const optionsBlock = isPlainObject(config.options) ? config.options : null;
@@ -102,7 +107,7 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
   }
 
   const normalized = {
-    npm: OPENAI_COMPATIBLE_NPM,
+    npm,
     name,
     options: {
       baseURL,

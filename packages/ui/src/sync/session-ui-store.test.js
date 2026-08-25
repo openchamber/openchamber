@@ -10,6 +10,7 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -199,6 +200,47 @@ describe('session-worktree-store worktree routing', () => {
   });
 });
 
+describe('draft materialization transition identity', () => {
+  beforeEach(() => {
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      materializedDraftSessionId: null,
+      newSessionDraft: { open: true, target: 'project', directoryOverride: '/projects/alpha' },
+    });
+  });
+
+  test('marks and consumes only the submitted draft session', () => {
+    useSessionUIStore.getState().setCurrentSession(
+      'session-created',
+      '/projects/alpha',
+      'submitted-draft',
+    );
+
+    expect(useSessionUIStore.getState().materializedDraftSessionId).toBe('session-created');
+
+    useSessionUIStore.getState().clearMaterializedDraftSession('another-session');
+    expect(useSessionUIStore.getState().materializedDraftSessionId).toBe('session-created');
+
+    useSessionUIStore.getState().clearMaterializedDraftSession('session-created');
+    expect(useSessionUIStore.getState().materializedDraftSessionId).toBeNull();
+  });
+
+  test('clears the marker when navigating from a draft to an existing session', () => {
+    useSessionUIStore.getState().setCurrentSession(
+      'session-created',
+      '/projects/alpha',
+      'submitted-draft',
+    );
+    useSessionUIStore.setState({
+      newSessionDraft: { open: true, target: 'project', directoryOverride: '/projects/alpha' },
+    });
+    useSessionUIStore.getState().setCurrentSession('session-existing', '/projects/alpha');
+
+    expect(useSessionUIStore.getState().materializedDraftSessionId).toBeNull();
+  });
+});
+
 describe('routeMessage directory scoping', () => {
   test('runs sends in the provided session directory', async () => {
     // The session directory travels as an explicit request param (not via
@@ -370,16 +412,17 @@ describe('openNewSessionDraft project binding', () => {
     useDirectoryStore.getState().setDirectory(projectB.path, { showOverlay: false });
   });
 
-  test('keeps implicit draft on current directory when active project differs', () => {
+  test('defaults an implicit draft to Chat when active project differs', () => {
     useSessionUIStore.getState().openNewSessionDraft();
     const draft = useSessionUIStore.getState().newSessionDraft;
 
     expect(draft.open).toBe(true);
-    expect(draft.selectedProjectId).toBe(projectB.id);
-    expect(draft.directoryOverride).toBe(projectB.path);
+    expect(draft.target).toBe('chat');
+    expect(draft.selectedProjectId).toBeNull();
+    expect(draft.directoryOverride).toBeNull();
   });
 
-  test('does not attach active project when current directory is unmatched', () => {
+  test('defaults an implicit draft to Chat when current directory is unmatched', () => {
     useDirectoryStore.getState().setDirectory('/external/worktree', { showOverlay: false });
 
     useSessionUIStore.getState().openNewSessionDraft();
@@ -387,7 +430,8 @@ describe('openNewSessionDraft project binding', () => {
 
     expect(draft.open).toBe(true);
     expect(draft.selectedProjectId).toBeNull();
-    expect(draft.directoryOverride).toBe('/external/worktree');
+    expect(draft.target).toBe('chat');
+    expect(draft.directoryOverride).toBeNull();
   });
 
   test('respects explicit directoryOverride over active project', () => {
@@ -464,7 +508,7 @@ describe('createSession draft lifecycle', () => {
     useDirectoryStore.getState().setDirectory('/private/deleted-worktree', { showOverlay: false });
     opencodeClient.getDirectoryAvailability = async () => 'missing';
 
-    useSessionUIStore.getState().openNewSessionDraft();
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: '/private/deleted-worktree' });
     await Bun.sleep(0);
 
     expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe('/projects/main');
@@ -482,7 +526,7 @@ describe('createSession draft lifecycle', () => {
       activeProjectId: 'project-active',
     });
     useDirectoryStore.getState().setDirectory('/private/deleted-worktree', { showOverlay: false });
-    useSessionUIStore.getState().openNewSessionDraft();
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: '/private/deleted-worktree' });
     opencodeClient.getDirectoryAvailability = async () => 'missing';
     opencodeClient.createSession = async (_params, directory) => {
       createSessionCalls.push(directory);
@@ -542,7 +586,7 @@ describe('createSession draft lifecycle', () => {
       activeProjectId: 'project-main',
     });
     useDirectoryStore.getState().setDirectory('/private/unavailable-worktree', { showOverlay: false });
-    useSessionUIStore.getState().openNewSessionDraft();
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: '/private/unavailable-worktree' });
     opencodeClient.getDirectoryAvailability = async () => 'unknown';
     opencodeClient.createSession = async (_params, directory) => {
       createSessionCalls.push(directory);
@@ -571,7 +615,7 @@ describe('createSession draft lifecycle', () => {
       return { id: 'session-race', directory };
     };
 
-    useSessionUIStore.getState().openNewSessionDraft();
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: '/private/deleted-worktree' });
     const createPromise = useSessionUIStore.getState().createSession('Draft title', '/private/deleted-worktree');
     expect(availabilityResolvers.length).toBe(2);
 
@@ -654,9 +698,19 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
       currentSessionDirectory: null,
       newSessionDraft: { open: false, directoryOverride: null, parentID: null },
     });
+    useProjectsStore.setState({ projects: [], activeProjectId: null });
+    useSessionDisplayStore.setState({ singleProjectId: null });
   });
 
   test('draft send snapshots the draft; switching to another project mid-flight still targets the materialized session', async () => {
+    useProjectsStore.setState({
+      projects: [
+        { id: 'project-alpha', path: '/projects/alpha', label: 'Alpha' },
+        { id: 'project-beta', path: '/projects/beta', label: 'Beta' },
+      ],
+      activeProjectId: 'project-alpha',
+    });
+    useSessionDisplayStore.setState({ singleProjectId: 'project-alpha' });
     const draftSnapshot = {
       open: true,
       directoryOverride: '/projects/alpha',
@@ -684,6 +738,7 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
 
     // A sidebar switch while the send is still in flight must not reroute it.
     useSessionUIStore.getState().setCurrentSession('session-project-b', '/projects/beta');
+    expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-beta');
 
     await sendPromise;
 
@@ -692,6 +747,7 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].id).toBe('session-materialized');
     expect(sendMessageCalls[0].directory).toBe('/projects/alpha');
+    expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-alpha');
   });
 
   test('existing-session send keeps the submit-time target even when selection changes', async () => {

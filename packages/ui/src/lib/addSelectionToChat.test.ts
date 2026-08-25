@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 
 const focusChatInputCalls: number[] = [];
 const pendingInputCalls: Array<{ text: string | null; mode?: string }> = [];
-const activeMainTabCalls: string[] = [];
+const activeSurfaceCalls: string[] = [];
 const sessionSwitcherCalls: boolean[] = [];
 const codeMirrorDispatches: Array<{ selection: { anchor: number } }> = [];
 
@@ -41,8 +41,8 @@ mock.module('@/sync/input-store', () => ({
 mock.module('@/stores/useUIStore', () => ({
   useUIStore: {
     getState: () => ({
-      setActiveMainTab: (tab: string) => {
-        activeMainTabCalls.push(tab);
+      setActiveSurface: (tab: string) => {
+        activeSurfaceCalls.push(tab);
       },
       setSessionSwitcherOpen: (open: boolean) => {
         sessionSwitcherCalls.push(open);
@@ -86,7 +86,7 @@ const installSelectionEnvironment = (options: {
 const clearCalls = () => {
   focusChatInputCalls.length = 0;
   pendingInputCalls.length = 0;
-  activeMainTabCalls.length = 0;
+  activeSurfaceCalls.length = 0;
   sessionSwitcherCalls.length = 0;
   codeMirrorDispatches.length = 0;
   codeMirrorView = null;
@@ -262,7 +262,7 @@ describe('addSelectionToChat', () => {
     installSelectionEnvironment({ activeElement: textarea });
 
     expect(addSelectionToChat()).toBe(true);
-    expect(activeMainTabCalls).toEqual(['chat']);
+    expect(activeSurfaceCalls).toEqual(['chat']);
     expect(sessionSwitcherCalls).toEqual([false]);
     expect(pendingInputCalls).toEqual([{ text: '```md\nselected\n```', mode: 'append' }]);
 
@@ -290,7 +290,7 @@ describe('addSelectionToChat', () => {
 
     expect(addSelectionToChat()).toBe(false);
     expect(pendingInputCalls).toEqual([]);
-    expect(activeMainTabCalls).toEqual(['chat']);
+    expect(activeSurfaceCalls).toEqual(['chat']);
 
     await Promise.resolve();
     expect(focusChatInputCalls.length).toBe(1);

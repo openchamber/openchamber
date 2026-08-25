@@ -168,7 +168,6 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, projectPl
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const gitDirectories = useGitStore((state) => state.directories);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
-  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const runtimeApis = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
@@ -579,10 +578,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, projectPl
   }, []);
 
   const routeToChat = React.useCallback(() => {
-    setActiveMainTab('chat');
     setSessionSwitcherOpen(false);
     onNavigatedToChat?.();
-  }, [onNavigatedToChat, setActiveMainTab, setSessionSwitcherOpen]);
+  }, [onNavigatedToChat, setSessionSwitcherOpen]);
 
   const handleConfirmPlanSend = React.useCallback(
     async (execution: TodoSendExecution) => {

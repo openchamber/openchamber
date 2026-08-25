@@ -4,7 +4,7 @@ import type { GitHubPullRequestStatus, RuntimeAPIs } from "@/lib/api/types"
 let runtimeKey = "runtime-a"
 mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => runtimeKey }))
 
-const { getGitHubPrStatusKey, useGitHubPrStatusStore } = await import("./useGitHubPrStatusStore")
+const { getFreshestPrStatusForBranch, getGitHubPrStatusKey, useGitHubPrStatusStore } = await import("./useGitHubPrStatusStore")
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void
@@ -36,6 +36,34 @@ describe("GitHub PR status cache ownership", () => {
     const originB = getGitHubPrStatusKey("/repo", "main", "origin")
 
     expect(new Set([originA, upstreamA, originB]).size).toBe(3)
+  })
+
+  test("passive branch readers follow the freshest remote-keyed status", () => {
+    const automatic = getGitHubPrStatusKey("/repo", "feature")
+    const origin = getGitHubPrStatusKey("/repo", "feature", "origin")
+    useGitHubPrStatusStore.getState().ensureEntry(automatic)
+    useGitHubPrStatusStore.getState().ensureEntry(origin)
+    useGitHubPrStatusStore.getState().updateStatus(automatic, () => ({
+      connected: true,
+      pr: { number: 7, title: "old", url: "u7", state: "open", draft: false, base: "main", head: "feature" },
+      checks: { state: "pending", total: 3, success: 1, failure: 0, pending: 2 },
+    }))
+    useGitHubPrStatusStore.getState().updateStatus(origin, () => ({
+      connected: true,
+      pr: { number: 7, title: "current", url: "u7", state: "open", draft: false, base: "main", head: "feature" },
+      checks: { state: "success", total: 3, success: 3, failure: 0, pending: 0 },
+    }))
+    useGitHubPrStatusStore.setState((state) => ({
+      entries: {
+        ...state.entries,
+        [automatic]: { ...state.entries[automatic], lastRefreshAt: 1 },
+        [origin]: { ...state.entries[origin], lastRefreshAt: 2 },
+      },
+    }))
+
+    const freshest = getFreshestPrStatusForBranch(useGitHubPrStatusStore.getState().entries, "/repo", "feature")
+    expect(freshest?.pr?.title).toBe("current")
+    expect(freshest?.checks?.pending).toBe(0)
   })
 
   test("rejects a response after params change", async () => {
