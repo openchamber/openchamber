@@ -20,6 +20,26 @@ describe("useProjectsStore settings synchronization", () => {
   })
 })
 
+describe("useProjectsStore selection identity", () => {
+  test("changes only the active project id", () => {
+    const first = { id: "project-a", path: "/repo-a", lastOpenedAt: 10 } as ProjectEntry
+    const second = { id: "project-b", path: "/repo-b", lastOpenedAt: 20 } as ProjectEntry
+    const projects = [first, second]
+    useProjectsStore.setState({
+      projects,
+      activeProjectId: first.id,
+      manualProjectOrder: projects.map((project) => project.id),
+    })
+
+    useProjectsStore.getState().setActiveProjectIdOnly(second.id)
+
+    const state = useProjectsStore.getState()
+    expect(state.activeProjectId).toBe(second.id)
+    expect(state.projects).toBe(projects)
+    expect(state.projects.map((project) => project.lastOpenedAt)).toEqual([10, 20])
+  })
+})
+
 describe("useProjectsStore default model and thinking level", () => {
   const seed = (project: ProjectEntry) => {
     useProjectsStore.setState({

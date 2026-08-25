@@ -262,7 +262,7 @@ describe('addSelectionToChat', () => {
     installSelectionEnvironment({ activeElement: textarea });
 
     expect(addSelectionToChat()).toBe(true);
-    expect(activeSurfaceCalls).toEqual(['chat']);
+    expect(activeSurfaceCalls).toEqual([]);
     expect(sessionSwitcherCalls).toEqual([false]);
     expect(pendingInputCalls).toEqual([{ text: '```md\nselected\n```', mode: 'append' }]);
 
@@ -290,7 +290,7 @@ describe('addSelectionToChat', () => {
 
     expect(addSelectionToChat()).toBe(false);
     expect(pendingInputCalls).toEqual([]);
-    expect(activeSurfaceCalls).toEqual(['chat']);
+    expect(activeSurfaceCalls).toEqual([]);
 
     await Promise.resolve();
     expect(focusChatInputCalls.length).toBe(1);

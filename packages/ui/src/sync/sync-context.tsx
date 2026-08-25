@@ -37,7 +37,8 @@ import { setActionRefs } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
 import { useSessionUIStore } from "./session-ui-store"
 import { stripSessionDiffSnapshots } from "./sanitize"
-import { applySessionEventToGlobalSessions } from "./session-event-router"
+import { upsertSessionRecord } from "./session-records"
+import { applySessionEventToGlobalSessions, applySessionEventsToGlobalSessions } from "./session-event-router"
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 import { messagesBefore } from "./message-ordering"
@@ -52,7 +53,12 @@ import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
-import { applyGlobalSessionStatusEvent, applyGlobalSessionStatusSnapshot, useGlobalSessionStatusStore } from "./global-session-status"
+import {
+  applyGlobalSessionStatusEvent,
+  applyGlobalSessionStatusEvents,
+  applyGlobalSessionStatusSnapshot,
+  useGlobalSessionStatusStore,
+} from "./global-session-status"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
@@ -86,22 +92,29 @@ import {
 // Context
 // ---------------------------------------------------------------------------
 
-type SyncSystem = {
+type SyncRuntime = {
   childStores: ChildStoreManager
   messageLoader: SessionMessageLoader
   runtimeKey: string
   sdk: OpencodeClient
+}
+
+type SyncSystem = SyncRuntime & {
   directory: string
 }
 
 const SYNC_CONTEXT_GLOBAL_KEY = "__openchamber_sync_context__"
+const SYNC_RUNTIME_CONTEXT_GLOBAL_KEY = "__openchamber_sync_runtime_context__"
 type SyncGlobal = typeof globalThis & {
   [SYNC_CONTEXT_GLOBAL_KEY]?: React.Context<SyncSystem | null>
+  [SYNC_RUNTIME_CONTEXT_GLOBAL_KEY]?: React.Context<SyncRuntime | null>
 }
 
 const syncGlobal = globalThis as SyncGlobal
 const SyncContext = syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] ?? createContext<SyncSystem | null>(null)
 syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] = SyncContext
+const SyncRuntimeContext = syncGlobal[SYNC_RUNTIME_CONTEXT_GLOBAL_KEY] ?? createContext<SyncRuntime | null>(null)
+syncGlobal[SYNC_RUNTIME_CONTEXT_GLOBAL_KEY] = SyncRuntimeContext
 
 type SdkResult<T> = {
   data?: T
@@ -137,6 +150,12 @@ function useSyncSystem() {
   return ctx
 }
 
+export function useSyncRuntime() {
+  const ctx = useContext(SyncRuntimeContext)
+  if (!ctx) throw new Error("useSyncRuntime must be used within <SyncProvider>")
+  return ctx
+}
+
 function getLiveStates(childStores: ChildStoreManager): State[] {
   return Array.from(childStores.children.values(), (store) => store.getState())
 }
@@ -147,25 +166,42 @@ function useLiveSyncSelector<T>(
   subscribe?: (childStores: ChildStoreManager, notify: () => void) => () => void,
 ): T {
   const { childStores } = useSyncSystem()
-  const cacheRef = useRef<T | undefined>(undefined)
-  const initializedRef = useRef(false)
+  const sourceRevisionRef = useRef(0)
+  const cacheRef = useRef<{
+    childStores: ChildStoreManager
+    selector: (states: State[]) => T
+    revision: number
+    value: T
+  } | null>(null)
 
   const getSnapshot = useCallback(() => {
-    const next = selector(getLiveStates(childStores))
-    if (initializedRef.current && isEqual(cacheRef.current as T, next)) {
-      return cacheRef.current as T
+    const cached = cacheRef.current
+    if (
+      cached
+      && cached.childStores === childStores
+      && cached.selector === selector
+      && cached.revision === sourceRevisionRef.current
+    ) {
+      return cached.value
     }
-
-    cacheRef.current = next
-    initializedRef.current = true
-    return next
+    const next = selector(getLiveStates(childStores))
+    const value = cached && isEqual(cached.value, next) ? cached.value : next
+    cacheRef.current = { childStores, selector, revision: sourceRevisionRef.current, value }
+    return value
   }, [childStores, isEqual, selector])
 
+  const subscribeToSource = useCallback((notify: () => void) => {
+    const invalidate = () => {
+      sourceRevisionRef.current += 1
+      notify()
+    }
+    // Force the post-subscribe snapshot to close the read-before-subscribe gap.
+    sourceRevisionRef.current += 1
+    return subscribe ? subscribe(childStores, invalidate) : childStores.subscribeAll(invalidate)
+  }, [childStores, subscribe])
+
   return React.useSyncExternalStore(
-    useCallback(
-      (notify) => subscribe ? subscribe(childStores, notify) : childStores.subscribeAll(notify),
-      [childStores, subscribe],
-    ),
+    subscribeToSource,
     getSnapshot,
     getSnapshot,
   )
@@ -181,12 +217,16 @@ type DirectoryEventBatch = {
   states: Map<StoreApi<DirectoryStore>, DirectoryStore>
   clonedFields: Map<StoreApi<DirectoryStore>, Set<keyof State>>
   changedStores: Set<StoreApi<DirectoryStore>>
+  globalSessionEvents: Event[]
+  globalStatusEventsByDirectory: Map<string, Event[]>
 }
 
 const createDirectoryEventBatch = (): DirectoryEventBatch => ({
   states: new Map(),
   clonedFields: new Map(),
   changedStores: new Set(),
+  globalSessionEvents: [],
+  globalStatusEventsByDirectory: new Map(),
 })
 
 const getDirectoryEventState = (
@@ -195,6 +235,10 @@ const getDirectoryEventState = (
 ): DirectoryStore => batch?.states.get(store) ?? store.getState()
 
 const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
+  applySessionEventsToGlobalSessions(batch.globalSessionEvents)
+  for (const [directory, events] of batch.globalStatusEventsByDirectory) {
+    applyGlobalSessionStatusEvents(directory, events)
+  }
   for (const store of batch.changedStores) {
     const state = batch.states.get(store)
     if (!state) continue
@@ -227,7 +271,10 @@ export function useAllSessionStatuses(): Record<string, SessionStatus> {
 
 export function useAllLiveSessions(): Session[] {
   return useLiveSyncSelector(
-    useCallback((states) => aggregateLiveSessions(states), []),
+    useCallback((states) => {
+      countSyncPerformance("liveSessionAggregateRuns")
+      return aggregateLiveSessions(states)
+    }, []),
     areSessionListsEquivalent,
     useCallback(
       (childStores: ChildStoreManager, notify: () => void) => childStores.subscribeAllSelected(
@@ -1408,28 +1455,13 @@ async function resyncDirectoryAfterReconnect(
 
     const nextSession = stripSessionDiffSnapshots(session)
     store.setState((state: DirectoryStore) => {
-      const sessionIndex = state.session.findIndex((item) => item.id === nextSession.id)
-      let sessions = state.session
-      let sessionChanged = false
+      const sessions = upsertSessionRecord(state.session, nextSession)
       let sessionTotal = state.sessionTotal
 
-      if (sessionIndex >= 0) {
-        if (!haveEquivalentSyncSnapshots(sessions[sessionIndex], nextSession)) {
-          sessions = [...state.session]
-          sessions[sessionIndex] = nextSession
-          sessionChanged = true
-        }
-      } else {
-        sessions = [...state.session]
-        sessions.push(nextSession)
-        sessions.sort((a, b) => cmp(a.id, b.id))
-        if (!nextSession.parentID) sessionTotal += 1
-        sessionChanged = true
-      }
-
-      if (!sessionChanged) {
+      if (sessions === state.session) {
         return state
       }
+      if (!state.session.some((item) => item.id === nextSession.id) && !nextSession.parentID) sessionTotal += 1
 
       return {
         session: sessions,
@@ -1455,6 +1487,7 @@ export function handleEvent(
   skipVSCodeAutoAccept = false,
   streamingDirectory?: string,
   batch?: DirectoryEventBatch,
+  globalEffectsAlreadyApplied = false,
 ) {
   if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
     const properties = (payload as unknown as { properties?: unknown }).properties
@@ -1483,12 +1516,19 @@ export function handleEvent(
     return
   }
 
-  applySessionEventToGlobalSessions(payload)
-  // Keep the cross-project status map current for ALL directories (mirrors the
-  // global-session handling above). Child stores remain the primary source for
-  // synced directories; this map covers sessions a child store doesn't list
-  // (unopened directories, or list/status races for just-created sessions).
-  applyGlobalSessionStatusEvent(directory, payload)
+  if (!globalEffectsAlreadyApplied) {
+    if (batch) {
+      batch.globalSessionEvents.push(payload)
+      const statusEvents = batch.globalStatusEventsByDirectory.get(directory)
+      if (statusEvents) statusEvents.push(payload)
+      else batch.globalStatusEventsByDirectory.set(directory, [payload])
+    } else {
+      applySessionEventToGlobalSessions(payload)
+      // Child stores remain the primary source for synced directories; this
+      // index covers unopened directories and list/status races.
+      applyGlobalSessionStatusEvent(directory, payload)
+    }
+  }
 
   // Global events
   if (directory === "global" || !directory) {
@@ -1571,7 +1611,17 @@ export function handleEvent(
         if (eventKey && pendingVSCodePermissionEvents.get(eventKey) !== eventToken) return
         if (eventKey) pendingVSCodePermissionEvents.delete(eventKey)
         if (expectedRuntimeKey !== getRuntimeKey()) return
-        if (!accepted) handleEvent(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, true, streamingDirectory)
+        if (!accepted) handleEvent(
+          rawDirectory,
+          payload,
+          childStores,
+          routingIndex,
+          expectedRuntimeKey,
+          true,
+          streamingDirectory,
+          undefined,
+          true,
+        )
       }
       void processVSCodePermissionAutoAccept(permission, resolvedDirectory).then(
         completePermissionCheck,
@@ -2024,15 +2074,13 @@ export function SyncProvider(props: {
   const pipelineHasConnectedRef = useRef(false)
   const pipelineDisconnectedBeforeFirstConnectRef = useRef(false)
 
+  const runtime = useMemo<SyncRuntime>(
+    () => ({ childStores, messageLoader, runtimeKey, sdk: props.sdk }),
+    [childStores, messageLoader, props.sdk, runtimeKey],
+  )
   const system = useMemo<SyncSystem>(
-    () => ({
-      childStores,
-      messageLoader,
-      runtimeKey,
-      sdk: props.sdk,
-      directory: props.directory,
-    }),
-    [childStores, messageLoader, props.sdk, props.directory, runtimeKey],
+    () => ({ ...runtime, directory: props.directory }),
+    [props.directory, runtime],
   )
 
   const triggerDirectoryResync = useCallback((directory: string, reason: SessionMaterializationReason) => {
@@ -2547,7 +2595,14 @@ export function SyncProvider(props: {
     return unsubscribe
   }, [props.directory, childStores])
 
-  return <SyncContext.Provider value={system}>{props.children}</SyncContext.Provider>
+  // Directory navigation must not republish stable runtime dependencies.
+  return (
+    <SyncContext.Provider value={system}>
+      <SyncRuntimeContext.Provider value={runtime}>
+        {props.children}
+      </SyncRuntimeContext.Provider>
+    </SyncContext.Provider>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -2832,13 +2887,25 @@ export function useScopedBlockingQuestions(sessionID: string | null, directory?:
   return useScopedBlockingRequests(sessionID, directory, selectQuestionRequestsBySession, EMPTY_QUESTION_REQUESTS)
 }
 
+const sessionsByIdCache = new WeakMap<State["session"], Map<string, Session>>()
+
+const getSessionById = (sessions: State["session"], sessionID?: string | null): Session | undefined => {
+  if (!sessionID) return undefined
+  let sessionsById = sessionsByIdCache.get(sessions)
+  if (!sessionsById) {
+    sessionsById = new Map(sessions.map((session) => [session.id, session]))
+    sessionsByIdCache.set(sessions, sessionsById)
+  }
+  return sessionsById.get(sessionID)
+}
+
 export function useParentSession(sessionID: string | null, directory?: string): Session | null {
   return useDirectorySync(
     useCallback((state: State) => {
       if (!sessionID) return null
-      const current = state.session.find((s) => s.id === sessionID)
+      const current = getSessionById(state.session, sessionID)
       if (!current?.parentID) return null
-      return state.session.find((s) => s.id === current.parentID)
+      return getSessionById(state.session, current.parentID)
         ?? getAllSyncSessions().find((s) => s.id === current.parentID)
         ?? null
     }, [sessionID]),
@@ -2851,7 +2918,8 @@ export function useSession(sessionID?: string | null, directory?: string) {
   const { childStores } = useSyncSystem()
   const getSnapshot = useCallback(() => {
     if (directory) {
-      return childStores.getChild(directory)?.getState().session.find((session) => session.id === sessionID)
+      const sessions = childStores.getChild(directory)?.getState().session
+      return sessions ? getSessionById(sessions, sessionID) : undefined
     }
     return findLiveSession(getLiveStates(childStores), sessionID)
   }, [childStores, directory, sessionID])

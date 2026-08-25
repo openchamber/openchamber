@@ -27,6 +27,13 @@ describe('useGlobalSessionsStore', () => {
       activeSessions: [],
       archivedSessions: [],
       sessionsByDirectory: new Map(),
+      entityById: new Map(),
+      structure: {
+        activeSessionIds: [],
+        activeRootIds: [],
+        activeChildrenByParentId: new Map(),
+        activeIdsByDirectory: new Map(),
+      },
       hasLoaded: false,
       status: 'idle',
     });
@@ -114,11 +121,13 @@ describe('useGlobalSessionsStore', () => {
     expect(useGlobalSessionsStore.getState().archivedSessions).toBe(archivedSessions);
 
     const activeSessions = useGlobalSessionsStore.getState().activeSessions;
+    const structure = useGlobalSessionsStore.getState().structure;
     useGlobalSessionsStore.getState().upsertSession({
       ...archived,
       time: { created: 1, updated: 4, archived: 3 },
     });
     expect(useGlobalSessionsStore.getState().activeSessions).toBe(activeSessions);
+    expect(useGlobalSessionsStore.getState().structure).toBe(structure);
   });
 
   test('applies a batch of session upserts in one store publication', () => {
@@ -135,6 +144,90 @@ describe('useGlobalSessionsStore', () => {
     unsubscribe();
     expect(useGlobalSessionsStore.getState().activeSessions.map((session) => session.id)).toEqual(['ses_2', 'ses_1']);
     expect(publications).toBe(1);
+  });
+
+  test('indexes a large batch of subagents in one store publication', () => {
+    const parent = buildSession('https://share.example/parent', { id: 'ses_parent' });
+    const children = Array.from({ length: 1_000 }, (_, index) => buildSession(
+      `https://share.example/child-${index}`,
+      { id: `ses_child_${index}`, parentID: parent.id },
+    ));
+    let publications = 0;
+    const unsubscribe = useGlobalSessionsStore.subscribe(() => {
+      publications += 1;
+    });
+
+    useGlobalSessionsStore.getState().upsertSessions([parent, ...children]);
+
+    unsubscribe();
+    const state = useGlobalSessionsStore.getState();
+    expect(publications).toBe(1);
+    expect(state.structure.activeRootIds).toEqual([parent.id]);
+    expect(state.structure.activeChildrenByParentId.get(parent.id)?.length).toBe(1_000);
+  });
+
+  test('preserves hierarchy references for entity-only updates', () => {
+    const parent = buildSession('https://share.example/parent', { id: 'ses_parent', directory: '/repo' });
+    const child = buildSession('https://share.example/child', {
+      id: 'ses_child',
+      directory: '/repo',
+      parentID: parent.id,
+    });
+    useGlobalSessionsStore.getState().upsertSessions([parent, child]);
+    const previous = useGlobalSessionsStore.getState();
+    const previousChildren = previous.structure.activeChildrenByParentId.get(parent.id);
+
+    useGlobalSessionsStore.getState().upsertSession({
+      ...child,
+      title: 'Renamed child',
+      time: { ...child.time, updated: 3 },
+    });
+
+    const next = useGlobalSessionsStore.getState();
+    expect(next.structure).toBe(previous.structure);
+    expect(next.structure.activeChildrenByParentId.get(parent.id)).toBe(previousChildren);
+    expect(next.entityById.get(child.id)?.title).toBe('Renamed child');
+  });
+
+  test('updates only affected hierarchy buckets when a session is reparented', () => {
+    const parentA = buildSession('https://share.example/a', { id: 'ses_parent_a' });
+    const parentB = buildSession('https://share.example/b', { id: 'ses_parent_b' });
+    const parentC = buildSession('https://share.example/c', { id: 'ses_parent_c' });
+    const child = buildSession('https://share.example/child', { id: 'ses_child', parentID: parentA.id });
+    const unrelatedChild = buildSession('https://share.example/other', { id: 'ses_other', parentID: parentC.id });
+    useGlobalSessionsStore.getState().upsertSessions([parentA, parentB, parentC, child, unrelatedChild]);
+    const previous = useGlobalSessionsStore.getState().structure;
+    const unrelatedBucket = previous.activeChildrenByParentId.get(parentC.id);
+
+    useGlobalSessionsStore.getState().upsertSession({ ...child, parentID: parentB.id });
+
+    const next = useGlobalSessionsStore.getState().structure;
+    expect(next).not.toBe(previous);
+    expect(next.activeChildrenByParentId.get(parentA.id)).toBe(undefined);
+    expect([...next.activeChildrenByParentId.get(parentB.id) ?? []]).toEqual([child.id]);
+    expect(next.activeChildrenByParentId.get(parentC.id)).toBe(unrelatedBucket);
+  });
+
+  test('applies ordered mixed mutations in one publication', () => {
+    const original = buildSession('https://share.example/original', { id: 'ses_original' });
+    useGlobalSessionsStore.getState().upsertSession(original);
+    let publications = 0;
+    const unsubscribe = useGlobalSessionsStore.subscribe(() => {
+      publications += 1;
+    });
+
+    useGlobalSessionsStore.getState().applySessionMutations([
+      { type: 'upsert', session: buildSession('https://share.example/temporary', { id: 'ses_temporary' }) },
+      { type: 'remove', sessionId: original.id },
+      { type: 'remove', sessionId: 'ses_temporary' },
+      { type: 'upsert', session: buildSession('https://share.example/final', { id: 'ses_final' }) },
+    ]);
+
+    unsubscribe();
+    const state = useGlobalSessionsStore.getState();
+    expect(publications).toBe(1);
+    expect(state.activeSessions.map((session) => session.id)).toEqual(['ses_final']);
+    expect(state.structure.activeRootIds).toEqual(['ses_final']);
   });
 });
 

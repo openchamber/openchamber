@@ -41,6 +41,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import type { UsageWindow } from '@/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import { useSessionListSync } from '@/components/session/sidebar/list/useSessionListSync';
 
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 
@@ -526,8 +527,11 @@ export const VSCodeLayout: React.FC = () => {
     }
   }, [usesExpandedLayout, currentView, viewMode]);
 
+  useSessionListSync({ isVSCode: true });
+
   return (
-    <div ref={containerRef} className="h-full w-full bg-background text-foreground flex flex-col">
+    <>
+      <div ref={containerRef} className="h-full w-full bg-background text-foreground flex flex-col">
       {viewMode === 'editor' ? (
         // Editor mode: just chat, no sidebar
         <div className="flex flex-col h-full">
@@ -639,7 +643,8 @@ export const VSCodeLayout: React.FC = () => {
         </>
       )}
       <SessionDialogs />
-    </div>
+      </div>
+    </>
   );
 };
 
