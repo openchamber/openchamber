@@ -19,9 +19,6 @@ describe('quota credential store', () => {
   });
 
   it.skipIf(process.platform === 'win32')('preserves pre-existing credential directory permissions across writes', () => {
-    // Admins may deliberately open an existing credentials directory to a
-    // group (e.g. POSIX ACLs). A write must not re-assert 0700 and clobber
-    // that (chmod replaces the ACL mask).
     const quotaDirectory = path.join(temporaryDirectory, 'quota');
     fs.mkdirSync(quotaDirectory, { recursive: true });
     fs.chmodSync(quotaDirectory, 0o770);

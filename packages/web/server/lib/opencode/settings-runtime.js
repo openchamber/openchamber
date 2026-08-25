@@ -568,10 +568,8 @@ export const createSettingsRuntime = (deps) => {
 
   const writeSettingsToDisk = async (settings) => {
     const settingsDirectory = path.dirname(SETTINGS_FILE_PATH);
-    // Restrictive mode applies to directory creation only. Re-asserting 0700
-    // on every write would also clobber administrator-granted access on an
-    // existing directory (plain chmod replaces the POSIX ACL mask, silently
-    // revoking group/ACL entries).
+    // Restrictive mode on creation only: re-chmodding an existing directory
+    // would clobber granted group access (chmod replaces the POSIX ACL mask).
     const createdDirectory = await fsPromises.mkdir(settingsDirectory, { recursive: true, mode: 0o700 });
     if (createdDirectory !== undefined && process.platform !== 'win32') {
       await fsPromises.chmod(settingsDirectory, 0o700);

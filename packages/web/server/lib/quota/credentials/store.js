@@ -29,9 +29,8 @@ export const writeQuotaCredential = (providerId, credential) => {
   const target = credentialPath(providerId);
   const directory = path.dirname(target);
   const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
-  // Restrictive mode applies to directory creation only: re-asserting 0700
-  // on every write would clobber administrator-granted access on an
-  // existing directory (plain chmod replaces the POSIX ACL mask).
+  // Restrictive mode on creation only: re-chmodding an existing directory
+  // would clobber granted group access (chmod replaces the POSIX ACL mask).
   const createdDirectory = fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   if (createdDirectory !== undefined) fs.chmodSync(directory, 0o700);
   try {

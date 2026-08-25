@@ -24,9 +24,8 @@ function readAuthFile() {
 
 function writeAuthFile(auth) {
   try {
-    // Restrictive mode applies to directory creation only: re-asserting 0700
-    // on every write would clobber administrator-granted access on an
-    // existing directory (plain chmod replaces the POSIX ACL mask).
+    // Restrictive mode on creation only: re-chmodding an existing directory
+    // would clobber granted group access (chmod replaces the POSIX ACL mask).
     if (!fs.existsSync(OPENCODE_DATA_DIR)) {
       fs.mkdirSync(OPENCODE_DATA_DIR, { recursive: true, mode: 0o700 });
       if (process.platform !== 'win32') fs.chmodSync(OPENCODE_DATA_DIR, 0o700);
