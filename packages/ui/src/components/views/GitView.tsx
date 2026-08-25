@@ -60,6 +60,8 @@ import { InProgressOperationBanner } from './git/InProgressOperationBanner';
 import { BranchIntegrationSection, type OperationLogEntry } from './git/BranchIntegrationSection';
 import { deriveBaseBranch } from './git/baseBranch';
 import { getFreshestPrStatusForBranch, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
+import { useGitLabMrForBranch } from '@/lib/gitlabMrStatus';
+import { useGiteaPrForBranch } from '@/lib/giteaPrStatus';
 import { createGitIndexMutationQueue, type GitIndexMutationDirection, type GitIndexMutationQueue } from './git/gitIndexMutationQueue';
 import type { GitRemote } from '@/lib/gitApi';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
@@ -305,6 +307,8 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const openContextSurface = useUIStore((state) => state.openContextSurface);
 
   const prStatusBranch = status?.current ?? null;
+  const { mr: gitLabMr } = useGitLabMrForBranch(currentDirectory, prStatusBranch);
+  const { pr: giteaPr } = useGiteaPrForBranch(currentDirectory, prStatusBranch);
   const prChipStatus = useGitHubPrStatusStore((state) => {
     if (!currentDirectory || !prStatusBranch) {
       return null;
@@ -2360,6 +2364,14 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
             pullRequest={prChipStatus?.pr ?? null}
             prChecks={prChipStatus?.checks ?? null}
             onOpenPullRequest={
+              currentDirectory ? () => openContextSurface(currentDirectory, 'pr') : undefined
+            }
+            gitLabMr={gitLabMr}
+            onOpenGitLabMr={
+              currentDirectory ? () => openContextSurface(currentDirectory, 'pr') : undefined
+            }
+            giteaPr={giteaPr}
+            onOpenGiteaPr={
               currentDirectory ? () => openContextSurface(currentDirectory, 'pr') : undefined
             }
           />

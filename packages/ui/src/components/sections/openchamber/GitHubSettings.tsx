@@ -11,6 +11,8 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { Icon } from "@/components/icon/Icon";
 import { SettingsSection, SettingsGroupTitle } from '@/components/sections/shared/SettingsSection';
+import { ProviderApiBaseUrlInput } from '@/components/sections/shared/ProviderApiBaseUrlInput';
+import { ProviderDetectUrlsInput } from '@/components/sections/shared/ProviderDetectUrlsInput';
 
 type GitHubUser = {
   login: string;
@@ -34,7 +36,7 @@ type DeviceFlowCompleteResponse =
   | { connected: true; user: GitHubUser; scope?: string }
   | { connected: false; status?: string; error?: string };
 
-export const GitHubSettings: React.FC = () => {
+export const GitHubSettings: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const runtimeGitHub = getRegisteredRuntimeAPIs()?.github;
@@ -269,14 +271,8 @@ export const GitHubSettings: React.FC = () => {
     ? t('settings.github.page.accountSource.cli')
     : t('settings.github.page.accountSource.oauth');
 
-  return (
+  const accountContent = (
     <>
-      <SettingsSection
-        title={t('settings.github.page.oauth.title')}
-        divider={false}
-        settingsItem="git.github-account"
-        info={t('settings.github.page.tooltip.connectAccount')}
-      >
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
         {connected ? (
           <div className={cn("px-4 py-3", isMobile ? "flex flex-col gap-3" : "flex items-center justify-between gap-4")}>
@@ -445,60 +441,103 @@ export const GitHubSettings: React.FC = () => {
         </div>
       )}
 
-      </SettingsSection>
+      <div className={cn('flex flex-col gap-4', embedded ? 'border-t border-[var(--surface-subtle)] pt-4' : 'pt-4')}>
+        {connected ? (
+          <>
+            <ProviderApiBaseUrlInput provider="github" />
+            <ProviderDetectUrlsInput provider="github" />
+          </>
+        ) : (
+          <p className="typography-meta text-muted-foreground">
+            {t('settings.gitProviders.overridesLocked.description', { provider: t('settings.git.tabs.github') })}
+          </p>
+        )}
+      </div>
+    </>
+  );
 
-      {ghCli?.available && !ghCli?.active && (!ghCli.user || ghCli.disabled) && (
-        <SettingsSection title={t('settings.github.page.ghCli.title')}>
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden">
-            <div className={cn("px-4 py-3", isMobile ? "flex flex-col gap-3" : "flex items-center justify-between gap-4")}>
-              <div className={cn("flex min-w-0 items-center gap-4", isMobile ? "w-full" : undefined)}>
-                {ghCli.user?.avatarUrl ? (
-                  <img
-                    src={ghCli.user.avatarUrl}
-                    alt={ghCli.user.login ? t('settings.github.page.avatarAlt.withLogin', { login: ghCli.user.login }) : t('settings.github.page.avatarAlt.fallback')}
-                    className="h-10 w-10 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)] object-cover"
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
-                    <Icon name="github-fill" className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  {!ghCli.disabled && ghCli.user && (
-                    <div className="typography-ui-label text-foreground truncate">
-                      {ghCli.user.name?.trim() || ghCli.user.login || 'GitHub'}
-                    </div>
-                  )}
-                  {!ghCli.disabled && ghCli.user?.login && (
-                    <div className={cn("flex items-center gap-2 typography-meta text-muted-foreground mt-0.5", isMobile ? "flex-wrap" : "truncate")}>
-                      <Icon name="github-fill" className="h-3.5 w-3.5 shrink-0" />
-                      <span className="font-mono">{ghCli.user.login}</span>
-                      {ghCli.user.email && <span className="opacity-50">•</span>}
-                      {ghCli.user.email && <span>{ghCli.user.email}</span>}
-                    </div>
-                  )}
-                  <div className={cn("typography-meta text-muted-foreground", ghCli.disabled ? "opacity-60" : undefined)}>
-                    {ghCli.disabled
-                      ? t('settings.github.page.ghCli.disabledDescription')
-                      : t('settings.github.page.ghCli.fallbackDescription')}
-                  </div>
-                </div>
+  const ghCliContent = ghCli?.available && !ghCli?.active && (!ghCli.user || ghCli.disabled) ? (
+    <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden">
+      <div className={cn("px-4 py-3", isMobile ? "flex flex-col gap-3" : "flex items-center justify-between gap-4")}>
+        <div className={cn("flex min-w-0 items-center gap-4", isMobile ? "w-full" : undefined)}>
+          {ghCli.user?.avatarUrl ? (
+            <img
+              src={ghCli.user.avatarUrl}
+              alt={ghCli.user.login ? t('settings.github.page.avatarAlt.withLogin', { login: ghCli.user.login }) : t('settings.github.page.avatarAlt.fallback')}
+              className="h-10 w-10 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)] object-cover"
+              loading="lazy"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
+              <Icon name="github-fill" className="h-4 w-4 text-muted-foreground" />
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            {!ghCli.disabled && ghCli.user && (
+              <div className="typography-ui-label text-foreground truncate">
+                {ghCli.user.name?.trim() || ghCli.user.login || 'GitHub'}
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => toggleGhCli(!ghCli.disabled)}
-                disabled={isBusy}
-                className={cn(isMobile ? "w-full" : undefined)}
-              >
-                {ghCli.disabled
-                  ? t('settings.github.page.ghCli.actions.enable')
-                  : t('settings.github.page.ghCli.actions.disable')}
-              </Button>
+            )}
+            {!ghCli.disabled && ghCli.user?.login && (
+              <div className={cn("flex items-center gap-2 typography-meta text-muted-foreground mt-0.5", isMobile ? "flex-wrap" : "truncate")}>
+                <Icon name="github-fill" className="h-3.5 w-3.5 shrink-0" />
+                <span className="font-mono">{ghCli.user.login}</span>
+                {ghCli.user.email && <span className="opacity-50">•</span>}
+                {ghCli.user.email && <span>{ghCli.user.email}</span>}
+              </div>
+            )}
+            <div className={cn("typography-meta text-muted-foreground", ghCli.disabled ? "opacity-60" : undefined)}>
+              {ghCli.disabled
+                ? t('settings.github.page.ghCli.disabledDescription')
+                : t('settings.github.page.ghCli.fallbackDescription')}
             </div>
           </div>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => toggleGhCli(!ghCli.disabled)}
+          disabled={isBusy}
+          className={cn(isMobile ? "w-full" : undefined)}
+        >
+          {ghCli.disabled
+            ? t('settings.github.page.ghCli.actions.enable')
+            : t('settings.github.page.ghCli.actions.disable')}
+        </Button>
+      </div>
+    </div>
+  ) : null;
+
+  if (embedded) {
+    return (
+      <>
+        <div data-settings-item="git.github-account" className="p-4">
+          {accountContent}
+        </div>
+        {ghCliContent && (
+          <div className="border-t border-[var(--surface-subtle)] px-4 py-4">
+            {ghCliContent}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <SettingsSection
+        title={t('settings.github.page.oauth.title')}
+        divider={false}
+        settingsItem="git.github-account"
+        info={t('settings.github.page.tooltip.connectAccount')}
+      >
+        {accountContent}
+      </SettingsSection>
+
+      {ghCliContent && (
+        <SettingsSection title={t('settings.github.page.ghCli.title')}>
+          {ghCliContent}
         </SettingsSection>
       )}
     </>

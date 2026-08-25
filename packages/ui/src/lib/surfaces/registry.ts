@@ -191,6 +191,12 @@ type VisibleRailSurfacesOptions = {
   isVSCode: boolean;
   screenWidth: number;
   tabs: readonly { mode: ContextPanelMode }[];
+  /**
+   * The repository's git provider. The 'pr' surface renders the GitHub pull
+   * request / GitLab merge request view; it is hidden for repositories on
+   * any other provider. null (unknown, still resolving) keeps it visible.
+   */
+  gitProvider?: 'github' | 'gitlab' | 'gitea' | 'other' | null;
 };
 
 /**
@@ -204,6 +210,13 @@ type VisibleRailSurfacesOptions = {
 export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOptions): ContextSurfaceDescriptor[] => {
   return sortContextSurfaces(options.railOrder).filter((surface) => {
     if (surface.id === 'plan' && !options.planModeEnabled) {
+      return false;
+    }
+    // The 'pr' surface hosts the GitHub PR / GitLab MR view. Neither applies
+    // to repositories on other providers, so the rail button (and its shortcut
+    // digit) must not appear. Unknown (null) keeps it while the provider is
+    // still resolving — it is not a reason to hide the surface.
+    if (surface.id === 'pr' && options.gitProvider === 'other') {
       return false;
     }
     // The walkthrough needs room for a stop list beside real code, and its

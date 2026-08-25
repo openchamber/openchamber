@@ -13,7 +13,9 @@ import type { GitRemote } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { PullRequestSection } from './git/PullRequestSection';
+import { GitHubIssuesSection } from './git/GitHubIssuesSection';
 import { deriveBaseBranch } from './git/baseBranch';
 
 const normalizePath = (value?: string | null): string =>
@@ -240,14 +242,23 @@ export const PullRequestView: React.FC = () => {
     worktreeMetadata?.createdFromBranch,
   ]);
 
-  if (!currentDirectory || !currentBranch) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <Icon name="git-pull-request" className="h-12 w-12 text-muted-foreground/50" />
-        <div className="typography-ui-header text-foreground">{t('gitView.pullRequest.title')}</div>
-        <div className="max-w-sm typography-micro text-muted-foreground">{t('gitView.pullRequest.createHint')}</div>
-      </div>
-    );
+  // Local tab selection between the pull-request and issues surfaces. Not
+  // persisted: reopening the panel always lands on pull requests.
+  const [activeTab, setActiveTab] = React.useState<'pr' | 'issues'>('pr');
+
+  // Empty state for the pull-request surface: returned full-height when there
+  // is no effective directory, and shown inside the "Pull requests" tab when
+  // the current branch has not resolved (issues need no branch, PRs do).
+  const prEmptyState = (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+      <Icon name="git-pull-request" className="h-12 w-12 text-muted-foreground/50" />
+      <div className="typography-ui-header text-foreground">{t('gitView.pullRequest.title')}</div>
+      <div className="max-w-sm typography-micro text-muted-foreground">{t('gitView.pullRequest.createHint')}</div>
+    </div>
+  );
+
+  if (!currentDirectory) {
+    return prEmptyState;
   }
 
   return (
@@ -258,14 +269,39 @@ export const PullRequestView: React.FC = () => {
       disableHorizontal
       preventOverscroll
     >
-      <PullRequestSection
-        directory={currentDirectory}
-        branch={currentBranch}
-        baseBranch={baseBranch}
-        trackingBranch={status?.tracking ?? undefined}
-        remotes={remotes}
-        remoteBranches={remoteBranches}
-      />
+      <div className="flex h-full min-h-0 flex-col gap-4">
+        <div className="flex h-8 min-w-0">
+          <SortableTabsStrip
+            className="h-full"
+            items={[
+              { id: 'pr', label: t('gitView.pullRequest.tabs.pullRequests') },
+              { id: 'issues', label: t('gitView.pullRequest.tabs.issues') },
+            ]}
+            activeId={activeTab}
+            onSelect={(tabId) => setActiveTab(tabId as 'pr' | 'issues')}
+            layoutMode="fit"
+            variant="active-pill"
+            activePillButtonClassName="h-7"
+          />
+        </div>
+
+        {activeTab === 'pr' ? (
+          currentBranch ? (
+            <PullRequestSection
+              directory={currentDirectory}
+              branch={currentBranch}
+              baseBranch={baseBranch}
+              trackingBranch={status?.tracking ?? undefined}
+              remotes={remotes}
+              remoteBranches={remoteBranches}
+            />
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col">{prEmptyState}</div>
+          )
+        ) : (
+          <GitHubIssuesSection directory={currentDirectory} />
+        )}
+      </div>
     </ScrollableOverlay>
   );
 };

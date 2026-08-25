@@ -556,17 +556,54 @@ interface FilePart {
   source?: Record<string, unknown>;
 }
 
-const GITHUB_ISSUE_LINK_MIME = 'application/vnd.github.issue-link';
-const GITHUB_PR_LINK_MIME = 'application/vnd.github.pull-request-link';
+const FORGE_LINK_MIMES = new Set([
+  'application/vnd.github.issue-link',
+  'application/vnd.github.pull-request-link',
+  'application/vnd.gitlab.issue-link',
+  'application/vnd.gitlab.merge-request-link',
+  'application/vnd.gitea.issue-link',
+  'application/vnd.gitea.pull-request-link',
+]);
 
-const getGitHubLinkKind = (file: FilePart): 'issue' | 'pr' | null => {
-  if (file.mime === GITHUB_ISSUE_LINK_MIME) {
-    return 'issue';
+const ISSUE_LINK_MIMES = new Set([
+  'application/vnd.github.issue-link',
+  'application/vnd.gitlab.issue-link',
+  'application/vnd.gitea.issue-link',
+]);
+
+const PR_LINK_MIMES = new Set([
+  'application/vnd.github.pull-request-link',
+  'application/vnd.gitlab.merge-request-link',
+  'application/vnd.gitea.pull-request-link',
+]);
+
+type ForgeLinkInfo = { kind: 'issue' | 'pr'; provider: 'github' | 'gitlab' | 'gitea' } | null;
+
+const getForgeLinkInfo = (file: FilePart): ForgeLinkInfo => {
+  const mime = file.mime;
+  if (!mime || !FORGE_LINK_MIMES.has(mime)) return null;
+
+  if (ISSUE_LINK_MIMES.has(mime)) {
+    if (mime.includes('gitlab')) return { kind: 'issue', provider: 'gitlab' };
+    if (mime.includes('gitea')) return { kind: 'issue', provider: 'gitea' };
+    return { kind: 'issue', provider: 'github' };
   }
-  if (file.mime === GITHUB_PR_LINK_MIME) {
-    return 'pr';
+
+  if (PR_LINK_MIMES.has(mime)) {
+    if (mime.includes('gitlab')) return { kind: 'pr', provider: 'gitlab' };
+    if (mime.includes('gitea')) return { kind: 'pr', provider: 'gitea' };
+    return { kind: 'pr', provider: 'github' };
   }
+
   return null;
+};
+
+const forgeLinkIconName = (info: ForgeLinkInfo): 'github' | 'gitlab' | 'git-branch' | 'git-pull-request' => {
+  if (!info) return 'github';
+  if (info.kind === 'pr') return 'git-pull-request';
+  if (info.provider === 'gitlab') return 'gitlab';
+  if (info.provider === 'gitea') return 'git-branch';
+  return 'github';
 };
 
 interface MessageFilesDisplayProps {
@@ -591,8 +628,8 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
   };
 
   const resolveDisplayName = React.useCallback((file: FilePart): string => {
-    const isGitHubLink = getGitHubLinkKind(file) !== null;
-    if (isGitHubLink && typeof file.filename === 'string' && file.filename.trim().length > 0) {
+    const isForgeLink = getForgeLinkInfo(file) !== null;
+    if (isForgeLink && typeof file.filename === 'string' && file.filename.trim().length > 0) {
       return file.filename.trim();
     }
     return extractFilename(file.filename || file.url);
@@ -665,11 +702,11 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
               const fileName = resolveDisplayName(file);
               const ext = fileName.split('.').pop() || '';
               const sizeText = formatFileSize(file.size);
-              const githubLinkKind = getGitHubLinkKind(file);
+              const forgeLink = getForgeLinkInfo(file);
               return (
                 <Tooltip key={`file-${file.url || file.filename || index}`}>
                   <TooltipTrigger asChild>
-                    {githubLinkKind && file.url ? (
+                    {forgeLink && file.url ? (
                       <button
                         type="button"
                         onClick={() => {
@@ -677,11 +714,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                         }}
                         className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg text-foreground hover:text-primary transition-colors"
                       >
-                        {githubLinkKind === 'pr' ? (
-                          <Icon name="git-pull-request" className="text-muted-foreground h-3.5 w-3.5" />
-                        ) : (
-                          <Icon name="github" className="text-muted-foreground h-3.5 w-3.5" />
-                        )}
+                        <Icon name={forgeLinkIconName(forgeLink)} className="text-muted-foreground h-3.5 w-3.5" />
                         <div className="overflow-hidden max-w-[220px]">
                           <span className="truncate block" title={fileName}>{fileName}</span>
                         </div>
@@ -764,7 +797,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
         const fileName = resolveDisplayName(file);
         const isImage = file.mime?.startsWith('image/');
         const sizeText = formatFileSize(file.size);
-        const githubLinkKind = getGitHubLinkKind(file);
+        const forgeLink = getForgeLinkInfo(file);
 
         if (isImage && file.url) {
           return (
@@ -787,7 +820,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
           );
         }
 
-        if (githubLinkKind && file.url) {
+        if (forgeLink && file.url) {
           return (
             <Tooltip key={file.url || `${fileName}-${index}`}>
               <TooltipTrigger asChild>
@@ -802,11 +835,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                   )}
                 >
                   <div className="flex-shrink-0">
-                    {githubLinkKind === 'pr' ? (
-                      <Icon name="git-pull-request" className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
-                    ) : (
-                      <Icon name="github" className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
-                    )}
+                    <Icon name={forgeLinkIconName(forgeLink)} className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium truncate">{fileName}</p>

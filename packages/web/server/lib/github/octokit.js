@@ -1,6 +1,8 @@
 import { Octokit } from '@octokit/rest';
 import { getGitHubAuth, isGhCliActive, isGhCliDisabled } from './auth.js';
 import { getGhCliToken } from './gh-cli-credential.js';
+import { getProviderApiBaseUrl, isSafeEndpointUrl } from '../git-providers/config.js';
+import { getEffectiveProviderApiBaseUrl } from '../git-providers/project-config.js';
 
 // Per-request timeout for every GitHub call. Octokit v22 uses native fetch,
 // which has no built-in timeout — without this, a stuck connection hangs until
@@ -69,16 +71,23 @@ const createConditionalFetch = (token) => async (url, options = {}) => {
 };
 
 /** Create an Octokit instance with per-request timeout + ETag revalidation. */
-export function createOctokit(token) {
-  return new Octokit({ auth: token, request: { fetch: createConditionalFetch(token) } });
+export function createOctokit(token, baseUrl) {
+  if (baseUrl && !isSafeEndpointUrl(baseUrl)) {
+    throw new Error('GitHub endpoint rejected: must be HTTPS and not a private/loopback address');
+  }
+  return new Octokit({
+    auth: token,
+    ...(baseUrl ? { baseUrl } : {}),
+    request: { fetch: createConditionalFetch(token) },
+  });
 }
 
-export function getOctokitOrNull() {
+export function getOctokitOrNull(directory) {
   const auth = getGitHubAuth();
   const ghToken = !isGhCliDisabled() ? getGhCliToken() : null;
   const token = isGhCliActive() ? ghToken || auth?.accessToken : auth?.accessToken || ghToken;
   if (!token) {
     return null;
   }
-  return createOctokit(token);
+  return createOctokit(token, directory ? getEffectiveProviderApiBaseUrl('github', directory) : getProviderApiBaseUrl('github'));
 }

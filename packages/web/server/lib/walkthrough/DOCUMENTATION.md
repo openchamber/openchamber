@@ -20,7 +20,7 @@ has to ask for it.
   `PROMPT_VERSION`.
 - `schema.js` — response schema, response normalization, tolerant JSON parsing.
 - `store.js` — content-addressed cache entries plus mutable pointers.
-- `pull-request.js` — PR diffs via the shared GitHub octokit helper.
+- `pull-request.js` — PR/MR diffs; the provider (GitHub octokit or GitLab REST client) is chosen by the git remote.
 - `model-settings.js` — the feature's own model override.
 - `languages.js` — the languages the prose may be written in.
 - `index.js` — orchestration.
@@ -53,7 +53,15 @@ written against staged code never silently re-anchors onto an unstaged edit.
 |---|---|---|
 | `working-tree` (`all` \| `staged` \| `working`) | `staged`, `working` | Untracked files are fetched individually because `git diff` omits them |
 | `branch` | `branch` | `getRangeDiff` uses three-dot `base...head`, so work merged in from the base branch is excluded |
-| `pr` | `pr:<number>` | GitHub returns the merge-base diff, matching the branch semantics |
+| `pr` | `pr:<number>` | GitHub returns the merge-base diff; a GitLab remote concatenates the merge request's diffs instead — both match the branch semantics |
+
+Provider selection lives in `pull-request.js`: the directory's git remote
+decides. A GitLab remote resolves through `resolveGitLabRepoFromDirectory` and
+fetches `merge_requests/:iid/diffs` pages (capped at 10), concatenating the
+per-file diffs into one patch; anything else falls back to the GitHub pull
+request API. A GitLab directory without a connected GitLab account fails with
+`401 gitlab-not-connected`, and an MR with no diffs fails with
+`404 empty-diff`, the same code an empty GitHub PR uses.
 
 For the current-branch source, the UI takes the base from the default branch of
 the current branch's tracking remote (`defaultBranches` in the branches

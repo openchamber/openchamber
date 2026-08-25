@@ -1,0 +1,334 @@
+import { describe, expect, test } from 'bun:test';
+import { buildGitProviderHosts, detectGitProvider, type GitProviderHosts } from './gitProvider';
+import {
+  mergeGitProviderApiBaseUrls,
+  resolveProjectApiBaseUrls,
+  resolveProjectIdForDirectory,
+} from './projectGitProviders';
+import { createProjectIdFromPath } from '@/lib/projectId';
+
+const EMPTY_HOSTS: GitProviderHosts = { github: [], gitlab: [], gitea: [] };
+
+const emptyInput = {
+  domains: { github: [], gitlab: [], gitea: [] },
+  apiBaseUrls: { github: '', gitlab: '', gitea: '' },
+};
+
+describe('detectGitProvider', () => {
+  test('returns null with no remotes', () => {
+    expect(detectGitProvider([], EMPTY_HOSTS)).toBeNull();
+  });
+
+  test('classifies github.com remotes across URL forms', () => {
+    expect(detectGitProvider(['git@github.com:owner/repo.git'], EMPTY_HOSTS)).toBe('github');
+    expect(detectGitProvider(['ssh://git@github.com/owner/repo.git'], EMPTY_HOSTS)).toBe('github');
+    expect(detectGitProvider(['https://github.com/owner/repo.git'], EMPTY_HOSTS)).toBe('github');
+  });
+
+  test('classifies gitlab.com remotes across URL forms', () => {
+    expect(detectGitProvider(['git@gitlab.com:group/project.git'], EMPTY_HOSTS)).toBe('gitlab');
+    expect(detectGitProvider(['ssh://git@gitlab.com/group/sub/project.git'], EMPTY_HOSTS)).toBe('gitlab');
+    expect(detectGitProvider(['https://gitlab.com/group/project'], EMPTY_HOSTS)).toBe('gitlab');
+  });
+
+  test('classifies a self-hosted GitLab remote through configured hosts', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitlab: ['git.example.com'] };
+    expect(detectGitProvider(['git@git.example.com:group/project.git'], hosts)).toBe('gitlab');
+    expect(detectGitProvider(['https://git.example.com/group/project.git'], hosts)).toBe('gitlab');
+  });
+
+  test('does not classify an unknown self-hosted host as gitlab without a configured host', () => {
+    expect(detectGitProvider(['git@git.example.com:group/project.git'], EMPTY_HOSTS)).toBe('other');
+  });
+
+  test('classifies other hosts as other', () => {
+    expect(detectGitProvider(['git@gitea.example.com:owner/repo.git'], EMPTY_HOSTS)).toBe('other');
+    expect(detectGitProvider(['https://bitbucket.org/owner/repo.git'], EMPTY_HOSTS)).toBe('other');
+  });
+
+  test('github wins when both github and gitlab remotes are present', () => {
+    expect(detectGitProvider([
+      'git@github.com:owner/repo.git',
+      'git@gitlab.com:owner/repo.git',
+    ], EMPTY_HOSTS)).toBe('github');
+  });
+
+  test('ignores malformed remotes', () => {
+    expect(detectGitProvider(['', 'not a url', '   '], EMPTY_HOSTS)).toBeNull();
+  });
+
+  test('classifies a self-hosted Gitea remote across URL forms through configured hosts', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['gitea.example.com'] };
+    expect(detectGitProvider(['git@gitea.example.com:owner/repo.git'], hosts)).toBe('gitea');
+    expect(detectGitProvider(['ssh://git@gitea.example.com/owner/repo.git'], hosts)).toBe('gitea');
+    expect(detectGitProvider(['https://gitea.example.com/owner/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('classifies codeberg.org remotes as gitea through configured hosts', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['codeberg.org'] };
+    expect(detectGitProvider(['git@codeberg.org:owner/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('classifies a bare scp remote (no user) through configured gitea hosts', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['codeberg.org'] };
+    expect(detectGitProvider(['codeberg.org:owner/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('classifies an ssh URL with a non-default port through configured gitea hosts', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['codeberg.org'] };
+    expect(detectGitProvider(['ssh://git@codeberg.org:2222/owner/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('matches a custom domain entered as an scp remote against an ssh URL remote', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['git@ssh.example.com:org/repo.git'] };
+    expect(detectGitProvider(['ssh://git@ssh.example.com/org/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('matches a custom domain entered bare against an scp remote', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['codeberg.org:owner/repo.git'] };
+    expect(detectGitProvider(['git@codeberg.org:owner/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('classifies an IPv6 remote through a configured gitea host', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['2001:db8::1'] };
+    expect(detectGitProvider(['ssh://git@[2001:db8::1]/owner/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('classifies codeberg.org as gitea by default (built-in host)', () => {
+    expect(detectGitProvider(['git@codeberg.org:owner/repo.git'], EMPTY_HOSTS)).toBe('gitea');
+    expect(detectGitProvider(['https://codeberg.org/owner/repo.git'], EMPTY_HOSTS)).toBe('gitea');
+  });
+
+  test('github wins over a configured gitea host when both remotes are present', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['gitea.example.com'] };
+    expect(detectGitProvider([
+      'git@github.com:owner/repo.git',
+      'git@gitea.example.com:owner/repo.git',
+    ], hosts)).toBe('github');
+  });
+
+  test('gitlab wins over a configured gitea host when both remotes are present', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, gitea: ['gitea.example.com'] };
+    expect(detectGitProvider([
+      'git@gitlab.com:group/project.git',
+      'git@gitea.example.com:owner/repo.git',
+    ], hosts)).toBe('gitlab');
+  });
+
+  test('custom github host wins over gitlab.com', () => {
+    const hosts: GitProviderHosts = { ...EMPTY_HOSTS, github: ['github.example.com'] };
+    expect(detectGitProvider([
+      'git@github.example.com:owner/repo.git',
+      'git@gitlab.com:group/project.git',
+    ], hosts)).toBe('github');
+  });
+
+  test('normalizes host entries (scheme, port, and path stripped)', () => {
+    const hosts: GitProviderHosts = {
+      github: ['https://github.example.com/some/path', 'ssh://git@gh.other.example.com:2222/org'],
+      gitlab: ['git@git.example.com:group/repo.git'],
+      gitea: [],
+    };
+    expect(detectGitProvider(['https://github.example.com/owner/repo.git'], hosts)).toBe('github');
+    expect(detectGitProvider(['https://gh.other.example.com/owner/repo.git'], hosts)).toBe('github');
+    expect(detectGitProvider(['https://git.example.com/group/project.git'], hosts)).toBe('gitlab');
+  });
+
+  test('dedupes host entries', () => {
+    const hosts: GitProviderHosts = {
+      github: ['https://github.example.com/a', 'https://github.example.com/b'],
+      gitlab: [],
+      gitea: [],
+    };
+    expect(detectGitProvider(['git@github.example.com:owner/repo.git'], hosts)).toBe('github');
+  });
+
+  test('normalizes github.com built-in case-insensitively', () => {
+    expect(detectGitProvider(['https://GITHUB.com/owner/repo.git'], EMPTY_HOSTS)).toBe('github');
+  });
+});
+
+describe('buildGitProviderHosts', () => {
+  test('adds no hosts when nothing is configured', () => {
+    expect(buildGitProviderHosts(emptyInput)).toEqual(EMPTY_HOSTS);
+  });
+
+  test('auto-adds the github api base host so the provider is detected', () => {
+    const hosts = buildGitProviderHosts({
+      ...emptyInput,
+      apiBaseUrls: { github: 'https://github.example.com/api/v3', gitlab: '', gitea: '' },
+    });
+    expect(hosts.github).toEqual(['github.example.com']);
+    expect(detectGitProvider(['git@github.example.com:owner/repo.git'], hosts)).toBe('github');
+  });
+
+  test('a github api base of api.github.com maps to github.com and changes nothing', () => {
+    const hosts = buildGitProviderHosts({
+      ...emptyInput,
+      apiBaseUrls: { github: 'https://api.github.com', gitlab: '', gitea: '' },
+    });
+    // github.com is already a built-in detection host; no behavior change.
+    expect(hosts.github).toEqual(['github.com']);
+    expect(detectGitProvider(['git@github.com:owner/repo.git'], hosts)).toBe('github');
+    // The api host itself is not a web/remote host.
+    expect(detectGitProvider(['git@api.github.com:owner/repo.git'], hosts)).toBe('other');
+  });
+
+  test('auto-adds the gitlab api base host so the provider is detected', () => {
+    const hosts = buildGitProviderHosts({
+      ...emptyInput,
+      apiBaseUrls: { github: '', gitlab: 'https://gitlab.example.com', gitea: '' },
+    });
+    expect(hosts.gitlab).toEqual(['gitlab.example.com']);
+    expect(detectGitProvider(['git@gitlab.example.com:group/project.git'], hosts)).toBe('gitlab');
+  });
+
+  test('auto-adds the gitea api base host so the provider is detected', () => {
+    const hosts = buildGitProviderHosts({
+      ...emptyInput,
+      apiBaseUrls: { github: '', gitlab: '', gitea: 'https://gitea.example.com' },
+    });
+    expect(hosts.gitea).toEqual(['gitea.example.com']);
+    expect(detectGitProvider(['git@gitea.example.com:owner/repo.git'], hosts)).toBe('gitea');
+  });
+
+  test('combines account base urls, api base host and custom domains, normalized and deduped', () => {
+    const hosts = buildGitProviderHosts({
+      domains: { github: [], gitlab: ['https://gitlab.example.com', 'gitlab.internal'], gitea: ['codeberg.org'] },
+      apiBaseUrls: { github: '', gitlab: 'https://gitlab.example.com/', gitea: '' },
+      gitlabAccounts: [{ baseUrl: 'https://gitlab.example.com' }, { baseUrl: 'ssh://git@gl.other.example.com/x' }],
+      giteaAccounts: [{ baseUrl: 'https://gitea.example.com' }],
+    });
+    expect(hosts.gitlab).toEqual(['gitlab.example.com', 'gl.other.example.com', 'gitlab.internal']);
+    expect(hosts.gitea).toEqual(['gitea.example.com', 'codeberg.org']);
+    expect(hosts.github).toEqual([]);
+  });
+
+  test('dedupes the api base host against configured domains', () => {
+    const hosts = buildGitProviderHosts({
+      domains: { github: ['github.example.com'], gitlab: [], gitea: [] },
+      apiBaseUrls: { github: 'https://github.example.com/api/v3', gitlab: '', gitea: '' },
+    });
+    expect(hosts.github).toEqual(['github.example.com']);
+  });
+});
+
+describe('resolveProjectIdForDirectory', () => {
+  const projects = [
+    { id: 'parent', path: '/workspace' },
+    { id: 'child', path: '/workspace/app' },
+  ];
+
+  test('matches the longest containing project path', () => {
+    expect(resolveProjectIdForDirectory('/workspace/app/sub', projects)).toBe('child');
+    expect(resolveProjectIdForDirectory('/workspace/app', projects)).toBe('child');
+    expect(resolveProjectIdForDirectory('/workspace', projects)).toBe('parent');
+    expect(resolveProjectIdForDirectory('/workspace/other', projects)).toBe('parent');
+  });
+
+  test('matches a root project for any directory', () => {
+    expect(resolveProjectIdForDirectory('/workspace/app', [{ id: 'root', path: '/' }])).toBe('root');
+  });
+
+  test('normalizes windows drive casing before matching', () => {
+    expect(resolveProjectIdForDirectory('C:\\repo\\sub', [{ id: 'proj', path: 'c:\\repo' }])).toBe('proj');
+  });
+
+  test('falls back to a path-derived project id when nothing matches', () => {
+    const directory = '/some/unregistered/repo';
+    expect(resolveProjectIdForDirectory(directory, [])).toBe(createProjectIdFromPath(directory));
+    expect(resolveProjectIdForDirectory(directory, projects)).toBe(createProjectIdFromPath(directory));
+  });
+
+  test('an external worktree resolves to its owning project via the worktree map', () => {
+    const worktreesByProject = new Map([
+      ['/workspace', [{ path: '/other/repo-worktrees/slug' }]],
+    ]);
+    // Worktree lives outside the project path and nothing contains it, but the
+    // map still ties it to the owning project.
+    expect(resolveProjectIdForDirectory('/other/repo-worktrees/slug', projects, worktreesByProject)).toBe('parent');
+  });
+
+  test('the worktree map lookup wins over containment when both would match', () => {
+    const worktreesByProject = new Map([
+      // Directory is inside the `child` project but declared as a worktree of
+      // the shallower `parent` project — the map is authoritative.
+      ['/workspace', [{ path: '/workspace/app/sub' }]],
+    ]);
+    expect(resolveProjectIdForDirectory('/workspace/app/sub', projects, worktreesByProject)).toBe('parent');
+  });
+
+  test('a worktree whose owning project is not registered falls through to path fallback', () => {
+    const worktreesByProject = new Map([
+      ['/unknown/owner', [{ path: '/other/worktrees/slug' }]],
+    ]);
+    expect(resolveProjectIdForDirectory('/other/worktrees/slug', projects, worktreesByProject))
+      .toBe(createProjectIdFromPath('/other/worktrees/slug'));
+  });
+
+  test('resolution is unchanged when worktreesByProject is omitted', () => {
+    expect(resolveProjectIdForDirectory('/workspace/app/sub', projects)).toBe('child');
+    expect(resolveProjectIdForDirectory('/some/unregistered/repo', projects)).toBe(createProjectIdFromPath('/some/unregistered/repo'));
+    expect(resolveProjectIdForDirectory(null, projects)).toBeNull();
+  });
+
+  test('returns null for empty or sibling-only directories without a matching project', () => {
+    expect(resolveProjectIdForDirectory('', projects)).toBeNull();
+    expect(resolveProjectIdForDirectory(null, projects)).toBeNull();
+    expect(resolveProjectIdForDirectory('   ', projects)).toBeNull();
+  });
+});
+
+describe('project override detection overlay', () => {
+  const projects = [{ id: 'proj', path: '/repo' }];
+  const overrides = { proj: { github: '', gitlab: 'https://git.self.example.com', gitea: '' } };
+
+  test('resolveProjectApiBaseUrls returns the owning project override', () => {
+    expect(resolveProjectApiBaseUrls('/repo/sub', projects, overrides)).toEqual(overrides.proj);
+    expect(resolveProjectApiBaseUrls('/repo', projects, overrides)).toEqual(overrides.proj);
+  });
+
+  test('resolveProjectApiBaseUrls returns undefined without a resolvable project', () => {
+    expect(resolveProjectApiBaseUrls('/unknown', [], overrides)).toBe(undefined);
+    expect(resolveProjectApiBaseUrls('/unknown', projects, {})).toBe(undefined);
+    expect(resolveProjectApiBaseUrls(null, projects, overrides)).toBe(undefined);
+  });
+
+  test('resolveProjectApiBaseUrls forwards the worktree map to project resolution', () => {
+    const worktreesByProject = new Map([
+      ['/repo', [{ path: '/elsewhere/worktrees/pr-42' }]],
+    ]);
+    expect(resolveProjectApiBaseUrls('/elsewhere/worktrees/pr-42', projects, overrides, worktreesByProject)).toEqual(overrides.proj);
+  });
+
+  test('mergeGitProviderApiBaseUrls: project values win, empty slots fall back to global', () => {
+    const global = { github: 'https://github.example.com/api/v3', gitlab: '', gitea: 'https://gitea.example.com' };
+    const override = { github: '', gitlab: 'https://git.self.example.com', gitea: '' };
+    expect(mergeGitProviderApiBaseUrls(override, global)).toEqual({
+      github: 'https://github.example.com/api/v3',
+      gitlab: 'https://git.self.example.com',
+      gitea: 'https://gitea.example.com',
+    });
+    expect(mergeGitProviderApiBaseUrls(undefined, global)).toEqual(global);
+  });
+
+  test('a project override host that is not global classifies the remote as the provider', () => {
+    const override = resolveProjectApiBaseUrls('/repo/sub', projects, overrides);
+    const effective = mergeGitProviderApiBaseUrls(override, emptyInput.apiBaseUrls);
+    const hosts = buildGitProviderHosts({ ...emptyInput, apiBaseUrls: effective });
+    // The override host is added to detection even though nothing global or
+    // account-derived knows it.
+    expect(hosts.gitlab).toEqual(['git.self.example.com']);
+    expect(hosts.github).toEqual([]);
+    expect(detectGitProvider(['git@git.self.example.com:group/repo.git'], hosts)).toBe('gitlab');
+    expect(detectGitProvider(['https://git.self.example.com/group/repo.git'], hosts)).toBe('gitlab');
+  });
+
+  test('global api base urls keep working when the project has no override', () => {
+    const globalApi = { github: '', gitlab: 'https://gitlab.example.com', gitea: '' };
+    const override = resolveProjectApiBaseUrls('/repo/sub', projects, {});
+    const effective = mergeGitProviderApiBaseUrls(override, globalApi);
+    const hosts = buildGitProviderHosts({ ...emptyInput, apiBaseUrls: effective });
+    expect(detectGitProvider(['git@gitlab.example.com:group/repo.git'], hosts)).toBe('gitlab');
+  });
+});

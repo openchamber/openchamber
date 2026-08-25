@@ -31,6 +31,15 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { getPrContextKey, usePrContextStore } from '@/stores/usePrContextStore';
 import { summarizeCheckRuns } from '@/lib/githubChecks';
+import { buildForgeProvider, mapGithubPr } from '@/lib/forge';
+import type { ForgeCommit, ForgeFileChange } from '@/lib/forge';
+import { ForgeCommitsSection, ForgeFilesDiffSection, ForgeMetadataChips } from '@/components/views/forge';
+import {
+  ForgeCommentComposer,
+  ForgeDraftToggle,
+  ForgeReviewActions,
+  ForgeStateActions,
+} from '@/components/views/forge/actions';
 import type {
   GitHubPullRequest,
   GitHubCheckRun,
@@ -41,7 +50,7 @@ import type {
 import { useI18n } from '@/lib/i18n';
 
 type MergeMethod = 'merge' | 'squash' | 'rebase';
-type PrSegment = 'overview' | 'checks' | 'comments';
+type PrSegment = 'overview' | 'checks' | 'comments' | 'commits' | 'files';
 
 const PR_CHECKS_AUTO_REFRESH_MS = 35_000;
 
@@ -366,6 +375,7 @@ export const PullRequestSection: React.FC<{
     }
     return normalizeBranchRef(baseBranch);
   });
+  const [headBranch, setHeadBranch] = React.useState(branch);
   const [mergeMethod, setMergeMethod] = React.useState<MergeMethod>('squash');
 
   const [isGenerating, setIsGenerating] = React.useState(false);
@@ -442,6 +452,37 @@ export const PullRequestSection: React.FC<{
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
   }, [baseBranch, remoteBranches, selectedRemote?.name, targetBaseBranch, upstreamBranches, useDetectedUpstream]);
 
+  const availableHeadBranches = React.useMemo(() => {
+    const selectedRemoteName = useDetectedUpstream ? null : (selectedRemote?.name?.trim() || null);
+    const unique = new Set<string>();
+
+    // The current local branch must always be offered, even before the branch list resolves.
+    unique.add(branch);
+
+    for (const remoteBranch of remoteBranches) {
+      const branchName = remoteBranchToName(remoteBranch, selectedRemoteName);
+      if (!branchName || branchName === 'HEAD') {
+        continue;
+      }
+      unique.add(branchName);
+    }
+
+    // When using detected upstream, include all upstream repo branches
+    if (useDetectedUpstream) {
+      for (const b of upstreamBranches) {
+        if (b && b !== 'HEAD') {
+          unique.add(b);
+        }
+      }
+    }
+
+    const sorted = Array.from(unique).sort((a, b) => a.localeCompare(b));
+    if (branch && sorted[0] !== branch) {
+      return [branch, ...sorted.filter((candidate) => candidate !== branch)];
+    }
+    return sorted;
+  }, [branch, remoteBranches, selectedRemote?.name, upstreamBranches, useDetectedUpstream]);
+
   // Update selected remote when remotes change
   React.useEffect(() => {
     if (remotes.length === 0) {
@@ -512,6 +553,100 @@ export const PullRequestSection: React.FC<{
   // the panel offers creating the next PR instead of a read-only detail view.
   const isHistoricalPr = pr?.state === 'merged' || pr?.state === 'closed';
   const livePr = isHistoricalPr ? null : pr;
+
+  // Forge rich-view tabs (commits / files): the provider facade wraps the raw
+  // GitHub API with normalized result envelopes. `forgePr` is the status PR
+  // projected onto the forge vocabulary (labels/assignees/milestone come from
+  // the enriched summary the server already returns).
+  const forgeProvider = React.useMemo(() => (github ? buildForgeProvider('github', { github }) : null), [github]);
+  const forgePr = React.useMemo(() => (pr ? mapGithubPr(pr) : null), [pr]);
+  const prSourceRepo = React.useMemo(() => {
+    if (!status?.repo) {
+      return null;
+    }
+    return `${status.repo.owner}/${status.repo.repo}`;
+  }, [status?.repo]);
+
+  const [commits, setCommits] = React.useState<ForgeCommit[] | null>(null);
+  const [commitsLoading, setCommitsLoading] = React.useState(false);
+  const [commitsError, setCommitsError] = React.useState<string | null>(null);
+  const [prFiles, setPrFiles] = React.useState<ForgeFileChange[] | null>(null);
+  const [prDiff, setPrDiff] = React.useState<string | null>(null);
+  const [filesLoading, setFilesLoading] = React.useState(false);
+  const [filesError, setFilesError] = React.useState<string | null>(null);
+
+  // Key on the PR number, not the status object: periodic status refreshes
+  // create a new object identity for the same PR, which must not re-trigger a
+  // refetch (and a loading flicker) of an already loaded tab.
+  const prNumber = pr?.number ?? null;
+
+  // Commits and files load lazily per segment and bypass the shared
+  // usePrContextStore flow that Overview/Checks/Comments rely on. Leaving the
+  // segment cancels the in-flight request so a stale result never overwrites
+  // a newer segment's data.
+  React.useEffect(() => {
+    if (activeSegment !== 'commits' || prNumber === null || !forgeProvider?.getCommits) {
+      return;
+    }
+    let cancelled = false;
+    setCommitsLoading(true);
+    setCommitsError(null);
+    void forgeProvider
+      .getCommits(directory, prNumber, { sourceRepo: prSourceRepo })
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setCommits(result.commits);
+        setCommitsError(result.error ?? null);
+      })
+      .catch((e) => {
+        if (cancelled) {
+          return;
+        }
+        setCommitsError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCommitsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSegment, directory, forgeProvider, prNumber, prSourceRepo]);
+
+  React.useEffect(() => {
+    if (activeSegment !== 'files' || prNumber === null || !forgeProvider) {
+      return;
+    }
+    let cancelled = false;
+    setFilesLoading(true);
+    setFilesError(null);
+    void forgeProvider
+      .getPullRequestContext(directory, prNumber, { includeDiff: true, sourceRepo: prSourceRepo })
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setPrFiles(result.files ?? null);
+        setPrDiff(result.diff ?? null);
+      })
+      .catch((e) => {
+        if (cancelled) {
+          return;
+        }
+        setFilesError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setFilesLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSegment, directory, forgeProvider, prNumber, prSourceRepo]);
 
   const prContextKey = livePr ? getPrContextKey(directory, livePr.number) : null;
   const prContextEntry = usePrContextStore((state) => (prContextKey ? state.entries[prContextKey] : undefined));
@@ -1049,6 +1184,19 @@ export const PullRequestSection: React.FC<{
     }, delayMs));
   }, [refresh]);
 
+  // Forge write actions in the Overview refresh the status store so chips,
+  // checks, and the header stay coherent after a state/draft/review change.
+  const refreshPr = React.useCallback(() => {
+    void refresh({ force: true });
+  }, [refresh]);
+
+  // A posted comment lives in the context store (Comments tab), so refresh it
+  // in place; the status store is unaffected by comments.
+  const refreshPrContext = React.useCallback(() => {
+    if (!github?.prContext || !pr) return;
+    void ensurePrContext(github, directory, pr.number, { force: true, sourceRepo: status?.repo ?? null });
+  }, [directory, ensurePrContext, github, pr, status?.repo]);
+
   React.useEffect(() => {
     if (!github?.prStatus || !canShow || remotes.length <= 1) {
       return;
@@ -1137,6 +1285,7 @@ export const PullRequestSection: React.FC<{
     setBody(snapshot?.body ?? '');
     setDraft(snapshot?.draft ?? false);
     setTargetBaseBranch(snapshot?.targetBaseBranch ? normalizeBranchRef(snapshot.targetBaseBranch) : normalizeBranchRef(baseBranch));
+    setHeadBranch(branch);
     const nextRemote = pickInitialPrRemote(remotes, {
       selectedRemoteName: snapshot?.selectedRemoteName,
       trackingBranch,
@@ -1274,7 +1423,7 @@ export const PullRequestSection: React.FC<{
       toast.error(t('gitView.pr.toast.baseBranchRequired'));
       return;
     }
-    if (!useDetectedUpstream && trimmedBase === branch) {
+    if (!useDetectedUpstream && trimmedBase === headBranch) {
       toast.error(t('gitView.pr.toast.baseMustDifferFromHead'));
       return;
     }
@@ -1288,7 +1437,7 @@ export const PullRequestSection: React.FC<{
       const pr = await github.prCreate({
         directory,
         title: trimmedTitle,
-        head: branch,
+        head: headBranch,
         base: trimmedBase,
         ...(body.trim() ? { body } : {}),
         draft,
@@ -1311,7 +1460,7 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsCreating(false);
     }
-  }, [body, branch, detectedUpstream, directory, draft, github, prStatusKey, refresh, scheduleActionRefresh, selectedRemote, targetBaseBranch, title, trackingBranch, updatePrStatus, useDetectedUpstream, t]);
+  }, [body, detectedUpstream, directory, draft, github, headBranch, prStatusKey, refresh, scheduleActionRefresh, selectedRemote, targetBaseBranch, title, trackingBranch, updatePrStatus, useDetectedUpstream, t]);
 
   const mergePr = React.useCallback(async (pr: GitHubPullRequest) => {
     if (!github?.prMerge) {
@@ -1633,6 +1782,14 @@ export const PullRequestSection: React.FC<{
                             ? `${t('gitView.pr.segment.comments')} ${(prContext.issueComments?.length ?? 0) + (prContext.reviewComments?.length ?? 0)}`
                             : t('gitView.pr.segment.comments'),
                         },
+                        {
+                          id: 'commits',
+                          label: t('forge.section.commits'),
+                        },
+                        {
+                          id: 'files',
+                          label: t('forge.section.files'),
+                        },
                       ]}
                       activeId={activeSegment}
                       onSelect={(segmentId) => setActiveSegment(segmentId as PrSegment)}
@@ -1725,6 +1882,33 @@ export const PullRequestSection: React.FC<{
                       ) : null}
                     </div>
 
+                    {forgePr ? <ForgeMetadataChips kind="pull" pr={forgePr} /> : null}
+
+                    {forgeProvider && forgePr && forgePr.state === 'open' ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <ForgeDraftToggle
+                          provider={forgeProvider}
+                          directory={directory}
+                          ref={{ kind: 'pull', number: pr.number }}
+                          draft={!!forgePr.draft}
+                          onChanged={refreshPr}
+                        />
+                        <ForgeStateActions
+                          provider={forgeProvider}
+                          directory={directory}
+                          ref={{ kind: 'pull', number: pr.number }}
+                          state={forgePr.state}
+                          onChanged={refreshPr}
+                        />
+                        <ForgeReviewActions
+                          provider={forgeProvider}
+                          directory={directory}
+                          ref={{ kind: 'pull', number: pr.number }}
+                          onReviewed={refreshPr}
+                        />
+                      </div>
+                    ) : null}
+
                     {isEditingPr ? (
                       <Textarea
                         value={editBody}
@@ -1749,6 +1933,15 @@ export const PullRequestSection: React.FC<{
                           {isHydratingCurrentPrBody ? t('gitView.pr.loadingDescription') : t('gitView.pr.noDescription')}
                         </div>
                       )
+                    ) : null}
+
+                    {forgeProvider && forgePr && forgePr.state === 'open' ? (
+                      <ForgeCommentComposer
+                        provider={forgeProvider}
+                        directory={directory}
+                        ref={{ kind: 'pull', number: pr.number }}
+                        onPosted={refreshPrContext}
+                      />
                     ) : null}
                   </div>
                 ) : null}
@@ -1961,6 +2154,14 @@ export const PullRequestSection: React.FC<{
                     )}
                   </div>
                 ) : null}
+
+                {activeSegment === 'commits' ? (
+                  <ForgeCommitsSection commits={commits} loading={commitsLoading} error={commitsError} />
+                ) : null}
+
+                {activeSegment === 'files' ? (
+                  <ForgeFilesDiffSection files={prFiles} diff={prDiff} loading={filesLoading} error={filesError} />
+                ) : null}
               </div>
             ) : (
               <div className="flex flex-col gap-3">
@@ -1992,7 +2193,7 @@ export const PullRequestSection: React.FC<{
                   <div className="min-w-0">
                     <div className="typography-ui-label text-foreground">{t('gitView.pr.createTitle')}</div>
                     <div className="typography-micro text-muted-foreground truncate">
-                      {branch} <span className="opacity-60">(local)</span> → {targetBaseBranch} <span className="opacity-60">({useDetectedUpstream && detectedUpstream ? 'upstream' : 'remote'})</span>
+                      {headBranch}{headBranch === branch ? <span className="opacity-60">(local)</span> : null} → {targetBaseBranch} <span className="opacity-60">({useDetectedUpstream && detectedUpstream ? 'upstream' : 'remote'})</span>
                     </div>
                   </div>
                   {repoUrl ? (
@@ -2015,6 +2216,20 @@ export const PullRequestSection: React.FC<{
                     autoCapitalize={hasTouchInput ? "sentences" : "off"}
                     spellCheck={hasTouchInput}
                   />
+                </label>
+
+                <label className="space-y-1">
+                  <div className="typography-micro text-muted-foreground">{t('gitView.pr.field.headBranch')}</div>
+                  <Select value={headBranch} onValueChange={setHeadBranch}>
+                    <SelectTrigger size="lg">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableHeadBranches.map((candidate) => (
+                        <SelectItem key={candidate} value={candidate}>{candidate}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </label>
 
                 <label className="space-y-1">
@@ -2167,7 +2382,7 @@ export const PullRequestSection: React.FC<{
                     size="sm"
                     className="min-w-[7.5rem] justify-center gap-2"
                     onClick={createPr}
-                    disabled={isCreating || !isConnected || !targetBaseBranch.trim() || (!useDetectedUpstream && targetBaseBranch.trim() === branch)}
+                    disabled={isCreating || !isConnected || !targetBaseBranch.trim() || (!useDetectedUpstream && targetBaseBranch.trim() === headBranch)}
                   >
                     <span className="inline-flex size-4 items-center justify-center">
                       {isCreating ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="git-pull-request" className="size-4" />}
