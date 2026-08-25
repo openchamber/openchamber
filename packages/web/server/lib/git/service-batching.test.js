@@ -159,6 +159,65 @@ describe('git path batching', () => {
     expect(stagedPaths.length).toBeLessThan(filePaths.length + 1);
   });
 
+  it('commits explicit stageFiles without rewriting unrelated partial or newline index entries', async () => {
+    const directory = createRepository();
+    const stagedOnlySelectedPath = 'selected-stage-only.txt';
+    const stagedDeletedSelectedPath = 'selected-deleted.txt';
+    const stagedUntrackedPath = 'selected\nstage-file.txt';
+    const partiallyStagedPath = 'unrelated-partial-stage.txt';
+    const newlinePartiallyStagedPath = 'unrelated\npartial-stage.txt';
+    const selectedStage = getStageOnlyContents();
+    const partialStage = getPartialStageContents();
+
+    for (const filePath of [
+      stagedOnlySelectedPath,
+      stagedDeletedSelectedPath,
+      partiallyStagedPath,
+      newlinePartiallyStagedPath,
+    ]) {
+      fs.writeFileSync(path.join(directory, filePath), filePath.startsWith('selected')
+        ? selectedStage.original
+        : partialStage.original);
+    }
+    runGit(directory, ['add', '--', stagedOnlySelectedPath, stagedDeletedSelectedPath, partiallyStagedPath, newlinePartiallyStagedPath]);
+    runGit(directory, ['commit', '-m', 'Add explicit stageFiles fixtures']);
+
+    const stagedOnlySelected = stageOnlySelectedFile(directory, stagedOnlySelectedPath);
+    runGit(directory, ['rm', '--', stagedDeletedSelectedPath]);
+    const unrelatedPartialStage = stageOneUnrelatedHunk(directory, partiallyStagedPath);
+    const unrelatedNewlinePartialStage = stageOneUnrelatedHunk(directory, newlinePartiallyStagedPath);
+    const unrelatedPartialIndex = runGit(directory, ['ls-files', '--stage', '-z', '--', partiallyStagedPath]);
+    const unrelatedNewlinePartialIndex = runGit(directory, ['ls-files', '--stage', '-z', '--', newlinePartiallyStagedPath]);
+    fs.writeFileSync(path.join(directory, stagedUntrackedPath), 'selected untracked content\n');
+
+    const commitTrace = await captureGitTrace(() => commit(directory, 'Commit explicit stageFiles', {
+      files: [stagedOnlySelectedPath, stagedDeletedSelectedPath],
+      stageFiles: [stagedUntrackedPath],
+    }));
+
+    const committedPaths = runGit(directory, ['show', '--format=', '--name-only', '-z', 'HEAD'])
+      .split('\0')
+      .filter(Boolean)
+      .sort();
+    const stillStagedPaths = runGit(directory, ['diff', '--cached', '--name-only', '-z'])
+      .split('\0')
+      .filter(Boolean)
+      .sort();
+    expect(committedPaths).toEqual([stagedOnlySelectedPath, stagedDeletedSelectedPath, stagedUntrackedPath].sort());
+    expect(stillStagedPaths).toEqual([partiallyStagedPath, newlinePartiallyStagedPath].sort());
+    expect(getTracedCommands(commitTrace, 'restore --staged --')).toHaveLength(0);
+    expect(getTracedCommands(commitTrace, 'write-tree')).toHaveLength(0);
+    expect(runGit(directory, ['show', `HEAD:${stagedOnlySelectedPath}`])).toBe(stagedOnlySelected.staged);
+    expect(runGit(directory, ['show', `HEAD:${stagedUntrackedPath}`])).toBe('selected untracked content\n');
+    expect(() => runGit(directory, ['show', `HEAD:${stagedDeletedSelectedPath}`])).toThrow();
+    expect(runGit(directory, ['ls-files', '--stage', '-z', '--', partiallyStagedPath])).toBe(unrelatedPartialIndex);
+    expect(runGit(directory, ['ls-files', '--stage', '-z', '--', newlinePartiallyStagedPath])).toBe(unrelatedNewlinePartialIndex);
+    expect(runGit(directory, ['show', `:${partiallyStagedPath}`])).toBe(unrelatedPartialStage.staged);
+    expect(runGit(directory, ['show', `:${newlinePartiallyStagedPath}`])).toBe(unrelatedNewlinePartialStage.staged);
+    expect(fs.readFileSync(path.join(directory, partiallyStagedPath), 'utf8')).toBe(unrelatedPartialStage.working);
+    expect(fs.readFileSync(path.join(directory, newlinePartiallyStagedPath), 'utf8')).toBe(unrelatedNewlinePartialStage.working);
+  });
+
   it('commits oversized staged-only selected paths while preserving unrelated partial staging and intent-to-add entries', async () => {
     const directory = createRepository();
     const selectedPaths = createOversizedPaths('selected');

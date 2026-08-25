@@ -2732,112 +2732,61 @@ export async function createGitCommit(
 ): Promise<GitCommitResult> {
   const selectedFiles = Array.isArray(options?.files) ? options.files : [];
   const explicitStageFiles = Array.isArray(options?.stageFiles) ? options.stageFiles : null;
-  const shouldCommitSelectedFilesFromIndex = selectedFiles.length > 0 && explicitStageFiles !== null;
-  const shouldCommitOversizedSelectedFilesWithTemporaryIndex = selectedFiles.length > 0 && (
-    explicitStageFiles === null && hasMultipleGitPathBatches(selectedFiles)
+  const shouldCommitSelectedFilesWithTemporaryIndex = selectedFiles.length > 0 && (
+    explicitStageFiles !== null || hasMultipleGitPathBatches(selectedFiles)
   );
 
-  if (shouldCommitSelectedFilesFromIndex || shouldCommitOversizedSelectedFilesWithTemporaryIndex) {
-    let temporarilyUnstagedPathsToRestore: string[] = [];
+  if (shouldCommitSelectedFilesWithTemporaryIndex) {
     let commitResult: GitCommitResult | null = null;
 
-    try {
-      if (shouldCommitSelectedFilesFromIndex) {
-        const selectedFileSet = new Set(selectedFiles);
-        const stagedResult = await execGit(['diff', '--cached', '--name-only'], directory);
-        if (stagedResult.exitCode !== 0) {
-          throw new Error(stagedResult.stderr || 'Failed to list staged git files');
-        }
-        const temporarilyUnstagedFiles = stagedResult.stdout
-          .split('\n')
-          .map((line) => line.trim())
-          .filter((filePath) => filePath && !selectedFileSet.has(filePath));
+    const filesToStage = explicitStageFiles ?? selectedFiles;
+    const statusByPath = explicitStageFiles === null && hasMultipleGitPathBatches(selectedFiles)
+      ? new Map((await getGitStatus(directory)).files.map((file) => [file.path, file]))
+      : null;
+    const workingTreePathsDifferentFromHead = statusByPath
+      ? await getWorkingTreePathsDifferentFromHead(directory)
+      : null;
+    const filesNeedingStage = statusByPath
+      ? filesToStage.filter((filePath) => {
+        const fileStatus = statusByPath.get(filePath);
+        const indexStatus = (fileStatus?.index || '').trim();
+        const hasStagedIndex = Boolean(indexStatus) && indexStatus !== '?';
+        const workingTreeMatchesHead = hasStagedIndex
+          && workingTreePathsDifferentFromHead
+          && !workingTreePathsDifferentFromHead.has(filePath);
+        return !hasStagedIndex || (
+          (fileStatus?.working_dir || ' ') !== ' ' && !workingTreeMatchesHead
+        );
+      })
+      : filesToStage;
+    if (filesNeedingStage.length > 0) {
+      await stageGitFiles(directory, filesNeedingStage);
+    }
 
-        if (temporarilyUnstagedFiles.length > 0) {
-          try {
-            await unstageGitFiles(directory, temporarilyUnstagedFiles);
-            temporarilyUnstagedPathsToRestore = temporarilyUnstagedFiles;
-          } catch (error) {
-            if (error instanceof GitPathBatchError) {
-              temporarilyUnstagedPathsToRestore = error.completedPaths;
-            }
-            throw error;
-          }
-        }
-      }
-      const filesToStage = explicitStageFiles ?? selectedFiles;
-      const statusByPath = shouldCommitOversizedSelectedFilesWithTemporaryIndex
-        ? new Map((await getGitStatus(directory)).files.map((file) => [file.path, file]))
-        : null;
-      const workingTreePathsDifferentFromHead = shouldCommitOversizedSelectedFilesWithTemporaryIndex
-        ? await getWorkingTreePathsDifferentFromHead(directory)
-        : null;
-      const filesNeedingStage = statusByPath
-        ? filesToStage.filter((filePath) => {
-          const fileStatus = statusByPath.get(filePath);
-          const indexStatus = (fileStatus?.index || '').trim();
-          const hasStagedIndex = Boolean(indexStatus) && indexStatus !== '?';
-          const workingTreeMatchesHead = hasStagedIndex
-            && workingTreePathsDifferentFromHead
-            && !workingTreePathsDifferentFromHead.has(filePath);
-          return !hasStagedIndex || (
-            (fileStatus?.working_dir || ' ') !== ' ' && !workingTreeMatchesHead
-          );
-        })
-        : filesToStage;
-      if (filesNeedingStage.length > 0) {
-        await stageGitFiles(directory, filesNeedingStage);
-      }
-
-      const result = shouldCommitOversizedSelectedFilesWithTemporaryIndex
-        ? await commitGitPathsFromTemporaryIndex(directory, message, selectedFiles)
-        : await execGit(['commit', '-m', message], directory);
-      if (result.exitCode !== 0) {
-        commitResult = {
-          success: false,
-          commit: '',
-          branch: '',
-          summary: { changes: 0, insertions: 0, deletions: 0 },
-        };
-      } else {
-        const hashResult = await execGit(['rev-parse', 'HEAD'], directory);
-        const branchResult = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], directory);
-        commitResult = {
-          success: true,
-          commit: hashResult.stdout.trim(),
-          branch: branchResult.stdout.trim(),
-          summary: { changes: 0, insertions: 0, deletions: 0 },
-        };
-      }
-    } catch (error) {
-      if (temporarilyUnstagedPathsToRestore.length > 0) {
-        try {
-          await stageGitFiles(directory, temporarilyUnstagedPathsToRestore);
-          temporarilyUnstagedPathsToRestore = [];
-        } catch (restoreError) {
-          const commitError = error instanceof Error ? error.message : String(error || 'Git command failed');
-          const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError || 'Git command failed');
-          throw new Error(
-            `Commit failed: ${commitError}. Restoring unrelated staged files also failed: ${restoreMessage}`
-          );
-        }
-      }
-      throw error;
+    const temporaryIndexFiles = explicitStageFiles
+      ? Array.from(new Set([...selectedFiles, ...filesToStage]))
+      : selectedFiles;
+    const result = await commitGitPathsFromTemporaryIndex(directory, message, temporaryIndexFiles);
+    if (result.exitCode !== 0) {
+      commitResult = {
+        success: false,
+        commit: '',
+        branch: '',
+        summary: { changes: 0, insertions: 0, deletions: 0 },
+      };
+    } else {
+      const hashResult = await execGit(['rev-parse', 'HEAD'], directory);
+      const branchResult = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], directory);
+      commitResult = {
+        success: true,
+        commit: hashResult.stdout.trim(),
+        branch: branchResult.stdout.trim(),
+        summary: { changes: 0, insertions: 0, deletions: 0 },
+      };
     }
 
     if (!commitResult) {
       throw new Error('Failed to create git commit');
-    }
-
-    if (temporarilyUnstagedPathsToRestore.length > 0) {
-      try {
-        await stageGitFiles(directory, temporarilyUnstagedPathsToRestore);
-      } catch (restoreError) {
-        const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError || 'Git command failed');
-        throw new Error(
-          `Commit ${commitResult.commit} was created, but restoring unrelated staged files failed: ${restoreMessage}`
-        );
-      }
     }
 
     return commitResult;

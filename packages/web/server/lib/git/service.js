@@ -3709,7 +3709,6 @@ export async function unstageFiles(directory, paths) {
 export async function commit(directory, message, options = {}) {
   return withGitIndexMutationQueue(directory, async () => {
     const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
-    let temporarilyUnstagedPathsToRestore = [];
     let result;
 
     try {
@@ -3724,8 +3723,8 @@ export async function commit(directory, message, options = {}) {
           .filter(Boolean)
         : null;
       let filesToCommit = [];
-      let commitFromIndexOnly = false;
       let commitWithTemporaryIndex = false;
+      let stageFilesToCommit = null;
 
       if (options.addAll) {
         await git.add('.');
@@ -3735,7 +3734,7 @@ export async function commit(directory, message, options = {}) {
           return fileContext.repoPath;
         }))));
 
-        const stageFilesToCommit = requestedStageFiles
+        stageFilesToCommit = requestedStageFiles
           ? Array.from(new Set(await Promise.all(requestedStageFiles.map(async (filePath) => {
             const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
             return fileContext.repoPath;
@@ -3751,31 +3750,12 @@ export async function commit(directory, message, options = {}) {
         }
 
         if (requestedStageFiles) {
-          commitFromIndexOnly = true;
-          const selectedFileSet = new Set(filesToCommit);
-          const temporarilyUnstagedFiles = status.files
-            .filter((file) => {
-              const indexStatus = (file.index || '').trim();
-              return indexStatus && indexStatus !== '?' && !selectedFileSet.has(file.path);
-            })
-            .map((file) => file.path);
-
-          if (temporarilyUnstagedFiles.length > 0) {
-            try {
-              await unstageGitPaths(git, temporarilyUnstagedFiles, 'Preparing the selected commit');
-              temporarilyUnstagedPathsToRestore = temporarilyUnstagedFiles;
-            } catch (error) {
-              if (error instanceof GitPathBatchError) {
-                temporarilyUnstagedPathsToRestore = error.completedPaths;
-              }
-              throw error;
-            }
-          }
+          commitWithTemporaryIndex = true;
         } else if (hasMultipleGitPathBatches(filesToCommit)) {
           commitWithTemporaryIndex = true;
         }
 
-        const workingTreePathsDifferentFromHead = commitWithTemporaryIndex
+        const workingTreePathsDifferentFromHead = !requestedStageFiles && commitWithTemporaryIndex
           ? await getWorkingTreePathsDifferentFromHead(git, repoRoot)
           : null;
         const filesNeedingAdd = requestedStageFiles
@@ -3801,13 +3781,16 @@ export async function commit(directory, message, options = {}) {
       }
 
       const commitArgs =
-        !commitFromIndexOnly && !commitWithTemporaryIndex && !options.addAll && filesToCommit.length > 0
+        !commitWithTemporaryIndex && !options.addAll && filesToCommit.length > 0
           ? filesToCommit
           : undefined;
+      const temporaryIndexPaths = requestedStageFiles
+        ? Array.from(new Set([...filesToCommit, ...(stageFilesToCommit || [])]))
+        : filesToCommit;
 
       try {
         result = commitWithTemporaryIndex
-          ? await commitGitPathsFromTemporaryIndex(git, repoRoot, message, filesToCommit)
+          ? await commitGitPathsFromTemporaryIndex(git, repoRoot, message, temporaryIndexPaths)
           : await git.commit(message, commitArgs);
       } catch (error) {
         const gitErrorText = parseGitErrorText(error);
@@ -3820,36 +3803,8 @@ export async function commit(directory, message, options = {}) {
         result = await git.commit(message);
       }
     } catch (error) {
-      if (temporarilyUnstagedPathsToRestore.length > 0) {
-        try {
-          await stageGitPaths(git, temporarilyUnstagedPathsToRestore, 'Restoring unrelated staged files');
-          temporarilyUnstagedPathsToRestore = [];
-        } catch (restoreError) {
-          const commitError = error instanceof Error ? error.message : String(error || 'Git command failed');
-          const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError || 'Git command failed');
-          const failure = new Error(
-            `Commit failed: ${commitError}. Restoring unrelated staged files also failed: ${restoreMessage}`
-          );
-          console.error('Failed to commit:', failure);
-          throw failure;
-        }
-      }
       console.error('Failed to commit:', error);
       throw error;
-    }
-
-    if (temporarilyUnstagedPathsToRestore.length > 0) {
-      try {
-        await stageGitPaths(git, temporarilyUnstagedPathsToRestore, 'Restoring unrelated staged files');
-        temporarilyUnstagedPathsToRestore = [];
-      } catch (restoreError) {
-        const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError || 'Git command failed');
-        const failure = new Error(
-          `Commit ${result.commit} was created, but restoring unrelated staged files failed: ${restoreMessage}`
-        );
-        console.error('Failed to commit:', failure);
-        throw failure;
-      }
     }
 
     return {

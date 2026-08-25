@@ -236,24 +236,47 @@ describe('VS Code git path batching', () => {
     expect(getCommandCalls('write-tree')).toHaveLength(0);
   });
 
-  it('keeps explicit stageFiles on the existing index-managed selected-commit path', async () => {
-    const selectedPaths = createOversizedPaths('selected');
-    const unrelatedPaths = createOversizedPaths('unrelated');
-    processState.stagedPathOutput = `${unrelatedPaths.join('\n')}\n`;
+  it('uses a temporary index for explicit stageFiles without rewriting unrelated newline paths', async () => {
+    const stagedOnlySelectedPath = 'selected-stage-only.txt';
+    const stagedDeletedSelectedPath = 'selected-deleted.txt';
+    const stagedUntrackedPath = 'selected\nstage-file.txt';
+    const unrelatedPartialPath = 'unrelated-partial-stage.txt';
+    const unrelatedNewlinePath = 'unrelated\npartial-stage.txt';
+    const selectedPaths = [stagedOnlySelectedPath, stagedDeletedSelectedPath];
+    const indexInfoForPath = (filePath) => `100644 ${'a'.repeat(40)} 0\t${filePath}\0`;
+    processState.stagedPathOutput = `${unrelatedPartialPath}\n${unrelatedNewlinePath}\n`;
+    processState.indexInfoByPath.set(stagedOnlySelectedPath, indexInfoForPath(stagedOnlySelectedPath));
+    processState.indexInfoByPath.set(stagedUntrackedPath, indexInfoForPath(stagedUntrackedPath));
 
     const result = await createGitCommit('/repo', 'Commit selected paths', {
       files: selectedPaths,
-      stageFiles: selectedPaths,
+      stageFiles: [stagedUntrackedPath],
     });
 
     expect(result).toMatchObject({ success: true, commit: 'abc123', branch: 'main' });
-    expect(processState.calls.find((args) => args[0] === 'commit')).toEqual([
-      'commit',
-      '-m',
-      'Commit selected paths',
-    ]);
-    expect(processState.pathspecContents).toBeNull();
-    expect(getPathBatches('restore', ['--staged', '--']).length).toBeGreaterThan(1);
-    expect(getPathBatches('add', ['--']).length).toBeGreaterThan(1);
+    expect(getCommandCalls('commit')).toEqual([expect.objectContaining({
+      args: ['commit', '-m', 'Commit selected paths'],
+      environment: expect.objectContaining({
+        GIT_INDEX_FILE: expect.stringMatching(/openchamber-git-pathspec-/),
+      }),
+    })]);
+    expect(getCommandCalls('diff').filter((call) => call.args.includes('--cached'))).toHaveLength(0);
+    expect(getPathBatches('restore', ['--staged', '--'])).toHaveLength(0);
+    expect(getPathBatches('add', ['--'])).toEqual([[stagedUntrackedPath]]);
+
+    const indexInfoCalls = getCommandCalls('ls-files');
+    expect(indexInfoCalls).toEqual([expect.objectContaining({
+      args: [
+        '--literal-pathspecs',
+        'ls-files',
+        '--stage',
+        '-z',
+        '--',
+        ...selectedPaths,
+        stagedUntrackedPath,
+      ],
+    })]);
+    expect(processState.pathspecContents).toEqual(Buffer.from(`${stagedDeletedSelectedPath}\0`, 'utf8'));
+    expect(getCommandCalls('write-tree')).toHaveLength(0);
   });
 });
