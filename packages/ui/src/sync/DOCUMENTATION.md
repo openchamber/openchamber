@@ -280,9 +280,10 @@ The fork API uses `messageID` as a stop sign. It does not copy that message or a
 - For an assistant-message fork, the action sends the next message as the stop sign. The new session includes the selected answer.
 - For the last assistant message, no next message exists. The action omits `messageID`, so OpenCode copies the full transcript.
 
-OpenCode compares the stop ID as text while it walks messages by time.
-If an earlier ID sorts at or after the stop ID, the requested fork boundary cannot work.
-OpenChamber rejects that request before OpenCode creates a fork.
+Older OpenCode servers compare the stop ID as text while they walk messages by time.
+If an earlier ID sorts at or after the stop ID, those servers stop before the requested boundary.
+OpenCode 1.18.15 and later find the exact stop message and copy the correct chronological prefix.
+OpenChamber keeps this boundary fact and verifies the returned fork instead of refusing the request.
 
 The action fetches the source transcript first because it must find the next message.
 
@@ -290,10 +291,16 @@ The source session can change between that fetch and the moment the server copie
 A fork from the last assistant message sends no stop message, so the server copies every record that exists when it reads.
 Setup therefore reads the new fork's transcript and compares it with the copied prefix.
 The check runs after directory registration and before metadata cleanup and selection.
+
 A transcript longer than the copied prefix fails setup, because the fork holds messages the user excluded.
+A lexically inverted boundary requires a transcript with the exact copied-prefix length.
+An old server returns a short transcript for that boundary, so setup removes the fork and reports the unsupported-boundary error.
+A fixed server returns the full prefix, so the valid fork succeeds.
 A role or created-time mismatch inside the returned records also fails setup.
-A shorter matching transcript passes setup, and the fork remains usable. The pin remap then reports any missing copied pins.
+
+A shorter transcript that matches passes for other boundaries, and the fork remains usable. The pin remap then reports any missing copied pins.
 Every setup failure here removes the fork, so an over-copied fork never opens.
+An old server now creates and removes a short fork. This extra work lets fixed servers accept valid cross-rollover forks.
 This costs one transcript request for a fork without pins. A fork with pins reuses these records, so its request count does not change.
 
 The fork response is authoritative for metadata. Before selection, the action reads that metadata and removes pins and source-only state.

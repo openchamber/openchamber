@@ -532,6 +532,19 @@ describe('forkFromMessage errors', () => {
   });
 
   test('shows the unsupported-boundary toast for a rollover fork', async () => {
+    const directory = '/rollover/project';
+    const sourceSession = {
+      id: 'session-rollover',
+      title: 'Source',
+      directory,
+      time: { created: 1, updated: 1 },
+    };
+    const forkedSession = {
+      id: 'session-rollover-fork',
+      title: 'Source (fork #1)',
+      directory,
+      time: { created: 2, updated: 2 },
+    };
     const sourceRecords = [
       { info: { id: 'msg_ff5b3480000100000000000000', role: 'user', time: { created: 1 } }, parts: [] },
       {
@@ -547,43 +560,53 @@ describe('forkFromMessage errors', () => {
     ];
     const sdk = {
       session: {
-        messages: async () => ({ data: sourceRecords }),
+        messages: async ({ sessionID }) => ({
+          data: sessionID === sourceSession.id ? sourceRecords : [],
+        }),
       },
     };
-    const childStore = {
-      getState: () => ({
-        session: [{ id: 'session-rollover', directory: '/rollover/project' }],
-        message: {},
-        session_status: {},
-        permission: {},
-        question: {},
-      }),
-    };
+    const childStore = createChildStore([sourceSession]);
     const childStores = {
-      children: new Map([['/rollover/project', childStore]]),
+      children: new Map([[directory, childStore]]),
       ensureChild: () => childStore,
       getChild: () => childStore,
     };
     const toastErrors = [];
+    let forkCalls = 0;
+    let deleteCalls = 0;
+    const originalForkSession = opencodeClient.forkSession;
+    const originalDeleteSession = opencodeClient.deleteSession;
     const originalToastError = toast.error;
     const previousI18nState = useI18nStore.getState();
+    opencodeClient.forkSession = async () => {
+      forkCalls += 1;
+      return forkedSession;
+    };
+    opencodeClient.deleteSession = async () => {
+      deleteCalls += 1;
+      return true;
+    };
     toast.error = (message) => {
       toastErrors.push(message);
       return 'unsupported-boundary-toast';
     };
     useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
-    setActionRefs(sdk, childStores, () => '/rollover/project');
+    setActionRefs(sdk, childStores, () => directory);
 
     try {
       await useSessionUIStore.getState().forkFromMessage(
-        'session-rollover',
+        sourceSession.id,
         'msg_00a4cb80000100000000000000',
       );
     } finally {
+      opencodeClient.forkSession = originalForkSession;
+      opencodeClient.deleteSession = originalDeleteSession;
       toast.error = originalToastError;
       useI18nStore.setState(previousI18nState);
     }
 
+    expect(forkCalls).toBe(1);
+    expect(deleteCalls).toBe(1);
     expect(toastErrors).toEqual([
       'OpenCode cannot fork this session at this message. Retrying will not help.',
     ]);

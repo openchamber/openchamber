@@ -678,7 +678,7 @@ describe("session forks", () => {
     expect(inputState.attachedFiles).toEqual([])
   })
 
-  test("rejects a user-message fork when chronological IDs cross the rollover", async () => {
+  test("deletes a short user-message fork from an old server after the ID rollover", async () => {
     const sourceMessages = [
       userMessageFixture("msg_ff5b3480000100000000000000", 1),
       assistantMessageFixture("msg_ff5b3480000200000000000000", 2, "msg_ff5b3480000100000000000000"),
@@ -687,6 +687,7 @@ describe("session forks", () => {
       userMessageFixture("msg_00a4cb80000300000000000000", 5),
     ]
     sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    sessionMessagesBySessionID.set("session-fork", { data: [] })
     const source = createStore({}, {
       session: [sessionFixture("session-a", "Source", "/test/project")],
       sessionTotal: 1,
@@ -699,10 +700,22 @@ describe("session forks", () => {
 
     await expect(forkFromMessage("session-a", "msg_00a4cb80000100000000000000"))
       .rejects.toThrow(UnsupportedForkBoundaryError)
-    expect(replyCalls.filter((call) => call.method === "session.fork")).toHaveLength(0)
+    expect(replyCalls.filter((call) => call.method === "session.fork")).toEqual([{
+      method: "session.fork",
+      params: {
+        sessionID: "session-a",
+        messageID: "msg_00a4cb80000100000000000000",
+        directory: "/test/project",
+      },
+    }])
+    expect(replyCalls.filter((call) => call.method === "session.delete")).toEqual([{
+      method: "session.delete",
+      params: { sessionID: "session-fork", directory: "/test/project" },
+    }])
+    expect(selectedSessions).toEqual([])
   })
 
-  test("rejects an assistant-message fork when chronological IDs cross the rollover", async () => {
+  test("deletes a short assistant-message fork from an old server after the ID rollover", async () => {
     const sourceMessages = [
       userMessageFixture("msg_ff5b3480000100000000000000", 1),
       assistantMessageFixture("msg_ff5b3480000200000000000000", 2, "msg_ff5b3480000100000000000000"),
@@ -711,6 +724,7 @@ describe("session forks", () => {
       userMessageFixture("msg_00a4cb80000300000000000000", 5),
     ]
     sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    sessionMessagesBySessionID.set("session-fork", { data: [] })
     const source = createStore({}, {
       session: [sessionFixture("session-a", "Source", "/test/project")],
       sessionTotal: 1,
@@ -723,7 +737,52 @@ describe("session forks", () => {
 
     await expect(forkFromMessage("session-a", "msg_00a4cb80000200000000000000"))
       .rejects.toThrow(UnsupportedForkBoundaryError)
-    expect(replyCalls.filter((call) => call.method === "session.fork")).toHaveLength(0)
+    expect(replyCalls.filter((call) => call.method === "session.fork")).toEqual([{
+      method: "session.fork",
+      params: {
+        sessionID: "session-a",
+        messageID: "msg_00a4cb80000300000000000000",
+        directory: "/test/project",
+      },
+    }])
+    expect(replyCalls.filter((call) => call.method === "session.delete")).toEqual([{
+      method: "session.delete",
+      params: { sessionID: "session-fork", directory: "/test/project" },
+    }])
+    expect(selectedSessions).toEqual([])
+  })
+
+  test("accepts a full user-message fork from a fixed server after the ID rollover", async () => {
+    const sourceMessages = [
+      userMessageFixture("msg_ff5b3480000100000000000000", 1),
+      assistantMessageFixture("msg_ff5b3480000200000000000000", 2, "msg_ff5b3480000100000000000000"),
+      userMessageFixture("msg_00a4cb80000100000000000000", 3),
+    ]
+    const forkMessages = [
+      userMessageFixture("fork-1-user", 1, "session-fork"),
+      assistantMessageFixture("fork-2-assistant", 2, "fork-1-user", "session-fork"),
+    ]
+    sessionMessagesBySessionID.set("session-a", { data: messageRecords(sourceMessages) })
+    sessionMessagesBySessionID.set("session-fork", { data: messageRecords(forkMessages) })
+    const source = createStore({}, {
+      session: [sessionFixture("session-a", "Source", "/test/project")],
+      sessionTotal: 1,
+    })
+    const { forkFromMessage, setActionRefs } = await import("./session-actions")
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://fork-rollover-fixed.test", runtimeKey: "fork-rollover-fixed" })
+    setActionRefs(opencodeClient.getSdkClient(), createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const result = await forkFromMessage("session-a", "msg_00a4cb80000100000000000000")
+
+    expect(result).toEqual({ status: "success" })
+    expect(replyCalls.filter((call) => call.method === "session.fork")).toHaveLength(1)
+    expect(replyCalls.filter((call) => (
+      call.method === "session.messages" && call.params.sessionID === "session-fork"
+    ))).toHaveLength(1)
+    expect(replyCalls.filter((call) => call.method === "session.delete")).toEqual([])
+    expect(selectedSessions).toEqual([{ sessionID: "session-fork", directory: "/test/project" }])
   })
 
   test("omits the boundary for the last assistant but still applies metadata cleanup", async () => {

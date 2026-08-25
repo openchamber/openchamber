@@ -121,7 +121,7 @@ type SessionMessageRecord = {
   parts: Part[]
 }
 
-/** The fork action throws this before OpenCode creates a fork with the wrong message boundary. */
+/** The fork action throws this when an older OpenCode server stops before the requested boundary. */
 export class UnsupportedForkBoundaryError extends Error {
   constructor() {
     super("OpenCode cannot copy the requested message prefix")
@@ -2158,11 +2158,13 @@ function prepareCleanForkMetadata(forkedSession: Session): PreparedForkMetadata 
  * the server copies whatever exists when it reads. This check runs before
  * selection so a fork that copied too much never opens.
  *
- * The action accepts a shorter matching transcript.
+ * A normal boundary accepts a shorter transcript that matches. An inverted
+ * boundary requires the full prefix because older servers stop early there.
  */
 async function fetchVerifiedForkPrefix(
   forkedSession: Session,
   copiedSourceRecords: SessionMessageRecord[],
+  boundaryIsInverted: boolean,
   forkDirectory: string | null,
   expectedRuntimeKey: string,
 ): Promise<SessionMessageRecord[]> {
@@ -2176,6 +2178,11 @@ async function fetchVerifiedForkPrefix(
   // A longer fork copied messages the user excluded. That is the race.
   if (forkRecords.length > copiedSourceRecords.length) {
     throw new Error("The fork transcript is longer than the copied prefix")
+  }
+  if (boundaryIsInverted && forkRecords.length < copiedSourceRecords.length) {
+    // An old server creates this fork, then stops early. Setup deletes that
+    // short fork so a fixed server can copy the valid full prefix.
+    throw new UnsupportedForkBoundaryError()
   }
   for (let index = 0; index < forkRecords.length; index += 1) {
     const sourceMessage = copiedSourceRecords[index].info
@@ -2285,6 +2292,7 @@ async function forkAndReconcileSession(
   sessionId: string,
   messageBoundaryId: string | undefined,
   copiedSourceRecords: SessionMessageRecord[],
+  boundaryIsInverted: boolean,
   store: DirectoryStoreApi,
   directory: string | undefined,
   expectedRuntimeKey: string,
@@ -2305,6 +2313,7 @@ async function forkAndReconcileSession(
     forkRecords = await fetchVerifiedForkPrefix(
       forkedSession,
       copiedSourceRecords,
+      boundaryIsInverted,
       forkDirectory,
       expectedRuntimeKey,
     )
@@ -2363,20 +2372,20 @@ async function forkAndReconcileSession(
   }
 }
 
-function canServerCopyThroughBoundary(
+function isForkBoundaryInverted(
   sourceRecords: SessionMessageRecord[],
   copiedThroughIndex: number,
   exclusiveBoundaryId: string | undefined,
 ): boolean {
-  if (!exclusiveBoundaryId) return true
+  if (!exclusiveBoundaryId) return false
 
-  // OpenCode walks messages by time but compares IDs to find the stop point.
-  // An earlier larger ID makes the server stop before the requested message.
+  // Older OpenCode servers compare IDs while they walk messages by time.
+  // An earlier larger ID makes those servers stop before the requested message.
   for (let index = 0; index <= copiedThroughIndex; index += 1) {
     const record = sourceRecords[index]
-    if (record && record.info.id >= exclusiveBoundaryId) return false
+    if (record && record.info.id >= exclusiveBoundaryId) return true
   }
-  return true
+  return false
 }
 
 /**
@@ -2405,9 +2414,11 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     : selectedIndex
   const copiedSourceRecords = sourceRecords.slice(0, copiedThroughIndex + 1)
   const exclusiveBoundaryId = sourceRecords[copiedThroughIndex + 1]?.info.id
-  if (!canServerCopyThroughBoundary(sourceRecords, copiedThroughIndex, exclusiveBoundaryId)) {
-    throw new UnsupportedForkBoundaryError()
-  }
+  const boundaryIsInverted = isForkBoundaryInverted(
+    sourceRecords,
+    copiedThroughIndex,
+    exclusiveBoundaryId,
+  )
 
   // Only user-message forks restore the selected message in the composer.
   // Synthetic text and files come from the server, not from the user's input.
@@ -2427,6 +2438,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     sessionId,
     exclusiveBoundaryId,
     copiedSourceRecords,
+    boundaryIsInverted,
     store,
     directory,
     expectedRuntimeKey,
