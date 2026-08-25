@@ -70,7 +70,7 @@ export async function bootstrapGlobal(
   set: (patch: Partial<GlobalState>) => void,
 ) {
   // Sync chat classification needs the root before session lists load.
-  warmChatsRootDirectory()
+  await warmChatsRootDirectory()
   const results = await Promise.allSettled([
     retry(() => sdk.path.get().then((x) => set({ path: unwrap(x, "path.get") }))),
     retry(() => sdk.global.config.get().then((x) => set({ config: unwrap(x, "global.config.get") }))),

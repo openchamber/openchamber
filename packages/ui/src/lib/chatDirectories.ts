@@ -86,8 +86,8 @@ async function getChatsRootDirectory(): Promise<string> {
   return pending;
 }
 
-export function warmChatsRootDirectory(): void {
-  void getChatsRootDirectory().catch(() => undefined);
+export function warmChatsRootDirectory(): Promise<void> {
+  return getChatsRootDirectory().then(() => undefined, () => undefined);
 }
 
 export async function createChatDirectory(now = new Date()): Promise<string> {
