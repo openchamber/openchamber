@@ -657,28 +657,30 @@ html:not(.dark) .chat-scroll {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  opacity: 0;
   transition: opacity 0.2s ease;
   /* Above sticky zone headers (z-20) — the thumb must never dive under
      a stuck sidebar header while scrolling. */
   z-index: 30;
 }
 
-.overlay-scrollbar--dense,
-.overlay-scrollbar--bottom-right,
-.overlay-scrollbar--zero,
-.overlay-scrollbar--flush {
-  /* no-op: positioning handled inline */
+.overlay-scrollbar[data-visible="true"] {
+  opacity: 1;
 }
 
 .overlay-scrollbar__thumb {
-  pointer-events: auto;
+  pointer-events: none;
   position: absolute;
   width: 6px;
   background: var(--oc-scrollbar-thumb);
   border-radius: 9999px;
   opacity: 0.8;
   transition: background-color 0.15s ease, opacity 0.15s ease;
-  will-change: transform, height;
+  will-change: transform;
+}
+
+.overlay-scrollbar[data-visible="true"] .overlay-scrollbar__thumb {
+  pointer-events: auto;
 }
 
 .overlay-scrollbar__thumb:hover,

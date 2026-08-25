@@ -548,6 +548,136 @@ describe('updateDesktopSettings', () => {
     });
   });
 
+  test('does not broadcast a stale project selection over a newer pending update', async () => {
+    const firstSave = deferred<SettingsPayload>();
+    const savedChanges: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      savedChanges.push(changes);
+      if (savedChanges.length === 1) return firstSave.promise;
+      return changes as SettingsPayload;
+    });
+    const syncedSettings: SettingsPayload[] = [];
+    const handleSettingsSynced = (event: Event) => {
+      syncedSettings.push((event as CustomEvent<SettingsPayload>).detail);
+    };
+    getWindow().addEventListener('openchamber:settings-synced', handleSettingsSynced);
+
+    try {
+      const firstUpdate = updateDesktopSettings({ activeProjectId: 'project-a' });
+      await delay(250);
+      const secondUpdate = updateDesktopSettings({ activeProjectId: 'project-b' });
+
+      firstSave.resolve({ activeProjectId: 'project-a' });
+      await firstUpdate;
+
+      expect(syncedSettings.at(-1)?.activeProjectId).toBe('project-b');
+
+      await secondUpdate;
+    } finally {
+      getWindow().removeEventListener('openchamber:settings-synced', handleSettingsSynced);
+    }
+  });
+
+  test('does not broadcast a stale loaded project selection over a newer pending update', async () => {
+    const loadedSettings = deferred<{ settings: SettingsPayload; source: 'web' | 'vscode' }>();
+    registerSettingsApi(async (changes) => changes as SettingsPayload, () => loadedSettings.promise);
+    invalidateSettingsCache();
+    const syncedSettings: SettingsPayload[] = [];
+    const handleSettingsSynced = (event: Event) => {
+      syncedSettings.push((event as CustomEvent<SettingsPayload>).detail);
+    };
+    getWindow().addEventListener('openchamber:settings-synced', handleSettingsSynced);
+
+    try {
+      const sync = syncDesktopSettings();
+      const update = updateDesktopSettings({ activeProjectId: 'project-b' });
+
+      loadedSettings.resolve({
+        settings: {
+          activeProjectId: 'project-a',
+          draftStartersCraftGoalAdded: true,
+          draftStartersScheduleTaskAdded: true,
+        },
+        source: 'web',
+      });
+      await sync;
+
+      expect(syncedSettings.at(-1)?.activeProjectId).toBe('project-b');
+
+      await update;
+    } finally {
+      getWindow().removeEventListener('openchamber:settings-synced', handleSettingsSynced);
+    }
+  });
+
+  test('does not broadcast a stale load after a newer project update has saved', async () => {
+    const loadedSettings = deferred<{ settings: SettingsPayload; source: 'web' | 'vscode' }>();
+    registerSettingsApi(async (changes) => changes as SettingsPayload, () => loadedSettings.promise);
+    invalidateSettingsCache();
+    const syncedSettings: SettingsPayload[] = [];
+    const handleSettingsSynced = (event: Event) => {
+      syncedSettings.push((event as CustomEvent<SettingsPayload>).detail);
+    };
+    getWindow().addEventListener('openchamber:settings-synced', handleSettingsSynced);
+
+    try {
+      const sync = syncDesktopSettings();
+      const update = updateDesktopSettings({ activeProjectId: 'project-b' });
+      await update;
+
+      loadedSettings.resolve({
+        settings: {
+          activeProjectId: 'project-a',
+          draftStartersCraftGoalAdded: true,
+          draftStartersScheduleTaskAdded: true,
+        },
+        source: 'web',
+      });
+      await sync;
+
+      expect(syncedSettings.at(-1)?.activeProjectId).toBe('project-b');
+    } finally {
+      getWindow().removeEventListener('openchamber:settings-synced', handleSettingsSynced);
+    }
+  });
+
+  test('preserves only the latest settings values across repeated pending updates', async () => {
+    const loadedSettings = deferred<{ settings: SettingsPayload; source: 'web' | 'vscode' }>();
+    registerSettingsApi(async (changes) => changes as SettingsPayload, () => loadedSettings.promise);
+    invalidateSettingsCache();
+    const syncedSettings: SettingsPayload[] = [];
+    const handleSettingsSynced = (event: Event) => {
+      syncedSettings.push((event as CustomEvent<SettingsPayload>).detail);
+    };
+    getWindow().addEventListener('openchamber:settings-synced', handleSettingsSynced);
+
+    try {
+      const sync = syncDesktopSettings();
+      const updates = Array.from({ length: 100 }, (_, index) => updateDesktopSettings({
+        activeProjectId: `project-${index}`,
+        showReasoningTraces: index % 2 === 0,
+      }));
+
+      loadedSettings.resolve({
+        settings: {
+          activeProjectId: 'stale-project',
+          showReasoningTraces: true,
+          draftStartersCraftGoalAdded: true,
+          draftStartersScheduleTaskAdded: true,
+        },
+        source: 'web',
+      });
+      await sync;
+
+      expect(syncedSettings.at(-1)?.activeProjectId).toBe('project-99');
+      expect(syncedSettings.at(-1)?.showReasoningTraces).toBe(false);
+
+      await Promise.all(updates);
+    } finally {
+      getWindow().removeEventListener('openchamber:settings-synced', handleSettingsSynced);
+    }
+  });
+
   test('applies model selector settings from server settings', async () => {
     getWindow();
     const settings = {

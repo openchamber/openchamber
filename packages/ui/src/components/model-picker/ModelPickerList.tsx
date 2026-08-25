@@ -545,8 +545,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       ? Math.min(STICKY_FADE_MIN_SIZE + scroller.scrollTop, STICKY_FADE_MAX_SIZE)
       : 0;
     stickyFadeSizeRef.current = fadeSize;
-    scroller.style.setProperty('--scroll-shadow-top-size', `${fadeSize}px`);
-    scroller.style.setProperty(
+    const fadeRoot = scroller.closest<HTMLElement>('.oc-sticky-fade-root');
+    fadeRoot?.style.setProperty('--scroll-shadow-top-size', `${fadeSize}px`);
+    fadeRoot?.style.setProperty(
       '--scroll-shadow-top-clear-size',
       `${Math.min(Math.max(fadeSize - 8, 0), STICKY_FADE_CLEAR_MAX_SIZE)}px`,
     );
@@ -876,24 +877,23 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
       <div
         className="oc-sticky-fade-root relative flex min-h-0 flex-1"
+        // SAFETY: these custom properties configure the viewport-owned edge fade.
+        style={stickyHeaders ? { '--scroll-shadow-top-size': '0px' } as React.CSSProperties : undefined}
         onPointerDownCapture={stickyHeaders ? blockStickyFadeInteraction : undefined}
         onClickCapture={stickyHeaders ? blockStickyFadeInteraction : undefined}
         onContextMenuCapture={stickyHeaders ? blockStickyFadeInteraction : undefined}
       >
-      <ScrollableOverlay
-        ref={scrollRef}
-        useScrollShadow={stickyHeaders}
-        hideBottomScrollShadow
-        scrollShadowSize={12}
-        outerClassName={maxHeightClassName}
-        className="oc-sticky-fade-scroller overlay-scrollbar-target--no-gutter"
-        style={{
-          ...(stickyHeaders ? { '--scroll-shadow-top-size': '0px' } as React.CSSProperties : {}),
-          ...maxHeightStyle,
-        }}
-        onScroll={stickyHeaders ? (event) => syncStickyFade(event.currentTarget) : undefined}
-      >
-        <div className="px-1">
+        <ScrollableOverlay
+          ref={scrollRef}
+          useScrollShadow={stickyHeaders}
+          hideBottomScrollShadow
+          scrollShadowSize={12}
+          outerClassName={maxHeightClassName}
+          className="overlay-scrollbar-target--no-gutter"
+          style={maxHeightStyle}
+          onScroll={stickyHeaders ? (event) => syncStickyFade(event.currentTarget) : undefined}
+        >
+          <div className="px-1">
           {includeNotSelected ? (
             <>
               <button
@@ -964,16 +964,16 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
               </div>
             ))
           )}
-        </div>
-      </ScrollableOverlay>
-      {stickyHeaders && leadingSectionKey ? (
-        <div
-          className="oc-sticky-fade-overlay pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 py-1.5 typography-micro font-semibold uppercase tracking-wider text-muted-foreground"
-          aria-hidden="true"
-        >
-          {renderSectionIdentity(leadingSectionKey)}
-        </div>
-      ) : null}
+          </div>
+        </ScrollableOverlay>
+        {stickyHeaders && leadingSectionKey ? (
+          <div
+            className="oc-sticky-fade-overlay pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 py-1.5 typography-micro font-semibold uppercase tracking-wider text-muted-foreground"
+            aria-hidden="true"
+          >
+            {renderSectionIdentity(leadingSectionKey)}
+          </div>
+        ) : null}
       </div>
 
       <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">

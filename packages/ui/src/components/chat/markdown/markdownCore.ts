@@ -557,10 +557,30 @@ export const __markdownBlockCacheSizesForTests = (): { full: number; live: numbe
   live: liveBlockCache.size,
 });
 
-const parseBlock = async (
-  block: MarkdownBlock,
-  imageMode: MarkdownImageMode,
-): Promise<string> => {
+/**
+ * Read a settled render synchronously when every block is already in the full
+ * cache. Cache reads retain the existing LRU `get` semantics and do not insert
+ * or expand either cache.
+ */
+export const getCachedMarkdownBlocks = (
+  text: string,
+  imageMode: MarkdownImageMode = 'inline',
+): RenderedBlock[] | null => {
+  if (!text) return [];
+
+  const blocks = streamBlocks(text, false);
+  const rendered: RenderedBlock[] = [];
+  for (const block of blocks) {
+    const contentHash = contentFingerprint(block.raw);
+    const id = markdownBlockCacheKey(contentHash, block.mode, block.highlight, imageMode);
+    const html = fullBlockCache.get(id);
+    if (html === undefined) return null;
+    rendered.push({ id, html });
+  }
+  return rendered;
+};
+
+const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): Promise<string> => {
   const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
   const parsed = await Promise.resolve(parser.parse(block.src));
   const withMath = renderMathExpressions(parsed);
