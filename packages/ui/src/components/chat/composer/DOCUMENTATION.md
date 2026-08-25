@@ -149,7 +149,12 @@ mostly not state machines but corrections for specific platform behaviors:
 mobile browsers dismissing the keyboard before a tap's click lands, iOS
 refusing programmatic focus outside a gesture, WebKit leaving the layout
 viewport panned after the keyboard hides, overlay chains handing off through a
-frame where nothing is open.
+frame where nothing is open. Non-Capacitor mobile browsers pin focused
+normal-height composers on both draft and active-session screens because native
+focus reveal is unreliable. In active sessions, fixing the form removes it from
+flow, so the parent composer slot preserves space (`minHeight` matching the form
+plus any keyboard-covered layout) to keep transcript text fully scrollable into
+view above the pinned composer.
 
 **Every timeout and `flushSync` in them has a reason recorded next to it, and
 none of them is verifiable outside a real device.** Change them only against

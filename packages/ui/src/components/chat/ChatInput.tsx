@@ -2505,8 +2505,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setMobileDraftPickerQuery('');
     }, [mobileDraftPicker]);
 
-    // Mobile browsers pan the visual viewport instead of resizing the layout,
-    // so the composer form is pinned to it explicitly.
+    // Mobile browsers do not reliably reveal the focused composer above the
+    // keyboard, so pin normal-height composers to the visual viewport.
     useMobileViewportPin({
         isMobile,
         isFullscreen: isMobileExpanded,

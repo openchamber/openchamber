@@ -96,15 +96,20 @@ export function useMobileViewportPin(options: MobileViewportPinOptions): void {
         };
     }, [editorRef, formRef, isFullscreen, isMobile]);
 
-    // Draft screen with the keyboard up: anchor the normal-height composer to
-    // the visible bottom. The chat screen does not need this — its own
-    // focused-field reveal works there.
+    // Normal-height composer with the keyboard up: anchor to the visible bottom.
+    // Native focused-field reveal is unreliable across mobile browsers (e.g.
+    // Chrome and Firefox Android, WebKit pans), so pin on both draft and active
+    // sessions. In active sessions, reserving layout space on the parent slot
+    // keeps the transcript scrollable above the pinned form.
     React.useLayoutEffect(() => {
         if (!isMobile || isCapacitorApp()) return;
-        if (!isDraftScreen || isFullscreen || !isFocused) return;
+        if (isFullscreen || !isFocused) return;
         const vv = window.visualViewport;
         const form = formRef.current;
         if (!vv || !form) return;
+
+        const parent = form.parentElement;
+        const originalParentMinHeight = parent?.style.minHeight ?? '';
 
         // Keep the in-flow horizontal geometry (page paddings) while fixed.
         const rect = form.getBoundingClientRect();
@@ -118,6 +123,7 @@ export function useMobileViewportPin(options: MobileViewportPinOptions): void {
         // can simply not fire), so track the pan with a rAF loop instead —
         // cheap math per frame, a style write only when the value changes.
         let lastTop = Number.NaN;
+        let lastSlotMinHeight = Number.NaN;
         let frame = 0;
         const track = () => {
             // iOS standalone (PWA) can serve stale visualViewport metrics after
@@ -128,12 +134,28 @@ export function useMobileViewportPin(options: MobileViewportPinOptions): void {
             // pan-mode browsers clientHeight stays full height, so the min
             // keeps the visual-viewport anchor there.
             const layoutBottom = document.documentElement.clientHeight;
-            const vvBottom = vv.offsetTop + vv.height;
-            const top = Math.max(0, Math.floor(Math.min(vvBottom, layoutBottom) - form.offsetHeight));
+            const visibleBottom = Math.min(vv.offsetTop + vv.height, layoutBottom);
+            const formHeight = form.offsetHeight;
+            const top = Math.max(0, Math.floor(visibleBottom - formHeight));
             if (top !== lastTop) {
                 lastTop = top;
                 form.style.top = `${top}px`;
             }
+
+            // In active sessions, taking the form out of flow would allow the
+            // transcript to hide behind the pinned composer. Reserve enough
+            // minHeight on the parent slot so the transcript remains fully
+            // scrollable above the composer. The reservation is derived from the
+            // exact applied top (layoutBottom - top), so fractional viewport
+            // values cannot leave a seam between the transcript and the pin.
+            if (!isDraftScreen && parent) {
+                const requiredMinHeight = Math.ceil(layoutBottom - top);
+                if (requiredMinHeight !== lastSlotMinHeight) {
+                    lastSlotMinHeight = requiredMinHeight;
+                    parent.style.minHeight = `${requiredMinHeight}px`;
+                }
+            }
+
             frame = requestAnimationFrame(track);
         };
         track();
@@ -141,6 +163,9 @@ export function useMobileViewportPin(options: MobileViewportPinOptions): void {
         return () => {
             cancelAnimationFrame(frame);
             releaseForm(form);
+            if (parent) {
+                parent.style.minHeight = originalParentMinHeight;
+            }
         };
     }, [formRef, isDraftScreen, isFocused, isFullscreen, isMobile]);
 }
