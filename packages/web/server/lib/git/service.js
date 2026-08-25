@@ -516,6 +516,29 @@ const runGitPathBatches = async (filePaths, action, runBatch) => {
   }
 };
 
+const getGitIndexInfoForPaths = async (git, repoPaths) => {
+  const indexInfo = [];
+  for (const batch of splitGitPathBatches(repoPaths)) {
+    indexInfo.push(await git.raw([
+      '--literal-pathspecs',
+      'ls-files',
+      '--stage',
+      '-z',
+      '--',
+      ...batch,
+    ]));
+  }
+  return indexInfo.join('');
+};
+
+const getIndexInfoPaths = (indexInfo) => new Set(indexInfo
+  .split('\0')
+  .map((entry) => {
+    const separatorIndex = entry.indexOf('\t');
+    return separatorIndex === -1 ? '' : entry.slice(separatorIndex + 1);
+  })
+  .filter(Boolean));
+
 const validateRepositoryFilePaths = (directoryPath, filePaths) => {
   const repoRoot = path.resolve(directoryPath);
 
@@ -1016,6 +1039,36 @@ const resolveGitCommitFilePath = async (repoRoot, hash, candidates) => {
 
 const runGitCommandOrThrow = async (cwd, args, fallbackMessage) => {
   const result = await runGitCommand(cwd, args);
+  if (!result.success) {
+    throw new Error(result.message || fallbackMessage || 'Git command failed');
+  }
+  return result;
+};
+
+const runGitCommandWithInputOrThrow = async (cwd, args, input, environment, fallbackMessage) => {
+  const env = { ...(await buildGitEnv()), ...environment };
+  const result = await new Promise((resolve) => {
+    const child = execFile(getGitBinary(), args, {
+      cwd,
+      env,
+      windowsHide: true,
+      maxBuffer: 20 * 1024 * 1024,
+    }, (error) => {
+      if (error) {
+        resolve({
+          success: false,
+          message: parseGitErrorText(error),
+        });
+        return;
+      }
+      resolve({
+        success: true,
+      });
+    });
+    child.stdin?.on('error', () => {});
+    child.stdin?.end(input);
+  });
+
   if (!result.success) {
     throw new Error(result.message || fallbackMessage || 'Git command failed');
   }
@@ -3541,6 +3594,70 @@ const unstageGitPathBatch = async (git, repoPaths) => {
 const unstageGitPaths = (git, repoPaths, action = 'Unstaging selected files') =>
   runGitPathBatches(repoPaths, action, (batch) => unstageGitPathBatch(git, batch));
 
+const getWorkingTreePathsDifferentFromHead = async (git, repoRoot) => {
+  const hasHead = await git.raw(['rev-parse', '--verify', 'HEAD']).then(() => true).catch(() => false);
+  if (!hasHead) {
+    return null;
+  }
+
+  const temporaryDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), 'openchamber-git-index-'));
+  const temporaryIndexFile = path.join(temporaryDirectory, 'index');
+  try {
+    const temporaryIndexGit = await createGit(repoRoot);
+    temporaryIndexGit.env({ ...(await buildGitEnv()), GIT_INDEX_FILE: temporaryIndexFile });
+    await temporaryIndexGit.raw(['read-tree', 'HEAD']);
+    const paths = await temporaryIndexGit.raw(['diff', '--name-only', '-z', '--no-renames']);
+    return new Set(paths.split('\0').filter(Boolean));
+  } finally {
+    await fsp.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
+};
+
+const commitGitPathsFromTemporaryIndex = async (git, repoRoot, message, repoPaths) => {
+  const temporaryDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), 'openchamber-git-pathspec-'));
+  const pathspecFile = path.join(temporaryDirectory, 'selected-deletions');
+  const temporaryIndexFile = path.join(temporaryDirectory, 'index');
+
+  try {
+    const temporaryIndexGit = await createGit(repoRoot);
+    temporaryIndexGit.env({ ...(await buildGitEnv()), GIT_INDEX_FILE: temporaryIndexFile });
+    const [indexInfo, hasHead] = await Promise.all([
+      getGitIndexInfoForPaths(git, repoPaths),
+      git.raw(['rev-parse', '--verify', 'HEAD']).then(() => true).catch(() => false),
+    ]);
+    const indexedPaths = getIndexInfoPaths(indexInfo);
+    const selectedPathsMissingFromIndex = repoPaths.filter((repoPath) => !indexedPaths.has(repoPath));
+
+    await temporaryIndexGit.raw(hasHead ? ['read-tree', 'HEAD'] : ['read-tree', '--empty']);
+
+    if (selectedPathsMissingFromIndex.length > 0) {
+      await fsp.writeFile(pathspecFile, Buffer.from(`${selectedPathsMissingFromIndex.join('\0')}\0`, 'utf8'));
+      await temporaryIndexGit.raw([
+        '--literal-pathspecs',
+        'rm',
+        '--cached',
+        '--ignore-unmatch',
+        `--pathspec-from-file=${pathspecFile}`,
+        '--pathspec-file-nul',
+      ]);
+    }
+
+    if (indexInfo) {
+      await runGitCommandWithInputOrThrow(
+        repoRoot,
+        ['update-index', '-z', '--index-info'],
+        Buffer.from(indexInfo, 'utf8'),
+        { GIT_INDEX_FILE: temporaryIndexFile },
+        'Failed to prepare the temporary git index'
+      );
+    }
+
+    return await temporaryIndexGit.commit(message);
+  } finally {
+    await fsp.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
+};
+
 export async function stageFiles(directory, paths) {
   if (!directory) {
     throw new Error('directory and path are required for stageFile');
@@ -3608,6 +3725,7 @@ export async function commit(directory, message, options = {}) {
         : null;
       let filesToCommit = [];
       let commitFromIndexOnly = false;
+      let commitWithTemporaryIndex = false;
 
       if (options.addAll) {
         await git.add('.');
@@ -3632,7 +3750,7 @@ export async function commit(directory, message, options = {}) {
           throw new Error('No selected files are available to commit. Refresh git status and try again.');
         }
 
-        if (requestedStageFiles || hasMultipleGitPathBatches(filesToCommit)) {
+        if (requestedStageFiles) {
           commitFromIndexOnly = true;
           const selectedFileSet = new Set(filesToCommit);
           const temporarilyUnstagedFiles = status.files
@@ -3653,8 +3771,13 @@ export async function commit(directory, message, options = {}) {
               throw error;
             }
           }
+        } else if (hasMultipleGitPathBatches(filesToCommit)) {
+          commitWithTemporaryIndex = true;
         }
 
+        const workingTreePathsDifferentFromHead = commitWithTemporaryIndex
+          ? await getWorkingTreePathsDifferentFromHead(git, repoRoot)
+          : null;
         const filesNeedingAdd = requestedStageFiles
           ? (stageFilesToCommit || []).filter((filePath) => fileStatusByPath.has(filePath))
           : filesToCommit.filter((filePath) => {
@@ -3663,8 +3786,13 @@ export async function commit(directory, message, options = {}) {
               return false;
             }
 
-            const alreadyFullyStaged = fileStatus.index !== ' ' && fileStatus.working_dir === ' ';
-            return !alreadyFullyStaged;
+            const indexStatus = (fileStatus.index || '').trim();
+            const hasStagedIndex = Boolean(indexStatus) && indexStatus !== '?';
+            const alreadyFullyStaged = hasStagedIndex && (fileStatus.working_dir || ' ') === ' ';
+            const workingTreeMatchesHead = hasStagedIndex
+              && workingTreePathsDifferentFromHead
+              && !workingTreePathsDifferentFromHead.has(filePath);
+            return !alreadyFullyStaged && !workingTreeMatchesHead;
           });
 
         if (filesNeedingAdd.length > 0) {
@@ -3673,12 +3801,14 @@ export async function commit(directory, message, options = {}) {
       }
 
       const commitArgs =
-        !commitFromIndexOnly && !options.addAll && filesToCommit.length > 0
+        !commitFromIndexOnly && !commitWithTemporaryIndex && !options.addAll && filesToCommit.length > 0
           ? filesToCommit
           : undefined;
 
       try {
-        result = await git.commit(message, commitArgs);
+        result = commitWithTemporaryIndex
+          ? await commitGitPathsFromTemporaryIndex(git, repoRoot, message, filesToCommit)
+          : await git.commit(message, commitArgs);
       } catch (error) {
         const gitErrorText = parseGitErrorText(error);
         const isPathspecError = gitErrorText.includes('pathspec') && gitErrorText.includes('did not match any files');

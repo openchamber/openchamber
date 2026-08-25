@@ -309,7 +309,12 @@ function cleanBranchName(branch: string): string {
 /**
  * Execute a raw git command and return the output
  */
-async function execGit(args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+async function execGit(
+  args: string[],
+  cwd: string,
+  environmentOverrides: NodeJS.ProcessEnv = {},
+  input?: Buffer,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
     const normalizedCwd = normalizePath(cwd);
     const gitPath = gitApi?.git.path || 'git';
@@ -317,9 +322,14 @@ async function execGit(args: string[], cwd: string): Promise<{ stdout: string; s
     buildGitEnv().then((env) => {
       const proc = spawn(gitPath, args, {
         cwd: normalizedCwd,
-        env,
+        env: { ...env, ...environmentOverrides },
         windowsHide: true,
       });
+
+      if (input !== undefined) {
+        proc.stdin?.on('error', () => {});
+        proc.stdin?.end(input);
+      }
 
       let stdout = '';
       let stderr = '';
@@ -405,6 +415,120 @@ const runGitPathBatches = async (
       const detail = error instanceof Error ? error.message : String(error || 'Git command failed');
       throw new GitPathBatchError(action, completedPaths, filePaths.length, detail);
     }
+  }
+};
+
+const getGitIndexInfoForPaths = async (directory: string, filePaths: string[]): Promise<string> => {
+  const indexInfo: string[] = [];
+  for (const batch of splitGitPathBatches(filePaths)) {
+    const entries = await execGit([
+      '--literal-pathspecs',
+      'ls-files',
+      '--stage',
+      '-z',
+      '--',
+      ...batch,
+    ], directory);
+    if (entries.exitCode !== 0) {
+      throw new Error(entries.stderr || 'Failed to read selected git index entries');
+    }
+    indexInfo.push(entries.stdout);
+  }
+  return indexInfo.join('');
+};
+
+const getIndexInfoPaths = (indexInfo: string): Set<string> => new Set(indexInfo
+  .split('\0')
+  .map((entry) => {
+    const separatorIndex = entry.indexOf('\t');
+    return separatorIndex === -1 ? '' : entry.slice(separatorIndex + 1);
+  })
+  .filter(Boolean));
+
+const getWorkingTreePathsDifferentFromHead = async (directory: string): Promise<Set<string> | null> => {
+  const hasHead = await execGit(['rev-parse', '--verify', 'HEAD'], directory);
+  if (hasHead.exitCode !== 0) {
+    return null;
+  }
+
+  const temporaryDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-git-index-'));
+  const temporaryIndexEnvironment = { GIT_INDEX_FILE: path.join(temporaryDirectory, 'index') };
+  try {
+    const readTree = await execGit(['read-tree', 'HEAD'], directory, temporaryIndexEnvironment);
+    if (readTree.exitCode !== 0) {
+      throw new Error(readTree.stderr || 'Failed to inspect selected git changes');
+    }
+
+    const paths = await execGit(['diff', '--name-only', '-z', '--no-renames'], directory, temporaryIndexEnvironment);
+    if (paths.exitCode !== 0) {
+      throw new Error(paths.stderr || 'Failed to inspect selected git changes');
+    }
+    return new Set(paths.stdout.split('\0').filter(Boolean));
+  } finally {
+    await fs.promises.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
+};
+
+const commitGitPathsFromTemporaryIndex = async (
+  directory: string,
+  message: string,
+  filePaths: string[],
+): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+  const temporaryDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-git-pathspec-'));
+  const pathspecFile = path.join(temporaryDirectory, 'selected-deletions');
+  const temporaryIndexFile = path.join(temporaryDirectory, 'index');
+  const temporaryIndexEnvironment = { GIT_INDEX_FILE: temporaryIndexFile };
+
+  try {
+    const [indexInfo, hasHead] = await Promise.all([
+      getGitIndexInfoForPaths(directory, filePaths),
+      execGit(['rev-parse', '--verify', 'HEAD'], directory),
+    ]);
+    const indexedPaths = getIndexInfoPaths(indexInfo);
+    const selectedPathsMissingFromIndex = filePaths.filter((filePath) => !indexedPaths.has(filePath));
+    const readTree = await execGit(
+      hasHead.exitCode === 0 ? ['read-tree', 'HEAD'] : ['read-tree', '--empty'],
+      directory,
+      temporaryIndexEnvironment,
+    );
+    if (readTree.exitCode !== 0) {
+      throw new Error(readTree.stderr || 'Failed to prepare the temporary git index');
+    }
+
+    if (selectedPathsMissingFromIndex.length > 0) {
+      await fs.promises.writeFile(pathspecFile, Buffer.from(`${selectedPathsMissingFromIndex.join('\0')}\0`, 'utf8'));
+      const remove = await execGit(
+        [
+          '--literal-pathspecs',
+          'rm',
+          '--cached',
+          '--ignore-unmatch',
+          `--pathspec-from-file=${pathspecFile}`,
+          '--pathspec-file-nul',
+        ],
+        directory,
+        temporaryIndexEnvironment,
+      );
+      if (remove.exitCode !== 0) {
+        throw new Error(remove.stderr || 'Failed to prepare selected git changes');
+      }
+    }
+
+    if (indexInfo) {
+      const updateIndex = await execGit(
+        ['update-index', '-z', '--index-info'],
+        directory,
+        temporaryIndexEnvironment,
+        Buffer.from(indexInfo, 'utf8'),
+      );
+      if (updateIndex.exitCode !== 0) {
+        throw new Error(updateIndex.stderr || 'Failed to prepare the temporary git index');
+      }
+    }
+
+    return await execGit(['commit', '-m', message], directory, temporaryIndexEnvironment);
+  } finally {
+    await fs.promises.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
   }
 };
 
@@ -2608,41 +2732,66 @@ export async function createGitCommit(
 ): Promise<GitCommitResult> {
   const selectedFiles = Array.isArray(options?.files) ? options.files : [];
   const explicitStageFiles = Array.isArray(options?.stageFiles) ? options.stageFiles : null;
-  const shouldCommitSelectedFilesFromIndex = selectedFiles.length > 0 && (
-    explicitStageFiles !== null || hasMultipleGitPathBatches(selectedFiles)
+  const shouldCommitSelectedFilesFromIndex = selectedFiles.length > 0 && explicitStageFiles !== null;
+  const shouldCommitOversizedSelectedFilesWithTemporaryIndex = selectedFiles.length > 0 && (
+    explicitStageFiles === null && hasMultipleGitPathBatches(selectedFiles)
   );
 
-  if (shouldCommitSelectedFilesFromIndex) {
-    const selectedFileSet = new Set(selectedFiles);
-    const stagedResult = await execGit(['diff', '--cached', '--name-only'], directory);
-    if (stagedResult.exitCode !== 0) {
-      throw new Error(stagedResult.stderr || 'Failed to list staged git files');
-    }
-    const temporarilyUnstagedFiles = stagedResult.stdout
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((filePath) => filePath && !selectedFileSet.has(filePath));
+  if (shouldCommitSelectedFilesFromIndex || shouldCommitOversizedSelectedFilesWithTemporaryIndex) {
     let temporarilyUnstagedPathsToRestore: string[] = [];
     let commitResult: GitCommitResult | null = null;
 
     try {
-      if (temporarilyUnstagedFiles.length > 0) {
-        try {
-          await unstageGitFiles(directory, temporarilyUnstagedFiles);
-          temporarilyUnstagedPathsToRestore = temporarilyUnstagedFiles;
-        } catch (error) {
-          if (error instanceof GitPathBatchError) {
-            temporarilyUnstagedPathsToRestore = error.completedPaths;
+      if (shouldCommitSelectedFilesFromIndex) {
+        const selectedFileSet = new Set(selectedFiles);
+        const stagedResult = await execGit(['diff', '--cached', '--name-only'], directory);
+        if (stagedResult.exitCode !== 0) {
+          throw new Error(stagedResult.stderr || 'Failed to list staged git files');
+        }
+        const temporarilyUnstagedFiles = stagedResult.stdout
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((filePath) => filePath && !selectedFileSet.has(filePath));
+
+        if (temporarilyUnstagedFiles.length > 0) {
+          try {
+            await unstageGitFiles(directory, temporarilyUnstagedFiles);
+            temporarilyUnstagedPathsToRestore = temporarilyUnstagedFiles;
+          } catch (error) {
+            if (error instanceof GitPathBatchError) {
+              temporarilyUnstagedPathsToRestore = error.completedPaths;
+            }
+            throw error;
           }
-          throw error;
         }
       }
       const filesToStage = explicitStageFiles ?? selectedFiles;
-      if (filesToStage.length > 0) {
-        await stageGitFiles(directory, filesToStage);
+      const statusByPath = shouldCommitOversizedSelectedFilesWithTemporaryIndex
+        ? new Map((await getGitStatus(directory)).files.map((file) => [file.path, file]))
+        : null;
+      const workingTreePathsDifferentFromHead = shouldCommitOversizedSelectedFilesWithTemporaryIndex
+        ? await getWorkingTreePathsDifferentFromHead(directory)
+        : null;
+      const filesNeedingStage = statusByPath
+        ? filesToStage.filter((filePath) => {
+          const fileStatus = statusByPath.get(filePath);
+          const indexStatus = (fileStatus?.index || '').trim();
+          const hasStagedIndex = Boolean(indexStatus) && indexStatus !== '?';
+          const workingTreeMatchesHead = hasStagedIndex
+            && workingTreePathsDifferentFromHead
+            && !workingTreePathsDifferentFromHead.has(filePath);
+          return !hasStagedIndex || (
+            (fileStatus?.working_dir || ' ') !== ' ' && !workingTreeMatchesHead
+          );
+        })
+        : filesToStage;
+      if (filesNeedingStage.length > 0) {
+        await stageGitFiles(directory, filesNeedingStage);
       }
 
-      const result = await execGit(['commit', '-m', message], directory);
+      const result = shouldCommitOversizedSelectedFilesWithTemporaryIndex
+        ? await commitGitPathsFromTemporaryIndex(directory, message, selectedFiles)
+        : await execGit(['commit', '-m', message], directory);
       if (result.exitCode !== 0) {
         commitResult = {
           success: false,

@@ -8,10 +8,11 @@ import { commit, stageFiles, unstageFiles } from './service.js';
 
 const tempDirs = [];
 
-const runGit = (cwd, args) => execFileSync('git', args, {
+const runGit = (cwd, args, input) => execFileSync('git', args, {
   cwd,
+  input,
   encoding: 'utf8',
-  stdio: ['ignore', 'pipe', 'pipe'],
+  stdio: input === undefined ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
 });
 
 const createRepository = () => {
@@ -35,6 +36,56 @@ const writeFiles = (directory, filePaths) => {
   for (const filePath of filePaths) {
     fs.writeFileSync(path.join(directory, filePath), `${filePath}\n`);
   }
+};
+
+const getPartialStageContents = () => {
+  const original = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join('\n') + '\n';
+  const staged = original.replace('line 1', 'staged line 1');
+  const working = staged.replace('line 20', 'unstaged line 20');
+  return { original, staged, working };
+};
+
+const stageOneUnrelatedHunk = (directory, filePath) => {
+  const { staged, working } = getPartialStageContents();
+  fs.writeFileSync(path.join(directory, filePath), staged);
+  runGit(directory, ['add', '--', filePath]);
+  fs.writeFileSync(path.join(directory, filePath), working);
+
+  return getPartialStageContents();
+};
+
+const getStageOnlyContents = () => {
+  const original = 'original selected content\n';
+  const staged = 'staged selected content\n';
+  return { original, staged };
+};
+
+const stageOnlySelectedFile = (directory, filePath) => {
+  const { original, staged } = getStageOnlyContents();
+  fs.writeFileSync(path.join(directory, filePath), staged);
+  runGit(directory, ['add', '--', filePath]);
+  fs.writeFileSync(path.join(directory, filePath), original);
+
+  return getStageOnlyContents();
+};
+
+const createUnmergedIndexEntries = (directory, filePath) => {
+  const hashes = ['base', 'ours', 'theirs'].map((content) => runGit(
+    directory,
+    ['hash-object', '-w', '--stdin'],
+    `${content}\n`,
+  ).trim());
+  const zeroHash = '0'.repeat(40);
+  const writeIndexInfo = (entry) => runGit(
+    directory,
+    ['update-index', '-z', '--index-info'],
+    Buffer.from(entry, 'utf8'),
+  );
+
+  writeIndexInfo(`0 ${zeroHash}\t${filePath}\0`);
+  hashes.forEach((hash, index) => {
+    writeIndexInfo(`100644 ${hash} ${index + 1}\t${filePath}\0`);
+  });
 };
 
 const captureGitTrace = async (callback) => {
@@ -108,30 +159,91 @@ describe('git path batching', () => {
     expect(stagedPaths.length).toBeLessThan(filePaths.length + 1);
   });
 
-  it('keeps oversized selected commits out of a single git commit argv', async () => {
+  it('commits oversized staged-only selected paths while preserving unrelated partial staging and intent-to-add entries', async () => {
     const directory = createRepository();
     const selectedPaths = createOversizedPaths('selected');
+    const stagedOnlySelectedPath = 'selected-stage-only.txt';
+    const stagedOnlyDeletedPath = 'selected\nstage-only-deleted.txt';
     const unrelatedPaths = createOversizedPaths('unrelated');
-    writeFiles(directory, [...selectedPaths, ...unrelatedPaths]);
-    await stageFiles(directory, [...selectedPaths, ...unrelatedPaths]);
+    const partiallyStagedPath = 'unrelated-partial-stage.txt';
+    const newlineUnrelatedPath = 'unrelated\nnewline.txt';
+    const intentToAddPath = 'unrelated\nintent-to-add.txt';
+    const initialPartialStage = getPartialStageContents();
+    const initialSelectedStage = getStageOnlyContents();
+    fs.writeFileSync(path.join(directory, partiallyStagedPath), initialPartialStage.original);
+    fs.writeFileSync(path.join(directory, stagedOnlySelectedPath), initialSelectedStage.original);
+    fs.writeFileSync(path.join(directory, stagedOnlyDeletedPath), initialSelectedStage.original);
+    runGit(directory, ['add', '--', partiallyStagedPath, stagedOnlySelectedPath, stagedOnlyDeletedPath]);
+    runGit(directory, ['commit', '-m', 'Add commit batching fixtures']);
+    const partialStage = stageOneUnrelatedHunk(directory, partiallyStagedPath);
+    const selectedStage = stageOnlySelectedFile(directory, stagedOnlySelectedPath);
+    runGit(directory, ['rm', '--', stagedOnlyDeletedPath]);
+    writeFiles(directory, [...selectedPaths, ...unrelatedPaths, newlineUnrelatedPath]);
+    await stageFiles(directory, [...unrelatedPaths, newlineUnrelatedPath]);
+    fs.writeFileSync(path.join(directory, intentToAddPath), 'intent-to-add\n');
+    runGit(directory, ['add', '-N', '--', intentToAddPath]);
+    const intentToAddIndex = runGit(directory, ['ls-files', '--stage', '-z', '--', intentToAddPath]);
 
-    const commitTrace = await captureGitTrace(() => commit(directory, 'Commit selected paths', { files: selectedPaths }));
+    const commitTrace = await captureGitTrace(() => commit(directory, 'Commit selected paths', {
+      files: [...selectedPaths, stagedOnlySelectedPath, stagedOnlyDeletedPath],
+    }));
 
     const commitCommands = getTracedCommands(commitTrace, 'commit -m');
     expect(commitCommands).toHaveLength(1);
     expect(commitCommands[0]).not.toContain(selectedPaths[0]);
-    expect(getTracedCommands(commitTrace, 'restore --staged --')).toHaveLength(2);
-    expect(getTracedCommands(commitTrace, 'add --')).toHaveLength(2);
+    expect(commitCommands[0]).not.toContain('--pathspec-from-file=');
+    expect(getTracedCommands(commitTrace, 'write-tree')).toHaveLength(0);
+    expect(getTracedCommands(commitTrace, 'add --').some((command) => command.includes(stagedOnlySelectedPath))).toBe(false);
 
-    const committedPaths = runGit(directory, ['show', '--format=', '--name-only', 'HEAD'])
-      .trim()
-      .split('\n')
+    const committedPaths = runGit(directory, ['show', '--format=', '--name-only', '-z', 'HEAD'])
+      .split('\0')
+      .filter(Boolean)
       .sort();
-    const stillStagedPaths = runGit(directory, ['diff', '--cached', '--name-only'])
-      .trim()
-      .split('\n')
+    const stillStagedPaths = runGit(directory, ['diff', '--cached', '--name-only', '-z'])
+      .split('\0')
+      .filter(Boolean)
       .sort();
-    expect(committedPaths).toEqual([...selectedPaths].sort());
-    expect(stillStagedPaths).toEqual([...unrelatedPaths].sort());
+    expect(committedPaths).toEqual([...selectedPaths, stagedOnlySelectedPath, stagedOnlyDeletedPath].sort());
+    expect(stillStagedPaths).toEqual([...unrelatedPaths, newlineUnrelatedPath, partiallyStagedPath].sort());
+    expect(runGit(directory, ['show', `HEAD:${stagedOnlySelectedPath}`])).toBe(selectedStage.staged);
+    expect(runGit(directory, ['show', `:${stagedOnlySelectedPath}`])).toBe(selectedStage.staged);
+    expect(() => runGit(directory, ['show', `HEAD:${stagedOnlyDeletedPath}`])).toThrow();
+    expect(fs.readFileSync(path.join(directory, stagedOnlySelectedPath), 'utf8')).toBe(selectedStage.original);
+    expect(fs.existsSync(path.join(directory, stagedOnlyDeletedPath))).toBe(false);
+    expect(runGit(directory, ['show', `:${partiallyStagedPath}`])).toBe(partialStage.staged);
+    expect(fs.readFileSync(path.join(directory, partiallyStagedPath), 'utf8')).toBe(partialStage.working);
+    expect(runGit(directory, ['ls-files', '--stage', '-z', '--', intentToAddPath])).toBe(intentToAddIndex);
+    expect(fs.readFileSync(path.join(directory, intentToAddPath), 'utf8')).toBe('intent-to-add\n');
+  });
+
+  it('commits oversized selected paths without reading an unrelated unmerged index entry', async () => {
+    const directory = createRepository();
+    const selectedPaths = createOversizedPaths('selected');
+    const stagedOnlySelectedPath = 'selected-stage-only.txt';
+    const unmergedPath = 'unrelated\nconflict.txt';
+    const selectedStage = getStageOnlyContents();
+    fs.writeFileSync(path.join(directory, stagedOnlySelectedPath), selectedStage.original);
+    fs.writeFileSync(path.join(directory, unmergedPath), 'conflict base\n');
+    runGit(directory, ['add', '--', stagedOnlySelectedPath, unmergedPath]);
+    runGit(directory, ['commit', '-m', 'Add unmerged batching fixtures']);
+    stageOnlySelectedFile(directory, stagedOnlySelectedPath);
+    writeFiles(directory, selectedPaths);
+    createUnmergedIndexEntries(directory, unmergedPath);
+    const unmergedIndex = runGit(directory, ['ls-files', '--unmerged', '-z']);
+
+    const commitTrace = await captureGitTrace(() => commit(directory, 'Commit selected paths', {
+      files: [...selectedPaths, stagedOnlySelectedPath],
+    }));
+
+    const committedPaths = runGit(directory, ['show', '--format=', '--name-only', '-z', 'HEAD'])
+      .split('\0')
+      .filter(Boolean)
+      .sort();
+    expect(committedPaths).toEqual([...selectedPaths, stagedOnlySelectedPath].sort());
+    expect(getTracedCommands(commitTrace, 'write-tree')).toHaveLength(0);
+    expect(runGit(directory, ['ls-files', '--unmerged', '-z'])).toBe(unmergedIndex);
+    expect(runGit(directory, ['show', `HEAD:${stagedOnlySelectedPath}`])).toBe(selectedStage.staged);
+    expect(fs.readFileSync(path.join(directory, stagedOnlySelectedPath), 'utf8')).toBe(selectedStage.original);
+    expect(fs.readFileSync(path.join(directory, unmergedPath), 'utf8')).toBe('conflict base\n');
   });
 });

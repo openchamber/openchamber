@@ -134,7 +134,7 @@ The following functions are internal helpers used by exported functions:
 - A file with both staged and unstaged changes can appear in both UI sections. Staged rows request diffs with `staged: true`; unstaged rows request normal working-tree diffs.
 - The shared Git panel exposes explicit staging actions. Unstaged rows use `stageFile`, staged rows use `unstageFile`, and commits operate on the current staged index.
 - `stageFiles` remains supported for callers that need to stage a selected unstaged subset as part of commit. In that mode the server temporarily unstages unrelated index entries, stages `stageFiles`, commits from the index, then restores temporarily unstaged entries.
-- Large selected path lists are split internally before Git is spawned. If a later batch fails, the operation rejects with a completed-path count rather than reporting the full selection as successful.
+- When an oversized selection has paths that need staging, the server stages them in bounded Git argv batches. An oversized `files` selection without `stageFiles` starts a temporary index from `HEAD` (or empty), writes only the selected current index entries into it, and removes selected staged deletions through a NUL-delimited literal pathspec before committing it. This preserves selected staged-only content without serializing or changing unrelated index entries. If a staging batch fails, the operation rejects with a completed-path count rather than reporting the full selection as successful.
 ### Worktree Create/Remove Response
 - `head`: HEAD commit SHA.
 - `name`: Worktree name.
