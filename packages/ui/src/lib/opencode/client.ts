@@ -1037,7 +1037,7 @@ class OpencodeService {
     const response = await this.client.session.revert({
       sessionID: sessionId,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
-      ...(messageId ? { messageID: messageId } : {}),
+      messageID: messageId,
       partID: partId,
     });
     return unwrapSdkData(response, 'session.revert');

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 type ConfigResponse = { data: Record<string, unknown> };
 type ForkRequest = { sessionID: string; directory?: string; messageID?: string };
+type RevertRequest = { sessionID: string; directory?: string; messageID: string; partID?: string };
 
 (mock as unknown as { restore?: () => void }).restore?.();
 
@@ -12,6 +13,7 @@ const promptAsyncCalls: unknown[][] = [];
 const promptAsyncResults: Array<unknown> = [];
 const pathGetResults: Array<unknown> = [];
 const forkCalls: ForkRequest[] = [];
+const revertCalls: RevertRequest[] = [];
 
 const promptAsyncMock = mock(async (...args: unknown[]) => {
   promptAsyncCalls.push(args);
@@ -31,6 +33,11 @@ const forkMock = mock(async (params: ForkRequest) => {
   return { data: { id: 'session-fork', title: 'Forked' } };
 });
 
+const revertMock = mock(async (params: RevertRequest) => {
+  revertCalls.push(params);
+  return { data: { id: 'session-a', title: 'Session' } };
+});
+
 mock.module('@opencode-ai/sdk/v2', () => ({
   createOpencodeClient: mock(() => ({
     config: {
@@ -44,6 +51,7 @@ mock.module('@opencode-ai/sdk/v2', () => ({
     session: {
       promptAsync: promptAsyncMock,
       fork: forkMock,
+      revert: revertMock,
     },
     path: {
       get: pathGetMock,
@@ -84,6 +92,7 @@ beforeEach(() => {
   promptAsyncResults.length = 0;
   pathGetResults.length = 0;
   forkCalls.length = 0;
+  revertCalls.length = 0;
 });
 
 describe('opencodeClient session fork', () => {
@@ -104,6 +113,19 @@ describe('opencodeClient session fork', () => {
       sessionID: 'session-a',
       directory: '/workspace/project',
       messageID: 'message-a',
+    }]);
+  });
+});
+
+describe('opencodeClient session revert', () => {
+  test('includes the required messageID', async () => {
+    await opencodeClient.revertSession('session-a', 'message-a', undefined, '/workspace/project');
+
+    expect(revertCalls).toStrictEqual([{
+      sessionID: 'session-a',
+      directory: '/workspace/project',
+      messageID: 'message-a',
+      partID: undefined,
     }]);
   });
 });
