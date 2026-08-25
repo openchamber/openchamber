@@ -117,6 +117,8 @@ OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
 | `OPENCHAMBER_COMPRESS_API` | Set to `true` to force `/api/*` compression, or `false` to disable it. Desktop runtime disables API compression by default to reduce local sidecar CPU use |
 | `OPENCHAMBER_FS_UPLOAD_MAX_BYTES` | Maximum file upload size in bytes (default: 100 MiB) |
 | `OPENCHAMBER_TERMINAL_SHELL` | Preferred terminal shell executable used by the `Auto` setting before platform defaults |
+| `OPENCHAMBER_PACKAGE_MANAGER_COMMAND` | Absolute package-manager executable used with `OPENCHAMBER_PACKAGE_MANAGER`. Use this for services whose runtime PATH can resolve a different global installation. |
+| `OPENCHAMBER_UPDATE_RESTART_ON_EXIT` | Set to `true` for a foreground server whose process manager restarts it after exit. UI updates keep the current server online during installation, then exit after success so the manager starts the new version. |
 
 </details>
 

@@ -570,6 +570,11 @@ function detectPackageManagerFromInvocationPath(invokedPath) {
 
 function getPackageManagerCommandCandidates(pm) {
   const candidates = [];
+  const configuredPackageManager = process.env.OPENCHAMBER_PACKAGE_MANAGER?.trim();
+  const configuredCommand = process.env.OPENCHAMBER_PACKAGE_MANAGER_COMMAND?.trim();
+  if (configuredPackageManager === pm && configuredCommand && path.isAbsolute(configuredCommand)) {
+    candidates.push(configuredCommand);
+  }
   if (pm === 'bun') {
     const bunExecutable = process.platform === 'win32' ? 'bun.exe' : 'bun';
     if (process.env.BUN_INSTALL) {
@@ -598,7 +603,7 @@ function resolvePackageManagerCommand(pm) {
 
 function quoteCommand(command) {
   if (!command) return command;
-  if (!/\s/.test(command)) return command;
+  if (/^[A-Za-z0-9_./:\\-]+$/.test(command)) return command;
   if (process.platform === 'win32') {
     return `"${command.replace(/"/g, '""')}"`;
   }

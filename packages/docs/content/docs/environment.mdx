@@ -45,6 +45,14 @@ Overrides the update-check API endpoint. Most users should leave this unset.
 
 Forces the package manager used by update operations when auto-detection is wrong.
 
+### `OPENCHAMBER_PACKAGE_MANAGER_COMMAND`
+
+Sets the absolute package-manager executable used with `OPENCHAMBER_PACKAGE_MANAGER`. Use this for supervised services whose runtime `PATH` can resolve a different global installation than the one that owns the running OpenChamber package.
+
+### `OPENCHAMBER_UPDATE_RESTART_ON_EXIT`
+
+Set to `true` for a foreground server whose process manager restarts it after exit. UI updates keep the current server online during installation, then exit only after success so the manager starts the new version.
+
 ## OpenCode server
 
 ### `OPENCODE_HOST`

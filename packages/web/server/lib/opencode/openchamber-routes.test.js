@@ -18,11 +18,14 @@ const childProcess = await import('child_process');
 const packageManager = await import('../package-manager.js');
 const { registerOpenChamberRoutes } = await import('./openchamber-routes.js');
 
-const createApp = ({ environment = {}, storedOptions = {} } = {}) => {
+const createApp = ({ environment = {}, platform = 'linux', storedOptions = {} } = {}) => {
   const app = express();
   const dependencies = {
     fs: {
       existsSync: vi.fn(() => false),
+      mkdirSync: vi.fn(),
+      openSync: vi.fn(() => 17),
+      closeSync: vi.fn(),
       promises: {
         readFile: vi.fn(async () => JSON.stringify({
           launchMode: 'foreground',
@@ -34,8 +37,9 @@ const createApp = ({ environment = {}, storedOptions = {} } = {}) => {
     path,
     process: {
       env: environment,
-      platform: 'linux',
+      platform,
       execPath: '/usr/bin/node',
+      pid: 4321,
     },
     server: {
       address: () => ({ port: 7897 }),
@@ -62,6 +66,7 @@ beforeEach(() => {
     packageManager: 'npm',
   });
   packageManager.getUpdateCommand.mockReturnValue('npm install -g @openchamber/web@latest');
+  childProcess.spawn.mockReturnValue({ unref: vi.fn() });
 });
 
 afterEach(() => {
@@ -76,7 +81,7 @@ describe('OpenChamber foreground update route', () => {
     await request(app)
       .post('/api/openchamber/update-install')
       .expect(409, {
-        error: 'Foreground servers must be updated by their service manager. Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, or run openchamber update and restart the service.',
+        error: 'Foreground servers must be updated by their service manager. Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, set OPENCHAMBER_UPDATE_RESTART_ON_EXIT=true for a restart-on-exit supervisor, or run openchamber update and restart the service.',
       });
 
     expect(childProcess.spawnSync).not.toHaveBeenCalled();
@@ -93,7 +98,7 @@ describe('OpenChamber foreground update route', () => {
     await request(app)
       .post('/api/openchamber/update-install')
       .expect(409, {
-        error: 'Foreground servers must be updated by their service manager. Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, or run openchamber update and restart the service.',
+        error: 'Foreground servers must be updated by their service manager. Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, set OPENCHAMBER_UPDATE_RESTART_ON_EXIT=true for a restart-on-exit supervisor, or run openchamber update and restart the service.',
       });
 
     expect(childProcess.spawnSync).not.toHaveBeenCalled();
@@ -137,5 +142,72 @@ describe('OpenChamber foreground update route', () => {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 5000,
     });
+  });
+
+  it('keeps a supervised foreground server online until installation succeeds', async () => {
+    const { app, dependencies } = createApp({
+      platform: 'darwin',
+      environment: {
+        OPENCHAMBER_UPDATE_RESTART_ON_EXIT: 'true',
+        PATH: '/Users/test/.local/bin:/usr/bin:/bin',
+      },
+    });
+
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(200, {
+        success: true,
+        message: 'Update queued; OpenChamber will exit after installation completes',
+        version: '1.17.1',
+        packageManager: 'npm',
+        autoRestart: true,
+        restartManager: 'process-manager',
+        logPath: '/tmp/openchamber/update-install.log',
+      });
+
+    expect(childProcess.spawn).toHaveBeenCalledWith('/bin/sh', ['-c', [
+      'set -eu',
+      'sleep 1',
+      'npm install -g @openchamber/web@latest',
+      'kill -TERM 4321',
+    ].join('\n')], {
+      detached: true,
+      stdio: ['ignore', 17, 17],
+      env: dependencies.process.env,
+    });
+    expect(dependencies.fs.closeSync).toHaveBeenCalledWith(17);
+  });
+
+  it('does not queue a supervised update when its log cannot be opened', async () => {
+    const { app, dependencies } = createApp({
+      platform: 'darwin',
+      environment: { OPENCHAMBER_UPDATE_RESTART_ON_EXIT: 'true' },
+    });
+    dependencies.fs.openSync.mockImplementation(() => {
+      throw new Error('update log unavailable');
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(500, { error: 'update log unavailable' });
+
+    expect(childProcess.spawn).not.toHaveBeenCalled();
+    expect(dependencies.fs.closeSync).not.toHaveBeenCalled();
+  });
+
+  it('does not enable restart-on-exit updates on Windows', async () => {
+    const { app } = createApp({
+      platform: 'win32',
+      environment: { OPENCHAMBER_UPDATE_RESTART_ON_EXIT: 'true' },
+    });
+
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(409, {
+        error: 'Foreground servers must be updated by their service manager. Run openchamber update and restart the service.',
+      });
+
+    expect(childProcess.spawn).not.toHaveBeenCalled();
   });
 });
