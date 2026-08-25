@@ -3,6 +3,7 @@ import { retry } from "./retry"
 import type { GlobalState, State } from "./types"
 import { runtimeFetch } from "../lib/runtime-fetch"
 import { emitSyncConfigChanged } from "./sync-refs"
+import { warmChatsRootDirectory } from "../lib/chatDirectories"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -68,6 +69,11 @@ export async function bootstrapGlobal(
   sdk: OpencodeClient,
   set: (patch: Partial<GlobalState>) => void,
 ) {
+  // Resolve the managed chats root before session lists load: sync chat
+  // classification (sidebar grouping, global session filters) needs the
+  // server-configured root — relocated chat directories do not contain the
+  // well-known path segment.
+  warmChatsRootDirectory()
   const results = await Promise.allSettled([
     retry(() => sdk.path.get().then((x) => set({ path: unwrap(x, "path.get") }))),
     retry(() => sdk.global.config.get().then((x) => set({ config: unwrap(x, "global.config.get") }))),

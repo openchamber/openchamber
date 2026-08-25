@@ -4,15 +4,26 @@ const createdDirectories: string[] = [];
 const createDirectoryOptions: Array<{ allowOutsideWorkspace?: boolean } | undefined> = [];
 const deletedDirectories: string[] = [];
 
+// Server-provided chats root (OPENCHAMBER_CHATS_DIR override); null models
+// an older server whose /api/fs/home answers without chatsRoot.
+let serverChatsRoot: string | null = null;
+// Unique per test so the module's per-runtime root caches stay isolated.
+let testRuntimeKey = 'runtime-0';
+
 mock.module('@/lib/opencode/client', () => ({
   opencodeClient: {
     getFilesystemHome: mock(async () => '/Users/tester'),
+    getFilesystemChatsRoot: mock(async () => serverChatsRoot),
     createDirectory: mock(async (path: string, options?: { allowOutsideWorkspace?: boolean }) => {
       createdDirectories.push(path);
       createDirectoryOptions.push(options);
       return { success: true, path };
     }),
   },
+}));
+
+mock.module('@/lib/runtime-switch', () => ({
+  getRuntimeKey: () => testRuntimeKey,
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
@@ -22,13 +33,15 @@ mock.module('@/lib/runtime-fetch', () => ({
   }),
 }));
 
-const { createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, isChatDirectoryForHome, isChatDirectoryPath } = await import('./chatDirectories');
+const { createChatDirectory, deleteChatDirectory, getChatsRootForHome, getChatsRootFromDirectory, isChatDirectoryForHome, isChatDirectoryPath, warmChatsRootDirectory } = await import('./chatDirectories');
 
 describe('chat directories', () => {
   beforeEach(() => {
     createdDirectories.length = 0;
     createDirectoryOptions.length = 0;
     deletedDirectories.length = 0;
+    serverChatsRoot = null;
+    testRuntimeKey = `runtime-${Math.random().toString(36).slice(2)}`;
   });
 
   test('creates one isolated directory beneath the dated chats root', async () => {
@@ -51,5 +64,46 @@ describe('chat directories', () => {
     await deleteChatDirectory('/Users/tester/.config/openchamber/chats/2026-08-21/session-a');
     await deleteChatDirectory('/Users/tester/project');
     expect(deletedDirectories).toEqual(['/Users/tester/.config/openchamber/chats/2026-08-21/session-a']);
+  });
+});
+
+describe('chat directories with relocated chats root', () => {
+  beforeEach(() => {
+    createdDirectories.length = 0;
+    createDirectoryOptions.length = 0;
+    deletedDirectories.length = 0;
+    serverChatsRoot = '/srv/openchamber-chats';
+    testRuntimeKey = `runtime-${Math.random().toString(36).slice(2)}`;
+  });
+
+  test('creates chat directories beneath the server-provided root', async () => {
+    const directory = await createChatDirectory(new Date(2026, 7, 21, 12));
+    expect(directory.startsWith('/srv/openchamber-chats/2026-08-21/session-')).toBe(true);
+    expect(createdDirectories).toEqual([directory]);
+  });
+
+  test('classifies relocated directories synchronously once the root is warm', async () => {
+    await warmChatsRootDirectory();
+    // The next microtask resolves the warm promise; the sync helpers must
+    // see the cached root afterwards.
+    await new Promise<void>((resolve) => { queueMicrotask(() => resolve()); });
+
+    expect(isChatDirectoryPath('/srv/openchamber-chats/2026-08-21/session-a')).toBe(true);
+    expect(isChatDirectoryPath('/srv/openchamber-chats')).toBe(true);
+    expect(isChatDirectoryPath('/Users/tester/project')).toBe(false);
+    expect(isChatDirectoryForHome('/srv/openchamber-chats/2026-08-21/session-a', '/Users/tester')).toBe(true);
+    expect(getChatsRootFromDirectory('/srv/openchamber-chats/2026-08-21/session-a')).toBe('/srv/openchamber-chats');
+    expect(getChatsRootForHome('/Users/tester')).toBe('/srv/openchamber-chats');
+  });
+
+  test('deletes relocated chat directories', async () => {
+    await deleteChatDirectory('/srv/openchamber-chats/2026-08-21/session-a');
+    await deleteChatDirectory('/Users/tester/project');
+    expect(deletedDirectories).toEqual(['/srv/openchamber-chats/2026-08-21/session-a']);
+  });
+
+  test('still recognizes the well-known segment when the root is not warm', () => {
+    expect(isChatDirectoryPath('/remote/home/.config/openchamber/chats/2026-08-21/session-a')).toBe(true);
+    expect(isChatDirectoryPath('/srv/openchamber-chats/2026-08-21/session-a')).toBe(false);
   });
 });

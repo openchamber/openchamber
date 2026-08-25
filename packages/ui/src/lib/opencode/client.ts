@@ -3,6 +3,7 @@ import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
 import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
 import type { FilesAPI } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
+import { z } from "zod";
 import type {
   Session,
   Message,
@@ -264,6 +265,11 @@ const getDesktopFilesApi = (): FilesAPI | null => {
   }
   return null;
 };
+
+// Parsing boundary for the OpenChamber-owned /api/fs/home response.
+// Older servers answer without chatsRoot — .partial() maps that to
+// undefined → null, so callers fall back to the home join.
+const fsHomeResponseSchema = z.object({ chatsRoot: z.string().min(1) }).partial();
 
 class OpencodeService {
   private client: OpencodeClient;
@@ -1966,6 +1972,26 @@ class OpencodeService {
       return null;
     } catch (error) {
       console.warn('Failed to resolve filesystem home directory:', error);
+      return null;
+    }
+  }
+
+  async getFilesystemChatsRoot(): Promise<string | null> {
+    // The server owns the managed chats root (OPENCHAMBER_CHATS_DIR override
+    // or the default under the config root). Missing field/older server →
+    // null, callers fall back to joining home + the well-known segment.
+    try {
+      const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json'
+        }
+      });
+      if (!response.ok) {
+        return null;
+      }
+      return fsHomeResponseSchema.parse(await response.json()).chatsRoot ?? null;
+    } catch {
       return null;
     }
   }

@@ -266,6 +266,13 @@ const sanitizeProjects = (...args) => settingsNormalizationRuntime.sanitizeProje
 const OPENCHAMBER_USER_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
 const OPENCHAMBER_USER_THEMES_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'themes');
 const OPENCHAMBER_PROJECTS_CONFIG_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'projects');
+// Managed chat worktrees default to <config root>/chats. OPENCHAMBER_CHATS_DIR
+// relocates them — needed when the OpenCode server runs as a separate user
+// that cannot traverse $HOME (UID-separated setups), or when the home
+// directory should stay free of agent-written files.
+const OPENCHAMBER_CHATS_DIR = process.env.OPENCHAMBER_CHATS_DIR && process.env.OPENCHAMBER_CHATS_DIR.trim()
+  ? path.resolve(process.env.OPENCHAMBER_CHATS_DIR.trim())
+  : path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats');
 
 const MAX_THEME_JSON_BYTES = 512 * 1024;
 
@@ -1291,7 +1298,7 @@ const resolveMemoryProjectId = createMemoryProjectResolver({
     return sanitizeProjects(settings?.projects || []).map((project) => project.path);
   },
   resolvePrimaryWorktreeRoot,
-  managedProjectRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats')],
+  managedProjectRoots: [OPENCHAMBER_CHATS_DIR],
 });
 
 /**
@@ -1873,6 +1880,7 @@ async function main(options = {}) {
     createFsSearchRuntime: createFsSearchRuntimeFactory,
     openchamberDataDir: OPENCHAMBER_DATA_DIR,
     openchamberUserConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
+    managedChatsRoot: OPENCHAMBER_CHATS_DIR,
     normalizeDirectoryPath,
     resolveProjectDirectory,
     resolveOptionalProjectDirectory,
