@@ -231,12 +231,23 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         restartCmdPrimary += ' --api-only';
         restartCmdFallback += ' --api-only';
       }
-      let restartCmd = isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
-      if (isDarwin) {
-        const plistPath = resolveLaunchdPlistPath(path, os || (await import('os')));
-        const quotedPlistPath = quotePosixShell(plistPath);
-        restartCmd = `launchctl kickstart -k gui/$(id -u)/${LAUNCHD_SERVICE_ID} || (launchctl unload ${quotedPlistPath} && launchctl load ${quotedPlistPath})`;
+
+      let restartCmd = '';
+      switch (process.platform) {
+        case 'darwin': {
+          const plistPath = resolveLaunchdPlistPath(path, os || (await import('os')));
+          const quotedPlistPath = quotePosixShell(plistPath);
+          restartCmd = `launchctl kickstart -k gui/$(id -u)/${LAUNCHD_SERVICE_ID} || (launchctl unload ${quotedPlistPath} && launchctl load ${quotedPlistPath})`;
+          break;
+        }
+        default: {
+          if (!isForegroundService) {
+            restartCmd = `(${restartCmdPrimary}) || (${restartCmdFallback})`;
+          }
+          break;
+        }
       }
+
 
 
       const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
