@@ -1,4 +1,5 @@
 const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
+const LAUNCHD_SERVICE_ID = 'dev.openchamber.web';
 
 function resolveSystemdServiceUnit(environment) {
   if (!environment.INVOCATION_ID) {
@@ -12,13 +13,19 @@ function resolveSystemdServiceUnit(environment) {
   return SYSTEMD_SERVICE_UNIT_PATTERN.test(unit) ? unit : null;
 }
 
+function resolveLaunchdPlistPath(pathModule, osModule) {
+  return pathModule.join(osModule.homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_SERVICE_ID}.plist`);
+}
+
 function quotePosixShell(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
+
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
     fs,
+    os,
     path,
     process,
     server,
@@ -30,6 +37,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     fetchFreeZenModels,
     getCachedZenModels,
   } = dependencies;
+
 
   app.get('/api/openchamber/update-check', async (req, res) => {
     try {
@@ -223,9 +231,13 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         restartCmdPrimary += ' --api-only';
         restartCmdFallback += ' --api-only';
       }
-      const restartCmd = isDarwin
-        ? 'launchctl kickstart -k gui/$(id -u)/dev.openchamber.web || (launchctl unload ~/Library/LaunchAgents/dev.openchamber.web.plist && launchctl load ~/Library/LaunchAgents/dev.openchamber.web.plist)'
-        : (isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`);
+      let restartCmd = isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
+      if (isDarwin) {
+        const plistPath = resolveLaunchdPlistPath(path, os || (await import('os')));
+        const quotedPlistPath = quotePosixShell(plistPath);
+        restartCmd = `launchctl kickstart -k gui/$(id -u)/${LAUNCHD_SERVICE_ID} || (launchctl unload ${quotedPlistPath} && launchctl load ${quotedPlistPath})`;
+      }
+
 
       const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
       const logPreamble = [
