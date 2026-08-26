@@ -3706,8 +3706,13 @@ const commitGitPathsFromTemporaryIndex = async (git, repoRoot, message, repoPath
     // Carry the source path of every selected rename destination into the
     // removal list so the selected commit contains only the new half of the
     // rename pair.
-    const statusOutput = await git.raw(['status', '--porcelain', '-z']).catch(() => '');
-    const renameSourceByPath = getStagedRenameSourcePaths(String(statusOutput || ''));
+    let statusOutput = '';
+    try {
+      statusOutput = String(await git.raw(['status', '--porcelain', '-z']) || '');
+    } catch (statusError) {
+      throw new Error(parseGitErrorText(statusError) || 'Failed to read git status for rename detection');
+    }
+    const renameSourceByPath = getStagedRenameSourcePaths(statusOutput);
     if (renameSourceByPath.size > 0) {
       const pathsToRemove = new Set(selectedPathsMissingFromIndex);
       for (const repoPath of repoPaths) {
@@ -3768,14 +3773,38 @@ const commitGitPathsFromTemporaryIndex = async (git, repoRoot, message, repoPath
       'Failed to commit the selected paths'
     );
     const commitBranchMatch = /^\[([^\s]+)( \([^)]+\))? ([^\]]+)\]/.exec(commitResult.stdout);
-    const changesMatch = /(\d+)[^,]*(?:,\s*(\d+)[^,]*)(?:,\s*(\d+))/.exec(commitResult.stdout);
+    const changesMatch = /(\d+)\s+files?\s+changed/.exec(commitResult.stdout);
+    const insertionsMatch = /(\d+)\s+insertions?\(\+\)/.exec(commitResult.stdout);
+    const deletionsMatch = /(\d+)\s+deletions?\(-\)/.exec(commitResult.stdout);
+
+    let commitHash = commitBranchMatch?.[3] || '';
+    let branchName = commitBranchMatch?.[1] || '';
+    if (!commitHash) {
+      const hashResult = await runGitCommandWithEnvOrThrow(
+        repoRoot,
+        ['rev-parse', 'HEAD'],
+        { GIT_INDEX_FILE: temporaryIndexFile },
+        'Failed to resolve the commit hash'
+      );
+      commitHash = hashResult.stdout.trim();
+    }
+    if (!branchName) {
+      const branchResult = await runGitCommandWithEnvOrThrow(
+        repoRoot,
+        ['rev-parse', '--abbrev-ref', 'HEAD'],
+        { GIT_INDEX_FILE: temporaryIndexFile },
+        'Failed to resolve the branch name'
+      );
+      branchName = branchResult.stdout.trim();
+    }
+
     return {
-      commit: commitBranchMatch?.[3] || '',
-      branch: commitBranchMatch?.[1] || '',
+      commit: commitHash,
+      branch: branchName,
       summary: {
         changes: changesMatch ? parseInt(changesMatch[1], 10) || 0 : 0,
-        insertions: changesMatch ? parseInt(changesMatch[2], 10) || 0 : 0,
-        deletions: changesMatch ? parseInt(changesMatch[3], 10) || 0 : 0,
+        insertions: insertionsMatch ? parseInt(insertionsMatch[1], 10) || 0 : 0,
+        deletions: deletionsMatch ? parseInt(deletionsMatch[1], 10) || 0 : 0,
       },
     };
   } finally {
@@ -3900,6 +3929,20 @@ export async function commit(directory, message, options = {}) {
             return !alreadyFullyStaged && !workingTreeMatchesHead;
           });
 
+        // The temporary-index flow rebuilds the selected commit from index
+        // entries and would silently drop unmerged conflict entries from an
+        // in-progress merge. Refuse the selected commit while MERGE_HEAD
+        // exists so the merge state is left untouched. Check before staging
+        // so the real index is never mutated on refusal.
+        if (commitWithTemporaryIndex) {
+          const mergeInProgress = await git.raw(['rev-parse', '--verify', 'MERGE_HEAD'])
+            .then(() => true)
+            .catch(() => false);
+          if (mergeInProgress) {
+            throw new Error('Selected commit refused while a merge is in progress');
+          }
+        }
+
         if (filesNeedingAdd.length > 0) {
           await stageGitPaths(git, filesNeedingAdd, 'Preparing the selected commit');
         }
@@ -3912,19 +3955,6 @@ export async function commit(directory, message, options = {}) {
       const temporaryIndexPaths = requestedStageFiles
         ? Array.from(new Set([...filesToCommit, ...(stageFilesToCommit || [])]))
         : filesToCommit;
-
-      // The temporary-index flow rebuilds the selected commit from index
-      // entries and would silently drop unmerged conflict entries from an
-      // in-progress merge. Refuse the selected commit while MERGE_HEAD
-      // exists so the merge state is left untouched.
-      if (commitWithTemporaryIndex) {
-        const mergeInProgress = await git.raw(['rev-parse', '--verify', 'MERGE_HEAD'])
-          .then(() => true)
-          .catch(() => false);
-        if (mergeInProgress) {
-          throw new Error('Selected commit refused while a merge is in progress');
-        }
-      }
 
       try {
         result = commitWithTemporaryIndex

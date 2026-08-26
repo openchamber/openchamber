@@ -586,7 +586,10 @@ const commitGitPathsFromTemporaryIndex = async (
     // removal list so the selected commit contains only the new half of the
     // rename pair.
     const statusOutput = await execGit(['status', '--porcelain', '-z'], directory);
-    const renameSourceByPath = getStagedRenameSourcePaths(statusOutput.exitCode === 0 ? statusOutput.stdout : '');
+    if (statusOutput.exitCode !== 0) {
+      throw new Error(statusOutput.stderr || 'Failed to read git status for rename detection');
+    }
+    const renameSourceByPath = getStagedRenameSourcePaths(statusOutput.stdout);
     if (renameSourceByPath.size > 0) {
       const pathsToRemove = new Set(selectedPathsMissingFromIndex);
       for (const filePath of filePaths) {
@@ -2880,17 +2883,18 @@ export async function createGitCommit(
             (fileStatus.working_dir || ' ') !== ' ' && !workingTreeMatchesHead
           );
         });
-      if (filesNeedingStage.length > 0) {
-        await stageGitFiles(directory, filesNeedingStage);
-      }
-
       // The temporary-index flow rebuilds the selected commit from index
       // entries and would silently drop unmerged conflict entries from an
       // in-progress merge. Refuse the selected commit while MERGE_HEAD
-      // exists so the merge state is left untouched.
+      // exists so the merge state is left untouched. Check before staging
+      // so the real index is never mutated on refusal.
       const mergeInProgress = await execGit(['rev-parse', '--verify', 'MERGE_HEAD'], directory);
       if (mergeInProgress.exitCode === 0) {
         throw new Error('Selected commit refused while a merge is in progress');
+      }
+
+      if (filesNeedingStage.length > 0) {
+        await stageGitFiles(directory, filesNeedingStage);
       }
 
       const temporaryIndexFiles = explicitStageFiles
