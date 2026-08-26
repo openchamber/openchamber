@@ -305,4 +305,125 @@ describe('git path batching', () => {
     expect(fs.readFileSync(path.join(directory, stagedOnlySelectedPath), 'utf8')).toBe(selectedStage.original);
     expect(fs.readFileSync(path.join(directory, unmergedPath), 'utf8')).toBe('conflict base\n');
   });
+
+  it('commits both halves of a selected staged rename without keeping the old path', async () => {
+    const directory = createRepository();
+    const oldPath = 'renamed-old.txt';
+    const newPath = 'renamed-new.txt';
+    fs.writeFileSync(path.join(directory, oldPath), 'rename source content\n');
+    runGit(directory, ['add', '--', oldPath]);
+    runGit(directory, ['commit', '-m', 'Add rename source fixture']);
+    runGit(directory, ['mv', '--', oldPath, newPath]);
+    const stagedNameStatus = runGit(directory, ['diff', '--cached', '--name-status']).trim();
+    expect(stagedNameStatus).toMatch(/^R/);
+
+    const commitTrace = await captureGitTrace(() => commit(directory, 'Commit staged rename', {
+      files: [newPath],
+      stageFiles: [],
+    }));
+
+    const committedPaths = runGit(directory, ['show', '--format=', '--name-only', '-z', 'HEAD'])
+      .split('\0')
+      .filter(Boolean)
+      .sort();
+    expect(committedPaths).toEqual([newPath]);
+    expect(getTracedCommands(commitTrace, 'write-tree')).toHaveLength(0);
+    expect(runGit(directory, ['show', `HEAD:${newPath}`])).toBe('rename source content\n');
+    expect(() => runGit(directory, ['show', `HEAD:${oldPath}`])).toThrow();
+  });
+
+  it('refuses a selected commit while a merge is in progress and leaves merge state untouched', async () => {
+    const directory = createRepository();
+    const selectedPath = 'merge-guard-selected.txt';
+    const unmergedPath = 'merge-guard-conflict.txt';
+    fs.writeFileSync(path.join(directory, selectedPath), 'selected content\n');
+    fs.writeFileSync(path.join(directory, unmergedPath), 'conflict base\n');
+    runGit(directory, ['add', '--', selectedPath, unmergedPath]);
+    runGit(directory, ['commit', '-m', 'Add merge guard fixtures']);
+    fs.writeFileSync(path.join(directory, selectedPath), 'selected change\n');
+    createUnmergedIndexEntries(directory, unmergedPath);
+    const parentCommit = runGit(directory, ['rev-parse', 'HEAD']).trim();
+    fs.writeFileSync(path.join(directory, '.git', 'MERGE_HEAD'), `${parentCommit}\n`);
+    const unmergedIndex = runGit(directory, ['ls-files', '--unmerged', '-z']);
+
+    await expect(commit(directory, 'Commit during merge', {
+      files: [selectedPath],
+      stageFiles: [],
+    })).rejects.toThrow('Selected commit refused while a merge is in progress');
+
+    expect(fs.readFileSync(path.join(directory, '.git', 'MERGE_HEAD'), 'utf8').trim()).toBe(parentCommit);
+    expect(runGit(directory, ['ls-files', '--unmerged', '-z'])).toBe(unmergedIndex);
+    expect(runGit(directory, ['diff', '--name-only', '--', selectedPath]).trim()).toBe(selectedPath);
+  });
+
+  it('creates the first commit of an unborn repository through the temporary index', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-git-batching-'));
+    tempDirs.push(directory);
+    runGit(directory, ['init']);
+    runGit(directory, ['config', 'user.email', 'test@example.com']);
+    runGit(directory, ['config', 'user.name', 'Test User']);
+    const selectedPaths = createOversizedPaths('unborn', 40);
+    writeFiles(directory, selectedPaths);
+    await stageFiles(directory, selectedPaths);
+
+    const commitTrace = await captureGitTrace(() => commit(directory, 'Initial selected commit', {
+      files: [...selectedPaths, ...selectedPaths],
+      stageFiles: [],
+    }));
+
+    const committedPaths = runGit(directory, ['show', '--format=', '--name-only', '-z', 'HEAD'])
+      .split('\0')
+      .filter(Boolean)
+      .sort();
+    expect(committedPaths).toEqual([...selectedPaths].sort());
+    expect(getTracedCommands(commitTrace, 'write-tree')).toHaveLength(0);
+    for (const filePath of selectedPaths) {
+      expect(runGit(directory, ['show', `HEAD:${filePath}`])).toBe(`${filePath}\n`);
+    }
+    expect(runGit(directory, ['rev-parse', '--verify', 'HEAD']).trim()).toMatch(/^[0-9a-f]{40}$/);
+    expect(runGit(directory, ['status', '--porcelain']).trim()).toBe('');
+  }, 15000);
+
+  it('keeps git commands working when EDITOR/PAGER env entries are present', async () => {
+    const directory = createRepository();
+    const selectedPath = 'editor-env-selected.txt';
+    writeFiles(directory, [selectedPath]);
+    await stageFiles(directory, [selectedPath]);
+
+    const previousEditor = process.env.EDITOR;
+    const previousPager = process.env.PAGER;
+    const previousGitEditor = process.env.GIT_EDITOR;
+    process.env.EDITOR = 'vi';
+    process.env.PAGER = 'less';
+    process.env.GIT_EDITOR = 'vi';
+    try {
+      const commitTrace = await captureGitTrace(() => commit(directory, 'Commit with editor env', {
+        files: [selectedPath],
+        stageFiles: [],
+      }));
+
+      const committedPaths = runGit(directory, ['show', '--format=', '--name-only', '-z', 'HEAD'])
+        .split('\0')
+        .filter(Boolean)
+        .sort();
+      expect(committedPaths).toEqual([selectedPath]);
+      expect(getTracedCommands(commitTrace, 'write-tree')).toHaveLength(0);
+    } finally {
+      if (previousEditor === undefined) {
+        delete process.env.EDITOR;
+      } else {
+        process.env.EDITOR = previousEditor;
+      }
+      if (previousPager === undefined) {
+        delete process.env.PAGER;
+      } else {
+        process.env.PAGER = previousPager;
+      }
+      if (previousGitEditor === undefined) {
+        delete process.env.GIT_EDITOR;
+      } else {
+        process.env.GIT_EDITOR = previousGitEditor;
+      }
+    }
+  });
 });

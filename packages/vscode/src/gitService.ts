@@ -418,6 +418,68 @@ const runGitPathBatches = async (
   }
 };
 
+const gitIndexMutationQueues = new Map<string, Promise<unknown>>();
+const gitIndexMutationQueueActive = new Set<string>();
+
+const getGitIndexMutationQueueKey = (directory: string): string => {
+  const normalized = normalizeDirectoryPath(directory);
+  if (!normalized) {
+    return '';
+  }
+  return path.resolve(normalized);
+};
+
+// Serialize index mutations per repository root so concurrent stage/unstage/
+// commit requests cannot interleave `git add`/`restore`/`commit` calls on the
+// same index (mirrors the web runtime's withGitIndexMutationQueue). The
+// reentrancy guard lets a queued operation call another queued helper (e.g.
+// createGitCommit -> stageGitFiles) inline instead of chaining behind its own
+// tail, which would deadlock.
+const withGitIndexMutationQueue = async <T>(directory: string, task: () => Promise<T>): Promise<T> => {
+  let key = getGitIndexMutationQueueKey(directory);
+  try {
+    const directoryPath = normalizeDirectoryPath(directory);
+    if (directoryPath) {
+      const topLevel = await execGit(['rev-parse', '--show-toplevel'], directoryPath);
+      if (topLevel.exitCode === 0 && topLevel.stdout.trim()) {
+        const normalizedTopLevel = topLevel.stdout.trim();
+        key = path.isAbsolute(normalizedTopLevel)
+          ? path.resolve(normalizedTopLevel)
+          : path.resolve(directoryPath, normalizedTopLevel);
+      }
+    }
+  } catch {
+    // Fall back to the normalized directory key when the repo root is unavailable.
+  }
+  if (!key) {
+    return task();
+  }
+
+  if (gitIndexMutationQueueActive.has(key)) {
+    return task();
+  }
+
+  const previous = gitIndexMutationQueues.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(async () => {
+    gitIndexMutationQueueActive.add(key);
+    try {
+      return await task();
+    } finally {
+      gitIndexMutationQueueActive.delete(key);
+    }
+  });
+  const tail = current.catch(() => {});
+  gitIndexMutationQueues.set(key, tail);
+
+  try {
+    return await current;
+  } finally {
+    if (gitIndexMutationQueues.get(key) === tail) {
+      gitIndexMutationQueues.delete(key);
+    }
+  }
+};
+
 const getGitIndexInfoForPaths = async (directory: string, filePaths: string[]): Promise<string> => {
   const indexInfo: string[] = [];
   for (const batch of splitGitPathBatches(filePaths)) {
@@ -469,6 +531,36 @@ const getWorkingTreePathsDifferentFromHead = async (directory: string): Promise<
   }
 };
 
+// Parses `git status --porcelain -z` output into a map of rename
+// destinations to their source path. Records look like `XY path\0` or
+// `R  new-path\0old-path\0` (the staged rename's second NUL-terminated
+// record is the source). Copies (`C`) are intentionally ignored: a copy
+// leaves its source in the index, so removing the source from the
+// temporary index would drop it from the selected commit. Git only reports
+// `C` when status.renames=copies is set. Returns an empty map when no
+// renames are present.
+const getStagedRenameSourcePaths = (statusOutput: string): Map<string, string> => {
+  const records = statusOutput.split('\0').filter(Boolean);
+  const renameSourceByPath = new Map<string, string>();
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (record.length < 3) {
+      continue;
+    }
+    const statusCodes = record.slice(0, 2);
+    const path = record.slice(3);
+    if (statusCodes[0] !== 'R') {
+      continue;
+    }
+    const sourcePath = records[index + 1];
+    if (sourcePath) {
+      renameSourceByPath.set(path, sourcePath);
+      index += 1;
+    }
+  }
+  return renameSourceByPath;
+};
+
 const commitGitPathsFromTemporaryIndex = async (
   directory: string,
   message: string,
@@ -485,7 +577,27 @@ const commitGitPathsFromTemporaryIndex = async (
       execGit(['rev-parse', '--verify', 'HEAD'], directory),
     ]);
     const indexedPaths = getIndexInfoPaths(indexInfo);
-    const selectedPathsMissingFromIndex = filePaths.filter((filePath) => !indexedPaths.has(filePath));
+    let selectedPathsMissingFromIndex = filePaths.filter((filePath) => !indexedPaths.has(filePath));
+
+    // A staged rename (`R  new -> old`) removes the source from the real
+    // index, so the temporary index (seeded from HEAD, which still holds the
+    // old path) would otherwise keep a stale `old` entry in the commit.
+    // Carry the source path of every selected rename destination into the
+    // removal list so the selected commit contains only the new half of the
+    // rename pair.
+    const statusOutput = await execGit(['status', '--porcelain', '-z'], directory);
+    const renameSourceByPath = getStagedRenameSourcePaths(statusOutput.exitCode === 0 ? statusOutput.stdout : '');
+    if (renameSourceByPath.size > 0) {
+      const pathsToRemove = new Set(selectedPathsMissingFromIndex);
+      for (const filePath of filePaths) {
+        const renameSourcePath = renameSourceByPath.get(filePath);
+        if (renameSourcePath) {
+          pathsToRemove.add(renameSourcePath);
+        }
+      }
+      selectedPathsMissingFromIndex = Array.from(pathsToRemove);
+    }
+
     const readTree = await execGit(
       hasHead.exitCode === 0 ? ['read-tree', 'HEAD'] : ['read-tree', '--empty'],
       directory,
@@ -2538,34 +2650,36 @@ export async function stageGitFiles(directory: string, filePaths: string[]): Pro
   if (paths.length === 0) {
     throw new Error('path is required');
   }
-  await runGitPathBatches(paths, 'Staging selected files', async (batch) => {
-    const result = await execGit(['add', '--', ...batch], directory);
-    if (result.exitCode === 0) {
-      return;
-    }
-
-    const isPathspecError =
-      /pathspec/.test(result.stderr) && /did not match any files/.test(result.stderr);
-    if (!isPathspecError) {
-      throw new Error(result.stderr || 'Failed to stage git file');
-    }
-
-    // During rapid stage/unstage toggling the optimistic UI can request staging a
-    // path that a prior queued mutation already staged (most visibly a deletion,
-    // whose file is gone from the working tree). `git add` aborts the whole batch on
-    // a single unmatched pathspec, so retry per-path and skip the ones already in
-    // their target state rather than failing the entire "stage all".
-    for (const path of batch) {
-      const perPath = await execGit(['add', '--', path], directory);
-      if (perPath.exitCode === 0) {
-        continue;
+  await withGitIndexMutationQueue(directory, async () => {
+    await runGitPathBatches(paths, 'Staging selected files', async (batch) => {
+      const result = await execGit(['add', '--', ...batch], directory);
+      if (result.exitCode === 0) {
+        return;
       }
-      const perPathIsPathspecError =
-        /pathspec/.test(perPath.stderr) && /did not match any files/.test(perPath.stderr);
-      if (!perPathIsPathspecError) {
-        throw new Error(perPath.stderr || 'Failed to stage git file');
+
+      const isPathspecError =
+        /pathspec/.test(result.stderr) && /did not match any files/.test(result.stderr);
+      if (!isPathspecError) {
+        throw new Error(result.stderr || 'Failed to stage git file');
       }
-    }
+
+      // During rapid stage/unstage toggling the optimistic UI can request staging a
+      // path that a prior queued mutation already staged (most visibly a deletion,
+      // whose file is gone from the working tree). `git add` aborts the whole batch on
+      // a single unmatched pathspec, so retry per-path and skip the ones already in
+      // their target state rather than failing the entire "stage all".
+      for (const path of batch) {
+        const perPath = await execGit(['add', '--', path], directory);
+        if (perPath.exitCode === 0) {
+          continue;
+        }
+        const perPathIsPathspecError =
+          /pathspec/.test(perPath.stderr) && /did not match any files/.test(perPath.stderr);
+        if (!perPathIsPathspecError) {
+          throw new Error(perPath.stderr || 'Failed to stage git file');
+        }
+      }
+    });
   });
 }
 
@@ -2575,15 +2689,17 @@ export async function unstageGitFiles(directory: string, filePaths: string[]): P
   if (paths.length === 0) {
     throw new Error('path is required');
   }
-  await runGitPathBatches(paths, 'Unstaging selected files', async (batch) => {
-    const result = await execGit(['restore', '--staged', '--', ...batch], directory);
-    if (result.exitCode === 0) {
-      return;
-    }
-    const fallback = await execGit(['reset', 'HEAD', '--', ...batch], directory);
-    if (fallback.exitCode !== 0) {
-      throw new Error(fallback.stderr || result.stderr || 'Failed to unstage git file');
-    }
+  await withGitIndexMutationQueue(directory, async () => {
+    await runGitPathBatches(paths, 'Unstaging selected files', async (batch) => {
+      const result = await execGit(['restore', '--staged', '--', ...batch], directory);
+      if (result.exitCode === 0) {
+        return;
+      }
+      const fallback = await execGit(['reset', 'HEAD', '--', ...batch], directory);
+      if (fallback.exitCode !== 0) {
+        throw new Error(fallback.stderr || result.stderr || 'Failed to unstage git file');
+      }
+    });
   });
 }
 
@@ -2730,54 +2846,67 @@ export async function createGitCommit(
   message: string,
   options?: { addAll?: boolean; files?: string[]; stageFiles?: string[] }
 ): Promise<GitCommitResult> {
-  const selectedFiles = Array.isArray(options?.files) ? options.files : [];
-  const explicitStageFiles = Array.isArray(options?.stageFiles) ? options.stageFiles : null;
-  const shouldCommitSelectedFilesWithTemporaryIndex = selectedFiles.length > 0 && (
-    explicitStageFiles !== null || hasMultipleGitPathBatches(selectedFiles)
-  );
+  return withGitIndexMutationQueue(directory, async () => {
+    const selectedFiles = Array.isArray(options?.files) ? options.files : [];
+    const explicitStageFiles = Array.isArray(options?.stageFiles) ? options.stageFiles : null;
+    const shouldCommitSelectedFilesWithTemporaryIndex = selectedFiles.length > 0 && (
+      explicitStageFiles !== null || hasMultipleGitPathBatches(selectedFiles)
+    );
 
-  if (shouldCommitSelectedFilesWithTemporaryIndex) {
-    let commitResult: GitCommitResult | null = null;
+    if (shouldCommitSelectedFilesWithTemporaryIndex) {
+      const filesToStage = explicitStageFiles ?? selectedFiles;
+      const statusByPath = new Map((await getGitStatus(directory)).files.map((file) => [file.path, file]));
+      const workingTreePathsDifferentFromHead = explicitStageFiles === null
+        ? await getWorkingTreePathsDifferentFromHead(directory)
+        : null;
+      const filesNeedingStage = explicitStageFiles !== null
+        // Explicit stageFiles: only stage paths that are present in git
+        // status at all (stale selections are dropped), mirroring the web
+        // runtime's fileStatusByPath filter.
+        ? filesToStage.filter((filePath) => statusByPath.has(filePath))
+        : filesToStage.filter((filePath) => {
+          const fileStatus = statusByPath.get(filePath);
+          if (!fileStatus) {
+            // The path is not present in git status at all (stale selection or
+            // already-committed path): never stage it.
+            return false;
+          }
+          const indexStatus = (fileStatus.index || '').trim();
+          const hasStagedIndex = Boolean(indexStatus) && indexStatus !== '?';
+          const workingTreeMatchesHead = hasStagedIndex
+            && workingTreePathsDifferentFromHead
+            && !workingTreePathsDifferentFromHead.has(filePath);
+          return !hasStagedIndex || (
+            (fileStatus.working_dir || ' ') !== ' ' && !workingTreeMatchesHead
+          );
+        });
+      if (filesNeedingStage.length > 0) {
+        await stageGitFiles(directory, filesNeedingStage);
+      }
 
-    const filesToStage = explicitStageFiles ?? selectedFiles;
-    const statusByPath = explicitStageFiles === null && hasMultipleGitPathBatches(selectedFiles)
-      ? new Map((await getGitStatus(directory)).files.map((file) => [file.path, file]))
-      : null;
-    const workingTreePathsDifferentFromHead = statusByPath
-      ? await getWorkingTreePathsDifferentFromHead(directory)
-      : null;
-    const filesNeedingStage = statusByPath
-      ? filesToStage.filter((filePath) => {
-        const fileStatus = statusByPath.get(filePath);
-        const indexStatus = (fileStatus?.index || '').trim();
-        const hasStagedIndex = Boolean(indexStatus) && indexStatus !== '?';
-        const workingTreeMatchesHead = hasStagedIndex
-          && workingTreePathsDifferentFromHead
-          && !workingTreePathsDifferentFromHead.has(filePath);
-        return !hasStagedIndex || (
-          (fileStatus?.working_dir || ' ') !== ' ' && !workingTreeMatchesHead
-        );
-      })
-      : filesToStage;
-    if (filesNeedingStage.length > 0) {
-      await stageGitFiles(directory, filesNeedingStage);
-    }
+      // The temporary-index flow rebuilds the selected commit from index
+      // entries and would silently drop unmerged conflict entries from an
+      // in-progress merge. Refuse the selected commit while MERGE_HEAD
+      // exists so the merge state is left untouched.
+      const mergeInProgress = await execGit(['rev-parse', '--verify', 'MERGE_HEAD'], directory);
+      if (mergeInProgress.exitCode === 0) {
+        throw new Error('Selected commit refused while a merge is in progress');
+      }
 
-    const temporaryIndexFiles = explicitStageFiles
-      ? Array.from(new Set([...selectedFiles, ...filesToStage]))
-      : selectedFiles;
-    const result = await commitGitPathsFromTemporaryIndex(directory, message, temporaryIndexFiles);
-    if (result.exitCode !== 0) {
-      commitResult = {
-        success: false,
-        commit: '',
-        branch: '',
-        summary: { changes: 0, insertions: 0, deletions: 0 },
-      };
-    } else {
+      const temporaryIndexFiles = explicitStageFiles
+        ? Array.from(new Set([...selectedFiles, ...filesToStage]))
+        : selectedFiles;
+      const result = await commitGitPathsFromTemporaryIndex(directory, message, temporaryIndexFiles);
+      if (result.exitCode !== 0) {
+        // Surface the git stderr to the caller instead of a silent
+        // success:false with empty fields: the bridge rejects the request
+        // with this text and the UI shows it in the commit toast.
+        throw new Error(result.stderr || 'Failed to create git commit');
+      }
+
       const hashResult = await execGit(['rev-parse', 'HEAD'], directory);
       const branchResult = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], directory);
-      commitResult = {
+      return {
         success: true,
         commit: hashResult.stdout.trim(),
         branch: branchResult.stdout.trim(),
@@ -2785,75 +2914,74 @@ export async function createGitCommit(
       };
     }
 
-    if (!commitResult) {
-      throw new Error('Failed to create git commit');
-    }
+    const repo = await getRepository(directory);
 
-    return commitResult;
-  }
-
-  const repo = await getRepository(directory);
-  
-  if (repo) {
-    try {
-      if (options?.addAll) {
-        await repo.add(['.']);
-      } else if (options?.files?.length) {
-        const filesToStage = options.stageFiles ?? options.files;
-        if (filesToStage.length > 0) {
-          if (hasMultipleGitPathBatches(filesToStage)) {
-            await stageGitFiles(directory, filesToStage);
-          } else {
-            await repo.add(filesToStage);
+    if (repo) {
+      try {
+        if (options?.addAll) {
+          await repo.add(['.']);
+        } else if (options?.files?.length) {
+          const filesToStage = options.stageFiles ?? options.files;
+          if (filesToStage.length > 0) {
+            if (hasMultipleGitPathBatches(filesToStage)) {
+              await stageGitFiles(directory, filesToStage);
+            } else {
+              await repo.add(filesToStage);
+            }
           }
         }
+
+        await repo.commit(message);
+
+        const head = repo.state.HEAD;
+        return {
+          success: true,
+          commit: head?.commit || '',
+          branch: head?.name || '',
+          summary: { changes: 0, insertions: 0, deletions: 0 },
+        };
+      } catch (error) {
+        console.error('[GitService] Failed to commit:', error);
       }
-      
-      await repo.commit(message);
-      
-      const head = repo.state.HEAD;
+    }
+
+    // Fallback to raw git. Unlike the web runtime, the raw commit path never
+    // passes pathspecs to `git commit` (files are staged first and the whole
+    // index is committed), so the web's "pathspec did not match any files"
+    // fallback to a full-index commit cannot trigger here: a stale selection
+    // already degrades to the same outcome through the repo->raw fallback and
+    // the per-path retry in stageGitFiles.
+    if (options?.addAll) {
+      await execGit(['add', '-A'], directory);
+    } else if (options?.files?.length) {
+      const filesToStage = options.stageFiles ?? options.files;
+      if (filesToStage.length > 0) {
+        await stageGitFiles(directory, filesToStage);
+      }
+    }
+
+    const result = await execGit(['commit', '-m', message], directory);
+
+    if (result.exitCode !== 0) {
       return {
-        success: true,
-        commit: head?.commit || '',
-        branch: head?.name || '',
+        success: false,
+        commit: '',
+        branch: '',
         summary: { changes: 0, insertions: 0, deletions: 0 },
       };
-    } catch (error) {
-      console.error('[GitService] Failed to commit:', error);
     }
-  }
 
-  // Fallback to raw git
-  if (options?.addAll) {
-    await execGit(['add', '-A'], directory);
-  } else if (options?.files?.length) {
-    const filesToStage = options.stageFiles ?? options.files;
-    if (filesToStage.length > 0) {
-      await stageGitFiles(directory, filesToStage);
-    }
-  }
+    // Get commit info
+    const hashResult = await execGit(['rev-parse', 'HEAD'], directory);
+    const branchResult = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], directory);
 
-  const result = await execGit(['commit', '-m', message], directory);
-  
-  if (result.exitCode !== 0) {
     return {
-      success: false,
-      commit: '',
-      branch: '',
+      success: true,
+      commit: hashResult.stdout.trim(),
+      branch: branchResult.stdout.trim(),
       summary: { changes: 0, insertions: 0, deletions: 0 },
     };
-  }
-
-  // Get commit info
-  const hashResult = await execGit(['rev-parse', 'HEAD'], directory);
-  const branchResult = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], directory);
-
-  return {
-    success: true,
-    commit: hashResult.stdout.trim(),
-    branch: branchResult.stdout.trim(),
-    summary: { changes: 0, insertions: 0, deletions: 0 },
-  };
+  });
 }
 
 // ============== Remote Operations ==============

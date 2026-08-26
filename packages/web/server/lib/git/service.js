@@ -1075,6 +1075,38 @@ const runGitCommandWithInputOrThrow = async (cwd, args, input, environment, fall
   return result;
 };
 
+// Runs git through execFile with an explicit environment overlay
+// (buildGitEnv() plus caller-provided entries) and returns stdout/stderr.
+// Unlike simple-git's `.env()`, this does not trip blockUnsafeOperationsPlugin
+// when the environment carries EDITOR/PAGER/GIT_EDITOR/SSH_ASKPASS/
+// GIT_SSH_COMMAND, which the temporary-index commit flows need because they
+// spread process.env. Callers that only need success/message (stdin-fed
+// commands) should keep using runGitCommandWithInputOrThrow instead.
+const runGitCommandWithEnvOrThrow = async (cwd, args, environment, fallbackMessage) => {
+  try {
+    const { stdout, stderr } = await execFileAsync(getGitBinary(), args, {
+      cwd,
+      env: { ...(await buildGitEnv()), ...environment },
+      windowsHide: true,
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    return {
+      success: true,
+      exitCode: 0,
+      stdout: String(stdout || ''),
+      stderr: String(stderr || ''),
+    };
+  } catch (error) {
+    const e = new Error(
+      parseGitErrorText(error) || fallbackMessage || 'Git command failed'
+    );
+    e.exitCode = typeof error?.code === 'number' ? error.code : 1;
+    e.stdout = String(error?.stdout || '');
+    e.stderr = String(error?.stderr || '');
+    throw e;
+  }
+};
+
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const isIndexLockError = (result) => {
@@ -3603,14 +3635,56 @@ const getWorkingTreePathsDifferentFromHead = async (git, repoRoot) => {
   const temporaryDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), 'openchamber-git-index-'));
   const temporaryIndexFile = path.join(temporaryDirectory, 'index');
   try {
-    const temporaryIndexGit = await createGit(repoRoot);
-    temporaryIndexGit.env({ ...(await buildGitEnv()), GIT_INDEX_FILE: temporaryIndexFile });
-    await temporaryIndexGit.raw(['read-tree', 'HEAD']);
-    const paths = await temporaryIndexGit.raw(['diff', '--name-only', '-z', '--no-renames']);
-    return new Set(paths.split('\0').filter(Boolean));
+    // All temporary-index commands run through execFile with an explicit
+    // GIT_INDEX_FILE instead of a simple-git instance configured via
+    // `.env()`: simple-git's blockUnsafeOperationsPlugin rejects
+    // environment entries such as EDITOR/GIT_EDITOR/PAGER/SSH_ASKPASS that
+    // buildGitEnv() carries over from process.env.
+    await runGitCommandWithEnvOrThrow(
+      repoRoot,
+      ['read-tree', 'HEAD'],
+      { GIT_INDEX_FILE: temporaryIndexFile },
+      'Failed to read HEAD into the temporary git index'
+    );
+    const paths = await runGitCommandWithEnvOrThrow(
+      repoRoot,
+      ['diff', '--name-only', '-z', '--no-renames'],
+      { GIT_INDEX_FILE: temporaryIndexFile },
+      'Failed to diff the temporary git index'
+    );
+    return new Set(paths.stdout.split('\0').filter(Boolean));
   } finally {
     await fsp.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
   }
+};
+
+// Parses `git status --porcelain -z` output into a map of rename
+// destinations to their source path. Records look like `XY path\0` or
+// `R  new-path\0old-path\0` (the staged rename's second NUL-terminated
+// record is the source). Only staged renames ('R') are carried into the
+// temporary-index removal list: a copy ('C') leaves its source in the
+// index, so removing the source would drop it from the selected commit.
+// Returns {} when no staged renames are present.
+const getStagedRenameSourcePaths = (statusOutput) => {
+  const records = statusOutput.split('\0').filter(Boolean);
+  const renameSourceByPath = new Map();
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (record.length < 3) {
+      continue;
+    }
+    const statusCodes = record.slice(0, 2);
+    const path = record.slice(3);
+    if (statusCodes[0] !== 'R') {
+      continue;
+    }
+    const sourcePath = records[index + 1];
+    if (sourcePath) {
+      renameSourceByPath.set(path, sourcePath);
+      index += 1;
+    }
+  }
+  return renameSourceByPath;
 };
 
 const commitGitPathsFromTemporaryIndex = async (git, repoRoot, message, repoPaths) => {
@@ -3619,27 +3693,60 @@ const commitGitPathsFromTemporaryIndex = async (git, repoRoot, message, repoPath
   const temporaryIndexFile = path.join(temporaryDirectory, 'index');
 
   try {
-    const temporaryIndexGit = await createGit(repoRoot);
-    temporaryIndexGit.env({ ...(await buildGitEnv()), GIT_INDEX_FILE: temporaryIndexFile });
     const [indexInfo, hasHead] = await Promise.all([
       getGitIndexInfoForPaths(git, repoPaths),
       git.raw(['rev-parse', '--verify', 'HEAD']).then(() => true).catch(() => false),
     ]);
     const indexedPaths = getIndexInfoPaths(indexInfo);
-    const selectedPathsMissingFromIndex = repoPaths.filter((repoPath) => !indexedPaths.has(repoPath));
+    let selectedPathsMissingFromIndex = repoPaths.filter((repoPath) => !indexedPaths.has(repoPath));
 
-    await temporaryIndexGit.raw(hasHead ? ['read-tree', 'HEAD'] : ['read-tree', '--empty']);
+    // A staged rename (`R  new -> old`) removes the source from the real
+    // index, so the temporary index (seeded from HEAD, which still holds the
+    // old path) would otherwise keep a stale `old` entry in the commit.
+    // Carry the source path of every selected rename destination into the
+    // removal list so the selected commit contains only the new half of the
+    // rename pair.
+    const statusOutput = await git.raw(['status', '--porcelain', '-z']).catch(() => '');
+    const renameSourceByPath = getStagedRenameSourcePaths(String(statusOutput || ''));
+    if (renameSourceByPath.size > 0) {
+      const pathsToRemove = new Set(selectedPathsMissingFromIndex);
+      for (const repoPath of repoPaths) {
+        const renameSourcePath = renameSourceByPath.get(repoPath);
+        if (renameSourcePath) {
+          pathsToRemove.add(renameSourcePath);
+        }
+      }
+      selectedPathsMissingFromIndex = Array.from(pathsToRemove);
+    }
+
+    // All temporary-index commands below run through execFile with an
+    // explicit GIT_INDEX_FILE instead of a simple-git instance configured
+    // via `.env()`: simple-git's blockUnsafeOperationsPlugin rejects
+    // environment entries such as EDITOR/GIT_EDITOR/PAGER/SSH_ASKPASS that
+    // buildGitEnv() carries over from process.env. `update-index` already
+    // used runGitCommandWithInputOrThrow (also execFile-based).
+    await runGitCommandWithEnvOrThrow(
+      repoRoot,
+      hasHead ? ['read-tree', 'HEAD'] : ['read-tree', '--empty'],
+      { GIT_INDEX_FILE: temporaryIndexFile },
+      'Failed to read HEAD into the temporary git index'
+    );
 
     if (selectedPathsMissingFromIndex.length > 0) {
       await fsp.writeFile(pathspecFile, Buffer.from(`${selectedPathsMissingFromIndex.join('\0')}\0`, 'utf8'));
-      await temporaryIndexGit.raw([
-        '--literal-pathspecs',
-        'rm',
-        '--cached',
-        '--ignore-unmatch',
-        `--pathspec-from-file=${pathspecFile}`,
-        '--pathspec-file-nul',
-      ]);
+      await runGitCommandWithEnvOrThrow(
+        repoRoot,
+        [
+          '--literal-pathspecs',
+          'rm',
+          '--cached',
+          '--ignore-unmatch',
+          `--pathspec-from-file=${pathspecFile}`,
+          '--pathspec-file-nul',
+        ],
+        { GIT_INDEX_FILE: temporaryIndexFile },
+        'Failed to remove selected paths from the temporary git index'
+      );
     }
 
     if (indexInfo) {
@@ -3652,7 +3759,25 @@ const commitGitPathsFromTemporaryIndex = async (git, repoRoot, message, repoPath
       );
     }
 
-    return await temporaryIndexGit.commit(message);
+    // Mirror simple-git's commit task: output parsing relies on the full
+    // abbreviated hash, so the same `-c core.abbrev=40` prefix is applied.
+    const commitResult = await runGitCommandWithEnvOrThrow(
+      repoRoot,
+      ['-c', 'core.abbrev=40', 'commit', '-m', message],
+      { GIT_INDEX_FILE: temporaryIndexFile },
+      'Failed to commit the selected paths'
+    );
+    const commitBranchMatch = /^\[([^\s]+)( \([^)]+\))? ([^\]]+)\]/.exec(commitResult.stdout);
+    const changesMatch = /(\d+)[^,]*(?:,\s*(\d+)[^,]*)(?:,\s*(\d+))/.exec(commitResult.stdout);
+    return {
+      commit: commitBranchMatch?.[3] || '',
+      branch: commitBranchMatch?.[1] || '',
+      summary: {
+        changes: changesMatch ? parseInt(changesMatch[1], 10) || 0 : 0,
+        insertions: changesMatch ? parseInt(changesMatch[2], 10) || 0 : 0,
+        deletions: changesMatch ? parseInt(changesMatch[3], 10) || 0 : 0,
+      },
+    };
   } finally {
     await fsp.rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
   }
@@ -3788,6 +3913,19 @@ export async function commit(directory, message, options = {}) {
         ? Array.from(new Set([...filesToCommit, ...(stageFilesToCommit || [])]))
         : filesToCommit;
 
+      // The temporary-index flow rebuilds the selected commit from index
+      // entries and would silently drop unmerged conflict entries from an
+      // in-progress merge. Refuse the selected commit while MERGE_HEAD
+      // exists so the merge state is left untouched.
+      if (commitWithTemporaryIndex) {
+        const mergeInProgress = await git.raw(['rev-parse', '--verify', 'MERGE_HEAD'])
+          .then(() => true)
+          .catch(() => false);
+        if (mergeInProgress) {
+          throw new Error('Selected commit refused while a merge is in progress');
+        }
+      }
+
       try {
         result = commitWithTemporaryIndex
           ? await commitGitPathsFromTemporaryIndex(git, repoRoot, message, temporaryIndexPaths)
@@ -3795,7 +3933,10 @@ export async function commit(directory, message, options = {}) {
       } catch (error) {
         const gitErrorText = parseGitErrorText(error);
         const isPathspecError = gitErrorText.includes('pathspec') && gitErrorText.includes('did not match any files');
-        if (!isPathspecError || !commitArgs || commitArgs.length === 0) {
+        // The fallback only ever applies to the plain pathspec commit path:
+        // a temporary-index commit failure must never degrade into a
+        // full-index commit that rewrites unrelated staged entries.
+        if (!isPathspecError || !commitArgs || commitArgs.length === 0 || commitWithTemporaryIndex) {
           throw error;
         }
 

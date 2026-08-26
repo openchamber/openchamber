@@ -160,8 +160,9 @@ The following functions are internal helpers used by exported functions:
 3. Use `createGit(directory)` to get a simple-git instance with the correct environment. `directory` is required (`baseDir`); never omit it so commands cannot inherit `process.cwd()`.
 4. Use `runGitCommand(cwd, args)` for direct git command execution with better error handling.
 5. Use `runGitCommandOrThrow(cwd, args, fallbackMessage)` for commands that must succeed.
-6. Return consistent error messages; use `parseGitErrorText(error)` to extract meaningful git errors.
-7. Update this file with the new function in the appropriate API section.
+6. Use `runGitCommandWithEnvOrThrow(cwd, args, environment, fallbackMessage)` for commands that must run with an explicit environment overlay (e.g. `GIT_INDEX_FILE`) without simple-git's `.env()`, which blockUnsafeOperationsPlugin rejects when the env carries EDITOR/PAGER/GIT_EDITOR/SSH_ASKPASS/GIT_SSH_COMMAND.
+7. Return consistent error messages; use `parseGitErrorText(error)` to extract meaningful git errors.
+8. Update this file with the new function in the appropriate API section.
 
 ### SSH Key Handling
 - SSH keys are escaped and validated via `escapeSshKeyPath` to prevent command injection.

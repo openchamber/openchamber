@@ -17,6 +17,8 @@ const processState = {
   indexInfoByPath: new Map(),
   stdinInputs: [],
   environments: [],
+  mergeHeadPresent: false,
+  failCommit: false,
 };
 
 const spawn = mock((_command, args, options = {}) => {
@@ -39,6 +41,7 @@ const spawn = mock((_command, args, options = {}) => {
 
   const isFailedAdd = command === 'add' && (++processState.addCallCount === processState.failOnAddCall);
   let stdout = '';
+  let exitCode = 0;
   if (command === 'status') {
     stdout = processState.statusOutput;
   } else if (command === 'diff' && commandArgs.includes('--cached')) {
@@ -51,12 +54,21 @@ const spawn = mock((_command, args, options = {}) => {
     const separatorIndex = commandArgs.indexOf('--');
     const requestedPaths = separatorIndex === -1 ? [] : commandArgs.slice(separatorIndex + 1);
     stdout = requestedPaths.map((filePath) => processState.indexInfoByPath.get(filePath) || '').join('');
+  } else if (command === 'rev-parse' && commandArgs.includes('--verify') && commandArgs.includes('MERGE_HEAD')) {
+    // No merge in progress by default; tests opt in via mergeHeadPresent.
+    if (processState.mergeHeadPresent) {
+      stdout = 'abc123\n';
+    } else {
+      exitCode = 1;
+    }
   } else if (command === 'rev-parse' && (
     commandArgs[1] === 'HEAD' || (commandArgs.includes('--verify') && commandArgs.includes('HEAD'))
   )) {
     stdout = 'abc123\n';
   } else if (command === 'rev-parse') {
     stdout = 'main\n';
+  } else if (command === 'commit' && processState.failCommit) {
+    exitCode = 1;
   }
 
   queueMicrotask(() => {
@@ -66,6 +78,11 @@ const spawn = mock((_command, args, options = {}) => {
     if (isFailedAdd) {
       process.stderr.emit('data', Buffer.from('simulated batch failure'));
       process.emit('close', 1);
+      return;
+    }
+    if (exitCode !== 0) {
+      process.stderr.emit('data', Buffer.from('simulated failure'));
+      process.emit('close', exitCode);
       return;
     }
     process.emit('close', 0);
@@ -102,6 +119,8 @@ const resetProcessState = () => {
   processState.indexInfoByPath.clear();
   processState.stdinInputs.length = 0;
   processState.environments.length = 0;
+  processState.mergeHeadPresent = false;
+  processState.failCommit = false;
   spawn.mockClear();
 };
 
@@ -169,7 +188,13 @@ describe('VS Code git path batching', () => {
     const stagedDeletionPath = ':selected-deleted.txt';
     const selectedFiles = [...selectedPaths, stagedOnlyPath, stagedDeletionPath];
     const indexInfoForPath = (filePath) => `100644 ${'a'.repeat(40)} 0\t${filePath}\0`;
-    processState.statusOutput = `MM ${stagedOnlyPath}\nD  ${stagedDeletionPath}\n`;
+    // Untracked selected paths appear in git status as `??` entries; the
+    // status filter keeps them for staging.
+    processState.statusOutput = [
+      `MM ${stagedOnlyPath}`,
+      `D  ${stagedDeletionPath}`,
+      ...selectedPaths.map((filePath) => `?? ${filePath}`),
+    ].join('\n') + '\n';
     for (const filePath of selectedFiles.filter((filePath) => filePath !== stagedDeletionPath)) {
       processState.indexInfoByPath.set(filePath, indexInfoForPath(filePath));
     }
@@ -239,12 +264,17 @@ describe('VS Code git path batching', () => {
   it('uses a temporary index for explicit stageFiles without rewriting unrelated newline paths', async () => {
     const stagedOnlySelectedPath = 'selected-stage-only.txt';
     const stagedDeletedSelectedPath = 'selected-deleted.txt';
-    const stagedUntrackedPath = 'selected\nstage-file.txt';
+    const stagedUntrackedPath = 'selected-stage-file.txt';
     const unrelatedPartialPath = 'unrelated-partial-stage.txt';
     const unrelatedNewlinePath = 'unrelated\npartial-stage.txt';
     const selectedPaths = [stagedOnlySelectedPath, stagedDeletedSelectedPath];
     const indexInfoForPath = (filePath) => `100644 ${'a'.repeat(40)} 0\t${filePath}\0`;
     processState.stagedPathOutput = `${unrelatedPartialPath}\n${unrelatedNewlinePath}\n`;
+    processState.statusOutput = [
+      `MM ${stagedOnlySelectedPath}`,
+      `D  ${stagedDeletedSelectedPath}`,
+      `?? ${stagedUntrackedPath}`,
+    ].join('\n') + '\n';
     processState.indexInfoByPath.set(stagedOnlySelectedPath, indexInfoForPath(stagedOnlySelectedPath));
     processState.indexInfoByPath.set(stagedUntrackedPath, indexInfoForPath(stagedUntrackedPath));
 
@@ -278,5 +308,100 @@ describe('VS Code git path batching', () => {
     })]);
     expect(processState.pathspecContents).toEqual(Buffer.from(`${stagedDeletedSelectedPath}\0`, 'utf8'));
     expect(getCommandCalls('write-tree')).toHaveLength(0);
+  });
+
+  it('carries the old path of a selected staged rename into the temporary-index removal list', async () => {
+    const oldPath = 'renamed-old.txt';
+    const newPath = 'renamed-new.txt';
+    const indexInfoForPath = (filePath) => `100644 ${'a'.repeat(40)} 0\t${filePath}\0`;
+    // `git status --porcelain -z` emits the staged rename as two NUL-terminated
+    // records: `R  new-path\0old-path\0`.
+    processState.statusOutput = `R  ${newPath}\0${oldPath}\0`;
+    processState.indexInfoByPath.set(newPath, indexInfoForPath(newPath));
+
+    const result = await createGitCommit('/repo', 'Commit staged rename', {
+      files: [newPath],
+      stageFiles: [],
+    });
+
+    expect(result).toMatchObject({ success: true, commit: 'abc123', branch: 'main' });
+    // The old path is not in the index, so it must be added to the removal
+    // pathspec file alongside the missing-from-index destinations.
+    expect(processState.pathspecContents).toEqual(Buffer.from(`${oldPath}\0`, 'utf8'));
+    expect(getCommandCalls('write-tree')).toHaveLength(0);
+  });
+
+  it('does not carry a copy source into the temporary-index removal list', async () => {
+    const sourcePath = 'copied-old.txt';
+    const copiedPath = 'copied-new.txt';
+    const indexInfoForPath = (filePath) => `100644 ${'a'.repeat(40)} 0\t${filePath}\0`;
+    // `git status --porcelain -z` emits a staged copy as two NUL-terminated
+    // records: `C  new-path\0old-path\0` (only when status.renames=copies is
+    // set). A copy leaves its source in the index, so the source must stay in
+    // the selected commit.
+    processState.statusOutput = `C  ${copiedPath}\0${sourcePath}\0`;
+    processState.indexInfoByPath.set(copiedPath, indexInfoForPath(copiedPath));
+    processState.indexInfoByPath.set(sourcePath, indexInfoForPath(sourcePath));
+
+    const result = await createGitCommit('/repo', 'Commit staged copy', {
+      files: [copiedPath],
+      stageFiles: [],
+    });
+
+    expect(result).toMatchObject({ success: true, commit: 'abc123', branch: 'main' });
+    // The copy source stays in the index, so it must NOT be added to the
+    // removal pathspec file.
+    expect(processState.pathspecContents).toBeNull();
+    expect(getCommandCalls('write-tree')).toHaveLength(0);
+  });
+
+  it('refuses a selected commit while a merge is in progress', async () => {
+    const selectedPath = 'merge-guard-selected.txt';
+    const indexInfoForPath = (filePath) => `100644 ${'a'.repeat(40)} 0\t${filePath}\0`;
+    processState.statusOutput = `MM ${selectedPath}\n`;
+    processState.indexInfoByPath.set(selectedPath, indexInfoForPath(selectedPath));
+    processState.mergeHeadPresent = true;
+
+    await expect(createGitCommit('/repo', 'Commit during merge', {
+      files: [selectedPath],
+      stageFiles: [],
+    })).rejects.toThrow('Selected commit refused while a merge is in progress');
+
+    // The guard must fire before any temporary-index command runs.
+    expect(getCommandCalls('read-tree')).toHaveLength(0);
+    expect(getCommandCalls('commit')).toHaveLength(0);
+  });
+
+  it('drops explicit stageFiles paths that are absent from git status', async () => {
+    const selectedPath = 'selected-staged.txt';
+    const staleStagePath = 'stale-stage.txt';
+    const indexInfoForPath = (filePath) => `100644 ${'a'.repeat(40)} 0\t${filePath}\0`;
+    processState.statusOutput = `MM ${selectedPath}\n`;
+    processState.indexInfoByPath.set(selectedPath, indexInfoForPath(selectedPath));
+    processState.indexInfoByPath.set(staleStagePath, indexInfoForPath(staleStagePath));
+
+    const result = await createGitCommit('/repo', 'Commit selected paths', {
+      files: [selectedPath],
+      stageFiles: [selectedPath, staleStagePath],
+    });
+
+    expect(result).toMatchObject({ success: true, commit: 'abc123', branch: 'main' });
+    // Only the path present in status is staged; the stale path is filtered
+    // out before stageGitFiles runs.
+    expect(getPathBatches('add', ['--'])).toEqual([[selectedPath]]);
+    expect(getCommandCalls('write-tree')).toHaveLength(0);
+  });
+
+  it('surfaces git stderr when the temporary-index commit fails', async () => {
+    const selectedPath = 'failing-commit.txt';
+    const indexInfoForPath = (filePath) => `100644 ${'a'.repeat(40)} 0\t${filePath}\0`;
+    processState.statusOutput = `MM ${selectedPath}\n`;
+    processState.indexInfoByPath.set(selectedPath, indexInfoForPath(selectedPath));
+    processState.failCommit = true;
+
+    await expect(createGitCommit('/repo', 'Commit selected paths', {
+      files: [selectedPath],
+      stageFiles: [],
+    })).rejects.toThrow('simulated failure');
   });
 });
