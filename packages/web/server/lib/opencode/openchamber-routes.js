@@ -126,16 +126,17 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         storedOptions = JSON.parse(content);
       } catch {
       }
-      const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
+      const isDarwin = process.platform === 'darwin';
       const isForegroundService = launchMode === 'foreground';
-      const systemdServiceUnit = isForegroundService ? resolveSystemdServiceUnit(process.env) : null;
+      const systemdServiceUnit = isForegroundService && !isDarwin ? resolveSystemdServiceUnit(process.env) : null;
 
-      if (isForegroundService) {
+      if (isForegroundService && !isDarwin) {
         if (!systemdServiceUnit) {
           return res.status(409).json({
             error: 'Foreground servers must be updated by their service manager. Set OPENCHAMBER_SYSTEMD_UNIT when running under systemd, or run openchamber update and restart the service.',
           });
         }
+
 
         const updateJobName = `openchamber-update-${Date.now()}`;
         const updateLogPath = `journalctl --user-unit ${updateJobName}.service`;
@@ -221,7 +222,9 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         restartCmdPrimary += ' --api-only';
         restartCmdFallback += ' --api-only';
       }
-      const restartCmd = isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
+      const restartCmd = isDarwin
+        ? 'launchctl kickstart -k gui/$(id -u)/dev.openchamber.web || launchctl unload ~/Library/LaunchAgents/dev.openchamber.web.plist && launchctl load ~/Library/LaunchAgents/dev.openchamber.web.plist'
+        : (isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`);
       const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
       const logPreamble = [
         '',
