@@ -840,13 +840,18 @@ export async function materializeOpenDraftSession(selection: {
   })
 
   const effectiveDraftAgent = trimmedAgent ?? configState.currentAgentName
+  const variantOverride = configState.currentProviderId === selection.providerID
+    && configState.currentModelId === selection.modelID
+    && configState.currentAgentName === effectiveDraftAgent
+    ? configState.currentVariantSelection.override ?? undefined
+    : selection.variant
 
   useSelectionStore.getState().saveSessionModelSelection(created.id, selection.providerID, selection.modelID)
 
   if (effectiveDraftAgent) {
     useSelectionStore.getState().saveSessionAgentSelection(created.id, effectiveDraftAgent)
     useSelectionStore.getState().saveAgentModelForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID)
-    useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID, selection.variant)
+    useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID, variantOverride)
   }
 
   store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])

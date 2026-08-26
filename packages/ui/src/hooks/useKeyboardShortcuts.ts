@@ -273,16 +273,16 @@ export const useKeyboardShortcuts = () => {
       if (state.isSettingsDialogOpen || hasOverlay) return false;
       const config = useConfigStore.getState();
       if (config.getCurrentModelVariants().length === 0) return false;
-      config.cycleCurrentVariant();
+      const nextVariantOverride = config.cycleCurrentVariant();
       const sessionId = useSessionUIStore.getState().currentSessionId;
-      const { currentVariant, currentAgentName, currentProviderId, currentModelId } = useConfigStore.getState();
+      const { currentAgentName, currentProviderId, currentModelId } = useConfigStore.getState();
       if (sessionId && currentAgentName && currentProviderId && currentModelId) {
         useSelectionStore.getState().saveAgentModelVariantForSession(
           sessionId,
           currentAgentName,
           currentProviderId,
           currentModelId,
-          currentVariant,
+          nextVariantOverride,
         );
       }
     },

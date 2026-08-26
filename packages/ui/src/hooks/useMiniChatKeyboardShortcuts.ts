@@ -71,10 +71,9 @@ export const useMiniChatKeyboardShortcuts = () => {
       const configState = useConfigStore.getState();
       if (configState.getCurrentModelVariants().length === 0) return false;
 
-      configState.cycleCurrentVariant();
+      const nextVariantOverride = configState.cycleCurrentVariant();
       const sessionId = useSessionUIStore.getState().currentSessionId;
       const {
-        currentVariant,
         currentAgentName,
         currentProviderId,
         currentModelId,
@@ -85,7 +84,7 @@ export const useMiniChatKeyboardShortcuts = () => {
           currentAgentName,
           currentProviderId,
           currentModelId,
-          currentVariant,
+          nextVariantOverride,
         );
       }
     },
