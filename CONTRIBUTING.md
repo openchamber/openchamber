@@ -106,7 +106,7 @@ OPENCHAMBER_TARGET_ARCH=arm64 bun run electron:build
 bun run --cwd packages/electron verify:linux-appimage
 ```
 
-The final AppImage verifier checks desktop identity and the architecture of Electron, the bundled OpenCode CLI, and packaged native modules. CI also checks the Debian package architecture, metadata, and desktop entry.
+The final AppImage verifier checks desktop identity and the architecture of Electron, the bundled OpenCode CLI, and packaged native modules. CI also checks the Debian package architecture, metadata, desktop entry, and 512x512 hicolor application icon.
 
 ## Before Submitting
 

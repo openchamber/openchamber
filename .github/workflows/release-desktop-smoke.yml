@@ -372,6 +372,10 @@ jobs:
              *openchamber.desktop*) ;;
              *) echo "Debian package is missing openchamber.desktop" >&2; exit 1 ;;
            esac
+           case "$DEB_CONTENTS" in
+             *"usr/share/icons/hicolor/512x512/apps/openchamber.png"*) ;;
+             *) echo "Debian package is missing the 512x512 application icon" >&2; exit 1 ;;
+           esac
 
       - name: Validate Linux update manifest
         working-directory: packages/electron
