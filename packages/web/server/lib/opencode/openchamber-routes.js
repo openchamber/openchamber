@@ -126,6 +126,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         storedOptions = JSON.parse(content);
       } catch {
       }
+      const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
       const isDarwin = process.platform === 'darwin';
       const isForegroundService = launchMode === 'foreground';
       const systemdServiceUnit = isForegroundService && !isDarwin ? resolveSystemdServiceUnit(process.env) : null;
@@ -223,8 +224,9 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         restartCmdFallback += ' --api-only';
       }
       const restartCmd = isDarwin
-        ? 'launchctl kickstart -k gui/$(id -u)/dev.openchamber.web || launchctl unload ~/Library/LaunchAgents/dev.openchamber.web.plist && launchctl load ~/Library/LaunchAgents/dev.openchamber.web.plist'
+        ? 'launchctl kickstart -k gui/$(id -u)/dev.openchamber.web || (launchctl unload ~/Library/LaunchAgents/dev.openchamber.web.plist && launchctl load ~/Library/LaunchAgents/dev.openchamber.web.plist)'
         : (isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`);
+
       const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
       const logPreamble = [
         '',
