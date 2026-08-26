@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
-import { fetchCommandCodeUsage } from './commandCodeQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { getProviderAuth, updateProviderAuth } from './opencodeAuth';
 
@@ -773,9 +772,6 @@ export const listConfiguredQuotaProviders = () => {
   const configured = new Set<string>();
   const openCodeGoAuth = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
   if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
-  const commandCodeAuth = normalizeAuthEntry(getAuthEntry(auth, ['command-code']));
-  if (commandCodeAuth && (typeof commandCodeAuth.key === 'string' || typeof commandCodeAuth.access === 'string' || typeof commandCodeAuth.token === 'string')) configured.add('command-code');
-  if (process.env.COMMAND_CODE_API_KEY?.trim()) configured.add('command-code');
   if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
   if (readCredential('cursor')) configured.add('cursor');
 
@@ -2873,18 +2869,6 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
         return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage({ apiKey }) } });
       } catch (error) {
         return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
-      }
-    }
-    case 'command-code': {
-      try {
-        const entry = normalizeAuthEntry(getAuthEntry(readAuthFile(), ['command-code']));
-        const stored = typeof entry?.key === 'string' ? entry.key : typeof entry?.access === 'string' ? entry.access : typeof entry?.token === 'string' ? entry.token : null;
-        const environment = process.env.COMMAND_CODE_API_KEY?.trim() || null;
-        const apiKey = stored?.trim() || environment;
-        if (!apiKey) return buildResult({ providerId, providerName: 'Command Code', ok: false, configured: false, error: 'Not configured' });
-        return buildResult({ providerId, providerName: 'Command Code', ok: true, configured: true, usage: { windows: await fetchCommandCodeUsage(apiKey) } });
-      } catch (error) {
-        return buildResult({ providerId, providerName: 'Command Code', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
       }
     }
     case 'cursor':

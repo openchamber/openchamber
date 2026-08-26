@@ -1904,12 +1904,12 @@ export const useConfigStore = create<ConfigStore>()(
                     }
 
                     const index = variantKeys.indexOf(current);
-                    if (index === -1 || index === variantKeys.length - 1) {
-                        get().setCurrentVariant(undefined);
+                    if (index === -1) {
+                        get().setCurrentVariant(variantKeys[0]);
                         return;
                     }
 
-                    get().setCurrentVariant(variantKeys[index + 1]);
+                    get().setCurrentVariant(variantKeys[(index + 1) % variantKeys.length]);
                 },
  
                 setSelectedProvider: (providerId: string) => {

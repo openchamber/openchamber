@@ -2,7 +2,6 @@ import React from 'react';
 
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { StatusRow } from './StatusRow';
 
@@ -12,15 +11,6 @@ import { StatusRow } from './StatusRow';
  * labels while still limiting subscriptions to the active assistant message.
  */
 export const StatusRowContainer: React.FC = React.memo(() => {
-    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-    const abortRecord = useSessionUIStore(
-        React.useCallback((state) => {
-            if (!currentSessionId) {
-                return null;
-            }
-            return state.sessionAbortFlags?.get(currentSessionId) ?? null;
-        }, [currentSessionId]),
-    );
     const { activeModel, working } = useAssistantStatus();
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
     const providers = useConfigStore((state) => state.providers);
@@ -35,16 +25,13 @@ export const StatusRowContainer: React.FC = React.memo(() => {
         return getProviderModelDisplayName(provider, activeModel.modelId) || null;
     }, [activeModel, providers]);
 
-    const wasAborted = Boolean(abortRecord && !abortRecord.acknowledged);
-
     return (
         <StatusRow
             isWorking={working.isWorking}
             statusText={working.statusText}
             isGenericStatus={working.isGenericStatus}
             isWaitingForPermission={working.isWaitingForPermission}
-            wasAborted={wasAborted || working.wasAborted}
-            abortActive={wasAborted || working.abortActive}
+            abortActive={working.abortActive}
             retryInfo={working.retryInfo}
             agentName={currentAgentName}
             modelName={modelDisplayName}

@@ -22,34 +22,48 @@ All notable changes to this project will be documented in this file.
 - Chat: comment on a reply — select text in a chat message (or in a rendered markdown preview in Files) and choose Comment to attach exactly that quote, with a source line range when it can be located, plus your note to the next message. The selection stays highlighted while you type, and the selection menu was restyled — Add to chat is now Add to input.
 - Diff: comment like a review — hovering a line shows a + button in the gutter; clicking it, clicking a line, or dragging across lines opens the comment editor for that line or range. The comment editor and saved-comment cards match the chat's comment style.
 - Composer: hovering or tapping a context chip above the input opens a stacked preview of everything attached, where a comment can be edited in place or an item removed before sending.
+- **Chat scrolling rebuilt around your message.** Sending parks your message near the top and the reply streams in below it, gliding smoothly a paragraph at a time. Scrolling up immediately hands you the wheel; the scroll-to-bottom pill carries the model's working status while you're away.
+- **Keyboard shortcuts redesigned:** single chords for everyday actions, a Cmd/Ctrl+K leader for two-step open/go actions, held Cmd/Ctrl+digit for session tabs and Cmd/Ctrl+Option+digit for panel surfaces. Shortcuts work on non-English keyboard layouts now, tooltips show the binding you actually have set, and old custom bindings reset once. The full map lives in Settings → Shortcuts (registry contributed by @ChangeHow — thanks!).
+- Chat: Cmd/Ctrl+Shift+T now cycles through every thinking level offered by the selected model instead of skipping levels after reaching the end (thanks to @nimobeeren).
+- **Chat context attachments:** diff comments, terminal selections, browser annotations, linked issues/PRs and the rest now appear in the conversation as compact context cards instead of walls of raw text.
+- **Session tabs (opt-in):** the web/desktop header can show open sessions as browser-style tabs (Settings → General → Navigation). A tab switches the whole workspace; closing one never touches the session itself.
+- Sessions: switching is much faster in large workspaces — the sidebar no longer rebuilds on switch and recently viewed sessions restore their rendered messages; end-to-end switch time roughly halved with thousands of loaded sessions (thanks to @c-w-xiaohei).
+- Permission cards answer to the keyboard: Alt+Enter allows once, Alt+Shift+Enter allows always, Alt+Backspace denies — the keys are printed on the buttons. The auto-accept toggle got Cmd/Ctrl+K, A.
+- Sessions: Cmd/Ctrl+Alt+Left/Right steps back and forward through the sessions you opened in this window, browser-history style; with session tabs enabled it moves between neighbouring tabs instead.
+- Git: Cmd/Ctrl+Enter in the commit message box commits. Diff review moves between changed files with Alt+Down/Up, expanding a collapsed file on arrival.
+- Panels: the context rail got a configure button — a dialog chooses which panels the rail shows. Hidden panels keep their data, stay reachable from the command palette, and leave the digit switcher, so digits always match the icons you see.
+- Chat: comment on a reply — select text in a chat message (or a rendered markdown preview in Files) and choose Comment to attach exactly that quote, with a source line range when it can be located, plus your note. The selection stays highlighted while you type.
+- Diff: comment like a review — hovering a line shows a + in the gutter; clicking or dragging across lines opens the comment editor for that range, styled like the chat's comments.
+- Composer: hovering or tapping a context chip opens a stacked preview of everything attached, where a comment can be edited in place or an item removed before sending.
 - Mobile: the chat comment input overlays the composer exactly and rides the keyboard; Enter makes a new line there, with attach on the button.
-- Terminal: terminals no longer vanish or die behind your back. Opening the app in another browser tab, on another device, or after a reload shows the terminals already running on the server instead of an empty list, and terminals sitting in background tabs are no longer closed by the server's idle cleanup while the app is open.
-- Search: every searchable picker — branches, projects, agents, models, providers, stashes, SSH hosts, skills, archived sessions — now uses one matcher: best matches come first, multi-word queries match in any order, and punctuation doesn't matter (so "gpt4o" finds "gpt-4o"). Ctrl/Cmd+P also matches the whole file path, not just the file name, and the git branch and gitmoji pickers stopped silently dropping rows a second built-in filter didn't like. Sidebar session search and the Todos/Memory/Plans/Notes filters match the same way.
-- Chat: @ file mentions rank files and directories together by how well they match, so the file you typed is at the top instead of below unrelated directories. Multi-word queries match in any order, and long paths keep the folder next to the file name visible so identical-looking index.md rows are distinguishable.
-- Chat: a new "Follow new content while streaming" checkbox (Settings → Chat → Streaming, on by default) turns the automatic following off entirely — your message still parks at the top on send, but the view never moves on its own afterwards.
-- Mobile: narrowing a browser window past phone size switches into the mobile app layout (and back when widened) instead of squeezing the desktop layout. The old/new mobile layout setting is gone — phones always get the mobile layout.
-- Chat: streamed code blocks are syntax-highlighted while they stream, and finished messages no longer jump when a code block's line numbers fill in at the end of a reply.
-- Chat: finished replies no longer flicker — tool cards stopped re-rendering (and replaying their reveal animation) when they completed, and resizing the window no longer throws the conversation up and down while you're at the bottom.
-- Chat: clicking the last item in the prompt rail now always lands on it, and rail jumps teleport instead of a long smooth scroll that could stop halfway.
-- Mobile: scrolling during a streaming reply works again — a drag immediately takes over, the scroll-to-bottom pill shows up, and the load-older button no longer throws you to the bottom of the chat.
-- Fixed file links in messages being checked twice against the filesystem, and against the wrong project directory on the first pass.
+- Terminal: terminals no longer vanish behind your back — every tab and device shows the ones already running on the server, and background tabs survive the idle cleanup.
+- Search: every searchable picker uses one matcher now — best matches first, multi-word queries in any order, punctuation ignored ("gpt4o" finds "gpt-4o"). Ctrl/Cmd+P matches whole file paths.
+- Chat: @ file mentions rank files and directories together by match quality, and long paths keep the folder next to the file name visible.
+- Chat: a "Follow new content while streaming" checkbox (Settings → Chat → Streaming, on by default) turns automatic following off entirely; with it off, the scroll-to-bottom pill now appears as soon as the reply grows past the visible area.
+- Command palette: rarely used commands (pin session, copy session ID, multi-run launcher, archived sessions, notes, todos, status, theme) are found by typing but stay off the first screen.
+- Mobile: narrowing a browser window past phone size switches into the mobile layout (and back when widened); the old/new mobile layout setting is gone.
+- Usage: the Command Code tile is gone — their official API exposes no usage data, so the tile could only fail.
+- Auth: an expired OpenChamber login is announced within seconds by a banner with a Log in button, instead of being discovered through failing actions. Sending pauses until login, and a conversation that failed to load reloads itself afterwards.
+- Chat: a failed send returns your typed prompt to the input — whatever the reason — instead of losing it to an error toast; a mid-send session switch lands it in that session's draft.
+- Chat: opening a session or resizing panels could strand the view in a large empty space below the last message; the list now returns to the real end, and a width resize keeps a reader who was at the bottom at the bottom.
+- Chat: prompt-rail and message jumps land exactly on the target once the layout finishes measuring, and clicking the last rail item always works.
+- Desktop: two windows on different projects no longer hijack each other — one window's session switch could make the other adopt its project mid-typing. Notification clicks and openchamber:// links now open in one window instead of all of them.
+- Git: the branch's PR badge no longer picks up a stranger's pull request — with contributor forks added as remotes, a fork's closed PR sharing only the branch name could show up on the local branch.
+- Chat: streamed code blocks are syntax-highlighted while streaming, and finished messages no longer jump when line numbers fill in.
+- Chat: finished replies no longer flicker — tool cards stopped replaying their reveal animation on completion, and window resizing no longer throws the conversation around at the bottom.
+- Mobile: scrolling during a streaming reply works again — a drag immediately takes over, the pill shows up, and load-older no longer throws you to the bottom.
+- Fixed file links in messages being checked twice, and against the wrong project directory on the first pass.
 - Fixed the selected project or session briefly jumping back to a previous choice when settings responses arrived out of order.
-- Fixed sessions staying on "loading sessions" forever after the connection to OpenCode went half-open — stalled reads now time out and retry instead of holding bootstrap hostage (thanks @herjarsa).
-- Files: previews of files above the editable size cap now show the whole file instead of the first 200k characters, virtualized so opening and scrolling a huge file no longer freezes the app (thanks @gaojunran).
-- VSCode: the chat view no longer stays stuck on its loading screen on slow or remote connections (for example code-server behind a reverse proxy) — the connection status is re-sent until the webview is ready to hear it (thanks @VinciYan).
-- Terminal: mobile keyboards no longer capitalize the first letter of every command on iOS and Android.
-- Desktop: a freshly installed or updated build no longer keeps loading the previous version's interface from cache.
-- Devices: re-pairing a phone (or logging in again) keeps the device's existing name in Connected Devices instead of resetting it to "OpenChamber Mobile".
-- Relay: paired devices no longer get logged out when the app restarts (for example during an update) while another local OpenChamber process is running — the restarted app keeps serving them instead of a bystander process taking over.
+- Fixed sessions staying on "loading sessions" forever after a half-open connection to OpenCode — stalled reads now time out and retry (thanks to @herjarsa).
+- Files: previews above the editable size cap show the whole file, virtualized so huge files no longer freeze the app (thanks to @gaojunran).
+- VSCode: the chat view no longer sticks on its loading screen on slow or remote connections (thanks to @VinciYan).
+- Terminal: mobile keyboards no longer capitalize the first letter of every command.
+- Desktop: a freshly installed or updated build no longer loads the previous version's interface from cache.
+- Devices: re-pairing a phone keeps the device's existing name instead of resetting it to "OpenChamber Mobile".
+- Relay: paired devices no longer get logged out when the app restarts while another local OpenChamber process is running.
 - Sessions: headers now find archived sessions too, so an archived session's title no longer goes missing.
-- Files: the editor toolbar is now always docked under the file tabs; the floating hover toolbar and its setting were removed.
-- UI: the chat's top and bottom scroll fades are back, and the first uncached open of a session fades the conversation in instead of popping.
-- UI: the timeline dialog now fits small screens instead of squeezing the message list to a couple of rows (thanks to @gaojunran).
-- Chat: OpenCode notices now share one style.
-- UI: draft target menus stay inside the chat area instead of overlapping the header.
-- UI: Linear and Cloudflare tools now show their own icons.
-- UI: sidebar item tooltips no longer appear instantly on passing hover.
-- UI: the btw panel's shadow is lighter, matching the composer.
+- Files: the editor toolbar is always docked under the file tabs; the floating hover toolbar and its setting were removed.
+- UI: the chat's scroll fades are back, the first uncached session open fades in, the timeline dialog fits small screens (thanks to @gaojunran), OpenCode notices share one style, draft target menus stay inside the chat area, Linear and Cloudflare tools show their own icons, sidebar tooltips no longer appear on passing hover, and the btw panel's shadow matches the composer.
 
 ## [1.20.0] - 2026-08-23
 

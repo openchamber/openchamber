@@ -45,7 +45,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@legendapp/list": "3.3.8",
     "@lezer/highlight": "^1.2.3",
-    "@opencode-ai/sdk": "1.18.21",
+    "@opencode-ai/sdk": "1.18.23",
     "@pierre/diffs": "1.3.0-beta.6",
     "@replit/codemirror-vim": "^6.4.0",
     "@simplewebauthn/browser": "13.3.0",

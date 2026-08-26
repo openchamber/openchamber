@@ -1,11 +1,9 @@
 import React from "react";
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
-import { Icon } from "@/components/icon/Icon";
-import { useI18n } from "@/lib/i18n";
 
 // The floating assistant-status chip that hovers above the composer while the
-// agent works ("Claude is working…", abort notice). ONLY that. The composer's
+// agent works ("Claude is working…"). ONLY that. The composer's
 // own bar — pending changes, todos dropdown — is ComposerStatusBar: they used
 // to share this component, and every restyle of this chip (glass, placement)
 // silently dragged the composer bar and its dropdown along with it.
@@ -17,10 +15,8 @@ interface StatusRowProps {
   statusText?: string | null;
   isGenericStatus?: boolean;
   isWaitingForPermission?: boolean;
-  wasAborted?: boolean;
   abortActive?: boolean;
   retryInfo?: { attempt?: number; next?: number } | null;
-  showAbortStatus?: boolean;
   agentName?: string;
   modelName?: string | null;
   providerId?: string | null;
@@ -31,19 +27,16 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   statusText = null,
   isGenericStatus,
   isWaitingForPermission,
-  wasAborted,
   abortActive,
   retryInfo,
-  showAbortStatus,
   agentName,
   modelName,
   providerId,
 }) => {
-  const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
 
-  const shouldRenderPlaceholder = !showAbortStatus && (wasAborted || !abortActive);
-  const hasContent = isWorking || Boolean(wasAborted) || Boolean(showAbortStatus);
+  const shouldRenderPlaceholder = !abortActive;
+  const hasContent = isWorking;
 
   if (!hasContent) {
     return null;
@@ -63,14 +56,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
           a shrink-to-fit wrapper around it always collapsed to zero. */}
       <div className="oc-glass-popover inline-flex w-max max-w-full items-center gap-2 h-8 whitespace-nowrap rounded-full [corner-shape:round] px-3">
         <div className="flex items-center min-w-0 gap-2 overflow-x-hidden">
-          {showAbortStatus ? (
-            <div className="flex h-full items-center text-[var(--status-error)] pl-0.5">
-              <span className="flex items-center gap-1.5 typography-ui-label">
-                <Icon name="close-circle" aria-hidden="true"/>
-                {t('chat.statusRow.aborted')}
-              </span>
-            </div>
-          ) : shouldRenderPlaceholder ? (
+          {shouldRenderPlaceholder ? (
             <WorkingPlaceholder
               key={currentSessionId ?? "no-session"}
               isWorking={isWorking}

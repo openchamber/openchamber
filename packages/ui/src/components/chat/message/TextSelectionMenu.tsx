@@ -108,7 +108,6 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const mouseUpTimeoutRef = React.useRef<number | null>(null);
   const isMenuVisibleRef = React.useRef(false);
   const activeAddToChatCleanupRef = React.useRef<(() => void) | null>(null);
-  const createSession = useSessionUIStore((state) => state.createSession);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
   const addContextDraft = useInlineCommentDraftStore((state) => state.addDraft);
@@ -487,18 +486,6 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     });
   }, [addContextDraft, commentText, currentSessionId, effectiveDirectory, hideMenu, newSessionDraftOpen, selectedMessageId, selectedTextMarkdown]);
 
-  const handleCreateNewSession = React.useCallback(async () => {
-    if (!selectedText) return;
-
-    const session = await createSession(undefined, null, null);
-    if (session) {
-      setPendingInputText(selectedText, 'replace');
-    }
-
-    hideMenu();
-    window.getSelection()?.removeAllRanges();
-  }, [selectedText, createSession, setPendingInputText, hideMenu]);
-
   const currentSession = React.useMemo(() => {
     if (!currentSessionId) {
       return null;
@@ -700,22 +687,6 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.addToInput')}</span>
           </button>
 
-          <button
-            onClick={handleCreateNewSession}
-            className={cn(
-              'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left',
-              'text-sm font-medium leading-tight',
-              'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]',
-              'active:opacity-80',
-              'transition-opacity duration-150'
-            )}
-            title={t('chat.textSelection.title.newSessionWithSelection')}
-            type="button"
-          >
-            <Icon name="chat-new" className="h-5 w-5 flex-shrink-0" />
-            <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.newSession')}</span>
-          </button>
-
           {!isVSCodeRuntime() ? (
             <button
               onClick={handleAddToNotes}
@@ -777,39 +748,6 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             {t('chat.textSelection.actions.comment')}
           </button>
 
-          <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
-
-          <button
-            onClick={handleAddToChat}
-            className={cn(
-              'px-3.5 py-1.5 rounded-full',
-              'text-sm font-medium',
-              'text-[var(--surface-foreground)]',
-              'hover:bg-[var(--interactive-hover)]',
-              'transition-colors duration-150'
-            )}
-            title={t('chat.textSelection.title.addToCurrentChat')}
-            type="button"
-          >
-            {t('chat.textSelection.actions.addToInput')}
-          </button>
-
-          <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
-
-          <button
-            onClick={handleCreateNewSession}
-            className={cn(
-              'px-3.5 py-1.5 rounded-full',
-              'text-sm font-medium',
-              'text-[var(--surface-foreground)]',
-              'hover:bg-[var(--interactive-hover)]',
-              'transition-colors duration-150'
-            )}
-            title={t('chat.textSelection.title.newSessionWithSelection')}
-            type="button"
-          >
-            {t('chat.textSelection.actions.newSession')}
-          </button>
 
           {!isVSCodeRuntime() ? (
             <>

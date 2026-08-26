@@ -525,6 +525,22 @@ describe('useConfigStore provider persistence', () => {
     expect(state.directoryScoped[DIRECTORY]?.currentVariant).toBe('high');
   });
 
+  test('cycleCurrentVariant wraps through every model variant', () => {
+    useConfigStore.setState({
+      providers: [provider('openai', 'gpt-5.6-sol', { none: {}, low: {}, medium: {}, high: {}, xhigh: {}, max: {} })],
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.6-sol',
+      currentVariant: 'high',
+      directoryScoped: {},
+    });
+
+    const expectedVariants = ['xhigh', 'max', 'none', 'low', 'medium', 'high'];
+    for (const expectedVariant of expectedVariants) {
+      useConfigStore.getState().cycleCurrentVariant();
+      expect(useConfigStore.getState().currentVariant).toBe(expectedVariant);
+    }
+  });
+
   test('setAgent prefers saved and agent variants before settings default', () => {
     const sessionId = 'ses_agent_saved_variant';
     useSessionUIStore.setState({ currentSessionId: sessionId });
