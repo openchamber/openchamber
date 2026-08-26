@@ -18,7 +18,7 @@ const childProcess = await import('child_process');
 const packageManager = await import('../package-manager.js');
 const { registerOpenChamberRoutes } = await import('./openchamber-routes.js');
 
-const createApp = ({ environment = {}, storedOptions = {} } = {}) => {
+const createApp = ({ environment = {}, storedOptions = {}, platform = 'linux' } = {}) => {
   const app = express();
   const dependencies = {
     fs: {
@@ -34,9 +34,10 @@ const createApp = ({ environment = {}, storedOptions = {} } = {}) => {
     path,
     process: {
       env: environment,
-      platform: 'linux',
+      platform,
       execPath: '/usr/bin/node',
     },
+
     server: {
       address: () => ({ port: 7897 }),
     },
@@ -138,4 +139,23 @@ describe('OpenChamber foreground update route', () => {
       timeout: 5000,
     });
   });
+
+  it('allows foreground update on macOS and invokes launchd restart command', async () => {
+    const { app } = createApp({
+      platform: 'darwin',
+    });
+
+    await request(app)
+      .post('/api/openchamber/update-install')
+      .expect(200, {
+        success: true,
+        message: 'Update starting, server will restart shortly',
+        version: '1.17.1',
+        packageManager: 'npm',
+        autoRestart: true,
+        restartManager: 'service',
+      });
+  });
 });
+
+
