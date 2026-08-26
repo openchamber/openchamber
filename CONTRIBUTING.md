@@ -37,7 +37,7 @@ macOS builds create `dmg` and `zip` files. You need Xcode/build tools for notari
 
 Windows builds create an NSIS installer. If signing env vars are not set, the build script makes an unsigned installer.
 
-Linux builds produce an AppImage for the native x64 or arm64 host.
+Linux builds produce an AppImage and Debian package for the native x64 or arm64 host. AppImages support the desktop in-app update flow; Debian packages are updated through the system package manager.
 
 For desktop-specific details, see [`packages/electron/README.md`](./packages/electron/README.md).
 
@@ -96,7 +96,7 @@ Windows:
 bun run electron:build
 ```
 
-Linux x64 and arm64 AppImages are packaged natively on the matching host architecture. Use Bun for dependency installation and packaging orchestration:
+Linux x64 and arm64 AppImages and Debian packages are packaged natively on the matching host architecture. Use Bun for dependency installation and packaging orchestration:
 
 ```bash
 OPENCHAMBER_TARGET_ARCH=x64 bun run electron:build
@@ -106,7 +106,7 @@ OPENCHAMBER_TARGET_ARCH=arm64 bun run electron:build
 bun run --cwd packages/electron verify:linux-appimage
 ```
 
-The final AppImage verifier checks desktop identity and the architecture of Electron, the bundled OpenCode CLI, and packaged native modules.
+The final AppImage verifier checks desktop identity and the architecture of Electron, the bundled OpenCode CLI, and packaged native modules. CI also checks the Debian package architecture, metadata, and desktop entry.
 
 ## Before Submitting
 

@@ -24,7 +24,7 @@ on:
         default: true
         type: boolean
       build_linux:
-        description: Build Linux Electron AppImage artifacts
+        description: Build Linux Electron AppImage and Debian package artifacts
         required: false
         default: true
         type: boolean
@@ -289,11 +289,13 @@ jobs:
             arch: x64
             host_arch: x86_64
             artifact_arch: x86_64
+            deb_arch: amd64
             manifest: latest-linux.yml
           - runner: ubuntu-24.04-arm
             arch: arm64
             host_arch: aarch64
             artifact_arch: arm64
+            deb_arch: arm64
             manifest: latest-linux-arm64.yml
     runs-on: ${{ matrix.runner }}
     steps:
@@ -344,7 +346,7 @@ jobs:
           bun run test:architecture
           bun run test:updater
 
-      - name: Build and package Linux AppImage
+      - name: Build and package Linux artifacts
         working-directory: packages/electron
         env:
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
@@ -355,9 +357,21 @@ jobs:
           bun run verify:opencode-cli
           bun run bundle:main
           bun run rebuild:native
-          node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never
-          bun run verify:opencode-cli:packaged
-          bun run verify:linux-appimage
+           node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never
+           bun run verify:opencode-cli:packaged
+           bun run verify:linux-appimage
+
+           DEB="dist/OpenChamber-${{ steps.versions.outputs.app }}-linux-${{ matrix.deb_arch }}.deb"
+           test -f "$DEB"
+           EXPECTED_DEB_ARCH="${{ matrix.arch == 'x64' && 'amd64' || 'arm64' }}"
+           test "$(dpkg-deb --field "$DEB" Architecture)" = "$EXPECTED_DEB_ARCH"
+           test "$(dpkg-deb --field "$DEB" Package)" = "openchamber"
+           test "$(dpkg-deb --field "$DEB" Version)" = "${{ steps.versions.outputs.app }}"
+           DEB_CONTENTS="$(dpkg-deb --contents "$DEB")"
+           case "$DEB_CONTENTS" in
+             *openchamber.desktop*) ;;
+             *) echo "Debian package is missing openchamber.desktop" >&2; exit 1 ;;
+           esac
 
       - name: Validate Linux update manifest
         working-directory: packages/electron
@@ -376,6 +390,7 @@ jobs:
           name: desktop-release-smoke-linux-${{ matrix.arch }}
           path: |
             packages/electron/dist/OpenChamber-${{ steps.versions.outputs.app }}-linux-${{ matrix.artifact_arch }}.AppImage
+            packages/electron/dist/OpenChamber-${{ steps.versions.outputs.app }}-linux-${{ matrix.deb_arch }}.deb
             packages/electron/dist/${{ matrix.manifest }}
           if-no-files-found: error
           retention-days: ${{ fromJSON(inputs.retention_days) }}

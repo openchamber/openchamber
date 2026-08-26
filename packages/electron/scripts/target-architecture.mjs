@@ -69,7 +69,7 @@ export const resolveTargetArchitecture = ({
   const target = normalizeTargetArchitecture(requestedValues[0] || host.node);
   if (platform === 'linux' && target.node !== host.node) {
     throw new Error(
-      `Linux AppImages must be built natively: host is ${host.node}, target is ${target.node}. `
+      `Linux packages must be built natively: host is ${host.node}, target is ${target.node}. `
       + `Run this build on a ${target.node} Linux host.`,
     );
   }
