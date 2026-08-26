@@ -20,7 +20,6 @@ import { toast } from '@/components/ui';
 import { Text } from '@/components/ui/text';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ToolPopupContent } from '../types';
 import { PlainDiffFallback } from './PlainDiffFallback';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
@@ -82,7 +81,6 @@ interface ToolPartProps {
     onToggle: (toolId: string) => void;
     isMobile: boolean;
     alwaysShowActions?: boolean;
-    onContentChange?: (reason?: ContentChangeReason) => void;
     onShowPopup?: (content: ToolPopupContent) => void;
     animateTailText?: boolean;
 }
@@ -1684,7 +1682,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     isExpanded,
     onToggle,
     isMobile,
-    onContentChange,
     onShowPopup,
     animateTailText = true,
 }) => {
@@ -1754,10 +1751,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         });
     }, [currentDirectory, input, isFinalized, isSuccessfullyFinalized, metadata, normalizedPartTool]);
 
-    const shouldNotifyStructuralChange = isFinalized || isTaskTool;
-
-    const onContentChangeRef = React.useRef(onContentChange);
-    onContentChangeRef.current = onContentChange;
     const expandedContentRef = React.useRef<HTMLDivElement>(null);
 
     React.useLayoutEffect(() => {
@@ -1772,11 +1765,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
         element.style.height = isExpanded ? 'auto' : '0px';
         element.style.overflow = isExpanded ? 'visible' : 'hidden';
-
-        if (shouldNotifyStructuralChange) {
-            onContentChangeRef.current?.('structural');
-        }
-    }, [isExpanded, isTaskTool, shouldNotifyStructuralChange]);
+    }, [isExpanded, isTaskTool]);
 
     const partMetadata = (part as unknown as { metadata?: unknown }).metadata;
     const time = stateWithData.time;
@@ -1934,26 +1923,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
         return metadataTaskSummaryEntries;
     }, [childSessionTaskSummaryEntries, metadataTaskSummaryEntries]);
-    const taskSummaryRenderSignature = React.useMemo(() => {
-        return taskSummaryEntries.map(getTaskSummaryEntryRenderSignature).join('\u0000');
-    }, [taskSummaryEntries]);
-    const lastTaskSummaryRenderSignatureRef = React.useRef<string | null>(null);
-
-    React.useEffect(() => {
-        if (!isTaskTool) {
-            lastTaskSummaryRenderSignatureRef.current = null;
-            return;
-        }
-
-        const previous = lastTaskSummaryRenderSignatureRef.current;
-        lastTaskSummaryRenderSignatureRef.current = taskSummaryRenderSignature;
-        if (previous === null || previous === taskSummaryRenderSignature || taskSummaryEntries.length === 0) {
-            return;
-        }
-
-        onContentChangeRef.current?.('structural');
-    }, [isTaskTool, taskSummaryEntries.length, taskSummaryRenderSignature]);
-
     const diffStats = React.useMemo(() => {
         return (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'apply_patch')
             ? parseDiffStats(metadata)
@@ -2351,7 +2320,6 @@ export default React.memo(ToolPart, (prev, next) => {
         && prev.isExpanded === next.isExpanded
         && prev.isMobile === next.isMobile
         && prev.alwaysShowActions === next.alwaysShowActions
-        && prev.onContentChange === next.onContentChange
         && prev.onShowPopup === next.onShowPopup
         && prev.animateTailText === next.animateTailText;
 });

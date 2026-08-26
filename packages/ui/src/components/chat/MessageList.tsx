@@ -1,11 +1,10 @@
 import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
-import { elementScroll, useVirtualizer as useTanstackVirtualizer, type ReactVirtualizer, type VirtualItem } from '@tanstack/react-virtual';
+import { LegendList, type LegendListRef } from '@legendapp/list/react';
 
 import ChatMessage from './ChatMessage';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
 import TurnItem from './components/TurnItem';
-import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
@@ -19,9 +18,9 @@ import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/
 import { streamPerfCount, streamPerfMark, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useSessionParts } from '@/sync/sync-context';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { useSessionPartsForMessages } from '@/sync/sync-context';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
+import { resolveChatListAnchoredEndSpace, resolveTimelineIsAtEnd } from './lib/scroll/timelineScrollAnchoring';
 import {
     USER_SHELL_MARKER,
     isUserShellMarkerMessage,
@@ -29,96 +28,52 @@ import {
     type ShellBridgeDetails,
 } from './lib/shellBridge';
 
-const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
 const EMPTY_UNGROUPED_MESSAGE_IDS = new Set<string>();
-const TIMELINE_CACHE_LIMIT = 16;
 
-const sameKeys = (a: readonly string[] | undefined, b: readonly string[] | undefined): boolean => {
-    if (a === b) return true;
-    if (!a || !b) return false;
-    if (a.length !== b.length) return false;
-    return a.every((key, index) => key === b[index]);
-};
+// --- Timeline virtualization (@legendapp/list) -----------------------------
+// The timeline is a single virtualized list on every surface: history turns
+// AND the live streaming tail are rows of the same list, so the list owns one
+// coherent scroll position instead of arbitrating between a virtualizer and a
+// separately-rendered tail.
+//
+// Scroll behavior the list owns natively, which is why none of it exists here
+// any more:
+//   • `maintainScrollAtEnd` keeps the live edge pinned as rows grow.
+//   • `maintainVisibleContentPosition` preserves the read position when older
+//     history is prepended, replacing the manual anchor-hold and the mobile
+//     quiet-window prepend deferral.
+//   • `anchoredEndSpace` reserves the tail space that parks a just-sent
+//     message near the top of the viewport.
+const TIMELINE_ESTIMATED_ENTRY_SIZE = 320;
 
-// --- History virtualization (@tanstack/react-virtual) ----------------------
-// The history list virtualizes with @tanstack/react-virtual on all surfaces:
-// its core has bottom anchoring (anchorTo: 'end'), key-stable prepend
-// preservation, and native iOS touch/momentum deferral for scroll
-// adjustments — the failure modes that historically forced virtua off on
-// mobile and required manual prepend compensation on desktop.
-type TanstackVirtualizerInstance = ReactVirtualizer<HTMLDivElement, HTMLDivElement>;
-type HistoryEngine = 'none' | 'tanstack';
-
-const TANSTACK_ESTIMATED_ENTRY_SIZE = 320;
-const TANSTACK_OVERSCAN = 8;
-// Touch flings cover more distance between paints than desktop wheels; a
-// larger window keeps fast mobile scrolling over mounted rows.
-const TANSTACK_MOBILE_OVERSCAN = 16;
-const resolveTanstackOverscan = (): number => (
-    isMobileSurfaceRuntime() ? TANSTACK_MOBILE_OVERSCAN : TANSTACK_OVERSCAN
-);
-// Post-prepend anchor hold: measurements of freshly
-// prepended rows settle over multiple frames, so a single restore can be
-// invalidated by the next measurement pass. Re-assert the anchor until it
-// holds still for STABLE_FRAMES consecutive frames, giving up at MAX_FRAMES.
+// Anchor hold for an explicit viewport restore (session re-entry): row
+// measurements settle over several frames, so a single restore can be
+// invalidated by the next measurement pass. Re-assert until it holds still for
+// STABLE_FRAMES consecutive frames, giving up at MAX_FRAMES.
 const ANCHOR_HOLD_STABLE_FRAMES = 30;
 const ANCHOR_HOLD_MAX_FRAMES = 180;
-// Adaptive estimate bounds: only trust the session average once a few rows
-// are measured, and keep it inside sane turn-height bounds.
-const TANSTACK_ESTIMATE_MIN_SAMPLES = 5;
-const TANSTACK_ESTIMATE_MIN = 120;
-const TANSTACK_ESTIMATE_MAX = 1200;
-// "At bottom" tolerance for resize-adjustment decisions.
-const TANSTACK_AT_END_THRESHOLD_PX = 80;
 
-// Quiet-window prepend on mobile: while a touch drag or momentum scroll is
-// active, iOS owns the scroll position and ANY geometry change above the
-// viewport races against the native animation — a race that compensation
-// logic can only lose sometimes. So freshly loaded older history is held
-// (data already fetched, store already updated) and inserted into the
-// rendered list only once the gesture goes quiet. Safety valves: flush when
-// the user gets close to the top (a blank top is worse than a small hop) or
-// after MAX_HOLD_MS.
-const HISTORY_PREPEND_QUIET_MS = 160;
-const HISTORY_PREPEND_MAX_HOLD_MS = 1500;
-const HISTORY_PREPEND_NEAR_TOP_VIEWPORTS = 1.5;
-const HISTORY_PREPEND_MONITOR_INTERVAL_MS = 90;
-
-// A commit is a deferable prepend when older entries were inserted strictly
-// above the known content: the previous first key still exists deeper in the
-// list and the tail is unchanged. Anything else renders immediately.
-const isPrependAboveCommit = (previous: RenderEntry[], next: RenderEntry[]): boolean => {
-    if (previous.length === 0 || next.length <= previous.length) return false;
-    if (previous[previous.length - 1]?.key !== next[next.length - 1]?.key) return false;
-    const previousFirstKey = previous[0]?.key;
-    const insertedIndex = next.findIndex((entry) => entry.key === previousFirstKey);
-    return insertedIndex > 0;
+// Reserved tail space that parks an anchored row near the top of the viewport.
+// `onReady` fires once the list has measured the anchor, `onSizeChanged` when
+// the reserved size is recomputed.
+// Presentation-only props forwarded to the scroll container the list renders.
+// Deliberately narrow: the list owns scroll and layout callbacks on that
+// element, so only styling, focus and click-through are caller-controlled.
+type TimelineScrollContainerProps = {
+    className?: string;
+    style?: React.CSSProperties;
+    tabIndex?: number;
+    onClick?: React.MouseEventHandler<HTMLDivElement>;
+    'data-scrollbar'?: string;
+    'data-scroll-shadow'?: string;
 };
 
-const tanstackTimelineCache = new Map<string, { keys: readonly string[]; items: VirtualItem[] }>();
-
-const readTanstackTimelineCache = (sessionKey: string, keys: readonly string[]): VirtualItem[] | undefined => {
-    const entry = tanstackTimelineCache.get(sessionKey);
-    if (!entry) return undefined;
-    if (sameKeys(entry.keys, keys)) return entry.items;
-    tanstackTimelineCache.delete(sessionKey);
-    return undefined;
-};
-
-const writeTanstackTimelineCache = (
-    sessionKey: string,
-    keys: readonly string[],
-    virtualizer: TanstackVirtualizerInstance | null | undefined,
-): void => {
-    if (!virtualizer || keys.length === 0) return;
-    tanstackTimelineCache.delete(sessionKey);
-    tanstackTimelineCache.set(sessionKey, { keys: keys.slice(), items: virtualizer.takeSnapshot() });
-    while (tanstackTimelineCache.size > TIMELINE_CACHE_LIMIT) {
-        const oldest = tanstackTimelineCache.keys().next().value;
-        if (typeof oldest !== 'string') break;
-        tanstackTimelineCache.delete(oldest);
-    }
+type TimelineAnchoredEndSpace = {
+    anchorIndex: number;
+    anchorOffset?: number;
+    onReady?: (info: { anchorIndex: number | undefined; anchorKey: string | undefined; size: number }) => void;
+    onSizeChanged?: (size: number) => void;
 };
 
 const useStableEvent = <TArgs extends unknown[], TResult>(handler: (...args: TArgs) => TResult) => {
@@ -350,7 +305,6 @@ const withShellBridgeDetails = (message: ChatMessageEntry, details: ShellBridgeD
 
 interface MessageListProps {
     sessionKey: string;
-    disableStaging?: boolean;
     messages: ChatMessageEntry[];
     sessionIsWorking?: boolean;
     activeStreamingMessageId?: string | null;
@@ -361,12 +315,29 @@ interface MessageListProps {
         confirmedAt?: number;
         fallbackTimestamp?: number;
     } | null;
-    onMessageContentChange: (reason?: ContentChangeReason) => void;
-    getAnimationHandlers: (messageId: string) => AnimationHandlers;
     isLoadingOlder: boolean;
     scrollToBottom?: () => void;
-    scrollRef?: React.RefObject<HTMLDivElement | null>;
     directory?: string;
+    // The list owns its scroll container; the timeline scroll hook drives it
+    // through this ref and observes it through the callbacks below.
+    registerList?: (list: LegendListRef | null) => void;
+    // True while a real gesture owns the scroll; releases the list's own
+    // end pinning so the state machine, not the library heuristic, decides.
+    endPinningReleased?: boolean;
+    // The anchored row is identified by message id; the index it maps to is a
+    // property of the row model, which only this component knows.
+    anchorMessageId?: string | null;
+    onAnchorReady?: (messageId: string, anchorIndex: number) => void;
+    onAnchorSizeChanged?: (messageId: string) => void;
+    composerOverlayHeight?: number;
+    onIsAtEndChange?: (isAtEnd: boolean) => void;
+    onTimelineDataChange?: () => void;
+    // Content that used to sit as siblings of the list inside the scroll
+    // container. The list owns that container now, so they render as its
+    // header/footer and scroll with the rows exactly as before.
+    listHeader?: React.ReactNode;
+    listFooter?: React.ReactNode;
+    scrollContainerProps?: TimelineScrollContainerProps;
 }
 
 export interface MessageListHandle {
@@ -403,8 +374,6 @@ interface MessageRowProps {
     activeStreamingPhase?: StreamPhase | null;
     animateUserOnMount?: boolean;
     onUserAnimationConsumed?: (messageId: string) => void;
-    onContentChange: (reason?: ContentChangeReason) => void;
-    animationHandlers: AnimationHandlers;
     scrollToBottom?: () => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
 }
@@ -419,8 +388,6 @@ const MessageRow = React.memo<MessageRowProps>(({
     activeStreamingPhase,
     animateUserOnMount,
     onUserAnimationConsumed,
-    onContentChange,
-    animationHandlers,
     scrollToBottom,
     reviewTransferDirection,
 }) => {
@@ -431,8 +398,6 @@ const MessageRow = React.memo<MessageRowProps>(({
             nextMessage={nextMessage}
             animateUserOnMount={animateUserOnMount}
             onUserAnimationConsumed={onUserAnimationConsumed}
-            onContentChange={onContentChange}
-            animationHandlers={animationHandlers}
             scrollToBottom={scrollToBottom}
             turnGroupingContext={turnGroupingContext}
             assistantHeaderMessageId={assistantHeaderMessageId}
@@ -450,20 +415,12 @@ const MessageRow = React.memo<MessageRowProps>(({
         && areOptionalRenderRelevantMessagesEqual(prev.nextMessage, next.nextMessage)
         && prev.animateUserOnMount === next.animateUserOnMount
         && prev.onUserAnimationConsumed === next.onUserAnimationConsumed
-        && prev.onContentChange === next.onContentChange
         && prev.scrollToBottom === next.scrollToBottom
         && areRelevantTurnGroupingContextsEqual(prevTurn, nextTurn, prev.message.info.id, resolveMessageRole(prev.message) === 'user')
         && prev.assistantHeaderMessageId === next.assistantHeaderMessageId
         && prev.isInActiveTurn === next.isInActiveTurn
         && prev.activeStreamingPhase === next.activeStreamingPhase
-        && prev.reviewTransferDirection === next.reviewTransferDirection
-        && prev.animationHandlers?.onChunk === next.animationHandlers?.onChunk
-        && prev.animationHandlers?.onComplete === next.animationHandlers?.onComplete
-        && prev.animationHandlers?.onStreamingCandidate === next.animationHandlers?.onStreamingCandidate
-        && prev.animationHandlers?.onAnimationStart === next.animationHandlers?.onAnimationStart
-        && prev.animationHandlers?.onReservationCancelled === next.animationHandlers?.onReservationCancelled
-        && prev.animationHandlers?.onReasoningBlock === next.animationHandlers?.onReasoningBlock
-        && prev.animationHandlers?.onAnimatedHeightChange === next.animationHandlers?.onAnimatedHeightChange;
+        && prev.reviewTransferDirection === next.reviewTransferDirection;
 });
 
 MessageRow.displayName = 'MessageRow';
@@ -477,8 +434,6 @@ interface TurnBlockProps {
     turnUiStates: Map<string, TurnUiState>;
     onToggleTurnGroup: (turnId: string) => void;
     chatRenderMode: 'sorted' | 'live';
-    onMessageContentChange: (reason?: ContentChangeReason) => void;
-    getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: () => void;
     stickyUserHeader?: boolean;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
@@ -497,8 +452,6 @@ const TurnBlock = React.memo(({
     turnUiStates,
     onToggleTurnGroup,
     chatRenderMode,
-    onMessageContentChange,
-    getAnimationHandlers,
     scrollToBottom,
     stickyUserHeader = true,
     shouldAnimateUserMessage,
@@ -507,6 +460,7 @@ const TurnBlock = React.memo(({
     activeStreamingPhase,
     reviewTransferDirection,
 }: TurnBlockProps) => {
+
     const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
     const userMessageHidden = React.useMemo(
         () => isHiddenUserMessage(turn.userMessage, { planModeEnabled }),
@@ -735,19 +689,15 @@ const TurnBlock = React.memo(({
                     reviewTransferDirection={reviewTransferDirection}
                     animateUserOnMount={shouldAnimateUserMessage(message)}
                     onUserAnimationConsumed={onUserAnimationConsumed}
-                    onContentChange={onMessageContentChange}
-                    animationHandlers={getAnimationHandlers(message.info.id)}
                     scrollToBottom={scrollToBottom}
                 />
             );
         },
         [
-            getAnimationHandlers,
             isLastTurn,
             nextEntryFirstMessage,
             messageOrder.lookup,
             messageOrder.ordered,
-            onMessageContentChange,
             scrollToBottom,
             sessionIsWorking,
             chatRenderMode,
@@ -796,8 +746,6 @@ interface UngroupedMessageRowProps {
     message: ChatMessageEntry;
     previousMessage?: ChatMessageEntry;
     nextMessage?: ChatMessageEntry;
-    onMessageContentChange: (reason?: ContentChangeReason) => void;
-    getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: () => void;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
@@ -810,8 +758,6 @@ const UngroupedMessageRow = React.memo(({
     message,
     previousMessage,
     nextMessage,
-    onMessageContentChange,
-    getAnimationHandlers,
     scrollToBottom,
     shouldAnimateUserMessage,
     onUserAnimationConsumed,
@@ -826,8 +772,6 @@ const UngroupedMessageRow = React.memo(({
             nextMessage={nextMessage}
             animateUserOnMount={shouldAnimateUserMessage(message)}
             onUserAnimationConsumed={onUserAnimationConsumed}
-            onContentChange={onMessageContentChange}
-            animationHandlers={getAnimationHandlers(message.info.id)}
             scrollToBottom={scrollToBottom}
             isInActiveTurn={Boolean(activeStreamingMessageId) && message.info.id === activeStreamingMessageId}
             activeStreamingPhase={message.info.id === activeStreamingMessageId ? activeStreamingPhase : null}
@@ -840,8 +784,6 @@ UngroupedMessageRow.displayName = 'UngroupedMessageRow';
 
 interface MessageListEntryProps {
     entry: RenderEntry;
-    onMessageContentChange: (reason?: ContentChangeReason) => void;
-    getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: () => void;
     stickyUserHeader?: boolean;
     sessionIsWorking: boolean;
@@ -870,8 +812,6 @@ const turnContainsMessageId = (turn: TurnRecord, messageId: string | null | unde
 
 const MessageListEntry = React.memo(({
     entry,
-    onMessageContentChange,
-    getAnimationHandlers,
     scrollToBottom,
     stickyUserHeader,
     sessionIsWorking,
@@ -892,8 +832,6 @@ const MessageListEntry = React.memo(({
                 message={entry.message}
                 previousMessage={entry.previousMessage}
                 nextMessage={entry.nextMessage}
-                onMessageContentChange={onMessageContentChange}
-                getAnimationHandlers={getAnimationHandlers}
                 scrollToBottom={scrollToBottom}
                 shouldAnimateUserMessage={shouldAnimateUserMessage}
                 onUserAnimationConsumed={onUserAnimationConsumed}
@@ -919,8 +857,6 @@ const MessageListEntry = React.memo(({
             activeStreamingMessageId={activeStreamingMessageId}
             activeStreamingPhase={activeStreamingPhase}
             reviewTransferDirection={reviewTransferDirection}
-            onMessageContentChange={onMessageContentChange}
-            getAnimationHandlers={getAnimationHandlers}
             scrollToBottom={scrollToBottom}
             stickyUserHeader={stickyUserHeader}
         />
@@ -929,264 +865,241 @@ const MessageListEntry = React.memo(({
 
 MessageListEntry.displayName = 'MessageListEntry';
 
-// Inner component that renders staged turn entries.
-type StaticHistoryListProps = {
-    entries: RenderEntry[];
-    engine: HistoryEngine;
-    contentRef: React.RefObject<HTMLDivElement | null>;
-    scrollRef?: React.RefObject<HTMLDivElement | null>;
-    registerTanstackVirtualizer?: (virtualizer: TanstackVirtualizerInstance | null) => void;
-    virtualizerKey: string;
-    onMessageContentChange: (reason?: ContentChangeReason) => void;
-    getAnimationHandlers: (messageId: string) => AnimationHandlers;
+// Shared row state. Passed through context rather than closed over by
+// `renderItem` so the render callback keeps a stable identity — a changing
+// `renderItem` makes the list re-render every mounted row on every commit.
+type TimelineRowContextValue = {
     scrollToBottom?: () => void;
     stickyUserHeader: boolean;
     defaultActivityExpanded: boolean;
     turnUiStates: Map<string, TurnUiState>;
     onToggleTurnGroup: (turnId: string) => void;
     chatRenderMode: 'sorted' | 'live';
+    showTurnChangedFiles: boolean;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    // The live tail row renders through StreamingTailContent, which subscribes
+    // to streaming parts; every other row renders statically.
+    streamingTailKey: string | null;
+    directory?: string;
+    sessionIsWorking: boolean;
+    activeStreamingMessageId: string | null;
+    activeStreamingPhase: StreamPhase | null;
 };
 
-const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, registerTanstackVirtualizer, virtualizerKey, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, reviewTransferDirection }: StaticHistoryListProps) => {
-    const isTanstack = engine === 'tanstack';
+const TimelineRowContext = React.createContext<TimelineRowContextValue | null>(null);
 
-    // --- Quiet-window prepend (mobile) --------------------------------------
-    // Gesture tracking for the deferred-prepend decision. Refs only: reading
-    // them never re-renders, and the render-phase reconcile below needs them.
-    const touchActiveRef = React.useRef(false);
-    const lastScrollAtRef = React.useRef(0);
-    const holdSinceRef = React.useRef<number | null>(null);
-    const deferPrepends = isTanstack && isMobileSurfaceRuntime();
+const TimelineRow = React.memo(({ entry }: { entry: RenderEntry }) => {
+    const context = React.useContext(TimelineRowContext);
+    if (!context) return null;
 
-    React.useEffect(() => {
-        if (!deferPrepends) return;
-        const element = scrollRef?.current;
-        if (!element) return;
-        const onTouchStart = () => { touchActiveRef.current = true; };
-        const onTouchEnd = () => { touchActiveRef.current = false; };
-        const onScroll = () => { lastScrollAtRef.current = performance.now(); };
-        element.addEventListener('touchstart', onTouchStart, { passive: true });
-        element.addEventListener('touchend', onTouchEnd, { passive: true });
-        element.addEventListener('touchcancel', onTouchEnd, { passive: true });
-        element.addEventListener('scroll', onScroll, { passive: true });
-        return () => {
-            element.removeEventListener('touchstart', onTouchStart);
-            element.removeEventListener('touchend', onTouchEnd);
-            element.removeEventListener('touchcancel', onTouchEnd);
-            element.removeEventListener('scroll', onScroll);
-        };
-    }, [deferPrepends, scrollRef]);
-
-    const isGestureActive = React.useCallback(() => (
-        touchActiveRef.current
-        || performance.now() - lastScrollAtRef.current < HISTORY_PREPEND_QUIET_MS
-    ), []);
-
-    const isNearTop = React.useCallback(() => {
-        const element = scrollRef?.current;
-        if (!element) return true;
-        return element.scrollTop < element.clientHeight * HISTORY_PREPEND_NEAR_TOP_VIEWPORTS;
-    }, [scrollRef]);
-
-    const [displayEntries, setDisplayEntries] = React.useState(entries);
-    // Render-phase reconcile (official derived-state pattern): adopt the new
-    // entries immediately unless this commit is a pure prepend-above landing
-    // in the middle of an active touch gesture — those wait for quiet.
-    let renderEntries = displayEntries;
-    if (entries !== displayEntries) {
-        const shouldHold = deferPrepends
-            && isPrependAboveCommit(displayEntries, entries)
-            && isGestureActive()
-            && !isNearTop()
-            && (holdSinceRef.current === null
-                || performance.now() - holdSinceRef.current < HISTORY_PREPEND_MAX_HOLD_MS);
-        if (shouldHold) {
-            if (holdSinceRef.current === null) holdSinceRef.current = performance.now();
-        } else {
-            holdSinceRef.current = null;
-            setDisplayEntries(entries);
-            renderEntries = entries;
-        }
-    } else if (holdSinceRef.current !== null) {
-        holdSinceRef.current = null;
-    }
-
-    // While a prepend is held, poll for the quiet window (touch/momentum have
-    // no completion event we can await) and flush by re-rendering.
-    const [, forceFlushTick] = React.useReducer((tick: number) => tick + 1, 0);
-    React.useEffect(() => {
-        if (!deferPrepends) return;
-        const timer = window.setInterval(() => {
-            if (holdSinceRef.current === null) return;
-            const expired = performance.now() - holdSinceRef.current >= HISTORY_PREPEND_MAX_HOLD_MS;
-            if (!isGestureActive() || isNearTop() || expired) {
-                forceFlushTick();
-            }
-        }, HISTORY_PREPEND_MONITOR_INTERVAL_MS);
-        return () => window.clearInterval(timer);
-    }, [deferPrepends, isGestureActive, isNearTop]);
-
-    const entriesRef = React.useRef(renderEntries);
-    entriesRef.current = renderEntries;
-    // Initial-only read: measurement cache restore is a mount-time concern;
-    // afterwards the live virtualizer owns measurements.
-    const [initialMeasurements] = React.useState(() => (
-        isTanstack
-            ? readTanstackTimelineCache(virtualizerKey, entries.map((entry) => entry.key))
-            : undefined
-    ));
-
-    const sizeContainerRef = React.useRef<HTMLDivElement | null>(null);
-    // Adaptive estimate: rows this session has actually measured are a far
-    // better predictor for the still-unmeasured ones than a fixed constant.
-    // Smaller estimate error → smaller anchor corrections when prepended rows
-    // measure in → less visible drift. The ref keeps estimateSize's identity
-    // stable so updating the average never triggers a global remeasure.
-    const estimatedEntrySizeRef = React.useRef(TANSTACK_ESTIMATED_ENTRY_SIZE);
-    const tanstackVirtualizer = useTanstackVirtualizer<HTMLDivElement, HTMLDivElement>({
-        count: renderEntries.length,
-        enabled: isTanstack,
-        getScrollElement: () => scrollRef?.current ?? null,
-        estimateSize: () => estimatedEntrySizeRef.current,
-        overscan: resolveTanstackOverscan(),
-        scrollToFn: (offset, options, instance) => {
-            // Expose the new total height before core writes an anchor
-            // correction so the browser does not clamp the offset to the old
-            // height.
-            const sizeElement = sizeContainerRef.current;
-            if (sizeElement) sizeElement.style.height = `${instance.getTotalSize()}px`;
-            elementScroll(offset, options, instance);
-        },
-        getItemKey: (index) => entriesRef.current[index]?.key ?? `index:${index}`,
-        // Bottom-anchored chat semantics: prepending older entries above the
-        // viewport must not move what the user is reading, and iOS-specific
-        // touch/momentum deferral for those adjustments lives in the core.
-        anchorTo: 'end',
-        initialOffset: () => Number.MAX_SAFE_INTEGER,
-        initialMeasurementsCache: initialMeasurements,
-    });
-    // Only compensate scroll for rows growing ABOVE the viewport (history
-    // remeasures, prepended pages). A row growing inside the viewport —
-    // expanding a tool call or thinking block — must grow DOWNWARD naturally;
-    // the end-anchored default made it expand upward. At the bottom,
-    // app-level auto-follow owns pinning, so skip there too instead of
-    // double-writing. (This is an instance field, not a constructor option.)
-    tanstackVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
-        if (instance.isAtEnd(TANSTACK_AT_END_THRESHOLD_PX)) return false;
-        const firstVisibleIndex = instance.range?.startIndex;
-        return firstVisibleIndex !== undefined && item.index < firstVisibleIndex;
-    };
-
-    React.useEffect(() => {
-        if (!isTanstack) return;
-        const sizes = tanstackVirtualizer.itemSizeCache;
-        if (sizes.size >= TANSTACK_ESTIMATE_MIN_SAMPLES) {
-            let total = 0;
-            for (const size of sizes.values()) total += size;
-            estimatedEntrySizeRef.current = Math.min(
-                TANSTACK_ESTIMATE_MAX,
-                Math.max(TANSTACK_ESTIMATE_MIN, Math.round(total / sizes.size)),
-            );
-        }
-    });
-
-    React.useEffect(() => {
-        if (!isTanstack) return;
-        registerTanstackVirtualizer?.(tanstackVirtualizer);
-        return () => {
-            writeTanstackTimelineCache(
-                virtualizerKey,
-                entriesRef.current.map((entry) => entry.key),
-                tanstackVirtualizer,
-            );
-            registerTanstackVirtualizer?.(null);
-        };
-    }, [isTanstack, registerTanstackVirtualizer, tanstackVirtualizer, virtualizerKey]);
-
-    const renderEntry = React.useCallback((entry: RenderEntry) => {
+    if (context.streamingTailKey === entry.key) {
         return (
-            <MessageListEntry
-                key={entry.key}
+            <StreamingTailContent
                 entry={entry}
-                onMessageContentChange={onMessageContentChange}
-                getAnimationHandlers={getAnimationHandlers}
-                scrollToBottom={scrollToBottom}
-                stickyUserHeader={stickyUserHeader}
-                sessionIsWorking={false}
-                defaultActivityExpanded={defaultActivityExpanded}
-                turnUiStates={turnUiStates}
-                onToggleTurnGroup={onToggleTurnGroup}
-                chatRenderMode={chatRenderMode}
-                shouldAnimateUserMessage={shouldAnimateUserMessage}
-                onUserAnimationConsumed={onUserAnimationConsumed}
-                activeStreamingMessageId={null}
-                activeStreamingPhase={null}
-                reviewTransferDirection={reviewTransferDirection}
+                directory={context.directory}
+                scrollToBottom={context.scrollToBottom}
+                stickyUserHeader={context.stickyUserHeader}
+                sessionIsWorking={context.sessionIsWorking}
+                defaultActivityExpanded={context.defaultActivityExpanded}
+                turnUiStates={context.turnUiStates}
+                onToggleTurnGroup={context.onToggleTurnGroup}
+                chatRenderMode={context.chatRenderMode}
+                showTurnChangedFiles={context.showTurnChangedFiles}
+                shouldAnimateUserMessage={context.shouldAnimateUserMessage}
+                onUserAnimationConsumed={context.onUserAnimationConsumed}
+                activeStreamingMessageId={context.activeStreamingMessageId}
+                activeStreamingPhase={context.activeStreamingPhase}
+                reviewTransferDirection={context.reviewTransferDirection}
             />
         );
-    }, [chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, reviewTransferDirection, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
-
-    if (engine === 'none') {
-        return (
-            <div ref={contentRef} className="relative w-full">
-                {renderEntries.map((entry) => (
-                    <div
-                        key={entry.key}
-                        data-turn-entry={entry.key}
-                    >
-                        {renderEntry(entry)}
-                    </div>
-                ))}
-            </div>
-        );
     }
 
-    if (engine === 'tanstack') {
-        const virtualItems = tanstackVirtualizer.getVirtualItems();
-        const startOffset = virtualItems[0]?.start ?? 0;
-        // Rendered rows stay in normal flow inside a single offset wrapper (not
-        // per-row absolute positioning) so per-turn sticky user headers keep
-        // working against the scroll container. The offset MUST be padding, not
-        // transform: a transformed ancestor becomes the sticky containing block,
-        // so headers would stick to the wrapper's (arbitrary, overscan-dependent)
-        // top edge mid-list and float over the previous turn. Padding only
-        // changes when the virtual window shifts — not per scroll frame — so the
-        // layout cost is negligible.
-        return (
-            <div ref={sizeContainerRef} className="relative w-full" style={{ height: tanstackVirtualizer.getTotalSize() }}>
-                <div style={{ paddingTop: `${startOffset}px` }}>
-                    {virtualItems.map((item) => {
-                        const entry = renderEntries[item.index];
-                        if (!entry) return null;
-                        return (
-                            <div
-                                key={entry.key}
-                                data-index={item.index}
-                                ref={tanstackVirtualizer.measureElement}
-                                data-turn-entry={entry.key}
-                            >
-                                {renderEntry(entry)}
-                            </div>
-                        );
-                    })}
-                </div>
-            </div>
-        );
-    }
-
-    return null;
+    return (
+        <MessageListEntry
+            entry={entry}
+            scrollToBottom={context.scrollToBottom}
+            stickyUserHeader={context.stickyUserHeader}
+            sessionIsWorking={false}
+            defaultActivityExpanded={context.defaultActivityExpanded}
+            turnUiStates={context.turnUiStates}
+            onToggleTurnGroup={context.onToggleTurnGroup}
+            chatRenderMode={context.chatRenderMode}
+            shouldAnimateUserMessage={context.shouldAnimateUserMessage}
+            onUserAnimationConsumed={context.onUserAnimationConsumed}
+            activeStreamingMessageId={null}
+            activeStreamingPhase={null}
+            reviewTransferDirection={context.reviewTransferDirection}
+        />
+    );
 });
 
-StaticHistoryList.displayName = 'StaticHistoryList';
+TimelineRow.displayName = 'TimelineRow';
+
+const timelineKeyExtractor = (item: RenderEntry): string => item.key;
+
+// Row type drives container reuse. Turn blocks and ungrouped messages have very
+// different shapes, so keeping them in separate pools avoids re-measuring a
+// container every time one replaces the other.
+const timelineItemType = (item: RenderEntry): string => item.kind;
+
+const renderTimelineItem = ({ item }: { item: RenderEntry }) => <TimelineRow entry={item} />;
+
+type TimelineListProps = {
+    entries: RenderEntry[];
+    streamingTailKey: string | null;
+    registerList: (list: LegendListRef | null) => void;
+    endPinningReleased: boolean;
+    anchoredEndSpace?: {
+        anchorIndex: number;
+        anchorOffset?: number;
+        onReady?: (info: { anchorIndex: number | undefined; anchorKey: string | undefined; size: number }) => void;
+        onSizeChanged?: (size: number) => void;
+    };
+    composerOverlayHeight: number;
+    onIsAtEndChange: (isAtEnd: boolean) => void;
+    onTimelineDataChange: () => void;
+    listHeader?: React.ReactNode;
+    listFooter?: React.ReactNode;
+    scrollContainerProps?: TimelineScrollContainerProps;
+    rowContext: TimelineRowContextValue;
+};
+
+const TimelineList = React.memo(({
+    entries,
+    registerList,
+    endPinningReleased,
+    anchoredEndSpace,
+    composerOverlayHeight,
+    onIsAtEndChange,
+    onTimelineDataChange,
+    listHeader,
+    listFooter,
+    scrollContainerProps,
+    rowContext,
+}: TimelineListProps) => {
+    const listRef = React.useRef<LegendListRef | null>(null);
+    // With streaming auto-follow off, content growth must never move the
+    // viewport; explicit commands (the scroll-to-bottom pill, session open)
+    // still scroll through the imperative handle.
+    const streamingAutoFollowEnabled = useUIStore((state) => state.streamingAutoFollowEnabled);
+    const isAtEndRef = React.useRef(true);
+
+    const setListRef = React.useCallback((list: LegendListRef | null) => {
+        listRef.current = list;
+        registerList(list);
+    }, [registerList]);
+
+    // A width change re-wraps every row, so all content above the viewport
+    // changes height at once; without size compensation the accumulated delta
+    // throws the read position around. Size restoration stays off otherwise —
+    // rows growing in place (a tool result expanding) must grow downward —
+    // so compensation is enabled only while the list width is actively
+    // resizing, and released shortly after it settles.
+    const [isWidthResizing, setIsWidthResizing] = React.useState(false);
+    React.useEffect(() => {
+        const node = listRef.current?.getScrollableNode();
+        if (!node) return;
+        let lastWidth: number | null = null;
+        let quietTimer: ReturnType<typeof setTimeout> | null = null;
+        const observer = new ResizeObserver((observerEntries) => {
+            const width = observerEntries[observerEntries.length - 1]?.contentRect.width;
+            if (typeof width !== 'number') return;
+            if (lastWidth === null) {
+                lastWidth = width;
+                return;
+            }
+            if (Math.abs(width - lastWidth) < 1) return;
+            lastWidth = width;
+            setIsWidthResizing(true);
+            if (quietTimer !== null) clearTimeout(quietTimer);
+            quietTimer = setTimeout(() => {
+                quietTimer = null;
+                setIsWidthResizing(false);
+            }, 300);
+        });
+        observer.observe(node);
+        return () => {
+            observer.disconnect();
+            if (quietTimer !== null) clearTimeout(quietTimer);
+        };
+    }, []);
+
+    // The list reports scroll continuously; only end-crossings are interesting,
+    // so the edge is debounced to a state transition here rather than pushing a
+    // callback on every frame.
+    const handleScroll = React.useCallback(() => {
+        const state = listRef.current?.getState();
+        if (!state) return;
+        const isAtEnd = resolveTimelineIsAtEnd(state);
+        if (typeof isAtEnd !== 'boolean' || isAtEnd === isAtEndRef.current) return;
+        isAtEndRef.current = isAtEnd;
+        onIsAtEndChange(isAtEnd);
+    }, [onIsAtEndChange]);
+
+    // Data changes are the only moment an automatic correction can be needed;
+    // the owning hook decides whether one actually applies.
+    React.useEffect(() => {
+        onTimelineDataChange();
+    }, [entries, onTimelineDataChange]);
+
+    const header = React.useMemo(() => (listHeader ? <>{listHeader}</> : undefined), [listHeader]);
+    const footer = React.useMemo(() => (listFooter ? <>{listFooter}</> : undefined), [listFooter]);
+
+    return (
+        <TimelineRowContext.Provider value={rowContext}>
+            <LegendList<RenderEntry>
+                ref={setListRef}
+                data={entries}
+                keyExtractor={timelineKeyExtractor}
+                getItemType={timelineItemType}
+                renderItem={renderTimelineItem}
+                estimatedItemSize={TIMELINE_ESTIMATED_ENTRY_SIZE}
+                initialScrollAtEnd
+                // Chat rows own internal state (expanded tool calls, reveal
+                // animations); recycling a container into a different row would
+                // carry that state across.
+                recycleItems={false}
+                {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+                contentInsetEndAdjustment={composerOverlayHeight}
+                // While a turn is anchored, the reserved end space — not the
+                // live edge — defines where the viewport rests.
+                // Also released while the width resizes: re-pinning against
+                // rows that are still re-measuring shakes the pinned
+                // viewport; the owning hook re-asserts the end once the
+                // resize settles.
+                maintainScrollAtEnd={anchoredEndSpace || !streamingAutoFollowEnabled || isWidthResizing || endPinningReleased
+                    ? false
+                    // Animated only while the session actively streams: there
+                    // the block-step growth turns each correction into a glide
+                    // and reveal + scroll read as one motion. Outside of a live
+                    // stream — opening a historical session, late measurements —
+                    // corrections must be instant: an animated catch-up scrolls
+                    // visibly through the whole conversation on open, and an
+                    // in-flight glide can supersede explicit navigation.
+                    : {
+                        animated: rowContext.sessionIsWorking,
+                        on: { dataChange: true, itemLayout: true, layout: true, footerLayout: true },
+                    }}
+                // Prepending older history must not move what the user is
+                // reading. Size restoration applies only during a width
+                // resize — see the observer above.
+                maintainVisibleContentPosition={{ data: true, size: isWidthResizing }}
+                onScroll={handleScroll}
+                ListHeaderComponent={header}
+                ListFooterComponent={footer}
+                {...scrollContainerProps}
+            />
+        </TimelineRowContext.Provider>
+    );
+});
+
+TimelineList.displayName = 'TimelineList';
 
 const StreamingTailContent: React.FC<{
     entry: RenderEntry;
     directory?: string;
-    onMessageContentChange: (reason?: ContentChangeReason) => void;
-    getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: () => void;
     stickyUserHeader: boolean;
     sessionIsWorking: boolean;
@@ -1203,8 +1116,6 @@ const StreamingTailContent: React.FC<{
 }> = ({
     entry,
     directory,
-    onMessageContentChange,
-    getAnimationHandlers,
     scrollToBottom,
     stickyUserHeader,
     sessionIsWorking,
@@ -1219,21 +1130,26 @@ const StreamingTailContent: React.FC<{
     activeStreamingPhase,
     reviewTransferDirection,
 }) => {
-    const liveParts = useSessionParts(activeStreamingMessageId ?? '', directory);
+    // Overlay live parts on every message of the tail, not only the one
+    // currently streaming: a finished step message's base record can lag the
+    // part store, and rendering it from that stale snapshot briefly unmounts
+    // its completed tool parts when the stream hands off to the next message.
+    const tailMessageIds = React.useMemo(() => {
+        if (entry.kind === 'turn') return entry.turn.assistantMessageIds;
+        return [entry.message.info.id];
+    }, [entry]);
+    const livePartsByMessageId = useSessionPartsForMessages(tailMessageIds, directory);
     const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
     const liveEntry = React.useMemo(() => buildLiveStreamingEntry(entry, {
-        activeStreamingMessageId,
-        liveParts,
+        livePartsByMessageId,
         showTextJustificationActivity: chatRenderMode === 'sorted',
         showTurnChangedFiles,
         mergeHiddenUserTurns: { planModeEnabled },
-    }), [activeStreamingMessageId, chatRenderMode, entry, liveParts, showTurnChangedFiles, planModeEnabled]);
+    }), [chatRenderMode, entry, livePartsByMessageId, showTurnChangedFiles, planModeEnabled]);
 
     return (
         <MessageListEntry
             entry={liveEntry}
-            onMessageContentChange={onMessageContentChange}
-            getAnimationHandlers={getAnimationHandlers}
             scrollToBottom={scrollToBottom}
             stickyUserHeader={stickyUserHeader}
             sessionIsWorking={sessionIsWorking}
@@ -1259,11 +1175,19 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     activeStreamingMessageId = null,
     activeStreamingPhase = null,
     retryOverlay = null,
-    onMessageContentChange,
-    getAnimationHandlers,
     scrollToBottom,
-    scrollRef,
     directory,
+    registerList,
+    endPinningReleased = false,
+    anchorMessageId = null,
+    onAnchorReady,
+    onAnchorSizeChanged,
+    composerOverlayHeight = 0,
+    onIsAtEndChange,
+    onTimelineDataChange,
+    listHeader,
+    listFooter,
+    scrollContainerProps,
 }, ref) => {
     streamPerfMark('react.message_list_render');
     streamPerfCount('ui.message_list.render');
@@ -1281,7 +1205,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         previousOrder: string[];
         animatedIds: Set<string>;
     }>({ sessionKey: undefined, previousOrder: [], animatedIds: new Set() });
-    const stableGetAnimationHandlers = useStableEvent(getAnimationHandlers);
     const stableScrollToBottom = useStableEvent(() => {
         scrollToBottom?.();
     });
@@ -1357,16 +1280,18 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return output;
     }), [messages]);
 
-    const historyContentRef = React.useRef<HTMLDivElement | null>(null);
-    const resolveScrollContainer = React.useCallback((): HTMLDivElement | null => {
-        if (scrollRef?.current) {
-            return scrollRef.current;
+    // The list owns the scroll container. The DOM fallback covers the window
+    // between mount and the list handing us its node.
+    const resolveScrollContainer = React.useCallback((): HTMLElement | null => {
+        const listNode = listRef.current?.getScrollableNode();
+        if (listNode) {
+            return listNode;
         }
         if (typeof document === 'undefined') {
             return null;
         }
         return document.querySelector<HTMLDivElement>('[data-scrollbar="chat"]');
-    }, [scrollRef]);
+    }, []);
 
     const displayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.retry_overlay_ms', () => {
         return applyRetryOverlay(baseDisplayMessages, {
@@ -1483,30 +1408,27 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             return { ...entry, nextEntryFirstMessage };
         });
     }, [staticRenderEntries, trailingEntryFirstMessage]);
-    // Mobile always starts with the same virtualized engine it will use after
-    // pagination. Switching a short list from normal DOM to TanStack during a
-    // prepend remounts the history subtree, and the newly enabled end-anchored
-    // virtualizer initializes at the bottom before it has prior keyed state.
-    // Desktop keeps the small-list threshold where that transition is not tied
-    // to the explicit mobile load-older interaction.
-    const shouldVirtualizeHistory = isMobileSurfaceRuntime()
-        || historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
-    const historyEngine: HistoryEngine = shouldVirtualizeHistory ? 'tanstack' : 'none';
-    const tanstackVirtualizerRef = React.useRef<TanstackVirtualizerInstance | null>(null);
-    const registerTanstackVirtualizer = React.useCallback((virtualizer: TanstackVirtualizerInstance | null) => {
-        tanstackVirtualizerRef.current = virtualizer;
-    }, []);
+    // Every surface uses the same virtualized list for the whole timeline —
+    // there is no small-list DOM path to transition out of, which is what used
+    // to remount the history subtree mid-prepend.
+    const listRef = React.useRef<LegendListRef | null>(null);
+    const handleRegisterList = React.useCallback((list: LegendListRef | null) => {
+        listRef.current = list;
+        registerList?.(list);
+    }, [registerList]);
 
     const allEntries = React.useMemo(() => {
         return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
     }, [historyEntries, trailingStreamingEntry]);
 
-    const stableHistoryContentChange = useStableEvent((reason?: ContentChangeReason) => {
-        onMessageContentChange(reason);
+    // Stable identities: these reach the list, where a changing callback would
+    // re-render every mounted row.
+    const stableIsAtEndChange = useStableEvent((isAtEnd: boolean) => {
+        onIsAtEndChange?.(isAtEnd);
     });
 
-    const stableTailContentChange = useStableEvent((reason?: ContentChangeReason) => {
-        onMessageContentChange(reason);
+    const stableTimelineDataChange = useStableEvent(() => {
+        onTimelineDataChange?.();
     });
 
     const currentUserOrder = React.useMemo(() => {
@@ -1591,27 +1513,26 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return container.querySelector(`[data-message-id="${messageId}"]`);
     }, [resolveScrollContainer]);
 
+    // Accepts any index the list renders, the trailing streaming entry
+    // included — it lives at historyEntries.length and is a legitimate
+    // navigation target (the timeline rail's last item).
     const scrollHistoryIndexIntoView = React.useCallback((index: number) => {
-        if (index < 0 || index >= historyEntries.length) {
+        if (index < 0 || index >= allEntries.length) {
             return false;
         }
 
-        if (!shouldVirtualizeHistory) {
+        const list = listRef.current;
+        if (!list) {
             return false;
         }
 
-        const virtualizer = tanstackVirtualizerRef.current;
-        if (!virtualizer) {
-            return false;
-        }
-
-        // Smooth scrolling can stop at a stale offset while unmounted,
-        // variable-height rows replace estimates with real measurements. Use
-        // exact auto-reconciliation; mounted targets still take the smooth DOM
-        // path below.
-        virtualizer.scrollToIndex(index, { align: 'start', behavior: 'auto' });
+        // Unanimated: an unmounted target's position is still an estimate, and
+        // a smooth scroll would end at that stale offset once the real
+        // measurement replaces it. Mounted targets still take the smooth DOM
+        // path in scrollMessageElementIntoView.
+        void list.scrollToIndex({ index, animated: false, viewPosition: 0 });
         return true;
-    }, [historyEntries.length, shouldVirtualizeHistory]);
+    }, [allEntries.length]);
 
     const scrollMessageElementIntoView = React.useCallback((messageId: string, behavior: ScrollBehavior = 'auto') => {
         const container = resolveScrollContainer();
@@ -1654,10 +1575,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return true;
                 }
 
-                const targetIsTail = trailingStreamingEntry !== undefined && index >= historyEntries.length;
-                if (targetIsTail) {
-                    return false;
-                }
 
                 return scrollHistoryIndexIntoView(index);
             },
@@ -1670,11 +1587,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 }
 
                 return scrollMessageElementIntoView(messageId, behavior)
-                    || (
-                        trailingStreamingEntry !== undefined && index >= historyEntries.length
-                            ? false
-                            : scrollHistoryIndexIntoView(index)
-                    );
+                    || scrollHistoryIndexIntoView(index);
             },
 
             holdViewportAnchor: (anchor) => {
@@ -1718,7 +1631,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 window.requestAnimationFrame(step);
             },
 
-            isHistoryVirtualized: () => shouldVirtualizeHistory,
+            // The timeline is always virtualized now; the flag stays so callers
+            // that branch on it keep compiling and take the virtualized path.
+            isHistoryVirtualized: () => true,
 
             captureViewportAnchor: () => {
                 const container = resolveScrollContainer();
@@ -1790,14 +1705,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             },
 
             scrollToBottom: () => {
-                if (shouldVirtualizeHistory && historyEntries.length > 0 && tanstackVirtualizerRef.current) {
-                    tanstackVirtualizerRef.current.scrollToEnd();
+                const list = listRef.current;
+                if (list) {
+                    void list.scrollToEnd({ animated: false });
                     return;
                 }
                 const container = resolveScrollContainer();
                 if (!container) return;
                 // Overshoot so the browser clamps to the exact fractional
-                // maximum (scrollHeight is integer-rounded) — see useChatAutoFollow.
+                // maximum (scrollHeight is integer-rounded).
                 container.scrollTop = container.scrollHeight + 4096;
             },
         };
@@ -1814,65 +1730,85 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             objectRef.current = null;
         };
-    }, [findMessageElement, historyEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
+    }, [findMessageElement, historyEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, turnIndexMap, ref]);
 
-    const disableFadeIn = false;
+    const anchoredEndSpace = React.useMemo<TimelineAnchoredEndSpace | undefined>(() => {
+        const resolved = resolveChatListAnchoredEndSpace(
+            allEntries,
+            anchorMessageId,
+            (entry) => (entry.kind === 'turn' ? entry.turn.userMessage.info.id : entry.message.info.id),
+        );
+        if (!resolved || !anchorMessageId) {
+            return undefined;
+        }
+        return {
+            ...resolved,
+            onReady: (info) => {
+                if (info.anchorIndex === undefined) return;
+                onAnchorReady?.(anchorMessageId, info.anchorIndex);
+            },
+            onSizeChanged: () => {
+                onAnchorSizeChanged?.(anchorMessageId);
+            },
+        };
+    }, [allEntries, anchorMessageId, onAnchorReady, onAnchorSizeChanged]);
+
+    const rowContext = React.useMemo(() => ({
+        scrollToBottom: stableScrollToBottom,
+        stickyUserHeader,
+        defaultActivityExpanded,
+        turnUiStates,
+        onToggleTurnGroup: toggleTurnGroup,
+        chatRenderMode,
+        showTurnChangedFiles,
+        shouldAnimateUserMessage,
+        onUserAnimationConsumed,
+        reviewTransferDirection,
+        streamingTailKey: trailingStreamingEntry?.key ?? null,
+        directory,
+        sessionIsWorking,
+        activeStreamingMessageId,
+        activeStreamingPhase,
+    }), [
+        activeStreamingMessageId,
+        activeStreamingPhase,
+        chatRenderMode,
+        defaultActivityExpanded,
+        directory,
+        onUserAnimationConsumed,
+        reviewTransferDirection,
+        sessionIsWorking,
+        shouldAnimateUserMessage,
+        showTurnChangedFiles,
+        stableScrollToBottom,
+        stickyUserHeader,
+        toggleTurnGroup,
+        trailingStreamingEntry?.key,
+        turnUiStates,
+    ]);
 
     return (
-        <div>
-                <FadeInDisabledProvider disabled={disableFadeIn}>
-                    <div className="relative w-full">
-                        {/* Virtualized history rows unmount/remount during scroll;
-                            re-running the reveal fade on every remount reads as
-                            blinking. History content is never "new", so fade-in
-                            is disabled there — the streaming tail keeps it. */}
-                        <FadeInDisabledProvider disabled={shouldVirtualizeHistory}>
-                            <StaticHistoryList
-                                key={sessionKey}
-                                entries={historyEntries}
-                                engine={historyEngine}
-                                contentRef={historyContentRef}
-                                scrollRef={scrollRef}
-                                registerTanstackVirtualizer={registerTanstackVirtualizer}
-                                virtualizerKey={sessionKey}
-                                onMessageContentChange={stableHistoryContentChange}
-                                getAnimationHandlers={stableGetAnimationHandlers}
-                                scrollToBottom={stableScrollToBottom}
-                                stickyUserHeader={stickyUserHeader}
-                                defaultActivityExpanded={defaultActivityExpanded}
-                                turnUiStates={turnUiStates}
-                                onToggleTurnGroup={toggleTurnGroup}
-                                chatRenderMode={chatRenderMode}
-                                shouldAnimateUserMessage={shouldAnimateUserMessage}
-                                onUserAnimationConsumed={onUserAnimationConsumed}
-                                reviewTransferDirection={reviewTransferDirection}
-                            />
-                        </FadeInDisabledProvider>
-                        {trailingStreamingEntry ? (
-                            <StreamingTailContent
-                                entry={trailingStreamingEntry}
-                                directory={directory}
-                                onMessageContentChange={stableTailContentChange}
-                                getAnimationHandlers={stableGetAnimationHandlers}
-                                scrollToBottom={stableScrollToBottom}
-                                stickyUserHeader={stickyUserHeader}
-                                sessionIsWorking={sessionIsWorking}
-                                defaultActivityExpanded={defaultActivityExpanded}
-                                turnUiStates={turnUiStates}
-                                onToggleTurnGroup={toggleTurnGroup}
-                                chatRenderMode={chatRenderMode}
-                                showTurnChangedFiles={showTurnChangedFiles}
-                                shouldAnimateUserMessage={shouldAnimateUserMessage}
-                                onUserAnimationConsumed={onUserAnimationConsumed}
-                                activeStreamingMessageId={activeStreamingMessageId}
-                                activeStreamingPhase={activeStreamingPhase}
-                                reviewTransferDirection={reviewTransferDirection}
-                            />
-                        ) : null}
-                    </div>
-                </FadeInDisabledProvider>
-
-        </div>
+        // Virtualized rows unmount/remount during scroll; re-running the reveal
+        // fade on every remount reads as blinking. Rows are never "new" from the
+        // list's point of view, so fade-in is disabled for them — content
+        // arriving inside the streaming tail keeps its own animations.
+        <FadeInDisabledProvider disabled>
+            <TimelineList
+                key={sessionKey}
+                entries={allEntries}
+                streamingTailKey={trailingStreamingEntry?.key ?? null}
+                registerList={handleRegisterList}
+                anchoredEndSpace={anchoredEndSpace}
+                composerOverlayHeight={composerOverlayHeight}
+                onIsAtEndChange={stableIsAtEndChange}
+                onTimelineDataChange={stableTimelineDataChange}
+                listHeader={listHeader}
+                listFooter={listFooter}
+                scrollContainerProps={scrollContainerProps}
+                rowContext={rowContext}
+                endPinningReleased={endPinningReleased}
+            />
+        </FadeInDisabledProvider>
     );
 });
 

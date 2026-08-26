@@ -26,9 +26,6 @@ import { QuestionCard } from '../QuestionCard';
 
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 
-/** Stable no-op so ChatMessage memoization keeps working in the read-only peek. */
-const NOOP_CONTENT_CHANGE = (): void => {};
-
 /**
  * The `/btw` peek panel.
  *
@@ -446,7 +443,6 @@ const BtwMessages: React.FC<{
                         message={record}
                         previousMessage={data.messageRecords[index - 1]}
                         nextMessage={data.messageRecords[index + 1]}
-                        onContentChange={NOOP_CONTENT_CHANGE}
                         isInActiveTurn={index === data.messageRecords.length - 1}
                         activeStreamingPhase={
                             record.info.id === data.streamingMessageId ? data.activeStreamingPhase : null

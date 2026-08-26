@@ -357,13 +357,7 @@ const readPersistedActiveProjectId = (): string | null => {
   return null;
 };
 
-const cacheProjects = (projects: ProjectEntry[], activeProjectId: string | null) => {
-  try {
-    safeStorage.setItem(getProjectsStorageKey(), JSON.stringify(projects));
-  } catch {
-    // ignored
-  }
-
+const cacheActiveProjectId = (activeProjectId: string | null) => {
   try {
     const activeProjectStorageKey = getActiveProjectStorageKey();
     if (activeProjectId) {
@@ -374,6 +368,15 @@ const cacheProjects = (projects: ProjectEntry[], activeProjectId: string | null)
   } catch {
     // ignored
   }
+};
+
+const cacheProjects = (projects: ProjectEntry[], activeProjectId: string | null) => {
+  try {
+    safeStorage.setItem(getProjectsStorageKey(), JSON.stringify(projects));
+  } catch {
+    // ignored
+  }
+  cacheActiveProjectId(activeProjectId);
 };
 
 const persistProjects = (projects: ProjectEntry[], activeProjectId: string | null, manualOrder?: string[]) => {
@@ -693,18 +696,13 @@ export const useProjectsStore = create<ProjectsStore>()(
       if (activeProjectId === id) {
         return;
       }
-      const target = projects.find((project) => project.id === id);
-      if (!target) {
+      if (!projects.some((project) => project.id === id)) {
         return;
       }
 
-      const now = Date.now();
-      const nextProjects = projects.map((project) =>
-        project.id === id ? { ...project, lastOpenedAt: now } : project
-      );
-
-      set({ projects: nextProjects, activeProjectId: id });
-      persistProjects(nextProjects, id, get().manualProjectOrder);
+      set({ activeProjectId: id });
+      cacheActiveProjectId(id);
+      void updateDesktopSettings({ activeProjectId: id });
     },
 
     renameProject: (id: string, label: string) => {

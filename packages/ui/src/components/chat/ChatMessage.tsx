@@ -14,7 +14,6 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 
-import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import MessageBody from './message/MessageBody';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
@@ -132,8 +131,6 @@ interface ChatMessageProps {
         info: Message;
         parts: Part[];
     };
-    onContentChange?: (reason?: ContentChangeReason) => void;
-    animationHandlers?: AnimationHandlers;
     scrollToBottom?: () => void;
     turnGroupingContext?: TurnGroupingContext;
     assistantHeaderMessageId?: string;
@@ -148,8 +145,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     message,
     previousMessage,
     nextMessage,
-    onContentChange,
-    animationHandlers,
     turnGroupingContext,
     assistantHeaderMessageId,
     isInActiveTurn = false,
@@ -850,34 +845,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         });
     }, [defaultOpenToolIds, effectiveExpandedTools, message.info.id]);
 
-    const resolvedAnimationHandlers = animationHandlers ?? null;
-    const hasAnnouncedAuxiliaryScrollRef = React.useRef(false);
-
-    const animationCompletedRef = React.useRef(false);
-    const hasRequestedReservationRef = React.useRef(false);
-    const animationStartNotifiedRef = React.useRef(false);
-    const hasTriggeredReservationOnceRef = React.useRef(false);
     const hasEverStreamedRef = React.useRef(false);
 
     React.useEffect(() => {
-        animationCompletedRef.current = false;
-        hasRequestedReservationRef.current = false;
-        animationStartNotifiedRef.current = false;
-        hasTriggeredReservationOnceRef.current = false;
-        hasAnnouncedAuxiliaryScrollRef.current = false;
         hasEverStreamedRef.current = false;
     }, [message.info.id]);
-
-    const handleAuxiliaryContentComplete = React.useCallback(() => {
-        if (isUser) {
-            return;
-        }
-        if (hasAnnouncedAuxiliaryScrollRef.current) {
-            return;
-        }
-        hasAnnouncedAuxiliaryScrollRef.current = true;
-        onContentChange?.('structural');
-    }, [isUser, onContentChange]);
 
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
 
@@ -901,114 +873,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         hasEverStreamedRef.current = true;
     }
 
-    const hasReasoningParts = React.useMemo(() => {
-        if (isUser) {
-            return false;
-        }
-        return visibleParts.some((part) => part.type === 'reasoning');
-    }, [isUser, visibleParts]);
-
     const allowAnimation = shouldAnimateMessage && !isAnimationSettled && !isStreamingPhase && !hasEverStreamedRef.current;
-    const shouldReserveAnimationSpace = !isUser && shouldAnimateMessage && assistantTextParts.length > 0 && !shouldCoordinateRendering;
-
-    React.useEffect(() => {
-        if (!resolvedAnimationHandlers?.onStreamingCandidate) {
-            return;
-        }
-
-        if (!shouldReserveAnimationSpace) {
-            if (hasRequestedReservationRef.current) {
-                if (hasReasoningParts && resolvedAnimationHandlers?.onReasoningBlock) {
-                    resolvedAnimationHandlers.onReasoningBlock();
-                } else if (resolvedAnimationHandlers?.onReservationCancelled) {
-                    resolvedAnimationHandlers.onReservationCancelled();
-                }
-                hasRequestedReservationRef.current = false;
-            }
-            return;
-        }
-
-        if (hasTriggeredReservationOnceRef.current) {
-            return;
-        }
-
-        hasTriggeredReservationOnceRef.current = true;
-        resolvedAnimationHandlers.onStreamingCandidate();
-        hasRequestedReservationRef.current = true;
-    }, [resolvedAnimationHandlers, shouldReserveAnimationSpace, hasReasoningParts]);
-
-    React.useEffect(() => {
-        if (!resolvedAnimationHandlers?.onAnimationStart) {
-            return;
-        }
-        if (!allowAnimation) {
-            return;
-        }
-        if (animationStartNotifiedRef.current) {
-            return;
-        }
-        resolvedAnimationHandlers.onAnimationStart();
-        animationStartNotifiedRef.current = true;
-    }, [resolvedAnimationHandlers, allowAnimation]);
-
-    React.useEffect(() => {
-        if (isUser) {
-            return;
-        }
-
-        const handler = resolvedAnimationHandlers?.onAnimatedHeightChange;
-        if (!handler) {
-            return;
-        }
-
-        const shouldTrackHeight = allowAnimation || shouldReserveAnimationSpace;
-        if (!shouldTrackHeight) {
-            return;
-        }
-
-        const element = messageContainerRef.current;
-        if (!element) {
-            return;
-        }
-
-        if (typeof window === 'undefined' || typeof ResizeObserver === 'undefined') {
-            handler(element.getBoundingClientRect().height);
-            return;
-        }
-
-        let rafId: number | null = null;
-        const notifyHeight = (height: number) => {
-            if (typeof window === 'undefined') {
-                handler(height);
-                return;
-            }
-            if (rafId !== null) {
-                window.cancelAnimationFrame(rafId);
-            }
-            rafId = window.requestAnimationFrame(() => {
-                handler(height);
-            });
-        };
-
-        const observer = new ResizeObserver((entries) => {
-            const entry = entries[0];
-            if (!entry) {
-                return;
-            }
-            notifyHeight(entry.contentRect.height);
-        });
-
-        observer.observe(element);
-        notifyHeight(element.getBoundingClientRect().height);
-
-        return () => {
-            if (rafId !== null) {
-                window.cancelAnimationFrame(rafId);
-                rafId = null;
-            }
-            observer.disconnect();
-        };
-    }, [allowAnimation, isUser, resolvedAnimationHandlers, shouldReserveAnimationSpace]);
 
     if (shouldHideUserMessage) {
         return null;
@@ -1070,13 +935,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 onShowPopup={handleShowPopup}
                                                 streamPhase={streamPhase}
                                                 allowAnimation={allowAnimation}
-                                                onContentChange={onContentChange}
                                                 shouldShowHeader={false}
                                                 hasTextContent={hasTextContent}
                                                 onCopyMessage={handleCopyMessage}
                                                 copiedMessage={copiedMessage}
                                                 showReasoningTraces={showReasoningTraces}
-                                                onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
                                                 agentMention={agentMention}
                                                 onRevert={handleRevert}
                                                 onFork={isUser ? handleFork : undefined}
@@ -1106,13 +969,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 onShowPopup={handleShowPopup}
                                                 streamPhase={streamPhase}
                                                 allowAnimation={allowAnimation}
-                                                onContentChange={onContentChange}
                                                 shouldShowHeader={false}
                                                 hasTextContent={hasTextContent}
                                                 onCopyMessage={handleCopyMessage}
                                                 copiedMessage={copiedMessage}
                                                 showReasoningTraces={showReasoningTraces}
-                                                onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
                                                 agentMention={agentMention}
                                                 onRevert={handleRevert}
                                                 onFork={isUser ? handleFork : undefined}
@@ -1152,12 +1013,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 onShowPopup={handleShowPopup}
                                 streamPhase={streamPhase}
                                 allowAnimation={allowAnimation}
-                                onContentChange={onContentChange}
                                 shouldShowHeader={shouldShowHeader}
                                 hasTextContent={hasTextContent}
                                 onCopyMessage={handleCopyMessage}
                                 copiedMessage={copiedMessage}
-                                onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
                                 showReasoningTraces={showReasoningTraces}
                                 agentMention={agentMention}
                                 turnGroupingContext={turnGroupingContext}

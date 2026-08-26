@@ -1,3 +1,4 @@
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 
 import { toast } from '@/components/ui';
@@ -146,11 +147,10 @@ export const PlansSection: React.FC<{
     [onTogglePinned, projectRef, t]
   );
 
-  const visiblePlans = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return plans;
-    return plans.filter((plan) => plan.title.toLowerCase().includes(needle));
-  }, [plans, query]);
+  const visiblePlans = React.useMemo(
+    () => plans.filter((plan) => matchesRankQuery([plan.title], query)),
+    [plans, query],
+  );
 
   const handleOpenPlan = React.useCallback(
     (plan: ProjectPlanLink) => {

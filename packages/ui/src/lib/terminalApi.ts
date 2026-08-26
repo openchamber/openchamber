@@ -1,4 +1,4 @@
-import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalSession, TerminalShellOption, TerminalStreamEvent } from './api/types';
+import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalServerSession, TerminalSession, TerminalShellOption, TerminalStreamEvent } from './api/types';
 import { openRuntimeWebSocket } from './relay/runtime-socket';
 import type { RelayTunnelWebSocket } from './relay/tunnel-client';
 import { runtimeFetch } from './runtime-fetch';
@@ -355,6 +355,32 @@ export async function createTerminalSession(options: CreateTerminalOptions): Pro
   const response = await runtimeFetch('/api/terminal/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options) });
   if (!response.ok) throw await responseError(response, 'Failed to create terminal session');
   return response.json() as Promise<TerminalSession>;
+}
+export async function listTerminalSessions(cwd: string): Promise<TerminalServerSession[]> {
+  const response = await runtimeFetch(`/api/terminal/sessions?cwd=${encodeURIComponent(cwd)}`);
+  if (!response.ok) throw await responseError(response, 'Failed to list terminal sessions');
+  const payload: unknown = await response.json().catch(() => null);
+  const rawSessions = payload && typeof payload === 'object' && 'sessions' in payload ? payload.sessions : null;
+  if (!Array.isArray(rawSessions)) throw new Error('Failed to list terminal sessions');
+  const parsed: TerminalServerSession[] = [];
+  for (const entry of rawSessions as unknown[]) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    // SAFETY: every field is verified below before the value is used.
+    const candidate = entry as Partial<Record<keyof TerminalServerSession, unknown>>;
+    if (typeof candidate.sessionId !== 'string' || typeof candidate.cwd !== 'string') continue;
+    if (candidate.status !== 'running' && candidate.status !== 'exited') continue;
+    parsed.push({
+      sessionId: candidate.sessionId,
+      cwd: candidate.cwd,
+      status: candidate.status,
+      createdAt: typeof candidate.createdAt === 'number' ? candidate.createdAt : null,
+    });
+  }
+  return parsed;
+}
+export async function touchTerminalSessions(sessionIds: string[]): Promise<void> {
+  if (sessionIds.length === 0) return;
+  await command('/api/terminal/touch', 'POST', { sessionIds });
 }
 export async function listTerminalShells(): Promise<TerminalShellOption[]> {
   const response = await runtimeFetch('/api/terminal/shells');

@@ -80,8 +80,19 @@ export interface ForceKillOptions {
   cwd?: string;
 }
 
+export interface TerminalServerSession {
+  sessionId: string;
+  cwd: string;
+  status: 'running' | 'exited';
+  createdAt: number | null;
+}
+
 export interface TerminalAPI {
   listShells?(): Promise<TerminalShellOption[]>;
+  /** Server-side sessions for a working directory; absent on runtimes without a server terminal list. */
+  listSessions?(cwd: string): Promise<TerminalServerSession[]>;
+  /** Marks the sessions as active so the server's idle sweep does not reap terminals an open client still shows. */
+  touchSessions?(sessionIds: string[]): Promise<void>;
   createSession(options: CreateTerminalOptions): Promise<TerminalSession>;
   connect(sessionId: string, handlers: TerminalHandlers): Subscription;
   sendInput(sessionId: string, input: string): Promise<void>;

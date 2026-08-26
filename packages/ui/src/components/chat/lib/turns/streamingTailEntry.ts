@@ -15,8 +15,13 @@ export type StreamingTailEntry =
     | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean };
 
 type BuildLiveStreamingEntryOptions = {
-    activeStreamingMessageId: string | null | undefined;
-    liveParts: Part[];
+    // Live parts for EVERY message of the streaming tail, not only the one
+    // currently streaming: when the stream moves to the next step message, the
+    // previous message's base record can still lag behind the part store, and
+    // rendering it from that stale snapshot briefly drops its completed tool
+    // parts — remounting them (and replaying their reveal animation) once the
+    // record catches up.
+    livePartsByMessageId: Readonly<Record<string, Part[]>>;
     showTextJustificationActivity: boolean;
     showTurnChangedFiles: boolean;
     mergeHiddenUserTurns?: { planModeEnabled: boolean };
@@ -24,10 +29,12 @@ type BuildLiveStreamingEntryOptions = {
 
 const withLiveParts = (
     message: ChatMessageEntry,
-    activeStreamingMessageId: string,
-    liveParts: Part[],
+    livePartsByMessageId: Readonly<Record<string, Part[]>>,
 ): ChatMessageEntry => {
-    if (message.info.id !== activeStreamingMessageId || message.parts === liveParts) {
+    const liveParts = livePartsByMessageId[message.info.id];
+    // An empty live array is ambiguous — the store may simply not have loaded
+    // this message's parts — and must never erase parts the record does have.
+    if (!liveParts || liveParts.length === 0 || message.parts === liveParts) {
         return message;
     }
 
@@ -41,13 +48,10 @@ export const buildLiveStreamingEntry = <TEntry extends StreamingTailEntry>(
     entry: TEntry,
     options: BuildLiveStreamingEntryOptions,
 ): TEntry => {
-    const activeStreamingMessageId = options.activeStreamingMessageId;
-    if (!activeStreamingMessageId) {
-        return entry;
-    }
+    const livePartsByMessageId = options.livePartsByMessageId;
 
     if (entry.kind === 'ungrouped') {
-        const message = withLiveParts(entry.message, activeStreamingMessageId, options.liveParts);
+        const message = withLiveParts(entry.message, livePartsByMessageId);
         if (message === entry.message) {
             return entry;
         }
@@ -59,7 +63,7 @@ export const buildLiveStreamingEntry = <TEntry extends StreamingTailEntry>(
 
     let changed = false;
     const assistantMessages = entry.turn.assistantMessages.map((message) => {
-        const next = withLiveParts(message, activeStreamingMessageId, options.liveParts);
+        const next = withLiveParts(message, livePartsByMessageId);
         if (next !== message) {
             changed = true;
         }

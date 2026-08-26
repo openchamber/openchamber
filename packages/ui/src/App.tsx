@@ -20,7 +20,7 @@ import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { hasModifier } from '@/lib/utils';
+import { useKeybind } from '@/hooks/useKeybind';
 import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop } from '@/lib/desktop';
 import {
   getInjectedBootOutcome,
@@ -626,7 +626,6 @@ function App({ apis }: AppProps) {
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
-      useUIStore.getState().setActiveMainTab('chat');
       void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
     };
 
@@ -675,7 +674,6 @@ function App({ apis }: AppProps) {
         ? detail.projectId.trim()
         : null;
       const hasProjectTarget = Boolean(directory || projectId);
-      useUIStore.getState().setActiveMainTab('chat');
       useUIStore.getState().setSessionSwitcherOpen(false);
       useSessionUIStore.getState().openNewSessionDraft({
         target: hasProjectTarget ? 'project' : 'chat',
@@ -725,26 +723,10 @@ function App({ apis }: AppProps) {
 
   useSessionStatusBootstrap({ enabled: embeddedBackgroundWorkEnabled });
 
-  React.useEffect(() => {
-    if (embeddedSessionChat) {
-      return;
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isDebugShortcut = hasModifier(e)
-        && e.shiftKey
-        && !e.altKey
-        && (e.code === 'KeyD' || e.key.toLowerCase() === 'd');
-
-      if (isDebugShortcut) {
-        e.preventDefault();
-        setShowMemoryDebug(prev => !prev);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [embeddedSessionChat]);
+  useKeybind('toggle_memory_debug', () => {
+    if (embeddedSessionChat) return false;
+    setShowMemoryDebug((previous) => !previous);
+  });
 
   React.useEffect(() => {
     if (embeddedSessionChat) {

@@ -1,3 +1,4 @@
+import { rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import QRCode from 'qrcode';
 import { Button } from '@/components/ui/button';
@@ -1255,13 +1256,10 @@ export const RemoteInstancesPage: React.FC = () => {
     [createImportedInstance],
   );
 
-  const filteredImportCandidates = React.useMemo(() => {
-    const query = sshHostSearch.trim().toLowerCase();
-    if (!query) return importCandidates;
-    return importCandidates.filter((candidate) => {
-      return candidate.host.toLowerCase().includes(query) || candidate.sshCommand.toLowerCase().includes(query);
-    });
-  }, [importCandidates, sshHostSearch]);
+  const filteredImportCandidates = React.useMemo(
+    () => rankByQuery(importCandidates, sshHostSearch, (candidate) => [candidate.host, candidate.sshCommand]),
+    [importCandidates, sshHostSearch],
+  );
 
   // Opening a ready instance means pointing this window at the forwarded local
   // URL — the same navigation the host switcher performs after its own connect.

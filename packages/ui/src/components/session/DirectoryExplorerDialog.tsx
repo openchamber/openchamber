@@ -24,6 +24,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
 import { opencodeClient } from '@/lib/opencode/client';
 import { useI18n } from '@/lib/i18n';
+import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import {
   isFilesystemError,
   type FilesystemErrorReason,
@@ -148,7 +149,6 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const homeDirectory = useDirectoryStore((s) => s.homeDirectory);
   const projects = useProjectsStore((s) => s.projects);
   const addProject = useProjectsStore((s) => s.addProject);
-  const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const gitIdentityProfiles = useGitIdentitiesStore((s) => s.profiles);
@@ -361,9 +361,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const hasHighlightedBrowseItem = Boolean(
     highlightedRow && (highlightedRow.type === 'up' || (highlightedRow.type === 'directory' && !highlightedRow.disabled))
   );
-  const submitModifierLabel = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
-    ? '⌘'
-    : 'Ctrl';
+  const submitModifierLabel = formatShortcutForDisplay('mod');
   const submitActionLabel = isAlreadyAdded
     ? t('directoryExplorerDialog.actions.alreadyAdded')
     : isCloneMode
@@ -411,11 +409,10 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   }, [onOpenChange]);
 
   const openProjectDraft = React.useCallback((projectId: string, projectPath: string) => {
-    setActiveMainTab('chat');
     if (isMobile) setSessionSwitcherOpen(false);
     openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: projectPath });
     handleClose();
-  }, [handleClose, isMobile, openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
+  }, [handleClose, isMobile, openNewSessionDraft, setSessionSwitcherOpen]);
 
   const handleQuickAdd = React.useCallback((event: React.MouseEvent, path: string) => {
     event.stopPropagation();

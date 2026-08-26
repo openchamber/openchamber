@@ -6,7 +6,6 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { useUIStore } from '@/stores/useUIStore';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useGitStore } from '@/stores/useGitStore';
@@ -16,7 +15,7 @@ import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resetStreamingState } from '@/sync/streaming';
-import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useGlobalSessionStatusStore, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
 import { clearSessionModelUsageCache } from '@/lib/analytics/session-model-usage-cache';
@@ -38,7 +37,6 @@ export const reconnectAppForTransportSwitch = (): void => {
 
 export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedDetail): void => {
   useSessionUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
-  useUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
   if (detail.previousRuntimeKey) {
     useAutoReviewStore.getState().stopRunningRunsForRuntime(detail.previousRuntimeKey);
   }
@@ -60,7 +58,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // Cross-project session list (mobile sessions sheet & co) belongs to the
   // previous instance — drop it so stale sessions can't linger after a switch.
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
-  useGlobalSessionStatusStore.setState({ statusById: new Map() });
+  replaceGlobalSessionStatusById(new Map());
   resetSessionOrdering();
   // Turn timings belong to the previous instance's sessions, and the reset also
   // restarts the resume window so the switch is treated as a fresh load.
@@ -73,7 +71,6 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useFilesViewTabsStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   clearSessionModelUsageCache();
   useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
-  useUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
   resetStreamingState();
   queueMicrotask(() => void syncDesktopSettings());
 };

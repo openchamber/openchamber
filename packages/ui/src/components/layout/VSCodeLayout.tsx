@@ -41,6 +41,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import type { UsageWindow } from '@/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import { useSessionListSync } from '@/components/session/sidebar/list/useSessionListSync';
 
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 
@@ -55,10 +56,10 @@ const formatTime = (timestamp: number | null, timeFormatPreference: TimeFormatPr
 
 // Width threshold for mobile vs desktop layout in settings
 const MOBILE_WIDTH_THRESHOLD = 550;
-// Width threshold for expanded layout (sidebar + chat side by side)
-const EXPANDED_LAYOUT_THRESHOLD = 1400;
 // Sessions sidebar width in expanded layout
 const SESSIONS_SIDEBAR_WIDTH = 280;
+// Keep enough room for the chat after adding the persistent sessions sidebar.
+const EXPANDED_LAYOUT_THRESHOLD = SESSIONS_SIDEBAR_WIDTH + 520;
 const SESSIONS_SIDEBAR_MIN_WIDTH = Math.round(SESSIONS_SIDEBAR_WIDTH * 0.7);
 const SESSIONS_SIDEBAR_MAX_WIDTH = 520;
 
@@ -526,8 +527,11 @@ export const VSCodeLayout: React.FC = () => {
     }
   }, [usesExpandedLayout, currentView, viewMode]);
 
+  useSessionListSync({ isVSCode: true });
+
   return (
-    <div ref={containerRef} className="h-full w-full bg-background text-foreground flex flex-col">
+    <>
+      <div ref={containerRef} className="h-full w-full bg-background text-foreground flex flex-col">
       {viewMode === 'editor' ? (
         // Editor mode: just chat, no sidebar
         <div className="flex flex-col h-full">
@@ -639,7 +643,8 @@ export const VSCodeLayout: React.FC = () => {
         </>
       )}
       <SessionDialogs />
-    </div>
+      </div>
+    </>
   );
 };
 

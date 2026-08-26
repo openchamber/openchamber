@@ -19,7 +19,6 @@ import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialo
 import { ForkSessionDialog, type ForkSessionExecution } from '@/components/session/ForkSessionDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
-import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 
 import { MarkdownImageGallery, SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -419,13 +418,10 @@ interface MessageBodyProps {
     onShowPopup: (content: ToolPopupContent) => void;
     streamPhase: StreamPhase;
     allowAnimation: boolean;
-    onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
-
     shouldShowHeader?: boolean;
     hasTextContent?: boolean;
     onCopyMessage?: () => void | boolean | Promise<void | boolean>;
     copiedMessage?: boolean;
-    onAuxiliaryContentComplete?: () => void;
     showReasoningTraces?: boolean;
     agentMention?: AgentMentionInfo;
     turnGroupingContext?: TurnGroupingContext;
@@ -1112,10 +1108,8 @@ const AssistantMessageBody = React.memo(({
     onShowPopup,
     streamPhase: _streamPhase,
     allowAnimation: _allowAnimation,
-    onContentChange,
     hasTextContent = false,
     onCopyMessage,
-    onAuxiliaryContentComplete,
     showReasoningTraces = false,
     turnGroupingContext,
     errorMessage,
@@ -1422,50 +1416,6 @@ const AssistantMessageBody = React.memo(({
     const shouldHoldTools = awaitingMessageCompletion
         || (hasTools && (hasPendingTools || hasOpenStep || !allToolsFinalized));
     const shouldHoldReasoning = awaitingMessageCompletion || shouldHoldForReasoning;
-
-    const hasAuxiliaryContent = hasTools || reasoningParts.length > 0;
-    const isTextlessAssistantMessage = assistantTextParts.length === 0;
-    const auxiliaryContentComplete = hasAuxiliaryContent && isTextlessAssistantMessage && !shouldHoldTools && !shouldHoldReasoning && allToolsFinalized && reasoningComplete;
-    const auxiliaryCompletionAnnouncedRef = React.useRef(false);
-    const soloReasoningScrollTriggeredRef = React.useRef(false);
-
-    React.useEffect(() => {
-        soloReasoningScrollTriggeredRef.current = false;
-    }, [messageId]);
-
-    React.useEffect(() => {
-        if (!auxiliaryContentComplete) {
-            auxiliaryCompletionAnnouncedRef.current = false;
-            return;
-        }
-        if (auxiliaryCompletionAnnouncedRef.current) {
-            return;
-        }
-        auxiliaryCompletionAnnouncedRef.current = true;
-        onAuxiliaryContentComplete?.();
-    }, [auxiliaryContentComplete, onAuxiliaryContentComplete]);
-
-    React.useEffect(() => {
-        if (awaitingMessageCompletion) {
-            soloReasoningScrollTriggeredRef.current = false;
-            return;
-        }
-        if (hasTools) {
-            soloReasoningScrollTriggeredRef.current = false;
-            return;
-        }
-        if (reasoningParts.length === 0) {
-            return;
-        }
-        if (shouldHoldReasoning || !reasoningComplete) {
-            return;
-        }
-        if (soloReasoningScrollTriggeredRef.current) {
-            return;
-        }
-        soloReasoningScrollTriggeredRef.current = true;
-        onContentChange?.('structural');
-    }, [awaitingMessageCompletion, hasTools, onContentChange, reasoningComplete, reasoningParts.length, shouldHoldReasoning]);
 
     const hasCopyableText = Boolean(hasTextContent) && !awaitingMessageCompletion;
 
@@ -1821,7 +1771,6 @@ const AssistantMessageBody = React.memo(({
                         expandedTools={expandedTools}
                         onToggleTool={onToggleTool}
                         onShowPopup={onShowPopup}
-                        onContentChange={onContentChange}
                         streamPhase={effectiveStreamPhase}
                         showHeader={true}
                         animateRows={animateActivityRows}
@@ -1898,7 +1847,6 @@ const AssistantMessageBody = React.memo(({
                             messageId={messageId}
                             streamPhase={effectiveStreamPhase}
                             chatRenderMode={chatRenderMode}
-                            onContentChange={onContentChange}
                             onShowPopup={onShowPopup}
                         />
                     </div>
@@ -1933,7 +1881,6 @@ const AssistantMessageBody = React.memo(({
                                 messageId={messageId}
                                 streamPhase={effectiveStreamPhase}
                                 chatRenderMode={chatRenderMode}
-                                onContentChange={onContentChange}
                                 onShowPopup={onShowPopup}
                             />
                         );
@@ -1945,7 +1892,6 @@ const AssistantMessageBody = React.memo(({
                                 part={part}
                                 messageId={messageId}
                                 streamPhase={effectiveStreamPhase}
-                                onContentChange={onContentChange}
                             />
                         );
                     }
@@ -1989,7 +1935,6 @@ const AssistantMessageBody = React.memo(({
                                     onToggle={onToggleTool}
                                     isMobile={isMobile}
                                     alwaysShowActions={alwaysShowMessageActions}
-                                    onContentChange={onContentChange}
                                     onShowPopup={onShowPopup}
                                     animateTailText={animatedToolIdsLookup.has(toolPart.id)}
                                 />
@@ -2061,7 +2006,6 @@ const AssistantMessageBody = React.memo(({
         messageActionButtons,
         renderJustificationActions,
         sessionId,
-        onContentChange,
         onShowPopup,
         onToggleTool,
         shouldRenderActivityGroup,

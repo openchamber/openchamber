@@ -1,3 +1,4 @@
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 
 import { toast } from '@/components/ui';
@@ -186,13 +187,10 @@ export const MemorySection: React.FC<{
     };
   }, [markViewed, viewKey]);
 
-  const visibleEntries = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return entries;
-    return entries.filter((entry) => (
-      entry.title.toLowerCase().includes(needle) || entry.body.toLowerCase().includes(needle)
-    ));
-  }, [entries, query]);
+  const visibleEntries = React.useMemo(
+    () => entries.filter((entry) => matchesRankQuery([entry.title, entry.body], query)),
+    [entries, query],
+  );
 
   const handleDelete = React.useCallback(async (memoryId: string) => {
     if (!await deleteEntry(scope, memoryId)) {

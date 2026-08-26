@@ -473,7 +473,7 @@
    choreography driven by useNativeMobileChrome:
 
      show: shell keeps its full height for the whole 0.25s; the composer (and, when
-           pinned, the chat scroll container — see useChatAutoFollow) slides up via
+           pinned, the chat scroll container — see useChatTimelineScroll) slides up via
            inline transforms in sync with the keyboard; at the end the shell snaps to
            its final height (--oc-kb-layout, one reflow) and the shift is removed
            in the same frame — visually identical, so the swap is invisible.

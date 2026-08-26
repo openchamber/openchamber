@@ -43,28 +43,30 @@ export type DecorateContext = {
   onPreviewLoopback?: (url: string) => void;
 };
 
-// Reference the app's icon sprite (injected into <body> by the shared Icon
-// component) so DOM-built controls use the same themed icons as the rest of
-// the app. Sprite symbols are registered under `#oc-<name>`.
-const spriteIcon = (name: IconName): string =>
-  `<svg class="remixicon size-3.5" viewBox="0 0 24 24" aria-hidden="true"><use href="#oc-${name}"></use></svg>`;
-
 const ICONS = {
-  copy: spriteIcon('file-copy'),
-  check: spriteIcon('check'),
-  download: spriteIcon('download'),
-  zoomIn: spriteIcon('add'),
-  zoomOut: spriteIcon('subtract'),
-  fit: spriteIcon('refresh'),
-  textWrap: spriteIcon('text-wrap'),
-  image: spriteIcon('file-image'),
-} as const;
+  copy: 'file-copy',
+  check: 'check',
+  download: 'download',
+  zoomIn: 'add',
+  zoomOut: 'subtract',
+  fit: 'refresh',
+  textWrap: 'text-wrap',
+  image: 'file-image',
+} as const satisfies Record<string, IconName>;
 
 const ICON_BTN_CLASS =
   'p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--interactive-focus-ring)]';
 
-const setIconHtml = (el: Element, html: string): void => {
-  el.innerHTML = html;
+const setIcon = (el: Element, icon: keyof typeof ICONS): void => {
+  const iconName = ICONS[icon];
+  const svg = el.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'remixicon size-3.5');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const use = el.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#oc-${iconName}`);
+  svg.appendChild(use);
+  el.replaceChildren(svg);
 };
 
 const decorateImageLabels = (root: HTMLElement): void => {
@@ -74,7 +76,7 @@ const decorateImageLabels = (root: HTMLElement): void => {
     icon.className = 'inline-flex shrink-0';
     icon.setAttribute('aria-hidden', 'true');
     icon.setAttribute('data-openchamber-markdown-image-label-icon', 'true');
-    setIconHtml(icon, ICONS.image);
+    setIcon(icon, 'image');
     label.prepend(icon);
   }
 };
@@ -86,7 +88,7 @@ const makeIconButton = (icon: keyof typeof ICONS, title: string, slot: string): 
   button.setAttribute('data-md-action', slot);
   button.setAttribute('title', title);
   button.setAttribute('aria-label', title);
-  setIconHtml(button, ICONS[icon]);
+  setIcon(button, icon);
   return button;
 };
 
@@ -130,6 +132,9 @@ const applyCodeBlockWrapState = (wrapper: HTMLElement, enabled: boolean, labels:
 const layoutCodeLines = (pre: HTMLPreElement): void => {
   const code = pre.querySelector<HTMLElement>(':scope > code');
   if (!code || code.hasAttribute('data-md-code-lines')) return;
+
+  // The real gutter takes over the reserved footprint.
+  pre.removeAttribute('data-md-gutter-reserved');
 
   const text = code.textContent ?? '';
   const hasTrailingNewline = text.endsWith('\n');
@@ -196,11 +201,11 @@ export const applyMarkdownCodeBlockWrapState = (root: HTMLElement, enabled: bool
 };
 
 const flashCopied = (button: HTMLButtonElement, copiedTitle: string, restore: keyof typeof ICONS, restoreTitle: string): void => {
-  setIconHtml(button, ICONS.check);
+  setIcon(button, 'check');
   button.setAttribute('title', copiedTitle);
   button.setAttribute('aria-label', copiedTitle);
   window.setTimeout(() => {
-    setIconHtml(button, ICONS[restore]);
+    setIcon(button, restore);
     button.setAttribute('title', restoreTitle);
     button.setAttribute('aria-label', restoreTitle);
   }, 2000);
@@ -263,7 +268,15 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
     pre.style.margin = '0';
     pre.style.background = 'transparent';
     pre.classList.add('min-w-0', 'w-full', 'flex-1');
-    if (!ctx.deferCodeLineNumberSync) layoutCodeLines(pre);
+    if (!ctx.deferCodeLineNumberSync) {
+      layoutCodeLines(pre);
+    } else {
+      // Streaming defers the per-line gutter markup, but the gutter's
+      // horizontal footprint is reserved immediately — otherwise the
+      // end-of-stream decorate pass shifts every code line right by the
+      // gutter column and the finished message visibly jumps.
+      pre.setAttribute('data-md-gutter-reserved', '');
+    }
     body.appendChild(pre);
     wrapper.appendChild(header);
     wrapper.appendChild(body);
@@ -492,7 +505,7 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
       preview.setAttribute('data-md-url', href);
       preview.setAttribute('title', ctx.labels.previewTitle);
       preview.setAttribute('aria-label', ctx.labels.previewLabel);
-      setIconHtml(preview, ICONS.download);
+      setIcon(preview, 'download');
       anchor.parentNode?.insertBefore(preview, anchor.nextSibling);
     }
   }
@@ -554,7 +567,12 @@ export const attachMarkdownInteractions = (
     if (action === 'copy-code') {
       const code = actionEl.closest('[data-component="markdown-code"]')?.querySelector('code');
       const text = code ? getMarkdownCodeText(code) : '';
-      if (text) void copyTextToClipboard(text).then(() => flashCopied(actionEl as HTMLButtonElement, ctx.labels.copied, 'copy', ctx.labels.copy));
+      if (text) {
+        actionEl.setAttribute('data-md-copy-pending', '');
+        void copyTextToClipboard(text)
+          .then(() => flashCopied(actionEl as HTMLButtonElement, ctx.labels.copied, 'copy', ctx.labels.copy))
+          .finally(() => actionEl.removeAttribute('data-md-copy-pending'));
+      }
       return;
     }
 

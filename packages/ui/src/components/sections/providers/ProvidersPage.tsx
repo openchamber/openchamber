@@ -1,3 +1,4 @@
+import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -603,15 +604,9 @@ export const ProvidersPage: React.FC = () => {
                         </div>
                         <ScrollableOverlay outerClassName="max-h-[240px]" className="p-1">
                           {(() => {
-                            const query = providerSearchQuery.toLowerCase();
                             const customLabel = t('settings.providers.page.custom.optionLabel');
-                            const customMatches = !query
-                              || customLabel.toLowerCase().includes(query)
-                              || 'other'.includes(query)
-                              || 'custom'.includes(query);
-                            const filtered = unconnectedProviders.filter(p => {
-                              return (p.name || p.id).toLowerCase().includes(query) || p.id.toLowerCase().includes(query);
-                            });
+                            const customMatches = matchesRankQuery([customLabel, 'other', 'custom'], providerSearchQuery);
+                            const filtered = rankByQuery(unconnectedProviders, providerSearchQuery, (p) => [p.name || p.id, p.id]);
                             if (filtered.length === 0 && !customMatches) {
                               return <p className="py-4 text-center typography-meta text-muted-foreground">{t('settings.providers.page.connect.noProvidersFound')}</p>;
                             }
@@ -792,13 +787,10 @@ export const ProvidersPage: React.FC = () => {
     ? t('settings.providers.page.auth.useReconnectHint')
     : t('settings.providers.page.auth.incompleteHint');
 
-  const filteredModels = providerModels.filter((model) => {
-    const name = typeof model?.name === 'string' ? model.name : '';
-    const id = typeof model?.id === 'string' ? model.id : '';
-    const query = modelQuery.trim().toLowerCase();
-    if (!query) return true;
-    return name.toLowerCase().includes(query) || id.toLowerCase().includes(query);
-  });
+  const filteredModels = rankByQuery(providerModels, modelQuery, (model) => [
+    typeof model?.name === 'string' ? model.name : '',
+    typeof model?.id === 'string' ? model.id : '',
+  ]);
 
   if (isCustomEditMode && isEditableCustomProvider && editingCustomFormInitial) {
     return (

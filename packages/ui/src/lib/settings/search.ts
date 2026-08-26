@@ -149,17 +149,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['editor', 'autosave', 'auto-save', 'files', 'save'],
   },
   {
-    id: 'appearance.expanded-editor-toolbar',
-    page: 'general',
-    titleKey: 'settings.openchamber.visual.field.expandedEditorToolbar',
-    keywords: ['editor', 'toolbar', 'tabs', 'docked', 'files'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
     id: 'appearance.file-editor-keymap',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.fileEditorKeymap',
     keywords: ['editor', 'vim', 'keymap'],
+  },
+  {
+    id: 'appearance.session-tabs',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.sessionTabsGroup',
+    descriptionKey: 'settings.openchamber.visual.field.sessionTabsInfo',
+    keywords: ['session', 'tabs', 'header', 'working set'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
   },
   {
     id: 'appearance.terminal-quick-keys',
@@ -238,6 +239,19 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.openchamber.visual.section.reasoning',
     keywords: ['thinking', 'traces'],
+  },
+  {
+    id: 'chat.streaming',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.section.streaming',
+    keywords: ['stream', 'scroll'],
+  },
+  {
+    id: 'chat.streaming-auto-follow',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.streamingAutoFollow',
+    descriptionKey: 'settings.openchamber.visual.field.streamingAutoFollowInfo',
+    keywords: ['autoscroll', 'auto-scroll', 'follow', 'stick to bottom', 'streaming'],
   },
   {
     id: 'chat.sticky-user-header',

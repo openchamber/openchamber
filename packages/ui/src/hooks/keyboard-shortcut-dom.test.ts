@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { hasOpenDropdown } from './keyboard-shortcut-dom';
+import { hasOpenDropdown, shouldStopDropdownImeEscape } from './keyboard-shortcut-dom';
 
 test('does not treat an unrelated visible listbox as an open dropdown', () => {
   const promptNavigator = {} as Element;
@@ -27,4 +27,11 @@ test('detects an open select popup', () => {
   } as unknown as ParentNode;
 
   expect(hasOpenDropdown(root)).toBe(true);
+});
+
+test('stops IME Escape before an open dropdown dismiss listener', () => {
+  expect(shouldStopDropdownImeEscape({ key: 'Escape', isComposing: true, keyCode: 0 }, true)).toBe(true);
+  expect(shouldStopDropdownImeEscape({ key: 'Escape', isComposing: false, keyCode: 229 }, true)).toBe(true);
+  expect(shouldStopDropdownImeEscape({ key: 'Escape', isComposing: false, keyCode: 27 }, true)).toBe(false);
+  expect(shouldStopDropdownImeEscape({ key: 'Escape', isComposing: true, keyCode: 0 }, false)).toBe(false);
 });

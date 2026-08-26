@@ -7,6 +7,7 @@ import type { TerminalShell } from '@/lib/api/types';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
+  streamingAutoFollowEnabled: boolean;
   workStatusPanelEnabled: boolean;
   workStatusHiddenSections: string[];
   sessionRecapEnabled: boolean;
@@ -62,6 +63,7 @@ export const startAppearanceAutoSave = (): void => {
 
   let previous: AppearanceSlice = {
     showReasoningTraces: useUIStore.getState().showReasoningTraces,
+    streamingAutoFollowEnabled: useUIStore.getState().streamingAutoFollowEnabled,
     workStatusPanelEnabled: useUIStore.getState().workStatusPanelEnabled,
     workStatusHiddenSections: useUIStore.getState().workStatusHiddenSections,
     sessionRecapEnabled: useUIStore.getState().sessionRecapEnabled,
@@ -104,6 +106,7 @@ export const startAppearanceAutoSave = (): void => {
   useUIStore.subscribe((state) => {
     const current: AppearanceSlice = {
       showReasoningTraces: state.showReasoningTraces,
+      streamingAutoFollowEnabled: state.streamingAutoFollowEnabled,
       workStatusPanelEnabled: state.workStatusPanelEnabled,
       workStatusHiddenSections: state.workStatusHiddenSections,
       sessionRecapEnabled: state.sessionRecapEnabled,
@@ -155,6 +158,9 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.showReasoningTraces !== previous.showReasoningTraces) {
       diff.showReasoningTraces = current.showReasoningTraces;
+    }
+    if (current.streamingAutoFollowEnabled !== previous.streamingAutoFollowEnabled) {
+      diff.streamingAutoFollowEnabled = current.streamingAutoFollowEnabled;
     }
     if (current.sessionRecapEnabled !== previous.sessionRecapEnabled) {
       diff.sessionRecapEnabled = current.sessionRecapEnabled;

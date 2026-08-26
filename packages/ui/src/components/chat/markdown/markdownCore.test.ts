@@ -49,7 +49,10 @@ import { escapeRawMarkdownHtml, isLocalFileUrl, MARKDOWN_FORBIDDEN_TAGS } from '
 const {
   __markdownImageCandidateCacheForTests,
   extractMarkdownImageCandidates,
+  getCachedMarkdownBlocks,
+  renderMarkdownBlocks,
   renderMarkdownSync,
+  resetMarkdownHtmlCacheForTests,
 } = await import('./markdownCore');
 const { resolveMarkdownImageSource } = await import('./markdownImageAssets');
 
@@ -88,6 +91,47 @@ describe('markdown sanitization', () => {
     expect(html).not.toContain('href="ms-msdt:/id%20PCWDiagnostic"');
   });
 
+});
+
+describe('Markdown block cache reads', () => {
+  test('returns all settled blocks synchronously after a full cache hit', async () => {
+    resetMarkdownHtmlCacheForTests();
+    const text = '**cached** settled markdown';
+
+    expect(getCachedMarkdownBlocks(text)).toBeNull();
+    const rendered = await renderMarkdownBlocks(text, false);
+
+    expect(getCachedMarkdownBlocks(text)).toEqual(rendered);
+  });
+
+  test('returns null for a cold or partial settled miss', async () => {
+    resetMarkdownHtmlCacheForTests();
+    const first = 'first settled block';
+    const changed = 'first settled block\n\nsecond settled block';
+
+    await renderMarkdownBlocks(first, false);
+
+    expect(getCachedMarkdownBlocks(changed)).toBeNull();
+  });
+
+  test('keeps image mode identity out of the settled full hit', async () => {
+    resetMarkdownHtmlCacheForTests();
+    const text = '![image](https://example.test/image.png)';
+
+    await renderMarkdownBlocks(text, false, 'inline');
+
+    expect(getCachedMarkdownBlocks(text, 'label')).toBeNull();
+    expect(getCachedMarkdownBlocks(text, 'inline')).not.toBeNull();
+  });
+
+  test('does not treat streaming live-cache entries as settled full hits', async () => {
+    resetMarkdownHtmlCacheForTests();
+    const text = 'streaming markdown';
+
+    await renderMarkdownBlocks(text, true);
+
+    expect(getCachedMarkdownBlocks(text)).toBeNull();
+  });
 });
 
 describe('Markdown images', () => {

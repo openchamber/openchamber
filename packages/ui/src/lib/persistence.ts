@@ -531,6 +531,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     darkThemeId: DEFAULT_DARK_THEME_ID,
     openInAppId: DEFAULT_OPEN_IN_APP_ID,
     showReasoningTraces: defaults.showReasoningTraces,
+    streamingAutoFollowEnabled: defaults.streamingAutoFollowEnabled,
     workStatusPanelEnabled: defaults.workStatusPanelEnabled,
     workStatusHiddenSections: defaults.workStatusHiddenSections,
     sessionRecapEnabled: defaults.sessionRecapEnabled,
@@ -578,7 +579,6 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     messageStreamTransport: 'auto',
     stickyUserHeader: defaults.stickyUserHeader,
     promptNavigatorEnabled: defaults.promptNavigatorEnabled,
-    expandedEditorToolbar: defaults.expandedEditorToolbar,
     wideChatLayoutEnabled: defaults.wideChatLayoutEnabled,
     showSplitAssistantMessageActions: defaults.showSplitAssistantMessageActions,
     draftStartersVisible: defaults.draftStartersVisible,
@@ -637,6 +637,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
     store.setShowReasoningTraces(settings.showReasoningTraces);
+  }
+  if (typeof settings.streamingAutoFollowEnabled === 'boolean' && settings.streamingAutoFollowEnabled !== store.streamingAutoFollowEnabled) {
+    store.setStreamingAutoFollowEnabled(settings.streamingAutoFollowEnabled);
   }
   if (typeof settings.sessionRecapEnabled === 'boolean' && settings.sessionRecapEnabled !== store.sessionRecapEnabled) {
     store.setSessionRecapEnabled(settings.sessionRecapEnabled);
@@ -841,9 +844,6 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.promptNavigatorEnabled === 'boolean' && settings.promptNavigatorEnabled !== store.promptNavigatorEnabled) {
     store.setPromptNavigatorEnabled(settings.promptNavigatorEnabled);
-  }
-  if (typeof settings.expandedEditorToolbar === 'boolean' && settings.expandedEditorToolbar !== store.expandedEditorToolbar) {
-    store.setExpandedEditorToolbar(settings.expandedEditorToolbar);
   }
   if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
     store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
@@ -1161,6 +1161,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
+  }
+  if (typeof candidate.streamingAutoFollowEnabled === 'boolean') {
+    result.streamingAutoFollowEnabled = candidate.streamingAutoFollowEnabled;
   }
   if (typeof candidate.sessionRecapEnabled === 'boolean') {
     result.sessionRecapEnabled = candidate.sessionRecapEnabled;
@@ -1511,9 +1514,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.promptNavigatorEnabled === 'boolean') {
     result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
   }
-  if (typeof candidate.expandedEditorToolbar === 'boolean') {
-    result.expandedEditorToolbar = candidate.expandedEditorToolbar;
-  }
   if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
     result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
   }
@@ -1676,6 +1676,62 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
 };
 
 type SettingsRuntimeContext = { runtimeKey: string; generation: number };
+type SettingsMutation = { revision: number; changes: Partial<DesktopSettings> };
+type SettingsOperation = { revision: number };
+
+class SettingsMutationTracker {
+  private revision = 0;
+  private mutations: SettingsMutation[] = [];
+  private operations = new Set<SettingsOperation>();
+
+  record(changes: Partial<DesktopSettings>): number {
+    this.revision += 1;
+    if (this.operations.size > 0) {
+      const latest = this.mutations.at(-1);
+      // A new segment is only needed when an operation started after the last one.
+      const crossedOperationBoundary = latest
+        ? [...this.operations].some((operation) => operation.revision >= latest.revision)
+        : true;
+      if (latest && !crossedOperationBoundary) {
+        latest.revision = this.revision;
+        latest.changes = { ...latest.changes, ...changes };
+      } else {
+        this.mutations.push({ revision: this.revision, changes });
+      }
+    }
+    return this.revision;
+  }
+
+  begin(revision = this.revision): SettingsOperation {
+    const operation = { revision };
+    this.operations.add(operation);
+    return operation;
+  }
+
+  reconcile(settings: DesktopSettings, operation: SettingsOperation): DesktopSettings {
+    let reconciled = settings;
+    for (const mutation of this.mutations) {
+      if (mutation.revision <= operation.revision) continue;
+      reconciled = { ...reconciled, ...mutation.changes };
+    }
+    return reconciled;
+  }
+
+  finish(operation: SettingsOperation): void {
+    if (!this.operations.delete(operation)) return;
+    if (this.operations.size === 0) {
+      this.mutations = [];
+      return;
+    }
+    const oldestRevision = Math.min(...[...this.operations].map(({ revision }) => revision));
+    this.mutations = this.mutations.filter((mutation) => mutation.revision > oldestRevision);
+  }
+
+  reset(): void {
+    this.mutations = [];
+    this.operations.clear();
+  }
+}
 
 // Short-lived cache + in-flight dedup for settings fetches to avoid repeated GET calls during startup
 let _settingsRuntimeGeneration = 0;
@@ -1686,6 +1742,8 @@ let _pendingSettingsContext: SettingsRuntimeContext | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let _settingsFlushWaiters: Array<() => void> = [];
 let _settingsLifecycleInitialized = false;
+let _pendingSettingsRevision = 0;
+const _settingsMutationTracker = new SettingsMutationTracker();
 const SETTINGS_CACHE_TTL = 2_000; // 2 seconds — covers the startup burst
 const SETTINGS_DEBOUNCE_MS = 200;
 
@@ -1714,6 +1772,8 @@ const ensureSettingsRuntimeLifecycle = (): void => {
   subscribeRuntimeEndpointChanged((detail) => {
     if (detail.runtimeKey === detail.previousRuntimeKey) return;
     _settingsRuntimeGeneration += 1;
+    _settingsMutationTracker.reset();
+    _pendingSettingsRevision = 0;
     _settingsCache = null;
     _settingsInflight = null;
   });
@@ -1787,6 +1847,7 @@ export const syncDesktopSettings = async (): Promise<void> => {
   }
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
+  const operation = _settingsMutationTracker.begin();
 
   const persistApis = [getPersistApi(), useSessionDisplayStore.persist];
 
@@ -1823,8 +1884,22 @@ export const syncDesktopSettings = async (): Promise<void> => {
   // Each step is wrapped in try/catch so a failure in one side-effect (e.g.
   // a TypeError from writing to a contextBridge-protected global) doesn't
   // prevent server settings from reaching the Zustand store.
-  const applySettings = async (settings: DesktopSettings) => {
+  // Local changes sitting in the debounce buffer are not yet tracked as
+  // mutations (record() only stores while a request is in flight), so a GET
+  // racing the debounce window would briefly revert them. Reapply the
+  // pending buffer over every reconciled result.
+  const overlayPendingChanges = (settings: DesktopSettings): DesktopSettings => {
+    if (!_pendingSettingsChanges || !_pendingSettingsContext) return settings;
+    if (!isSettingsRuntimeContextCurrent(_pendingSettingsContext)) return settings;
+    return { ...settings, ..._pendingSettingsChanges };
+  };
+
+  const applySettings = async (loadedSettings: DesktopSettings) => {
     if (!isSettingsRuntimeContextCurrent(context)) return;
+    let settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
+    await waitForHydration();
+    if (!isSettingsRuntimeContextCurrent(context)) return;
+    settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
     const shouldPersistCraftGoalMigration = settings.draftStartersCraftGoalAdded !== true
       || settings.draftStartersScheduleTaskAdded !== true;
     // `autoSaveEnabled` is new to the settings backend. Until the server has a
@@ -1843,8 +1918,6 @@ export const syncDesktopSettings = async (): Promise<void> => {
     } catch (error) {
       console.warn('persistToLocalStorage failed:', error);
     }
-    await waitForHydration();
-    if (!isSettingsRuntimeContextCurrent(context)) return;
     if (shouldSeedAutoSaveEnabled) {
       authoritativeSettings.autoSaveEnabled = useUIStore.getState().autoSaveEnabled;
     }
@@ -1907,6 +1980,8 @@ export const syncDesktopSettings = async (): Promise<void> => {
     }
   } catch (error) {
     console.warn('Failed to synchronise settings:', error);
+  } finally {
+    _settingsMutationTracker.finish(operation);
   }
 };
 
@@ -1914,9 +1989,11 @@ export const syncDesktopSettings = async (): Promise<void> => {
 async function _flushSettingsUpdate(): Promise<void> {
   const changes = _pendingSettingsChanges;
   const context = _pendingSettingsContext;
+  const revision = _pendingSettingsRevision;
   const waiters = _settingsFlushWaiters;
   _pendingSettingsChanges = null;
   _pendingSettingsContext = null;
+  _pendingSettingsRevision = 0;
   _settingsFlushTimer = null;
   _settingsFlushWaiters = [];
   try {
@@ -1925,59 +2002,66 @@ async function _flushSettingsUpdate(): Promise<void> {
       dispatchSettingsSaveState('saved');
       return;
     }
+    const operation = _settingsMutationTracker.begin(revision);
 
-    const runtimeSettings = getRuntimeSettingsAPI();
-    if (runtimeSettings) {
+    try {
+      const runtimeSettings = getRuntimeSettingsAPI();
+      if (runtimeSettings) {
+        try {
+          const updated = await runtimeSettings.save(changes);
+          if (!isSettingsRuntimeContextCurrent(context)) return;
+          if (updated) {
+            const reconciled = _settingsMutationTracker.reconcile(updated, operation);
+            applyDesktopUiPreferences(reconciled);
+            dispatchSettingsSynced(reconciled);
+            _settingsCache = null;
+          }
+          dispatchSettingsSaveState(updated ? 'saved' : 'error');
+          return;
+        } catch (error) {
+          if (!isSettingsRuntimeContextCurrent(context)) return;
+          console.warn('Failed to update settings via runtime settings API:', error);
+        }
+      }
+
+      if (!isSettingsRuntimeContextCurrent(context)) return;
       try {
-        const updated = await runtimeSettings.save(changes);
+        const response = await runtimeFetch('/api/config/settings', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify(changes),
+        });
+
+        if (!isSettingsRuntimeContextCurrent(context)) return;
+        if (!response.ok) {
+          console.warn('Failed to update shared settings via API:', response.status, response.statusText);
+          dispatchSettingsSaveState('error');
+          return;
+        }
+
+        const updated = sanitizeWebSettings(await response.json().catch(() => null));
         if (!isSettingsRuntimeContextCurrent(context)) return;
         if (updated) {
-          applyDesktopUiPreferences(updated);
-          dispatchSettingsSynced(updated);
+          const reconciled = _settingsMutationTracker.reconcile(updated, operation);
+          applyDesktopUiPreferences(reconciled);
+          dispatchSettingsSynced(reconciled);
+          dispatchSettingsSaveState('saved');
+          // Invalidate GET cache so next read sees the fresh data
           _settingsCache = null;
+        } else {
+          dispatchSettingsSaveState('error');
         }
-        dispatchSettingsSaveState(updated ? 'saved' : 'error');
-        return;
       } catch (error) {
-        if (!isSettingsRuntimeContextCurrent(context)) return;
-        console.warn('Failed to update settings via runtime settings API:', error);
+        if (isSettingsRuntimeContextCurrent(context)) {
+          console.warn('Failed to update shared settings via API:', error);
+          dispatchSettingsSaveState('error');
+        }
       }
-    }
-
-    if (!isSettingsRuntimeContextCurrent(context)) return;
-    try {
-      const response = await runtimeFetch('/api/config/settings', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(changes),
-      });
-
-      if (!isSettingsRuntimeContextCurrent(context)) return;
-      if (!response.ok) {
-        console.warn('Failed to update shared settings via API:', response.status, response.statusText);
-        dispatchSettingsSaveState('error');
-        return;
-      }
-
-      const updated = sanitizeWebSettings(await response.json().catch(() => null));
-      if (!isSettingsRuntimeContextCurrent(context)) return;
-      if (updated) {
-        applyDesktopUiPreferences(updated);
-        dispatchSettingsSynced(updated);
-        dispatchSettingsSaveState('saved');
-        // Invalidate GET cache so next read sees the fresh data
-        _settingsCache = null;
-      } else {
-        dispatchSettingsSaveState('error');
-      }
-    } catch (error) {
-      if (isSettingsRuntimeContextCurrent(context)) {
-        console.warn('Failed to update shared settings via API:', error);
-        dispatchSettingsSaveState('error');
-      }
+    } finally {
+      _settingsMutationTracker.finish(operation);
     }
   } finally {
     waiters.forEach((resolve) => resolve());
@@ -1998,6 +2082,7 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
 
   _pendingSettingsChanges = { ...(_pendingSettingsChanges ?? {}), ...changes };
   _pendingSettingsContext = context;
+  _pendingSettingsRevision = _settingsMutationTracker.record(changes);
   dispatchSettingsSaveState('saving');
 
   if (_settingsFlushTimer) {

@@ -1,5 +1,10 @@
 import type { Event, Session } from "@opencode-ai/sdk/v2/client"
-import { isGlobalSessionRecencyOnlyUpdate, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import {
+  isGlobalSessionRecencyOnlyUpdate,
+  mergeSessionDirectoryMetadata,
+  useGlobalSessionsStore,
+  type GlobalSessionMutation,
+} from "@/stores/useGlobalSessionsStore"
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from "@/lib/runtime-switch"
 import { streamPerfCount, streamPerfMark } from "@/stores/utils/streamDebug"
 import { stripSessionDiffSnapshots } from "./sanitize"
@@ -9,23 +14,6 @@ const pendingGlobalSessionUpdates = new Map<string, { runtimeKey: string; sessio
 
 const clearPendingGlobalSessionUpdates = (): void => {
   pendingGlobalSessionUpdates.clear()
-}
-
-const flushPendingGlobalSessionUpdate = (sessionID: string): void => {
-  const update = pendingGlobalSessionUpdates.get(sessionID)
-  pendingGlobalSessionUpdates.delete(sessionID)
-  if (!update) return
-  const runtimeKey = getRuntimeKey()
-  if (update.runtimeKey !== runtimeKey) return
-  const currentSession = getGlobalSessionSnapshot(update.session.id)
-  if (
-    !currentSession
-    || shouldSkipStaleSessionEvent(currentSession, update.session)
-    || !isGlobalSessionRecencyOnlyUpdate(currentSession, update.session)
-  ) return
-  streamPerfMark("global_sessions.event_update_flush")
-  useGlobalSessionsStore.getState().upsertSession(update.session)
-  streamPerfCount("ui.global_sessions.event_update_publication")
 }
 
 const scheduleGlobalSessionUpdate = (session: Session): void => {
@@ -58,51 +46,82 @@ const getSessionInfoFromPayload = (event: Event): Session | null => {
   return stripSessionDiffSnapshots(session as Session)
 }
 
-const getGlobalSessionSnapshot = (sessionId: string): Session | null => {
-  const global = useGlobalSessionsStore.getState()
-  return [...global.activeSessions, ...global.archivedSessions].find((session) => session.id === sessionId) ?? null
+export const applySessionEventsToGlobalSessions = (payloads: readonly Event[]): void => {
+  if (payloads.length === 0) return
+  const runtimeKey = getRuntimeKey()
+  const store = useGlobalSessionsStore.getState()
+  const overlay = new Map(store.entityById)
+  const mutations: GlobalSessionMutation[] = []
+  let flushedRecency = false
+
+  const appendUpsert = (session: Session): void => {
+    const existing = overlay.get(session.id) ?? null
+    const merged = mergeSessionDirectoryMetadata(session, existing)
+    overlay.set(session.id, merged)
+    mutations.push({ type: "upsert", session: merged })
+  }
+
+  for (const payload of payloads) {
+    if (payload.type === "session.idle" || payload.type === "session.error") {
+      const sessionID = (payload as { properties?: { sessionID?: unknown } }).properties?.sessionID
+      if (typeof sessionID !== "string") continue
+      const update = pendingGlobalSessionUpdates.get(sessionID)
+      pendingGlobalSessionUpdates.delete(sessionID)
+      if (!update || update.runtimeKey !== runtimeKey) continue
+      const currentSession = overlay.get(sessionID) ?? null
+      if (
+        !currentSession
+        || shouldSkipStaleSessionEvent(currentSession, update.session)
+        || !isGlobalSessionRecencyOnlyUpdate(currentSession, update.session)
+      ) continue
+      appendUpsert(update.session)
+      flushedRecency = true
+      continue
+    }
+
+    if (payload.type === "session.created") {
+      const session = getSessionInfoFromPayload(payload)
+      if (session) {
+        const currentSession = overlay.get(session.id) ?? null
+        if (!shouldSkipStaleSessionEvent(currentSession, session)) appendUpsert(session)
+      }
+      continue
+    }
+
+    if (payload.type === "session.updated") {
+      const session = getSessionInfoFromPayload(payload)
+      if (session) {
+        const currentSession = overlay.get(session.id) ?? null
+        if (!shouldSkipStaleSessionEvent(currentSession, session)) {
+          if (currentSession && isGlobalSessionRecencyOnlyUpdate(currentSession, session)) {
+            scheduleGlobalSessionUpdate(session)
+          } else {
+            pendingGlobalSessionUpdates.delete(session.id)
+            appendUpsert(session)
+            streamPerfCount("ui.global_sessions.event_update_immediate")
+          }
+        }
+      }
+      continue
+    }
+
+    if (payload.type === "session.deleted") {
+      const sessionID = (payload as { properties?: { sessionID?: string } }).properties?.sessionID
+        ?? getSessionInfoFromPayload(payload)?.id
+      if (sessionID) {
+        pendingGlobalSessionUpdates.delete(sessionID)
+        overlay.delete(sessionID)
+        mutations.push({ type: "remove", sessionId: sessionID })
+      }
+    }
+  }
+
+  if (mutations.length === 0 || runtimeKey !== getRuntimeKey()) return
+  if (flushedRecency) streamPerfMark("global_sessions.event_update_flush")
+  store.applySessionMutations(mutations)
+  streamPerfCount("ui.global_sessions.event_update_publication")
 }
 
 export const applySessionEventToGlobalSessions = (payload: Event): void => {
-  if (payload.type === "session.idle" || payload.type === "session.error") {
-    const sessionID = (payload as { properties?: { sessionID?: unknown } }).properties?.sessionID
-    if (typeof sessionID === "string") flushPendingGlobalSessionUpdate(sessionID)
-    return
-  }
-
-  if (payload.type === "session.created") {
-    const session = getSessionInfoFromPayload(payload)
-    if (session) {
-      const currentSession = getGlobalSessionSnapshot(session.id)
-      if (!shouldSkipStaleSessionEvent(currentSession, session)) {
-        useGlobalSessionsStore.getState().upsertSession(session)
-      }
-    }
-    return
-  }
-
-  if (payload.type === "session.updated") {
-    const session = getSessionInfoFromPayload(payload)
-    if (session) {
-      const currentSession = getGlobalSessionSnapshot(session.id)
-      if (!shouldSkipStaleSessionEvent(currentSession, session)) {
-        if (currentSession && isGlobalSessionRecencyOnlyUpdate(currentSession, session)) {
-          scheduleGlobalSessionUpdate(session)
-        } else {
-          pendingGlobalSessionUpdates.delete(session.id)
-          useGlobalSessionsStore.getState().upsertSession(session)
-          streamPerfCount("ui.global_sessions.event_update_immediate")
-        }
-      }
-    }
-    return
-  }
-
-  if (payload.type === "session.deleted") {
-    const sessionID = (payload as { properties?: { sessionID?: string } }).properties?.sessionID ?? getSessionInfoFromPayload(payload)?.id
-    if (sessionID) {
-      pendingGlobalSessionUpdates.delete(sessionID)
-      useGlobalSessionsStore.getState().removeSessions([sessionID])
-    }
-  }
+  applySessionEventsToGlobalSessions([payload])
 }

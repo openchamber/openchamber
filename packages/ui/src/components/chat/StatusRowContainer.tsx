@@ -46,8 +46,6 @@ export const StatusRowContainer: React.FC = React.memo(() => {
             wasAborted={wasAborted || working.wasAborted}
             abortActive={wasAborted || working.abortActive}
             retryInfo={working.retryInfo}
-            showAssistantStatus
-            showTodos={false}
             agentName={currentAgentName}
             modelName={modelDisplayName}
             providerId={activeModel?.providerId ?? null}
