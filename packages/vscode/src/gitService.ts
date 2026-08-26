@@ -587,7 +587,10 @@ const commitGitPathsFromTemporaryIndex = async (
     // rename pair.
     const statusOutput = await execGit(['status', '--porcelain', '-z'], directory);
     if (statusOutput.exitCode !== 0) {
-      throw new Error(statusOutput.stderr || 'Failed to read git status for rename detection');
+      throw new Error(
+        statusOutput.stderr ||
+        `Failed to read git status for rename detection (exit code ${statusOutput.exitCode})`
+      );
     }
     const renameSourceByPath = getStagedRenameSourcePaths(statusOutput.stdout);
     if (renameSourceByPath.size > 0) {

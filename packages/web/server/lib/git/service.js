@@ -3766,10 +3766,12 @@ const commitGitPathsFromTemporaryIndex = async (git, repoRoot, message, repoPath
 
     // Mirror simple-git's commit task: output parsing relies on the full
     // abbreviated hash, so the same `-c core.abbrev=40` prefix is applied.
+    // LC_ALL pins the summary to English so the regexes below match
+    // regardless of the server's locale.
     const commitResult = await runGitCommandWithEnvOrThrow(
       repoRoot,
       ['-c', 'core.abbrev=40', 'commit', '-m', message],
-      { GIT_INDEX_FILE: temporaryIndexFile },
+      { GIT_INDEX_FILE: temporaryIndexFile, LC_ALL: 'C.UTF-8' },
       'Failed to commit the selected paths'
     );
     const commitBranchMatch = /^\[([^\s]+)( \([^)]+\))? ([^\]]+)\]/.exec(commitResult.stdout);
@@ -3783,7 +3785,7 @@ const commitGitPathsFromTemporaryIndex = async (git, repoRoot, message, repoPath
       const hashResult = await runGitCommandWithEnvOrThrow(
         repoRoot,
         ['rev-parse', 'HEAD'],
-        { GIT_INDEX_FILE: temporaryIndexFile },
+        {},
         'Failed to resolve the commit hash'
       );
       commitHash = hashResult.stdout.trim();
@@ -3792,7 +3794,7 @@ const commitGitPathsFromTemporaryIndex = async (git, repoRoot, message, repoPath
       const branchResult = await runGitCommandWithEnvOrThrow(
         repoRoot,
         ['rev-parse', '--abbrev-ref', 'HEAD'],
-        { GIT_INDEX_FILE: temporaryIndexFile },
+        {},
         'Failed to resolve the branch name'
       );
       branchName = branchResult.stdout.trim();
