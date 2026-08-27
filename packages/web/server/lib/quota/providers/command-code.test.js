@@ -59,6 +59,11 @@ describe('Command Code quota provider', () => {
     ]);
   });
 
+  it('rejects identity responses without an explicit account scope', async () => {
+    await expect(fetchCommandCodeUsage('secret', async () => new Response(JSON.stringify({ user: { id: 'user-1' } })))).rejects.toThrow('account could not be determined');
+    await expect(fetchCommandCodeUsage('secret', async () => new Response(JSON.stringify({ org: {} })))).rejects.toThrow('account could not be determined');
+  });
+
   it('does not expose credentials in authentication errors', async () => {
     await expect(fetchCommandCodeUsage('secret', async () => new Response('', { status: 401 }))).rejects.toThrow('authentication failed');
   });
@@ -130,6 +135,30 @@ describe('Command Code quota provider', () => {
       if (previousApiKey === undefined) delete process.env.COMMAND_CODE_API_KEY;
       else process.env.COMMAND_CODE_API_KEY = previousApiKey;
       vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('retries the next credential after an authentication failure', async () => {
+    const previousApiKey = process.env.COMMAND_CODE_API_KEY;
+    process.env.COMMAND_CODE_API_KEY = 'environment-token';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ org: null })))
+      .mockResolvedValueOnce(new Response(JSON.stringify(creditsPayload)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const result = await fetchQuota({ commandcode: { type: 'api', key: 'stale-token' } });
+      expect(result).toMatchObject({ providerId: 'command-code', ok: true, configured: true });
+      expect(fetchMock.mock.calls.map(([, options]) => options.headers.Authorization)).toEqual([
+        'Bearer stale-token',
+        'Bearer environment-token',
+        'Bearer environment-token',
+      ]);
+    } finally {
+      if (previousApiKey === undefined) delete process.env.COMMAND_CODE_API_KEY;
+      else process.env.COMMAND_CODE_API_KEY = previousApiKey;
       vi.unstubAllGlobals();
     }
   });

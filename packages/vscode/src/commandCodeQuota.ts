@@ -55,10 +55,17 @@ const parseCommandCodeCredits = (payload: CommandCodeCredits) => {
 
 const requestJson = async (requestPath: string, apiKey: string): Promise<unknown> => {
   const response = await fetch(`https://api.commandcode.ai${requestPath}`, { headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15_000) });
-  if (response.status === 401 || response.status === 403) throw new Error('Command Code authentication failed');
+  if (response.status === 401 || response.status === 403) throw new CommandCodeAuthenticationError();
   if (!response.ok) throw new Error(`Command Code usage API returned HTTP ${response.status}`);
   return response.json().catch(() => null);
 };
+
+export class CommandCodeAuthenticationError extends Error {
+  constructor() {
+    super('Command Code authentication failed');
+    this.name = 'CommandCodeAuthenticationError';
+  }
+}
 
 export const fetchCommandCodeUsage = async (apiKey: string) => {
   const orgId = parseOrgId(await requestJson('/alpha/whoami', apiKey));

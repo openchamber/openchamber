@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
-import { fetchCommandCodeUsage } from './commandCodeQuota';
+import { CommandCodeAuthenticationError, fetchCommandCodeUsage } from './commandCodeQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { getProviderAuth, updateProviderAuth } from './opencodeAuth';
 
@@ -2895,9 +2895,17 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
         }
         const entry = normalizeAuthEntry(getAuthEntry(auth, ['command-code', 'commandcode', 'command_code', 'command code']));
         const stored = typeof entry?.key === 'string' ? entry.key : typeof entry?.access === 'string' ? entry.access : typeof entry?.token === 'string' ? entry.token : null;
-        const apiKey = stored?.trim() || process.env.COMMAND_CODE_API_KEY?.trim() || readCommandCodeCliApiKey();
-        if (!apiKey) return buildResult({ providerId, providerName: 'Command Code', ok: false, configured: false, error: 'Not configured' });
-        return buildResult({ providerId, providerName: 'Command Code', ok: true, configured: true, usage: { windows: await fetchCommandCodeUsage(apiKey) } });
+        const apiKeys = [...new Set([stored?.trim(), process.env.COMMAND_CODE_API_KEY?.trim(), readCommandCodeCliApiKey()].filter((value): value is string => Boolean(value)))];
+        if (apiKeys.length === 0) return buildResult({ providerId, providerName: 'Command Code', ok: false, configured: false, error: 'Not configured' });
+        for (const [index, apiKey] of apiKeys.entries()) {
+          try {
+            return buildResult({ providerId, providerName: 'Command Code', ok: true, configured: true, usage: { windows: await fetchCommandCodeUsage(apiKey) } });
+          } catch (error) {
+            if (error instanceof CommandCodeAuthenticationError && index < apiKeys.length - 1) continue;
+            throw error;
+          }
+        }
+        throw new Error('Command Code authentication failed');
       } catch (error) {
         return buildResult({ providerId, providerName: 'Command Code', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
       }

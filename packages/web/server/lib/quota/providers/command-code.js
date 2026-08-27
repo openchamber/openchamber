@@ -21,7 +21,7 @@ export const readCommandCodeCliApiKey = (authFile = COMMAND_CODE_AUTH_FILE) => {
   }
 };
 
-const getApiKey = (auth) => {
+const getApiKeys = (auth) => {
   let resolvedAuth = auth;
   if (resolvedAuth === undefined) {
     try {
@@ -32,10 +32,11 @@ const getApiKey = (auth) => {
   }
   const entry = normalizeAuthEntry(getAuthEntry(resolvedAuth, aliases));
   const stored = entry?.key ?? entry?.access ?? entry?.token;
-  return (typeof stored === 'string' ? stored.trim() : '')
-    || process.env.COMMAND_CODE_API_KEY?.trim()
-    || readCommandCodeCliApiKey()
-    || null;
+  return [...new Set([
+    typeof stored === 'string' ? stored.trim() : '',
+    process.env.COMMAND_CODE_API_KEY?.trim(),
+    readCommandCodeCliApiKey(),
+  ].filter(Boolean))];
 };
 
 const requestJson = async (requestPath, apiKey, fetchImpl) => {
@@ -47,7 +48,11 @@ const requestJson = async (requestPath, apiKey, fetchImpl) => {
     },
     signal: AbortSignal.timeout(15_000),
   });
-  if (response.status === 401 || response.status === 403) throw new Error('Command Code authentication failed');
+  if (response.status === 401 || response.status === 403) {
+    const error = new Error('Command Code authentication failed');
+    error.status = response.status;
+    throw error;
+  }
   if (!response.ok) throw new Error(`Command Code usage API returned HTTP ${response.status}`);
   return response.json().catch(() => null);
 };
@@ -91,7 +96,13 @@ export const parseCommandCodeCredits = (payload) => {
 
 export const fetchCommandCodeUsage = async (apiKey, fetchImpl = fetch) => {
   const identity = asObject(await requestJson('/alpha/whoami', apiKey, fetchImpl));
-  const org = asObject(identity?.org);
+  if (!identity || !Object.prototype.hasOwnProperty.call(identity, 'org')) {
+    throw new Error('Command Code account could not be determined');
+  }
+  const org = identity.org === null ? null : asObject(identity.org);
+  if (identity.org !== null && (!org || typeof org.id !== 'string' || !org.id.trim())) {
+    throw new Error('Command Code account could not be determined');
+  }
   const orgId = typeof org?.id === 'string' ? org.id.trim() : '';
   const creditsPath = orgId
     ? `/alpha/billing/credits?orgId=${encodeURIComponent(orgId)}`
@@ -102,14 +113,17 @@ export const fetchCommandCodeUsage = async (apiKey, fetchImpl = fetch) => {
   return windows;
 };
 
-export const isConfigured = () => Boolean(getApiKey());
+export const isConfigured = () => getApiKeys().length > 0;
 
 export const fetchQuota = async (auth) => {
-  const apiKey = getApiKey(auth);
-  if (!apiKey) return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });
-  try {
-    return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: await fetchCommandCodeUsage(apiKey) } });
-  } catch (error) {
-    return buildResult({ providerId, providerName, ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
+  const apiKeys = getApiKeys(auth);
+  if (apiKeys.length === 0) return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });
+  for (const [index, apiKey] of apiKeys.entries()) {
+    try {
+      return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: await fetchCommandCodeUsage(apiKey) } });
+    } catch (error) {
+      if (error?.status && [401, 403].includes(error.status) && index < apiKeys.length - 1) continue;
+      return buildResult({ providerId, providerName, ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
+    }
   }
 };

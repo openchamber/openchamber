@@ -177,6 +177,31 @@ describe('Command Code quota provider (VS Code parity)', () => {
     assert.equal(result.error, 'Command Code usage API returned HTTP 503');
   });
 
+  test('retries the next credential after an authentication failure', async () => {
+    const previousApiKey = process.env.COMMAND_CODE_API_KEY;
+    process.env.COMMAND_CODE_API_KEY = 'environment-token';
+    const authorizations: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get('Authorization') ?? '';
+      authorizations.push(authorization);
+      if (authorization === 'Bearer test-token') return mockResponse(null, { ok: false, status: 401 });
+      return mockResponse(String(url).endsWith('/alpha/whoami') ? { org: null } : { credits: { monthlyCredits: 70 } });
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchQuotaForProvider('command-code');
+      assert.equal(result.ok, true);
+      assert.deepEqual(authorizations, [
+        'Bearer test-token',
+        'Bearer environment-token',
+        'Bearer environment-token',
+      ]);
+    } finally {
+      if (previousApiKey === undefined) delete process.env.COMMAND_CODE_API_KEY;
+      else process.env.COMMAND_CODE_API_KEY = previousApiKey;
+    }
+  });
+
   test('uses the API key created by cmd login', async () => {
     const originalReadFileSync = fs.readFileSync;
     const originalConsoleError = console.error;
