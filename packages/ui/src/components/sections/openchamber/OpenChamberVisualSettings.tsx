@@ -267,7 +267,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs' | 'worktreeDiscovery' | 'worktreeDiscoveryInterval';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs' | 'worktreeDiscovery' | 'worktreeDiscoveryInterval' | 'backgroundProjectSessionLoading';
 
 const WORKTREE_DISCOVERY_INTERVALS = [0, 30_000, 60_000, 300_000] as const;
 
@@ -326,6 +326,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setWorktreeDiscoveryEnabled = useUIStore(state => state.setWorktreeDiscoveryEnabled);
     const worktreeDiscoveryIntervalMs = useUIStore(state => state.worktreeDiscoveryIntervalMs);
     const setWorktreeDiscoveryIntervalMs = useUIStore(state => state.setWorktreeDiscoveryIntervalMs);
+    const backgroundProjectSessionLoadingEnabled = useUIStore(state => state.backgroundProjectSessionLoadingEnabled);
+    const setBackgroundProjectSessionLoadingEnabled = useUIStore(state => state.setBackgroundProjectSessionLoadingEnabled);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
     const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
     const codeBlockLineWrap = useUIStore(state => state.codeBlockLineWrap);
@@ -625,7 +627,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         ? hasLocalizationSettings
         : (shouldShow('theme') || showWindowControlsPositionSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || shouldShow('worktreeDiscovery') || shouldShow('worktreeDiscoveryInterval') || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || shouldShow('worktreeDiscovery') || shouldShow('worktreeDiscoveryInterval') || shouldShow('backgroundProjectSessionLoading') || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('userMessageRendering')
@@ -1462,6 +1464,19 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     ariaLabel={t('settings.openchamber.visual.field.worktreeDiscoveryAria')}
                                     info={t('settings.openchamber.visual.field.worktreeDiscoveryInfo')}
                                     settingsItem="appearance.worktree-discovery"
+                                />
+                            )}
+                            {shouldShow('backgroundProjectSessionLoading') && (
+                                <SettingsCheckboxRow
+                                    checked={backgroundProjectSessionLoadingEnabled}
+                                    onChange={(enabled) => {
+                                        setBackgroundProjectSessionLoadingEnabled(enabled);
+                                        void updateDesktopSettings({ backgroundProjectSessionLoadingEnabled: enabled });
+                                    }}
+                                    label={t('settings.openchamber.visual.field.backgroundProjectSessionLoading')}
+                                    ariaLabel={t('settings.openchamber.visual.field.backgroundProjectSessionLoadingAria')}
+                                    info={t('settings.openchamber.visual.field.backgroundProjectSessionLoadingInfo')}
+                                    settingsItem="appearance.background-project-session-loading"
                                 />
                             )}
                             {shouldShow('worktreeDiscoveryInterval') && (
