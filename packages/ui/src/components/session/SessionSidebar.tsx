@@ -148,6 +148,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   // sessionAttentionStates removed — now using notification-store directly in SessionNodeItem
   const worktreeMetadata = useSessionUIStore((state) => state.worktreeMetadata);
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const worktreeDiscoveryEnabled = useUIStore((state) => state.worktreeDiscoveryEnabled);
+  const worktreeDiscoveryIntervalMs = useUIStore((state) => state.worktreeDiscoveryIntervalMs);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const liveSessions = useAllLiveSessions();
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
@@ -193,13 +195,13 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     return sessions;
   }, [globalActiveSessions, liveSessions]);
   const worktreeDiscoveryProjects = React.useMemo(
-    () => selectWorktreeDiscoveryProjects(
+    () => worktreeDiscoveryEnabled ? selectWorktreeDiscoveryProjects(
       projects,
       activeProjectId,
       worktreeDiscoverySessions,
       availableWorktreesByProject,
-    ),
-    [activeProjectId, availableWorktreesByProject, projects, worktreeDiscoverySessions],
+    ) : [],
+    [activeProjectId, availableWorktreesByProject, projects, worktreeDiscoveryEnabled, worktreeDiscoverySessions],
   );
   const projectWorktreeDiscoveryKey = React.useMemo(
     () => `${runtimeKey}|${worktreeDiscoveryProjects
@@ -213,6 +215,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const [worktreeDiscoveryRevision, requestWorktreeDiscovery] = React.useReducer((revision) => revision + 1, 0);
   const isWorktreeTopologyLoading = !isVSCode && resolvedWorktreeTopologyKey !== projectWorktreeDiscoveryKey;
   const [unresolvedWorktreeProjectPaths, setUnresolvedWorktreeProjectPaths] = React.useState<ReadonlySet<string>>(new Set());
+  const lastWorktreeDiscoveryAtRef = React.useRef(0);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -299,12 +302,18 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       setResolvedWorktreeTopologyKey(projectWorktreeDiscoveryKey);
     };
 
-    void discoverWorktrees();
+    const elapsed = Date.now() - lastWorktreeDiscoveryAtRef.current;
+    const delay = Math.max(0, worktreeDiscoveryIntervalMs - elapsed);
+    const timer = setTimeout(() => {
+      lastWorktreeDiscoveryAtRef.current = Date.now();
+      void discoverWorktrees();
+    }, delay);
 
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryProjects, worktreeDiscoveryRevision]);
+  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryIntervalMs, worktreeDiscoveryProjects, worktreeDiscoveryRevision]);
 
   React.useEffect(() => {
     if (isVSCode) return;
