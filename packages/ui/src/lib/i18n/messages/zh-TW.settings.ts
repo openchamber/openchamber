@@ -1106,6 +1106,7 @@ export const settingsDict = {
   'settings.usage.sidebar.field.displayModeUsage': '用量',
   'settings.usage.sidebar.field.displayModeRemaining': '剩餘配額',
   'settings.usage.sidebar.status.notSet': '未設定',
+  'settings.usage.sidebar.status.unofficial': '非官方',
   'settings.usage.page.empty.selectProvider': '選擇一個供應商以查看用量詳情。',
   'settings.usage.page.header.providerUsage': '{provider} 用量',
   'settings.usage.page.header.refreshing': '正在重新整理用量...',

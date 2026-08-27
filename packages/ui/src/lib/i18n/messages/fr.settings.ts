@@ -1117,6 +1117,7 @@ export const settingsDict = {
   'settings.usage.sidebar.field.displayModeUsage': 'Usage',
   'settings.usage.sidebar.field.displayModeRemaining': 'Quota restant',
   'settings.usage.sidebar.status.notSet': 'Non défini',
+  'settings.usage.sidebar.status.unofficial': 'Non officiel',
   'settings.usage.page.empty.selectProvider': 'Sélectionnez un fournisseur pour afficher les détails d\'utilisation.',
   'settings.usage.page.header.providerUsage': 'Utilisation de {provider}',
   'settings.usage.page.header.refreshing': 'Utilisation rafraîchissante...',

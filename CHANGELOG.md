@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Usage: Command Code returns as an optional best-effort provider, with credit balances and five-hour/weekly limits for accounts connected through OpenCode, `COMMAND_CODE_API_KEY`, or `cmd login` (thanks to @bernhardberger).
+
 ## [1.21.0] - 2026-08-26
 
 - **Chat scrolling rebuilt around your message.** Sending parks your message near the top and the reply streams in below it, gliding smoothly a paragraph at a time. Scrolling up immediately hands you the wheel; the scroll-to-bottom pill carries the model's working status while you're away.

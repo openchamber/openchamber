@@ -3,11 +3,13 @@ import type { QuotaProviderId } from '@/types';
 export interface QuotaProviderMeta {
   id: QuotaProviderId;
   name: string;
+  unofficial?: boolean;
 }
 
 export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'claude', name: 'Claude' },
   { id: 'codex', name: 'Codex' },
+  { id: 'command-code', name: 'Command Code', unofficial: true },
   { id: 'cursor', name: 'Cursor' },
   { id: 'github-copilot', name: 'GitHub Copilot' },
   { id: 'google', name: 'Google' },

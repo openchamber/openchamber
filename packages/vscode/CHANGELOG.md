@@ -1,3 +1,7 @@
+## [Unreleased]
+
+- Usage: Command Code returns as an optional best-effort provider, with credit balances and five-hour/weekly limits for accounts connected through OpenCode, `COMMAND_CODE_API_KEY`, or `cmd login` (thanks to @bernhardberger).
+
 ## [1.21.0] - 2026-08-26
 
 - **Chat context attachments:** diff and file comments, terminal selections, and linked issues/PRs now show in the conversation as compact context cards — source header, captured content behind an expander, your comment below — instead of raw text inside the message.

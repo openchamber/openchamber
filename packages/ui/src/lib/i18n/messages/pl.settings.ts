@@ -2072,6 +2072,7 @@ export const settingsDict = {
   'settings.usage.sidebar.field.displayModeUsage': 'Użycie',
   'settings.usage.sidebar.field.intervalPlaceholder': 'Interwał',
   'settings.usage.sidebar.status.notSet': 'Nie ustawiono',
+  'settings.usage.sidebar.status.unofficial': 'Nieoficjalne',
   'settings.usage.sidebar.title': 'Użycie',
   'settings.usage.sidebar.tooltip.autoRefresh': 'Automatycznie odświeżaj dane o użyciu w określonych odstępach czasu',
   'settings.usage.sidebar.total': 'Suma: {count}',

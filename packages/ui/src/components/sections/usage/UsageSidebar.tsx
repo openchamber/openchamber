@@ -129,6 +129,9 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
                 <span className="typography-ui-label font-normal truncate flex-1 min-w-0 text-foreground">
                   {provider.name}
                 </span>
+              {provider.unofficial && (
+                <span className="typography-micro text-muted-foreground flex-shrink-0">{t('settings.usage.sidebar.status.unofficial')}</span>
+              )}
               {!configured && (
                 <span className="typography-micro text-muted-foreground/60 flex-shrink-0">{t('settings.usage.sidebar.status.notSet')}</span>
               )}

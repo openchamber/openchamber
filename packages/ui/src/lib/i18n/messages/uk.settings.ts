@@ -1199,6 +1199,7 @@ export const settingsDict = {
   "settings.usage.sidebar.field.displayModeUsage": "Використання",
   "settings.usage.sidebar.field.displayModeRemaining": "Залишок квоти",
   "settings.usage.sidebar.status.notSet": "Не встановлено",
+  "settings.usage.sidebar.status.unofficial": "Неофіційно",
   "settings.usage.page.empty.selectProvider": "Виберіть провайдера, щоб переглянути деталі використання.",
   "settings.usage.page.header.providerUsage": "Використання {provider}",
   "settings.usage.page.header.refreshing": "Оновлення використання...",
