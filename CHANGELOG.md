@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Desktop/Linux:** added official RPM packages for Fedora, RHEL, and CentOS. Install with `sudo dnf install ./OpenChamber-<version>-linux-<arch>.rpm`; the in-app updater is silently skipped for RPM installs (updates are manual via downloading the next release artifact) (thanks to @rlevidev).
 - Files: opening a file over 5,000 lines is no longer blocked — the line-count guard now allows up to 20,000 lines, letting large files reach the virtualized full-file preview instead of being rejected at the open step (thanks @gaojunran).
 - Settings: fixed the Cloudflare Tunnel download link shown when cloudflared is not installed (thanks to @AyoubAchour).
 
