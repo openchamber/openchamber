@@ -1063,15 +1063,6 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
     const deferPrepends = isTanstack && isMobileSurfaceRuntime();
 
     React.useEffect(() => {
-        const element = scrollRef?.current;
-        // Stable selector for the performance recorder's targeted view probe
-        // (it must not scan the whole DOM on every heartbeat).
-        if (element && !element.hasAttribute('data-message-scroll-container')) {
-            element.setAttribute('data-message-scroll-container', '');
-        }
-    }, [scrollRef]);
-
-    React.useEffect(() => {
         if (!deferPrepends) return;
         const element = scrollRef?.current;
         if (!element) return;
@@ -1463,7 +1454,6 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
         return (
             <div
                 ref={sizeContainerRef}
-                data-vlist-size-container="true"
                 className="relative w-full"
                 style={{
                     height: tanstackVirtualizer.getTotalSize(),

@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Chat: the conversation no longer jumps while the sidebar or context panel is being resized; the first visible message stays put during panel drags.
+- UI: sidebar and context panel open/close now animate smoothly instead of appearing in a single frame, with a shorter, softer animation when reduced motion is enabled.
 - Usage: quota limits enabled for display now refresh every three minutes on desktop, mobile, and VS Code, with a manual refresh action available at any time.
 
 ## [1.18.2] - 2026-08-10

@@ -526,7 +526,13 @@ export const usePanelResize = <T extends HTMLElement = HTMLElement>(
                 animFrameRef.current = window.requestAnimationFrame(() => followFrameRef.current());
                 return;
             }
-            // Riding an existing global transaction: write this frame.
+            // Riding an existing global transaction: JOIN it before writing
+            // so these frames carry the shared transactionId (the anchor
+            // controller drops frames from unknown ids) and this source is
+            // registered for the shared finalize. Joining shares the current
+            // id WITHOUT re-firing transaction-start participants (no
+            // re-capture, no finalizer reset).
+            ensureTransaction();
             if (prev === null) {
                 setIsResizing(true);
             }

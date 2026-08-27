@@ -70,7 +70,7 @@ interface SeamVirtualizer {
 }
 
 export interface UseConversationResizeAnchorOptions {
-    /** The chat scroll container ([data-message-scroll-container]). */
+    /** The chat scroll container element. */
     scrollerRef: React.RefObject<HTMLDivElement | null>;
     /** The MessageList root element used to query turn markers + rows. */
     containerRef: React.RefObject<HTMLDivElement | null>;

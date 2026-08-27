@@ -1034,7 +1034,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 data-message-id={message.info.id}
                 ref={messageContainerRef}
             >
-                <div className="chat-message-column relative" data-chat-wrap-surface="true">
+                <div className="chat-message-column relative">
                     {isUser ? (
                         displayParts.length === 0 ? null : (
                             <FadeInOnReveal
@@ -1047,7 +1047,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                     <div className={cn('max-w-[85%]', showStickyInlineHoverRow ? 'pb-5' : undefined)}>
                                         <div
                                             data-chat-user-bubble="true"
-                                            data-chat-message-id={message.info.id}
                                             style={{
                                                 backgroundColor: 'var(--chat-user-message-bg)',
                                                 borderRadius: userMessageRadius,

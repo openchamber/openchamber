@@ -31,6 +31,7 @@ import {
   getCurrentResizeTransactionId,
   getResizeInteractionPhase,
   registerResizeFrameParticipant,
+  registerResizeTransactionStartParticipant,
   resetResizeFrameParticipantsForTests,
   resetResizeInteractionForTests,
   setResizeSchedulerForTests,
@@ -185,22 +186,20 @@ function installDomStub() {
     HTMLAnchorElement: class {},
   };
 
-  const g = globalThis as unknown as {
-    document?: typeof documentObj;
-    window?: typeof windowObj;
-    navigator?: typeof windowObj.navigator;
-    IS_REACT_ACT_ENVIRONMENT?: boolean;
+  // Another test file's stub may have left a global as a READ-ONLY
+  // (defineProperty'd) property, where plain assignment throws
+  // "Attempted to assign to readonly property" and kills every test in this
+  // file depending on file order. (Re)define instead, keeping each ORIGINAL
+  // descriptor so restore() puts back exactly what was there before.
+  const savedGlobals: Array<[string, PropertyDescriptor | undefined]> = [];
+  const setGlobal = (name: string, value: unknown) => {
+    savedGlobals.push([name, Object.getOwnPropertyDescriptor(globalThis, name)]);
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   };
-  const previous = {
-    document: g.document,
-    window: g.window,
-    navigator: g.navigator,
-    IS_REACT_ACT_ENVIRONMENT: g.IS_REACT_ACT_ENVIRONMENT,
-  };
-  g.IS_REACT_ACT_ENVIRONMENT = true;
-  g.document = documentObj as unknown as typeof g.document;
-  g.window = windowObj as unknown as typeof g.window;
-  g.navigator = windowObj.navigator as unknown as typeof g.navigator;
+  setGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  setGlobal("document", documentObj);
+  setGlobal("window", windowObj);
+  setGlobal("navigator", windowObj.navigator);
 
   return {
     windowObj,
@@ -216,10 +215,13 @@ function installDomStub() {
       for (const entry of pending) entry.fn();
     },
     restore() {
-      g.document = previous.document;
-      g.window = previous.window;
-      g.navigator = previous.navigator;
-      g.IS_REACT_ACT_ENVIRONMENT = previous.IS_REACT_ACT_ENVIRONMENT;
+      for (const [name, descriptor] of savedGlobals.reverse()) {
+        if (descriptor) {
+          Object.defineProperty(globalThis, name, descriptor);
+        } else {
+          Reflect.deleteProperty(globalThis, name);
+        }
+      }
     },
   };
 }
@@ -1177,6 +1179,101 @@ describe("round 11: motion profiles (standard 200ms / reduced 120ms)", () => {
     });
     expect(getResizeInteractionPhase()).toBe("idle");
     expect(width(api)).toBe(280);
+  });
+});
+
+// --- Review follow-up: follow-during-drag joins the shared transaction ----
+describe("follow-during-drag joins the shared transaction", () => {
+  const widthOf = (api: HarnessApi) => Number.parseFloat(api.container()!.style.get("--w") ?? "");
+
+  test("a parent-layout follow riding a pointer drag JOINS the transaction: its frames carry the drag's transactionId and no re-capture fires", async () => {
+    const frames: Array<{ transactionId: number; kind: string; origin: string; source: string }> = [];
+    const starts: Array<{ transactionId: number; source: string; origin: string }> = [];
+    registerResizeFrameParticipant((frame) => frames.push({ ...frame }));
+    registerResizeTransactionStartParticipant((start) => starts.push({ ...start }));
+
+    // Left sidebar pointer drag opens transaction T.
+    const left = await mount({ initial: 200 });
+    let followWidth: number | null = 300;
+    const right = await mountSecond({
+      transactionSource: "context-panel",
+      initial: 300,
+      programmaticTarget: { key: "open:mode", width: 300, cause: "parent-layout" },
+      resolveFollowWidth: () => followWidth,
+    });
+    await startDrag(left, 100);
+    const txId = getCurrentResizeTransactionId();
+    expect(txId).not.toBeNull();
+
+    // Parent layout changes mid-drag: the right panel wakes up and follows.
+    followWidth = 340;
+    await act(async () => {
+      right.notifyAvailableWidthChange();
+      stub!.flushRaf();
+    });
+    // The follow frame was written WHILE RIDING, and it carries the drag's
+    // transactionId — not 0 (a dropped frame would delay the anchor by one).
+    const followFrames = frames.filter((f) => f.source === "context-panel");
+    expect(followFrames.length).toBe(1);
+    expect(followFrames[0]!.transactionId).toBe(txId);
+    expect(followFrames[0]!.origin).toBe("programmatic");
+    expect(widthOf(right)).toBe(340);
+
+    // Joining must NOT re-fire the transaction-start capture: the anchor
+    // baseline stays the left drag's ORIGINAL capture (no re-anchor).
+    expect(starts.length).toBe(1);
+    expect(starts[0]!.source).toBe("left-sidebar");
+
+    // The follow width stabilizes: the right panel finalizes ITS part while
+    // the transaction stays open for the still-dragging left panel.
+    await act(async () => { stub!.flushRaf(); });
+    const rightFrames = frames.filter((f) => f.source === "context-panel");
+    expect(rightFrames[rightFrames.length - 1]!.kind).toBe("final");
+    expect(rightFrames.every((f) => f.transactionId === txId)).toBe(true);
+    expect(getResizeInteractionPhase()).toBe("dragging");
+
+    // Pointerup: the left drag releases and the transaction finalizes once.
+    await act(async () => {
+      left.handlePointerUp(makePointerEvent({ clientX: 100 }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(getResizeInteractionPhase()).toBe("idle");
+  });
+
+  test("a follow that detaches mid-drag releases its part; the other drag still owns and finalizes the transaction", async () => {
+    const left = await mount({ initial: 200 });
+    let followWidth: number | null = 300;
+    const right = await mountSecond({
+      transactionSource: "context-panel",
+      initial: 300,
+      programmaticTarget: { key: "open:mode", width: 300, cause: "parent-layout" },
+      resolveFollowWidth: () => followWidth,
+    });
+    await startDrag(left, 100);
+    const txId = getCurrentResizeTransactionId();
+    expect(txId).not.toBeNull();
+    followWidth = 340;
+    await act(async () => {
+      right.notifyAvailableWidthChange();
+      stub!.flushRaf();
+    });
+    // The follow detaches mid-drag (resolveFollowWidth -> null): it must
+    // release its registration so the shared transaction is not held open
+    // by a ghost source.
+    followWidth = null;
+    await act(async () => {
+      right.notifyAvailableWidthChange();
+      stub!.flushRaf();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(getResizeInteractionPhase()).toBe("dragging");
+    expect(getCurrentResizeTransactionId()).toBe(txId);
+    // The left drag can still finalize the shared transaction.
+    await act(async () => {
+      left.handlePointerUp(makePointerEvent({ clientX: 100 }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(getResizeInteractionPhase()).toBe("idle");
   });
 });
 
