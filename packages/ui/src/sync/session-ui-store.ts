@@ -34,7 +34,7 @@ import { normalizePath } from "@/lib/pathNormalization"
 import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, warmChatsRootDirectory } from "@/lib/chatDirectories"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
-import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
+import { composeStartSessionFromAnswerMessage } from "@/lib/messages/executionMeta"
 import { findLatestUserModelChoice } from "@/lib/messages/userModelChoice"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
@@ -71,6 +71,8 @@ import {
   revertToMessage as revertToMessageAction,
   unrevertSession as unrevertSessionAction,
   forkFromMessage as forkFromMessageAction,
+  ForkLeftoverError,
+  UnsupportedForkBoundaryError,
   fetchMessagesForSession,
   type ArchiveSessionsOptions,
   type DeleteSessionOptions,
@@ -96,6 +98,13 @@ import { contextTokensFromBreakdown } from "@/stores/utils/tokenUtils"
 export type { AttachedFile }
 
 type GoalCommand = { name: string; template?: string }
+
+// Reuse one request for every runtime, source session, and message.
+// This guard covers every control that starts a message fork.
+const messageForkInflightByKey = new Map<string, Promise<void>>()
+
+const keyForMessageFork = (runtimeKey: string, sessionId: string, messageId: string): string =>
+  `${runtimeKey}\n${sessionId}\n${messageId}`
 
 export function expandSlashCommandGoalObjective(content: string, commands: GoalCommand[]): string {
   if (!content.startsWith("/")) return content
@@ -1869,23 +1878,53 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   },
 
   // ---------------------------------------------------------------------------
-  // forkFromMessage — delegates to session-actions (handles text + sidebar)
+  // Session forks delegate state reconciliation to session-actions.
   // ---------------------------------------------------------------------------
-  forkFromMessage: async (sessionId, messageId) => {
-    const sessions = getSyncSessions()
-    const existingSession = sessions.find((s) => s.id === sessionId)
-    if (!existingSession) return
+  forkFromMessage: (sessionId, messageId) => {
+    const key = keyForMessageFork(getRuntimeKey(), sessionId, messageId)
+    const existing = messageForkInflightByKey.get(key)
+    if (existing) return existing
 
-    try {
-      await forkFromMessageAction(sessionId, messageId)
+    const promise = (async () => {
+      try {
+        const result = await forkFromMessageAction(sessionId, messageId)
+        const { toast } = await import("sonner")
+        const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+        const { dictionary } = useI18nStore.getState()
+        if (result.status === "pins-dropped") {
+          toast.warning(formatMessage(dictionary, "sessions.fork.toast.pinsDropped"))
+        } else {
+          toast.success(formatMessage(dictionary, "sessions.fork.toast.success"))
+        }
+      } catch (error) {
+        const leftover = error instanceof ForkLeftoverError
+        if (!leftover && error instanceof Error && error.message === "runtime changed") return
+        const unsupportedBoundary = error instanceof UnsupportedForkBoundaryError
+        if (!unsupportedBoundary) {
+          console.error("Failed to fork session:", leftover ? error.originalError : error)
+        }
+        const { toast } = await import("sonner")
+        const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+        const { dictionary } = useI18nStore.getState()
+        toast.error(formatMessage(
+          dictionary,
+          leftover
+            ? "sessions.fork.toast.leftover"
+            : unsupportedBoundary
+              ? "sessions.fork.toast.unsupportedBoundary"
+              : "sessions.fork.toast.error",
+        ))
+      }
+    })()
 
-      const { toast } = await import("sonner")
-      toast.success(`Forked from ${existingSession.title}`)
-    } catch (error) {
-      console.error("Failed to fork session:", error)
-      const { toast } = await import("sonner")
-      toast.error("Failed to fork session")
+    messageForkInflightByKey.set(key, promise)
+    const clearInflightRequest = () => {
+      if (messageForkInflightByKey.get(key) === promise) {
+        messageForkInflightByKey.delete(key)
+      }
     }
+    void promise.then(clearInflightRequest, clearInflightRequest)
+    return promise
   },
 
   // ---------------------------------------------------------------------------
@@ -1992,13 +2031,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     // "Run as goal" rides the same arm mechanism as the composer target
     // button: sendMessage consumes the flag, stamps the goal (objective =
-    // the composed fork message) and attaches the goal-mode intro part.
+    // the composed start-from-answer message) and attaches the goal-mode intro part.
     // Set explicitly either way so a stray armed flag cannot leak into a
-    // non-goal fork.
+    // non-goal start-from-answer action.
     useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true)
 
     await get().sendMessage(
-      composeForkSessionMessage(execution.instructions, assistantPlanText),
+      composeStartSessionFromAnswerMessage(execution.instructions, assistantPlanText),
       pID,
       mID,
       execution.agent || undefined,

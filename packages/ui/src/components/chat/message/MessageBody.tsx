@@ -16,7 +16,10 @@ import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
 import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialog';
-import { ForkSessionDialog, type ForkSessionExecution } from '@/components/session/ForkSessionDialog';
+import {
+    StartSessionFromAnswerDialog,
+    type StartSessionFromAnswerExecution,
+} from '@/components/session/StartSessionFromAnswerDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 
@@ -1280,6 +1283,7 @@ const AssistantMessageBody = React.memo(({
     }, [assistantTextParts, isMobile, isMiniChatSurface, isVSCode, toolParts]);
 
     const createSessionFromAssistantMessage = useSessionUIStore((state) => state.createSessionFromAssistantMessage);
+    const forkFromMessage = useSessionUIStore((state) => state.forkFromMessage);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((state) => state.getDirectoryForSession);
     const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
@@ -1317,8 +1321,9 @@ const AssistantMessageBody = React.memo(({
     }, [assistantPlanText, effectiveDirectory, effectiveReviewTransferDirection, sessionId, t]);
     const [isPlanDialogOpen, setIsPlanDialogOpen] = React.useState(false);
     const [isSavingPlan, setIsSavingPlan] = React.useState(false);
-    const [isForkDialogOpen, setIsForkDialogOpen] = React.useState(false);
-    const [isForkSubmitting, setIsForkSubmitting] = React.useState(false);
+    const [isStartFromAnswerDialogOpen, setIsStartFromAnswerDialogOpen] = React.useState(false);
+    const [isStartFromAnswerSubmitting, setIsStartFromAnswerSubmitting] = React.useState(false);
+    const [isSessionForkSubmitting, setIsSessionForkSubmitting] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
@@ -1373,29 +1378,44 @@ const AssistantMessageBody = React.memo(({
 
     const hasCopyableText = Boolean(hasTextContent) && !awaitingMessageCompletion;
 
-    const handleForkClick = React.useCallback(
+    const handleStartFromAnswerClick = React.useCallback(
         (event: React.MouseEvent<HTMLButtonElement>) => {
             event.stopPropagation();
             event.preventDefault();
             if (!createSessionFromAssistantMessage || !assistantPlanText.trim()) {
                 return;
             }
-            setIsForkDialogOpen(true);
+            setIsStartFromAnswerDialogOpen(true);
         },
-        [createSessionFromAssistantMessage, assistantPlanText]
+        [assistantPlanText, createSessionFromAssistantMessage]
     );
 
-    const handleConfirmFork = React.useCallback(
-        async (execution: ForkSessionExecution) => {
+    const handleAssistantForkClick = React.useCallback(
+        async (event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            event.preventDefault();
+            if (!sessionId || isSessionForkSubmitting) return;
+            setIsSessionForkSubmitting(true);
+            try {
+                await forkFromMessage(sessionId, messageId);
+            } finally {
+                setIsSessionForkSubmitting(false);
+            }
+        },
+        [forkFromMessage, isSessionForkSubmitting, messageId, sessionId]
+    );
+
+    const handleConfirmStartFromAnswer = React.useCallback(
+        async (execution: StartSessionFromAnswerExecution) => {
             if (!createSessionFromAssistantMessage) {
                 return;
             }
-            setIsForkSubmitting(true);
+            setIsStartFromAnswerSubmitting(true);
             try {
                 await createSessionFromAssistantMessage(messageId, execution);
-                setIsForkDialogOpen(false);
+                setIsStartFromAnswerDialogOpen(false);
             } finally {
-                setIsForkSubmitting(false);
+                setIsStartFromAnswerSubmitting(false);
             }
         },
         [createSessionFromAssistantMessage, messageId]
@@ -2074,12 +2094,30 @@ const AssistantMessageBody = React.memo(({
                         variant="ghost"
                         className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
                         onPointerDown={(event) => event.stopPropagation()}
-                        onClick={handleForkClick}
+                        aria-label={t('chat.messageBody.actions.startNewSession')}
+                        onClick={handleStartFromAnswerClick}
                     >
                         <Icon name="chat-new" className="h-4 w-4" />
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewSession')}</TooltipContent>
+            </Tooltip> : null}
+            {!isMiniChatSurface ? <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        disabled={isSessionForkSubmitting}
+                        aria-label={t('chat.messageBody.actions.forkSession')}
+                        onClick={(event) => { void handleAssistantForkClick(event); }}
+                    >
+                        <Icon name="git-branch" className="h-4 w-4" />
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.forkSession')}</TooltipContent>
             </Tooltip> : null}
             {canShowMultiRunAction && !isReviewSessionView ? (
                 <Tooltip>
@@ -2122,13 +2160,13 @@ const AssistantMessageBody = React.memo(({
                      onSave={handleConfirmSaveAsPlan}
                  />
              ) : null}
-             {isForkDialogOpen ? (
-                 <ForkSessionDialog
-                     open={isForkDialogOpen}
-                     onOpenChange={setIsForkDialogOpen}
+             {isStartFromAnswerDialogOpen ? (
+                 <StartSessionFromAnswerDialog
+                     open={isStartFromAnswerDialogOpen}
+                     onOpenChange={setIsStartFromAnswerDialogOpen}
                      projectDirectory={effectiveDirectory ?? null}
-                     submitting={isForkSubmitting}
-                     onConfirm={handleConfirmFork}
+                     submitting={isStartFromAnswerSubmitting}
+                     onConfirm={handleConfirmStartFromAnswer}
                  />
              ) : null}
               <div>

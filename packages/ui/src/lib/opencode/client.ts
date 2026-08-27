@@ -1140,11 +1140,11 @@ class OpencodeService {
 
   async forkSession(sessionId: string, messageId?: string, directory?: string | null): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
-    const response = await this.client.session.fork({
-      sessionID: sessionId,
-      ...(requestDirectory ? { directory: requestDirectory } : {}),
-      messageID: messageId,
-    });
+    const request = requestDirectory
+      ? { sessionID: sessionId, directory: requestDirectory, messageID: messageId }
+      : { sessionID: sessionId, messageID: messageId };
+    if (!messageId) delete request.messageID;
+    const response = await this.client.session.fork(request);
     return unwrapSdkData(response, 'session.fork');
   }
 

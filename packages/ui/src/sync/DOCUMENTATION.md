@@ -171,6 +171,7 @@ VS Code does not run the server permission-auto-accept runtime. The extension ho
 2. session create/update/delete events; recency-only updates for existing sessions are retained latest-per-session and committed once on `session.idle`/`session.error`, while structural updates and create/delete remain immediate and runtime switching discards pending updates. Display ordering reacts separately to active/settled lifecycle transitions, not to these recency publications
 3. direct mutation from session actions after successful SDK calls:
    - create
+   - fork
    - title update
    - share
    - unshare
@@ -272,6 +273,72 @@ Rules:
 Examples of global-store updates performed in `session-actions.ts`:
 
 - `createSession()` -> `upsertSession(session)`
+- `forkFromMessage()` handles user and assistant messages.
+- A user-message fork excludes the selected prompt and restores it in the composer.
+- An assistant-message fork includes the selected answer. The source session keeps its text draft, and the new session opens with an empty composer.
+- The fork action registers the directory, updates both session stores, and selects the returned session.
+- Identical concurrent fork requests for one runtime, source session, and message share one in-flight operation.
+
+The fork API uses `messageID` as a stop sign. It does not copy that message or anything after it.
+
+- For a user-message fork, the action sends the selected user message as the stop sign. The new session excludes it.
+- For an assistant-message fork, the action sends the next message as the stop sign. The new session includes the selected answer.
+- For the last assistant message, no next message exists. The action omits `messageID`, so OpenCode copies the full transcript.
+
+Older OpenCode servers compare the stop ID as text while they walk messages by time.
+If an earlier ID sorts at or after the stop ID, those servers stop before the requested boundary.
+OpenCode 1.18.15 and later find the exact stop message and copy the correct chronological prefix.
+OpenChamber keeps this boundary fact and verifies the returned fork instead of refusing the request.
+
+The action fetches the source transcript first because it must find the next message.
+
+The source session can change between that fetch and the moment the server copies.
+A fork from the last assistant message sends no stop message, so the server copies every record that exists when it reads.
+Setup therefore reads the new fork's transcript and compares it with the copied prefix.
+The check runs after directory registration and before metadata cleanup and selection.
+
+A transcript longer than the copied prefix fails setup, because the fork holds messages the user excluded.
+A lexically inverted boundary requires a transcript with the exact copied-prefix length.
+An old server returns a short transcript for that boundary, so setup removes the fork and reports the unsupported-boundary error.
+A fixed server returns the full prefix, so the valid fork succeeds.
+A role or created-time mismatch inside the returned records also fails setup.
+
+A shorter transcript that matches passes for other boundaries, and the fork remains usable. The pin remap then reports any missing copied pins.
+Every setup failure here removes the fork, so an over-copied fork never opens.
+An old server now creates and removes a short fork. This extra work lets fixed servers accept valid cross-rollover forks.
+This costs one transcript request for a fork without pins. A fork with pins reuses these records, so its request count does not change.
+
+The fork response is authoritative for metadata. Before selection, the action reads that metadata and removes pins and source-only state.
+It sends the title and clean metadata in one update.
+If that update fails after a title change, the action retries the required metadata update without the title.
+
+If setup fails after fork creation, the action removes the fork through the bare client delete while the runtime remains current.
+It does not call the high-level session delete action because that action also removes linked sessions.
+A runtime switch stops compensation because the client points to another server. The same ID can identify an unrelated session there.
+If compensation fails or stops, the error tells the user that the fork remains.
+
+After selection, the action maps pinned message IDs to cloned message IDs only when source pins exist.
+It reuses the transcript that setup verified, so it sends no second transcript request.
+If pin mapping fails on the same runtime, the clean fork remains usable.
+The UI shows the pins warning.
+If the runtime changes during the pin request, the action rejects the stale result.
+The stale result does not change the composer in the new runtime.
+
+Linked issues are session-scoped and carry across a message fork unchanged.
+
+Message forks preserve unknown metadata. They remove goal, assist, compaction, and review state.
+Those fields have no message time. The action cannot tell whether each field existed before or after the fork point, so it removes them.
+
+A message fork from a review session becomes a normal independent session. Metadata cleanup removes the review links from the fork.
+The original session and its review session keep their existing relationship.
+Both user and assistant message controls can create this fork.
+
+OpenCode derives the fork title from the source title alone. It appends `(fork #1)` or increments an existing `(fork #N)` suffix, but it does not inspect other sessions and can duplicate an existing fork title.
+The shared action scans materialized session records in the fork directory and selects the next available number.
+Until the global store contains a complete active and archived snapshot, the selected fork number is best-effort.
+The action does not count the new fork if its creation event reaches the stores first.
+
+Forks remain independent root sessions. They do not receive the source session as `parentID`. That field remains reserved for child sessions such as subagents.
 - `updateSessionTitle()` -> `upsertSession(result.data)`
 - `shareSession()` / `unshareSession()` -> `upsertSession(result.data)`
 - `archiveSession()` / `archiveSessions()` -> wait for server confirmation, then upsert each archived session

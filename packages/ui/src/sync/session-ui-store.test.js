@@ -11,6 +11,9 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useI18nStore } from '@/lib/i18n/store';
+import { dict as enDict } from '@/lib/i18n/messages/en';
+import { toast } from 'sonner';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -269,6 +272,344 @@ describe('routeMessage directory scoping', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].sessionId).toBe('session-a');
     expect(calls[0].directory).toBe('/session/project');
+  });
+});
+
+describe('forkFromMessage errors', () => {
+  const createChildStore = (sessions) => {
+    let state = {
+      session: sessions,
+      sessionTotal: sessions.length,
+      sessionRevision: 0,
+      sessionEventRevision: {},
+      sessionDeletedRevision: {},
+      message: {},
+      part: {},
+      session_status: {},
+      permission: {},
+      question: {},
+    };
+    return {
+      getState: () => state,
+      setState: (patch) => {
+        state = { ...state, ...patch };
+      },
+    };
+  };
+
+  test('reuses one in-flight fork for repeated requests from the same message', async () => {
+    const directory = '/fork-inflight/project';
+    const sourceSession = {
+      id: 'session-inflight',
+      title: 'Source',
+      directory,
+      time: { created: 1, updated: 1 },
+    };
+    const forkedSession = {
+      id: 'session-inflight-fork',
+      title: 'Source (fork #1)',
+      directory,
+      time: { created: 2, updated: 2 },
+    };
+    const sourceRecords = [
+      { info: { id: 'source-user', role: 'user', time: { created: 1 } }, parts: [] },
+    ];
+    let releaseMessages = () => {};
+    const messagesReady = new Promise((resolve) => {
+      releaseMessages = resolve;
+    });
+    let messageCalls = 0;
+    let forkCalls = 0;
+    const sdk = {
+      session: {
+        // The fork boundary is the first user message, so the copied prefix is
+        // empty. Setup verification reads the fork transcript and accepts that.
+        messages: async ({ sessionID }) => {
+          messageCalls += 1;
+          await messagesReady;
+          return { data: sessionID === forkedSession.id ? [] : sourceRecords };
+        },
+      },
+    };
+    const childStore = createChildStore([sourceSession]);
+    const childStores = {
+      children: new Map([[directory, childStore]]),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    const successes = [];
+    const originalForkSession = opencodeClient.forkSession;
+    const originalUpdateSession = opencodeClient.updateSession;
+    const originalToastSuccess = toast.success;
+    const previousI18nState = useI18nStore.getState();
+    opencodeClient.forkSession = async () => {
+      forkCalls += 1;
+      return forkedSession;
+    };
+    opencodeClient.updateSession = async (_sessionId, patch) => ({ ...forkedSession, ...patch });
+    toast.success = (message) => {
+      successes.push(message);
+      return 'fork-success-toast';
+    };
+    useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+    setActionRefs(sdk, childStores, () => directory);
+
+    try {
+      const first = useSessionUIStore.getState().forkFromMessage(sourceSession.id, 'source-user');
+      const second = useSessionUIStore.getState().forkFromMessage(sourceSession.id, 'source-user');
+      const messageCallsWhilePending = messageCalls;
+
+      releaseMessages();
+      await Promise.all([first, second]);
+
+      expect(messageCallsWhilePending).toBe(1);
+      expect(forkCalls).toBe(1);
+      expect(successes).toHaveLength(1);
+
+      await useSessionUIStore.getState().forkFromMessage(sourceSession.id, 'source-user');
+
+      // Each completed fork reads the source transcript once and the new fork
+      // transcript once, so two operations make four requests.
+      expect(messageCalls).toBe(4);
+      expect(forkCalls).toBe(2);
+      expect(successes).toHaveLength(2);
+    } finally {
+      opencodeClient.forkSession = originalForkSession;
+      opencodeClient.updateSession = originalUpdateSession;
+      toast.success = originalToastSuccess;
+      useI18nStore.setState(previousI18nState);
+    }
+  });
+
+  test('warns when the clean fork remains usable but not all pinned messages were copied', async () => {
+    const directory = '/fork-pin-warning/project';
+    const sourceSession = {
+      id: 'session-pin-warning',
+      title: 'Source',
+      directory,
+      time: { created: 1, updated: 1 },
+    };
+    const forkedSession = {
+      id: 'session-pin-warning-fork',
+      title: 'Source (fork #1)',
+      directory,
+      time: { created: 2, updated: 2 },
+      metadata: {
+        openchamber: {
+          context_obligatory_messages: [
+            { id: 'source-user', createdAt: 1, role: 'user' },
+          ],
+        },
+      },
+    };
+    const sourceRecords = [
+      { info: { id: 'source-user', role: 'user', time: { created: 1 } }, parts: [] },
+      {
+        info: {
+          id: 'source-assistant',
+          role: 'assistant',
+          parentID: 'source-user',
+          time: { created: 2 },
+        },
+        parts: [],
+      },
+    ];
+    const sdk = {
+      session: {
+        // Setup verifies the fork transcript before selection. An empty fork
+        // transcript is a valid short prefix, so setup passes and the pinned
+        // source message has nothing to map to.
+        messages: async ({ sessionID }) => sessionID === sourceSession.id
+          ? { data: sourceRecords }
+          : { data: [] },
+      },
+    };
+    const childStore = createChildStore([sourceSession]);
+    const childStores = {
+      children: new Map([[directory, childStore]]),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    const warnings = [];
+    const successes = [];
+    const originalForkSession = opencodeClient.forkSession;
+    const originalUpdateSession = opencodeClient.updateSession;
+    const originalToastWarning = toast.warning;
+    const originalToastSuccess = toast.success;
+    const previousI18nState = useI18nStore.getState();
+    opencodeClient.forkSession = async () => forkedSession;
+    opencodeClient.updateSession = async (_sessionId, patch) => ({ ...forkedSession, ...patch });
+    toast.warning = (message) => {
+      warnings.push(message);
+      return 'pin-warning-toast';
+    };
+    toast.success = (message) => {
+      successes.push(message);
+      return 'fork-success-toast';
+    };
+    useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+    setActionRefs(sdk, childStores, () => directory);
+
+    try {
+      await useSessionUIStore.getState().forkFromMessage(sourceSession.id, 'source-assistant');
+    } finally {
+      opencodeClient.forkSession = originalForkSession;
+      opencodeClient.updateSession = originalUpdateSession;
+      toast.warning = originalToastWarning;
+      toast.success = originalToastSuccess;
+      useI18nStore.setState(previousI18nState);
+    }
+
+    expect(warnings).toEqual(['Session forked, but not all pinned messages were copied']);
+    expect(successes).toEqual([]);
+    expect(useSessionUIStore.getState().currentSessionId).toBe(forkedSession.id);
+  });
+
+  test('reports a leftover session when setup and compensation both fail', async () => {
+    const directory = '/fork-leftover/project';
+    const sourceSession = {
+      id: 'session-leftover',
+      title: 'Source',
+      directory,
+      time: { created: 1, updated: 1 },
+    };
+    const forkedSession = {
+      id: 'session-leftover-fork',
+      title: 'Source (fork #1)',
+      directory,
+      time: { created: 2, updated: 2 },
+    };
+    const sourceRecords = [
+      { info: { id: 'source-user', role: 'user', time: { created: 1 } }, parts: [] },
+      {
+        info: {
+          id: 'source-assistant',
+          role: 'assistant',
+          parentID: 'source-user',
+          time: { created: 2 },
+        },
+        parts: [],
+      },
+    ];
+    const sdk = { session: { messages: async () => ({ data: sourceRecords }) } };
+    const childStore = createChildStore([sourceSession]);
+    const childStores = {
+      children: new Map([[directory, childStore]]),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    const errors = [];
+    const originalForkSession = opencodeClient.forkSession;
+    const originalUpdateSession = opencodeClient.updateSession;
+    const originalDeleteSession = opencodeClient.deleteSession;
+    const originalToastError = toast.error;
+    const previousI18nState = useI18nStore.getState();
+    opencodeClient.forkSession = async () => forkedSession;
+    opencodeClient.updateSession = async () => {
+      throw new Error('metadata cleanup failed');
+    };
+    opencodeClient.deleteSession = async () => {
+      throw new Error('delete failed');
+    };
+    toast.error = (message) => {
+      errors.push(message);
+      return 'fork-leftover-toast';
+    };
+    useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+    setActionRefs(sdk, childStores, () => directory);
+
+    try {
+      await useSessionUIStore.getState().forkFromMessage(sourceSession.id, 'source-assistant');
+    } finally {
+      opencodeClient.forkSession = originalForkSession;
+      opencodeClient.updateSession = originalUpdateSession;
+      opencodeClient.deleteSession = originalDeleteSession;
+      toast.error = originalToastError;
+      useI18nStore.setState(previousI18nState);
+    }
+
+    expect(errors).toEqual(['Fork setup failed, but the new session still exists']);
+  });
+
+  test('shows the unsupported-boundary toast for a rollover fork', async () => {
+    const directory = '/rollover/project';
+    const sourceSession = {
+      id: 'session-rollover',
+      title: 'Source',
+      directory,
+      time: { created: 1, updated: 1 },
+    };
+    const forkedSession = {
+      id: 'session-rollover-fork',
+      title: 'Source (fork #1)',
+      directory,
+      time: { created: 2, updated: 2 },
+    };
+    const sourceRecords = [
+      { info: { id: 'msg_ff5b3480000100000000000000', role: 'user', time: { created: 1 } }, parts: [] },
+      {
+        info: {
+          id: 'msg_ff5b3480000200000000000000',
+          role: 'assistant',
+          parentID: 'msg_ff5b3480000100000000000000',
+          time: { created: 2 },
+        },
+        parts: [],
+      },
+      { info: { id: 'msg_00a4cb80000100000000000000', role: 'user', time: { created: 3 } }, parts: [] },
+    ];
+    const sdk = {
+      session: {
+        messages: async ({ sessionID }) => ({
+          data: sessionID === sourceSession.id ? sourceRecords : [],
+        }),
+      },
+    };
+    const childStore = createChildStore([sourceSession]);
+    const childStores = {
+      children: new Map([[directory, childStore]]),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    const toastErrors = [];
+    let forkCalls = 0;
+    let deleteCalls = 0;
+    const originalForkSession = opencodeClient.forkSession;
+    const originalDeleteSession = opencodeClient.deleteSession;
+    const originalToastError = toast.error;
+    const previousI18nState = useI18nStore.getState();
+    opencodeClient.forkSession = async () => {
+      forkCalls += 1;
+      return forkedSession;
+    };
+    opencodeClient.deleteSession = async () => {
+      deleteCalls += 1;
+      return true;
+    };
+    toast.error = (message) => {
+      toastErrors.push(message);
+      return 'unsupported-boundary-toast';
+    };
+    useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+    setActionRefs(sdk, childStores, () => directory);
+
+    try {
+      await useSessionUIStore.getState().forkFromMessage(
+        sourceSession.id,
+        'msg_00a4cb80000100000000000000',
+      );
+    } finally {
+      opencodeClient.forkSession = originalForkSession;
+      opencodeClient.deleteSession = originalDeleteSession;
+      toast.error = originalToastError;
+      useI18nStore.setState(previousI18nState);
+    }
+
+    expect(forkCalls).toBe(1);
+    expect(deleteCalls).toBe(1);
+    expect(toastErrors).toEqual([
+      'OpenCode cannot fork this session at this message. Retrying will not help.',
+    ]);
   });
 });
 

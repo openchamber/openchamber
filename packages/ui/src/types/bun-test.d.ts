@@ -6,6 +6,7 @@ declare module "bun:test" {
   export function test(name: string, fn: () => void | Promise<void>): void;
   export function expect(value: unknown): {
     toEqual(expected: unknown): void;
+    toStrictEqual(expected: unknown): void;
     toBe(expected: unknown): void;
     toBeTruthy(): void;
     toBeFalsy(): void;

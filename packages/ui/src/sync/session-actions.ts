@@ -3,7 +3,7 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { FilePart, OpencodeClient, Session, Message, Part, TextPart } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -25,9 +25,15 @@ import {
   withoutReviewSessionLink,
   type SessionMetadataRecord,
 } from "@/lib/sessionReviewMetadata"
-import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
+import {
+  getContextObligatoryMessages,
+  withContextObligatoryMessage,
+  withContextObligatoryMessages,
+  type ContextObligatoryMessage,
+} from "@/lib/contextObligatoryMessages"
 import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
 import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
+import { prepareMessageForkMetadata } from "@/lib/sessionForkMetadata"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { getRuntimeKey } from "@/lib/runtime-switch"
@@ -108,6 +114,36 @@ type SdkResult<T> = {
   data?: T
   error?: unknown
   response?: { status?: number }
+}
+
+type SessionMessageRecord = {
+  info: Message
+  parts: Part[]
+}
+
+/** The fork action throws this when an older OpenCode server stops before the requested boundary. */
+export class UnsupportedForkBoundaryError extends Error {
+  constructor() {
+    super("OpenCode cannot copy the requested message prefix")
+    this.name = "UnsupportedForkBoundaryError"
+  }
+}
+
+export type ForkFromMessageResult =
+  | { status: "success" }
+  | { status: "pins-dropped" }
+
+/** The server created the fork, but setup failed and rollback did not remove it. */
+export class ForkLeftoverError extends Error {
+  readonly forkedSessionId: string
+  readonly originalError: Error
+
+  constructor(forkedSessionId: string, originalError: Error) {
+    super(originalError.message)
+    this.name = "ForkLeftoverError"
+    this.forkedSessionId = forkedSessionId
+    this.originalError = originalError
+  }
 }
 
 function formatSdkError(error: unknown): string {
@@ -481,14 +517,15 @@ function getSessionReplyClient(sessionId?: string): OpencodeClient {
   return sdk()
 }
 
-function restoreFilePartsToInput(fileParts: Array<Record<string, unknown>>): void {
+function restoreFilePartsToInput(fileParts: FilePart[]): void {
   useInputStore.getState().clearAttachedFiles()
   for (const filePart of fileParts) {
-    const url = typeof filePart.url === "string" ? filePart.url : ""
-    const mime = typeof filePart.mime === "string" ? filePart.mime : "application/octet-stream"
-    const filename = typeof filePart.filename === "string" ? filePart.filename : "attachment"
-    if (url) {
-      useInputStore.getState().addRestoredAttachment({ url, mimeType: mime, filename })
+    if (filePart.url) {
+      useInputStore.getState().addRestoredAttachment({
+        url: filePart.url,
+        mimeType: filePart.mime,
+        filename: filePart.filename ?? "attachment",
+      })
     }
   }
 }
@@ -1857,7 +1894,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const messages = state.message[sessionId] ?? []
   const targetMsg = messages.find((m) => m.id === messageId)
   let messageText = ""
-  let submittedFileParts: Array<Record<string, unknown>> = []
+  let submittedFileParts: FilePart[] = []
   if (targetMsg && targetMsg.role === "user") {
     const parts = state.part[messageId] ?? []
     const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
@@ -1868,7 +1905,9 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     // Snapshot file parts for later restoration to the input.
     // Exclude synthetic file parts (server-generated file content that should
     // not be restored to the composer).
-    submittedFileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
+    submittedFileParts = parts.filter((part): part is FilePart => (
+      part.type === "file" && !isSyntheticPart(part)
+    ))
   }
 
   // Optimistically set only the revert marker. Keep messages and parts in the
@@ -2011,54 +2050,410 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   }
 }
 
-/**
- * Fork from a user message.
- *
- * 1. Extract text from the message for input restoration
- * 2. Call the runtime fork endpoint
- * 3. Insert the new session into the child store (so sidebar updates immediately)
- * 4. Switch to new session and set pending input text
- */
-export async function forkFromMessage(sessionId: string, messageId: string): Promise<void> {
-  const { store, directory } = dirStoreForSession(sessionId)
-  const state = store.getState()
+function reconcileForkedSession(
+  forkedSession: Session,
+  fallbackStore: DirectoryStoreApi,
+  fallbackDirectory: string | undefined,
+  expectedRuntimeKey: string,
+  selectSession: boolean,
+): Session {
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
 
-  // Extract message text and file attachments for input restoration.
-  // Only non-synthetic text parts — the server adds file content as synthetic
-  // text parts that should not be restored. File parts (images, pasted
-  // screenshots) are user-originated and must be restored.
-  const parts = state.part[messageId] ?? []
-  let messageText = ""
-  const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
-  messageText = textParts
-    .map((p: Part) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
-    .join("\n")
-    .trim()
-  const fileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
-
-  const forkedSession = await opencodeClient.forkSession(sessionId, messageId, directory)
-
-  // Insert new session into child store so sidebar updates immediately
-  const current = store.getState()
+  const responseDirectory = forkedSession.directory
+  const sessionDirectory = responseDirectory ?? fallbackDirectory ?? null
+  const session = sessionDirectory && !responseDirectory
+    ? { ...forkedSession, directory: sessionDirectory }
+    : forkedSession
+  if (sessionDirectory) registerSessionDirectory(session.id, sessionDirectory)
+  const targetStore = sessionDirectory ? dirStoreForDirectory(sessionDirectory) : fallbackStore
+  const current = targetStore.getState()
   const sessions = [...current.session]
-  const searchResult = Binary.search(sessions, forkedSession.id, (s) => s.id)
-  if (!searchResult.found) {
-    sessions.splice(searchResult.index, 0, forkedSession)
-    store.setState({ session: sessions })
+  const searchResult = Binary.search(sessions, session.id, (entry) => entry.id)
+
+  if (searchResult.found) {
+    sessions[searchResult.index] = session
+    targetStore.setState({
+      session: sessions,
+      ...sessionMutationPatch(current, session.id, false),
+    })
+  } else {
+    sessions.splice(searchResult.index, 0, session)
+    targetStore.setState({
+      session: sessions,
+      sessionTotal: current.sessionTotal + 1,
+      ...sessionMutationPatch(current, session.id, false),
+    })
   }
 
-  // Switch to new session
-  useSessionUIStore.getState().setCurrentSession(forkedSession.id)
+  useGlobalSessionsStore.getState().upsertSession(session)
+  if (selectSession) useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
+  return session
+}
 
-  // Restore forked message text and file attachments to input
+const FORK_TITLE_PATTERN = /^(.*) \(fork #(\d+)\)$/
+
+function getNextForkTitle(proposedTitle: string, sessions: readonly Session[]): string {
+  const proposedMatch = proposedTitle.match(FORK_TITLE_PATTERN)
+  const baseTitle = proposedMatch?.[1] ?? proposedTitle
+  const proposedNumber = proposedMatch ? Number.parseInt(proposedMatch[2], 10) : 1
+  let nextNumber = proposedNumber
+  for (const session of sessions) {
+    const match = session.title.match(FORK_TITLE_PATTERN)
+    if (!match || match[1] !== baseTitle) continue
+    const number = Number.parseInt(match[2], 10)
+    if (Number.isSafeInteger(number)) nextNumber = Math.max(nextNumber, number + 1)
+  }
+  return `${baseTitle} (fork #${nextNumber})`
+}
+
+function getKnownSessionsForForkTitle(
+  store: DirectoryStoreApi,
+  directory: string | null,
+  forkedSessionId: string,
+): Session[] {
+  const globalState = useGlobalSessionsStore.getState()
+  const normalizedDirectory = normalizePath(directory)
+  return [
+    ...store.getState().session,
+    ...globalState.activeSessions,
+    ...globalState.archivedSessions,
+  ].filter((session) => {
+    // The creation event can add the new fork before this action resumes.
+    // Do not count that fork when the action chooses its own number.
+    if (session.id === forkedSessionId) return false
+    if (!normalizedDirectory) return true
+    const sessionDirectory = resolveGlobalSessionDirectory(session)
+    return !sessionDirectory || normalizePath(sessionDirectory) === normalizedDirectory
+  })
+}
+
+interface PreparedForkMetadata {
+  metadata: SessionMetadataRecord
+  pinnedMessages: ContextObligatoryMessage[]
+}
+
+interface RemappedForkPins {
+  session: Session
+  pinsDropped: boolean
+}
+
+function prepareCleanForkMetadata(forkedSession: Session): PreparedForkMetadata {
+  const pinnedMessages = getContextObligatoryMessages(forkedSession)
+  const currentMetadata = getSessionMetadata(forkedSession)
+  const metadataWithoutPins = pinnedMessages.length > 0
+    ? withContextObligatoryMessages(currentMetadata, [])
+    : currentMetadata
+
+  return {
+    metadata: prepareMessageForkMetadata(metadataWithoutPins),
+    pinnedMessages,
+  }
+}
+
+/**
+ * Read the new fork's transcript and prove it stays within the copied prefix.
+ *
+ * The source session can change between the snapshot this action fetched and
+ * the moment the server copies. A last-assistant fork sends no stop message, so
+ * the server copies whatever exists when it reads. This check runs before
+ * selection so a fork that copied too much never opens.
+ *
+ * A normal boundary accepts a shorter transcript that matches. An inverted
+ * boundary requires the full prefix because older servers stop early there.
+ */
+async function fetchVerifiedForkPrefix(
+  forkedSession: Session,
+  copiedSourceRecords: SessionMessageRecord[],
+  boundaryIsInverted: boolean,
+  forkDirectory: string | null,
+  expectedRuntimeKey: string,
+): Promise<SessionMessageRecord[]> {
+  const forkResult = await sdk().session.messages({
+    sessionID: forkedSession.id,
+    directory: forkDirectory ?? undefined,
+  })
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+
+  const forkRecords = assertSdkData(forkResult, "fork session.messages")
+  // A longer fork copied messages the user excluded. That is the race.
+  if (forkRecords.length > copiedSourceRecords.length) {
+    throw new Error("The fork transcript is longer than the copied prefix")
+  }
+  if (boundaryIsInverted && forkRecords.length < copiedSourceRecords.length) {
+    // An old server creates this fork, then stops early. Setup deletes that
+    // short fork so a fixed server can copy the valid full prefix.
+    throw new UnsupportedForkBoundaryError()
+  }
+  for (let index = 0; index < forkRecords.length; index += 1) {
+    const sourceMessage = copiedSourceRecords[index].info
+    const forkMessage = forkRecords[index].info
+    if (sourceMessage.role !== forkMessage.role || sourceMessage.time.created !== forkMessage.time.created) {
+      throw new Error("The fork transcript does not match the copied prefix")
+    }
+  }
+  return forkRecords
+}
+
+async function remapForkedPins(
+  forkRecords: SessionMessageRecord[],
+  copiedSourceRecords: SessionMessageRecord[],
+  forkedSession: Session,
+  pinnedMessages: readonly ContextObligatoryMessage[],
+  forkDirectory: string | null,
+  expectedRuntimeKey: string,
+): Promise<RemappedForkPins> {
+  const remappedMessages: ContextObligatoryMessage[] = []
+
+  // Setup already verified these records match the start of the copied prefix.
+  const forkMessageIdBySourceId = new Map<string, string>()
+  for (let index = 0; index < forkRecords.length; index += 1) {
+    forkMessageIdBySourceId.set(copiedSourceRecords[index].info.id, forkRecords[index].info.id)
+  }
+
+  const copiedSourceIds = new Set(copiedSourceRecords.map((record) => record.info.id))
+  let pinsDropped = false
+  for (const pinnedMessage of pinnedMessages) {
+    const forkMessageId = forkMessageIdBySourceId.get(pinnedMessage.id)
+    if (forkMessageId) {
+      remappedMessages.push({ ...pinnedMessage, id: forkMessageId })
+    } else if (copiedSourceIds.has(pinnedMessage.id)) {
+      pinsDropped = true
+    }
+  }
+
+  if (remappedMessages.length === 0) return { session: forkedSession, pinsDropped }
+
+  const updatedSession = await opencodeClient.updateSession(
+    forkedSession.id,
+    { metadata: withContextObligatoryMessages(getSessionMetadata(forkedSession), remappedMessages) },
+    forkDirectory,
+  )
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+  return { session: updatedSession, pinsDropped }
+}
+
+async function updateCleanFork(
+  forkedSession: Session,
+  nextTitle: string,
+  metadata: SessionMetadataRecord,
+  forkDirectory: string | null,
+  expectedRuntimeKey: string,
+): Promise<Session> {
+  try {
+    const updatedSession = await opencodeClient.updateSession(
+      forkedSession.id,
+      { title: nextTitle, metadata },
+      forkDirectory,
+    )
+    if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+    return updatedSession
+  } catch (error) {
+    if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+    if (nextTitle === forkedSession.title) throw error
+
+    try {
+      const updatedSession = await opencodeClient.updateSession(
+        forkedSession.id,
+        { metadata },
+        forkDirectory,
+      )
+      if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+      console.error("[session-actions] Failed to increase the fork title. The server title remains.", error)
+      return updatedSession
+    } catch (metadataError) {
+      if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+      console.error("[session-actions] Failed to clean fork metadata after the title update failed.", metadataError)
+      throw error
+    }
+  }
+}
+
+async function compensateFailedFork(
+  forkedSession: Session,
+  forkDirectory: string | null,
+  expectedRuntimeKey: string,
+): Promise<boolean> {
+  // After a runtime switch, opencodeClient points at another server. The same
+  // ID can belong to an unrelated session there, so deletion must stop.
+  if (isStaleRuntime(expectedRuntimeKey)) return false
+
+  try {
+    const deleted = await opencodeClient.deleteSession(forkedSession.id, forkDirectory)
+    if (isStaleRuntime(expectedRuntimeKey) || deleted !== true) return false
+    finalizeConfirmedSessionDeletion(forkedSession.id, forkDirectory ?? undefined, expectedRuntimeKey)
+    return true
+  } catch (compensationError) {
+    console.error("[session-actions] Failed to remove a fork after setup failed.", compensationError)
+    return false
+  }
+}
+
+async function forkAndReconcileSession(
+  sessionId: string,
+  messageBoundaryId: string | undefined,
+  copiedSourceRecords: SessionMessageRecord[],
+  boundaryIsInverted: boolean,
+  store: DirectoryStoreApi,
+  directory: string | undefined,
+  expectedRuntimeKey: string,
+): Promise<ForkFromMessageResult> {
+  const forkedSession = await opencodeClient.forkSession(sessionId, messageBoundaryId, directory)
+  const forkDirectory = forkedSession.directory ?? directory ?? null
+  let reconciledSession: Session
+  let pinnedMessages: ContextObligatoryMessage[]
+  let forkRecords: SessionMessageRecord[]
+
+  try {
+    if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+    // Register before the cleanup request so directory-less SSE events reach the fork store.
+    // Keep the later reconciliation registration because cleanup can return a different directory.
+    if (forkDirectory) registerSessionDirectory(forkedSession.id, forkDirectory)
+    // Verify before the cleanup write and before selection. A fork that copied
+    // past the selected message must never open, so this failure deletes it.
+    forkRecords = await fetchVerifiedForkPrefix(
+      forkedSession,
+      copiedSourceRecords,
+      boundaryIsInverted,
+      forkDirectory,
+      expectedRuntimeKey,
+    )
+    const preparedMetadata = prepareCleanForkMetadata(forkedSession)
+    pinnedMessages = preparedMetadata.pinnedMessages
+    const nextTitle = getNextForkTitle(
+      forkedSession.title,
+      getKnownSessionsForForkTitle(store, forkDirectory, forkedSession.id),
+    )
+    const cleanSession = await updateCleanFork(
+      forkedSession,
+      nextTitle,
+      preparedMetadata.metadata,
+      forkDirectory,
+      expectedRuntimeKey,
+    )
+    reconciledSession = reconcileForkedSession(
+      cleanSession,
+      store,
+      directory,
+      expectedRuntimeKey,
+      true,
+    )
+  } catch (error) {
+    const originalError = error instanceof Error ? error : new Error("Fork setup failed")
+    const deleted = await compensateFailedFork(forkedSession, forkDirectory, expectedRuntimeKey)
+    if (deleted) throw originalError
+    throw new ForkLeftoverError(forkedSession.id, originalError)
+  }
+
+  if (pinnedMessages.length === 0) return { status: "success" }
+
+  try {
+    const { session: sessionWithRemappedPins, pinsDropped } = await remapForkedPins(
+      forkRecords,
+      copiedSourceRecords,
+      reconciledSession,
+      pinnedMessages,
+      forkDirectory,
+      expectedRuntimeKey,
+    )
+    if (sessionWithRemappedPins !== reconciledSession) {
+      reconcileForkedSession(
+        sessionWithRemappedPins,
+        store,
+        directory,
+        expectedRuntimeKey,
+        false,
+      )
+    }
+    return { status: pinsDropped ? "pins-dropped" : "success" }
+  } catch (error) {
+    if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+    console.error("[session-actions] Failed to remap pinned messages. The clean fork remains usable.", error)
+    return { status: "pins-dropped" }
+  }
+}
+
+function isForkBoundaryInverted(
+  sourceRecords: SessionMessageRecord[],
+  copiedThroughIndex: number,
+  exclusiveBoundaryId: string | undefined,
+): boolean {
+  if (!exclusiveBoundaryId) return false
+
+  // Older OpenCode servers compare IDs while they walk messages by time.
+  // An earlier larger ID makes those servers stop before the requested message.
+  for (let index = 0; index <= copiedThroughIndex; index += 1) {
+    const record = sourceRecords[index]
+    if (record && record.info.id >= exclusiveBoundaryId) return true
+  }
+  return false
+}
+
+/**
+ * Copy a session from a user or assistant message.
+ *
+ * A user message stays in the composer and is not copied. An assistant message
+ * stays in the copied transcript. OpenCode treats messageID as an exclusive
+ * cutoff, so both cases send the first message that must not be copied.
+ */
+export async function forkFromMessage(sessionId: string, messageId: string): Promise<ForkFromMessageResult> {
+  const expectedRuntimeKey = getRuntimeKey()
+  const { store, directory } = dirStoreForSession(sessionId)
+
+  // A limit returns only the newest messages. A fork can start from any message,
+  // so this action needs all records for old boundaries and their copied prefixes.
+  const sourceResult = await sdk().session.messages({ sessionID: sessionId, directory })
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
+
+  const sourceRecords = assertSdkData(sourceResult, "source session.messages")
+  const selectedIndex = sourceRecords.findIndex((record) => record.info.id === messageId)
+  if (selectedIndex < 0) throw new Error("Cannot fork from a message that does not exist")
+
+  const selectedRecord = sourceRecords[selectedIndex]
+  const copiedThroughIndex = selectedRecord.info.role === "user"
+    ? selectedIndex - 1
+    : selectedIndex
+  const copiedSourceRecords = sourceRecords.slice(0, copiedThroughIndex + 1)
+  const exclusiveBoundaryId = sourceRecords[copiedThroughIndex + 1]?.info.id
+  const boundaryIsInverted = isForkBoundaryInverted(
+    sourceRecords,
+    copiedThroughIndex,
+    exclusiveBoundaryId,
+  )
+
+  // Only user-message forks restore the selected message in the composer.
+  // Synthetic text and files come from the server, not from the user's input.
+  const parts = selectedRecord.info.role === "user" ? selectedRecord.parts : []
+  const textParts = parts.filter((part): part is TextPart => (
+    part.type === "text" && !isSyntheticPart(part)
+  ))
+  const messageText = textParts
+    .map((part) => part.text)
+    .join("\n")
+    .trim()
+  const fileParts = parts.filter((part): part is FilePart => (
+    part.type === "file" && !isSyntheticPart(part)
+  ))
+
+  const result = await forkAndReconcileSession(
+    sessionId,
+    exclusiveBoundaryId,
+    copiedSourceRecords,
+    boundaryIsInverted,
+    store,
+    directory,
+    expectedRuntimeKey,
+  )
+
+  restoreFilePartsToInput(fileParts)
+  if (selectedRecord.info.role !== "user") return result
+
   if (messageText) {
     useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
     })
   }
-  // Clear existing attachments and restore file parts from the forked message.
-  restoreFilePartsToInput(fileParts)
+  return result
 }
 
 export async function fetchMessagesForSession(sessionID: string, directory?: string | null): Promise<void> {

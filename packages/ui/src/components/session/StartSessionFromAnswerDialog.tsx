@@ -14,11 +14,11 @@ import { ThinkingPill } from '@/components/session/ThinkingPill';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
-import { EXECUTION_FORK_DEFAULT_INSTRUCTIONS, EXECUTION_FORK_GOAL_INSTRUCTIONS } from '@/lib/messages/executionMeta';
+import { START_FROM_ANSWER_DEFAULT_INSTRUCTIONS, START_FROM_ANSWER_GOAL_INSTRUCTIONS } from '@/lib/messages/executionMeta';
 import { useI18n } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
 
-export type ForkSessionExecution = {
+export type StartSessionFromAnswerExecution = {
   providerID: string;
   modelID: string;
   variant: string;
@@ -28,15 +28,15 @@ export type ForkSessionExecution = {
   runAsGoal?: boolean;
 };
 
-type ForkSessionDialogProps = {
+type StartSessionFromAnswerDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectDirectory: string | null;
   submitting?: boolean;
-  onConfirm: (execution: ForkSessionExecution) => Promise<void> | void;
+  onConfirm: (execution: StartSessionFromAnswerExecution) => Promise<void> | void;
 };
 
-export function ForkSessionDialog(props: ForkSessionDialogProps) {
+export function StartSessionFromAnswerDialog(props: StartSessionFromAnswerDialogProps) {
   const { t } = useI18n();
   const { open, onOpenChange, projectDirectory, submitting = false, onConfirm } = props;
 
@@ -53,7 +53,7 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
   const [modelID, setModelID] = React.useState(currentModelID);
   const [variant, setVariant] = React.useState(currentVariant);
   const [agent, setAgent] = React.useState(currentAgentName);
-  const [instructions, setInstructions] = React.useState(EXECUTION_FORK_DEFAULT_INSTRUCTIONS);
+  const [instructions, setInstructions] = React.useState(START_FROM_ANSWER_DEFAULT_INSTRUCTIONS);
   const [createWorktree, setCreateWorktree] = React.useState(false);
   const [runAsGoal, setRunAsGoal] = React.useState(false);
   const showCreateWorktree = React.useMemo(() => !isVSCodeRuntime(), []);
@@ -66,15 +66,15 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
   const handleToggleRunAsGoal = React.useCallback((next: boolean) => {
     setRunAsGoal(next);
     setInstructions((current) => {
-      if (next && current === EXECUTION_FORK_DEFAULT_INSTRUCTIONS) return EXECUTION_FORK_GOAL_INSTRUCTIONS;
-      if (!next && current === EXECUTION_FORK_GOAL_INSTRUCTIONS) return EXECUTION_FORK_DEFAULT_INSTRUCTIONS;
+      if (next && current === START_FROM_ANSWER_DEFAULT_INSTRUCTIONS) return START_FROM_ANSWER_GOAL_INSTRUCTIONS;
+      if (!next && current === START_FROM_ANSWER_GOAL_INSTRUCTIONS) return START_FROM_ANSWER_DEFAULT_INSTRUCTIONS;
       return current;
     });
   }, []);
 
   React.useEffect(() => {
     if (!open) return;
-    void loadProviders({ directory: projectDirectory, source: 'forkSessionDialog' });
+    void loadProviders({ directory: projectDirectory, source: 'startSessionFromAnswerDialog' });
     void loadConfigAgents({ directory: projectDirectory });
     void loadAgentsStoreAgents();
   }, [open, loadProviders, loadConfigAgents, loadAgentsStoreAgents, projectDirectory]);
@@ -89,7 +89,7 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
     setModelID(config.currentModelId);
     setVariant(config.currentVariant || '');
     setAgent(config.currentAgentName || '');
-    setInstructions(EXECUTION_FORK_DEFAULT_INSTRUCTIONS);
+    setInstructions(START_FROM_ANSWER_DEFAULT_INSTRUCTIONS);
     setCreateWorktree(false);
     setRunAsGoal(false);
   }, [open]);
@@ -113,7 +113,7 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
 
   const variantOptions = React.useMemo(() => {
     const provider = providers.find((item) => item.id === providerID);
-    const model = provider?.models?.find((item) => item.id === modelID) as { variants?: Record<string, unknown> } | undefined;
+    const model = provider?.models?.find((item) => item.id === modelID);
     return model?.variants ? Object.keys(model.variants) : [];
   }, [providers, providerID, modelID]);
 
@@ -193,11 +193,11 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <span className="typography-meta font-medium text-muted-foreground">{t('chat.messageBody.forkDialog.instructions.label')}</span>
+            <span className="typography-meta font-medium text-muted-foreground">{t('chat.messageBody.startFromAnswerDialog.instructions.label')}</span>
             <Textarea
               value={instructions}
               onChange={(event) => setInstructions(event.target.value)}
-              placeholder={t('chat.messageBody.forkDialog.instructions.placeholder')}
+              placeholder={t('chat.messageBody.startFromAnswerDialog.instructions.placeholder')}
               hasError={instructions.trim().length === 0}
               disabled={submitting}
             />
@@ -212,7 +212,7 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
                   checked={createWorktree}
                   onChange={setCreateWorktree}
                   disabled={submitting}
-                  ariaLabel={t('chat.messageBody.forkDialog.createWorktree')}
+                  ariaLabel={t('chat.messageBody.startFromAnswerDialog.createWorktree')}
                 />
                 <button
                   type="button"
@@ -220,7 +220,7 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
                   disabled={submitting}
                   onClick={() => setCreateWorktree((value) => !value)}
                 >
-                  {t('chat.messageBody.forkDialog.createWorktree')}
+                  {t('chat.messageBody.startFromAnswerDialog.createWorktree')}
                 </button>
               </div>
             ) : null}

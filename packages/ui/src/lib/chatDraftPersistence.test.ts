@@ -41,6 +41,15 @@ describe('chatDraftPersistence', () => {
     expect(readChatDraft(namedSession).text).toBe('named session');
   });
 
+  test('does not copy a source session draft to a new session', () => {
+    const source = createChatDraftIdentity('runtime-a', '/repo', 'session-1')!;
+    const fork = createChatDraftIdentity('runtime-a', '/repo', 'session-2')!;
+    writeChatDraft(source, 'foobar', []);
+
+    expect(readChatDraft(source).text).toBe('foobar');
+    expect(readChatDraft(fork).text).toBe('');
+  });
+
   test('clears only the matching identity and notifies active composers', () => {
     const deleted = createChatDraftIdentity('runtime-a', '/repo-a', 'session-1')!;
     const retained = createChatDraftIdentity('runtime-a', '/repo-b', 'session-1')!;
