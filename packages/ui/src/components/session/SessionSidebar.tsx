@@ -229,8 +229,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       const projectEntries = worktreeDiscoveryProjects;
       if (projectEntries.length === 0 || isVSCode) {
         if (!cancelled) {
-          setUnresolvedWorktreeProjectPaths(new Set());
-          setResolvedWorktreeTopologyKey(projectWorktreeDiscoveryKey);
+          setUnresolvedWorktreeProjectPaths((current) => current.size === 0 ? current : new Set());
+          setResolvedWorktreeTopologyKey((current) => current === projectWorktreeDiscoveryKey ? current : projectWorktreeDiscoveryKey);
         }
         return;
       }
