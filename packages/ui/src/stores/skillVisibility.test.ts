@@ -6,6 +6,9 @@ const skill = (name: string, path: string) => ({ name, path });
 const AGENTS = (name: string) => skill(name, `/repo/.agents/skills/${name}/SKILL.md`);
 const CLAUDE = (name: string) => skill(name, `/repo/.claude/skills/${name}/SKILL.md`);
 const OPENCODE = (name: string) => skill(name, `/home/u/.config/opencode/skill/${name}/SKILL.md`);
+const WIN_AGENTS = (name: string) => skill(name, String.raw`C:\Users\u\.agents\skills\${name}\SKILL.md`);
+const WIN_CLAUDE = (name: string) => skill(name, String.raw`C:\Users\u\.claude\skills\${name}\SKILL.md`);
+const WIN_OPENCODE = (name: string) => skill(name, String.raw`C:\Users\u\.config\opencode\skill\${name}\SKILL.md`);
 
 const ENABLED = { claudeDisabled: false, allDisabled: false };
 
@@ -19,6 +22,13 @@ describe('resolveSkillRoot', () => {
 
   test('does not match a directory that merely contains the name', () => {
     expect(resolveSkillRoot('/repo/my.claude.backup/skills/a/SKILL.md')).toBe('opencode');
+  });
+
+  test('classifies Windows backslash paths', () => {
+    expect(resolveSkillRoot(WIN_CLAUDE('a').path)).toBe('claude');
+    expect(resolveSkillRoot(WIN_AGENTS('a').path)).toBe('agents');
+    expect(resolveSkillRoot(WIN_OPENCODE('a').path)).toBe('opencode');
+    expect(resolveSkillRoot(String.raw`C:\repo\my.claude.backup\skills\a\SKILL.md`)).toBe('opencode');
   });
 });
 
@@ -71,5 +81,23 @@ describe('filterSkillsByRuntimeFlags', () => {
   test('does not let dedup drop a name that only exists under .claude', () => {
     const result = filterSkillsByRuntimeFlags([CLAUDE('only-claude'), AGENTS('other')], ENABLED);
     expect(result.map((s) => s.name).sort()).toEqual(['only-claude', 'other']);
+  });
+
+  test('drops Windows .agents and .claude skills when external skills are disabled', () => {
+    const skills = [WIN_AGENTS('a'), WIN_CLAUDE('b'), WIN_OPENCODE('c')];
+    const result = filterSkillsByRuntimeFlags(skills, { claudeDisabled: false, allDisabled: true });
+    expect(result.map((s) => s.name)).toEqual(['c']);
+  });
+
+  test('drops only Windows .claude skills when claude skills are disabled', () => {
+    const skills = [WIN_AGENTS('a'), WIN_CLAUDE('b'), WIN_OPENCODE('c')];
+    const result = filterSkillsByRuntimeFlags(skills, { claudeDisabled: true, allDisabled: false });
+    expect(result.map((s) => s.name).sort()).toEqual(['a', 'c']);
+  });
+
+  test('prefers the .agents copy for a duplicated name on Windows', () => {
+    const result = filterSkillsByRuntimeFlags([WIN_CLAUDE('dup'), WIN_AGENTS('dup')], ENABLED);
+    expect(result).toHaveLength(1);
+    expect(result[0].path).toContain('.agents');
   });
 });

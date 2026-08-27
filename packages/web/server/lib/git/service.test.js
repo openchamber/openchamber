@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import simpleGit from 'simple-git';
 
 import {
@@ -13,6 +13,7 @@ import {
   getBranches,
   getRangeDiff,
   getStatus,
+  getWorktrees,
   isGitRepository,
   populateWorktreeWithLockRecovery,
   removeWorktree,
@@ -460,6 +461,47 @@ describe('worktree root resolution', () => {
     runGit(repo, ['worktree', 'add', '-b', 'feature/test', worktree, 'HEAD']);
 
     await expect(resolvePrimaryWorktreeRoot(worktree)).resolves.toEqual({ root: fs.realpathSync(repo) });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getWorktrees
+// ---------------------------------------------------------------------------
+
+describe('getWorktrees', () => {
+  if (!canRunGit()) {
+    it.skip('git binary not available', () => {});
+    return;
+  }
+
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+  afterEach(() => {
+    warnSpy.mockClear();
+  });
+
+  it('returns an empty list for a non-git directory without warning', async () => {
+    const nonGit = createTempDir();
+
+    const result = await getWorktrees(nonGit);
+
+    expect(result).toEqual([]);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns the worktrees for a real git repository', async () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'init']);
+
+    const result = await getWorktrees(repo);
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -1351,6 +1393,14 @@ describe('parseBranchCreationSource', () => {
 
   it('returns null when the branch was created from a detached HEAD pointer', () => {
     const reflog = 'branch: Created from HEAD@{0}';
+    expect(parseBranchCreationSource(reflog)).toBeNull();
+  });
+
+  it('returns null when the branch was created from the current HEAD without a named source', () => {
+    // `git switch -c <branch>` / `git checkout -b <branch>` from the current
+    // branch record `branch: Created from HEAD` in the reflog (git 2.x). The
+    // source branch name is not recorded, so no base can be derived from it.
+    const reflog = 'branch: Created from HEAD';
     expect(parseBranchCreationSource(reflog)).toBeNull();
   });
 

@@ -1,4 +1,5 @@
 import { Marked, marked, type Tokens } from 'marked';
+import markedLinkifyIt from 'marked-linkify-it';
 import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
@@ -331,10 +332,15 @@ const blockMathExtension = {
   },
 };
 
-const createParser = (imageMode: MarkdownImageMode) => new Marked().use({
-  gfm: true,
-  breaks: false,
-  extensions: [inlineMathExtension, blockMathExtension],
+// marked's GFM autolink swallows CJK punctuation after a bare URL, so switch
+// to marked-linkify-it, which treats Unicode punctuation as a URL boundary.
+// Plain CJK characters right after a URL are still consumed, matching GitHub.
+const createParser = (imageMode: MarkdownImageMode) => new Marked().use(
+  markedLinkifyIt({ fuzzyLink: false }),
+  {
+    gfm: true,
+    breaks: false,
+    extensions: [inlineMathExtension, blockMathExtension],
   renderer: {
     // Assistant output is untrusted. Markdown constructs still render as HTML,
     // but raw HTML must remain visible text so it cannot introduce active DOM

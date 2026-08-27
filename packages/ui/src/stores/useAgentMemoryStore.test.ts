@@ -21,6 +21,10 @@ interface MemoryReadResult {
   projectFailed: boolean;
 }
 
+interface PendingMemoryRead {
+  resolve?: (result: MemoryReadResult) => void;
+}
+
 /**
  * Swappable implementations rather than mock helpers: each test states the one
  * behaviour it needs.
@@ -45,7 +49,7 @@ mock.module('@/lib/agentMemoryApi', () => ({
   },
 }));
 
-const { useAgentMemoryStore } = await import('./useAgentMemoryStore');
+const { selectProjectMemoryForPath, useAgentMemoryStore } = await import('./useAgentMemoryStore');
 
 beforeEach(() => {
   useAgentMemoryStore.getState().reset();
@@ -83,6 +87,38 @@ describe('load', () => {
     const state = useAgentMemoryStore.getState();
     // Blanking here would read as the agent having forgotten everything.
     expect(state.global).toHaveLength(1);
+    expect(state.error).toBe('offline');
+  });
+
+  test("does not expose the previous project's memories under the Chats owner", async () => {
+    await useAgentMemoryStore.getState().load('/workspace/openchamber');
+
+    const pending: PendingMemoryRead = {};
+    readImpl = () => new Promise((resolve) => {
+      pending.resolve = resolve;
+    });
+    const chatsPath = '/Users/test/.config/openchamber/chats';
+    const loadingChats = useAgentMemoryStore.getState().load(chatsPath);
+
+    const switched = useAgentMemoryStore.getState();
+    expect(selectProjectMemoryForPath(switched, chatsPath)).toEqual([]);
+    expect(switched.projectPath).toBe(chatsPath);
+
+    pending.resolve?.({ global: [entry({ id: 'g1' })], project: [], globalFailed: false, projectFailed: false });
+    await loadingChats;
+
+    expect(selectProjectMemoryForPath(useAgentMemoryStore.getState(), chatsPath)).toEqual([]);
+  });
+
+  test('a failed load for a new owner stays distinct from an empty project', async () => {
+    await useAgentMemoryStore.getState().load('/workspace/openchamber');
+    readImpl = async () => { throw new Error('offline'); };
+
+    await useAgentMemoryStore.getState().load('/Users/test/.config/openchamber/chats');
+
+    const state = useAgentMemoryStore.getState();
+    expect(state.project).toEqual([]);
+    expect(state.projectFailed).toBe(true);
     expect(state.error).toBe('offline');
   });
 

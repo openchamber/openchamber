@@ -103,9 +103,13 @@ other runtime API.
     `https://chatgpt.com/backend-api/codex/responses` with
     `ChatGPT-Account-Id`; expired tokens are refreshed against
     `auth.openai.com` (single-flight) and written back to `auth.json`.
-  - **Anthropic** (`type: api`): `/v1/messages` with `x-api-key`.
+  - **Anthropic** (`type: api`): `/messages` with `x-api-key`, against
+    `provider.anthropic.options.baseURL` when configured (used as-is, matching
+    `@ai-sdk/anthropic` — no `/v1` is inserted) or `https://api.anthropic.com/v1`
+    otherwise.
   - **Google** (`type: api`): `generateContent` with `x-goog-api-key`; Gemini 3
-    uses `thinkingLevel` while older Flash models use `thinkingBudget: 0`.
+    uses `thinkingLevel`, Gemini 2.x uses `thinkingBudget: 0`, and all other
+    models omit `thinkingConfig` entirely.
   - Everything else: OpenAI-compatible `/chat/completions` against the
     provider's base URL, resolved from (1) `provider.<id>.options.baseURL`
     in the OpenCode config, (2) the hardcoded `https://api.openai.com/v1`

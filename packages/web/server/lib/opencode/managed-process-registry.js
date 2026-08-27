@@ -32,13 +32,26 @@
 //      been reparented to init/pid 1, or the recorded owner pid is dead. A
 //      child still owned by a live instance is left untouched.
 //
+// All filesystem and child-process operations here are ASYNCHRONOUS. The web
+// server runs in-process inside the Electron main event loop (and other hosts),
+// so any `spawnSync`/`*Sync` FS call blocks the single event loop — which also
+// serves UI asset requests and realtime SSE traffic. The startup reaper can
+// iterate several registry entries and, on Windows, each one spawns `tasklist`
+// (100-500ms) and possibly `taskkill`; doing that synchronously stalls the
+// whole process and is what caused the 1.13.3 `openchamber-ui://` lag
+// regression (#1841). `execFile`/`fsp.*` keep the event loop responsive while
+// the reaper waits on the kernel.
+//
 // The VS Code extension cannot import this module (it does not bundle the web
 // package); it carries a parity implementation that reads/writes the SAME dir.
 
-import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 const resolveRegistryDir = () => {
   const override = process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
@@ -48,49 +61,53 @@ const resolveRegistryDir = () => {
 
 const entryFilePath = (pid) => path.join(resolveRegistryDir(), `${pid}.json`);
 
-const writeEntryFile = (entry) => {
+const writeEntryFile = async (entry) => {
   const dir = resolveRegistryDir();
   try {
-    fs.mkdirSync(dir, { recursive: true });
+    await fsp.mkdir(dir, { recursive: true });
     const filePath = path.join(dir, `${entry.pid}.json`);
     const tmp = `${filePath}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(entry, null, 2));
-    fs.renameSync(tmp, filePath);
+    await fsp.writeFile(tmp, JSON.stringify(entry, null, 2));
+    await fsp.rename(tmp, filePath);
   } catch {
     // Best-effort: a failed registry write must never break spawn/shutdown.
   }
 };
 
-const readAllEntries = () => {
+const readAllEntries = async () => {
   const dir = resolveRegistryDir();
   let names = [];
   try {
-    names = fs.readdirSync(dir).filter((name) => name.endsWith('.json'));
+    names = await fsp.readdir(dir);
   } catch {
     return [];
   }
   const out = [];
-  for (const name of names) {
+  for (const name of names.filter((value) => value.endsWith('.json'))) {
     const filePath = path.join(dir, name);
     try {
-      const entry = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      const entry = JSON.parse(await fsp.readFile(filePath, 'utf8'));
       if (entry && Number.isInteger(entry.pid)) {
         out.push({ entry, filePath });
       } else {
-        fs.rmSync(filePath, { force: true });
+        await fsp.rm(filePath, { force: true });
       }
     } catch {
       // Corrupt/partial file — drop it.
-      try { fs.rmSync(filePath, { force: true }); } catch {}
+      try {
+        await fsp.rm(filePath, { force: true });
+      } catch {
+        // ignore
+      }
     }
   }
   return out;
 };
 
 /** Record an OpenCode process WE spawned so a future run can reap it if orphaned. */
-export const registerManagedProcess = ({ pid, ownerPid, port, binary, runtime } = {}) => {
+export const registerManagedProcess = async ({ pid, ownerPid, port, binary, runtime } = {}) => {
   if (!Number.isInteger(pid)) return;
-  writeEntryFile({
+  await writeEntryFile({
     pid,
     ownerPid: Number.isInteger(ownerPid) ? ownerPid : process.pid,
     port: Number.isInteger(port) ? port : null,
@@ -101,11 +118,12 @@ export const registerManagedProcess = ({ pid, ownerPid, port, binary, runtime } 
 };
 
 /** Drop a pid from the registry (after we have killed/closed it ourselves). */
-export const unregisterManagedProcess = (pid) => {
+export const unregisterManagedProcess = async (pid) => {
   if (!Number.isInteger(pid)) return;
   try {
-    fs.rmSync(entryFilePath(pid), { force: true });
+    await fsp.rm(entryFilePath(pid), { force: true });
   } catch {
+    // Best-effort: dropping a missing file is not an error.
   }
 };
 
@@ -123,14 +141,14 @@ const isPidAlive = (pid) => {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Returns { ppid, command } for a live pid on Unix, or null if it can't be read.
-const readUnixProcInfo = (pid) => {
+const readUnixProcInfo = async (pid) => {
   try {
-    const result = spawnSync('ps', ['-p', String(pid), '-o', 'ppid=,command='], {
+    const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'ppid=,command='], {
       encoding: 'utf8',
       timeout: 3000,
       windowsHide: true,
     });
-    const line = (result.stdout || '').trim();
+    const line = (stdout || '').trim();
     if (!line) return null;
     const match = line.match(/^\s*(\d+)\s+(.*)$/);
     if (!match) return null;
@@ -141,14 +159,14 @@ const readUnixProcInfo = (pid) => {
 };
 
 // Windows image name for a pid (e.g. "opencode.exe"), or null.
-const readWindowsImageName = (pid) => {
+const readWindowsImageName = async (pid) => {
   try {
-    const result = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
+    const { stdout } = await execFileAsync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
       encoding: 'utf8',
       timeout: 3000,
       windowsHide: true,
     });
-    return (result.stdout || '').trim() || null;
+    return (stdout || '').trim() || null;
   } catch {
     return null;
   }
@@ -167,15 +185,28 @@ const commandIdentifiesOurServer = (command, entry) => {
 const killOrphan = async (pid) => {
   if (process.platform === 'win32') {
     try {
-      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', timeout: 5000, windowsHide: true });
+      await execFileAsync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        stdio: 'ignore',
+        timeout: 5000,
+        windowsHide: true,
+      });
     } catch {
+      // Best-effort: a failed kill is not fatal (startup reaper is a backstop).
     }
     return;
   }
 
   const signalTree = (signal) => {
-    try { process.kill(-pid, signal); } catch {}
-    try { process.kill(pid, signal); } catch {}
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      // process group may already be gone
+    }
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // pid may already be gone
+    }
   };
 
   signalTree('SIGTERM');
@@ -196,7 +227,7 @@ const processEntry = async (entry, { log }) => {
   const ownerGone = Number.isInteger(entry.ownerPid) && !isPidAlive(entry.ownerPid);
 
   if (process.platform === 'win32') {
-    const image = readWindowsImageName(entry.pid);
+    const image = await readWindowsImageName(entry.pid);
     const looksLikeOpencode = typeof image === 'string' && image.toLowerCase().includes('opencode');
     // Windows lacks reliable reparent-to-1 semantics (job objects usually kill
     // children with the parent), so we reap only when the owner is provably dead
@@ -209,7 +240,7 @@ const processEntry = async (entry, { log }) => {
     return false;
   }
 
-  const info = readUnixProcInfo(entry.pid);
+  const info = await readUnixProcInfo(entry.pid);
   // Can't verify identity (or it's not our server) → leave it alone.
   if (!info || !commandIdentifiesOurServer(info.command, entry)) return false;
 
@@ -227,7 +258,7 @@ const processEntry = async (entry, { log }) => {
  * server. Returns { inspected, reaped }.
  */
 export const reapOrphanedProcesses = async ({ log } = {}) => {
-  const records = readAllEntries();
+  const records = await readAllEntries();
   if (records.length === 0) return { inspected: 0, reaped: 0 };
 
   let reaped = 0;
@@ -243,7 +274,11 @@ export const reapOrphanedProcesses = async ({ log } = {}) => {
       log?.(`[lifecycle] reap check failed for pid ${entry.pid}: ${error?.message ?? error}`);
     }
     if (drop) {
-      try { fs.rmSync(filePath, { force: true }); } catch {}
+      try {
+        await fsp.rm(filePath, { force: true });
+      } catch {
+        // best-effort
+      }
     }
   }
 

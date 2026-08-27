@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
 import { resolveProjectContextId, type ProjectRef, type ProjectTodoItem } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
-import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
+import { selectProjectMemoryForPath, useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { countHighlightedMemories, memoryViewKey } from '@/lib/agentMemoryBadges';
 import { EMPTY_PROJECT_CONTEXT_ENTRY, useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -29,8 +29,9 @@ interface ProjectNotesTodoPanelProps {
   canCreateWorktree?: boolean;
   onActionComplete?: () => void;
   /** When provided, opening a plan calls this instead of the desktop context
-      panel tab — hosts without ContextPanel (mobile) render their own viewer. */
-  onOpenPlan?: (plan: { id: string; title: string }) => void;
+      panel tab — hosts without ContextPanel (mobile) render their own viewer.
+      The plan carries its owner so the host's viewer cannot guess wrong. */
+  onOpenPlan?: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   className?: string;
 }
 
@@ -133,7 +134,9 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const memoryDisabledByServer = useAgentMemoryStore((state) => state.disabled);
   const memoryVisible = memoryEnabled && !memoryDisabledByServer;
   const globalMemory = useAgentMemoryStore((state) => state.global);
-  const projectMemory = useAgentMemoryStore((state) => state.project);
+  const projectMemory = useAgentMemoryStore(
+    (state) => selectProjectMemoryForPath(state, projectRef?.path ?? null),
+  );
 
   const isMobile = useUIStore((state) => state.isMobile);
   const storedTab = useUIStore((state) => state.projectContextTab);
@@ -499,10 +502,10 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           />
         ) : null}
 
-        {activeTab === 'plans' && openPlan ? (
+        {activeTab === 'plans' && openPlan && projectRef ? (
           <React.Suspense fallback={null}>
             <PlanView
-              projectPlanId={openPlan.id}
+              savedProjectPlan={{ projectRef, planId: openPlan.id }}
               onNavigatedToChat={() => setOpenPlan(null)}
             />
           </React.Suspense>

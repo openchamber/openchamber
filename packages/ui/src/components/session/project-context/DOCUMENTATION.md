@@ -60,6 +60,18 @@ Leaving the section or the project closes it, so its editor never sits over a
 list it no longer matches. Hosts that own a fullscreen plan surface (mobile)
 still pass `onOpenPlan` and keep theirs.
 
+The panel owns the only source of truth for which project a plan belongs to,
+and it never lets the editor guess. `PlanView` receives the owner as
+`savedProjectPlan={{ projectRef, planId }}` — load and autosave both go to that
+exact project. An earlier version let the editor re-derive the project from the
+current directory, which silently opened an empty document for plans stored
+under the managed Chats owner (`openchamber:chats`), for plans opened from a
+worktree the directory lookup missed, and for plan tabs restored after a
+reload. Persisted plan tabs carry `projectPlanRef` for the same reason; a saved-plan
+tab persisted with an id but no owner is dropped on rehydrate rather than
+reopened against a guessed project. A plain session plan tab legitimately has
+neither an id nor an owner and is kept.
+
 ## Pins belong to one session
 
 Notes and plans are project data, but attaching one writes its id to the current
@@ -106,10 +118,16 @@ its own tool. It feeds this panel only — what a session is told about memory i
 decided server-side by `packages/web/server/lib/session-knowledge`, so it
 reaches sessions that have no UI at all and survives compaction.
 
-Both sides resolve a worktree to its project before touching the store — the
-client through `resolveProjectForSessionDirectory`, the server through
-`agent-memory/project-resolution`. Keying by the session directory instead filed
-a worktree's memories under a project nothing reads.
+`useProjectContextOwner` is the client authority shared by this panel and the
+memory sync. It resolves managed chat directories to the Chats root and a
+worktree to its project before either consumer touches a store. The server uses
+`agent-memory/project-resolution` for the same worktree rule. Keying by a
+worktree session directory would file memories under a project nothing reads.
+
+Project memory is rendered only when the store's `projectPath` matches the
+panel owner. An owner switch hides the previous project's entries before the
+new request starts. A failed request marks the new owner unavailable instead of
+presenting that hidden list as authoritative empty memory.
 
 Turning the switch back on re-reads the store only after the setting has
 finished being written. The switch flips the client immediately, which makes the

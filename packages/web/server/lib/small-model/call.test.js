@@ -316,6 +316,69 @@ describe('callSmallModel — custom provider config', () => {
     });
   });
 
+  describe('anthropic provider custom baseURL override', () => {
+    const anthropicOk = (text) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ content: [{ type: 'text', text }] }),
+    });
+
+    it('respects provider.anthropic.options.baseURL over the hardcoded Anthropic endpoint', async () => {
+      readConfig.mockReturnValue({
+        provider: { anthropic: { options: { baseURL: 'http://127.0.0.1:3456/v1' } } },
+      });
+      fetchMock.mockResolvedValue(anthropicOk('ok'));
+
+      await callSmallModel({
+        auth: { anthropic: { type: 'api', key: 'dummy' } },
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'anthropic',
+        modelID: 'claude-haiku-4-5',
+        prompt: 'hi',
+      });
+
+      const { url, init } = lastCall(fetchMock);
+      expect(url).toBe('http://127.0.0.1:3456/v1/messages');
+      expect(url).not.toContain('api.anthropic.com');
+      expect(init.headers['x-api-key']).toBe('dummy');
+    });
+
+    it('uses a bare-host baseURL as-is without inserting /v1, matching @ai-sdk/anthropic', async () => {
+      readConfig.mockReturnValue({
+        provider: { anthropic: { options: { baseURL: 'http://127.0.0.1:3456' } } },
+      });
+      fetchMock.mockResolvedValue(anthropicOk('ok'));
+
+      await callSmallModel({
+        auth: { anthropic: { type: 'api', key: 'dummy' } },
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'anthropic',
+        modelID: 'claude-haiku-4-5',
+        prompt: 'hi',
+      });
+
+      expect(lastCall(fetchMock).url).toBe('http://127.0.0.1:3456/messages');
+    });
+
+    it('falls back to https://api.anthropic.com when no anthropic baseURL override is configured', async () => {
+      readConfig.mockReturnValue({});
+      fetchMock.mockResolvedValue(anthropicOk('ok'));
+
+      await callSmallModel({
+        auth: { anthropic: { type: 'api', key: 'sk-ant' } },
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'anthropic',
+        modelID: 'claude-haiku-4-5',
+        prompt: 'hi',
+      });
+
+      expect(lastCall(fetchMock).url).toBe('https://api.anthropic.com/v1/messages');
+    });
+  });
+
   describe('catalog-based base URL (no config override)', () => {
     it('uses the catalog api field when no config baseURL is set', async () => {
       readConfig.mockReturnValue({});
@@ -535,6 +598,22 @@ describe('callSmallModel — Google thinking configuration', () => {
 
     const body = JSON.parse(lastCall(fetchMock).init.body);
     expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+  });
+
+  it('omits thinkingConfig for other Google/Gemini models', async () => {
+    fetchMock.mockResolvedValue(googleResponse('generated commit'));
+
+    await callSmallModel({
+      auth: { google: { type: 'api', key: 'google-key' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'google',
+      modelID: 'gemini-1.5-flash',
+      prompt: 'generate',
+    });
+
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.generationConfig.thinkingConfig).toBeUndefined();
   });
 });
 

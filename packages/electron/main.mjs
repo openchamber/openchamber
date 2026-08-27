@@ -33,6 +33,7 @@ import {
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import { shouldAllowBrowserPanelCertificateError } from './browser-panel-security.mjs';
+import { createRendererRecoveryPolicy } from './renderer-recovery.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
@@ -2496,6 +2497,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   };
 
   const browserWindow = new BrowserWindow(options);
+  const rendererRecoveryPolicy = createRendererRecoveryPolicy();
   browserWindow.__ocLabel = label || nextWindowLabel();
   browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
   browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
@@ -2655,6 +2657,19 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.webContents.setZoomFactor(1);
   browserWindow.webContents.on('zoom-changed', () => {
     browserWindow.webContents.setZoomFactor(1);
+  });
+  browserWindow.webContents.on('render-process-gone', (_event, details) => {
+    if (!rendererRecoveryPolicy.shouldReload(details.reason)) return;
+    log.warn('[electron] renderer exited unexpectedly; reloading window', {
+      label: browserWindow.__ocLabel,
+      reason: details.reason,
+      exitCode: details.exitCode,
+    });
+    setTimeout(() => {
+      if (!browserWindow.isDestroyed()) {
+        browserWindow.webContents.reload();
+      }
+    }, 100);
   });
 
   browserWindow.webContents.on('dom-ready', () => {
