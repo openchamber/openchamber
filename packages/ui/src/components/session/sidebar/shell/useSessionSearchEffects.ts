@@ -26,6 +26,21 @@ export const useSessionSearchEffects = ({
     return () => window.cancelAnimationFrame(raf);
   }, [enabled, isSessionSearchOpen, sessionSearchInputRef]);
 
+  // The open_session_list shortcut lands here when the sidebar is visible:
+  // the session list is already on screen, so the shortcut opens its search.
+  React.useEffect(() => {
+    if (!enabled || typeof window === 'undefined') {
+      return;
+    }
+    const handleOpenRequest = () => {
+      setIsSessionSearchOpen(true);
+      sessionSearchInputRef.current?.focus();
+      sessionSearchInputRef.current?.select();
+    };
+    window.addEventListener('openchamber:sidebar-session-search', handleOpenRequest);
+    return () => window.removeEventListener('openchamber:sidebar-session-search', handleOpenRequest);
+  }, [enabled, setIsSessionSearchOpen, sessionSearchInputRef]);
+
   React.useEffect(() => {
     if (!enabled || !isSessionSearchOpen || typeof document === 'undefined') {
       return;

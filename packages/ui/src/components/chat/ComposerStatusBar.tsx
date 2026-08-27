@@ -116,13 +116,11 @@ const TodoItemRow: React.FC<{ todo: TodoItem }> = ({ todo }) => {
 const EMPTY_TODOS: TodoItem[] = [];
 
 interface ComposerStatusBarProps {
-  showAbortStatus?: boolean;
   showTodos?: boolean;
   leftAccessory?: React.ReactNode;
 }
 
 export const ComposerStatusBar: React.FC<ComposerStatusBarProps> = ({
-  showAbortStatus,
   showTodos = true,
   leftAccessory,
 }) => {
@@ -186,7 +184,7 @@ export const ComposerStatusBar: React.FC<ComposerStatusBarProps> = ({
 
   const hasTodoContent = showTodos && statusSummary.left > 0;
   const hasLeftAccessory = Boolean(leftAccessory);
-  const hasContent = Boolean(showAbortStatus) || hasTodoContent || hasLeftAccessory;
+  const hasContent = hasTodoContent || hasLeftAccessory;
 
   const popoverRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -252,16 +250,7 @@ export const ComposerStatusBar: React.FC<ComposerStatusBarProps> = ({
       <div className={cn("flex items-center justify-between gap-2 h-8", hasLeftAccessory && "px-0.5")}>
         {/* Left: abort status | pending-changes accessory */}
         <div className={cn("flex-1 flex items-center min-w-0 gap-2", hasLeftAccessory ? "pl-1.5" : "overflow-x-hidden")}>
-          {showAbortStatus ? (
-            <div className="flex h-full items-center text-[var(--status-error)] pl-0.5">
-              <span className="flex items-center gap-1.5 typography-ui-label">
-                <Icon name="close-circle" aria-hidden="true" />
-                {t('chat.statusRow.aborted')}
-              </span>
-            </div>
-          ) : leftAccessory ? (
-            leftAccessory
-          ) : null}
+          {leftAccessory ?? null}
         </div>
 
         {/* Right: todos dropdown */}

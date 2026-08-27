@@ -103,7 +103,7 @@ const STYLE_CLASS: Record<AnyStyle, string> = {
     mentionAgent: 'text-[var(--status-success)]',
     mentionCommand: 'text-[var(--primary)]',
     mentionSnippet: 'text-[var(--status-warning)]',
-    code: 'rounded-[3px] bg-[var(--surface-subtle)] text-[var(--markdown-inline-code)]',
+    code: 'rounded-[6px] bg-[var(--markdown-inline-code-bg)] text-[var(--markdown-inline-code)] px-[0.3125rem] py-0.5',
     codeFence: 'bg-[var(--surface-subtle)] text-[var(--markdown-inline-code)]',
     // A `~path` is written for the reader's benefit, not to attach anything —
     // it takes the same colour as a file mention, since it names the same kind

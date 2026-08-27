@@ -187,6 +187,9 @@ export const sortContextSurfaces = (railOrder: readonly string[]): ContextSurfac
 
 type VisibleRailSurfacesOptions = {
   railOrder: readonly string[];
+  /** Surfaces the user chose to hide from the rail (and from the digit
+      shortcuts, which share this filter). */
+  hiddenSurfaces?: readonly string[];
   planModeEnabled: boolean;
   isVSCode: boolean;
   screenWidth: number;
@@ -203,6 +206,9 @@ type VisibleRailSurfacesOptions = {
  */
 export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOptions): ContextSurfaceDescriptor[] => {
   return sortContextSurfaces(options.railOrder).filter((surface) => {
+    if (options.hiddenSurfaces?.includes(surface.id)) {
+      return false;
+    }
     if (surface.id === 'plan' && !options.planModeEnabled) {
       return false;
     }

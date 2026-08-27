@@ -36,6 +36,7 @@ import { cn } from '@/lib/utils';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitStatus } from '@/stores/useGitStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { ContextRailSurfacesDialog } from './ContextRailSurfacesDialog';
 
 const RAIL_TOOLTIP_DELAY_MS = 150;
 // Hold the surface-switch modifier for this long before revealing the order
@@ -161,6 +162,7 @@ export const ContextPanelRail: React.FC = () => {
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const workStatusPanelVisible = useUIStore((state) => state.workStatusPanelVisible);
   const contextRailOrder = useUIStore((state) => state.contextRailOrder);
+  const contextRailHiddenSurfaces = useUIStore((state) => state.contextRailHiddenSurfaces);
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
@@ -256,12 +258,15 @@ export const ContextPanelRail: React.FC = () => {
   const surfaces = React.useMemo(() => {
     return getVisibleContextRailSurfaces({
       railOrder: contextRailOrder,
+      hiddenSurfaces: contextRailHiddenSurfaces,
       planModeEnabled,
       isVSCode: isVSCodeRuntime(),
       screenWidth,
       tabs,
     });
-  }, [contextRailOrder, planModeEnabled, screenWidth, tabs]);
+  }, [contextRailHiddenSurfaces, contextRailOrder, planModeEnabled, screenWidth, tabs]);
+
+  const [isSurfacesDialogOpen, setIsSurfacesDialogOpen] = React.useState(false);
 
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const { active, over } = event;
@@ -331,6 +336,24 @@ export const ContextPanelRail: React.FC = () => {
           })}
         </SortableContext>
       </DndContext>
+      {/* Outside the sortable list on purpose: this button takes no digit,
+          cannot be dragged, and configures the rail rather than living on it. */}
+      <Tooltip delayDuration={RAIL_TOOLTIP_DELAY_MS}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={t('contextRail.configure.open')}
+            onClick={() => setIsSurfacesDialogOpen(true)}
+            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground"
+          >
+            <Icon name="equalizer-2" className="h-[18px] w-[18px]" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="left" sideOffset={8}>
+          {t('contextRail.configure.open')}
+        </TooltipContent>
+      </Tooltip>
+      <ContextRailSurfacesDialog open={isSurfacesDialogOpen} onOpenChange={setIsSurfacesDialogOpen} />
     </nav>
   );
 };

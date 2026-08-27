@@ -213,6 +213,13 @@ Each of them therefore keeps two things:
 - a flat mirror (`agents`, `commands`, `skills`, `mcpServers`, `providers`) that
   tracks the **active** project only.
 
+Thinking variants keep the effective value in `currentVariant` so existing send
+paths capture a stable configuration. The transient `currentVariantSelection`
+distinguishes automatic initialization from a picker or shortcut choosing an
+explicit override or `Default`; returning to `Default` restores its inherited
+effective value. Only explicit overrides are stored in the per-session
+selection store.
+
 Every loader and mutation takes an explicit directory; omitting it means the
 active project, which is what non-Settings callers pass. A load for another
 directory writes the map and leaves the mirror alone, so browsing another

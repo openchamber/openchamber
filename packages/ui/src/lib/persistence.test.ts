@@ -558,7 +558,7 @@ describe('updateDesktopSettings', () => {
     });
     const syncedSettings: SettingsPayload[] = [];
     const handleSettingsSynced = (event: Event) => {
-      syncedSettings.push((event as CustomEvent<SettingsPayload>).detail);
+      syncedSettings.push((event as CustomEvent<{ settings: SettingsPayload }>).detail.settings);
     };
     getWindow().addEventListener('openchamber:settings-synced', handleSettingsSynced);
 
@@ -584,7 +584,7 @@ describe('updateDesktopSettings', () => {
     invalidateSettingsCache();
     const syncedSettings: SettingsPayload[] = [];
     const handleSettingsSynced = (event: Event) => {
-      syncedSettings.push((event as CustomEvent<SettingsPayload>).detail);
+      syncedSettings.push((event as CustomEvent<{ settings: SettingsPayload }>).detail.settings);
     };
     getWindow().addEventListener('openchamber:settings-synced', handleSettingsSynced);
 
@@ -616,7 +616,7 @@ describe('updateDesktopSettings', () => {
     invalidateSettingsCache();
     const syncedSettings: SettingsPayload[] = [];
     const handleSettingsSynced = (event: Event) => {
-      syncedSettings.push((event as CustomEvent<SettingsPayload>).detail);
+      syncedSettings.push((event as CustomEvent<{ settings: SettingsPayload }>).detail.settings);
     };
     getWindow().addEventListener('openchamber:settings-synced', handleSettingsSynced);
 
@@ -647,7 +647,7 @@ describe('updateDesktopSettings', () => {
     invalidateSettingsCache();
     const syncedSettings: SettingsPayload[] = [];
     const handleSettingsSynced = (event: Event) => {
-      syncedSettings.push((event as CustomEvent<SettingsPayload>).detail);
+      syncedSettings.push((event as CustomEvent<{ settings: SettingsPayload }>).detail.settings);
     };
     getWindow().addEventListener('openchamber:settings-synced', handleSettingsSynced);
 

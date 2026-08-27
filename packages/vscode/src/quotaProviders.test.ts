@@ -17,9 +17,9 @@ const AUTH = JSON.stringify({
   crof: { key: 'test-token' },
   neuralwatt: { key: 'test-token' },
   'opencode-go': { key: 'test-token' },
-  'command-code': { type: 'oauth', access: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
+  'github-copilot': { access: 'test-token' },
   anthropic: { access: 'test-token', refresh: 'test-refresh' },
 });
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
@@ -104,57 +104,6 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
   });
 });
 
-describe('Command Code quota provider (VS Code parity)', () => {
-  test('uses the OAuth access token and resolves server-backed limits', async () => {
-    const requests: Array<{ url: string; init?: RequestInit }> = [];
-    globalThis.fetch = (async (url: string, init?: RequestInit) => {
-      requests.push({ url, init });
-      return mockResponse(url.endsWith('/alpha/whoami')
-        ? { org: { id: 'org/a' } }
-        : { credits: { monthlyCredits: 120 }, windowLimits: { fiveHour: { used: 25, cap: 100, resetAt: 1_776_000_000 } } });
-    }) as typeof fetch;
-
-    const result = await fetchQuotaForProvider('command-code');
-
-    assert.equal(result.ok, true);
-    assert.deepEqual(requests.map(({ url }) => url), [
-      'https://api.commandcode.ai/alpha/whoami',
-      'https://api.commandcode.ai/alpha/billing/credits?orgId=org%2Fa',
-    ]);
-    assert.equal((requests[0].init?.headers as Record<string, string>).Authorization, 'Bearer test-token');
-    assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
-    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '120');
-  });
-
-  test('omits orgId for personal accounts', async () => {
-    const urls: string[] = [];
-    globalThis.fetch = (async (url: string) => {
-      urls.push(url);
-      return mockResponse(url.endsWith('/alpha/whoami')
-        ? { user: { id: 'user-1' }, org: null }
-        : { credits: { monthlyCredits: 120 } });
-    }) as typeof fetch;
-
-    const result = await fetchQuotaForProvider('command-code');
-
-    assert.equal(result.ok, true);
-    assert.deepEqual(urls, [
-      'https://api.commandcode.ai/alpha/whoami',
-      'https://api.commandcode.ai/alpha/billing/credits',
-    ]);
-  });
-
-  test('formats fractional credit values for display', async () => {
-    globalThis.fetch = (async (url: string) => mockResponse(url.endsWith('/alpha/whoami')
-      ? { org: null }
-      : { credits: { monthlyCredits: 69.7947070034 }, windowLimits: { fiveHour: { used: 0.2052929966, cap: 14 } } })) as typeof fetch;
-
-    const result = await fetchQuotaForProvider('command-code');
-
-    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '69.79');
-    assert.equal(result.usage!.windows['5h']!.valueLabel, '0.21 / 14');
-  });
-});
 
 describe('Crof quota provider (VS Code parity)', () => {
   test('reports credits balance as valueLabel with null percent', async () => {
@@ -245,6 +194,71 @@ describe('Codex quota provider (VS Code parity)', () => {
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.credits!.usedPercent, 36);
     assert.equal(result.usage!.windows.credits!.valueLabel, '2675 / 7500 used');
+  });
+});
+
+describe('GitHub Copilot quota provider (VS Code parity)', () => {
+  test('exposes only premium interactions as the primary usage window', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      quota_reset_date: '2026-09-01T00:00:00Z',
+      quota_snapshots: {
+        chat: { entitlement: 100, remaining: 80 },
+        completions: { entitlement: 1000, remaining: 900 },
+        premium_interactions: { entitlement: 300, remaining: 225 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['premium_interactions']);
+    assert.equal(result.usage!.windows.premium_interactions!.usedPercent, 25);
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, '225 / 300 left');
+  });
+
+  test('add-on path mirrors the primary window shaping', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      quota_reset_date: '2026-09-01T00:00:00Z',
+      quota_snapshots: {
+        premium_interactions: { entitlement: 300, remaining: 225 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot-addon');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['premium_interactions']);
+    assert.equal(result.usage!.windows.premium_interactions!.usedPercent, 25);
+  });
+
+  test('reports unlimited plans without a percent', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      quota_reset_date: '2026-09-01T00:00:00Z',
+      quota_snapshots: {
+        premium_interactions: { unlimited: true, entitlement: -1, remaining: -1 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.premium_interactions!.usedPercent, null);
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, 'Unlimited');
+  });
+
+  test('falls back to percent_remaining when entitlement is unusable', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      quota_reset_date: '2026-09-01T00:00:00Z',
+      quota_snapshots: {
+        premium_interactions: { entitlement: 0, remaining: 0, percent_remaining: 75.5 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, true);
+    assert.ok(Math.abs(result.usage!.windows.premium_interactions!.usedPercent! - 24.5) < 1e-9);
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, undefined);
   });
 });
 

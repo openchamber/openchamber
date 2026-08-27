@@ -5,12 +5,13 @@ import {
   applyGlobalSessionStatusEvents,
   applyGlobalSessionStatusSnapshot,
   useGlobalSessionStatusStore,
+  replaceGlobalSessionStatusById,
 } from "./global-session-status"
 import { resetSessionOrdering, useSessionOrderingStore } from "./session-ordering"
 import { resetSessionActivityTiming, useSessionActivityTimingStore } from "./session-activity-timing"
 
 beforeEach(() => {
-  useGlobalSessionStatusStore.setState({ statusById: new Map() })
+  replaceGlobalSessionStatusById(new Map())
   resetSessionOrdering()
   resetSessionActivityTiming()
 })
@@ -162,7 +163,7 @@ describe("global session status index", () => {
       properties: { sessionID: "session-a", status: { type: "busy" } },
     } as Event)
 
-    useGlobalSessionStatusStore.setState({ statusById: new Map() })
+    replaceGlobalSessionStatusById(new Map())
 
     expect(activeSessionIds()?.size).toBe(0)
   })

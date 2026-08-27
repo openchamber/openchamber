@@ -1343,16 +1343,6 @@ const AssistantMessageBody = React.memo(({
         return resolved ? { id: resolved.id, path: resolved.path } : null;
     }, [availableWorktreesByProject, canUseProjectPlanActions, currentSessionId, effectiveDirectory, getDirectoryForSession, projects]);
 
-    const hasTools = toolParts.length > 0;
-
-    const hasPendingTools = React.useMemo(() => {
-        return toolParts.some((toolPart) => {
-            const state = (toolPart as Record<string, unknown>).state as Record<string, unknown> | undefined ?? {};
-            const status = state?.status;
-            return status === 'pending' || status === 'running' || status === 'started';
-        });
-    }, [toolParts]);
-
     const isActiveTool = React.useCallback((toolPart: ToolPartType): boolean => {
         const state = (toolPart as Record<string, unknown>).state as Record<string, unknown> | undefined ?? {};
         const status = state?.status;
@@ -1380,42 +1370,6 @@ const AssistantMessageBody = React.memo(({
     const shouldShowTool = React.useCallback((toolPart: ToolPartType): boolean => {
         return isActiveTool(toolPart) || isToolFinalized(toolPart);
     }, [isActiveTool, isToolFinalized]);
-
-    const allToolsFinalized = React.useMemo(() => {
-        if (toolParts.length === 0) {
-            return true;
-        }
-        if (hasPendingTools) {
-            return false;
-        }
-        return toolParts.every((toolPart) => isToolFinalized(toolPart));
-    }, [toolParts, hasPendingTools, isToolFinalized]);
-
-    const reasoningParts = React.useMemo(() => {
-        return visibleParts.filter((part) => part.type === 'reasoning');
-    }, [visibleParts]);
-
-    const reasoningComplete = React.useMemo(() => {
-        if (reasoningParts.length === 0) {
-            return true;
-        }
-        return reasoningParts.every((part) => {
-            const time = (part as Record<string, unknown>).time as { end?: number } | undefined;
-            return typeof time?.end === 'number';
-        });
-    }, [reasoningParts]);
-
-    // Message is considered to have an "open step" if info.finish is not yet present
-    const hasOpenStep = typeof messageFinish !== 'string';
-
-    const shouldHoldForReasoning =
-        reasoningParts.length > 0 &&
-        hasTools &&
-        (hasPendingTools || hasOpenStep || !allToolsFinalized);
-
-    const shouldHoldTools = awaitingMessageCompletion
-        || (hasTools && (hasPendingTools || hasOpenStep || !allToolsFinalized));
-    const shouldHoldReasoning = awaitingMessageCompletion || shouldHoldForReasoning;
 
     const hasCopyableText = Boolean(hasTextContent) && !awaitingMessageCompletion;
 

@@ -1768,6 +1768,37 @@ export const DiffView: React.FC<DiffViewProps> = ({
         scrollToFile(value);
     }, [cancelPendingScrollAlignment, expandStackedFile, scrollToFile]);
 
+    // Step review to the adjacent changed file (alt+arrow): selects, expands
+    // a collapsed section, and scrolls to it. Window-level because the diff
+    // surface has no persistent focus target; guarded off editable fields.
+    React.useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (!event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+            const target = event.target;
+            if (target instanceof HTMLElement && (
+                target.isContentEditable
+                || target.tagName === 'INPUT'
+                || target.tagName === 'TEXTAREA'
+                || target.closest('[role="dialog"]')
+            )) {
+                return;
+            }
+            if (changedFiles.length === 0) return;
+            const delta = event.key === 'ArrowDown' ? 1 : -1;
+            const index = displayFile ? changedFiles.findIndex((file) => file.path === displayFile) : -1;
+            const nextIndex = index === -1
+                ? (delta > 0 ? 0 : changedFiles.length - 1)
+                : index + delta;
+            const next = changedFiles[nextIndex];
+            if (!next) return;
+            event.preventDefault();
+            handleSelectFileAndScroll(next.path);
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [changedFiles, displayFile, handleSelectFileAndScroll]);
+
     const handleHeaderLayoutChange = React.useCallback((mode: DiffViewMode) => {
         const nextLayout: 'inline' | 'side-by-side' =
             mode === 'side-by-side' ? 'side-by-side' : 'inline';

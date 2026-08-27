@@ -47,8 +47,12 @@ export const MarkdownRenderer: React.FC<React.ComponentPropsWithoutRef<typeof Ma
   </React.Suspense>
 );
 
-export const SimpleMarkdownRenderer: React.FC<React.ComponentPropsWithoutRef<typeof SimpleMarkdownRendererLazy>> = (props) => (
-  <React.Suspense fallback={<MobileMarkdownFallback {...props} />}>
+type SimpleMarkdownRendererProps = React.ComponentPropsWithoutRef<typeof SimpleMarkdownRendererLazy> & {
+  fallbackContent?: React.ReactNode;
+};
+
+export const SimpleMarkdownRenderer: React.FC<SimpleMarkdownRendererProps> = ({ fallbackContent, ...props }) => (
+  <React.Suspense fallback={fallbackContent ?? <MobileMarkdownFallback {...props} />}>
     <SimpleMarkdownRendererLazy {...props} />
   </React.Suspense>
 );

@@ -2660,7 +2660,8 @@ const BRANCH_CREATION_SOURCE_RE = /^branch: Created from (.+)$/;
  * Parse a branch reflog (`git reflog show --format=%gs <branch>`) and return the
  * ref the branch was created from, when that source is itself a named ref.
  *
- * Returns null when the branch was created from `HEAD@{...}` or a raw commit
+ * Returns null when the branch was created from `HEAD` (bare, as `git switch -c`
+ * / `git checkout -b` without an explicit start point record) or a raw commit
  * (detached start): the original branch name is not recorded anywhere in that
  * case, and guessing a base from commit topology would be a heuristic, not an
  * answer. Callers should ask the user to pick a base instead.
@@ -2675,7 +2676,9 @@ export function parseBranchCreationSource(reflogText) {
     const match = lines[index].match(BRANCH_CREATION_SOURCE_RE);
     if (!match) continue;
     const source = match[1].trim();
-    if (!source || /^HEAD@/.test(source) || /^[0-9a-f]{7,40}$/i.test(source)) {
+    // Bare `HEAD` (`git switch -c` from the current branch) and `HEAD@{...}`
+    // (detached start) both lack a named source; a raw commit hash does too.
+    if (!source || /^HEAD(@|$)/.test(source) || /^[0-9a-f]{7,40}$/i.test(source)) {
       return null;
     }
     return source;
@@ -3895,7 +3898,15 @@ export async function getWorktrees(directory) {
       path: entry.worktree,
     }));
   } catch (error) {
-    console.warn('Failed to list worktrees, returning empty list:', error?.message || error);
+    // Worktrees are an optional feature. When the caller passes a directory
+    // that is not inside any git repository (for example, the managed
+    // OpenCode's working directory or an unconfigured project path), git
+    // exits with "fatal: not a git repository ...". Treat that as an
+    // authoritative empty result so the route handler can still respond
+    // 200 [] and the desktop main.log stays free of noise.
+    if (!isNotGitRepositoryError(error)) {
+      console.warn('Failed to list worktrees, returning empty list:', error?.message || error);
+    }
     return [];
   }
 }

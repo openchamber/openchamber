@@ -55,6 +55,7 @@ Use `gh pr view <number> --json number,title,body,author,mergedAt` for PR eviden
 ## Highlights and Ordering
 
 - Sort bullets by user impact, not commit order. Breaking changes first, then significant new capabilities or broad user-visible improvements, then smaller features, fixes, and visual polish.
+- Keep the opening highlight block contiguous. Place every bold highlight before the first regular bullet; a regular bullet marks the end of the highlight block.
 - Mark only the strongest highlights with a bold area prefix, such as `- **Chat attachments:** ...`. Usually the first 1–3 bullets; fewer when the release lacks substantial changes, more only when clearly justified.
 - Treat a change as a highlight only when it introduces a substantial user-facing capability, materially changes a common workflow, or fixes a severe/widespread problem. Do not bold merely because a bullet is first, has a large diff, or was hard to implement.
 - Keep related platform bullets together only when that does not push a more important change too far down.

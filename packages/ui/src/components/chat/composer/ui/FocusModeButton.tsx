@@ -5,7 +5,12 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
-import { cn, isMacOS } from '@/lib/utils';
+import {
+    formatShortcutForDisplay,
+    getEffectiveShortcutCombo,
+} from '@/lib/shortcuts';
+import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
 
 type FocusModeButtonProps = {
     footerIconButtonClass: string;
@@ -17,6 +22,12 @@ type FocusModeButtonProps = {
 export const FocusModeButton = React.memo(function FocusModeButton(props: FocusModeButtonProps) {
     const { footerIconButtonClass, iconSizeClass, isExpandedInput, onToggle } = props;
     const { t } = useI18n();
+    const expandInputShortcutOverride = useUIStore((state) => state.shortcutOverrides.expand_input);
+    const expandInputCombo = getEffectiveShortcutCombo(
+        'expand_input',
+        expandInputShortcutOverride === undefined ? undefined : { expand_input: expandInputShortcutOverride },
+    );
+    const shortcut = expandInputCombo ? formatShortcutForDisplay(expandInputCombo) : null;
 
     return (
         <Tooltip>
@@ -43,9 +54,7 @@ export const FocusModeButton = React.memo(function FocusModeButton(props: FocusM
             <TooltipContent side="top" sideOffset={8}>
                 <div className="flex flex-col gap-0.5 text-center">
                     <span>{t('chat.chatInput.focusMode.label')}</span>
-                    <span className="font-mono opacity-60">
-                        {isMacOS() ? '⌘⇧E' : 'Ctrl+Shift+E'}
-                    </span>
+                    {shortcut ? <span className="font-mono opacity-60">{shortcut}</span> : null}
                 </div>
             </TooltipContent>
         </Tooltip>

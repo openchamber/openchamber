@@ -438,6 +438,76 @@ type SessionListSnapshot = {
 
 type DirectoryStoreApi = ReturnType<ChildStoreManager["ensureChild"]>
 
+type DescendantSession = {
+  session: Session
+  directory: string
+}
+
+function getDescendantSessions(rootId: string): DescendantSession[] {
+  const stores = _childStores
+  if (!stores) return []
+
+  const sessionsById = new Map<string, DescendantSession>()
+  for (const [storeDirectory, store] of stores.children) {
+    for (const session of store.getState().session) {
+      const directory = session.directory || storeDirectory
+      const current = sessionsById.get(session.id)
+      if (!current || session.directory) sessionsById.set(session.id, { session, directory })
+    }
+  }
+
+  const subtreeIds = computeSubtreeIds(
+    [...sessionsById.values()].map(({ session }) => session),
+    rootId,
+  )
+  subtreeIds.delete(rootId)
+  return [...subtreeIds]
+    .map((id) => sessionsById.get(id))
+    .filter((entry): entry is DescendantSession => !!entry)
+}
+
+function firstUserMessageAtOrAfter(messages: Message[], cutoff: number): Message | null {
+  let target: Message | null = null
+  for (const message of messages) {
+    if (message.role !== "user" || message.time.created < cutoff) continue
+    if (!target || message.time.created < target.time.created) target = message
+  }
+  return target
+}
+
+async function fetchSessionMessages(sessionId: string, directory?: string | null): Promise<Message[]> {
+  const records = await opencodeClient.getSessionMessages(sessionId, undefined, directory)
+  return records.map(({ info }) => info)
+}
+
+async function cascadeRevertToDescendants(rootId: string, cutoff: number): Promise<void> {
+  for (const { session, directory } of getDescendantSessions(rootId)) {
+    try {
+      const messages = await fetchSessionMessages(session.id, directory)
+      // Equal timestamps belong to the reverted side of the boundary. Keeping
+      // them would rely on unrelated message IDs to decide chronology.
+      const target = firstUserMessageAtOrAfter(messages, cutoff)
+      if (!target) continue
+      const reverted = await opencodeClient.revertSession(session.id, target.id, undefined, directory)
+      mirrorSessionIntoLiveStores(reverted, directory)
+    } catch (error) {
+      console.error(`[session-actions] Failed to cascade revert to descendant ${session.id}:`, error)
+    }
+  }
+}
+
+async function cascadeUnrevertToDescendants(rootId: string): Promise<void> {
+  for (const { session, directory } of getDescendantSessions(rootId)) {
+    if (!session.revert) continue
+    try {
+      const result = await sdk().session.unrevert({ sessionID: session.id, directory })
+      mirrorSessionIntoLiveStores(assertSdkData(result, "session.unrevert"), directory)
+    } catch (error) {
+      console.error(`[session-actions] Failed to cascade unrevert to descendant ${session.id}:`, error)
+    }
+  }
+}
+
 function getGlobalSessionSnapshot(sessionId: string): Session | null {
   const global = useGlobalSessionsStore.getState()
   return [...global.activeSessions, ...global.archivedSessions].find((session) => session.id === sessionId) ?? null
@@ -1725,6 +1795,14 @@ export async function respondToQuestion(
     if (assertSdkData(result, "question.reply") !== true) {
       throw new Error("Question reply failed")
     }
+    // A successful reply is authoritative: the backend resolved the question,
+    // so clear it from the local store deterministically instead of waiting
+    // for the SSE `question.replied` event. A lost event (SSE gap) would leave
+    // the question pending forever, which keeps the session in "waiting for
+    // answer" — the next task's thinking and final response never render
+    // (issues #2911, #2448). The later SSE event is a no-op (the reducer only
+    // removes when present).
+    removeQuestionRequestFromChildStores(sessionId, requestId)
   } catch (error) {
     if (isQuestionRequestNotFoundError(error)) {
       removeQuestionRequestFromChildStores(sessionId, requestId)
@@ -1750,6 +1828,11 @@ export async function rejectQuestion(
     if (assertSdkData(result, "question.reject") !== true) {
       throw new Error("Question rejection failed")
     }
+    // A successful rejection is authoritative: the backend resolved the
+    // question, so clear it from the local store deterministically (see
+    // respondToQuestion for the lost-SSE-event rationale — issues #2911,
+    // #2448). The later SSE `question.rejected` event is a no-op.
+    removeQuestionRequestFromChildStores(sessionId, requestId)
   } catch (error) {
     if (isQuestionRequestNotFoundError(error)) {
       removeQuestionRequestFromChildStores(sessionId, requestId)
@@ -1781,6 +1864,10 @@ export async function rejectQuestion(
  * abort the session so the OpenCode runner reaches `idle` — otherwise the new
  * prompt arrives while the run is still active and is discarded by the runner's
  * `ensureRunning`.
+ *
+ * A successful reject clears the local store deterministically (see
+ * {@link rejectQuestion}) so a lost `question.rejected` SSE event cannot leave
+ * the session in the pending "waiting for answer" state (issues #2911, #2448).
  */
 export async function dismissOpenQuestionsForSession(sessionId: string): Promise<boolean> {
   if (!sessionId) return false
@@ -1841,6 +1928,11 @@ export async function dismissOpenQuestionsForSession(sessionId: string): Promise
 export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
   const { store, directory } = dirStoreForSession(sessionId)
   const state = store.getState()
+
+  const localTarget = state.message[sessionId]?.find((message) => message.id === messageId)
+  const targetMessage = localTarget
+    ?? (await fetchSessionMessages(sessionId, directory)).find((message) => message.id === messageId)
+  if (!targetMessage) throw new Error(`Cannot revert session: message ${messageId} was not found`)
 
   // Abort if busy before mutating session state
   const status = state.session_status[sessionId]
@@ -1912,6 +2004,9 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   // Call SDK and merge authoritative result into store
   try {
+    // Descendants go first because OpenCode also restores file snapshots during
+    // revert. All sessions share a directory, so the parent's snapshot must win.
+    await cascadeRevertToDescendants(sessionId, targetMessage.time.created)
     const revertedSession = await opencodeClient.revertSession(sessionId, messageId, undefined, directory)
     const current = store.getState()
     const updated = [...current.session]
@@ -1994,6 +2089,9 @@ export async function unrevertSession(sessionId: string): Promise<void> {
     }
   }
 
+  // Descendants go first because unrevert can also restore shared file state.
+  // Applying the parent last leaves the working tree at the parent's snapshot.
+  await cascadeUnrevertToDescendants(sessionId)
   const result = await sdk().session.unrevert({ sessionID: sessionId, directory })
   const unrevertedSession = assertSdkData(result, "session.unrevert")
   const current = store.getState()

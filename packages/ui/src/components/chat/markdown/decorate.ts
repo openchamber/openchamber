@@ -156,9 +156,8 @@ const layoutCodeLines = (pre: HTMLPreElement): void => {
     row.setAttribute('data-md-code-line', '');
 
     const number = document.createElement('span');
-    number.setAttribute('data-md-code-line-number', '');
+    number.setAttribute('data-md-code-line-number', String(index + 1));
     number.setAttribute('aria-hidden', 'true');
-    number.textContent = String(index + 1);
 
     const content = document.createElement('span');
     content.setAttribute('data-md-code-line-content', '');
@@ -168,7 +167,6 @@ const layoutCodeLines = (pre: HTMLPreElement): void => {
     } else {
       content.textContent = sourceLine;
     }
-
     row.append(number, content);
     fragment.appendChild(row);
     if (index < sourceLines.length - 1 || hasTrailingNewline) {
@@ -543,6 +541,67 @@ const closeAllMenus = (container: HTMLElement): void => {
   }
 };
 
+const getContainingMarkdownCode = (node: Node): HTMLElement | null => {
+  const element = node.nodeType === 1 ? node as Element : node.parentElement;
+  return element?.closest<HTMLElement>('pre code[data-md-code-lines]') ?? null;
+};
+
+const getMarkdownCodeSelectionText = (range: Range): string | null => {
+  const code = getContainingMarkdownCode(range.startContainer);
+  if (!code || code !== getContainingMarkdownCode(range.endContainer)) return null;
+  // Line numbers are CSS-generated, so the DOM range is already the exact
+  // source selection, including boundaries between rows and empty lines.
+  return range.toString();
+};
+
+type MarkdownCopyState = {
+  registrations: number;
+  handler: (event: ClipboardEvent) => void;
+  menuHandler: (event: Event) => void;
+};
+
+const markdownCopyStates = new WeakMap<Document, MarkdownCopyState>();
+
+const registerMarkdownCodeCopy = (doc: Document): (() => void) => {
+  let state = markdownCopyStates.get(doc);
+  if (!state) {
+    const getSelectedText = (): string | null => {
+      const selection = doc.getSelection();
+      if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
+      return getMarkdownCodeSelectionText(selection.getRangeAt(0));
+    };
+    const handler = (event: ClipboardEvent) => {
+      if (!event.clipboardData) return;
+      const text = getSelectedText();
+      if (text === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.clipboardData.setData('text/plain', text);
+    };
+    const menuHandler = (event: Event) => {
+      const text = getSelectedText();
+      if (text === null) return;
+      event.preventDefault();
+      void copyTextToClipboard(text);
+    };
+    state = { registrations: 0, handler, menuHandler };
+    markdownCopyStates.set(doc, state);
+    doc.addEventListener('copy', handler, true);
+    doc.defaultView?.addEventListener('openchamber:copy', menuHandler);
+  }
+  state.registrations += 1;
+
+  return () => {
+    const current = markdownCopyStates.get(doc);
+    if (!current) return;
+    current.registrations -= 1;
+    if (current.registrations > 0) return;
+    doc.removeEventListener('copy', current.handler, true);
+    doc.defaultView?.removeEventListener('openchamber:copy', current.menuHandler);
+    markdownCopyStates.delete(doc);
+  };
+};
+
 /**
  * Attach a single delegated click listener for all in-markdown actions: code
  * copy, table copy/download menus, mermaid copy/download, loopback preview.
@@ -552,6 +611,7 @@ export const attachMarkdownInteractions = (
   container: HTMLElement,
   ctx: DecorateContext,
 ): (() => void) => {
+  const unregisterCodeCopy = registerMarkdownCodeCopy(container.ownerDocument);
   const handleClick = (event: MouseEvent) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -658,5 +718,8 @@ export const attachMarkdownInteractions = (
   };
 
   container.addEventListener('click', handleClick);
-  return () => container.removeEventListener('click', handleClick);
+  return () => {
+    unregisterCodeCopy();
+    container.removeEventListener('click', handleClick);
+  };
 };

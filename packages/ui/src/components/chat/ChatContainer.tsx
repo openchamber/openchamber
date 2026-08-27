@@ -18,6 +18,7 @@ import { StatusRowContainer } from './StatusRowContainer';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { PromptNavigatorRail } from './components/PromptNavigatorRail';
+import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { useScrollShadow } from '@/components/ui/useScrollShadow';
 import { useChatTimelineScroll, type TimelineListHandle } from '@/hooks/useChatTimelineScroll';
 import { useChatTimelineController } from './hooks/useChatTimelineController';
@@ -645,6 +646,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         suspendPartUpdatesForMessageId: streamingMessageId,
     });
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
+    const authSessionExpired = useAuthSessionStore((store) => store.state !== 'ok');
+    const wasAuthExpiredRef = React.useRef(false);
     const sessionMessageLoadState = useSessionMessageLoadState(
         currentSessionId ?? '',
         effectiveSessionDirectory,
@@ -1170,6 +1173,23 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         void sync.ensureSessionRenderable(currentSessionId, true, effectiveSessionDirectory);
     }, [currentSessionId, effectiveSessionDirectory, messagesEnabled, sync]);
 
+    // A load that failed while the session was expired retries itself the
+    // moment the re-login lands — the error screen should never outlive its
+    // cause.
+    React.useEffect(() => {
+        if (authSessionExpired) {
+            wasAuthExpiredRef.current = true;
+            return;
+        }
+        if (wasAuthExpiredRef.current) {
+            wasAuthExpiredRef.current = false;
+            if (sessionMessageLoadState.status === 'error') {
+                retrySessionLoad();
+            }
+        }
+    }, [authSessionExpired, retrySessionLoad, sessionMessageLoadState.status]);
+
+
     React.useEffect(() => {
         if (!active || !currentSessionId) return;
         if (lastScrolledSessionKeyRef.current === currentSessionKey) return;
@@ -1298,10 +1318,20 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                                 <Icon name="error-warning" className="size-4" />
                             </div>
                             <p className="typography-ui-label font-medium text-foreground">{t('chat.container.sessionLoadError.title')}</p>
-                            <p className="typography-meta mt-1 text-muted-foreground">{t('chat.container.sessionLoadError.description')}</p>
-                            <Button variant="outline" size="sm" className="mt-4" onClick={retrySessionLoad}>
-                                {t('chat.container.sessionLoadError.retry')}
-                            </Button>
+                            <p className="typography-meta mt-1 text-muted-foreground">
+                                {authSessionExpired
+                                    ? t('chat.container.sessionLoadError.authDescription')
+                                    : t('chat.container.sessionLoadError.description')}
+                            </p>
+                            {authSessionExpired ? (
+                                <Button variant="outline" size="sm" className="mt-4" onClick={() => useAuthSessionStore.getState().markReauthenticating()}>
+                                    {t('sessionAuth.expired.loginAction')}
+                                </Button>
+                            ) : (
+                                <Button variant="outline" size="sm" className="mt-4" onClick={retrySessionLoad}>
+                                    {t('chat.container.sessionLoadError.retry')}
+                                </Button>
+                            )}
                         </div>
                     </div>
                 );
