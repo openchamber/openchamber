@@ -9,10 +9,9 @@ test('preserves updater behavior outside packaged Linux', () => {
   assert.doesNotThrow(() => assertUpdaterCapability({ platform: 'linux', packaged: false }));
 });
 
-test('rejects packaged Linux execution outside an AppImage', () => {
-  assert.throws(
-    () => assertUpdaterCapability({ platform: 'linux', packaged: true, appImagePath: '' }),
-    /Start OpenChamber from its \.AppImage file/,
+test('accepts packaged Linux execution outside an AppImage (RPM installs)', () => {
+  assert.doesNotThrow(
+    () => assertUpdaterCapability({ platform: 'linux', packaged: true, appImagePath: '' })
   );
 });
 
