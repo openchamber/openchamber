@@ -4,7 +4,7 @@ import type { Event } from '@opencode-ai/sdk/v2/client';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { deriveRecentSessions } from '../recent/activitySections';
-import { applyGlobalSessionStatusEvent, useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { applyGlobalSessionStatusEvent, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import {
   buildSidebarSessionProjection,
   getDescendantIds,
@@ -270,7 +270,7 @@ describe('useRecentSessionCollection', () => {
     };
 
     try {
-      useGlobalSessionStatusStore.setState({ statusById: new Map() });
+      replaceGlobalSessionStatusById(new Map());
       await act(async () => root.render(React.createElement(Harness)));
       expect(renderedIds).toEqual([]);
 
@@ -296,7 +296,7 @@ describe('useRecentSessionCollection', () => {
       expect(timeReadCount).toBe(activeDeriveOperationCount);
     } finally {
       await act(async () => root.unmount());
-      useGlobalSessionStatusStore.setState({ statusById: new Map() });
+      replaceGlobalSessionStatusById(new Map());
       dom.restore();
     }
   });

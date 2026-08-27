@@ -4,6 +4,7 @@ import {
     appendInlineText,
     appendWithLineBreaks,
     buildImagePasteInsertion,
+    getMarkdownAutoPairEdit,
     shouldWrapSelectionAsLink,
     withInlineInsertionBoundaries,
 } from '../text';
@@ -117,5 +118,41 @@ describe('shouldWrapSelectionAsLink', () => {
 
     test('a selection that is already a link is not nested', () => {
         expect(shouldWrapSelectionAsLink('https://x.dev', '[docs](https://y.dev)')).toBe(false);
+    });
+});
+
+describe('getMarkdownAutoPairEdit', () => {
+    test('completes a fenced block with the caret on the middle line', () => {
+        expect(getMarkdownAutoPairEdit('``', '`', 2, 2)).toEqual({
+            from: 2,
+            to: 2,
+            insert: '`\n\n```',
+            selectionStart: 4,
+            selectionEnd: 4,
+        });
+    });
+
+    test('completes a fence at the start of any line', () => {
+        expect(getMarkdownAutoPairEdit('intro\n``tail', '`', 8, 8)).toEqual({
+            from: 8,
+            to: 8,
+            insert: '`\n\n```',
+            selectionStart: 10,
+            selectionEnd: 10,
+        });
+    });
+
+    test('does not complete two backticks in the middle of a line', () => {
+        expect(getMarkdownAutoPairEdit('text ``', '`', 7, 7)).toBeNull();
+    });
+
+    test('wraps selected text and keeps the text selected', () => {
+        expect(getMarkdownAutoPairEdit('hello', '*', 1, 4)).toEqual({
+            from: 1,
+            to: 4,
+            insert: '*ell*',
+            selectionStart: 2,
+            selectionEnd: 5,
+        });
     });
 });

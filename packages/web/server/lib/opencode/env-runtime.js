@@ -1011,7 +1011,13 @@ export const createOpenCodeEnvRuntime = (deps) => {
       const normalized = normalizeOpencodeBinarySetting(settings.opencodeBinary);
 
       if (normalized === '') {
-        delete process.env.OPENCODE_BINARY;
+        // The empty-string sentinel drops a previously APPLIED settings
+        // override (source === 'settings'). An OPENCODE_BINARY provided by
+        // the user's own environment is explicit configuration and must not
+        // be destroyed by an empty setting.
+        if (state.resolvedOpencodeBinarySource === 'settings') {
+          delete process.env.OPENCODE_BINARY;
+        }
         state.resolvedOpencodeBinary = null;
         state.resolvedOpencodeBinarySource = null;
         clearWslOpencodeResolution();

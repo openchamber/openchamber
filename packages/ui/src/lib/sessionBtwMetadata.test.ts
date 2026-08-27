@@ -8,6 +8,7 @@ import {
   withBtwSessionLink,
   withBtwSessionMarker,
   withoutBtwSessionLink,
+  wasPromotedBtwSession,
   withoutBtwSessionMarker,
 } from './sessionBtwMetadata';
 
@@ -64,11 +65,20 @@ describe('fork marker', () => {
     expect(getBtwBoundaryMessageID(review)).toBeNull();
   });
 
-  test('withoutBtwSessionMarker strips the marker and keeps other keys', () => {
+  test('withoutBtwSessionMarker strips the marker, keeps other keys, and records the promotion', () => {
     const marked = { openchamber: { kind: 'btw', originalSessionID: 'parent-1', btwBoundaryMessageID: 'msg-9', btwSessionID: 'nested' } };
-    expect(withoutBtwSessionMarker(marked)).toEqual({ openchamber: { btwSessionID: 'nested' } });
-    expect(withoutBtwSessionMarker({ openchamber: { kind: 'btw', originalSessionID: 'parent-1' } })).toEqual({});
+    expect(withoutBtwSessionMarker(marked)).toEqual({ openchamber: { btwSessionID: 'nested', btwPromoted: true } });
+    expect(withoutBtwSessionMarker({ openchamber: { kind: 'btw', originalSessionID: 'parent-1' } })).toEqual({ openchamber: { btwPromoted: true } });
     const plain = { openchamber: { kind: 'review' } };
     expect(withoutBtwSessionMarker(plain)).toBe(plain);
+  });
+
+  test('wasPromotedBtwSession only reports a session that went through promotion', () => {
+    expect(wasPromotedBtwSession(sessionWith({ openchamber: { btwPromoted: true } }))).toBe(true);
+    // Still a live btw fork: the boundary applies, the notice must not.
+    expect(wasPromotedBtwSession(sessionWith({ openchamber: { kind: 'btw', originalSessionID: 'p-1' } }))).toBe(false);
+    expect(wasPromotedBtwSession(sessionWith({ openchamber: {} }))).toBe(false);
+    expect(wasPromotedBtwSession(sessionWith(undefined))).toBe(false);
+    expect(wasPromotedBtwSession(null)).toBe(false);
   });
 });

@@ -249,6 +249,7 @@ export const createSessionGoalRuntime = ({
   getOpenCodeAuthHeaders,
   getSmallModelService,
   emitGoalNotification,
+  isEnabled = isSessionGoalEnabled,
   idleQuietMs = IDLE_QUIET_MS,
   kickoffQuietMs = KICKOFF_QUIET_MS,
   maxAutoTurns = MAX_AUTO_TURNS,
@@ -444,7 +445,7 @@ export const createSessionGoalRuntime = ({
   };
 
   const tick = async (sessionId, directory) => {
-    if (!isSessionGoalEnabled()) return;
+    if (!isEnabled()) return;
 
     const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
       .catch((error) => {

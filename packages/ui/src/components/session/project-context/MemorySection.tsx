@@ -11,7 +11,7 @@ import { useI18n } from '@/lib/i18n';
 import { AGENT_MEMORY_BODY_MAX_LENGTH, AGENT_MEMORY_TITLE_MAX_LENGTH, type AgentMemoryEntry, type AgentMemoryScope } from '@/lib/agentMemoryApi';
 import { classifyMemory, memoryViewKey, type MemoryBadge } from '@/lib/agentMemoryBadges';
 import { cn } from '@/lib/utils';
-import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
+import { selectProjectMemoryForPath, useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 
 /**
@@ -160,7 +160,7 @@ export const MemorySection: React.FC<{
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
 
   const globalEntries = useAgentMemoryStore((state) => state.global);
-  const projectEntries = useAgentMemoryStore((state) => state.project);
+  const projectEntries = useAgentMemoryStore((state) => selectProjectMemoryForPath(state, projectPath));
   const globalFailed = useAgentMemoryStore((state) => state.globalFailed);
   const projectFailed = useAgentMemoryStore((state) => state.projectFailed);
   const deleteEntry = useAgentMemoryStore((state) => state.deleteEntry);

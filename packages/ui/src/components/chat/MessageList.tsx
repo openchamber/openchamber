@@ -1534,6 +1534,54 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return true;
     }, [allEntries.length]);
 
+    // A navigation scroll lands on estimates: an unmounted target teleports
+    // to its estimated offset, and even a mounted one drifts when neighbours
+    // finish measuring a frame later. This settle loop re-aligns the target to
+    // the requested viewport position until the layout stops moving, and backs
+    // off the moment the user touches the scroll.
+    const settleNavigationTarget = React.useCallback((
+        findElement: () => HTMLElement | null,
+        desiredOffsetTop: number,
+    ) => {
+        const container = resolveScrollContainer();
+        if (!container || typeof window === 'undefined') {
+            return;
+        }
+        let frames = 0;
+        let stable = 0;
+        let cancelled = false;
+        const cancelOnUserInput = () => {
+            cancelled = true;
+            container.removeEventListener('touchstart', cancelOnUserInput);
+            container.removeEventListener('wheel', cancelOnUserInput);
+        };
+        container.addEventListener('touchstart', cancelOnUserInput, { passive: true });
+        container.addEventListener('wheel', cancelOnUserInput, { passive: true });
+        const step = () => {
+            if (cancelled) return;
+            const element = findElement();
+            if (element) {
+                const delta = element.getBoundingClientRect().top
+                    - container.getBoundingClientRect().top
+                    - desiredOffsetTop;
+                if (Math.abs(delta) > 0.5) {
+                    container.scrollTop += delta;
+                    stable = 0;
+                } else {
+                    stable += 1;
+                }
+            }
+            frames += 1;
+            if (stable >= ANCHOR_HOLD_STABLE_FRAMES || frames >= ANCHOR_HOLD_MAX_FRAMES) {
+                container.removeEventListener('touchstart', cancelOnUserInput);
+                container.removeEventListener('wheel', cancelOnUserInput);
+                return;
+            }
+            window.requestAnimationFrame(step);
+        };
+        window.requestAnimationFrame(step);
+    }, [resolveScrollContainer]);
+
     const scrollMessageElementIntoView = React.useCallback((messageId: string, behavior: ScrollBehavior = 'auto') => {
         const container = resolveScrollContainer();
         if (!container) {
@@ -1569,14 +1617,19 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 if (!container) {
                     return false;
                 }
-                const turnElement = container.querySelector<HTMLElement>(`[data-turn-id="${turnId}"]`);
+                const findTurnElement = () => container.querySelector<HTMLElement>(`[data-turn-id="${turnId}"]`);
+                const turnElement = findTurnElement();
                 if (turnElement) {
                     turnElement.scrollIntoView({ behavior, block: 'start' });
+                    if (behavior !== 'smooth') settleNavigationTarget(findTurnElement, 0);
                     return true;
                 }
 
-
-                return scrollHistoryIndexIntoView(index);
+                if (!scrollHistoryIndexIntoView(index)) {
+                    return false;
+                }
+                if (behavior !== 'smooth') settleNavigationTarget(findTurnElement, 0);
+                return true;
             },
 
             scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior }) => {
@@ -1586,8 +1639,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return false;
                 }
 
-                return scrollMessageElementIntoView(messageId, behavior)
+                const didScroll = scrollMessageElementIntoView(messageId, behavior)
                     || scrollHistoryIndexIntoView(index);
+                if (didScroll && behavior !== 'smooth') {
+                    settleNavigationTarget(() => findMessageElement(messageId), 50);
+                }
+                return didScroll;
             },
 
             holdViewportAnchor: (anchor) => {
@@ -1730,7 +1787,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             objectRef.current = null;
         };
-    }, [findMessageElement, historyEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, turnIndexMap, ref]);
+    }, [findMessageElement, historyEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, settleNavigationTarget, turnIndexMap, ref]);
 
     const anchoredEndSpace = React.useMemo<TimelineAnchoredEndSpace | undefined>(() => {
         const resolved = resolveChatListAnchoredEndSpace(

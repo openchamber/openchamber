@@ -807,6 +807,8 @@ export interface VSCodeAPI {
   pickFiles?(options?: { extensions?: string[] }): Promise<unknown>;
   saveImage?(payload: unknown): Promise<unknown>;
   saveMarkdown?(payload: unknown): Promise<unknown>;
+  /** Add a directory as a VS Code workspace folder; resolves with the full folder list after the add. */
+  addWorkspaceFolder?(path: string): Promise<Array<{ name: string; path: string }>>;
 }
 
 export interface PushSubscribePayload {

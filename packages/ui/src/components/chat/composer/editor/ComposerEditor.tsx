@@ -34,6 +34,7 @@ import {
 
 import { cn } from '@/lib/utils';
 import type { ComposerLanguageContext } from '../language/tokenize';
+import type { ComposerAutoCorrect } from './autocorrect';
 import { composerLanguage, setLanguageContext } from './composerLanguage';
 import type { ComposerEditorViewStore } from './viewStore';
 import { composerEditorTheme, composerSelectionExtension } from './theme';
@@ -63,8 +64,8 @@ export interface ComposerEditorHandle {
     selectAll(): void;
     /** Replace the current selection, leaving the caret after the insertion. */
     insertText(text: string): void;
-    /** Replace an explicit range; the caret lands at `caret` or after the text. */
-    replaceRange(from: number, to: number, text: string, caret?: number): void;
+    /** Replace a range; selection defaults to a caret after the inserted text. */
+    replaceRange(from: number, to: number, text: string, selectionStart?: number, selectionEnd?: number): void;
     /** Viewport coordinates of the caret, for positioning popups. */
     caretCoords(position?: number): { top: number; bottom: number; left: number } | null;
     /** The scrollable element, for measuring and scroll compensation. */
@@ -89,8 +90,11 @@ export interface ComposerEditorProps {
     placeholder?: string;
     editable?: boolean;
     spellCheck?: boolean;
-    /** Mobile keyboards; ignored on desktop. */
-    autoCorrect?: boolean;
+    /**
+     * The content element's autocorrect keyword. See `autocorrect.ts` for the
+     * case-sensitive CodeMirror workaround.
+     */
+    autoCorrect?: ComposerAutoCorrect;
     autoCapitalize?: 'none' | 'sentences';
     /** Fill the available height instead of growing with the content. */
     fillContainer?: boolean;
@@ -157,7 +161,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             placeholder,
             editable = true,
             spellCheck = false,
-            autoCorrect = false,
+            autoCorrect = 'off',
             autoCapitalize = 'none',
             fillContainer = false,
             maxLines = 8,
@@ -287,7 +291,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                         }),
                         EditorView.contentAttributes.of({
                             spellcheck: String(handlersRef.current.spellCheck ?? false),
-                            autocorrect: handlersRef.current.autoCorrect ? 'on' : 'off',
+                            autocorrect: handlersRef.current.autoCorrect ?? 'off',
                             autocapitalize: handlersRef.current.autoCapitalize ?? 'none',
                             ...(handlersRef.current['aria-label']
                                 ? { 'aria-label': handlersRef.current['aria-label'] }
@@ -454,7 +458,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             if (!view) return;
             const content = view.contentDOM;
             content.setAttribute('spellcheck', String(spellCheck));
-            content.setAttribute('autocorrect', autoCorrect ? 'on' : 'off');
+            content.setAttribute('autocorrect', autoCorrect);
             content.setAttribute('autocapitalize', autoCapitalize);
         }, [autoCapitalize, autoCorrect, spellCheck]);
 
@@ -516,12 +520,13 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                     userEvent: 'input.type',
                 });
             },
-            replaceRange(from, to, text, caret) {
+            replaceRange(from, to, text, selectionStart, selectionEnd = selectionStart) {
                 const view = viewRef.current;
                 if (!view) return;
+                const anchor = selectionStart ?? from + text.length;
                 view.dispatch({
                     changes: { from, to, insert: text },
-                    selection: { anchor: caret ?? from + text.length },
+                    selection: { anchor, head: selectionEnd ?? anchor },
                     userEvent: 'input.type',
                 });
             },

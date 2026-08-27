@@ -13,6 +13,9 @@ let permissionReplyError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionUpdateResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
+const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part[] }>>()
+const failingRevertSessionIds = new Set<string>()
+const failingUnrevertSessionIds = new Set<string>()
 let sessionDeleteError: unknown | null = null
 let beforeSessionUpdateResolve: ((sessionId: string) => void) | null = null
 let beforeSessionDeleteResolve: ((sessionId: string) => void) | null = null
@@ -67,6 +70,13 @@ const mockSdk = {
     revert: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.revert", params })
       return Promise.resolve(sessionRevertResult)
+    }),
+    unrevert: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "session.unrevert", params })
+      if (failingUnrevertSessionIds.has(String(params.sessionID))) {
+        return Promise.resolve({ error: { message: "rejected" }, response: { status: 500 } })
+      }
+      return Promise.resolve({ data: { id: params.sessionID, time: { created: 1 } } })
     }),
     abort: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.abort", params })
@@ -127,6 +137,10 @@ mock.module("@/lib/opencode/client", () => ({
     getDirectory: () => "/test/project",
     getFilesystemHome: mock(async () => "/home/test"),
     getSdkClient: () => mockSdk,
+    getSessionMessages: mock((sessionId: string, _limit?: number, directory?: string | null) => {
+      replyCalls.push({ method: "session.messages", params: { sessionID: sessionId, directory } })
+      return Promise.resolve(sessionMessageRecords.get(sessionId) ?? [])
+    }),
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
       return Promise.resolve(true)
@@ -140,11 +154,11 @@ mock.module("@/lib/opencode/client", () => ({
         method: "session.revert",
         params: { sessionID: sessionId, messageID: messageId, partID: partId, directory },
       })
-      if (sessionRevertResult.error) {
+      if (sessionRevertResult.error || failingRevertSessionIds.has(sessionId)) {
         const status = sessionRevertResult.response?.status
         throw new Error(`session.revert failed${status ? ` (${status})` : ""}: rejected`)
       }
-      return Promise.resolve(sessionRevertResult.data)
+      return Promise.resolve(sessionRevertResult.data ?? { id: sessionId, time: { created: 1 }, revert: { messageID: messageId } })
     }),
     updateSession: mock((sessionId: string, changes: Record<string, unknown>, directory?: string | null) => {
       replyCalls.push({ method: "session.update", params: { sessionID: sessionId, ...changes, directory } })
@@ -1293,6 +1307,8 @@ describe("revertToMessage passes session directory", () => {
     replyCalls.length = 0
     scopedClientDirectories.length = 0
     sessionRevertResult = {}
+    sessionMessageRecords.clear()
+    failingRevertSessionIds.clear()
     Object.assign(inputState, {
       pendingInputText: "previous draft",
       pendingInputMode: "normal" as const,
@@ -1353,6 +1369,121 @@ describe("revertToMessage passes session directory", () => {
     expect((thrown as Error).message).toContain("session.revert failed (500)")
     expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert).toBe(undefined)
     expect(inputState.pendingInputText).toBe("previous draft")
+  })
+
+  test("reverts recursive descendants at their first user message on or after the parent cutoff", async () => {
+    const rootMessage = { id: "root-cutoff", sessionID: "root", role: "user", time: { created: 20 } } as Message
+    const sessions = [
+      { id: "root", directory: "/tree", time: { created: 1 } },
+      { id: "child", parentID: "root", directory: "/tree", time: { created: 2 } },
+      { id: "grandchild", parentID: "child", directory: "/tree", time: { created: 3 } },
+      { id: "old-child", parentID: "root", directory: "/tree", time: { created: 4 } },
+    ] as Session[]
+    const store = createStore({}, { session: sessions, message: { root: [rootMessage] } })
+    sessionMessageRecords.set("child", [
+      { info: { id: "child-before", sessionID: "child", role: "user", time: { created: 10 } } as Message, parts: [] },
+      { info: { id: "child-boundary", sessionID: "child", role: "user", time: { created: 20 } } as Message, parts: [] },
+      { info: { id: "child-later", sessionID: "child", role: "user", time: { created: 30 } } as Message, parts: [] },
+    ])
+    sessionMessageRecords.set("grandchild", [
+      { info: { id: "grandchild-assistant", sessionID: "grandchild", role: "assistant", time: { created: 20 } } as Message, parts: [] },
+      { info: { id: "grandchild-user", sessionID: "grandchild", role: "user", time: { created: 21 } } as Message, parts: [] },
+    ])
+    sessionMessageRecords.set("old-child", [
+      { info: { id: "old-child-user", sessionID: "old-child", role: "user", time: { created: 19 } } as Message, parts: [] },
+    ])
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await revertToMessage("root", "root-cutoff")
+
+    expect(replyCalls.filter((call) => call.method === "session.revert").map((call) => [
+      call.params.sessionID,
+      call.params.messageID,
+    ])).toEqual([
+      ["child", "child-boundary"],
+      ["grandchild", "grandchild-user"],
+      ["root", "root-cutoff"],
+    ])
+  })
+
+  test("continues reverting other descendants and the parent when one child fails", async () => {
+    const rootMessage = { id: "root-cutoff", sessionID: "root", role: "user", time: { created: 20 } } as Message
+    const sessions = [
+      { id: "root", directory: "/tree", time: { created: 1 } },
+      { id: "failing-child", parentID: "root", directory: "/tree", time: { created: 2 } },
+      { id: "healthy-child", parentID: "root", directory: "/tree", time: { created: 3 } },
+    ] as Session[]
+    const store = createStore({}, { session: sessions, message: { root: [rootMessage] } })
+    for (const id of ["failing-child", "healthy-child"]) {
+      sessionMessageRecords.set(id, [{
+        info: { id: `${id}-target`, sessionID: id, role: "user", time: { created: 20 } } as Message,
+        parts: [],
+      }])
+    }
+    failingRevertSessionIds.add("failing-child")
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await revertToMessage("root", "root-cutoff")
+
+    expect(replyCalls.filter((call) => call.method === "session.revert").map((call) => call.params.sessionID)).toEqual([
+      "failing-child",
+      "healthy-child",
+      "root",
+    ])
+  })
+})
+
+describe("unrevertSession descendant cascade", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    sessionMessagesResult = { data: [] }
+    failingUnrevertSessionIds.clear()
+  })
+
+  test("unreverts only marked descendants before the parent", async () => {
+    const sessions = [
+      { id: "root", directory: "/tree", time: { created: 1 }, revert: { messageID: "root-target" } },
+      { id: "marked-child", parentID: "root", directory: "/tree", time: { created: 2 }, revert: { messageID: "child-target" } },
+      { id: "plain-child", parentID: "root", directory: "/tree", time: { created: 3 } },
+      { id: "marked-grandchild", parentID: "plain-child", directory: "/tree", time: { created: 4 }, revert: { messageID: "grandchild-target" } },
+    ] as Session[]
+    const store = createStore({}, { session: sessions })
+
+    const { setActionRefs, unrevertSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await unrevertSession("root")
+
+    expect(replyCalls.filter((call) => call.method === "session.unrevert").map((call) => call.params.sessionID)).toEqual([
+      "marked-child",
+      "marked-grandchild",
+      "root",
+    ])
+  })
+
+  test("continues after a descendant unrevert fails", async () => {
+    const sessions = [
+      { id: "root", directory: "/tree", time: { created: 1 }, revert: { messageID: "root-target" } },
+      { id: "failing-child", parentID: "root", directory: "/tree", time: { created: 2 }, revert: { messageID: "first-target" } },
+      { id: "healthy-child", parentID: "root", directory: "/tree", time: { created: 3 }, revert: { messageID: "second-target" } },
+    ] as Session[]
+    const store = createStore({}, { session: sessions })
+    failingUnrevertSessionIds.add("failing-child")
+
+    const { setActionRefs, unrevertSession } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/tree", store]]), () => "/tree")
+
+    await unrevertSession("root")
+
+    expect(replyCalls.filter((call) => call.method === "session.unrevert").map((call) => call.params.sessionID)).toEqual([
+      "failing-child",
+      "healthy-child",
+      "root",
+    ])
   })
 })
 

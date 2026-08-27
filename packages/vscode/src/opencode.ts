@@ -15,6 +15,17 @@ import { applyProviderEnvAliases } from './provider-env-aliases';
 const t = vscode.l10n.t;
 
 const READY_CHECK_TIMEOUT_MS = 30000;
+
+// Reuse a single output channel across restarts instead of creating (and
+// leaking) a new one on every waitForReady call.
+let managerOutputChannel: vscode.OutputChannel | null = null;
+
+function getManagerOutputChannel(): vscode.OutputChannel {
+  if (!managerOutputChannel) {
+    managerOutputChannel = vscode.window.createOutputChannel('OpenChamberManager');
+  }
+  return managerOutputChannel;
+}
 const WINDOWS_EXECUTABLE_EXTENSIONS = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM')
   .split(';')
   .map((ext) => ext.trim().toLowerCase())
@@ -158,6 +169,19 @@ function stripWrappingQuotes(value: string): string {
     return trimmed.slice(1, -1).trim();
   }
   return trimmed;
+}
+
+function killProcessTree(pid: number | undefined): void {
+  if (!Number.isInteger(pid)) return;
+  if (process.platform === 'win32') {
+    try {
+      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        stdio: 'ignore', timeout: 5000, windowsHide: true,
+      });
+    } catch {
+      // ignore
+    }
+  }
 }
 
 function appendToPath(dir: string) {
@@ -613,7 +637,6 @@ async function waitForReady(
   timeoutMs = 15000,
   authHeaders: Record<string, string> = {}
 ): Promise<ReadyResult> {
-  const outputChannel = vscode.window.createOutputChannel('OpenChamberManager');
   const start = Date.now();
   const candidates = getCandidateBaseUrls(serverUrl);
   let attempts = 0;
@@ -641,7 +664,7 @@ async function waitForReady(
         }
 
         clearTimeout(timeout);
-        outputChannel?.appendLine(
+        getManagerOutputChannel().appendLine(
           `Health check to ${url.toString()} returned ${res.status} with body: ${JSON.stringify(body)}`
         );
 
@@ -743,6 +766,7 @@ async function spawnManagedOpenCodeServer(
   return {
     url,
     close: () => {
+      killProcessTree(child.pid);
       try {
         child.kill('SIGTERM');
       } catch {

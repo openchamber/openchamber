@@ -97,6 +97,25 @@ In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 mo
 
 The provider computes `usedPercent` from whichever of `used`/`remaining` is present (`used` takes precedence when both exist) rather than assuming one field name. Both `packages/web/server/lib/quota/providers/kimi.js` and `packages/vscode/src/quotaProviders.ts` (`fetchKimiQuota`) must stay in sync — the VS Code extension duplicates this parsing logic rather than importing it.
 
+## GitHub Copilot quota semantics
+
+GitHub Copilot usage exposes only the `premium_interactions` snapshot as the
+`premium_interactions` window. Shared UI labels that window **AI Credits** and treats it as
+the provider's primary usage marker. Legacy chat-request quota and unlimited
+completion quota are intentionally omitted. Keep
+`packages/web/server/lib/quota/providers/copilot.js` and
+`packages/vscode/src/quotaProviders.ts` in sync.
+
+The `/copilot_internal/user` endpoint is undocumented; its quota semantics mirror
+what `microsoft/vscode-copilot-chat` consumes (`CopilotUserQuotaInfo`). Each
+snapshot carries `entitlement`, `remaining`, `unlimited`, and
+`percent_remaining`. Providers must honor these rules:
+
+- `unlimited: true` renders a percent-less window with an "Unlimited" value label.
+- Percent math requires a positive `entitlement`; entitlements of `0`, `-1`, or null are unusable.
+- When entitlement/remaining are unusable, fall back to `100 - percent_remaining`.
+- Snapshots other than `premium_interactions` (legacy annual plans) yield zero windows.
+
 ## Notes for contributors
 - Keep provider IDs stable; clients use them directly.
 - Avoid adding alias-based dispatch in `fetchQuotaForProvider`; dispatch currently expects exact provider IDs.

@@ -3,6 +3,8 @@ import { Menu as BaseMenu } from "@base-ui/react/menu"
 
 import { cn } from "@/lib/utils"
 import { Icon } from "@/components/icon/Icon";
+import { shortcutRegistry } from "@/lib/shortcuts";
+import { handleDropdownNavigationKey } from "./dropdown-navigation";
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from "./dropdown-menu.styles";
 
 type AsChildProps = { asChild?: boolean };
@@ -34,11 +36,21 @@ function renderFromAsChild(asChild: boolean | undefined, children: React.ReactNo
   return { children };
 }
 
+type DropdownMenuProps = React.ComponentProps<typeof BaseMenu.Root> & {
+  disableGlobalShortcuts?: boolean;
+};
+
 function DropdownMenu({
+  disableGlobalShortcuts = false,
+  open,
+  defaultOpen,
+  onOpenChange,
   ...props
-}: React.ComponentProps<typeof BaseMenu.Root>) {
+}: DropdownMenuProps) {
   const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
   const [collisionBoundary, setCollisionBoundary] = React.useState<Element | null>(null);
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
+  const isOpen = open ?? uncontrolledOpen;
   const portalContextValue = React.useMemo<DropdownPortalContextValue>(() => ({
     portalContainer,
     collisionBoundary,
@@ -46,9 +58,24 @@ function DropdownMenu({
     setCollisionBoundary,
   }), [collisionBoundary, portalContainer]);
 
+  React.useLayoutEffect(() => {
+    if (!disableGlobalShortcuts || !isOpen) return;
+    return shortcutRegistry.suspend();
+  }, [disableGlobalShortcuts, isOpen]);
+
+  const handleOpenChange: NonNullable<React.ComponentProps<typeof BaseMenu.Root>['onOpenChange']> = (nextOpen, eventDetails) => {
+    if (open === undefined) setUncontrolledOpen(nextOpen);
+    onOpenChange?.(nextOpen, eventDetails);
+  };
+
   return (
     <DropdownPortalContext.Provider value={portalContextValue}>
-      <BaseMenu.Root {...props} />
+      <BaseMenu.Root
+        {...props}
+        defaultOpen={defaultOpen}
+        open={open}
+        onOpenChange={handleOpenChange}
+      />
     </DropdownPortalContext.Provider>
   )
 }
@@ -116,10 +143,22 @@ function DropdownMenuContent({
   style,
   children,
   onCloseAutoFocus,
+  onKeyDown,
   ...props
 }: ContentProps) {
   const portalContext = React.useContext(DropdownPortalContext);
   void onCloseAutoFocus
+
+  const handleKeyDown: NonNullable<React.ComponentProps<typeof BaseMenu.Popup>['onKeyDown']> = (event) => {
+    onKeyDown?.(event);
+    handleDropdownNavigationKey(event, (navigationKey) => {
+      event.currentTarget.dispatchEvent(new KeyboardEvent('keydown', {
+        key: navigationKey,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+  };
 
   return (
     <BaseMenu.Portal container={portalToBody ? undefined : portalContext?.portalContainer || undefined}>
@@ -143,6 +182,7 @@ function DropdownMenuContent({
             className
           )}
           {...props}
+          onKeyDown={handleKeyDown}
         >
           {children}
         </BaseMenu.Popup>

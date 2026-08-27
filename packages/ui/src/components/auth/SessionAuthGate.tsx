@@ -12,6 +12,8 @@ import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { installAuthSessionFocusWatch, useAuthSessionStore } from '@/lib/runtime-auth-expiry';
+import { AuthExpiredBanner } from './AuthExpiredBanner';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
@@ -351,6 +353,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   const [activePasskeyAction, setActivePasskeyAction] = React.useState<'auth' | 'register' | null>(null);
   const passwordInputRef = React.useRef<HTMLInputElement | null>(null);
   const hasResyncedRef = React.useRef(skipAuth);
+  const hasBootstrapResyncedRef = React.useRef(skipAuth);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -557,6 +560,27 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     }
   }, [skipAuth, state]);
 
+  // Mid-session expiry: the banner asks for a re-login by flipping the shared
+  // auth store to 'reauthenticating'; the gate answers with its own status
+  // check, which lands in the full 'locked' flow on a genuine 401. A
+  // successful login resolves the store back to 'ok'.
+  const authSessionState = useAuthSessionStore((store) => store.state);
+  React.useEffect(() => {
+    if (!skipAuth) installAuthSessionFocusWatch();
+  }, [skipAuth]);
+  React.useEffect(() => {
+    if (skipAuth) return;
+    if (authSessionState === 'reauthenticating') {
+      void checkStatusRef.current?.();
+    }
+  }, [authSessionState, skipAuth]);
+  React.useEffect(() => {
+    if (skipAuth) return;
+    if (state === 'authenticated' && useAuthSessionStore.getState().state !== 'ok') {
+      useAuthSessionStore.getState().markAuthenticated();
+    }
+  }, [skipAuth, state]);
+
   React.useEffect(() => {
     if (state === 'locked' && passwordInputRef.current) {
       passwordInputRef.current.focus();
@@ -570,10 +594,18 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     }
     if (state === 'authenticated' && !hasResyncedRef.current) {
       hasResyncedRef.current = true;
+      // First authentication of this page load is bootstrap: adopt the
+      // persisted workspace pointers. A re-login after mid-session expiry is
+      // not — this window already has its own workspace, and the shared
+      // settings document may carry another window's pointers.
+      const isBootstrapResync = !hasBootstrapResyncedRef.current;
+      hasBootstrapResyncedRef.current = true;
       void (async () => {
         await initializeAppearancePreferences();
-        await syncDesktopSettings();
-        await applyPersistedDirectoryPreferences();
+        await syncDesktopSettings({ adoptWorkspace: isBootstrapResync });
+        if (isBootstrapResync) {
+          await applyPersistedDirectoryPreferences();
+        }
       })();
     }
   }, [skipAuth, state]);
@@ -983,5 +1015,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {skipAuth ? null : <AuthExpiredBanner />}
+      {children}
+    </>
+  );
 };

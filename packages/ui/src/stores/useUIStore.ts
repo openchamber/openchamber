@@ -8,6 +8,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { TerminalShell } from '@/lib/api/types';
+import type { ProjectRef } from '@/lib/projectContextApi';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -37,6 +38,10 @@ type ContextPanelTab = {
       panel. Project plans are addressed by id because their markdown is
       server-owned and has no client-visible path. */
   projectPlanId: string | null;
+  /** The project that owns `projectPlanId`. Persisted with the tab so a
+      restored plan tab opens against its own project instead of guessing the
+      owner from whatever directory happens to be current. */
+  projectPlanRef: ProjectRef | null;
   dedupeKey: string;
   label: string | null;
   sessionTitleFallback: string | null;
@@ -50,6 +55,7 @@ type ContextPanelTabDescriptor = {
   mode: ContextPanelMode;
   targetPath?: string | null;
   projectPlanId?: string | null;
+  projectPlanRef?: ProjectRef | null;
   dedupeKey?: string | null;
   label?: string | null;
   sessionTitleFallback?: string | null;
@@ -191,6 +197,18 @@ const normalizePendingDiffScope = (value: unknown): PendingDiffScope | null => {
   return value === 'working' || value === 'staged' || value === 'turn' || value === 'branch' ? value : null;
 };
 
+/** A plan tab's owner must be a complete project reference or nothing; a
+    half-valid one is worse than none because it points the editor somewhere. */
+const normalizeContextPanelProjectPlanRef = (value: unknown): ProjectRef | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const candidate = value as { id?: unknown; path?: unknown };
+  const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+  const path = typeof candidate.path === 'string' ? candidate.path.trim() : '';
+  return id && path ? { id, path } : null;
+};
+
 const buildDefaultContextPanelTabDedupeKey = (mode: ContextPanelMode, targetPath: string | null): string => {
   if (mode === 'file') {
     return targetPath || mode;
@@ -240,6 +258,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     projectPlanId: typeof descriptor.projectPlanId === 'string' && descriptor.projectPlanId.trim()
       ? descriptor.projectPlanId.trim()
       : null,
+    projectPlanRef: normalizeContextPanelProjectPlanRef(descriptor.projectPlanRef),
     dedupeKey,
     label: normalizeContextTabLabel(descriptor.label),
     sessionTitleFallback: normalizeContextTabLabel(descriptor.sessionTitleFallback),
@@ -300,6 +319,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       mode?: unknown;
       targetPath?: unknown;
       projectPlanId?: unknown;
+      projectPlanRef?: unknown;
       dedupeKey?: unknown;
       label?: unknown;
       sessionTitleFallback?: unknown;
@@ -323,6 +343,19 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     }
 
     const targetPath = normalizeContextTargetPath(typeof candidate.targetPath === 'string' ? candidate.targetPath : null);
+    const projectPlanId = typeof candidate.projectPlanId === 'string' && candidate.projectPlanId.trim()
+      ? candidate.projectPlanId.trim()
+      : null;
+    const projectPlanRef = normalizeContextPanelProjectPlanRef(candidate.projectPlanRef);
+    // `mode: 'plan'` covers two documents: a saved Project knowledge plan
+    // (needs both the plan id and its owning project) and a plain session
+    // filesystem plan (has neither). Only the half-identified form — id
+    // without owner — is unopenable: the editor would have to guess the
+    // project from the current directory, which is exactly the bug that made
+    // saved plans open empty. Such tabs are dropped rather than resurrected.
+    if (candidate.mode === 'plan' && (projectPlanId !== null) !== (projectPlanRef !== null)) {
+      continue;
+    }
     const dedupeKey = normalizeContextPanelTabDedupeKey(
       candidate.mode,
       targetPath,
@@ -338,9 +371,8 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       id,
       mode: candidate.mode,
       targetPath,
-      projectPlanId: typeof candidate.projectPlanId === 'string' && candidate.projectPlanId.trim()
-        ? candidate.projectPlanId.trim()
-        : null,
+      projectPlanId,
+      projectPlanRef,
       dedupeKey,
       label: normalizeContextTabLabel(typeof candidate.label === 'string' ? candidate.label : null),
       sessionTitleFallback: normalizeContextTabLabel(typeof candidate.sessionTitleFallback === 'string' ? candidate.sessionTitleFallback : null),
@@ -393,7 +425,9 @@ const touchContextPanelState = (prev?: ContextPanelDirectoryState): ContextPanel
 const upsertContextPanelTab = (
   current: ContextPanelDirectoryState,
   descriptor: ContextPanelTabDescriptor,
+  options?: { reveal?: boolean },
 ): ContextPanelDirectoryState => {
+  const reveal = options?.reveal !== false;
   const nextTab = createContextPanelTab(descriptor);
   // A real file tab replaces the empty editor placeholder ('file' with no
   // target) that the rail can open before any file is picked.
@@ -403,27 +437,35 @@ const upsertContextPanelTab = (
   const existingIndex = baseTabs.findIndex((tab) => tab.id === nextTab.id);
   const tabs = existingIndex === -1
     ? [...baseTabs, nextTab]
-    : baseTabs.map((tab, index) => (index === existingIndex
-      ? {
-          ...tab,
-          mode: nextTab.mode,
-          targetPath: nextTab.targetPath || tab.targetPath,
-          dedupeKey: nextTab.dedupeKey,
-          label: nextTab.label,
-          sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
-          stagedDiff: nextTab.stagedDiff,
-          diffScope: nextTab.diffScope,
-          readOnly: nextTab.readOnly,
-          touchedAt: Date.now(),
-        }
-      : tab));
+     : baseTabs.map((tab, index) => (index === existingIndex
+       ? {
+           ...tab,
+           mode: nextTab.mode,
+           targetPath: nextTab.targetPath || tab.targetPath,
+           projectPlanId: nextTab.projectPlanId ?? tab.projectPlanId,
+           projectPlanRef: nextTab.projectPlanRef ?? tab.projectPlanRef,
+           dedupeKey: nextTab.dedupeKey,
+           label: nextTab.label,
+           sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
+           stagedDiff: nextTab.stagedDiff,
+           diffScope: nextTab.diffScope,
+           readOnly: nextTab.readOnly,
+           touchedAt: Date.now(),
+         }
+       : tab));
 
-  const activeTabId = nextTab.id;
+  // A background upsert (an agent working a page) keeps the panel exactly as
+  // the user left it: closed stays closed, and whatever tab they were on
+  // stays active. The tab still exists — panes are kept mounted regardless of
+  // visibility — so agent control and a later manual open both find it.
+  const activeTabId = reveal
+    ? nextTab.id
+    : current.activeTabId ?? nextTab.id;
   const clampedTabs = clampContextPanelTabs(tabs, CONTEXT_PANEL_MAX_TABS, activeTabId);
 
   return {
     ...current,
-    isOpen: true,
+    isOpen: reveal ? true : current.isOpen,
     tabs: clampedTabs,
     activeTabId: resolveActiveContextPanelTabID(clampedTabs, activeTabId),
     touchedAt: Date.now(),
@@ -537,6 +579,10 @@ const sanitizeContextPanelByDirectory = (
     let tabs = sanitizeContextPanelTabs(candidate.tabs);
     let activeTabId = typeof candidate.activeTabId === 'string' ? candidate.activeTabId : null;
 
+    // Legacy single-tab state can name a saved project plan, but it carries
+    // no owner and cannot be migrated into an openable saved-plan tab — that
+    // combination is dropped by sanitize above. A generic filesystem plan tab
+    // (no plan id) revives fine from the descriptor alone.
     if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'plan' || candidate.mode === 'chat')) {
       tabs = [createContextPanelTab({
         mode: candidate.mode,
@@ -607,6 +653,9 @@ interface UIStore {
   hasManuallyResizedLeftSidebar: boolean;
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
   contextRailOrder: string[];
+  /** Surface ids the user hid from the context rail; stored as the hidden set
+      so surfaces added later appear for everyone. */
+  contextRailHiddenSurfaces: string[];
   contextEditorTreeVisible: boolean;
   contextEditorTreeWidth: number;
   notesPanelHeight: number;
@@ -803,14 +852,13 @@ interface UIStore {
   toggleContextEditorTree: () => void;
   setContextEditorTreeWidth: (width: number) => void;
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
-  openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor) => void;
+  openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor, options?: { reveal?: boolean }) => void;
   openContextDiff: (directory: string, filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
   openContextFile: (directory: string, filePath: string) => void;
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
   openContextOverview: (directory: string) => void;
-  openContextPlan: (directory: string) => void;
   openContextPreview: (directory: string, url: string) => void;
-  openContextBrowser: (directory: string, url?: string) => void;
+  openContextBrowser: (directory: string, url?: string, options?: { reveal?: boolean }) => void;
   openNewContextBrowserTab: (directory: string) => void;
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
@@ -828,6 +876,8 @@ interface UIStore {
   setWorkStatusOverlayOpen: (open: boolean) => void;
   setWorkStatusSectionVisible: (sectionId: string, visible: boolean) => void;
   setWorkStatusHiddenSections: (sectionIds: string[]) => void;
+  setContextRailSurfaceVisible: (surfaceId: string, visible: boolean) => void;
+  setContextRailHiddenSurfaces: (surfaceIds: string[]) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean, scope?: PendingDiffScope | null) => void;
@@ -990,6 +1040,7 @@ export const useUIStore = create<UIStore>()(
         hasManuallyResizedLeftSidebar: false,
         contextPanelByDirectory: {},
         contextRailOrder: [],
+        contextRailHiddenSurfaces: [],
         contextEditorTreeVisible: true,
         contextEditorTreeWidth: 240,
         notesPanelHeight: 112,
@@ -1233,7 +1284,7 @@ export const useUIStore = create<UIStore>()(
           state.openContextPanelTab(normalizedDirectory, { mode });
         },
 
-        openContextPanelTab: (directory, tab) => {
+        openContextPanelTab: (directory, tab, options) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory) {
             return;
@@ -1244,7 +1295,7 @@ export const useUIStore = create<UIStore>()(
             const current = touchContextPanelState(prev);
             const byDirectory = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: upsertContextPanelTab(current, tab),
+              [normalizedDirectory]: upsertContextPanelTab(current, tab, options),
             };
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
@@ -1307,15 +1358,6 @@ export const useUIStore = create<UIStore>()(
           get().openContextPanelTab(normalizedDirectory, { mode: 'context' });
         },
 
-        openContextPlan: (directory) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
-            return;
-          }
-
-          get().openContextPanelTab(normalizedDirectory, { mode: 'plan' });
-        },
-
         openContextPreview: (directory, url) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedUrl = (url || '').trim();
@@ -1345,7 +1387,7 @@ export const useUIStore = create<UIStore>()(
             label: null,
           });
         },
-        openContextBrowser: (directory, url = '') => {
+        openContextBrowser: (directory, url = '', options) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory || isVSCodeRuntime()) return;
           const targetUrl = typeof url === 'string' && url.trim().length > 0 ? url.trim() : '';
@@ -1354,7 +1396,7 @@ export const useUIStore = create<UIStore>()(
             targetPath: targetUrl,
             dedupeKey: targetUrl || 'browser',
             label: null,
-          });
+          }, options);
         },
 
         setContextPanelTabTargetPath: (directory, tabID, targetPath) => {
@@ -1597,6 +1639,23 @@ export const useUIStore = create<UIStore>()(
 
         setWorkStatusHiddenSections: (sectionIds) => {
           set({ workStatusHiddenSections: [...new Set(sectionIds)] });
+        },
+
+        setContextRailSurfaceVisible: (surfaceId, visible) => {
+          set((state) => {
+            const hidden = state.contextRailHiddenSurfaces;
+            const isHidden = hidden.includes(surfaceId);
+            if (visible === !isHidden) return state;
+            return {
+              contextRailHiddenSurfaces: visible
+                ? hidden.filter((entry) => entry !== surfaceId)
+                : [...hidden, surfaceId],
+            };
+          });
+        },
+
+        setContextRailHiddenSurfaces: (surfaceIds) => {
+          set({ contextRailHiddenSurfaces: [...new Set(surfaceIds)] });
         },
 
 
@@ -2412,7 +2471,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 17,
+        version: 18,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -2431,6 +2490,15 @@ export const useUIStore = create<UIStore>()(
           // v16 -> v17: the editor toolbar is always docked; the preference is gone.
           if (version < 17) {
             delete state.expandedEditorToolbar;
+          }
+
+          // v17 -> v18: the default shortcut layout was redesigned around the
+          // mod+k leader and the held digit prefixes. Old overrides were
+          // recorded against the previous defaults (e.g. a bare 'mod' surface
+          // prefix now collides with session tabs), so custom bindings start
+          // fresh on the new system.
+          if (version < 18) {
+            delete state.shortcutOverrides;
           }
 
           // v13 -> v14: the separate 'preview' surface merged into 'browser'.
@@ -2618,6 +2686,9 @@ export const useUIStore = create<UIStore>()(
             state.autoSaveEnabled = true;
           }
 
+          state.contextRailHiddenSurfaces = Array.isArray(state.contextRailHiddenSurfaces)
+            ? (state.contextRailHiddenSurfaces as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+            : [];
           state.contextRailOrder = Array.isArray(state.contextRailOrder)
             ? (state.contextRailOrder as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
             : [];
@@ -2630,6 +2701,7 @@ export const useUIStore = create<UIStore>()(
           sidebarWidth: state.sidebarWidth,
           contextPanelByDirectory: state.contextPanelByDirectory,
           contextRailOrder: state.contextRailOrder,
+          contextRailHiddenSurfaces: state.contextRailHiddenSurfaces,
           contextEditorTreeVisible: state.contextEditorTreeVisible,
           contextEditorTreeWidth: state.contextEditorTreeWidth,
           notesPanelHeight: state.notesPanelHeight,

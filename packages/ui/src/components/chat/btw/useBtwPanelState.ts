@@ -5,6 +5,8 @@ import { getBtwBoundaryMessageID, getBtwSessionID } from '@/lib/sessionBtwMetada
 import { useBtwStore } from '@/stores/useBtwStore';
 
 export type BtwPanelState = {
+  /** The session the composer is in — the one `/btw` would fork. */
+  parentSession: Session | null;
   /** The active fork for this parent, or null when no panel should exist. */
   btwSessionId: string | null;
   btwSession: Session | null;
@@ -40,6 +42,7 @@ export function useBtwPanelState(
   const destroying = Boolean(uiState?.destroying);
   const btwSessionId = btwSession && !destroying ? linkedBtwSessionId : null;
   return {
+    parentSession: parentSession ?? null,
     btwSessionId,
     btwSession: btwSessionId ? btwSession : null,
     // SAFETY: the SDK Session type omits the server's `directory` field; this

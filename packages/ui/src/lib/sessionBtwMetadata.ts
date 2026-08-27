@@ -21,6 +21,7 @@ type BtwMetadata = {
   originalSessionID?: string;
   btwSessionID?: string;
   btwBoundaryMessageID?: string;
+  btwPromoted?: boolean;
 };
 
 const getOpenChamberMetadata = (metadata: SessionMetadataRecord): BtwMetadata => {
@@ -38,6 +39,18 @@ const nonEmpty = (value: string | undefined): string | null =>
 /** The parent's link to its active btw fork, or null. */
 export const getBtwSessionID = (session: Session | null | undefined): string | null =>
   nonEmpty(getOpenChamberMetadata(getSessionMetadata(session)).btwSessionID);
+
+/**
+ * The session was once a btw fork and was promoted to a normal session.
+ *
+ * Its transcript still contains the btw boundary instruction on every message
+ * sent while it was a side conversation, and there is no API to remove a
+ * message part after the fact. The flag lets the composer send a notice that
+ * those constraints have been lifted, so they cannot keep steering a session
+ * that is no longer a side conversation.
+ */
+export const wasPromotedBtwSession = (session: Session | null | undefined): boolean =>
+  getOpenChamberMetadata(getSessionMetadata(session)).btwPromoted === true;
 
 export const isBtwSession = (session: Session | null | undefined): boolean =>
   getOpenChamberMetadata(getSessionMetadata(session)).kind === 'btw'
@@ -84,7 +97,13 @@ export const withBtwSessionMarker = (
   return { ...metadata, openchamber };
 };
 
-/** Remove the btw marker so a promoted fork becomes a plain session. */
+/**
+ * Remove the btw marker so a promoted fork becomes a plain session.
+ *
+ * `btwPromoted` replaces it rather than leaving nothing behind: the btw
+ * boundary instructions stay in the transcript forever, so the session has to
+ * remain distinguishable from one that was never a side conversation.
+ */
 export const withoutBtwSessionMarker = (metadata: SessionMetadataRecord): SessionMetadataRecord => {
   const openchamber = getOpenChamberMetadata(metadata);
   if (openchamber.kind !== 'btw') return metadata;
@@ -92,13 +111,8 @@ export const withoutBtwSessionMarker = (metadata: SessionMetadataRecord): Sessio
   delete rest.kind;
   delete rest.originalSessionID;
   delete rest.btwBoundaryMessageID;
-  const next: SessionMetadataRecord = { ...metadata };
-  if (Object.keys(rest).length > 0) {
-    next.openchamber = rest;
-  } else {
-    delete next.openchamber;
-  }
-  return next;
+  rest.btwPromoted = true;
+  return { ...metadata, openchamber: rest };
 };
 
 /** Unlink the parent, but only if it still points at this fork. */

@@ -340,8 +340,11 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
   return text;
 };
 
-const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => callMessages({
-  url: 'https://api.anthropic.com/v1/messages',
+const callAnthropic = async ({ apiKey, baseURL, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => callMessages({
+  // Matches @ai-sdk/anthropic: baseURL is the full API prefix (commonly
+  // already ending in /v1), so it gets /messages appended as-is rather than
+  // having /v1/messages appended, which would double up a configured /v1.
+  url: `${(baseURL || 'https://api.anthropic.com/v1').replace(/\/+$/, '')}/messages`,
   headers: {
     'x-api-key': apiKey,
     'anthropic-version': '2023-06-01',
@@ -403,9 +406,10 @@ const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
 
 const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelID)}:generateContent`;
-  const thinkingConfig = modelID.toLowerCase().startsWith('gemini-3')
-    ? { thinkingLevel: modelID.toLowerCase().includes('flash') ? 'minimal' : 'low' }
-    : { thinkingBudget: 0 };
+  const lowerModelID = modelID.toLowerCase();
+  const thinkingConfig = lowerModelID.startsWith('gemini-3')
+    ? { thinkingLevel: lowerModelID.includes('flash') ? 'minimal' : 'low' }
+    : lowerModelID.startsWith('gemini-2') ? { thinkingBudget: 0 } : null;
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -415,13 +419,11 @@ const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, re
     },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+      ...(system && { systemInstruction: { parts: [{ text: system }] } }),
       generationConfig: {
         maxOutputTokens,
-        thinkingConfig,
-        ...(responseSchema
-          ? { responseMimeType: 'application/json', responseSchema: toGoogleSchema(responseSchema) }
-          : {}),
+        ...(thinkingConfig && { thinkingConfig }),
+        ...(responseSchema && { responseMimeType: 'application/json', responseSchema: toGoogleSchema(responseSchema) }),
       },
     }),
     signal: requestSignal(timeoutMs, signal),
@@ -706,7 +708,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
   }
 
   if (providerID === 'anthropic') {
-    return callAnthropic({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
+    return callAnthropic({ apiKey, baseURL: providerConfig?.baseURL, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
   }
   if (providerID === 'google') {
     return callGoogle({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });

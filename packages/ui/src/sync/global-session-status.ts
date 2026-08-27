@@ -40,61 +40,28 @@ const initialState: GlobalSessionStatusState = {
 export const useGlobalSessionStatusStore = create<GlobalSessionStatusState>(() => initialState);
 useGlobalSessionStatusStore.subscribe(() => countSyncPerformance('globalStatusPublications'));
 
-// Runtime switching currently replaces statusById directly. Keep that boundary
-// synchronized without making normal status mutations derive membership again.
-const storeSetState = useGlobalSessionStatusStore.setState;
-type GlobalSessionStatusStateUpdate = GlobalSessionStatusState
-  | Partial<GlobalSessionStatusState>
-  | ((state: GlobalSessionStatusState) => GlobalSessionStatusState | Partial<GlobalSessionStatusState>);
-
-function setSynchronizedState(
-  partial: GlobalSessionStatusStateUpdate,
-  replace?: false,
-): void;
-function setSynchronizedState(
-  partial: GlobalSessionStatusState | ((state: GlobalSessionStatusState) => GlobalSessionStatusState),
-  replace: true,
-): void;
-function setSynchronizedState(partial: GlobalSessionStatusStateUpdate, replace?: boolean): void {
-  if (partial instanceof Function) {
-    if (replace === true) {
-      // SAFETY: Zustand's `replace: true` overload only accepts a complete state or a complete-state updater.
-      storeSetState(partial as GlobalSessionStatusState | ((state: GlobalSessionStatusState) => GlobalSessionStatusState), true);
-    } else {
-      storeSetState(partial, replace);
-    }
-    return;
-  }
-  if (partial.statusById === undefined || partial.activeSessionIds) {
-    if (replace === true) {
-      // SAFETY: Zustand's `replace: true` overload only accepts a complete state or a complete-state updater.
-      storeSetState(partial as GlobalSessionStatusState, true);
-    } else {
-      storeSetState(partial, replace);
-    }
-    return;
-  }
-
-  const nextStatusById = partial.statusById;
+/**
+ * Replaces the status map wholesale and derives active membership from it.
+ * This is the ONE sanctioned way to swap statusById from outside the event
+ * reducers (runtime switch, tests) — previously a setState monkeypatch
+ * derived membership for arbitrary callers, which silently trusted any
+ * caller passing both fields to keep them consistent.
+ */
+export const replaceGlobalSessionStatusById = (statusById: Map<string, GlobalSessionStatusEntry>): void => {
   const current = useGlobalSessionStatusStore.getState();
   const nextActiveSessionIds = new Set<string>();
-  for (const [sessionId, entry] of nextStatusById) {
+  for (const [sessionId, entry] of statusById) {
     if (entry.status.type === 'busy' || entry.status.type === 'retry') {
       nextActiveSessionIds.add(sessionId);
     }
   }
   const sameMembership = nextActiveSessionIds.size === current.activeSessionIds.size
     && [...nextActiveSessionIds].every((sessionId) => current.activeSessionIds.has(sessionId));
-  const nextState = {
-    ...current,
-    ...partial,
+  useGlobalSessionStatusStore.setState({
+    statusById,
     activeSessionIds: sameMembership ? current.activeSessionIds : nextActiveSessionIds,
-  };
-  if (replace === true) storeSetState(nextState, true);
-  else storeSetState(nextState, replace);
-}
-
-useGlobalSessionStatusStore.setState = setSynchronizedState;
+  });
+};
 
 const normalizeStatusType = (type: string | undefined): ActiveStatusType | 'idle' => {
   if (type === 'busy') return 'busy';

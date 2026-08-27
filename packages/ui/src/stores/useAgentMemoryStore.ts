@@ -57,6 +57,14 @@ const EMPTY_STATE = {
   error: null as string | null,
 };
 
+const EMPTY_MEMORY: AgentMemoryEntry[] = [];
+
+/** Never expose one owner's project entries under another owner's heading. */
+export const selectProjectMemoryForPath = (
+  state: AgentMemoryState,
+  projectPath: string | null,
+): AgentMemoryEntry[] => state.projectPath === projectPath ? state.project : EMPTY_MEMORY;
+
 /**
  * Only the newest load may write to the store. Turning the feature back on
  * fires a load before the setting has finished being written, so an older
@@ -93,13 +101,20 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
 
   load: async (projectPath) => {
     const requestId = ++loadSequence;
-    set({ loading: true, projectPath });
+    const previous = get();
+    const ownerChanged = previous.projectPath !== projectPath;
+    if (ownerChanged) {
+      set({ loading: true, projectPath, project: [], projectFailed: false });
+    } else {
+      set({ loading: true, projectPath });
+    }
     try {
       const snapshot = await fetchAgentMemory(projectPath);
       if (requestId !== loadSequence) return;
+      const current = get();
       set({
-        global: snapshot.global,
-        project: snapshot.project,
+        global: snapshot.globalFailed ? current.global : snapshot.global,
+        project: snapshot.projectFailed ? current.project : snapshot.project,
         projectPath,
         globalFailed: snapshot.globalFailed,
         projectFailed: snapshot.projectFailed,
@@ -119,7 +134,12 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
         return;
       }
       // Whatever was loaded before stays. Only the error is new.
-      set({ loading: false, error: errorMessage(error, 'Failed to load agent memory') });
+      set({
+        loading: false,
+        globalFailed: true,
+        projectFailed: true,
+        error: errorMessage(error, 'Failed to load agent memory'),
+      });
     }
   },
 
@@ -156,4 +176,3 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
     set({ ...EMPTY_STATE });
   },
 }));
-

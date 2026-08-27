@@ -307,6 +307,8 @@ export class ChildStoreManager {
   private bootstrapConcurrency = 2
   private bootstrapGeneration = 0
   private bootstrapSequence = 0
+  private bootstrapRunSequence = 0
+  private readonly directoryBootstrapRuns = new Map<string, number>()
   private manualBootstrapDemandRevision = 0
   private disposed = false
 
@@ -596,11 +598,23 @@ export class ChildStoreManager {
         queuedMs: Math.max(0, Date.now() - next.enqueuedAt),
       })
 
+      // Store liveness, not run-token ownership. The pump deletes the run
+      // token in `.finally()` as soon as onBootstrap settles, while
+      // bootstrapDirectory schedules deferred recovery pulls (permission.list
+      // and friends) from a `setTimeout(0)` that always runs after that
+      // cleanup — gating those on the token made them dead code. A per-
+      // directory run sequence keeps the context current across settle (so
+      // deferred pulls commit) while invalidating it as soon as a newer run
+      // starts, so a late deferred response cannot overwrite a newer run's
+      // state. Mirrors the isCurrent contract in session-message-loader.
+      const runSequence = ++this.bootstrapRunSequence
+      this.directoryBootstrapRuns.set(next.directory, runSequence)
+      const store = this.children.get(next.directory)
       const isCurrent = () => (
         !this.disposed
         && this.bootstrapGeneration === running.generation
-        && this.runningBootstraps.get(next.directory)?.token === token
-        && this.children.has(next.directory)
+        && this.directoryBootstrapRuns.get(next.directory) === runSequence
+        && this.children.get(next.directory) === store
       )
       let bootstrapPromise: Promise<void>
       try {
@@ -673,6 +687,7 @@ export class ChildStoreManager {
     this.manualBootstrapDemands.delete(directory)
     this.bootstrapStates.delete(directory)
     this.bootstrapFailures.delete(directory)
+    this.directoryBootstrapRuns.delete(directory)
     for (const demands of this.bootstrapDemandsByOwner.values()) demands.delete(directory)
     this.children.delete(directory)
     this.notifyRegistrySubscribers()

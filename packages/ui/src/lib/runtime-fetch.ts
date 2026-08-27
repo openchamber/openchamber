@@ -1,6 +1,7 @@
 import { getActiveRelayTunnel } from './relay/runtime-tunnel';
 import { TUNNEL_PARSE_BASE } from './relay/tunnel-payloads';
 import { buildRuntimeAuthHeaders } from './runtime-auth';
+import { observeRuntimeAuthResponse } from './runtime-auth-expiry';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
 
 export interface RuntimeFetchOptions extends RequestInit {
@@ -293,6 +294,14 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
       requestInit.method ?? (resolvedInput instanceof Request ? resolvedInput.method : 'GET'),
     ).toUpperCase();
   }
+
+  // Session-expiry classification rides on responses that already flow
+  // through here; only the status is read, never the body.
+  const rawFetch = doFetch;
+  doFetch = () => rawFetch().then((response) => {
+    observeRuntimeAuthResponse(url, response.status);
+    return response;
+  });
 
   // A Request always carries a (possibly default) signal; treat any Request, or
   // an explicit init.signal, as "has signal" and skip coalescing for safety.
