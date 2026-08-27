@@ -1061,9 +1061,9 @@ export const useUIStore = create<UIStore>()(
         showOpenCodeRestartConfirm: true,
         autoDeleteEnabled: false,
          autoSaveEnabled: true,
-         worktreeDiscoveryEnabled: true,
+         worktreeDiscoveryEnabled: false,
          worktreeDiscoveryIntervalMs: 0,
-         backgroundProjectSessionLoadingEnabled: true,
+         backgroundProjectSessionLoadingEnabled: false,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         autoDeleteLastRunAt: null,
@@ -2669,13 +2669,13 @@ export const useUIStore = create<UIStore>()(
             state.autoSaveEnabled = true;
           }
           if (typeof state.worktreeDiscoveryEnabled !== 'boolean') {
-            state.worktreeDiscoveryEnabled = true;
+            state.worktreeDiscoveryEnabled = false;
           }
           if (typeof state.worktreeDiscoveryIntervalMs !== 'number' || !Number.isFinite(state.worktreeDiscoveryIntervalMs)) {
             state.worktreeDiscoveryIntervalMs = 0;
           }
           if (typeof state.backgroundProjectSessionLoadingEnabled !== 'boolean') {
-            state.backgroundProjectSessionLoadingEnabled = true;
+            state.backgroundProjectSessionLoadingEnabled = false;
           }
 
           state.contextRailHiddenSurfaces = Array.isArray(state.contextRailHiddenSurfaces)
