@@ -267,7 +267,9 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs' | 'worktreeDiscovery';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs' | 'worktreeDiscovery' | 'worktreeDiscoveryInterval';
+
+const WORKTREE_DISCOVERY_INTERVALS = [0, 30_000, 60_000, 300_000] as const;
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -322,6 +324,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setAutoSaveEnabled = useUIStore(state => state.setAutoSaveEnabled);
     const worktreeDiscoveryEnabled = useUIStore(state => state.worktreeDiscoveryEnabled);
     const setWorktreeDiscoveryEnabled = useUIStore(state => state.setWorktreeDiscoveryEnabled);
+    const worktreeDiscoveryIntervalMs = useUIStore(state => state.worktreeDiscoveryIntervalMs);
+    const setWorktreeDiscoveryIntervalMs = useUIStore(state => state.setWorktreeDiscoveryIntervalMs);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
     const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
     const codeBlockLineWrap = useUIStore(state => state.codeBlockLineWrap);
@@ -621,7 +625,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         ? hasLocalizationSettings
         : (shouldShow('theme') || showWindowControlsPositionSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || shouldShow('worktreeDiscovery') || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || shouldShow('worktreeDiscovery') || shouldShow('worktreeDiscoveryInterval') || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('userMessageRendering')
@@ -1459,6 +1463,34 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     info={t('settings.openchamber.visual.field.worktreeDiscoveryInfo')}
                                     settingsItem="appearance.worktree-discovery"
                                 />
+                            )}
+                            {shouldShow('worktreeDiscoveryInterval') && (
+                                <SettingsStackedField
+                                    label={t('settings.openchamber.visual.field.worktreeDiscoveryInterval')}
+                                    info={t('settings.openchamber.visual.field.worktreeDiscoveryIntervalInfo')}
+                                    settingsItem="appearance.worktree-discovery-interval"
+                                >
+                                    <Select
+                                        value={String(worktreeDiscoveryIntervalMs)}
+                                        onValueChange={(value) => {
+                                            const interval = Number(value);
+                                            if (!WORKTREE_DISCOVERY_INTERVALS.some((candidate) => candidate === interval)) return;
+                                            setWorktreeDiscoveryIntervalMs(interval);
+                                            void updateDesktopSettings({ worktreeDiscoveryIntervalMs: interval });
+                                        }}
+                                    >
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.worktreeDiscoveryIntervalAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {WORKTREE_DISCOVERY_INTERVALS.map((interval) => (
+                                                <SelectItem key={interval} value={String(interval)}>
+                                                    {t(`settings.openchamber.visual.option.worktreeDiscoveryInterval.${interval}`)}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </SettingsStackedField>
                             )}
                             {showTerminalShellSetting && (
                                 <SettingsStackedField
