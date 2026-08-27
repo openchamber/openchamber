@@ -1937,8 +1937,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
     const description = getToolDescription(normalizedPart, state, currentDirectory);
     const displayName = getToolMetadata(normalizedPartTool || part.tool).displayName;
-    const headerTitle = getToolHeaderTitle(normalizedPartTool, state, displayName);
-    const secondaryDescription = getToolSecondaryText(normalizedPartTool, description, state);
+    const headerTitle = getToolHeaderTitle(part.tool, state, displayName);
+    const secondaryDescription = getToolSecondaryText(part.tool, description, state);
     
     // Tool title/description — shown inline as context
     const justificationText = React.useMemo(() => {
@@ -1958,8 +1958,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             return null;
         }
         const inputDesc = getToolDescriptionFallback(normalizedPartTool, input?.description, undefined);
-        return getToolSecondaryText(normalizedPartTool, inputDesc, state);
-    }, [descriptionPath, normalizedPartTool, input, state]);
+        return getToolSecondaryText(part.tool, inputDesc, state);
+    }, [descriptionPath, normalizedPartTool, input, part.tool, state]);
     const runtime = React.useContext(RuntimeAPIContext);
     const mobileActions = useMobileAppActions();
 

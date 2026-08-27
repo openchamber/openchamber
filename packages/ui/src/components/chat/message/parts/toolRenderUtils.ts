@@ -8,7 +8,7 @@ const STATIC_TOOL_NAMES = new Set<string>(['read', 'skill']);
 const STANDALONE_TOOL_NAMES = new Set<string>(['task']);
 
 // OpenCode built-ins keep their dedicated path, command, and status rendering.
-// Unknown tools and OpenChamber plugin actions may provide a useful per-call title.
+// Custom, MCP, and OpenChamber plugin tools may provide a useful per-call title.
 const OPENCODE_BUILT_IN_TOOL_NAMES = new Set<string>([
     'read',
     'write',
@@ -35,6 +35,11 @@ const OPENCODE_BUILT_IN_TOOL_NAMES = new Set<string>([
     'file_write',
 ]);
 
+const isOpenCodeBuiltInTool = (toolName: string): boolean => {
+    const normalized = toolName.trim().toLowerCase().replace(/:\d+$/, '');
+    return !normalized.includes('.') && OPENCODE_BUILT_IN_TOOL_NAMES.has(normalized);
+};
+
 const normalizeToolName = (toolName: unknown): string => {
     if (typeof toolName !== 'string') return '';
     const trimmed = toolName.trim().toLowerCase();
@@ -58,14 +63,14 @@ const getAuthoritativeToolTitle = (state: ToolState): string | null => {
 };
 
 export const getToolHeaderTitle = (toolName: string, state: ToolState, displayName: string): string => {
-    return OPENCODE_BUILT_IN_TOOL_NAMES.has(normalizeToolName(toolName))
+    return isOpenCodeBuiltInTool(toolName)
         ? displayName
         : getAuthoritativeToolTitle(state) ?? displayName;
 };
 
 export const getToolSecondaryText = (toolName: string, value: string | undefined, state: ToolState): string | null => {
     if (!value || value.trim().length === 0) return null;
-    if (OPENCODE_BUILT_IN_TOOL_NAMES.has(normalizeToolName(toolName))) return value;
+    if (isOpenCodeBuiltInTool(toolName)) return value;
 
     const title = getAuthoritativeToolTitle(state);
     return title && value.trim() === title ? null : value;

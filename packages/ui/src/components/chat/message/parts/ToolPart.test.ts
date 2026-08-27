@@ -179,6 +179,10 @@ describe('getToolHeaderTitle', () => {
         expect(getToolSecondaryText('edit', 'src/file.ts', editState)).toBe('src/file.ts');
     });
 
+    test('keeps invocation titles for namespaced custom tools', () => {
+        expect(getToolHeaderTitle('mcp.edit', completedState, 'Edit File')).toBe('Listed projects');
+    });
+
     test('falls back to the metadata display name for blank or missing titles', () => {
         expect(getToolHeaderTitle('custom_tool', { status: 'running', input: {}, time: { start: 0 }, title: '   ' }, 'Custom Tool')).toBe('Custom Tool');
         expect(getToolHeaderTitle('custom_tool', { status: 'pending', input: {}, raw: '' }, 'Custom Tool')).toBe('Custom Tool');
