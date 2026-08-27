@@ -71,6 +71,7 @@ export type DesktopSettings = {
   sidebarProjectSortOrder?: 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
   sidebarShowRecentSection?: boolean;
   worktreeDiscoveryEnabled?: boolean;
+  worktreeDiscoveryIntervalMs?: number;
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;

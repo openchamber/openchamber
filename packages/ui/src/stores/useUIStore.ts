@@ -701,6 +701,7 @@ interface UIStore {
   /** Global file-editor autosave. Default true for backward compatibility. */
   autoSaveEnabled: boolean;
   worktreeDiscoveryEnabled: boolean;
+  worktreeDiscoveryIntervalMs: number;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   autoDeleteLastRunAt: number | null;
@@ -887,6 +888,7 @@ interface UIStore {
   setAutoDeleteEnabled: (value: boolean) => void;
   setAutoSaveEnabled: (value: boolean) => void;
   setWorktreeDiscoveryEnabled: (value: boolean) => void;
+  setWorktreeDiscoveryIntervalMs: (value: number) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
@@ -1058,6 +1060,7 @@ export const useUIStore = create<UIStore>()(
         autoDeleteEnabled: false,
          autoSaveEnabled: true,
          worktreeDiscoveryEnabled: true,
+         worktreeDiscoveryIntervalMs: 0,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         autoDeleteLastRunAt: null,
@@ -1840,6 +1843,10 @@ export const useUIStore = create<UIStore>()(
 
         setWorktreeDiscoveryEnabled: (value) => {
           set({ worktreeDiscoveryEnabled: value });
+        },
+
+        setWorktreeDiscoveryIntervalMs: (value) => {
+          set({ worktreeDiscoveryIntervalMs: Math.max(0, Math.floor(value)) });
         },
 
         setAutoDeleteAfterDays: (days) => {
@@ -2657,6 +2664,9 @@ export const useUIStore = create<UIStore>()(
           if (typeof state.worktreeDiscoveryEnabled !== 'boolean') {
             state.worktreeDiscoveryEnabled = true;
           }
+          if (typeof state.worktreeDiscoveryIntervalMs !== 'number' || !Number.isFinite(state.worktreeDiscoveryIntervalMs)) {
+            state.worktreeDiscoveryIntervalMs = 0;
+          }
 
           state.contextRailHiddenSurfaces = Array.isArray(state.contextRailHiddenSurfaces)
             ? (state.contextRailHiddenSurfaces as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
@@ -2704,6 +2714,7 @@ export const useUIStore = create<UIStore>()(
           autoDeleteEnabled: state.autoDeleteEnabled,
            autoSaveEnabled: state.autoSaveEnabled,
            worktreeDiscoveryEnabled: state.worktreeDiscoveryEnabled,
+           worktreeDiscoveryIntervalMs: state.worktreeDiscoveryIntervalMs,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
