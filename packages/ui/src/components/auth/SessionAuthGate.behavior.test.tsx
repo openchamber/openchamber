@@ -172,10 +172,13 @@ function useSyncExternalStore<T>(
 ): T {
   getHookRecord();
   hookIndex += 1;
+  void _getServerSnapshot;
   return getSnapshot();
 }
 
-function useDebugValue<T>(_value: T): void {}
+function useDebugValue<T>(_value: T): void {
+  void _value;
+}
 
 function jsx<P extends Record<string, unknown>>(type: JSXElementType<P>, props: JSXProps & P): unknown {
   if (type === reactJsxRuntime.Fragment) {
