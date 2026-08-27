@@ -65,6 +65,7 @@ const persistRuntimeSettingsMirror = (settings: DesktopSettings, runtimeKey: str
     projects: settings.projects,
     activeProjectId: settings.activeProjectId,
     sidebarProjectDisplayMode: settings.sidebarProjectDisplayMode,
+    worktreeDiscoveryEnabled: settings.worktreeDiscoveryEnabled,
     sidebarSessionGroupingMode: settings.sidebarSessionGroupingMode,
     sidebarProjectSortOrder: settings.sidebarProjectSortOrder,
     sidebarShowRecentSection: settings.sidebarShowRecentSection,
@@ -545,6 +546,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     showReasoningTraces: defaults.showReasoningTraces,
     streamingAutoFollowEnabled: defaults.streamingAutoFollowEnabled,
     workStatusPanelEnabled: defaults.workStatusPanelEnabled,
+    worktreeDiscoveryEnabled: defaults.worktreeDiscoveryEnabled,
     workStatusHiddenSections: defaults.workStatusHiddenSections,
     sessionRecapEnabled: defaults.sessionRecapEnabled,
     sessionSuggestionEnabled: defaults.sessionSuggestionEnabled,
@@ -676,6 +678,10 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.autoSaveEnabled === 'boolean' && settings.autoSaveEnabled !== store.autoSaveEnabled) {
     store.setAutoSaveEnabled(settings.autoSaveEnabled);
+  }
+  if (typeof settings.worktreeDiscoveryEnabled === 'boolean'
+    && settings.worktreeDiscoveryEnabled !== store.worktreeDiscoveryEnabled) {
+    store.setWorktreeDiscoveryEnabled(settings.worktreeDiscoveryEnabled);
   }
   if (typeof settings.autoDeleteAfterDays === 'number' && Number.isFinite(settings.autoDeleteAfterDays)) {
     const normalized = Math.max(1, Math.min(365, settings.autoDeleteAfterDays));
@@ -1200,6 +1206,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.autoSaveEnabled === 'boolean') {
     result.autoSaveEnabled = candidate.autoSaveEnabled;
+  }
+  if (typeof candidate.worktreeDiscoveryEnabled === 'boolean') {
+    result.worktreeDiscoveryEnabled = candidate.worktreeDiscoveryEnabled;
   }
   if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
     result.autoDeleteAfterDays = candidate.autoDeleteAfterDays;
