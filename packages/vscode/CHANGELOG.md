@@ -1,5 +1,6 @@
 ## [Unreleased]
 
+- Usage: Command Code returns as an optional best-effort provider, with credit balances and five-hour/weekly limits for accounts connected through OpenCode, `COMMAND_CODE_API_KEY`, or `cmd login` (thanks to @bernhardberger).
 - The context usage readout now reports the session cost including everything its subagents spent, matching the work status panel instead of showing a lower figure.
 
 ## [1.21.0] - 2026-08-26

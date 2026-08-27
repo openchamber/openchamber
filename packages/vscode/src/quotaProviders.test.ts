@@ -17,6 +17,7 @@ const AUTH = JSON.stringify({
   crof: { key: 'test-token' },
   neuralwatt: { key: 'test-token' },
   'opencode-go': { key: 'test-token' },
+  'command-code': { type: 'oauth', access: 'test-token' },
   'zai-coding-plan': { key: 'test-token' },
   deepseek: { key: 'test-token' },
   'github-copilot': { access: 'test-token' },
@@ -101,6 +102,137 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
     assert.equal((request?.headers as Record<string, string>).Authorization, 'Bearer test-token');
     assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
     assert.throws(() => fs.statSync(legacyPath));
+  });
+});
+
+describe('Command Code quota provider (VS Code parity)', () => {
+  test('uses the OAuth access token and resolves server-backed limits', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      requests.push({ url, init });
+      return mockResponse(url.endsWith('/alpha/whoami')
+        ? { org: { id: 'org/a' } }
+        : { credits: { monthlyCredits: 120 }, windowLimits: { fiveHour: { used: 25, cap: 100, resetAt: 1_776_000_000 } } });
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('command-code');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requests.map(({ url }) => url), [
+      'https://api.commandcode.ai/alpha/whoami',
+      'https://api.commandcode.ai/alpha/billing/credits?orgId=org%2Fa',
+    ]);
+    assert.equal((requests[0].init?.headers as Record<string, string>).Authorization, 'Bearer test-token');
+    assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
+    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '120');
+  });
+
+  test('omits orgId for personal accounts', async () => {
+    const urls: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      urls.push(url);
+      return mockResponse(url.endsWith('/alpha/whoami')
+        ? { user: { id: 'user-1' }, org: null }
+        : { credits: { monthlyCredits: 120 } });
+    }) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('command-code');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(urls, [
+      'https://api.commandcode.ai/alpha/whoami',
+      'https://api.commandcode.ai/alpha/billing/credits',
+    ]);
+  });
+
+  test('formats fractional credit values for display', async () => {
+    globalThis.fetch = (async (url: string) => mockResponse(url.endsWith('/alpha/whoami')
+      ? { org: null }
+      : { credits: { monthlyCredits: 69.7947070034 }, windowLimits: { fiveHour: { used: 0.2052929966, cap: 14 } } })) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('command-code');
+
+    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '69.79');
+    assert.equal(result.usage!.windows['5h']!.valueLabel, '0.21 / 14');
+  });
+
+  test('accepts numeric strings from the best-effort endpoint', async () => {
+    globalThis.fetch = (async (url: string) => mockResponse(url.endsWith('/alpha/whoami')
+      ? { org: null }
+      : { credits: { monthlyCredits: '69.79' }, windowLimits: { fiveHour: { used: '0.21', cap: '14' } } })) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('command-code');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '69.79');
+    assert.equal(result.usage!.windows['5h']!.valueLabel, '0.21 / 14');
+  });
+
+  test('isolates endpoint failures in the provider result', async () => {
+    globalThis.fetch = (async () => mockResponse(null, { ok: false, status: 503 })) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('command-code');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'Command Code usage API returned HTTP 503');
+  });
+
+  test('retries the next credential after an authentication failure', async () => {
+    const previousApiKey = process.env.COMMAND_CODE_API_KEY;
+    process.env.COMMAND_CODE_API_KEY = 'environment-token';
+    const authorizations: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get('Authorization') ?? '';
+      authorizations.push(authorization);
+      if (authorization === 'Bearer test-token') return mockResponse(null, { ok: false, status: 401 });
+      return mockResponse(String(url).endsWith('/alpha/whoami') ? { org: null } : { credits: { monthlyCredits: 70 } });
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchQuotaForProvider('command-code');
+      assert.equal(result.ok, true);
+      assert.deepEqual(authorizations, [
+        'Bearer test-token',
+        'Bearer environment-token',
+        'Bearer environment-token',
+      ]);
+    } finally {
+      if (previousApiKey === undefined) delete process.env.COMMAND_CODE_API_KEY;
+      else process.env.COMMAND_CODE_API_KEY = previousApiKey;
+    }
+  });
+
+  test('uses the API key created by cmd login', async () => {
+    const originalReadFileSync = fs.readFileSync;
+    const originalConsoleError = console.error;
+    const openCodeAuthPath = path.join(os.homedir(), '.local', 'share', 'opencode', 'auth.json');
+    const commandCodeAuthPath = path.join(os.homedir(), '.commandcode', 'auth.json');
+    Object.defineProperty(fs, 'readFileSync', {
+      configurable: true,
+      value: (file: fs.PathOrFileDescriptor) => {
+        if (String(file) === commandCodeAuthPath) return JSON.stringify({ apiKey: 'cli-token' });
+        if (String(file) === openCodeAuthPath) throw new Error('invalid auth');
+        return AUTH;
+      },
+    });
+    console.error = () => {};
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith('/alpha/whoami')) {
+        assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer cli-token');
+        return mockResponse({ org: null });
+      }
+      return mockResponse({ credits: { monthlyCredits: 70 } });
+    }) as typeof fetch;
+
+    try {
+      const result = await fetchQuotaForProvider('command-code');
+      assert.equal(result.ok, true);
+      assert.equal(result.usage!.windows.monthly_credits!.valueLabel, '70');
+    } finally {
+      Object.defineProperty(fs, 'readFileSync', { configurable: true, value: originalReadFileSync });
+      console.error = originalConsoleError;
+    }
   });
 });
 

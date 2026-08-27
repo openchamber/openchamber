@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
+import { CommandCodeAuthenticationError, fetchCommandCodeUsage } from './commandCodeQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { getProviderAuth, updateProviderAuth } from './opencodeAuth';
 
@@ -193,6 +194,7 @@ export type ProviderResult = {
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 const AUTH_FILE = path.join(OPENCODE_DATA_DIR, 'auth.json');
+const COMMAND_CODE_AUTH_FILE = path.join(os.homedir(), '.commandcode', 'auth.json');
 
 const XAI_USAGE_ENDPOINT = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
 const XAI_TOKEN_ENDPOINT = 'https://auth.x.ai/oauth2/token';
@@ -286,6 +288,15 @@ const readAuthFile = (): AuthFile => {
   } catch (error) {
     console.error('Failed to read auth file:', error);
     throw new Error('Failed to read OpenCode auth configuration');
+  }
+};
+
+const readCommandCodeCliApiKey = (): string | null => {
+  try {
+    const auth = asObject(JSON.parse(fs.readFileSync(COMMAND_CODE_AUTH_FILE, 'utf8')));
+    return asNonEmptyString(auth?.apiKey);
+  } catch {
+    return null;
   }
 };
 
@@ -772,6 +783,9 @@ export const listConfiguredQuotaProviders = () => {
   const configured = new Set<string>();
   const openCodeGoAuth = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
   if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
+  const commandCodeAuth = normalizeAuthEntry(getAuthEntry(auth, ['command-code', 'commandcode', 'command_code', 'command code']));
+  if (commandCodeAuth && (typeof commandCodeAuth.key === 'string' || typeof commandCodeAuth.access === 'string' || typeof commandCodeAuth.token === 'string')) configured.add('command-code');
+  if (process.env.COMMAND_CODE_API_KEY?.trim() || readCommandCodeCliApiKey()) configured.add('command-code');
   if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
   if (readCredential('cursor')) configured.add('cursor');
 
@@ -2885,6 +2899,31 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
         return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage({ apiKey }) } });
       } catch (error) {
         return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
+      }
+    }
+    case 'command-code': {
+      try {
+        let auth: AuthFile = {};
+        try {
+          auth = readAuthFile();
+        } catch {
+          // Environment and Command Code CLI credentials remain usable.
+        }
+        const entry = normalizeAuthEntry(getAuthEntry(auth, ['command-code', 'commandcode', 'command_code', 'command code']));
+        const stored = typeof entry?.key === 'string' ? entry.key : typeof entry?.access === 'string' ? entry.access : typeof entry?.token === 'string' ? entry.token : null;
+        const apiKeys = [...new Set([stored?.trim(), process.env.COMMAND_CODE_API_KEY?.trim(), readCommandCodeCliApiKey()].filter((value): value is string => Boolean(value)))];
+        if (apiKeys.length === 0) return buildResult({ providerId, providerName: 'Command Code', ok: false, configured: false, error: 'Not configured' });
+        for (const [index, apiKey] of apiKeys.entries()) {
+          try {
+            return buildResult({ providerId, providerName: 'Command Code', ok: true, configured: true, usage: { windows: await fetchCommandCodeUsage(apiKey) } });
+          } catch (error) {
+            if (error instanceof CommandCodeAuthenticationError && index < apiKeys.length - 1) continue;
+            throw error;
+          }
+        }
+        throw new Error('Command Code authentication failed');
+      } catch (error) {
+        return buildResult({ providerId, providerName: 'Command Code', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
       }
     }
     case 'cursor':

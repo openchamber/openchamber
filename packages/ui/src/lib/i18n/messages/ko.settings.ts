@@ -1199,6 +1199,7 @@ export const settingsDict = {
   'settings.usage.sidebar.field.displayModeUsage': '사용량',
   'settings.usage.sidebar.field.displayModeRemaining': '남은 할당량',
   'settings.usage.sidebar.status.notSet': '설정 안 됨',
+  'settings.usage.sidebar.status.unofficial': '비공식',
   'settings.usage.page.empty.selectProvider': '사용량 세부 정보를 보려면 프로바이더를 선택하세요.',
   'settings.usage.page.header.providerUsage': '{provider} 사용량',
   'settings.usage.page.header.refreshing': '사용량 새로고침 중...',
