@@ -601,12 +601,8 @@ export function PromptNavigatorRail({
                                         <span
                                             aria-hidden="true"
                                             className={cn(
-                                                'block h-0.5 rounded-full transition-all duration-200 ease-out',
-                                                isActive
-                                                    ? 'bg-[var(--surface-foreground)]'
-                                                    : isHighlighted
-                                                        ? 'bg-[var(--surface-foreground)]/80'
-                                                        : 'bg-[var(--surface-foreground)]/30',
+                                                'block h-0.5 rounded-full bg-[var(--surface-foreground)] transition-[width,opacity] duration-200 ease-out',
+                                                isActive || isHighlighted ? 'opacity-100' : 'opacity-50',
                                             )}
                                             style={{ width: `${tickWidth}px` }}
                                         />

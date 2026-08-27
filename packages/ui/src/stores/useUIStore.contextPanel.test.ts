@@ -207,6 +207,12 @@ describe('useUIStore context panel tabs', () => {
   });
 });
 
+describe('useUIStore timeline defaults', () => {
+  test('keeps timeline activity collapsed by default', () => {
+    expect(useUIStore.getInitialState().activityRenderMode).toBe('collapsed');
+  });
+});
+
 describe('useUIStore openContextSurface', () => {
   const directory = '/repo';
 
@@ -459,6 +465,7 @@ describe('useUIStore persistence migrations', () => {
       autoSaveEnabled: true,
       chatMessageWidthMode: 'wide',
       contextPanelByDirectory: {},
+      contextRailHiddenSurfaces: [],
       contextRailOrder: [],
       fileEditorKeymap: 'default',
     });

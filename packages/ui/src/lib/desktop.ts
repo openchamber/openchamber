@@ -182,7 +182,6 @@ export type DesktopSettings = {
   collapsibleUserMessages?: boolean;
   stickyUserHeader?: boolean;
   promptNavigatorEnabled?: boolean;
-  expandedEditorToolbar?: boolean;
   chatMessageWidthMode?: ChatMessageWidthMode;
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
