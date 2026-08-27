@@ -1,18 +1,17 @@
-## [Unreleased]
+## [1.21.0] - 2026-08-26
 
-- The chat view no longer stays stuck on its loading screen on slow or remote connections (for example code-server behind a reverse proxy) — the connection status is re-sent until the webview is ready to hear it (thanks @VinciYan).
 - **Chat context attachments:** diff and file comments, terminal selections, and linked issues/PRs now show in the conversation as compact context cards — source header, captured content behind an expander, your comment below — instead of raw text inside the message.
 - **Chat: comment on a reply.** Select text in a chat message and choose Comment to attach that quote with your note to the next message; the selection stays highlighted while you type.
-- Diff: hovering a line shows a + button that opens a comment for the line; clicking a line or dragging across lines opens the editor for that range. The comment editor and saved-comment cards match the chat's comment style.
+- Chat: the view no longer stays stuck on its loading screen on slow or remote connections, including code-server behind a reverse proxy (thanks to @VinciYan).
 - Composer: hovering a context chip above the input opens a stacked preview of everything attached, where comments can be edited in place or items removed before sending.
 - Chat: @ file mentions now rank files and directories together by how well they match, so the file you typed is at the top instead of below unrelated directories. Multi-word queries match in any order, and long paths keep the folder next to the file name visible.
 - Search: Ctrl/Cmd+P now matches the whole file path, not just the file name — searching a folder name finds the files inside it.
 - Search in dropdowns: searchable pickers (agents, models, providers, branches) now put the best matches first, match multi-word queries in any order, and ignore punctuation (so "gpt4o" finds "gpt-4o").
-- Permission cards answer to the keyboard: Alt+Enter allows once, Alt+Shift+Enter allows always, Alt+Backspace denies; the keys are printed on the buttons.
-- Keyboard: dropdown menus and pickers answer Ctrl+N/Ctrl+P for down/up, the session switcher opens focused on your current session, and shortcut labels in tooltips and menus show the binding you actually have set (thanks @ChangeHow).
+- Permissions: cards answer to the keyboard with Alt+Enter to allow once, Alt+Shift+Enter to allow always, and Alt+Backspace to deny; the keys are printed on the buttons.
+- Keyboard: dropdown menus and pickers answer Ctrl+N/Ctrl+P for down/up, the session switcher opens focused on your current session, and shortcut labels in tooltips and menus show the binding you actually have set (thanks to @ChangeHow).
 - Chat: Cmd/Ctrl+Shift+T now cycles through every thinking level offered by the selected model instead of skipping levels after reaching the end (thanks to @nimobeeren).
 - Chat: OpenCode notices now share one style.
-- The timeline dialog now fits small windows instead of squeezing the message list to a couple of rows (thanks to @gaojunran).
+- Chat: the timeline dialog now fits small windows instead of squeezing the message list to a couple of rows (thanks to @gaojunran).
 
 ## [1.20.0] - 2026-08-23
 

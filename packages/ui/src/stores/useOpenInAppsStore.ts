@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, isDesktopShell, type DesktopSettings, type InstalledDesktopAppInfo } from '@/lib/desktop';
+import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, isDesktopShell, type InstalledDesktopAppInfo } from '@/lib/desktop';
 import { OPEN_IN_APPS, DEFAULT_OPEN_IN_APP_ID, OPEN_IN_ALWAYS_AVAILABLE_APP_IDS, getOpenInAppById, getPlatformOpenInApp, type OpenInApp } from '@/lib/openInApps';
 import { type SettingsSyncedDetail, updateDesktopSettings } from '@/lib/persistence';
 

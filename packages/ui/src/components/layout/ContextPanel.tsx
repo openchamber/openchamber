@@ -452,10 +452,13 @@ export const ContextPanel: React.FC = () => {
 
   // Lets an agent's browser.open create the tab it needs when none is open yet.
   // Registered from the panel because opening a tab is panel state, not
-  // something the browser view itself can do before it exists.
+  // something the browser view itself can do before it exists. Background on
+  // purpose: an agent working a page must not pop the panel open (or steal
+  // the active surface) under the user — the tab mounts invisibly, and the
+  // rail is where the user opens it when curious.
   React.useEffect(() => {
     if (!effectiveDirectory) return;
-    return registerBrowserOpener((url) => openContextBrowser(effectiveDirectory, url));
+    return registerBrowserOpener((url) => openContextBrowser(effectiveDirectory, url, { reveal: false }));
   }, [effectiveDirectory, openContextBrowser]);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);

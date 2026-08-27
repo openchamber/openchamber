@@ -434,7 +434,6 @@ export const Header: React.FC = () => {
   const { t } = useI18n();
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
-  const openContextPlan = useUIStore((state) => state.openContextPlan);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
@@ -1263,21 +1262,6 @@ export const Header: React.FC = () => {
   const isContextPanelActive = activeContextMode === 'context';
 
 
-  const handleOpenContextPlan = React.useCallback(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return;
-    }
-
-    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
-    if (getActiveContextMode(panelState) === 'plan') {
-      closeContextPanel(directory);
-      return;
-    }
-
-    openContextPlan(directory);
-  }, [closeContextPanel, openContextPlan, openDirectory]);
-
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
   // Left padding the header needs to clear the OS window controls (macOS
@@ -1448,16 +1432,6 @@ export const Header: React.FC = () => {
     return formatShortcutForDisplay(getEffectiveShortcutCombo(actionId, shortcutOverrides));
   }, [shortcutOverrides]);
 
-  // Desktop keeps instances only: quota and MCP now live in the work-status
-  // panel, which reports them per session rather than per window. The mobile
-  // menu below is untouched — it has no panel to defer to.
-  const servicesTabs = React.useMemo(() => {
-    const base: Array<{ value: 'instance' | 'usage' | 'mcp'; label: string; icon: React.ReactNode }> = [];
-    if (isDesktopApp) {
-      base.push({ value: 'instance', label: t('layout.services.instance'), icon: <Icon name="server" className="h-3.5 w-3.5" /> });
-    }
-    return base;
-  }, [isDesktopApp, t]);
 
 
   useKeybinds({

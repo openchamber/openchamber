@@ -7,7 +7,6 @@ import React, {
 } from 'react';
 import { flushSync } from 'react-dom';
 import type { Theme, ThemeMode } from '@/types/theme';
-import type { DesktopSettings } from '@/lib/desktop';
 import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { setDesktopWindowTheme } from '@/lib/desktopNative';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';

@@ -1770,6 +1770,15 @@ const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => 
       : probe?.status === 'wrong-service'
         ? 'wrong-service'
         : 'ok';
+  // A relay-capable host is not a recovery case just because its stored
+  // direct URL failed the http probe — that URL is often the pairing
+  // creator's own loopback (unreachable here, or worse, someone else's
+  // service). The relay leg is activated in the renderer's relay restore,
+  // which cannot run from a recovery screen: boot to main on the local
+  // substrate and let it pick direct-or-relay.
+  if (status !== 'ok' && sanitizeHostRelayForStorage(host.relay)) {
+    return { target: 'remote', status: 'ok', hostId: host.id, url: host.apiUrl || host.url, ...availability };
+  }
   return { target: 'remote', status, hostId: host.id, url: host.apiUrl || host.url, ...availability };
 };
 
@@ -3025,12 +3034,24 @@ const resolveInitialUrl = async () => {
     }
   }
 
+  const defaultHostRelayCapable = Boolean(
+    config.defaultHostId
+    && config.defaultHostId !== LOCAL_HOST_ID
+    && sanitizeHostRelayForStorage(config.hosts.find((entry) => entry.id === config.defaultHostId)?.relay),
+  );
   if (apiBaseUrl && apiBaseUrl !== localUrl) {
     remoteProbe = await probeHostWithTimeout(apiBaseUrl, 2_000, clientToken, requestHeaders);
-    if (remoteProbe.status === 'unreachable') {
+    if (remoteProbe.status === 'unreachable' && !defaultHostRelayCapable) {
       remoteProbe = await probeHostWithTimeout(apiBaseUrl, 10_000, clientToken, requestHeaders);
     }
-    if (remoteProbe.status === 'unreachable') {
+    // The renderer's relay restore owns transport selection for relay-capable
+    // hosts; any failed direct probe falls back to the local substrate.
+    if (remoteProbe.status !== 'ok' && defaultHostRelayCapable) {
+      apiBaseUrl = localUrl || '';
+      clientToken = localUrl ? readDesktopLocalClientToken() : '';
+      requestHeaders = {};
+      initialUrl = localUiUrl;
+    } else if (remoteProbe.status === 'unreachable') {
       state.unreachableHosts.add(apiBaseUrl);
       apiBaseUrl = localUrl || '';
       clientToken = localUrl ? readDesktopLocalClientToken() : '';

@@ -393,7 +393,9 @@ const touchContextPanelState = (prev?: ContextPanelDirectoryState): ContextPanel
 const upsertContextPanelTab = (
   current: ContextPanelDirectoryState,
   descriptor: ContextPanelTabDescriptor,
+  options?: { reveal?: boolean },
 ): ContextPanelDirectoryState => {
+  const reveal = options?.reveal !== false;
   const nextTab = createContextPanelTab(descriptor);
   // A real file tab replaces the empty editor placeholder ('file' with no
   // target) that the rail can open before any file is picked.
@@ -418,12 +420,18 @@ const upsertContextPanelTab = (
         }
       : tab));
 
-  const activeTabId = nextTab.id;
+  // A background upsert (an agent working a page) keeps the panel exactly as
+  // the user left it: closed stays closed, and whatever tab they were on
+  // stays active. The tab still exists — panes are kept mounted regardless of
+  // visibility — so agent control and a later manual open both find it.
+  const activeTabId = reveal
+    ? nextTab.id
+    : current.activeTabId ?? nextTab.id;
   const clampedTabs = clampContextPanelTabs(tabs, CONTEXT_PANEL_MAX_TABS, activeTabId);
 
   return {
     ...current,
-    isOpen: true,
+    isOpen: reveal ? true : current.isOpen,
     tabs: clampedTabs,
     activeTabId: resolveActiveContextPanelTabID(clampedTabs, activeTabId),
     touchedAt: Date.now(),
@@ -806,14 +814,13 @@ interface UIStore {
   toggleContextEditorTree: () => void;
   setContextEditorTreeWidth: (width: number) => void;
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
-  openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor) => void;
+  openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor, options?: { reveal?: boolean }) => void;
   openContextDiff: (directory: string, filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
   openContextFile: (directory: string, filePath: string) => void;
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
   openContextOverview: (directory: string) => void;
-  openContextPlan: (directory: string) => void;
   openContextPreview: (directory: string, url: string) => void;
-  openContextBrowser: (directory: string, url?: string) => void;
+  openContextBrowser: (directory: string, url?: string, options?: { reveal?: boolean }) => void;
   openNewContextBrowserTab: (directory: string) => void;
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
@@ -1239,7 +1246,7 @@ export const useUIStore = create<UIStore>()(
           state.openContextPanelTab(normalizedDirectory, { mode });
         },
 
-        openContextPanelTab: (directory, tab) => {
+        openContextPanelTab: (directory, tab, options) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory) {
             return;
@@ -1250,7 +1257,7 @@ export const useUIStore = create<UIStore>()(
             const current = touchContextPanelState(prev);
             const byDirectory = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: upsertContextPanelTab(current, tab),
+              [normalizedDirectory]: upsertContextPanelTab(current, tab, options),
             };
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
@@ -1313,15 +1320,6 @@ export const useUIStore = create<UIStore>()(
           get().openContextPanelTab(normalizedDirectory, { mode: 'context' });
         },
 
-        openContextPlan: (directory) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
-            return;
-          }
-
-          get().openContextPanelTab(normalizedDirectory, { mode: 'plan' });
-        },
-
         openContextPreview: (directory, url) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedUrl = (url || '').trim();
@@ -1351,7 +1349,7 @@ export const useUIStore = create<UIStore>()(
             label: null,
           });
         },
-        openContextBrowser: (directory, url = '') => {
+        openContextBrowser: (directory, url = '', options) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory || isVSCodeRuntime()) return;
           const targetUrl = typeof url === 'string' && url.trim().length > 0 ? url.trim() : '';
@@ -1360,7 +1358,7 @@ export const useUIStore = create<UIStore>()(
             targetPath: targetUrl,
             dedupeKey: targetUrl || 'browser',
             label: null,
-          });
+          }, options);
         },
 
         setContextPanelTabTargetPath: (directory, tabID, targetPath) => {

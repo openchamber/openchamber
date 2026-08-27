@@ -4,6 +4,8 @@ import { togglePermissionAutoAccept } from "../../components/chat/permissionAuto
 const storage = new Map<string, string>()
 const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown }> = []
 const permissionAutoAcceptCalls: Array<[string, boolean]> = []
+const savedVariantCalls: Array<string | undefined> = []
+let configVariantOverride: string | null | undefined
 // Sync's session→directory index. `createSession` writes it, and directory
 // resolution reads it as the authoritative source, so the mock has to keep one.
 const sessionDirectoryRegistry = new Map<string, string>()
@@ -96,6 +98,9 @@ mock.module("@/stores/useConfigStore", () => ({
   useConfigStore: {
     getState: () => ({
       currentAgentName: "agent-default",
+      currentProviderId: "provider",
+      currentModelId: "model",
+      currentVariantSelection: { override: configVariantOverride, inherited: "high" },
       agents: [],
       activateDirectory: mock(async () => undefined),
       applyDefaultModelAgentSelection: mock(() => undefined),
@@ -170,7 +175,9 @@ mock.module("../selection-store", () => ({
       saveSessionModelSelection: () => undefined,
       saveSessionAgentSelection: () => undefined,
       saveAgentModelForSession: () => undefined,
-      saveAgentModelVariantForSession: () => undefined,
+      saveAgentModelVariantForSession: (_sessionId: string, _agent: string, _provider: string, _model: string, variant: string | undefined) => {
+        savedVariantCalls.push(variant)
+      },
       getSessionAgentSelection: () => null,
       getSessionModelSelection: () => null,
       getAgentModelForSession: () => null,
@@ -348,6 +355,8 @@ describe("issue 2039 draft auto-accept", () => {
     createSessionCalls.length = 0
     sessionDirectoryRegistry.clear()
     permissionAutoAcceptCalls.length = 0
+    savedVariantCalls.length = 0
+    configVariantOverride = undefined
     createdSessionDirectory = undefined
 
     useSessionUIStore.setState({
@@ -382,6 +391,29 @@ describe("issue 2039 draft auto-accept", () => {
     expect(createSessionCalls).toHaveLength(1)
     expect(permissionAutoAcceptCalls).toEqual([["ses_issue_2039", true]])
     expect(useSessionUIStore.getState().currentSessionId).toBe("ses_issue_2039")
+  })
+
+  test("stores only an explicit draft variant as the session override", async () => {
+    useSessionUIStore.getState().openNewSessionDraft()
+    await materializeOpenDraftSession({
+      providerID: "provider",
+      modelID: "model",
+      agent: "agent-default",
+      variant: "high",
+    })
+
+    expect(savedVariantCalls).toEqual([undefined])
+
+    configVariantOverride = "high"
+    useSessionUIStore.getState().openNewSessionDraft()
+    await materializeOpenDraftSession({
+      providerID: "provider",
+      modelID: "model",
+      agent: "agent-default",
+      variant: "high",
+    })
+
+    expect(savedVariantCalls).toEqual([undefined, "high"])
   })
 
   test("does not apply draft auto-accept after the draft is closed", async () => {
