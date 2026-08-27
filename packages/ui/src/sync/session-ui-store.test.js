@@ -871,6 +871,48 @@ describe('routeMessage skill invocation', () => {
     expect(sendCommandCalls[0].arguments).toBe('focus on auth');
   });
 
+  test('preserves context parts and skill invocation on the prompt route', async () => {
+    useSkillsStore.setState({
+      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+    });
+    const additionalParts = [{ text: 'Comment on `src/auth.ts` line 4:\ncheck this', synthetic: true }];
+
+    await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs focus on auth',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts,
+    });
+
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].additionalParts[0]).toEqual(additionalParts[0]);
+    expect(sendMessageCalls[0].additionalParts[1]).toMatchObject({ synthetic: true });
+    expect(sendMessageCalls[0].additionalParts[1].text).toContain('grill-with-docs skill');
+  });
+
+  test('expands a contextual command template on the prompt route', async () => {
+    useCommandsStore.setState({
+      commands: [{ name: 'inspect', template: 'Inspect $ARGUMENTS carefully.' }],
+    });
+
+    await routeMessage({
+      sessionId: 'session-command',
+      directory: '/skills/project',
+      content: '/inspect auth flow',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts: [{ text: 'attached context', synthetic: true }],
+    });
+
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].text).toBe('Inspect auth flow carefully.');
+    expect(sendMessageCalls[0].additionalParts).toEqual([{ text: 'attached context', synthetic: true }]);
+  });
+
   test('sends an unknown slash token as a plain message', async () => {
     await routeMessage({
       sessionId: 'session-skill',

@@ -301,6 +301,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           agent: resolved.agent,
           variant: resolved.variant,
         });
+        useMessageQueueStore.getState().clearSending(target, payload.queuedMessageId);
         useMessageQueueStore.getState().removeFromQueue(target, payload.queuedMessageId);
         sendFailuresRef.current.delete(targetKey);
       } catch (error) {

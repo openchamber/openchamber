@@ -1327,6 +1327,8 @@ onCommand('addLineComment', (payload) => {
     draftId?: unknown;
     filePath?: unknown;
     relativePath?: unknown;
+    source?: unknown;
+    side?: unknown;
     startLine?: unknown;
     endLine?: unknown;
     code?: unknown;
@@ -1338,6 +1340,8 @@ onCommand('addLineComment', (payload) => {
   // round trip. Absent when the comment came from anywhere else.
   const draftId = typeof record.draftId === 'string' && record.draftId ? record.draftId : undefined;
   const relativePath = typeof record.relativePath === 'string' ? record.relativePath : '';
+  const source = record.source === 'diff' ? 'diff' : 'file';
+  const side = record.side === 'original' || record.side === 'modified' ? record.side : undefined;
   const startLine = typeof record.startLine === 'number' ? record.startLine : 1;
   const endLine = typeof record.endLine === 'number' ? record.endLine : startLine;
   const code = typeof record.code === 'string' ? record.code : '';
@@ -1349,8 +1353,7 @@ onCommand('addLineComment', (payload) => {
     return;
   }
 
-  const basename = relativePath.replace(/\\/g, '/').split('/').pop() || relativePath;
-  const fileLabel = `${basename}:${startLine}${startLine !== endLine ? `-${endLine}` : ''}`;
+  const fileLabel = `${relativePath}:${startLine}${startLine !== endLine ? `-${endLine}` : ''}`;
 
   void Promise.all([
     import('@/sync/session-ui-store'),
@@ -1395,10 +1398,11 @@ onCommand('addLineComment', (payload) => {
 
     const addedId = useInlineCommentDraftStore.getState().addDraft(target, {
       id: draftId,
-      source: 'file',
+      source,
       fileLabel,
       startLine,
       endLine,
+      side,
       code,
       language,
       text: comment,

@@ -413,17 +413,18 @@ export function readContextPart(part: ContextCarrierPart): ContextPartPayload | 
 
     const legacy = text.match(/^Comment on `(.+?)` lines (\d+)-(\d+)(?: \((original|modified)\))?:\n```([^\n]*)\n([\s\S]*?)\n```\n\n([\s\S]+)$/);
     if (!legacy) return null;
-    return {
+    const payload: CodeCommentContext = {
         kind: 'code-comment',
         source: legacy[4] ? 'diff' : 'file',
         fileLabel: legacy[1].replace(/:\d+(-\d+)?$/, ''),
         startLine: Number(legacy[2]),
         endLine: Number(legacy[3]),
-        ...(legacy[4] ? { side: legacy[4] as 'original' | 'modified' } : {}),
         language: legacy[5],
         code: legacy[6],
         text: legacy[7],
     };
+    if (legacy[4] === 'original' || legacy[4] === 'modified') payload.side = legacy[4];
+    return payload;
 }
 
 /** Whether a message carries any user-attached context part. */

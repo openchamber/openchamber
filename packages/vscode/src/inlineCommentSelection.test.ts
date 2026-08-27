@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DELIVERY_CONFIRMATION_TIMEOUT_MS, broadcastRemoval, canCommentOnDocument, drainPending, dropPendingById, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldAbandonUnconfirmed, shouldDisposeOnEmptyBody, snapshotOwnsThread } from './inlineCommentSelection';
+import { DELIVERY_CONFIRMATION_TIMEOUT_MS, broadcastRemoval, canCommentOnDocument, drainPending, dropPendingById, nextDraftId, reconcileThreadFate, resolveCommentFilePath, resolveCommentOrigin, selectionLineRange, shouldAbandonUnconfirmed, shouldDisposeOnEmptyBody, snapshotOwnsThread } from './inlineCommentSelection';
 
 const selection = (startLine: number, startChar: number, endLine: number, endChar: number) => ({
     start: { line: startLine, character: startChar },
@@ -60,6 +60,23 @@ describe('resolveCommentFilePath', () => {
     test('a query without a usable path falls back to the URI path', () => {
         assert.equal(resolveCommentFilePath('/repo/src/app.ts', JSON.stringify({ ref: '~' })), '/repo/src/app.ts');
         assert.equal(resolveCommentFilePath('/repo/src/app.ts', JSON.stringify({ path: '  ' })), '/repo/src/app.ts');
+    });
+});
+
+describe('resolveCommentOrigin', () => {
+    const diff = {
+        original: 'git:/repo/src/app.ts?ref=HEAD',
+        modified: 'file:///repo/src/app.ts',
+    };
+
+    test('identifies both sides of the active diff', () => {
+        assert.deepEqual(resolveCommentOrigin(diff.original, 'git', diff), { source: 'diff', side: 'original' });
+        assert.deepEqual(resolveCommentOrigin(diff.modified, 'file', diff), { source: 'diff', side: 'modified' });
+    });
+
+    test('uses the URI scheme when the active tab is unavailable', () => {
+        assert.deepEqual(resolveCommentOrigin(diff.original, 'git'), { source: 'diff', side: 'original' });
+        assert.deepEqual(resolveCommentOrigin(diff.modified, 'file'), { source: 'file' });
     });
 });
 

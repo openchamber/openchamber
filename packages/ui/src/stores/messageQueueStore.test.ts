@@ -87,6 +87,35 @@ describe("in-flight queued sends", () => {
     expect(remaining[0]?.id).toBe(inFlight.id)
   })
 
+  test("editing, removing, and reordering cannot mutate an in-flight message", () => {
+    const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
+    const store = useMessageQueueStore.getState()
+    store.addToQueue(target, { content: "in flight" })
+    store.addToQueue(target, { content: "second" })
+    const [inFlight, second] = useMessageQueueStore.getState().getQueueForTarget(target)
+    store.markSending(target, inFlight.id)
+
+    store.removeFromQueue(target, inFlight.id)
+    expect(store.popToInput(target, inFlight.id)).toBeNull()
+    store.reorderQueue(target, inFlight.id, second.id)
+
+    expect(useMessageQueueStore.getState().getQueueForTarget(target).map((message) => message.id))
+      .toEqual([inFlight.id, second.id])
+  })
+
+  test("a successful send clears the claim before removing the message", () => {
+    const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
+    const store = useMessageQueueStore.getState()
+    store.addToQueue(target, { content: "in flight" })
+    const [inFlight] = useMessageQueueStore.getState().getQueueForTarget(target)
+    store.markSending(target, inFlight.id)
+
+    store.clearSending(target, inFlight.id)
+    store.removeFromQueue(target, inFlight.id)
+
+    expect(useMessageQueueStore.getState().getQueueForTarget(target)).toHaveLength(0)
+  })
+
   test("clearQueue drops everything once no send is in flight", () => {
     const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
     useMessageQueueStore.getState().addToQueue(target, { content: "queued" })

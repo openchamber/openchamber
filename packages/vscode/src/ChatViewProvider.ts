@@ -263,7 +263,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public addLineComment(payload: { draftId?: string; filePath: string; relativePath: string; startLine: number; endLine: number; code: string; language: string; comment: string }) {
+  public addLineComment(payload: { draftId?: string; filePath: string; relativePath: string; source: 'diff' | 'file'; side?: 'original' | 'modified'; startLine: number; endLine: number; code: string; language: string; comment: string }) {
     if (!this._view) return;
     // Bring the chat into view like the other capture flows do, so the chip the
     // comment becomes is visible rather than waiting behind a collapsed panel.

@@ -18,6 +18,8 @@ type LineCommentPayload = {
   draftId?: string;
   filePath: string;
   relativePath: string;
+  source: 'diff' | 'file';
+  side?: 'original' | 'modified';
   startLine: number;
   endLine: number;
   code: string;
@@ -331,6 +333,8 @@ export class SessionEditorPanelProvider {
     draftId?: string;
     filePath: string;
     relativePath: string;
+    source: 'diff' | 'file';
+    side?: 'original' | 'modified';
     startLine: number;
     endLine: number;
     code: string;

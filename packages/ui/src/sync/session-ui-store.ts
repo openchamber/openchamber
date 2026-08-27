@@ -143,6 +143,8 @@ export function routeMessage(params: {
   delivery?: 'steer'
 }): Promise<void> {
   const requestDirectory = params.directory ?? undefined
+  let promptContent = params.content
+  let promptAdditionalParts = params.additionalParts
   if (params.inputMode === "shell") {
     return opencodeClient.shellSession({
       runtimeKey: params.runtimeKey,
@@ -166,36 +168,53 @@ export function routeMessage(params: {
     // OpenCode registers every skill as a command (source: "skill"), but the
     // commands store filters skills out and the synced command list is only
     // hydrated at bootstrap. Consult the live skills store so a skill selected
-    // from the slash menu is invoked via session.command (injecting its
-    // content) instead of being sent as a literal "/name" message (#1605).
-    const isCommand = syncCommands.find((c) => c.name === cmdName)
+    // from the slash menu keeps its invocation semantics (#1605).
+    const matchedCommand = syncCommands.find((c) => c.name === cmdName)
       || storeCommands.find((c) => c.name === cmdName)
-      || useSkillsStore.getState().skills.some((s) => s.name === cmdName)
+    const matchedSkill = useSkillsStore.getState().skills.find((s) => s.name === cmdName)
 
-    if (isCommand) {
-      return optimisticSend({
-        runtimeKey: params.runtimeKey,
-        sessionId: params.sessionId,
-        content: params.content,
-        providerID: params.providerID,
-        modelID: params.modelID,
-        agent: params.agent,
-        directory: requestDirectory,
-        files: params.files,
-        send: (messageID) => opencodeClient.sendCommand({
+    if (matchedCommand || matchedSkill) {
+      if (!params.additionalParts?.length) {
+        return optimisticSend({
           runtimeKey: params.runtimeKey,
-          id: params.sessionId,
+          sessionId: params.sessionId,
+          content: params.content,
           providerID: params.providerID,
           modelID: params.modelID,
-          command: cmdName,
-          arguments: tail.join(" "),
           agent: params.agent,
-          variant: params.variant,
-          files: params.files,
-          messageId: messageID,
           directory: requestDirectory,
-        }).then(() => {}),
-      })
+          files: params.files,
+          send: (messageID) => opencodeClient.sendCommand({
+            runtimeKey: params.runtimeKey,
+            id: params.sessionId,
+            providerID: params.providerID,
+            modelID: params.modelID,
+            command: cmdName,
+            arguments: tail.join(" "),
+            agent: params.agent,
+            variant: params.variant,
+            files: params.files,
+            messageId: messageID,
+            directory: requestDirectory,
+          }).then(() => {}),
+        })
+      }
+
+      // session.command accepts file parts only. Keep structured context on
+      // the prompt route, expanding templates locally when available and
+      // preserving skill invocation as an explicit synthetic instruction.
+      if (matchedCommand?.template?.trim()) {
+        promptContent = expandSlashCommandGoalObjective(params.content, [matchedCommand])
+      }
+      if (matchedSkill) {
+        promptAdditionalParts = [
+          ...params.additionalParts,
+          {
+            text: `The user explicitly invoked the ${cmdName} skill. Use the corresponding skill tool to handle this request.`,
+            synthetic: true,
+          },
+        ]
+      }
     }
   }
 
@@ -214,12 +233,12 @@ export function routeMessage(params: {
       id: params.sessionId,
       providerID: params.providerID,
       modelID: params.modelID,
-      text: params.content,
+      text: promptContent,
       agent: params.agent,
       agentMentions: params.agentMentionName ? [{ name: params.agentMentionName }] : undefined,
       variant: params.variant,
       files: params.files,
-      additionalParts: params.additionalParts,
+      additionalParts: promptAdditionalParts,
       delivery: params.delivery,
       messageId: messageID,
       directory: requestDirectory,

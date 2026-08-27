@@ -57,12 +57,28 @@ export function shouldDisposeOnEmptyBody(body: string): boolean {
 export function resolveCommentFilePath(path: string, query: string): string {
     if (!query) return path;
     try {
-        const parsed = JSON.parse(query) as unknown;
-        const candidate = (parsed as { path?: unknown })?.path;
-        return typeof candidate === 'string' && candidate.trim() ? candidate : path;
+        const parsed: { path?: string } = JSON.parse(query);
+        return parsed.path?.trim() ? parsed.path : path;
     } catch {
         return path;
     }
+}
+
+export type CommentOrigin = {
+    source: 'diff' | 'file';
+    side?: 'original' | 'modified';
+};
+
+/** Preserves which side of an active diff supplied the selected code. */
+export function resolveCommentOrigin(
+    uri: string,
+    scheme: string,
+    activeDiff?: { original: string; modified: string },
+): CommentOrigin {
+    if (activeDiff?.original === uri) return { source: 'diff', side: 'original' };
+    if (activeDiff?.modified === uri) return { source: 'diff', side: 'modified' };
+    if (scheme === 'git') return { source: 'diff', side: 'original' };
+    return { source: 'file' };
 }
 
 /**

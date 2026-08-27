@@ -15,7 +15,7 @@
 
 import * as vscode from 'vscode';
 
-import { DELIVERY_CONFIRMATION_TIMEOUT_MS, canCommentOnDocument, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldAbandonUnconfirmed, shouldDisposeOnEmptyBody, snapshotOwnsThread, type LineRange } from './inlineCommentSelection';
+import { DELIVERY_CONFIRMATION_TIMEOUT_MS, canCommentOnDocument, nextDraftId, reconcileThreadFate, resolveCommentFilePath, resolveCommentOrigin, selectionLineRange, shouldAbandonUnconfirmed, shouldDisposeOnEmptyBody, snapshotOwnsThread, type CommentOrigin, type LineRange } from './inlineCommentSelection';
 
 // Also written literally in package.json, which gates the thread menus with
 // `commentController == openchamber.inlineComments`. JSON cannot import, so the
@@ -26,6 +26,8 @@ export interface InlineCommentDraftPayload {
     draftId: string;
     filePath: string;
     relativePath: string;
+    source: 'diff' | 'file';
+    side?: 'original' | 'modified';
     startLine: number;
     endLine: number;
     code: string;
@@ -35,6 +37,8 @@ export interface InlineCommentDraftPayload {
 
 interface OpenChamberCommentThread extends vscode.CommentThread {
     draftId?: string;
+    /** Diff identity captured while the thread's editor is authoritative. */
+    commentOrigin?: CommentOrigin;
     /** Last body written to this thread, so reconciliation can skip no-op renders. */
     commentBody?: string;
     /**
@@ -125,7 +129,10 @@ export class InlineCommentThreads implements vscode.Disposable {
     /** Opens an empty thread on a selection, with the reply box focused. */
     public openThread(uri: vscode.Uri, range: vscode.Range): vscode.CommentThread {
         const lines = selectionLineRange(range);
+        // SAFETY: this controller creates and owns the thread; the added fields
+        // are optional extension-local bookkeeping on VS Code's mutable object.
         const thread = this.controller.createCommentThread(uri, range, []) as OpenChamberCommentThread;
+        thread.commentOrigin = this.resolveOrigin(uri);
         thread.label = this.options.strings.threadLabel(lines);
         thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
         thread.canReply = true;
@@ -140,6 +147,8 @@ export class InlineCommentThreads implements vscode.Disposable {
      * as a comment that will never be sent.
      */
     public async submitReply(reply: { thread: vscode.CommentThread; text: string }): Promise<void> {
+        // SAFETY: this command is registered only for threads created by this
+        // controller, which are initialized as OpenChamberCommentThread above.
         const thread = reply.thread as OpenChamberCommentThread;
         if (shouldDisposeOnEmptyBody(reply.text)) {
             this.disposeThread(thread);
@@ -154,6 +163,11 @@ export class InlineCommentThreads implements vscode.Disposable {
             return;
         }
 
+        // Capture before the first await. Opening a git document can yield long
+        // enough for tab focus to move, while the thread still belongs to the
+        // diff pane where the user submitted it.
+        const origin = thread.commentOrigin ?? this.resolveOrigin(thread.uri);
+        thread.commentOrigin = origin;
         const document = await vscode.workspace.openTextDocument(thread.uri);
         const lines = selectionLineRange(range);
         const draftId = nextDraftId(Date.now(), Math.random());
@@ -172,7 +186,8 @@ export class InlineCommentThreads implements vscode.Disposable {
         const payload: InlineCommentDraftPayload = {
             draftId,
             filePath,
-            relativePath: vscode.workspace.asRelativePath(fileUri),
+            relativePath: vscode.workspace.asRelativePath(fileUri, false),
+            ...origin,
             startLine: lines.startLine,
             endLine: lines.endLine,
             code: document.getText(range),
@@ -211,6 +226,17 @@ export class InlineCommentThreads implements vscode.Disposable {
             this.disposeThread(thread);
             this.options.reportUndelivered();
         }, DELIVERY_CONFIRMATION_TIMEOUT_MS);
+    }
+
+    private resolveOrigin(uri: vscode.Uri): CommentOrigin {
+        const activeTabInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+        if (activeTabInput instanceof vscode.TabInputTextDiff) {
+            return resolveCommentOrigin(uri.toString(), uri.scheme, {
+                original: activeTabInput.original.toString(),
+                modified: activeTabInput.modified.toString(),
+            });
+        }
+        return resolveCommentOrigin(uri.toString(), uri.scheme);
     }
 
     /**
@@ -262,6 +288,7 @@ export class InlineCommentThreads implements vscode.Disposable {
      * chip would stay attached with nothing shown in the code.
      */
     public removeThread(thread: vscode.CommentThread): void {
+        // SAFETY: removeThread is wired only to this controller's comment menu.
         const draftId = (thread as OpenChamberCommentThread).draftId;
         if (draftId) {
             this.options.removeDraft(draftId);

@@ -119,6 +119,9 @@ interface MessageQueueActions {
 
 type MessageQueueStore = MessageQueueState & MessageQueueActions;
 
+const isMessageSending = (state: MessageQueueState, key: string, messageId: string): boolean =>
+    state.sendingIds[key]?.includes(messageId) ?? false;
+
 type PersistedMessageQueueState = {
     queuedMessages?: Record<string, QueuedMessage[]>;
     quarantinedLegacyMessages?: Record<string, QueuedMessage[]>;
@@ -182,6 +185,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 removeFromQueue: (target, messageId) => {
                     const key = getMessageQueueKey(target);
                     set((state) => {
+                        if (isMessageSending(state, key, messageId)) return state;
                         const currentQueue = state.queuedMessages[key] ?? [];
                         const newQueue = currentQueue.filter((m) => m.id !== messageId);
                         
@@ -206,6 +210,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     set((state) => {
                         const currentQueue = state.queuedMessages[key];
                         if (!currentQueue) return state;
+                        if (isMessageSending(state, key, fromId) || isMessageSending(state, key, toId)) return state;
                         const fromIndex = currentQueue.findIndex((m) => m.id === fromId);
                         const toIndex = currentQueue.findIndex((m) => m.id === toId);
                         if (fromIndex === -1 || toIndex === -1) return state;
@@ -227,6 +232,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     const key = getMessageQueueKey(target);
                     const state = get();
                     const currentQueue = state.queuedMessages[key] ?? [];
+                    if (isMessageSending(state, key, messageId)) return null;
                     const message = currentQueue.find((m) => m.id === messageId);
                     
                     if (!message) {
@@ -261,8 +267,8 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         // Clearing drops what is still queued, never a message
                         // already handed to the server: that send will resolve
                         // and must find its entry to remove or restore.
-                        const sending = state.sendingIds[key] ?? [];
-                        const retained = (state.queuedMessages[key] ?? []).filter((m) => sending.includes(m.id));
+                        const retained = (state.queuedMessages[key] ?? [])
+                            .filter((message) => isMessageSending(state, key, message.id));
                         if (retained.length > 0) {
                             return { queuedMessages: { ...state.queuedMessages, [key]: retained } };
                         }
