@@ -339,6 +339,7 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.addDevice.transport.localHint': 'For apps running on this same machine.',
   'settings.remoteInstances.clientAuth.addDevice.transport.lan': 'Home network only',
   'settings.remoteInstances.clientAuth.addDevice.transport.lanHint': 'Connects directly over your Wi-Fi. Does not work away from this network.',
+  'settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableDesktopHint': 'To use this option, go to Settings > Desktop Network Access, set a Desktop UI password, and allow other devices on your local network to open this app.',
   'settings.remoteInstances.clientAuth.addDevice.transport.relay': 'Anywhere',
   'settings.remoteInstances.clientAuth.addDevice.transport.relayHint': 'Works at home and away. Away traffic goes through OpenChamber Private Relay — an end-to-end encrypted tunnel. No setup needed.',
   'settings.remoteInstances.clientAuth.addDevice.fallback.relay': 'Also allow the encrypted relay when away from home',

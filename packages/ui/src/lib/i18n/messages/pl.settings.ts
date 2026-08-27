@@ -1777,6 +1777,7 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.addDevice.transport.localHint': 'Dla aplikacji na tej samej maszynie.',
   'settings.remoteInstances.clientAuth.addDevice.transport.lan': 'Tylko sieć domowa',
   'settings.remoteInstances.clientAuth.addDevice.transport.lanHint': 'Łączy się bezpośrednio przez Wi-Fi. Nie działa poza tą siecią.',
+  'settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableDesktopHint': 'Aby użyć tej opcji, przejdź do Ustawienia > Dostęp do sieci w aplikacji komputerowej, ustaw hasło interfejsu aplikacji komputerowej i zezwól innym urządzeniom w sieci lokalnej na otwieranie tej aplikacji.',
   'settings.remoteInstances.clientAuth.addDevice.transport.relay': 'Wszędzie',
   'settings.remoteInstances.clientAuth.addDevice.transport.relayHint': 'Działa w domu i poza nim. Poza domem ruch przechodzi przez OpenChamber Private Relay — szyfrowany end-to-end tunel. Bez konfiguracji.',
   'settings.remoteInstances.clientAuth.addDevice.fallback.relay': 'Zezwól też na szyfrowany relay poza domem',

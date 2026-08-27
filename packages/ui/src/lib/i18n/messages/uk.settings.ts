@@ -307,6 +307,7 @@ export const settingsDict = {
   "settings.remoteInstances.clientAuth.addDevice.transport.localHint": "Для застосунків на цій самій машині.",
   "settings.remoteInstances.clientAuth.addDevice.transport.lan": "Лише домашня мережа",
   "settings.remoteInstances.clientAuth.addDevice.transport.lanHint": "Підключається напряму через ваш Wi-Fi. Поза цією мережею не працює.",
+  "settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableDesktopHint": "Щоб скористатися цією опцією, перейдіть до Налаштування > Мережевий доступ десктопного застосунку, встановіть пароль інтерфейсу застосунку та дозвольте іншим пристроям у локальній мережі відкривати цей застосунок.",
   "settings.remoteInstances.clientAuth.addDevice.transport.relay": "Будь-де",
   "settings.remoteInstances.clientAuth.addDevice.transport.relayHint": "Працює вдома і поза домом. Поза домом трафік іде через OpenChamber Private Relay — наскрізно зашифрований тунель. Нічого налаштовувати не треба.",
   "settings.remoteInstances.clientAuth.addDevice.fallback.relay": "Також дозволити зашифрований relay поза домом",
