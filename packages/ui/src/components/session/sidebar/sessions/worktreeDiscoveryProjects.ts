@@ -16,6 +16,7 @@ export const selectWorktreeDiscoveryProjects = <TProject extends Project>(
   activeProjectId: string | null,
   sessions: Session[],
   availableWorktreesByProject: Map<string, Worktree[]>,
+  isVSCode = false,
 ): TProject[] => {
   const ownershipProjects = projects.map((project) => ({
     id: project.id,
@@ -25,7 +26,7 @@ export const selectWorktreeDiscoveryProjects = <TProject extends Project>(
     sessions,
     ownershipProjects,
     availableWorktreesByProject,
-    false,
+    isVSCode,
   );
 
   return projects.filter((project) => (

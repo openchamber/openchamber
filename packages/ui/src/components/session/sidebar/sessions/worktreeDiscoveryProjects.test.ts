@@ -43,4 +43,25 @@ describe('selectWorktreeDiscoveryProjects', () => {
 
     expect(eligible.map((project) => project.id)).toEqual(['active', 'worktree-owner']);
   });
+
+  test('uses exact directory ownership for VS Code sessions', () => {
+    const projects = [
+      { id: 'active', path: '/projects/active' },
+      { id: 'session-owner', path: '/projects/session-owner' },
+      { id: 'nested', path: '/projects/nested' },
+    ];
+    const sessions = [
+      { id: 'session', directory: '/projects/session-owner' },
+    ] as unknown as Session[];
+
+    const eligible = selectWorktreeDiscoveryProjects(
+      projects,
+      'active',
+      sessions,
+      new Map(),
+      true,
+    );
+
+    expect(eligible.map((project) => project.id)).toEqual(['active', 'session-owner']);
+  });
 });
