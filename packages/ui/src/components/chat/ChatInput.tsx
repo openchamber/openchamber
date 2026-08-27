@@ -326,6 +326,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // Ref to track current message value without triggering re-renders in effects
     const messageRef = React.useRef(message);
     const isSubmittingRef = React.useRef(false);
+    const isEnqueueingRef = React.useRef(false);
     const [isSubmitting, setIsSubmitting] = React.useState(false);
     const pendingPastedAttachmentFilenamesRef = React.useRef<Set<string>>(new Set());
     const largeTextPasteToastIdRef = React.useRef<string | number | null>(null);
@@ -773,8 +774,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         )
     );
     const addToQueue = useMessageQueueStore((state) => state.addToQueue);
-    const clearQueue = useMessageQueueStore((state) => state.clearQueue);
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
+    const markSending = useMessageQueueStore((state) => state.markSending);
+    const clearSending = useMessageQueueStore((state) => state.clearSending);
 
     // Inline comment drafts
     const inlineDraftSessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
@@ -923,42 +925,54 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     // Add message to queue instead of sending
     const handleQueueMessage = React.useCallback(() => {
+        if (isEnqueueingRef.current) return;
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
+        isEnqueueingRef.current = true;
+        let transferredToQueue = false;
 
-        // Context drafts stay in their store: the send that later delivers the
-        // queue consumes them and attaches them as structured context parts.
-        const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
-        const attachmentsToQueue = sanitizeAttachmentsForSend(attachedFiles);
+        try {
+            // Context drafts stay in their store: the send that later delivers the
+            // queue consumes them and attaches them as structured context parts.
+            const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
+            const attachmentsToQueue = sanitizeAttachmentsForSend(attachedFiles);
 
-        addToQueue(messageQueueTarget, {
-            content: messageToQueue,
-            attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
-            sendConfig: currentProviderId && currentModelId ? {
-                providerID: currentProviderId,
-                modelID: currentModelId,
-                agent: currentAgentName ?? undefined,
-                variant: currentVariant ?? undefined,
-            } : undefined,
-        });
+            addToQueue(messageQueueTarget, {
+                content: messageToQueue,
+                attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
+                sendConfig: currentProviderId && currentModelId ? {
+                    providerID: currentProviderId,
+                    modelID: currentModelId,
+                    agent: currentAgentName ?? undefined,
+                    variant: currentVariant ?? undefined,
+                } : undefined,
+            });
 
-        // Sending while the agent works must still take the reader to the
-        // live edge — a queued message produces no user row yet, so the
-        // anchor path has nothing to claim and would leave the viewport
-        // parked mid-history.
-        scrollToLatest?.();
+            // Sending while the agent works must still take the reader to the
+            // live edge — a queued message produces no user row yet, so the
+            // anchor path has nothing to claim and would leave the viewport
+            // parked mid-history.
+            scrollToLatest?.();
 
-        // Clear input and attachments
-        // Note: confirmedMentionsRef is NOT cleared here because queued messages
-        // are processed later in handleSubmit which reads the ref via extractInlineFileMentions.
-        // The ref is cleared in handleSubmit after all queued messages are sent.
-        setMessage('');
-        if (attachmentsToQueue.length > 0) {
-            clearAttachedFiles();
-        }
+            // Note: confirmedMentionsRef is NOT cleared here because queued messages
+            // are processed later in handleSubmit which reads the ref via extractInlineFileMentions.
+            // The ref is cleared in handleSubmit after all queued messages are sent.
+            messageRef.current = '';
+            setMessage('');
+            if (attachmentsToQueue.length > 0) {
+                clearAttachedFiles();
+            }
 
-        if (!isMobile) {
-            composerRef.current?.focus();
+            if (!isMobile) {
+                composerRef.current?.focus();
+            }
+            transferredToQueue = true;
+        } finally {
+            if (transferredToQueue) {
+                setTimeout(() => { isEnqueueingRef.current = false; }, 0);
+            } else {
+                isEnqueueingRef.current = false;
+            }
         }
     }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, attachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, currentProviderId, currentModelId, currentAgentName, currentVariant, scrollToLatest]);
 
@@ -1066,18 +1080,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         const submittedDraftIdentity = chatDraftIdentity;
         const submittedAttachmentIds = new Set(attachedFiles.map((attachment) => attachment.id));
+        const queuedMessageIds = queuedMessagesToSend.map((message) => message.id);
+        if (capturedTarget) {
+            for (const messageId of queuedMessageIds) markSending(capturedTarget, messageId);
+        }
 
         const commitSuccessfulSubmission = () => {
-            if (queuedOnly) return;
+            if (!queuedOnly) {
+                if (clearSubmittedDraft(submittedDraftIdentity, submittedDraft.message, submittedMentions)) {
+                    messageHistory.reset();
+                    setExpandedInput(false);
+                }
 
-            if (clearSubmittedDraft(submittedDraftIdentity, submittedDraft.message, submittedMentions)) {
-                messageHistory.reset();
-                setExpandedInput(false);
+                useInputStore.getState().setAttachedFiles(
+                    useInputStore.getState().attachedFiles.filter((attachment) => !submittedAttachmentIds.has(attachment.id)),
+                );
             }
 
-            useInputStore.getState().setAttachedFiles(
-                useInputStore.getState().attachedFiles.filter((attachment) => !submittedAttachmentIds.has(attachment.id)),
-            );
+            if (capturedTarget) {
+                for (const messageId of queuedMessageIds) removeFromQueue(capturedTarget, messageId);
+            }
         };
 
         try {
@@ -1232,14 +1254,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (outgoing.isEmpty) return;
 
-        // Queue entries already have durable local ownership, so they can be
-        // removed before dispatch. Composer content stays visible until the
-        // remote request acknowledges it.
-        if (capturedTarget && queuedMessageId) {
-            removeFromQueue(capturedTarget, queuedMessageId);
-        } else if (capturedTarget && hasQueuedMessages) {
-            clearQueue(capturedTarget);
-        }
         if (isMobile) {
             composerRef.current?.blur();
         }
@@ -1378,12 +1392,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             console.warn('[ChatInput] Failed to expand snippets, sending original text:', error);
         }
 
-        // Collect all attachments for error recovery
-        const allAttachments = [
-            ...primaryAttachments,
-            ...additionalParts.flatMap(p => p.attachments ?? []),
-        ];
-
         // Arm the timeline anchor BEFORE the optimistic user row can commit;
         // arming after (or a frame later) races the commit and the anchor
         // never claims the new message.
@@ -1496,31 +1504,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
-                if (queuedOnly && allAttachments.length > 0) {
-                    useInputStore.getState().setAttachedFiles(allAttachments);
-                }
                 return;
             }
 
             if (isSoftNetworkError) {
-                if (queuedOnly && allAttachments.length > 0) {
-                    useInputStore.getState().setAttachedFiles(allAttachments);
-                    toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
-                }
                 return;
             }
 
             if (normalized.includes('runtime changed')) {
-                if (queuedOnly && allAttachments.length > 0) {
-                    useInputStore.getState().setAttachedFiles(allAttachments);
-                }
                 toast.error(t('chat.chatInput.toast.messageSendFailed'));
                 return;
             }
 
-            if (queuedOnly && allAttachments.length > 0) {
-                useInputStore.getState().setAttachedFiles(allAttachments);
-            }
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
         }
 
@@ -1528,6 +1523,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             composerRef.current?.focus();
         }
         } finally {
+            if (capturedTarget) {
+                for (const messageId of queuedMessageIds) clearSending(capturedTarget, messageId);
+            }
             if (!queuedOnly) {
                 isSubmittingRef.current = false;
                 setIsSubmitting(false);

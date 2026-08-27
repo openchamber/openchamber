@@ -198,6 +198,11 @@ draft and attachment IDs; failure leaves them available for retry. `ChatInput`
 allows one remote submission at a time and owns this pending state locally;
 live session activity remains authoritative in the session stores.
 
+Queued prompts transfer ownership to `messageQueueStore` as soon as they are
+enqueued. A queue entry remains visible with a spinner while `sendingIds` marks
+it in flight, is removed only after acknowledgement, and stays queued after a
+failed automatic, manual, or steer delivery.
+
 The global Escape shortcut owns the two-press abort confirmation in
 `session-ui-store`. The composer only renders the armed state as a small
 "Press Esc again" hint above its action slot. The first press must not surface

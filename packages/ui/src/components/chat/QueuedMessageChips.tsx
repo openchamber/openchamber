@@ -25,11 +25,12 @@ import { cn } from '@/lib/utils';
 interface QueuedMessageChipProps {
     message: QueuedMessage;
     target: MessageQueueTarget;
+    isSending: boolean;
     onEdit: (message: QueuedMessage) => void;
     onSend: (message: QueuedMessage) => void;
 }
 
-const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessageChipProps) => {
+const QueuedMessageChip = memo(({ message, target, isSending, onEdit, onSend }: QueuedMessageChipProps) => {
     const { t } = useI18n();
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: message.id });
@@ -58,6 +59,7 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
                 type="button"
                 {...attributes}
                 {...listeners}
+                disabled={isSending}
                 className="flex flex-shrink-0 cursor-grab touch-none select-none items-center justify-center text-muted-foreground hover:text-foreground active:cursor-grabbing"
                 aria-label={t('chat.queuedMessage.reorderAria')}
             >
@@ -73,6 +75,7 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
                 type="button"
                 variant="secondary"
                 size="xs"
+                disabled={isSending}
                 onClick={() => onEdit(message)}
             >
                 <Icon name="edit" className="h-3 w-3" aria-hidden="true" />
@@ -82,13 +85,16 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
                 type="button"
                 variant="secondary"
                 size="xs"
+                disabled={isSending}
+                aria-busy={isSending || undefined}
                 onClick={() => onSend(message)}
             >
-                <Icon name="send-plane" className="h-3 w-3" aria-hidden="true" />
+                <Icon name={isSending ? 'loader-4' : 'send-plane'} className={cn('h-3 w-3', isSending && 'animate-spin')} aria-hidden="true" />
                 {t('chat.queuedMessage.send')}
             </Button>
             <button
                 type="button"
+                disabled={isSending}
                 onClick={() => removeFromQueue(target, message.id)}
                 className="flex items-center justify-center h-6 w-6 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                 aria-label={t('chat.queuedMessage.removeAria')}
@@ -107,6 +113,7 @@ interface QueuedMessageChipsProps {
 }
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
+const EMPTY_SENDING_IDS: string[] = [];
 
 export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
     const { t } = useI18n();
@@ -130,6 +137,9 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
             },
             [queueKey]
         )
+    );
+    const sendingIds = useMessageQueueStore(
+        React.useCallback((state) => queueKey ? state.sendingIds[queueKey] ?? EMPTY_SENDING_IDS : EMPTY_SENDING_IDS, [queueKey]),
     );
     const popToInput = useMessageQueueStore((state) => state.popToInput);
     const reorderQueue = useMessageQueueStore((state) => state.reorderQueue);
@@ -192,6 +202,7 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
                                     key={message.id}
                                     message={message}
                                     target={target}
+                                    isSending={sendingIds.includes(message.id)}
                                     onEdit={handleEdit}
                                     onSend={handleSend}
                                 />

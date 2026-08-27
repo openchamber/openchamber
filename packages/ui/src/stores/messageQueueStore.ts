@@ -158,16 +158,27 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
 
                     set((state) => {
                         const currentQueue = state.queuedMessages[key] ?? [];
+                        let excessMessages = Math.max(0, currentQueue.length + 1 - MAX_MESSAGES_PER_QUEUE);
+                        const sending = new Set(state.sendingIds[key] ?? []);
+                        const retainedQueue = currentQueue.filter((item) => {
+                            if (excessMessages === 0 || sending.has(item.id)) return true;
+                            excessMessages -= 1;
+                            return false;
+                        });
                         const queuedMessages = {
                             ...state.queuedMessages,
-                            [key]: [...currentQueue, queuedMessage].slice(-MAX_MESSAGES_PER_QUEUE),
+                            [key]: [...retainedQueue, queuedMessage],
                         };
                         const keys = Object.keys(queuedMessages);
                         if (keys.length > MAX_QUEUE_TARGETS) {
-                            keys.sort((left, right) => (
-                                (queuedMessages[left]?.[0]?.createdAt ?? 0) - (queuedMessages[right]?.[0]?.createdAt ?? 0)
-                            ));
-                            for (const staleKey of keys.slice(0, keys.length - MAX_QUEUE_TARGETS)) delete queuedMessages[staleKey];
+                            const removableKeys = keys
+                                .filter((candidate) => candidate !== key && !state.sendingIds[candidate]?.length)
+                                .sort((left, right) => (
+                                    (queuedMessages[left]?.[0]?.createdAt ?? 0) - (queuedMessages[right]?.[0]?.createdAt ?? 0)
+                                ));
+                            for (const staleKey of removableKeys.slice(0, keys.length - MAX_QUEUE_TARGETS)) {
+                                delete queuedMessages[staleKey];
+                            }
                         }
                         return {
                             queuedMessages,

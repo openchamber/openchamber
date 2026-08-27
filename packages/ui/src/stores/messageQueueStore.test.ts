@@ -93,4 +93,34 @@ describe("in-flight queued sends", () => {
 
     expect(useMessageQueueStore.getState().getQueueForTarget(target)).toHaveLength(0)
   })
+
+  test("capacity pruning evicts a queued item instead of an in-flight item", () => {
+    const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
+    for (let index = 0; index < 20; index += 1) {
+      useMessageQueueStore.getState().addToQueue(target, { content: `message-${index}` })
+    }
+    const [inFlight] = useMessageQueueStore.getState().getQueueForTarget(target)
+    useMessageQueueStore.getState().markSending(target, inFlight.id)
+
+    useMessageQueueStore.getState().addToQueue(target, { content: "message-20" })
+
+    const queue = useMessageQueueStore.getState().getQueueForTarget(target)
+    expect(queue).toHaveLength(20)
+    expect(queue.some((message) => message.id === inFlight.id)).toBe(true)
+    expect(queue.some((message) => message.content === "message-1")).toBe(false)
+  })
+
+  test("target pruning retains a target with an in-flight item", () => {
+    const inFlightTarget = createMessageQueueTarget("session-0", "/repo-0", "runtime-a")!
+    useMessageQueueStore.getState().addToQueue(inFlightTarget, { content: "in flight" })
+    const [inFlight] = useMessageQueueStore.getState().getQueueForTarget(inFlightTarget)
+    useMessageQueueStore.getState().markSending(inFlightTarget, inFlight.id)
+    for (let index = 1; index <= 50; index += 1) {
+      const target = createMessageQueueTarget(`session-${index}`, `/repo-${index}`, "runtime-a")!
+      useMessageQueueStore.getState().addToQueue(target, { content: `message-${index}` })
+    }
+
+    expect(useMessageQueueStore.getState().getQueueForTarget(inFlightTarget)).toHaveLength(1)
+    expect(Object.keys(useMessageQueueStore.getState().queuedMessages)).toHaveLength(50)
+  })
 })
